@@ -23,6 +23,15 @@ jobs:
     timeout-minutes: 45
 
     steps:
+      - name: Verify Anthropic API secret
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.API }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::Repository Actions secret 'API' is missing or unavailable."
+            exit 1
+          fi
+
       - name: Run Claude Code
         uses: anthropics/claude-code-action@v1
         with:
