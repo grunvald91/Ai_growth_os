@@ -3,6 +3,27 @@ from decimal import Decimal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 from app.models.domain import TaskStatus, ArtifactStatus, DecisionType
+from app.workflows.article_contracts import ArticleProductionInput, ArticleProductionResult, Channel
+
+
+class ArticleCreate(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    task_id: UUID | None = None
+    decision_id: UUID | None = None
+    channel: Channel = 'own_site'
+    topic: str = Field(min_length=1, max_length=300)
+    audience: str | None = Field(default=None, min_length=1, max_length=300)
+    problem: str | None = Field(default=None, min_length=1, max_length=4000)
+    request_publication: bool = False
+
+    def workflow_input(self, product_id: UUID) -> ArticleProductionInput:
+        return ArticleProductionInput(product_id=product_id, **self.model_dump())
+
+
+class ArticleProductionRead(ArticleProductionResult):
+    main_artifact_id: UUID | None = None
+    derivative_artifact_ids: list[UUID] = Field(default_factory=list)
+
 
 class ProductCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
