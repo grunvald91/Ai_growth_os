@@ -34,6 +34,12 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ github.token }}
+
       - name: Run Claude Code
         uses: anthropics/claude-code-action@v1
         with:
