@@ -1,6 +1,6 @@
 # AI Growth OS
 
-AI Growth OS is a modular monolith foundation for a safe, auditable growth operating system. Phase 1A provides the FastAPI health endpoint, PostgreSQL persistence models, and migration/container scaffolding. Phase 1B adds core services and the provider-neutral LLM/privacy boundary. Phase 1C adds in-process agent contracts, single-skill loading, fake tools, and deterministic approval policy. Daily growth review orchestration and production integrations remain out of scope.
+AI Growth OS is a modular monolith foundation for a safe, auditable growth operating system. Phase 1A provides the FastAPI health endpoint, PostgreSQL persistence models, and migration/container scaffolding. Phase 1B adds core services and the provider-neutral LLM/privacy boundary. Phase 1C adds in-process agent contracts, single-skill loading, fake tools, and deterministic approval policy. Phase 1D adds a bounded organic-first daily growth review and typed product APIs. Production integrations remain out of scope.
 
 ## Local setup
 
@@ -54,9 +54,9 @@ Set `SKILLS_ROOT` (default `skills`, relative to the working directory) to a loc
 
 Agents are logical roles inside this application, not background services. Each invocation is bounded; reasoning uses `LLMService`, which sanitizes requests through `PrivacyGateway` before calling a provider. CMO delegates specialist work; Content / SEO drafts but cannot publish.
 
-Tool requests carry typed operations and UUID resource references, not credentials or arbitrary adapter arguments. Policy is deterministic code: analytics reads, research, drafts, and calculations are GREEN; publishing, email, website changes, and ad launches are YELLOW; budget increases, pricing, destructive data actions, and billing/credential/access changes are RED. YELLOW and RED requests stop at approval-required. Phase 1C does not execute approved writes or wire approval persistence into an orchestration workflow; that future boundary must validate a persisted approval against the exact operation and resources before any real adapter runs.
+Tool requests carry typed operations and UUID resource references, not credentials or arbitrary adapter arguments. Policy is deterministic code: analytics reads, research, drafts, and calculations are GREEN; publishing, email, website changes, and ad launches are YELLOW; budget increases, pricing, destructive data actions, and billing/credential/access changes are RED. YELLOW and RED requests stop at approval-required. Phase 1D persists pending approvals linked through task briefs, but never executes approved writes. A future execution boundary must validate a persisted approval against the exact operation and resources before any real adapter runs.
 
-The fake gateway records calls for tests only. No production tool adapter, autonomous loop, daily growth review, or new database schema is included.
+The fake gateway records calls for tests only. No production tool adapter or autonomous loop is included. Phase 1D reuses the existing schema.
 
 ## Project layout
 
@@ -70,3 +70,81 @@ The fake gateway records calls for tests only. No production tool adapter, auton
 - `app/tools`, `app/policies` — typed fake tools and deterministic approval gates
 - `alembic` — database migrations
 - `tests` — offline unit and integration tests
+
+## First working organic growth review (Phase 1D)
+
+Run from the repository root. This API has **no authentication**: bind to localhost
+and do not expose it publicly. Use a development database, not production.
+
+1. Install with `python -m pip install -e '.[test]'` and copy `.env.example` to `.env`.
+2. Start PostgreSQL with `docker compose up -d postgres`. Configure `DATABASE_URL`
+   in `.env` for that database.
+3. Set `LLM_PROVIDER=anthropic`, `LLM_MODEL` to a model supported by your provider,
+   and `ANTHROPIC_API_KEY` in your private environment or `.env` (never commit it).
+   `ANTHROPIC_BASE_URL=https://api.anthropic.com` is the default; an explicitly
+   trusted compatible endpoint such as `https://api.claudehub.fun` is supported.
+   That endpoint receives sanitized product context; choose it deliberately.
+4. Run `alembic upgrade head` from your activated virtual environment, then `python -m app.bootstrap`.
+   Bootstrap prints the ServGo product UUID. It is idempotent, creates one organic
+   goal, and invents no production metrics or experiments.
+5. Start `python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`.
+6. Trigger and inspect (replace the UUID below):
+
+```bash
+PRODUCT_ID=replace-with-bootstrap-uuid
+curl -X POST "http://127.0.0.1:8000/products/$PRODUCT_ID/daily-growth-review"
+curl "http://127.0.0.1:8000/products/$PRODUCT_ID/decisions"
+curl "http://127.0.0.1:8000/products/$PRODUCT_ID/tasks"
+curl "http://127.0.0.1:8000/products/$PRODUCT_ID/artifacts"
+curl "http://127.0.0.1:8000/products/$PRODUCT_ID/approvals"
+```
+
+Interactive typed API documentation is at `/docs`. Products support create/list/get;
+product goals support create/list; experiments, tasks, artifacts, decisions and
+approvals support product-scoped lists with bounded `limit`/`offset` pagination.
+Review results include `status`, root `task_id`, CMO `run_id`, created record IDs,
+and a fixed safe error code on failure. An HTTP 200 can contain `status=failed`;
+inspect that field. Missing runtime configuration returns HTTP 503.
+
+### What runs automatically
+
+Each trigger performs one deterministic analytics snapshot and one CMO request
+(timeout 90 seconds, output 6,000 tokens). It loads up to 20 records per context
+kind, truncates text to 1,500 characters, and includes canonical product context
+from `PRODUCTS_ROOT/<slug>/.claude/product-marketing-context.md` (up to 12,000
+characters). Arbitrary database `context_path` values are not opened. Context
+truncation is disclosed to the CMO; analytics reports observations rather than
+inventing totals, attribution or conversion rates.
+
+The typed strategy allows at most five decisions and five specialist tasks per
+decision. Evidence must refer to the exact product-scoped rows supplied to the
+model. Missing evidence stays empty. All strategy writes are transactional;
+invalid output leaves failed audit runs and no partial strategy. Usage is recorded
+when provided, including invalid-output calls; monetary cost is explicitly unknown
+(`details.cost_known=false`, not a claim of free inference).
+
+Set `SKILLS_ROOT` to a trusted local checkout of
+<https://github.com/alirezarezvani/claude-skills>. Optionally set `REVIEW_SKILL` to
+one relative skill directory: only that skill is loaded. No skills are downloaded
+or bulk-loaded. Missing requested skills fail safely. Task skill names are stored
+in brief artifacts for future specialist execution, not loaded during this review.
+
+### Explicit limits
+
+This is orchestration, not a content factory: specialist tasks and article/video
+briefs are queued, not executed. No rendering, MP4 generation, publication, email,
+website mutation or advertising occurs. Paid launch/budget operations are rejected
+in code. YELLOW/RED proposals become pending approvals despite model approval
+claims; there is no approve-and-execute endpoint. The funnel is traffic → leads →
+demo/registration/booking → customers, not content volume. Channel adapters,
+article/video production and real analytics ingestion belong to later phases.
+
+There is no scheduler, retry loop, deduplication or concurrent-review locking;
+each explicit POST creates a new review. Process termination/database outage can
+leave running audit rows requiring operator reconciliation. PrivacyGateway uses
+pattern-based redaction and configurable PII hooks, not universal secret/PII
+recognition; never put credentials or raw customer data into product content.
+Evidence IDs are validated, but factual truth still requires human review.
+
+Run the complete offline suite with `python -m pytest`; fake providers require no
+credentials or network. Phase 1D adds no schema migration.
