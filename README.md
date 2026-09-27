@@ -44,7 +44,7 @@ pytest
 
 ## Configuration
 
-Application settings are loaded from environment variables or `.env`. The foundation currently uses `APP_ENV` and `DATABASE_URL`. Future provider credentials belong in environment variables and are not part of this Phase 1A implementation.
+Application settings are loaded from environment variables or `.env`. Set `APP_ENV` and `DATABASE_URL` for the application database. LLM access is provider-neutral and configured with `LLM_PROVIDER` (default `anthropic`) and `LLM_MODEL` (default `claude-opus-5-5`). The Anthropic adapter reads `ANTHROPIC_API_KEY` and supports an Anthropic-compatible `ANTHROPIC_BASE_URL` such as `https://api.anthropic.com`. Keep credentials out of prompts and never commit them.
 
 ## Project layout
 
