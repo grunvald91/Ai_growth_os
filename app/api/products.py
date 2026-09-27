@@ -1,0 +1,77 @@
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+from app.api.schemas import (ProductCreate, ProductRead, GoalCreate, GoalRead, TaskRead,
+    ExperimentRead, ArtifactRead, DecisionRead, ApprovalRead)
+from app.core.config import get_settings
+from app.core.composition import build_review
+from app.db.session import get_db
+from app.models.domain import Product, Goal, Task, Experiment, Artifact, Decision, Approval
+from app.workflows.contracts import ReviewResult
+
+router = APIRouter()
+
+def require_product(db, product_id):
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(404, "Product not found")
+    return product
+
+def get_review(db: Session = Depends(get_db)):
+    try:
+        return build_review(db, get_settings())
+    except ValueError:
+        raise HTTPException(503, "LLM runtime is not configured") from None
+
+@router.post('/products', response_model=ProductRead, status_code=201)
+def create_product(body: ProductCreate, db: Session = Depends(get_db)):
+    product = Product(**body.model_dump())
+    db.add(product)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Product slug already exists") from None
+    db.refresh(product)
+    return product
+
+@router.get('/products', response_model=list[ProductRead])
+def products(db: Session = Depends(get_db), limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
+    return list(db.scalars(select(Product).order_by(Product.created_at.desc(), Product.id).limit(limit).offset(offset)))
+
+@router.get('/products/{product_id}', response_model=ProductRead)
+def product(product_id: UUID, db: Session = Depends(get_db)):
+    return require_product(db, product_id)
+
+@router.post('/products/{product_id}/goals', response_model=GoalRead, status_code=201)
+def create_goal(product_id: UUID, body: GoalCreate, db: Session = Depends(get_db)):
+    require_product(db, product_id)
+    if body.starts_on and body.ends_on and body.starts_on > body.ends_on:
+        raise HTTPException(422, "Goal dates are reversed")
+    goal = Goal(product_id=product_id, **body.model_dump())
+    db.add(goal)
+    db.commit()
+    db.refresh(goal)
+    return goal
+
+@router.post('/products/{product_id}/daily-growth-review', response_model=ReviewResult)
+async def daily_growth_review(product_id: UUID, db: Session = Depends(get_db), review=Depends(get_review)):
+    require_product(db, product_id)
+    return await review.run(product_id)
+
+
+def register_list(path, model, schema):
+    def endpoint(product_id: UUID, db: Session = Depends(get_db),
+                 limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
+        require_product(db, product_id)
+        return list(db.scalars(select(model).where(model.product_id == product_id)
+            .order_by(model.created_at.desc(), model.id).limit(limit).offset(offset)))
+    endpoint.__name__ = 'list_' + path
+    router.add_api_route('/products/{product_id}/' + path, endpoint, response_model=list[schema])
+
+for path, model, schema in [('goals', Goal, GoalRead), ('tasks', Task, TaskRead),
+    ('experiments', Experiment, ExperimentRead), ('artifacts', Artifact, ArtifactRead),
+    ('decisions', Decision, DecisionRead), ('approvals', Approval, ApprovalRead)]:
+    register_list(path, model, schema)

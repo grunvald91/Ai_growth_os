@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     anthropic_base_url: str = "https://api.anthropic.com"
     skills_root: Path = Path("skills")
+    products_root: Path = Path("products")
+    review_skill: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
