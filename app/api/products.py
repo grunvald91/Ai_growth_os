@@ -4,9 +4,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.api.schemas import (ProductCreate, ProductRead, GoalCreate, GoalRead, TaskRead,
-    ExperimentRead, ArtifactRead, DecisionRead, ApprovalRead)
+    ExperimentRead, ArtifactRead, DecisionRead, ApprovalRead, ArticleCreate, ArticleProductionRead)
 from app.core.config import get_settings
-from app.core.composition import build_review
+from app.core.composition import build_review, build_article_production
 from app.db.session import get_db
 from app.models.domain import Product, Goal, Task, Experiment, Artifact, Decision, Approval
 from app.workflows.contracts import ReviewResult
@@ -60,6 +60,37 @@ def create_goal(product_id: UUID, body: GoalCreate, db: Session = Depends(get_db
 async def daily_growth_review(product_id: UUID, db: Session = Depends(get_db), review=Depends(get_review)):
     require_product(db, product_id)
     return await review.run(product_id)
+
+
+def get_article_production(db: Session = Depends(get_db)):
+    try:
+        return build_article_production(db, get_settings())
+    except ValueError:
+        raise HTTPException(503, 'LLM runtime is not configured') from None
+
+
+@router.post('/products/{product_id}/articles', response_model=ArticleProductionRead)
+async def produce_article(product_id: UUID, body: ArticleCreate,
+                          db: Session = Depends(get_db), workflow=Depends(get_article_production)):
+    require_product(db, product_id)
+    try:
+        result = await workflow.run(body.workflow_input(product_id))
+    except LookupError:
+        raise HTTPException(404, 'Product, task or decision not found for this product') from None
+    except ValueError:
+        raise HTTPException(409, 'Task is not available for article production') from None
+    return ArticleProductionRead(**result.model_dump(),
+        main_artifact_id=result.artifact_ids[0] if result.artifact_ids else None,
+        derivative_artifact_ids=result.artifact_ids[1:])
+
+
+@router.get('/products/{product_id}/artifacts/{artifact_id}', response_model=ArtifactRead)
+def artifact(product_id: UUID, artifact_id: UUID, db: Session = Depends(get_db)):
+    require_product(db, product_id)
+    record = db.get(Artifact, artifact_id)
+    if record is None or record.product_id != product_id:
+        raise HTTPException(404, 'Artifact not found')
+    return record
 
 
 def register_list(path, model, schema):

@@ -131,13 +131,13 @@ in brief artifacts for future specialist execution, not loaded during this revie
 
 ### Explicit limits
 
-This is orchestration, not a content factory: specialist tasks and article/video
-briefs are queued, not executed. No rendering, MP4 generation, publication, email,
+Phase 1D queues specialist tasks; Phase 2A1 executes article production explicitly
+through the endpoint below. No rendering, MP4 generation, publication, email,
 website mutation or advertising occurs. Paid launch/budget operations are rejected
 in code. YELLOW/RED proposals become pending approvals despite model approval
 claims; there is no approve-and-execute endpoint. The funnel is traffic → leads →
 demo/registration/booking → customers, not content volume. Channel adapters,
-article/video production and real analytics ingestion belong to later phases.
+video production and real analytics ingestion belong to later phases.
 
 There is no scheduler, retry loop, deduplication or concurrent-review locking;
 each explicit POST creates a new review. Process termination/database outage can
@@ -148,3 +148,49 @@ Evidence IDs are validated, but factual truth still requires human review.
 
 Run the complete offline suite with `python -m pytest`; fake providers require no
 credentials or network. Phase 1D adds no schema migration.
+
+## Article production (Phase 2A1)
+
+Use the same local database and provider configuration above. Trigger one bounded
+four-stage pipeline: content strategist → SEO editor → article writer → conversion
+editor. All four requests pass through PrivacyGateway. No tool adapter runs.
+
+```bash
+curl -X POST "http://127.0.0.1:8000/products/$PRODUCT_ID/articles" \
+  -H 'Content-Type: application/json' \
+  -d '{"channel":"own_site","topic":"How to assess booking friction","audience":"Service business owners","problem":"Manual scheduling","request_publication":false}'
+```
+
+`topic` is required. `audience` and `problem` are optional; `channel` defaults to
+`own_site` and also supports `dzen`, `tenchat`, `vc_ru`, and `telegram`. Optional
+`task_id` must identify a queued task belonging to this product; optional
+`decision_id` must also belong to the product. Unknown or foreign references return
+404; an unavailable task returns 409; invalid input returns 422. Missing provider
+configuration returns 503. Runtime failures return HTTP 200 with `status=failed`
+and a safe error code, so always inspect the response status.
+
+Successful responses include `task_id`, four `run_ids`, `main_artifact_id`, seven
+`derivative_artifact_ids`, all `artifact_ids`, and any `approval_ids`. Inspect JSON
+artifact content with `GET /products/{product_id}/artifacts/{artifact_id}` or the
+existing product-scoped artifact list. Main content contains the full article,
+strategy, SEO plan, proof-needed notes, CTA, proposed landing/internal links, and
+content → traffic → lead → demo/registration/booking → customer measurement plan.
+Each derivative includes a distinct channel-specific hook and framing, outline,
+CTA, proposed landing page, and its own measurement plan. Derivatives cover Dzen,
+TenChat, VC.ru, Telegram, FAQ, founder post, and a short-video **brief only**.
+
+Facts must preserve verbatim source quotes from canonical product context under
+`## Product` or `## Verified facts`; other article sections are labeled advice or
+hypotheses. This is structural grounding, not universal factual verification:
+human review must still catch unsupported claims in prose, titles, and CTAs.
+Links and funnel events are proposals, not verified pages or observed metrics.
+Invalid output or persistence failure leaves failed audit records and no partial
+final article package. Token usage is retained; monetary cost remains unknown.
+
+`request_publication=true` only creates a pending YELLOW approval and marks the
+main artifact awaiting approval. Nothing is published, rendered, emailed, or sent
+to an advertising platform. There is no approval execution endpoint. Requests
+without a task ID create a new task each time; no automatic retry or scheduler is
+introduced. This phase reuses the existing database schema.
+
+Run article acceptance tests offline with `python -m pytest tests/test_articles.py`.

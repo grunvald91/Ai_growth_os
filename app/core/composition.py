@@ -8,6 +8,21 @@ from app.privacy import PrivacyGateway
 from app.skills import SkillLoader
 from app.tools import FakeToolGateway
 from app.workflows.daily_growth_review import DailyGrowthReview
+from app.workflows.article_production import ArticleProduction
+
+
+def build_article_production(db: Session, settings: Settings,
+                             provider: LLMProvider | None = None) -> ArticleProduction:
+    if provider is None:
+        if settings.llm_provider != 'anthropic' or not settings.anthropic_api_key:
+            raise ValueError('Configure a supported provider and credentials')
+        provider = AnthropicProvider(api_key=settings.anthropic_api_key, model=settings.llm_model,
+                                     base_url=settings.anthropic_base_url)
+    privacy = PrivacyGateway(allowed_context_fields=set())
+    return ArticleProduction(db=db, llm=LLMService(privacy_gateway=privacy, provider=provider),
+        privacy=privacy, products_root=settings.products_root,
+        provider_name=settings.llm_provider, model=settings.llm_model)
+
 
 
 def build_review(db: Session, settings: Settings, provider: LLMProvider | None = None,
