@@ -1,0 +1,166 @@
+name: Deploy AI Growth OS to server
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - deploy/server
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-growth-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      REMOTE_ROOT: /opt/ai_growth_os
+      AI_GROWTH_PORT: "8091"
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+
+    steps:
+      - name: Guard required secrets
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
+          [ -n "$XAI_API_KEY" ] || { echo "::error::Missing XAI_API_KEY"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Server preflight
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" '
+            set -e
+            docker --version
+            docker compose version
+            echo "--- memory ---"
+            free -m
+            echo "--- disk ---"
+            df -h /
+            if ss -ltn | awk "{print \$4}" | grep -Eq "(:|^)8091$"; then
+              if ! docker ps --filter label=com.docker.compose.project=ai-growth-os --format "{{.Names}}" | grep -q .; then
+                echo "Port 8091 is occupied by another service" >&2
+                exit 23
+              fi
+            fi
+          '
+
+      - name: Upload release
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          RELEASE="$REMOTE_ROOT/releases/$GITHUB_SHA"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "mkdir -p '$RELEASE'"
+          tar --exclude=.git --exclude=.env -czf - . | sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "tar -xzf - -C '$RELEASE'"
+
+      - name: Install production secrets
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          printf '%s' "$XAI_API_KEY" | sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "umask 077; mkdir -p '$REMOTE_ROOT'; cat > '$REMOTE_ROOT/.xai_key.new'"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" '
+            set -euo pipefail
+            ROOT=/opt/ai_growth_os
+            KEY=$(cat "$ROOT/.xai_key.new")
+            rm -f "$ROOT/.xai_key.new"
+            DB_PASSWORD=""
+            if [ -f "$ROOT/.env" ]; then
+              DB_PASSWORD=$(grep "^POSTGRES_PASSWORD=" "$ROOT/.env" | head -n1 | cut -d= -f2- || true)
+            fi
+            if [ -z "$DB_PASSWORD" ]; then
+              DB_PASSWORD=$(openssl rand -hex 24)
+            fi
+            umask 077
+            {
+              echo "APP_ENV=production"
+              echo "POSTGRES_PASSWORD=$DB_PASSWORD"
+              echo "LLM_PROVIDER=xai"
+              echo "LLM_MODEL=grok-4.7"
+              echo "XAI_API_KEY=$KEY"
+              echo "XAI_BASE_URL=https://api.x.ai/v1"
+              echo "XAI_REASONING_EFFORT=medium"
+              echo "AI_GROWTH_PORT=8091"
+            } > "$ROOT/.env.new"
+            mv "$ROOT/.env.new" "$ROOT/.env"
+            chmod 600 "$ROOT/.env"
+          '
+
+      - name: Build, migrate and start
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          RELEASE="$REMOTE_ROOT/releases/$GITHUB_SHA"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' RELEASE='$RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$RELEASE"
+          dc() {
+            docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml "$@"
+          }
+          dc build api
+          dc up -d postgres
+          dc run --rm api alembic upgrade head
+          dc run --rm api python -m app.bootstrap
+          dc up -d api
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8091/health >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8091/health
+          REMOTE
+
+      - name: Smoke test Grok 4.7
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          RELEASE="$REMOTE_ROOT/releases/$GITHUB_SHA"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' RELEASE='$RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$RELEASE"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import asyncio
+          from app.core.composition import build_llm_provider
+          from app.core.config import get_settings
+          from app.llm.schemas import LLMMessage, LLMRequest
+
+          async def main():
+              provider = build_llm_provider(get_settings())
+              result = await provider.generate(LLMRequest(
+                  messages=[LLMMessage(role="user", content="Reply with exactly: OK")],
+                  max_tokens=64,
+              ))
+              if not result.content.strip():
+                  raise SystemExit("empty model response")
+              print("Grok smoke OK:", result.model)
+
+          asyncio.run(main())
+          PY
+          REMOTE
+
+      - name: Activate release
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          RELEASE="$REMOTE_ROOT/releases/$GITHUB_SHA"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' RELEASE='$RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          ln -sfn "$RELEASE" "$REMOTE_ROOT/current"
+          cd "$REMOTE_ROOT/releases"
+          ls -1dt */ 2>/dev/null | tail -n +4 | xargs -r rm -rf
+          echo "AI Growth OS active release: $(basename "$RELEASE")"
+          docker ps --filter label=com.docker.compose.project=ai-growth-os --format 'table {{.Names}}	{{.Status}}	{{.Ports}}'
+          REMOTE
