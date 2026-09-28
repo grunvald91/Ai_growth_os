@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -11,6 +12,9 @@ class Settings(BaseSettings):
     llm_model: str = "claude-opus-5-5"
     anthropic_api_key: str | None = None
     anthropic_base_url: str = "https://api.anthropic.com"
+    xai_api_key: str | None = None
+    xai_base_url: str = "https://api.x.ai/v1"
+    xai_reasoning_effort: Literal["low", "medium", "high", "xhigh"] = "medium"
     skills_root: Path = Path("skills")
     products_root: Path = Path("products")
     review_skill: str | None = None
