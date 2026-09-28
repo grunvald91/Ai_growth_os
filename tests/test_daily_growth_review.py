@@ -190,6 +190,9 @@ def test_context_bounded_and_bootstrap_idempotent(db, product, tmp_path):
     context = load_context(db, product, tmp_path)
     assert len(context['records']['task']) == 20
     assert 'task' in context['limits']['truncated_kinds']
-    assert len(context['records']['task'][0]['description']) <= 1500
+    descriptions = [row['description'] for row in context['records']['task'] if row['description'] is not None]
+    assert descriptions
+    assert all(len(description) <= 1500 for description in descriptions)
+    assert any(len(description) == 1500 for description in descriptions)
     assert bootstrap(db) == bootstrap(db) == product.id
     assert len(list(db.scalars(select(Metric)))) == 1
