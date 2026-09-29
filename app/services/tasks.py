@@ -1,6 +1,8 @@
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
+
 from app.models import Task
 from app.models.domain import TaskStatus
 from app.services.base import CRUDService
@@ -23,6 +25,35 @@ class TaskService(CRUDService[Task]):
         if "status" in values:
             values["status"] = self._status(values["status"])
         return self._update(entity_id, values)
+
+    def find_active_duplicate(
+        self,
+        *,
+        product_id: UUID,
+        title: str,
+        assigned_agent: str | None,
+    ) -> Task | None:
+        """Return an already-active logically identical task.
+
+        This deliberately deduplicates only exact title + assignee matches while the
+        prior task is still active. Completed/failed/cancelled work may be proposed
+        again later when new evidence justifies another iteration.
+        """
+        return self.db.scalar(
+            select(Task)
+            .where(
+                Task.product_id == product_id,
+                Task.title == title,
+                Task.assigned_agent == assigned_agent,
+                Task.status.in_([
+                    TaskStatus.QUEUED,
+                    TaskStatus.RUNNING,
+                    TaskStatus.WAITING_APPROVAL,
+                ]),
+            )
+            .order_by(Task.created_at.desc(), Task.id.desc())
+            .limit(1)
+        )
 
     def list(self, *, product_id: UUID | None = None, status: TaskStatus | str | None = None, limit: int = 100, offset: int = 0) -> list[Task]:
         statement = self._list_statement(product_id)

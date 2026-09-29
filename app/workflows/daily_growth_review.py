@@ -122,6 +122,13 @@ class DailyGrowthReview:
                 for proposal in strategy.next_tasks:
                     policy = self.policy.evaluate(proposal.operation) if proposal.operation else None
                     needs_approval = proposal.requires_approval or bool(policy and policy.requires_approval)
+                    duplicate = tasks.find_active_duplicate(
+                        product_id=product_id,
+                        title=proposal.title,
+                        assigned_agent=proposal.assigned_agent.value,
+                    )
+                    if duplicate is not None:
+                        continue
                     child = tasks.create(product_id=product_id, parent_id=task_id, goal_id=strategy.goal_id,
                         title=proposal.title, description=proposal.description,
                         assigned_agent=proposal.assigned_agent.value, priority=proposal.priority,
