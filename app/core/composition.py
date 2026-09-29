@@ -13,6 +13,8 @@ from app.workflows.article_production import ArticleProduction
 from app.workflows.daily_growth_review import DailyGrowthReview
 from app.workflows.team_cycle import TeamCycle
 
+SAFE_LLM_METADATA_FIELDS = {"reasoning_effort", "team_role", "task_type", "conversation_id"}
+
 
 def build_llm_provider(settings: Settings) -> LLMProvider:
     if settings.llm_provider == "anthropic":
@@ -41,7 +43,7 @@ def build_article_production(
     provider: LLMProvider | None = None,
 ) -> ArticleProduction:
     provider = provider or build_llm_provider(settings)
-    privacy = PrivacyGateway(allowed_context_fields=set())
+    privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     return ArticleProduction(
         db=db,
         llm=LLMService(privacy_gateway=privacy, provider=provider),
@@ -59,7 +61,7 @@ def build_review(
     tools: FakeToolGateway | None = None,
 ) -> DailyGrowthReview:
     provider = provider or build_llm_provider(settings)
-    privacy = PrivacyGateway(allowed_context_fields=set())
+    privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     return DailyGrowthReview(
         db=db,
         llm=LLMService(privacy_gateway=privacy, provider=provider),
@@ -79,7 +81,7 @@ def build_team_cycle(
     provider: LLMProvider | None = None,
 ) -> TeamCycle:
     provider = provider or build_llm_provider(settings)
-    privacy = PrivacyGateway(allowed_context_fields=set())
+    privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     return TeamCycle(
         db=db,
         llm=LLMService(privacy_gateway=privacy, provider=provider),

@@ -32,6 +32,11 @@ class AgentRole(StrEnum):
     VIDEO_PRODUCER = "video_producer"
     CRO = "cro"
     COMMUNITY_MANAGER = "community_manager"
+    RESEARCH_LEAD = "research_lead"
+    SEGMENT_RESEARCHER = "segment_researcher"
+    CHANNEL_RESEARCHER = "channel_researcher"
+    PROBLEM_RESEARCHER = "problem_researcher"
+    COMPETITOR_VOC_RESEARCHER = "competitor_voc_researcher"
 
 
 class AgentConfig(BaseModel):
@@ -115,6 +120,31 @@ AGENT_CONFIGS = MappingProxyType({
         role=AgentRole.COMMUNITY_MANAGER,
         responsibilities=("Plan non-spam community participation and distribution; external outreach requires approval.",),
         allowed_operations=frozenset({ToolOperation.PUBLISH, ToolOperation.SEND_EMAIL}),
+    ),
+    AgentRole.RESEARCH_LEAD: AgentConfig(
+        role=AgentRole.RESEARCH_LEAD,
+        responsibilities=("Decompose market research into specialist work and synthesize evidence without inventing consensus.",),
+        allowed_operations=frozenset({ToolOperation.RESEARCH}),
+    ),
+    AgentRole.SEGMENT_RESEARCHER: AgentConfig(
+        role=AgentRole.SEGMENT_RESEARCHER,
+        responsibilities=("Form falsifiable customer-segment hypotheses from supplied product evidence.",),
+        allowed_operations=frozenset({ToolOperation.RESEARCH}),
+    ),
+    AgentRole.CHANNEL_RESEARCHER: AgentConfig(
+        role=AgentRole.CHANNEL_RESEARCHER,
+        responsibilities=("Form falsifiable organic-channel hypotheses without claiming unobserved audience presence.",),
+        allowed_operations=frozenset({ToolOperation.RESEARCH}),
+    ),
+    AgentRole.PROBLEM_RESEARCHER: AgentConfig(
+        role=AgentRole.PROBLEM_RESEARCHER,
+        responsibilities=("Map verified product capabilities to customer-problem hypotheses and evidence gaps.",),
+        allowed_operations=frozenset({ToolOperation.RESEARCH}),
+    ),
+    AgentRole.COMPETITOR_VOC_RESEARCHER: AgentConfig(
+        role=AgentRole.COMPETITOR_VOC_RESEARCHER,
+        responsibilities=("Analyze only supplied competitor-review evidence and preserve source-level traceability.",),
+        allowed_operations=frozenset({ToolOperation.RESEARCH}),
     ),
 })
 
