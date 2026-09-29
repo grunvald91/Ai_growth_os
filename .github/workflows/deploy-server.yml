@@ -113,6 +113,11 @@ jobs:
           dc up -d postgres
           dc run -T --rm api alembic upgrade head </dev/null
           dc run -T --rm api python -m app.bootstrap </dev/null
+          if [ -f products/servgo/research_sources/initial-voc-2026-09-29.json ]; then
+            dc run -T --rm api python -m app.ingest_research_sources \
+              --product servgo \
+              --file /app/products/servgo/research_sources/initial-voc-2026-09-29.json </dev/null
+          fi
           dc up -d api
           for i in $(seq 1 30); do
             if curl -fsS --max-time 3 http://127.0.0.1:8091/health >/dev/null; then
