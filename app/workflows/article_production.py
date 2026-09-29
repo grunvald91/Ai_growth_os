@@ -41,6 +41,14 @@ STAGES = (
     ('conversion_editor', ConversionPackage, 'Design useful CTAs, proposed links, full funnel measurement and seven genuinely distinct derivative briefs.'),
 )
 
+STAGE_TIMEOUT_SECONDS = {
+    'content_strategist': 90,
+    'seo_editor': 90,
+    'article_writer': 180,
+    'conversion_editor': 120,
+    'conversion_editor_retry': 120,
+}
+
 
 def product_facts(text: str) -> dict[str, str]:
     """Fail closed: only Product/Verified facts sections, never hypotheses/positioning."""
@@ -171,7 +179,8 @@ class ArticleProduction:
                 error = f'provider_request_failed:{name}'
                 response = await asyncio.wait_for(self.llm.generate(LLMRequest(system_prompt=prompt,
                     messages=[LLMMessage(role='user', content=json.dumps(inputs))], model=self.model,
-                    max_tokens=12000, response_schema=schema.model_json_schema())), timeout=90)
+                    max_tokens=12000, response_schema=schema.model_json_schema())),
+                    timeout=STAGE_TIMEOUT_SECONDS[name])
                 responses[run_id] = response
                 error = f'invalid_article_output:{name}'
                 if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
@@ -256,7 +265,7 @@ class ArticleProduction:
                             response_schema=ConversionPackage.model_json_schema(),
                         )
                     ),
-                    timeout=90,
+                    timeout=STAGE_TIMEOUT_SECONDS['conversion_editor_retry'],
                 )
                 responses[retry_run_id] = retry_response
                 error = 'invalid_article_output:conversion_editor_retry'
