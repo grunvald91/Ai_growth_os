@@ -325,7 +325,7 @@ class TeamCycle:
             "Use only supplied product context and persisted records as factual evidence. "
             "No publishing, messaging, website mutation, advertising, credential changes, purchases, "
             "or other external actions. This task produces a draft/report artifact only. "
-            compact
+            + compact
             + f" Task type: {task_type}. Schema: {json.dumps(schema.model_json_schema())}"
         )
 
