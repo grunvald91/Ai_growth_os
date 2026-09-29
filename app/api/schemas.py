@@ -5,12 +5,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.domain import TaskStatus, ArtifactStatus, DecisionType
 from app.workflows.article_contracts import ArticleProductionInput, ArticleProductionResult, Channel
 from app.workflows.team_contracts import TeamCycleResult
+from app.workflows.experiment_materialization import ExperimentMaterializationResult
 
 
 class ArticleCreate(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
     task_id: UUID | None = None
     decision_id: UUID | None = None
+    experiment_id: UUID | None = None
     channel: Channel = 'own_site'
     topic: str = Field(min_length=1, max_length=300)
     audience: str | None = Field(default=None, min_length=1, max_length=300)
@@ -35,6 +37,17 @@ class TeamCycleCreate(BaseModel):
 class TeamCycleRead(TeamCycleResult):
     pass
 
+
+
+
+class ExperimentFromPlanCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    plan_artifact_id: UUID
+    decision_id: UUID | None = None
+
+
+class ExperimentMaterializationRead(ExperimentMaterializationResult):
+    pass
 
 class ProductCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
