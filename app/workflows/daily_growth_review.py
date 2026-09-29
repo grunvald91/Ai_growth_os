@@ -22,6 +22,8 @@ from app.tools import ToolGateway
 from app.workflows.context import analytics_snapshot, load_context, validate_references
 from app.workflows.contracts import CMOReview, ReviewResult
 
+CMO_TIMEOUT_SECONDS = 180
+
 
 class DailyGrowthReview:
     def __init__(self, *, db: Session, llm: LLMService, privacy: PrivacyGateway,
@@ -89,7 +91,7 @@ class DailyGrowthReview:
                 system_prompt=prompt, messages=[LLMMessage(role='user', content=json.dumps({
                     'context': self._sanitize_tree(context), 'analytics': self._sanitize_tree(snapshot)}))],
                 model=self.model, max_tokens=6000, response_schema=CMOReview.model_json_schema(),
-            )), timeout=90)
+            )), timeout=CMO_TIMEOUT_SECONDS)
             error_code = 'invalid_strategy_output'
             if len(response.content) > 100_000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
                 raise ValueError('Incomplete or oversized response')
