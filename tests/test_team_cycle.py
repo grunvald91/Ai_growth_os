@@ -46,7 +46,7 @@ def add_task(db, product, *, role, task_type, title, priority=0, operation=None,
     )
     db.add(task)
     db.flush()
-    brief = Artifact(
+    db.add(Artifact(
         product_id=product.id,
         task_id=task.id,
         kind="task_brief",
@@ -62,27 +62,9 @@ def add_task(db, product, *, role, task_type, title, priority=0, operation=None,
             "operation": operation,
             "requires_approval": requires_approval,
         }),
-    )
-    db.add(brief)
+    ))
     db.commit()
     return task
-
-
-def research_output():
-    return {
-        "summary": "Test one segment before scaling.",
-        "candidates": [{
-            "segment_hypothesis": "Massage studios",
-            "channel": "own-site SEO",
-            "booking_job": "Reduce manual coordination around booking.",
-            "proposed_test": "Publish one grounded guide and measure qualified inquiries.",
-            "evidence_to_support": ["Qualified owners request a demo."],
-            "evidence_to_kill": ["Target owners consistently reject the problem premise."],
-            "forbidden_claims": ["Do not claim conversion uplift."],
-        }],
-        "recommended_test": "Interview and test one massage-studio acquisition path.",
-        "evidence_gaps": ["No observed channel conversion data."],
-    }
 
 
 def analytics_output():
@@ -121,29 +103,28 @@ def content_output():
 
 
 @pytest.mark.asyncio
-async def test_team_cycle_executes_three_specialists_and_persists_results(db, product, tmp_path):
-    research = add_task(db, product, role="research_pmm", task_type="research", title="Research", priority=90)
+async def test_team_cycle_executes_nonresearch_specialists_and_persists_results(db, product, tmp_path):
     analytics = add_task(db, product, role="analytics", task_type="analytics", title="Analytics", priority=80)
     content = add_task(db, product, role="content_seo", task_type="article_brief", title="Article brief", priority=50)
-    provider = SequenceProvider([research_output(), analytics_output(), content_output()])
+    provider = SequenceProvider([analytics_output(), content_output()])
     cycle = build_team_cycle(db, Settings(products_root=tmp_path), provider)
 
     result = await cycle.run(product.id, max_tasks=10, followup_cmo=False)
 
     assert result.failed_task_ids == result.skipped_task_ids == []
-    assert result.completed_task_ids == [research.id, analytics.id, content.id]
-    assert len(result.artifact_ids) == len(result.run_ids) == len(provider.requests) == 3
+    assert result.completed_task_ids == [analytics.id, content.id]
+    assert len(result.artifact_ids) == len(result.run_ids) == len(provider.requests) == 2
     assert {db.get(Artifact, aid).kind for aid in result.artifact_ids} == {
-        "research_report", "measurement_spec", "article_brief"
+        "measurement_spec", "article_brief"
     }
     assert all(db.get(Task, tid).status == TaskStatus.COMPLETED for tid in result.completed_task_ids)
     assert all(db.get(AgentRun, rid).status == "completed" for rid in result.run_ids)
-    assert len(list(db.scalars(select(CostRecord)))) == 3
+    assert len(list(db.scalars(select(CostRecord)))) == 2
 
 
 @pytest.mark.asyncio
 async def test_bad_specialist_output_fails_one_task_and_continues(db, product, tmp_path):
-    first = add_task(db, product, role="research_pmm", task_type="research", title="Bad research", priority=90)
+    first = add_task(db, product, role="content_seo", task_type="article_brief", title="Bad content", priority=90)
     second = add_task(db, product, role="analytics", task_type="analytics", title="Good analytics", priority=80)
     provider = SequenceProvider(["not-json", analytics_output()])
     cycle = build_team_cycle(db, Settings(products_root=tmp_path), provider)
@@ -175,36 +156,35 @@ async def test_external_action_and_unknown_task_are_skipped_without_llm(db, prod
 
 @pytest.mark.asyncio
 async def test_followup_cmo_receives_specialist_artifact(db, product, tmp_path):
-    research = add_task(db, product, role="research_pmm", task_type="research", title="Research")
+    analytics = add_task(db, product, role="analytics", task_type="analytics", title="Analytics")
     cmo = {
-        "summary": "Research is now available; define the next test.",
+        "summary": "Analytics is now available; define the next test.",
         "decisions": [{
             "decision_type": "TEST",
-            "rationale": "Use the new research artifact as input.",
+            "rationale": "Use the new measurement artifact as input.",
             "evidence_references": [],
             "next_tasks": [{
-                "title": "Specify funnel",
-                "description": "Define the observed funnel before scaling.",
-                "assigned_agent": "analytics",
-                "task_type": "analytics",
+                "title": "Draft content brief",
+                "description": "Prepare one grounded brief.",
+                "assigned_agent": "content_seo",
+                "task_type": "article_brief",
                 "priority": 50,
                 "operation": None,
                 "requires_approval": False,
             }],
         }],
     }
-    provider = SequenceProvider([research_output(), cmo])
+    provider = SequenceProvider([analytics_output(), cmo])
     cycle = build_team_cycle(db, Settings(products_root=tmp_path), provider)
 
     result = await cycle.run(product.id, followup_cmo=True)
 
-    assert result.completed_task_ids == [research.id]
+    assert result.completed_task_ids == [analytics.id]
     assert result.followup_review is not None
     assert result.followup_review.status == "completed"
     assert result.followup_review.task_ids
     assert len(provider.requests) == 2
-    cmo_payload = provider.requests[1].messages[0].content
-    assert "research_report" in cmo_payload
+    assert "measurement_spec" in provider.requests[1].messages[0].content
 
 
 @pytest.mark.asyncio
