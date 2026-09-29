@@ -74,6 +74,9 @@ async def test_xai_provider_maps_request_and_usage(monkeypatch):
     assert sent["json"]["max_completion_tokens"] == 123
     assert sent["json"]["reasoning_effort"] == "medium"
     assert sent["json"]["messages"][0] == {"role": "system", "content": "Return JSON"}
+    assert sent["json"]["response_format"]["type"] == "json_schema"
+    assert sent["json"]["response_format"]["json_schema"]["strict"] is True
+    assert sent["json"]["response_format"]["json_schema"]["schema"]["required"] == ["ok"]
     assert response.content == '{"ok":true}'
     assert response.model == "grok-4.7"
     assert response.usage.input_tokens == 11
