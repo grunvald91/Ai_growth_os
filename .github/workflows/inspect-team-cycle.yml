@@ -41,6 +41,30 @@ jobs:
           echo "=== TASKS ==="
           curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/tasks?limit=50"
           echo
+          echo "=== AGENT_RUNS ==="
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import AgentRun, Task
+          with SessionLocal() as db:
+              rows = db.execute(
+                  select(AgentRun, Task)
+                  .join(Task, Task.id == AgentRun.task_id)
+                  .where(Task.product_id == "04392041-ea09-4853-874e-8060bee7286c")
+                  .order_by(AgentRun.created_at.desc())
+                  .limit(20)
+              ).all()
+              for run, task in rows:
+                  print({
+                      "task_id": str(task.id),
+                      "title": task.title,
+                      "agent": run.agent_name,
+                      "status": run.status,
+                      "error": run.error,
+                      "created_at": str(run.created_at),
+                  })
+          PY
+          echo
           echo "=== ARTIFACTS ==="
           curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/artifacts?limit=50"
           echo
