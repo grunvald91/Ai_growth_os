@@ -24,14 +24,14 @@ jobs:
       REMOTE_ROOT: /opt/ai_growth_os
       AI_GROWTH_PORT: "8091"
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
-      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      HUB_API_KEY: ${{ secrets.API }}
 
     steps:
       - name: Guard required secrets
         run: |
           set -euo pipefail
           [ -n "$SSHPASS" ] || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
-          [ -n "$XAI_API_KEY" ] || { echo "::error::Missing XAI_API_KEY"; exit 1; }
+          [ -n "$HUB_API_KEY" ] || { echo "::error::Missing API (ClaudeHub key)"; exit 1; }
 
       - uses: actions/checkout@v4
 
@@ -70,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-          printf '%s' "$XAI_API_KEY" | sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "umask 077; mkdir -p '$REMOTE_ROOT'; cat > '$REMOTE_ROOT/.xai_key.new'"
+          printf '%s' "$HUB_API_KEY" | sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "umask 077; mkdir -p '$REMOTE_ROOT'; cat > '$REMOTE_ROOT/.xai_key.new'"
           sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" '
             set -euo pipefail
             ROOT=/opt/ai_growth_os
@@ -90,7 +90,7 @@ jobs:
               echo "LLM_PROVIDER=xai"
               echo "LLM_MODEL=grok-4.7"
               echo "XAI_API_KEY=$KEY"
-              echo "XAI_BASE_URL=https://api.x.ai/v1"
+              echo "XAI_BASE_URL=https://api.claudehub.fun/v1"
               echo "XAI_REASONING_EFFORT=medium"
               echo "AI_GROWTH_PORT=8091"
             } > "$ROOT/.env.new"
