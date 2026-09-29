@@ -196,3 +196,41 @@ def test_context_bounded_and_bootstrap_idempotent(db, product, tmp_path):
     assert any(len(description) == 1500 for description in descriptions)
     assert bootstrap(db) == bootstrap(db) == product.id
     assert len(list(db.scalars(select(Metric)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_active_duplicate_specialist_task_is_not_recreated(db, product, tmp_path):
+    existing = Task(
+        product_id=product.id,
+        title='Research booking search intent',
+        description='Already queued from a prior review.',
+        assigned_agent='research_pmm',
+        status=TaskStatus.QUEUED,
+        priority=50,
+    )
+    db.add(existing)
+    db.commit()
+
+    review, _, _ = setup_review(db, output(), tmp_path)
+    result = await review.run(product.id)
+
+    assert result.status == 'completed'
+    assert len(result.decision_ids) == 1
+    assert result.task_ids == []
+    active = list(db.scalars(
+        select(Task).where(
+            Task.product_id == product.id,
+            Task.title == 'Research booking search intent',
+            Task.assigned_agent == 'research_pmm',
+            Task.status == TaskStatus.QUEUED,
+        )
+    ))
+    assert active == [existing]
+    task_briefs = list(db.scalars(
+        select(Artifact).where(
+            Artifact.product_id == product.id,
+            Artifact.kind == 'task_brief',
+            Artifact.title == 'Research booking search intent',
+        )
+    ))
+    assert task_briefs == []
