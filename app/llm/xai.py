@@ -68,6 +68,9 @@ class XAIProvider:
         input_tokens = usage.get("prompt_tokens", usage.get("input_tokens", 0))
         output_tokens = usage.get("completion_tokens", usage.get("output_tokens", 0))
 
+        finish_reason = choice.get("finish_reason")
+        stop_reason = "end_turn" if finish_reason == "stop" else finish_reason
+
         return LLMResponse(
             content=content,
             model=str(data.get("model") or request.model or self._model),
@@ -75,5 +78,5 @@ class XAIProvider:
                 input_tokens=max(0, int(input_tokens or 0)),
                 output_tokens=max(0, int(output_tokens or 0)),
             ),
-            stop_reason=choice.get("finish_reason"),
+            stop_reason=stop_reason,
         )
