@@ -35,6 +35,15 @@ SPECIALIST_TIMEOUTS = {
     "distribution_plan": 120,
 }
 
+SPECIALIST_MAX_TOKENS = {
+    "research": 3500,
+    "analytics": 5000,
+    "article_brief": 5000,
+    "video_brief": 4500,
+    "content_plan": 4500,
+    "distribution_plan": 4000,
+}
+
 TASK_SCHEMAS: dict[str, type[BaseModel]] = {
     "research": ResearchReport,
     "analytics": AnalyticsPlan,
@@ -198,7 +207,7 @@ class TeamCycle:
                     "task_brief": brief_data,
                     "product": context["product"],
                     "stable_product_context": context["stable_context"],
-                    "available_records": context["records"],
+                    "available_records": self._records_for_task(task_type, context["records"]),
                     "context_limits": context["limits"],
                 }
             )
@@ -209,7 +218,12 @@ class TeamCycle:
                         system_prompt=prompt,
                         messages=[LLMMessage(role="user", content=json.dumps(payload))],
                         model=self.model,
-                        max_tokens=7000,
+                        max_tokens=SPECIALIST_MAX_TOKENS.get(task_type, 4500),
+                        metadata={
+                            "reasoning_effort": "low",
+                            "team_role": role.value,
+                            "task_type": task_type,
+                        },
                     )
                 ),
                 timeout=SPECIALIST_TIMEOUTS.get(task_type, 120),
@@ -265,8 +279,41 @@ class TeamCycle:
                 error=error_code,
             )
 
+    @staticmethod
+    def _records_for_task(task_type: str, records: dict) -> dict:
+        base = {key: records.get(key, []) for key in ("goal", "metric", "experiment", "decision")}
+        artifacts = records.get("artifact", [])
+        if task_type == "research":
+            base["artifact"] = [
+                row for row in artifacts
+                if row.get("kind") in {"measurement_spec", "article_brief", "growth_review"}
+            ][:6]
+        elif task_type == "analytics":
+            base["artifact"] = [
+                row for row in artifacts
+                if row.get("kind") in {"research_report", "growth_review"}
+            ][:4]
+        elif task_type in {"article_brief", "video_brief", "content_plan"}:
+            base["artifact"] = [
+                row for row in artifacts
+                if row.get("kind") in {"research_report", "measurement_spec", "growth_review"}
+            ][:6]
+        elif task_type == "distribution_plan":
+            base["artifact"] = [
+                row for row in artifacts
+                if row.get("kind") in {"article", "article_brief", "video_brief", "content_plan"}
+            ][:8]
+        else:
+            base["artifact"] = []
+        return base
+
     def _prompt(self, role: AgentRole, task_type: str, schema: type[BaseModel]) -> str:
         config = AGENT_CONFIGS[role]
+        compact = (
+            " For research, group the most useful channels into no more than four test candidates; "
+            "do not enumerate every possible channel."
+            if task_type == "research" else ""
+        )
         return (
             f"You are the {role.value} specialist in an organic growth team. "
             + " ".join(config.responsibilities)
@@ -278,7 +325,8 @@ class TeamCycle:
             "Use only supplied product context and persisted records as factual evidence. "
             "No publishing, messaging, website mutation, advertising, credential changes, purchases, "
             "or other external actions. This task produces a draft/report artifact only. "
-            f"Task type: {task_type}. Schema: {json.dumps(schema.model_json_schema())}"
+            + compact
+            + f" Task type: {task_type}. Schema: {json.dumps(schema.model_json_schema())}"
         )
 
     @staticmethod

@@ -19,16 +19,16 @@ class ResearchCandidate(Contract):
     channel: str = Field(min_length=1, max_length=200)
     booking_job: str = Field(min_length=1, max_length=2000)
     proposed_test: str = Field(min_length=1, max_length=2000)
-    evidence_to_support: list[str] = Field(min_length=1, max_length=8)
-    evidence_to_kill: list[str] = Field(min_length=1, max_length=8)
-    forbidden_claims: list[str] = Field(default_factory=list, max_length=12)
+    evidence_to_support: list[str] = Field(min_length=1, max_length=4)
+    evidence_to_kill: list[str] = Field(min_length=1, max_length=4)
+    forbidden_claims: list[str] = Field(default_factory=list, max_length=6)
 
 
 class ResearchReport(Contract):
     summary: str = Field(min_length=1, max_length=4000)
-    candidates: list[ResearchCandidate] = Field(min_length=1, max_length=8)
+    candidates: list[ResearchCandidate] = Field(min_length=1, max_length=4)
     recommended_test: str = Field(min_length=1, max_length=3000)
-    evidence_gaps: list[str] = Field(default_factory=list, max_length=20)
+    evidence_gaps: list[str] = Field(default_factory=list, max_length=10)
 
 
 class FunnelStageSpec(Contract):
