@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 from app.models.domain import TaskStatus, ArtifactStatus, DecisionType
 from app.workflows.article_contracts import ArticleProductionInput, ArticleProductionResult, Channel
+from app.workflows.team_contracts import TeamCycleResult
 
 
 class ArticleCreate(BaseModel):
@@ -23,6 +24,16 @@ class ArticleCreate(BaseModel):
 class ArticleProductionRead(ArticleProductionResult):
     main_artifact_id: UUID | None = None
     derivative_artifact_ids: list[UUID] = Field(default_factory=list)
+
+
+class TeamCycleCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_tasks: int = Field(default=10, ge=1, le=20, strict=True)
+    followup_cmo: bool = True
+
+
+class TeamCycleRead(TeamCycleResult):
+    pass
 
 
 class ProductCreate(BaseModel):

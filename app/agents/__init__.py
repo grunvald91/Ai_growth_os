@@ -23,6 +23,15 @@ class AgentRole(StrEnum):
     CONTENT_SEO = "content_seo"
     DISTRIBUTION = "distribution"
     ANALYTICS = "analytics"
+    CONTENT_STRATEGIST = "content_strategist"
+    SEO_EDITOR = "seo_editor"
+    ARTICLE_WRITER = "article_writer"
+    CONVERSION_EDITOR = "conversion_editor"
+    SCRIPTWRITER = "scriptwriter"
+    CREATIVE_DIRECTOR = "creative_director"
+    VIDEO_PRODUCER = "video_producer"
+    CRO = "cro"
+    COMMUNITY_MANAGER = "community_manager"
 
 
 class AgentConfig(BaseModel):
@@ -42,24 +51,70 @@ AGENT_CONFIGS = MappingProxyType({
     ),
     AgentRole.RESEARCH_PMM: AgentConfig(
         role=AgentRole.RESEARCH_PMM,
-        responsibilities=("Produce evidence-backed research and positioning hypotheses.",),
+        responsibilities=("Produce evidence-backed market, audience and positioning hypotheses.",),
         allowed_operations=frozenset({ToolOperation.RESEARCH}),
     ),
     AgentRole.CONTENT_SEO: AgentConfig(
         role=AgentRole.CONTENT_SEO,
-        responsibilities=("Produce content drafts and SEO recommendations; never publish.",),
+        responsibilities=("Produce content and SEO briefs or drafts; never publish.",),
         allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
     ),
     AgentRole.DISTRIBUTION: AgentConfig(
         role=AgentRole.DISTRIBUTION,
-        responsibilities=("Propose channel delivery of approved artifact references.",),
+        responsibilities=("Plan channel delivery of approved artifact references; external writes require approval.",),
         allowed_operations=frozenset({ToolOperation.PUBLISH, ToolOperation.SEND_EMAIL,
                                       ToolOperation.MODIFY_WEBSITE, ToolOperation.LAUNCH_AD}),
     ),
     AgentRole.ANALYTICS: AgentConfig(
         role=AgentRole.ANALYTICS,
-        responsibilities=("Aggregate available metric facts; do not make strategy decisions.",),
+        responsibilities=("Define and aggregate observable funnel evidence; do not make strategy decisions.",),
         allowed_operations=frozenset({ToolOperation.ANALYTICS, ToolOperation.CALCULATE}),
+    ),
+    AgentRole.CONTENT_STRATEGIST: AgentConfig(
+        role=AgentRole.CONTENT_STRATEGIST,
+        responsibilities=("Turn audience evidence into channel-specific content hypotheses and briefs.",),
+        allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
+    ),
+    AgentRole.SEO_EDITOR: AgentConfig(
+        role=AgentRole.SEO_EDITOR,
+        responsibilities=("Design search-intent, query and structure recommendations without inventing demand.",),
+        allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
+    ),
+    AgentRole.ARTICLE_WRITER: AgentConfig(
+        role=AgentRole.ARTICLE_WRITER,
+        responsibilities=("Write grounded long-form drafts from approved briefs; never publish.",),
+        allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
+    ),
+    AgentRole.CONVERSION_EDITOR: AgentConfig(
+        role=AgentRole.CONVERSION_EDITOR,
+        responsibilities=("Design CTA, landing and funnel hypotheses from verified product context.",),
+        allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT, ToolOperation.CALCULATE}),
+    ),
+    AgentRole.SCRIPTWRITER: AgentConfig(
+        role=AgentRole.SCRIPTWRITER,
+        responsibilities=("Write short-form video scripts and hooks from grounded briefs.",),
+        allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
+    ),
+    AgentRole.CREATIVE_DIRECTOR: AgentConfig(
+        role=AgentRole.CREATIVE_DIRECTOR,
+        responsibilities=("Create visual treatments, shot logic and creative direction; no rendering or publishing.",),
+        allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
+    ),
+    AgentRole.VIDEO_PRODUCER: AgentConfig(
+        role=AgentRole.VIDEO_PRODUCER,
+        responsibilities=("Prepare bounded video production packages; no external rendering without a future adapter.",),
+        allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
+    ),
+    AgentRole.CRO: AgentConfig(
+        role=AgentRole.CRO,
+        responsibilities=("Propose conversion and activation experiments tied to measurable funnel outcomes.",),
+        allowed_operations=frozenset({ToolOperation.ANALYTICS, ToolOperation.CALCULATE,
+                                      ToolOperation.GENERATE_DRAFT}),
+    ),
+    AgentRole.COMMUNITY_MANAGER: AgentConfig(
+        role=AgentRole.COMMUNITY_MANAGER,
+        responsibilities=("Plan non-spam community participation and distribution; external outreach requires approval.",),
+        allowed_operations=frozenset({ToolOperation.PUBLISH, ToolOperation.SEND_EMAIL}),
     ),
 })
 
@@ -119,7 +174,6 @@ class Agent:
 
     async def request_tool(self, request: ToolRequest) -> ToolResult:
         """Authorize a typed proposal, without an LLM round trip or approval bypass."""
-        # Revalidate even pre-built models before crossing the execution boundary.
         request = ToolRequest.model_validate(request.model_dump())
         decision = self._policy.evaluate(request.operation)
         if request.operation not in self.config.allowed_operations:

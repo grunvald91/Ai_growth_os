@@ -11,6 +11,7 @@ from app.skills import SkillLoader
 from app.tools import FakeToolGateway
 from app.workflows.article_production import ArticleProduction
 from app.workflows.daily_growth_review import DailyGrowthReview
+from app.workflows.team_cycle import TeamCycle
 
 
 def build_llm_provider(settings: Settings) -> LLMProvider:
@@ -69,4 +70,22 @@ def build_review(
         provider_name=settings.llm_provider,
         model=settings.llm_model,
         review_skill=settings.review_skill,
+    )
+
+
+def build_team_cycle(
+    db: Session,
+    settings: Settings,
+    provider: LLMProvider | None = None,
+) -> TeamCycle:
+    provider = provider or build_llm_provider(settings)
+    privacy = PrivacyGateway(allowed_context_fields=set())
+    return TeamCycle(
+        db=db,
+        llm=LLMService(privacy_gateway=privacy, provider=provider),
+        privacy=privacy,
+        products_root=settings.products_root,
+        provider_name=settings.llm_provider,
+        model=settings.llm_model,
+        followup_review=build_review(db, settings, provider),
     )
