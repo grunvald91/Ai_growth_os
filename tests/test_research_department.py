@@ -155,7 +155,7 @@ async def test_research_department_fans_out_and_synthesizes_partial_without_sour
 
     result = await cycle.run(product.id, max_tasks=1, followup_cmo=False)
 
-    assert result.completed_task_ids == [parent.id]
+    assert result.completed_task_ids == [parent.id], result.model_dump(mode="json")
     assert len(provider.requests) == 4
     children = list(db.scalars(select(Task).where(Task.parent_id == parent.id)))
     assert len(children) == 4
