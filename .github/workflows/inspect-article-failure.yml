@@ -1,0 +1,64 @@
+name: Inspect Article Factory failure
+
+on:
+  push:
+    branches:
+      - ops-inspect-article-failure
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+
+    steps:
+      - name: Guard SSH secret
+        run: |
+          [ -n "$SSHPASS" ] || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Inspect failed article task
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=20 -o ServerAliveCountMax=15"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          from uuid import UUID
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import AgentRun, CostRecord, Task
+
+          task_id=UUID("38c9fd28-9dd1-4217-97a4-c72f490a2ea9")
+          with SessionLocal() as db:
+              task=db.get(Task, task_id)
+              print("TASK", {"id": str(task.id), "status": task.status.value, "title": task.title})
+              runs=list(db.scalars(
+                  select(AgentRun)
+                  .where(AgentRun.task_id==task_id)
+                  .order_by(AgentRun.created_at.asc(), AgentRun.id.asc())
+              ))
+              for run in runs:
+                  costs=list(db.scalars(select(CostRecord).where(CostRecord.agent_run_id==run.id)))
+                  print("RUN", {
+                      "id": str(run.id),
+                      "agent": run.agent_name,
+                      "status": run.status,
+                      "error": run.error,
+                      "started_at": str(run.started_at),
+                      "finished_at": str(run.finished_at),
+                      "cost_records": len(costs),
+                      "input_tokens": sum((c.input_tokens or 0) for c in costs),
+                      "output_tokens": sum((c.output_tokens or 0) for c in costs),
+                  })
+          PY
+          REMOTE
