@@ -63,6 +63,12 @@ async def test_xai_provider_maps_request_and_usage(monkeypatch):
             messages=[LLMMessage(role="user", content="hello")],
             max_tokens=123,
             metadata={"conversation_id": "servgo-review"},
+            response_schema={
+                "type": "object",
+                "properties": {"ok": {"type": "boolean"}},
+                "required": ["ok"],
+                "additionalProperties": False,
+            },
         )
     )
 
