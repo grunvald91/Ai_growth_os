@@ -29,7 +29,7 @@ jobs:
       - name: Run bounded team cycle and inspect results
         run: |
           set -euo pipefail
-          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=20 -o ServerAliveCountMax=15"
           sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
 
@@ -47,7 +47,7 @@ jobs:
 
           echo "SERVGO_PRODUCT_ID=$PRODUCT_ID"
           echo "=== TEAM_CYCLE ==="
-          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/team-cycle"             -H 'Content-Type: application/json'             -d '{"max_tasks":10,"followup_cmo":true}'
+          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/team-cycle"             -H 'Content-Type: application/json'             -d '{"max_tasks":1,"followup_cmo":true}'
           echo
           echo "=== TASKS ==="
           curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/tasks?limit=50"
