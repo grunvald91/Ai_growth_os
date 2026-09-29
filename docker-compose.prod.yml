@@ -24,7 +24,7 @@ services:
       LLM_PROVIDER: xai
       LLM_MODEL: ${LLM_MODEL:-grok-4.7}
       XAI_API_KEY: ${XAI_API_KEY:?XAI_API_KEY is required}
-      XAI_BASE_URL: ${XAI_BASE_URL:-https://api.x.ai/v1}
+      XAI_BASE_URL: ${XAI_BASE_URL:-https://api.claudehub.fun/v1}
       XAI_REASONING_EFFORT: ${XAI_REASONING_EFFORT:-medium}
       PRODUCTS_ROOT: /app/products
       SKILLS_ROOT: /app/skills
