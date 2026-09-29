@@ -33,7 +33,7 @@ jobs:
           sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
 
-          PRODUCT_ID=$(docker exec ai-growth-os-api-1 python - <<'PY'
+          PRODUCT_ID=$(docker exec -i ai-growth-os-api-1 python - <<'PY'
           import json, urllib.request
           data=json.load(urllib.request.urlopen("http://127.0.0.1:8000/products"))
           for p in data:
