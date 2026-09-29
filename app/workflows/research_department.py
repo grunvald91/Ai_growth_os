@@ -189,8 +189,11 @@ class ResearchDepartment:
             except asyncio.CancelledError:
                 self._mark_worker_failed(child.id, run.id, product.id, response)
                 raise
-            except Exception:
-                self._mark_worker_failed(child.id, run.id, product.id, response)
+            except Exception as exc:
+                self._mark_worker_failed(
+                    child.id, run.id, product.id, response,
+                    error=f"research_worker_failed:{type(exc).__name__}",
+                )
 
         if len(worker_outputs) < 3:
             self.db.get(Task, parent.id).status = TaskStatus.FAILED
@@ -366,11 +369,18 @@ class ResearchDepartment:
         self.db.commit()
         return artifact
 
-    def _mark_worker_failed(self, task_id: UUID, run_id: UUID, product_id: UUID, response) -> None:
+    def _mark_worker_failed(
+        self,
+        task_id: UUID,
+        run_id: UUID,
+        product_id: UUID,
+        response,
+        error: str = "research_worker_failed",
+    ) -> None:
         self.db.rollback()
         run = self.db.get(AgentRun, run_id)
         run.status = "failed"
-        run.error = "research_worker_failed"
+        run.error = error
         run.finished_at = datetime.now(timezone.utc)
         self.db.get(Task, task_id).status = TaskStatus.FAILED
         self._record_usage(product_id, run_id, response)
