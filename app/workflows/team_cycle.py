@@ -230,6 +230,7 @@ class TeamCycle:
                         messages=[LLMMessage(role="user", content=json.dumps(payload))],
                         model=self.model,
                         max_tokens=SPECIALIST_MAX_TOKENS.get(task_type, 4500),
+                        response_schema=schema.model_json_schema(),
                         metadata={
                             "reasoning_effort": "low",
                             "team_role": role.value,
