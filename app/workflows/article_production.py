@@ -43,7 +43,7 @@ STAGES = (
 
 STAGE_TIMEOUT_SECONDS = {
     'content_strategist': 90,
-    'seo_editor': 90,
+    'seo_editor': 180,
     'article_writer': 180,
     'conversion_editor': 240,
     'conversion_editor_retry': 240,
