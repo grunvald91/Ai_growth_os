@@ -1,4 +1,4 @@
-name: Materialize ServGo experiment and article
+name: Inspect ServGo experiment article state
 
 on:
   push:
@@ -9,9 +9,9 @@ permissions:
   contents: read
 
 jobs:
-  experiment-article:
+  inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     env:
       SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
       SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
@@ -26,27 +26,15 @@ jobs:
       - name: Install sshpass
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
 
-      - name: Materialize experiment and prepare article approval
+      - name: Inspect experiment and article state
         run: |
           set -euo pipefail
-          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=20 -o ServerAliveCountMax=30"
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=20 -o ServerAliveCountMax=15"
           sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           PRODUCT_ID="04392041-ea09-4853-874e-8060bee7286c"
-          PLAN_ID="42714723-7f9a-4734-a7a4-2a74e409f193"
-          DECISION_ID="dabc19ab-3620-4852-ab52-411de8a16c0f"
-
-          EXP_FILE=$(mktemp)
-          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/experiments/from-content-plan"             -H 'Content-Type: application/json'             -d "{\"plan_artifact_id\":\"$PLAN_ID\",\"decision_id\":\"$DECISION_ID\"}" > "$EXP_FILE"
-          echo "=== EXPERIMENT ==="
-          cat "$EXP_FILE"
-          echo
-          EXPERIMENT_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["experiment_id"])' "$EXP_FILE")
-
-          ARTICLE_FILE=$(mktemp)
-          curl --max-time 1200 -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/articles"             -H 'Content-Type: application/json'             -d "{\"experiment_id\":\"$EXPERIMENT_ID\",\"decision_id\":\"$DECISION_ID\",\"channel\":\"own_site\",\"topic\":\"Онлайн-запись для небольшой массажной студии: как устроить путь клиента от выбора услуги до подтверждения\",\"audience\":\"Владелец или управляющий небольшой массажной студии\",\"problem\":\"Проверить гипотезу, что владельцам полезно структурировать путь онлайн-записи и подтверждения без неподтвержденных сравнений с конкурентами.\",\"request_publication\":true}" > "$ARTICLE_FILE"
-          echo "=== ARTICLE_RESULT ==="
-          cat "$ARTICLE_FILE"
+          echo "=== HEALTH ==="
+          curl -fsS "http://127.0.0.1:8091/health"
           echo
           echo "=== EXPERIMENTS ==="
           curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/experiments?limit=10"
@@ -54,7 +42,33 @@ jobs:
           echo "=== APPROVALS ==="
           curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/approvals?limit=10"
           echo
-          echo "=== ARTIFACTS ==="
-          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/artifacts?limit=20"
-          echo
+          echo "=== ARTICLE TASKS/RUNS ==="
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Task, AgentRun, Artifact
+          from uuid import UUID
+          product_id=UUID("04392041-ea09-4853-874e-8060bee7286c")
+          with SessionLocal() as db:
+              tasks=list(db.scalars(
+                  select(Task)
+                  .where(Task.product_id==product_id, Task.title=="Article production")
+                  .order_by(Task.created_at.desc())
+                  .limit(5)
+              ))
+              for task in tasks:
+                  print("TASK", task.id, task.status, task.created_at)
+                  runs=list(db.scalars(
+                      select(AgentRun).where(AgentRun.task_id==task.id).order_by(AgentRun.created_at)
+                  ))
+                  for run in runs:
+                      print(" RUN", run.id, run.agent_name, run.status, run.error, run.started_at, run.finished_at)
+                  arts=list(db.scalars(
+                      select(Artifact).where(Artifact.task_id==task.id).order_by(Artifact.created_at)
+                  ))
+                  for art in arts:
+                      print(" ART", art.id, art.kind, art.status, art.title)
+          PY
+          echo "=== API LOG TAIL ==="
+          docker logs --tail 180 ai-growth-os-api-1 2>&1
           REMOTE
