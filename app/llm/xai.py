@@ -16,7 +16,7 @@ class XAIProvider:
         model: str = "grok-4.7",
         base_url: str = "https://api.x.ai/v1",
         reasoning_effort: ReasoningEffort = "medium",
-        timeout_seconds: float = 180.0,
+        timeout_seconds: float = 300.0,
     ) -> None:
         if not api_key:
             raise ValueError("An xAI API key is required")
