@@ -162,6 +162,7 @@ class ResearchDepartment:
                             messages=[LLMMessage(role="user", content=json.dumps(payload))],
                             model=self.model,
                             max_tokens=3200,
+                            response_schema=schema.model_json_schema(),
                             metadata={
                                 "reasoning_effort": "low",
                                 "team_role": role.value,
@@ -245,6 +246,7 @@ class ResearchDepartment:
                         ],
                         model=self.model,
                         max_tokens=4000,
+                        response_schema=ResearchSynthesisDraft.model_json_schema(),
                         metadata={
                             "reasoning_effort": "low",
                             "team_role": AgentRole.RESEARCH_LEAD.value,
