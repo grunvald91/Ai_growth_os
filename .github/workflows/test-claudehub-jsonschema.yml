@@ -1,0 +1,43 @@
+name: Test ClaudeHub Grok JSON Schema
+
+on:
+  push:
+    branches:
+      - ops-test-claudehub-jsonschema
+
+permissions:
+  contents: read
+
+jobs:
+  test-json-schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HUB_API_KEY: ${{ secrets.API }}
+
+    steps:
+      - name: Guard key
+        run: |
+          [ -n "$HUB_API_KEY" ] || { echo "::error::Missing API"; exit 1; }
+
+      - name: Test chat completions json_schema
+        run: |
+          set -euo pipefail
+          BODY=$(mktemp)
+          STATUS=$(curl -sS -o "$BODY" -w "%{http_code}"             https://api.claudehub.fun/v1/chat/completions             -H "Authorization: Bearer $HUB_API_KEY"             -H "Content-Type: application/json"             -d '{"model":"grok-4.7","messages":[{"role":"user","content":"Return JSON with ok=true"}],"max_completion_tokens":64,"reasoning_effort":"low","response_format":{"type":"json_schema","json_schema":{"name":"structured_response","strict":true,"schema":{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}}}}')
+          echo "HTTP_STATUS=$STATUS"
+          python - "$BODY" <<'PY'
+          import json, sys
+          raw=open(sys.argv[1], encoding="utf-8").read()
+          try:
+              data=json.loads(raw)
+          except Exception:
+              print(raw[:1200]); raise SystemExit(0)
+          safe={}
+          if "error" in data: safe["error"]=data["error"]
+          if "model" in data: safe["model"]=data["model"]
+          if "choices" in data and data["choices"]:
+              safe["finish_reason"]=data["choices"][0].get("finish_reason")
+              safe["content"]=data["choices"][0].get("message",{}).get("content")
+          print(json.dumps(safe, ensure_ascii=False)[:3000])
+          PY
