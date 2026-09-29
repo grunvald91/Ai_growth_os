@@ -26,6 +26,15 @@ from app.workflows.team_contracts import (
     TeamTaskResult,
 )
 
+SPECIALIST_TIMEOUTS = {
+    "research": 180,
+    "analytics": 120,
+    "article_brief": 120,
+    "video_brief": 120,
+    "content_plan": 120,
+    "distribution_plan": 120,
+}
+
 TASK_SCHEMAS: dict[str, type[BaseModel]] = {
     "research": ResearchReport,
     "analytics": AnalyticsPlan,
@@ -203,7 +212,7 @@ class TeamCycle:
                         max_tokens=7000,
                     )
                 ),
-                timeout=90,
+                timeout=SPECIALIST_TIMEOUTS.get(task_type, 120),
             )
             error_code = "invalid_specialist_output"
             if len(response.content) > 120_000 or response.stop_reason not in (
