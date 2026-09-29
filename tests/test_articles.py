@@ -86,6 +86,13 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
     assert {request.metadata["team_role"] for request in provider.requests} == {
         "content_strategist", "seo_editor", "article_writer", "conversion_editor"
     }
+    by_role = {request.metadata["team_role"]: request.max_tokens for request in provider.requests}
+    assert by_role == {
+        "content_strategist": 3000,
+        "seo_editor": 3500,
+        "article_writer": 8000,
+        "conversion_editor": 8000,
+    }
     content = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
     assert len(content.full_article) >= 2000 and len(content.draft.sections) >= 4
     assert content.conversion.cta
@@ -185,6 +192,7 @@ async def test_final_package_similarity_gets_one_conversion_retry(db, product, t
     assert len(result.run_ids) == 5
     assert all(request.metadata["reasoning_effort"] == "low" for request in provider.requests)
     assert provider.requests[-1].metadata["team_role"] == "conversion_editor_retry"
+    assert provider.requests[-1].max_tokens == 8000
     retry_run = db.get(AgentRun, result.run_ids[-1])
     assert retry_run.agent_name == 'conversion_editor_retry'
     assert retry_run.status == 'completed'
