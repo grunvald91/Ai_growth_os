@@ -104,7 +104,7 @@ class MeasurementPlan(Contract):
     activation: MeasurementStage
     customer: MeasurementStage
     activation_definition: Literal['demo', 'registration', 'booking']
-    review_window_days: int = Field(ge=1, le=90, strict=True)
+    review_window_days: int | None = Field(default=None, ge=1, le=90, strict=True)
     success_hypothesis: Text
 
 

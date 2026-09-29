@@ -161,6 +161,46 @@ async def test_article_rejects_missing_or_foreign_experiment(db, product, tmp_pa
         assert provider.requests == []
 
 
+
+
+@pytest.mark.asyncio
+async def test_final_package_similarity_gets_one_conversion_retry(db, product, tmp_path):
+    outputs = valid_outputs()
+    bad_conversion = json.loads(json.dumps(outputs[3]))
+    bad_conversion['derivatives'][0]['hook'] = outputs[1]['hook']
+    corrected_conversion = json.loads(json.dumps(outputs[3]))
+    workflow, provider, request = setup(
+        db, product, tmp_path,
+        [outputs[0], outputs[1], outputs[2], bad_conversion, corrected_conversion],
+    )
+
+    result = await workflow.run(request)
+
+    assert result.status == 'completed', result.error
+    assert len(provider.requests) == 5
+    assert len(result.run_ids) == 5
+    retry_run = db.get(AgentRun, result.run_ids[-1])
+    assert retry_run.agent_name == 'conversion_editor_retry'
+    assert retry_run.status == 'completed'
+    assert len(list(db.scalars(select(CostRecord)))) == 5
+
+
+@pytest.mark.asyncio
+async def test_measurement_window_may_remain_unset(db, product, tmp_path):
+    outputs = valid_outputs()
+    outputs[3]['measurement']['review_window_days'] = None
+    for derivative in outputs[3]['derivatives']:
+        derivative['measurement']['review_window_days'] = None
+    workflow, _, request = setup(db, product, tmp_path, outputs)
+
+    result = await workflow.run(request)
+
+    assert result.status == 'completed', result.error
+    content = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    assert content.conversion.measurement.review_window_days is None
+    assert all(d.measurement.review_window_days is None for d in content.conversion.derivatives)
+
+
 @pytest.mark.asyncio
 async def test_publication_only_requests_approval(db, product, tmp_path):
     workflow, _, request = setup(db, product, tmp_path, request_publication=True)
