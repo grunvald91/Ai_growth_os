@@ -97,8 +97,11 @@ def test_composition_selects_xai_and_requires_key():
         llm_model="grok-4.7",
         xai_api_key="xai-test-secret",
         xai_reasoning_effort="low",
+        xai_timeout_seconds=321,
     )
-    assert isinstance(build_llm_provider(settings), XAIProvider)
+    provider = build_llm_provider(settings)
+    assert isinstance(provider, XAIProvider)
+    assert provider._timeout.read == 321
 
     missing = Settings(
         _env_file=None,
