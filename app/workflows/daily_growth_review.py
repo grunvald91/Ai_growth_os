@@ -87,7 +87,8 @@ class DailyGrowthReview:
             error_code = 'provider_request_failed'
             response = await asyncio.wait_for(self.llm.generate(LLMRequest(
                 system_prompt=prompt, messages=[LLMMessage(role='user', content=json.dumps({
-                    'context': self._sanitize_tree(context), 'analytics': self._sanitize_tree(snapshot)}))], model=self.model, max_tokens=6000,
+                    'context': self._sanitize_tree(context), 'analytics': self._sanitize_tree(snapshot)}))],
+                model=self.model, max_tokens=6000, response_schema=CMOReview.model_json_schema(),
             )), timeout=90)
             error_code = 'invalid_strategy_output'
             if len(response.content) > 100_000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
