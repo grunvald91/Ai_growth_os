@@ -7,3 +7,6 @@ app.include_router(health_router)
 
 from app.api.products import router as products_router
 app.include_router(products_router)
+
+from app.api.research_sources import router as research_sources_router
+app.include_router(research_sources_router)
