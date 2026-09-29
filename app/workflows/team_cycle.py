@@ -17,6 +17,7 @@ from app.privacy import PrivacyGateway
 from app.services.artifacts import ArtifactService
 from app.workflows.context import load_context
 from app.workflows.daily_growth_review import DailyGrowthReview
+from app.workflows.research_department import ResearchDepartment
 from app.workflows.team_contracts import (
     AnalyticsPlan,
     ContentBrief,
@@ -94,6 +95,14 @@ class TeamCycle:
         self.provider_name = provider_name
         self.model = model
         self.followup_review = followup_review
+        self.research_department = ResearchDepartment(
+            db=db,
+            llm=llm,
+            privacy=privacy,
+            products_root=products_root,
+            provider_name=provider_name,
+            model=model,
+        )
 
     async def run(
         self,
@@ -154,6 +163,8 @@ class TeamCycle:
         task_type = brief_data.get("task_type")
         if task_type not in TASK_SCHEMAS:
             return TeamTaskResult(task_id=task.id, status="skipped", error="unsupported_task_type")
+        if task_type == "research":
+            return await self.research_department.run(product, task, brief, brief_data)
         if brief_data.get("operation") is not None or brief_data.get("requires_approval") is True:
             return TeamTaskResult(task_id=task.id, status="skipped", error="external_action_not_executable")
         try:
