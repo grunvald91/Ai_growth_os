@@ -5,12 +5,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.api.schemas import (ProductCreate, ProductRead, GoalCreate, GoalRead, TaskRead,
     ExperimentRead, ArtifactRead, DecisionRead, ApprovalRead, ArticleCreate, ArticleProductionRead,
-    TeamCycleCreate, TeamCycleRead)
+    TeamCycleCreate, TeamCycleRead, ExperimentFromPlanCreate, ExperimentMaterializationRead)
 from app.core.config import get_settings
 from app.core.composition import build_review, build_article_production, build_team_cycle
 from app.db.session import get_db
 from app.models.domain import Product, Goal, Task, Experiment, Artifact, Decision, Approval
 from app.workflows.contracts import ReviewResult
+from app.workflows.experiment_materialization import ExperimentFromPlanInput, ExperimentMaterialization
 
 router = APIRouter()
 
@@ -61,6 +62,23 @@ def create_goal(product_id: UUID, body: GoalCreate, db: Session = Depends(get_db
 async def daily_growth_review(product_id: UUID, db: Session = Depends(get_db), review=Depends(get_review)):
     require_product(db, product_id)
     return await review.run(product_id)
+
+
+@router.post('/products/{product_id}/experiments/from-content-plan',
+             response_model=ExperimentMaterializationRead, status_code=201)
+def experiment_from_content_plan(product_id: UUID, body: ExperimentFromPlanCreate,
+                                 db: Session = Depends(get_db)):
+    require_product(db, product_id)
+    try:
+        return ExperimentMaterialization(db).run(
+            ExperimentFromPlanInput(product_id=product_id, **body.model_dump())
+        )
+    except LookupError:
+        raise HTTPException(404, 'Plan artifact or decision not found for this product') from None
+    except ValueError:
+        raise HTTPException(409, 'Plan artifact cannot be materialized as an experiment') from None
+
+
 
 
 def get_team_cycle(db: Session = Depends(get_db)):

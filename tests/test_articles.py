@@ -15,7 +15,7 @@ from app.db.models import Base
 from app.db.session import get_db
 from app.llm.fake import LLMResponse, LLMUsage
 from app.main import app
-from app.models.domain import Product, Task, Artifact, Approval, AgentRun, CostRecord, ToolCall, Publication, TaskStatus
+from app.models.domain import Product, Task, Artifact, Approval, AgentRun, CostRecord, ToolCall, Publication, TaskStatus, Experiment
 from app.workflows.article_contracts import ArticleProductionInput, ArticleArtifact
 
 
@@ -120,6 +120,45 @@ async def test_invalid_output_is_atomic(db, product, tmp_path, mutation):
     assert list(db.scalars(select(Artifact))) == list(db.scalars(select(Approval))) == []
     assert db.get(Task, result.task_id).status == TaskStatus.FAILED
     assert any(r.status == 'failed' for r in db.scalars(select(AgentRun)))
+
+
+
+
+@pytest.mark.asyncio
+async def test_article_binds_verified_experiment_context(db, product, tmp_path):
+    experiment = Experiment(
+        product_id=product.id,
+        name='Own-site SEO test',
+        hypothesis='Massage studios are an unranked audience hypothesis.',
+        audience='Small massage-studio owners evaluating booking tools.',
+        channel='own_site',
+        target_metric='qualified_leads',
+        success_condition='Persist at least one qualified lead tied to the page before considering KEEP.',
+        status='draft',
+    )
+    db.add(experiment); db.commit()
+    workflow, provider, request = setup(db, product, tmp_path, experiment_id=experiment.id)
+    result = await workflow.run(request)
+    assert result.status == 'completed', result.error
+    content = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    assert content.experiment_id == experiment.id
+    outbound = provider.requests[0].messages[0].content
+    assert str(experiment.id) in outbound
+    assert 'qualified_leads' in outbound
+
+
+@pytest.mark.asyncio
+async def test_article_rejects_missing_or_foreign_experiment(db, product, tmp_path):
+    other = Product(name='Other experiment owner', slug='other-experiment-owner')
+    db.add(other); db.flush()
+    foreign = Experiment(product_id=other.id, name='Foreign', hypothesis='Foreign hypothesis')
+    db.add(foreign); db.commit()
+
+    for experiment_id in [uuid4(), foreign.id]:
+        workflow, provider, request = setup(db, product, tmp_path, experiment_id=experiment_id)
+        with pytest.raises(LookupError):
+            await workflow.run(request)
+        assert provider.requests == []
 
 
 @pytest.mark.asyncio
