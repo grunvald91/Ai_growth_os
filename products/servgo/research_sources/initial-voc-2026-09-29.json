@@ -1,0 +1,80 @@
+{
+  "label": "Initial competitor VOC sample — 2026-09-29",
+  "sources": [
+    {
+      "url": "https://www.rustore.ru/catalog/app/apps.yclients1/reviews",
+      "title": "YCLIENTS RuStore — 2026-09-04",
+      "platform": "RuStore",
+      "competitor": "YCLIENTS",
+      "excerpt": "Reviewer reports frequent freezing and difficulty opening current and future bookings.",
+      "observed_at": "2026-09-04"
+    },
+    {
+      "url": "https://www.rustore.ru/catalog/app/apps.yclients1/reviews",
+      "title": "YCLIENTS RuStore — 2026-07-30",
+      "platform": "RuStore",
+      "competitor": "YCLIENTS",
+      "excerpt": "Reviewer reports glitches and errors on both Android and iPhone that make appointment handling difficult.",
+      "observed_at": "2026-07-30"
+    },
+    {
+      "url": "https://www.rustore.ru/catalog/app/apps.yclients1/reviews",
+      "title": "YCLIENTS RuStore — 2026-05-23",
+      "platform": "RuStore",
+      "competitor": "YCLIENTS",
+      "excerpt": "Reviewer reports recurring client-data entry bugs and says earlier support contacts did not resolve them.",
+      "observed_at": "2026-05-23"
+    },
+    {
+      "url": "https://www.rustore.ru/catalog/app/ru.dikidi.beauty.business/reviews",
+      "title": "DIKIDI Business RuStore — 2026-09-03",
+      "platform": "RuStore",
+      "competitor": "DIKIDI Business",
+      "excerpt": "Reviewer reports booking notifications do not arrive despite permissions being enabled.",
+      "observed_at": "2026-09-03"
+    },
+    {
+      "url": "https://www.rustore.ru/catalog/app/ru.dikidi.beauty.business/reviews",
+      "title": "DIKIDI Business RuStore — 2026-08-28 notifications",
+      "platform": "RuStore",
+      "competitor": "DIKIDI Business",
+      "excerpt": "Reviewer reports missing push notifications and consequently missing booking changes.",
+      "observed_at": "2026-08-28"
+    },
+    {
+      "url": "https://www.rustore.ru/catalog/app/ru.dikidi.beauty.business/reviews",
+      "title": "DIKIDI Business RuStore — 2026-08-28 access",
+      "platform": "RuStore",
+      "competitor": "DIKIDI Business",
+      "excerpt": "Reviewer reports repeated app exits and a period when the business account and client online booking were inaccessible.",
+      "observed_at": "2026-08-28"
+    },
+    {
+      "url": "https://www.capterra.com/p/215487/EasyWeek/reviews/",
+      "title": "EasyWeek Capterra — Svitlana H, 2026-06-02",
+      "platform": "Capterra",
+      "competitor": "EasyWeek",
+      "excerpt": "Reviewer reports limited accounting and POS integrations creating additional manual work and dissatisfaction with subscription changes.",
+      "rating": 4,
+      "observed_at": "2026-06-02"
+    },
+    {
+      "url": "https://www.capterra.com/p/215487/EasyWeek/reviews/",
+      "title": "EasyWeek Capterra — Natallia K, 2026-06-02",
+      "platform": "Capterra",
+      "competitor": "EasyWeek",
+      "excerpt": "Reviewer reports limited widget layout and branding flexibility, with some newer widget settings not reliably appearing or loading.",
+      "rating": 5,
+      "observed_at": "2026-06-02"
+    },
+    {
+      "url": "https://www.capterra.com/p/215487/EasyWeek/reviews/",
+      "title": "EasyWeek Capterra — Annika M, 2026-08-02",
+      "platform": "Capterra",
+      "competitor": "EasyWeek",
+      "excerpt": "Reviewer reports not receiving an email when a customer cancels and considers the service somewhat expensive.",
+      "rating": 4,
+      "observed_at": "2026-08-02"
+    }
+  ]
+}
