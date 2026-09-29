@@ -42,11 +42,19 @@ STAGES = (
 )
 
 STAGE_TIMEOUT_SECONDS = {
-    'content_strategist': 90,
-    'seo_editor': 180,
-    'article_writer': 180,
+    'content_strategist': 120,
+    'seo_editor': 240,
+    'article_writer': 240,
     'conversion_editor': 240,
     'conversion_editor_retry': 240,
+}
+
+STAGE_MAX_TOKENS = {
+    'content_strategist': 3000,
+    'seo_editor': 3500,
+    'article_writer': 8000,
+    'conversion_editor': 8000,
+    'conversion_editor_retry': 8000,
 }
 
 
@@ -179,7 +187,7 @@ class ArticleProduction:
                 error = f'provider_request_failed:{name}'
                 response = await asyncio.wait_for(self.llm.generate(LLMRequest(system_prompt=prompt,
                     messages=[LLMMessage(role='user', content=json.dumps(inputs))], model=self.model,
-                    max_tokens=12000, response_schema=schema.model_json_schema(),
+                    max_tokens=STAGE_MAX_TOKENS[name], response_schema=schema.model_json_schema(),
                     metadata={'reasoning_effort': 'low', 'team_role': name, 'task_type': 'article_production'})),
                     timeout=STAGE_TIMEOUT_SECONDS[name])
                 responses[run_id] = response
@@ -262,7 +270,7 @@ class ArticleProduction:
                             system_prompt=retry_prompt,
                             messages=[LLMMessage(role='user', content=json.dumps(retry_inputs))],
                             model=self.model,
-                            max_tokens=12000,
+                            max_tokens=STAGE_MAX_TOKENS['conversion_editor_retry'],
                             response_schema=ConversionPackage.model_json_schema(),
                             metadata={
                                 'reasoning_effort': 'low',
