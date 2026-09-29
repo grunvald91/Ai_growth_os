@@ -1,0 +1,53 @@
+name: Inspect ServGo AI team state
+
+on:
+  push:
+    branches:
+      - ops/inspect-team-cycle
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+
+    steps:
+      - name: Guard SSH secret
+        run: |
+          [ -n "$SSHPASS" ] || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Inspect team state
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=20 -o ServerAliveCountMax=15"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          PRODUCT_ID=$(docker exec -i ai-growth-os-api-1 python - <<'PY'
+          import json, urllib.request
+          data=json.load(urllib.request.urlopen("http://127.0.0.1:8000/products"))
+          print(next(p["id"] for p in data if p.get("slug")=="servgo"))
+          PY
+          )
+          echo "=== TASKS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/tasks?limit=50"
+          echo
+          echo "=== ARTIFACTS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/artifacts?limit=50"
+          echo
+          echo "=== DECISIONS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/decisions?limit=20"
+          echo
+          echo "=== APPROVALS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/approvals?limit=20"
+          echo
+          REMOTE
