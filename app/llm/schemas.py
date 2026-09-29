@@ -15,6 +15,7 @@ class LLMRequest(BaseModel):
     max_tokens: int = Field(default=1024, gt=0)
     temperature: float | None = Field(default=None, ge=0, le=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    response_schema: dict[str, Any] | None = None
 
 
 class LLMUsage(BaseModel):

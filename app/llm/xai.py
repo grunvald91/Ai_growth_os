@@ -46,6 +46,15 @@ class XAIProvider:
         }
         if request.temperature is not None:
             payload["temperature"] = request.temperature
+        if request.response_schema is not None:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "structured_response",
+                    "strict": True,
+                    "schema": request.response_schema,
+                },
+            }
 
         headers = {
             "Authorization": f"Bearer {self._api_key}",

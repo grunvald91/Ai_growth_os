@@ -152,7 +152,7 @@ class ArticleProduction:
                 error = 'provider_request_failed'
                 response = await asyncio.wait_for(self.llm.generate(LLMRequest(system_prompt=prompt,
                     messages=[LLMMessage(role='user', content=json.dumps(inputs))], model=self.model,
-                    max_tokens=12000)), timeout=90)
+                    max_tokens=12000, response_schema=schema.model_json_schema())), timeout=90)
                 responses[run_id] = response
                 error = 'invalid_article_output'
                 if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
