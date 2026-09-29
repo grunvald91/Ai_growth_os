@@ -78,7 +78,7 @@ async def test_xai_provider_maps_request_and_usage(monkeypatch):
     assert response.model == "grok-4.7"
     assert response.usage.input_tokens == 11
     assert response.usage.output_tokens == 7
-    assert response.stop_reason == "stop"
+    assert response.stop_reason == "end_turn"
 
 
 def test_composition_selects_xai_and_requires_key():
