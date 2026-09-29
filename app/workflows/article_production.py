@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
-from app.models.domain import AgentRun, CostRecord, Decision, Product, Task, TaskStatus
+from app.models.domain import AgentRun, CostRecord, Decision, Experiment, Product, Task, TaskStatus
 from app.policies import PolicyEvaluator
 from app.privacy import PrivacyGateway
 from app.services.approvals import ApprovalService
@@ -90,6 +90,9 @@ class ArticleProduction:
         decision = self.db.get(Decision, request.decision_id) if request.decision_id else None
         if request.decision_id and (decision is None or decision.product_id != product.id):
             raise LookupError('Decision not found for product')
+        experiment = self.db.get(Experiment, request.experiment_id) if request.experiment_id else None
+        if request.experiment_id and (experiment is None or experiment.product_id != product.id):
+            raise LookupError('Experiment not found for product')
         if request.task_id:
             task = self.db.get(Task, request.task_id)
             if task is None or task.product_id != product.id:
@@ -106,6 +109,8 @@ class ArticleProduction:
         references = [{'kind': 'product', 'id': str(product_id)}, {'kind': 'task', 'id': str(task_id)}]
         if decision:
             references.append({'kind': 'decision', 'id': str(decision.id)})
+        if experiment:
+            references.append({'kind': 'experiment', 'id': str(experiment.id)})
         runs = [AgentRun(task_id=task_id, agent_name=name, provider=self.provider_name,
                          model=self.model, status='queued', input_references=references)
                 for name, _, _ in STAGES]
@@ -128,6 +133,17 @@ class ArticleProduction:
             if decision:
                 inputs['decision'] = {'id': str(decision.id), 'type': decision.decision_type.value,
                                       'rationale': self.privacy.sanitize_text(decision.rationale)}
+            if experiment:
+                inputs['experiment'] = {
+                    'id': str(experiment.id),
+                    'name': self.privacy.sanitize_text(experiment.name),
+                    'hypothesis': self.privacy.sanitize_text(experiment.hypothesis),
+                    'audience': self.privacy.sanitize_text(experiment.audience or ''),
+                    'channel': experiment.channel,
+                    'target_metric': experiment.target_metric,
+                    'success_condition': self.privacy.sanitize_text(experiment.success_condition or ''),
+                    'status': experiment.status,
+                }
             outputs = []
             for run_id, (name, schema, responsibility) in zip(run_ids, STAGES):
                 run = self.db.get(AgentRun, run_id)
@@ -171,7 +187,7 @@ class ArticleProduction:
                                 + section.body for section in draft.sections)
             full_article = f'# {seo.title}\n\n{seo.hook}\n\n{body}\n\n{conversion.cta}'
             package = ArticleArtifact(product_id=product_id, task_id=task_id, decision_id=request.decision_id,
-                channel=request.channel, topic=safe_request.topic, strategy=strategy, seo=seo,
+                experiment_id=request.experiment_id, channel=request.channel, topic=safe_request.topic, strategy=strategy, seo=seo,
                 draft=draft, full_article=full_article, conversion=conversion)
             error = 'article_persistence_failed'
             artifacts = ArtifactService(self.db)
