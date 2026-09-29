@@ -179,7 +179,8 @@ class ArticleProduction:
                 error = f'provider_request_failed:{name}'
                 response = await asyncio.wait_for(self.llm.generate(LLMRequest(system_prompt=prompt,
                     messages=[LLMMessage(role='user', content=json.dumps(inputs))], model=self.model,
-                    max_tokens=12000, response_schema=schema.model_json_schema())),
+                    max_tokens=12000, response_schema=schema.model_json_schema(),
+                    metadata={'reasoning_effort': 'low', 'team_role': name, 'task_type': 'article_production'})),
                     timeout=STAGE_TIMEOUT_SECONDS[name])
                 responses[run_id] = response
                 error = f'invalid_article_output:{name}'
@@ -263,6 +264,11 @@ class ArticleProduction:
                             model=self.model,
                             max_tokens=12000,
                             response_schema=ConversionPackage.model_json_schema(),
+                            metadata={
+                                'reasoning_effort': 'low',
+                                'team_role': 'conversion_editor_retry',
+                                'task_type': 'article_production',
+                            },
                         )
                     ),
                     timeout=STAGE_TIMEOUT_SECONDS['conversion_editor_retry'],
