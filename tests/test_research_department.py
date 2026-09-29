@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.core.composition import build_team_cycle
 from app.core.config import Settings
 from app.llm.schemas import LLMResponse, LLMUsage
-from app.models.domain import Artifact, Product, Task, TaskStatus
+from app.models.domain import AgentRun, Artifact, Product, Task, TaskStatus
 from app.workflows.research_contracts import ResearchDepartmentReport, ResearchSourceBundle
 
 
@@ -155,7 +155,12 @@ async def test_research_department_fans_out_and_synthesizes_partial_without_sour
 
     result = await cycle.run(product.id, max_tasks=1, followup_cmo=False)
 
-    assert result.completed_task_ids == [parent.id], result.model_dump(mode="json")
+    assert result.completed_task_ids == [parent.id], {
+        "result": result.model_dump(mode="json"),
+        "roles": [r.metadata.get("team_role") for r in provider.requests],
+        "children": [(str(t.id), t.assigned_agent, str(t.status)) for t in db.scalars(select(Task).where(Task.parent_id == parent.id))],
+        "runs": [(r.agent_name, r.status, r.error) for r in db.scalars(select(AgentRun))],
+    }
     assert len(provider.requests) == 4
     children = list(db.scalars(select(Task).where(Task.parent_id == parent.id)))
     assert len(children) == 4
