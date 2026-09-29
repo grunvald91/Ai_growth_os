@@ -38,20 +38,37 @@ jobs:
           DECISION_ID="dabc19ab-3620-4852-ab52-411de8a16c0f"
 
           echo "=== MATERIALIZE_EXPERIMENT ==="
-          EXP_JSON=$(curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/experiments/from-content-plan"             -H 'Content-Type: application/json'             -d "{"plan_artifact_id":"$PLAN_ID","decision_id":"$DECISION_ID"}")
+          EXP_PAYLOAD=$(python - "$PLAN_ID" "$DECISION_ID" <<'PY'
+          import json, sys
+          print(json.dumps({
+              "plan_artifact_id": sys.argv[1],
+              "decision_id": sys.argv[2],
+          }))
+          PY
+          )
+          EXP_JSON=$(curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/experiments/from-content-plan"             -H 'Content-Type: application/json'             --data-binary "$EXP_PAYLOAD")
           echo "$EXP_JSON"
           EXPERIMENT_ID=$(printf '%s' "$EXP_JSON" | python -c 'import json,sys; print(json.load(sys.stdin)["experiment_id"])')
 
           echo "=== ARTICLE_FACTORY ==="
-          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/articles"             -H 'Content-Type: application/json'             -d "{
-              "experiment_id":"$EXPERIMENT_ID",
-              "decision_id":"$DECISION_ID",
-              "channel":"own_site",
-              "topic":"Online booking workflow for a small massage studio",
-              "audience":"Owner or manager of a small massage studio evaluating booking tools",
-              "problem":"Hypothesis: the studio may need a clear online path from service selection through optional specialist and time slot to contact details, optional prepayment proof, manual owner verification, booking status and notifications.",
-              "request_publication":true
-            }"
+          ARTICLE_PAYLOAD=$(python - "$EXPERIMENT_ID" "$DECISION_ID" <<'PY'
+          import json, sys
+          print(json.dumps({
+              "experiment_id": sys.argv[1],
+              "decision_id": sys.argv[2],
+              "channel": "own_site",
+              "topic": "Online booking workflow for a small massage studio",
+              "audience": "Owner or manager of a small massage studio evaluating booking tools",
+              "problem": (
+                  "Hypothesis: the studio may need a clear online path from service selection "
+                  "through optional specialist and time slot to contact details, optional "
+                  "prepayment proof, manual owner verification, booking status and notifications."
+              ),
+              "request_publication": True,
+          }))
+          PY
+          )
+          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/articles"             -H 'Content-Type: application/json'             --data-binary "$ARTICLE_PAYLOAD"
           echo
 
           echo "=== EXPERIMENTS ==="
