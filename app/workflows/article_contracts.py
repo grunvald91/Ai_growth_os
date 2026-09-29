@@ -19,6 +19,7 @@ class ArticleProductionInput(Contract):
     product_id: UUID
     task_id: UUID | None = None
     decision_id: UUID | None = None
+    experiment_id: UUID | None = None
     channel: Channel = 'own_site'
     topic: ShortText
     audience: ShortText | None = None
@@ -159,6 +160,7 @@ class ArticleArtifact(Contract):
     product_id: UUID
     task_id: UUID
     decision_id: UUID | None
+    experiment_id: UUID | None
     channel: Channel
     topic: ShortText
     strategy: ArticleStrategy
