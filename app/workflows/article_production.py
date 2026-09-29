@@ -45,8 +45,8 @@ STAGE_TIMEOUT_SECONDS = {
     'content_strategist': 90,
     'seo_editor': 90,
     'article_writer': 180,
-    'conversion_editor': 120,
-    'conversion_editor_retry': 120,
+    'conversion_editor': 240,
+    'conversion_editor_retry': 240,
 }
 
 
