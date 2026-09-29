@@ -1,0 +1,66 @@
+name: Launch ServGo draft experiment package
+
+on:
+  push:
+    branches:
+      - ops-experiment-launch
+
+permissions:
+  contents: read
+
+jobs:
+  launch-draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+
+    steps:
+      - name: Guard SSH secret
+        run: |
+          [ -n "$SSHPASS" ] || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Materialize experiment and prepare article package
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=20 -o ServerAliveCountMax=30"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          PRODUCT_ID="04392041-ea09-4853-874e-8060bee7286c"
+          PLAN_ID="42714723-7f9a-4734-a7a4-2a74e409f193"
+          DECISION_ID="dabc19ab-3620-4852-ab52-411de8a16c0f"
+
+          echo "=== MATERIALIZE_EXPERIMENT ==="
+          EXP_JSON=$(curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/experiments/from-content-plan"             -H 'Content-Type: application/json'             -d "{"plan_artifact_id":"$PLAN_ID","decision_id":"$DECISION_ID"}")
+          echo "$EXP_JSON"
+          EXPERIMENT_ID=$(printf '%s' "$EXP_JSON" | python -c 'import json,sys; print(json.load(sys.stdin)["experiment_id"])')
+
+          echo "=== ARTICLE_FACTORY ==="
+          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/articles"             -H 'Content-Type: application/json'             -d "{
+              "experiment_id":"$EXPERIMENT_ID",
+              "decision_id":"$DECISION_ID",
+              "channel":"own_site",
+              "topic":"Online booking workflow for a small massage studio",
+              "audience":"Owner or manager of a small massage studio evaluating booking tools",
+              "problem":"Hypothesis: the studio may need a clear online path from service selection through optional specialist and time slot to contact details, optional prepayment proof, manual owner verification, booking status and notifications.",
+              "request_publication":true
+            }"
+          echo
+
+          echo "=== EXPERIMENTS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/experiments?limit=20"
+          echo
+          echo "=== APPROVALS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/approvals?limit=20"
+          echo
+          echo "=== ARTIFACTS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/artifacts?limit=20"
+          echo
+          REMOTE
