@@ -38,7 +38,7 @@ jobs:
           DECISION_ID="dabc19ab-3620-4852-ab52-411de8a16c0f"
 
           echo "=== MATERIALIZE_EXPERIMENT ==="
-          EXP_PAYLOAD=$(python - "$PLAN_ID" "$DECISION_ID" <<'PY'
+          EXP_PAYLOAD=$(docker exec -i ai-growth-os-api-1 python - "$PLAN_ID" "$DECISION_ID" <<'PY'
           import json, sys
           print(json.dumps({
               "plan_artifact_id": sys.argv[1],
@@ -48,10 +48,10 @@ jobs:
           )
           EXP_JSON=$(curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/experiments/from-content-plan"             -H 'Content-Type: application/json'             --data-binary "$EXP_PAYLOAD")
           echo "$EXP_JSON"
-          EXPERIMENT_ID=$(printf '%s' "$EXP_JSON" | python -c 'import json,sys; print(json.load(sys.stdin)["experiment_id"])')
+          EXPERIMENT_ID=$(printf '%s' "$EXP_JSON" | docker exec -i ai-growth-os-api-1 python -c 'import json,sys; print(json.load(sys.stdin)["experiment_id"])')
 
           echo "=== ARTICLE_FACTORY ==="
-          ARTICLE_PAYLOAD=$(python - "$EXPERIMENT_ID" "$DECISION_ID" <<'PY'
+          ARTICLE_PAYLOAD=$(docker exec -i ai-growth-os-api-1 python - "$EXPERIMENT_ID" "$DECISION_ID" <<'PY'
           import json, sys
           print(json.dumps({
               "experiment_id": sys.argv[1],
