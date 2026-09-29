@@ -1,4 +1,4 @@
-name: Test ClaudeHub Grok web search
+name: Test ClaudeHub Grok structured output
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  test-web-search:
+  test-structured-output:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -19,28 +19,20 @@ jobs:
       - name: Guard key
         run: |
           [ -n "$HUB_API_KEY" ] || { echo "::error::Missing API"; exit 1; }
-
-      - name: Test responses web_search
+      - name: Test chat completions JSON schema
         run: |
           set -euo pipefail
           BODY=$(mktemp)
-          STATUS=$(curl -sS -o "$BODY" -w "%{http_code}"             https://api.claudehub.fun/v1/responses             -H "Authorization: Bearer $HUB_API_KEY"             -H "Content-Type: application/json"             -d '{"model":"grok-4.7","input":"Find one current public source about online appointment booking software. Reply with only the source title and URL.","tools":[{"type":"web_search"}],"max_output_tokens":300}')
+          STATUS=$(curl -sS -o "$BODY" -w "%{http_code}"             https://api.claudehub.fun/v1/chat/completions             -H "Authorization: Bearer $HUB_API_KEY"             -H "Content-Type: application/json"             -d '{"model":"grok-4.7","messages":[{"role":"user","content":"Return a status and count."}],"max_completion_tokens":128,"reasoning_effort":"low","response_format":{"type":"json_schema","json_schema":{"name":"probe","strict":true,"schema":{"type":"object","properties":{"status":{"type":"string"},"count":{"type":"integer"}},"required":["status","count"],"additionalProperties":false}}}}')
           echo "HTTP_STATUS=$STATUS"
           python - "$BODY" <<'PY'
           import json, sys
-          path=sys.argv[1]
-          raw=open(path, encoding="utf-8").read()
-          try:
-              data=json.loads(raw)
-          except Exception:
-              print("NON_JSON_RESPONSE")
-              print(raw[:1000])
-              raise SystemExit(0)
-          safe={}
-          for key in ("id","object","model","status","error","output_text"):
-              if key in data:
-                  safe[key]=data[key]
-          if "output" in data:
-              safe["output_types"]=[item.get("type") for item in data.get("output",[]) if isinstance(item,dict)]
-          print(json.dumps(safe, ensure_ascii=False)[:4000])
+          data=json.load(open(sys.argv[1], encoding="utf-8"))
+          if "error" in data:
+              print(json.dumps(data["error"], ensure_ascii=False))
+          else:
+              msg=data["choices"][0]["message"]["content"]
+              print("CONTENT="+msg)
+              parsed=json.loads(msg)
+              assert set(parsed)=={"status","count"}
           PY
