@@ -48,61 +48,30 @@ jobs:
           echo "SERVGO_PRODUCT_ID=$PRODUCT_ID"
 
           docker exec -i ai-growth-os-api-1 python - "$PRODUCT_ID" <<'PY'
-          import json, sys
+          import sys
           from uuid import UUID
-          from sqlalchemy import select
           from app.db.session import SessionLocal
-          from app.models.domain import Artifact, Product, Task, TaskStatus
+          from app.models.domain import Task, TaskStatus
 
           product_id=UUID(sys.argv[1])
-          title="Research Department live test — segments, channels, problems and competitor VOC"
+          targets=[
+              (UUID("26688513-11f5-47e4-a519-fc4fa80feead"), 1000),
+              (UUID("34a9c7c6-daac-4b0c-ba3d-8986a3f617f4"), 999),
+          ]
           with SessionLocal() as db:
-              existing=db.scalar(
-                  select(Task)
-                  .where(Task.product_id==product_id, Task.title==title)
-                  .order_by(Task.created_at.desc())
-                  .limit(1)
-              )
-              if existing is None:
-                  task=Task(
-                      product_id=product_id,
-                      title=title,
-                      description=(
-                          "Research ServGo organic acquisition using separate segment, channel, "
-                          "problem/PMF and competitor/VOC specialists. Use stored public review "
-                          "evidence for competitor patterns. Keep claims falsifiable and grounded."
-                      ),
-                      assigned_agent="research_pmm",
-                      status=TaskStatus.QUEUED,
-                      priority=100,
-                  )
-                  db.add(task)
-                  db.flush()
-                  db.add(Artifact(
-                      product_id=product_id,
-                      task_id=task.id,
-                      kind="task_brief",
-                      title=title,
-                      content=json.dumps({
-                          "decision_id": None,
-                          "title": title,
-                          "description": task.description,
-                          "assigned_agent": "research_pmm",
-                          "task_type": "research",
-                          "skill_name": None,
-                          "priority": 100,
-                          "operation": None,
-                          "requires_approval": False,
-                      }),
-                  ))
-                  db.commit()
-                  print("CREATED_RESEARCH_TASK", task.id)
-              else:
-                  print("RESEARCH_TASK_EXISTS", existing.id, existing.status)
+              for task_id, priority in targets:
+                  task=db.get(Task, task_id)
+                  if task is None or task.product_id != product_id:
+                      raise SystemExit(f"Target task missing: {task_id}")
+                  if task.status != TaskStatus.QUEUED:
+                      raise SystemExit(f"Target task not queued: {task_id} status={task.status}")
+                  task.priority=priority
+              db.commit()
+              print("TARGET_TASKS_PRIORITIZED")
           PY
 
           echo "=== TEAM_CYCLE ==="
-          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/team-cycle"             -H 'Content-Type: application/json'             -d '{"max_tasks":1,"followup_cmo":true}'
+          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/team-cycle"             -H 'Content-Type: application/json'             -d '{"max_tasks":2,"followup_cmo":true}'
           echo
           echo "=== TASKS ==="
           curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/tasks?limit=50"
