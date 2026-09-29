@@ -55,8 +55,8 @@ jobs:
 
           product_id=UUID(sys.argv[1])
           targets=[
-              (UUID("26688513-11f5-47e4-a519-fc4fa80feead"), 1000),
-              (UUID("34a9c7c6-daac-4b0c-ba3d-8986a3f617f4"), 999),
+              (UUID("1da9c757-5b28-4804-a7b3-fc5036daf9d6"), 1000),
+              (UUID("a88d7f33-410a-473f-bd49-c451ce8b1465"), 999),
           ]
           with SessionLocal() as db:
               for task_id, priority in targets:
