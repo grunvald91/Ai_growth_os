@@ -1,0 +1,64 @@
+name: Run ServGo AI team cycle
+
+on:
+  push:
+    branches:
+      - ops/run-team-cycle
+
+permissions:
+  contents: read
+
+jobs:
+  team-cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+
+    steps:
+      - name: Guard SSH secret
+        run: |
+          [ -n "$SSHPASS" ] || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Run bounded team cycle and inspect results
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          PRODUCT_ID=$(docker exec -i ai-growth-os-api-1 python - <<'PY'
+          import json, urllib.request
+          data=json.load(urllib.request.urlopen("http://127.0.0.1:8000/products"))
+          for p in data:
+              if p.get("slug")=="servgo":
+                  print(p["id"])
+                  break
+          else:
+              raise SystemExit("ServGo product not found")
+          PY
+          )
+
+          echo "SERVGO_PRODUCT_ID=$PRODUCT_ID"
+          echo "=== TEAM_CYCLE ==="
+          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/team-cycle"             -H 'Content-Type: application/json'             -d '{"max_tasks":10,"followup_cmo":true}'
+          echo
+          echo "=== TASKS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/tasks?limit=50"
+          echo
+          echo "=== ARTIFACTS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/artifacts?limit=50"
+          echo
+          echo "=== DECISIONS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/decisions?limit=20"
+          echo
+          echo "=== APPROVALS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/approvals?limit=20"
+          echo
+          REMOTE
