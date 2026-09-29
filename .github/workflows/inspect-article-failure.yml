@@ -38,7 +38,7 @@ jobs:
           from app.db.session import SessionLocal
           from app.models.domain import AgentRun, CostRecord, Task
 
-          task_id=UUID("3380a046-b68f-48c4-b3bd-3d23fbfa5b43")
+          task_id=UUID("0a017adb-21ae-4f8d-a27b-91e60a2f05a9")
           with SessionLocal() as db:
               task=db.get(Task, task_id)
               print("TASK", {"id": str(task.id), "status": task.status.value, "title": task.title})
