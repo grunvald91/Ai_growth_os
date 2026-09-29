@@ -1,4 +1,4 @@
-name: Run ServGo AI team cycle
+name: Materialize ServGo experiment and article
 
 on:
   push:
@@ -9,9 +9,9 @@ permissions:
   contents: read
 
 jobs:
-  team-cycle:
+  experiment-article:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
       SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
@@ -26,63 +26,35 @@ jobs:
       - name: Install sshpass
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
 
-      - name: Run bounded team cycle and inspect results
+      - name: Materialize experiment and prepare article approval
         run: |
           set -euo pipefail
-          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=20 -o ServerAliveCountMax=15"
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=20 -o ServerAliveCountMax=30"
           sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
+          PRODUCT_ID="04392041-ea09-4853-874e-8060bee7286c"
+          PLAN_ID="42714723-7f9a-4734-a7a4-2a74e409f193"
+          DECISION_ID="dabc19ab-3620-4852-ab52-411de8a16c0f"
 
-          PRODUCT_ID=$(docker exec -i ai-growth-os-api-1 python - <<'PY'
-          import json, urllib.request
-          data=json.load(urllib.request.urlopen("http://127.0.0.1:8000/products"))
-          for p in data:
-              if p.get("slug")=="servgo":
-                  print(p["id"])
-                  break
-          else:
-              raise SystemExit("ServGo product not found")
-          PY
-          )
-
-          echo "SERVGO_PRODUCT_ID=$PRODUCT_ID"
-
-          docker exec -i ai-growth-os-api-1 python - "$PRODUCT_ID" <<'PY'
-          import sys
-          from uuid import UUID
-          from app.db.session import SessionLocal
-          from app.models.domain import Task, TaskStatus
-
-          product_id=UUID(sys.argv[1])
-          targets=[
-              (UUID("1da9c757-5b28-4804-a7b3-fc5036daf9d6"), 1000),
-              (UUID("a88d7f33-410a-473f-bd49-c451ce8b1465"), 999),
-          ]
-          with SessionLocal() as db:
-              for task_id, priority in targets:
-                  task=db.get(Task, task_id)
-                  if task is None or task.product_id != product_id:
-                      raise SystemExit(f"Target task missing: {task_id}")
-                  if task.status != TaskStatus.QUEUED:
-                      raise SystemExit(f"Target task not queued: {task_id} status={task.status}")
-                  task.priority=priority
-              db.commit()
-              print("TARGET_TASKS_PRIORITIZED")
-          PY
-
-          echo "=== TEAM_CYCLE ==="
-          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/team-cycle"             -H 'Content-Type: application/json'             -d '{"max_tasks":2,"followup_cmo":true}'
+          EXP_FILE=$(mktemp)
+          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/experiments/from-content-plan"             -H 'Content-Type: application/json'             -d "{\"plan_artifact_id\":\"$PLAN_ID\",\"decision_id\":\"$DECISION_ID\"}" > "$EXP_FILE"
+          echo "=== EXPERIMENT ==="
+          cat "$EXP_FILE"
           echo
-          echo "=== TASKS ==="
-          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/tasks?limit=50"
+          EXPERIMENT_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["experiment_id"])' "$EXP_FILE")
+
+          ARTICLE_FILE=$(mktemp)
+          curl --max-time 1200 -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/articles"             -H 'Content-Type: application/json'             -d "{\"experiment_id\":\"$EXPERIMENT_ID\",\"decision_id\":\"$DECISION_ID\",\"channel\":\"own_site\",\"topic\":\"Онлайн-запись для небольшой массажной студии: как устроить путь клиента от выбора услуги до подтверждения\",\"audience\":\"Владелец или управляющий небольшой массажной студии\",\"problem\":\"Проверить гипотезу, что владельцам полезно структурировать путь онлайн-записи и подтверждения без неподтвержденных сравнений с конкурентами.\",\"request_publication\":true}" > "$ARTICLE_FILE"
+          echo "=== ARTICLE_RESULT ==="
+          cat "$ARTICLE_FILE"
           echo
-          echo "=== ARTIFACTS ==="
-          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/artifacts?limit=50"
-          echo
-          echo "=== DECISIONS ==="
-          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/decisions?limit=20"
+          echo "=== EXPERIMENTS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/experiments?limit=10"
           echo
           echo "=== APPROVALS ==="
-          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/approvals?limit=20"
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/approvals?limit=10"
+          echo
+          echo "=== ARTIFACTS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/artifacts?limit=20"
           echo
           REMOTE
