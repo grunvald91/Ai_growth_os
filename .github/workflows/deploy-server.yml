@@ -111,8 +111,8 @@ jobs:
           }
           dc build api
           dc up -d postgres
-          dc run --rm api alembic upgrade head
-          dc run --rm api python -m app.bootstrap
+          dc run -T --rm api alembic upgrade head </dev/null
+          dc run -T --rm api python -m app.bootstrap </dev/null
           dc up -d api
           for i in $(seq 1 30); do
             if curl -fsS --max-time 3 http://127.0.0.1:8091/health >/dev/null; then
