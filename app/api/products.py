@@ -4,9 +4,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.api.schemas import (ProductCreate, ProductRead, GoalCreate, GoalRead, TaskRead,
-    ExperimentRead, ArtifactRead, DecisionRead, ApprovalRead, ArticleCreate, ArticleProductionRead)
+    ExperimentRead, ArtifactRead, DecisionRead, ApprovalRead, ArticleCreate, ArticleProductionRead,
+    TeamCycleCreate, TeamCycleRead)
 from app.core.config import get_settings
-from app.core.composition import build_review, build_article_production
+from app.core.composition import build_review, build_article_production, build_team_cycle
 from app.db.session import get_db
 from app.models.domain import Product, Goal, Task, Experiment, Artifact, Decision, Approval
 from app.workflows.contracts import ReviewResult
@@ -60,6 +61,20 @@ def create_goal(product_id: UUID, body: GoalCreate, db: Session = Depends(get_db
 async def daily_growth_review(product_id: UUID, db: Session = Depends(get_db), review=Depends(get_review)):
     require_product(db, product_id)
     return await review.run(product_id)
+
+
+def get_team_cycle(db: Session = Depends(get_db)):
+    try:
+        return build_team_cycle(db, get_settings())
+    except ValueError:
+        raise HTTPException(503, "LLM runtime is not configured") from None
+
+
+@router.post('/products/{product_id}/team-cycle', response_model=TeamCycleRead)
+async def team_cycle(product_id: UUID, body: TeamCycleCreate,
+                     db: Session = Depends(get_db), cycle=Depends(get_team_cycle)):
+    require_product(db, product_id)
+    return await cycle.run(product_id, max_tasks=body.max_tasks, followup_cmo=body.followup_cmo)
 
 
 def get_article_production(db: Session = Depends(get_db)):

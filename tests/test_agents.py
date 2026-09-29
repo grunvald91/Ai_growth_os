@@ -37,8 +37,9 @@ async def run(agent, request):
                            resource_id=request.resource_id)
 
 
-def test_five_frozen_configs_and_separation():
-    assert len(AGENT_CONFIGS) == 5
+def test_frozen_configs_cover_declared_team_and_separation():
+    assert set(AGENT_CONFIGS) == set(AgentRole)
+    assert len(AGENT_CONFIGS) >= 10
     assert AGENT_CONFIGS[AgentRole.CMO].allowed_operations == {ToolOperation.DELEGATE_TASK}
     assert ToolOperation.PUBLISH not in AGENT_CONFIGS[AgentRole.CONTENT_SEO].allowed_operations
     for config in AGENT_CONFIGS.values():
