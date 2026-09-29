@@ -34,11 +34,15 @@ class XAIProvider:
             messages.append({"role": "system", "content": request.system_prompt})
         messages.extend(message.model_dump() for message in request.messages)
 
+        reasoning_effort = request.metadata.get("reasoning_effort", self._reasoning_effort)
+        if reasoning_effort not in {"low", "medium", "high", "xhigh"}:
+            raise ValueError("Unsupported xAI reasoning effort")
+
         payload: dict[str, object] = {
             "model": request.model or self._model,
             "messages": messages,
             "max_completion_tokens": request.max_tokens,
-            "reasoning_effort": self._reasoning_effort,
+            "reasoning_effort": reasoning_effort,
         }
         if request.temperature is not None:
             payload["temperature"] = request.temperature
