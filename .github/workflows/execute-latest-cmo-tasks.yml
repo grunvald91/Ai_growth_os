@@ -40,14 +40,10 @@ jobs:
           from app.models.domain import Task, TaskStatus
 
           cancel_ids = [
-              UUID("4356f54e-1906-4b32-b62a-a4066b4531a0"),
-              UUID("4e6ad18f-0499-4a52-98ac-68d1be0f6bd0"),
-              UUID("9dc8051e-db54-463e-b918-7e851e99ad47"),
-              UUID("b4fecd46-4233-4305-93df-08dc09ce0a42"),
+              UUID("b8b2bba1-e3d9-4544-9c85-f85d36fb5a98"),
           ]
           target_ids = [
-              UUID("1da9c757-5b28-4804-a7b3-fc5036daf9d6"),
-              UUID("a88d7f33-410a-473f-bd49-c451ce8b1465"),
+              UUID("30130554-8993-4611-8e10-038729440a2b"),
           ]
 
           with SessionLocal() as db:
@@ -56,7 +52,7 @@ jobs:
                   if task is not None and task.status == TaskStatus.QUEUED:
                       task.status = TaskStatus.CANCELLED
                       print("CANCELLED", task_id, task.title)
-              for priority, task_id in zip((1000, 999), target_ids):
+              for priority, task_id in zip((1000,), target_ids):
                   task = db.get(Task, task_id)
                   if task is None:
                       raise SystemExit(f"Missing target task {task_id}")
@@ -69,7 +65,7 @@ jobs:
           PY
 
           echo "=== TEAM_CYCLE ==="
-          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/team-cycle"             -H 'Content-Type: application/json'             -d '{"max_tasks":2,"followup_cmo":true}'
+          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/team-cycle"             -H 'Content-Type: application/json'             -d '{"max_tasks":1,"followup_cmo":false}'
           echo
           echo "=== TASKS ==="
           curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/tasks?limit=40"
