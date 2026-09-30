@@ -18,8 +18,9 @@ from app.services.artifacts import ArtifactService
 from app.services.tasks import TaskService
 from app.tools import ToolOperation
 from app.workflows.article_contracts import (
-    ArticleArtifact, ArticleDraft, ArticleProductionInput, ArticleProductionResult,
-    ArticleStrategy, ConversionCore, ConversionPackage, DerivativeBrief, DerivativeSet, SEOPlan,
+    ArticleArtifact, ArticleBodyDraft, ArticleDraft, ArticleProductionInput, ArticleProductionResult,
+    ArticleSection, ArticleStrategy, ConversionCore, ConversionPackage, DerivativeBrief, DerivativeSet,
+    GroundedClaim, SEOPlan,
 )
 from app.workflows.context import load_context
 
@@ -37,7 +38,7 @@ CHANNEL_PROFILES = {
 STAGES = (
     ('content_strategist', ArticleStrategy, 'Define audience, pain, search intent and an organic article hypothesis.'),
     ('seo_editor', SEOPlan, 'Choose query, title, hook and long-form outline adapted to the requested channel.'),
-    ('article_writer', ArticleDraft, 'Write the complete long-form article, not a brief. Separate advice, hypotheses and facts.'),
+    ('article_writer', ArticleBodyDraft, 'Write the complete long-form article body as advice and hypotheses only. Verified facts are injected deterministically.'),
     ('conversion_editor', ConversionCore, 'Design the CTA, proposed links, funnel measurement and bounded distribution plan. Do not create derivatives.'),
     ('repurposing_editor', DerivativeSet, 'Create exactly seven genuinely distinct derivative briefs for the supported organic channels.'),
 )
@@ -86,8 +87,14 @@ def validate_grounding(draft: ArticleDraft, facts: dict[str, str]) -> None:
     used = set()
     for section in draft.sections:
         if section.kind == 'fact':
-            if len(section.claim_ids) != 1 or claims.get(section.claim_ids[0]) != section.body:
-                raise ValueError('Fact sections must contain exactly one grounded verbatim claim')
+            if not section.claim_ids:
+                raise ValueError('Fact sections require grounded claims')
+            try:
+                expected = '\n'.join(f'- {claims[claim_id]}' for claim_id in section.claim_ids)
+            except KeyError as exc:
+                raise ValueError('Fact section references an unknown claim') from exc
+            if section.body != expected:
+                raise ValueError('Fact section body must be deterministically assembled from grounded claims')
             used.update(section.claim_ids)
         elif section.claim_ids:
             raise ValueError('Advice and hypotheses cannot masquerade as sourced facts')
@@ -183,7 +190,11 @@ class ArticleProduction:
                 }
                 stage_rule = ''
                 if name == 'article_writer':
-                    stage_rule = ' Include >=2000 body characters across >=4 article sections.'
+                    stage_rule = (
+                        ' Include >=2000 body characters across >=4 sections. Output only advice or hypothesis '
+                        'sections. Do not output factual sections, claim IDs or grounded claims; verified ServGo '
+                        'facts are inserted deterministically by the application after this stage.'
+                    )
                 elif name == 'conversion_editor':
                     stage_rule = (
                         ' Return only conversion core fields: CTA, proposed local links, one funnel measurement '
@@ -225,13 +236,41 @@ class ArticleProduction:
                     raise ValueError('Incomplete or oversized response')
                 parsed = schema.model_validate_json(response.content)
                 parsed = schema.model_validate(self._sanitize(parsed.model_dump(mode='json')))
-                if isinstance(parsed, ArticleDraft):
-                    validate_grounding(parsed, facts)
                 outputs.append(parsed)
                 inputs['prior_stage_outputs'][name] = parsed.model_dump(mode='json')
                 if len(json.dumps(inputs)) > 250000:
                     raise ValueError('Stage context exceeds bound')
-            strategy, seo, draft, conversion_core, derivative_set = outputs
+            strategy, seo, body_draft, conversion_core, derivative_set = outputs
+
+            grounded_claims = [
+                GroundedClaim(claim=quote, source_id=source_id, quote=quote)
+                for source_id, quote in facts.items()
+            ]
+            fact_sections = []
+            if grounded_claims:
+                fact_sections.append(ArticleSection(
+                    heading='Verified ServGo facts',
+                    body='\n'.join(f'- {claim.quote}' for claim in grounded_claims),
+                    kind='fact',
+                    claim_ids=[claim.source_id for claim in grounded_claims],
+                ))
+            draft = ArticleDraft(
+                sections=[
+                    *fact_sections,
+                    *[
+                        ArticleSection(
+                            heading=section.heading,
+                            body=section.body,
+                            kind=section.kind,
+                            claim_ids=[],
+                        )
+                        for section in body_draft.sections
+                    ],
+                ],
+                claims=grounded_claims,
+                proof_needed_notes=body_draft.proof_needed_notes,
+            )
+            validate_grounding(draft, facts)
 
             def assemble_conversion(core, derivatives):
                 return ConversionPackage(
