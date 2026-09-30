@@ -34,21 +34,8 @@ jobs:
           set -euo pipefail
 
           PRODUCT_ID="04392041-ea09-4853-874e-8060bee7286c"
-          PLAN_ID="42714723-7f9a-4734-a7a4-2a74e409f193"
+          EXPERIMENT_ID="6a59dfeb-10e6-4fe4-bca9-e218dd31b5f0"
           DECISION_ID="dabc19ab-3620-4852-ab52-411de8a16c0f"
-
-          echo "=== MATERIALIZE_EXPERIMENT ==="
-          EXP_PAYLOAD=$(docker exec -i ai-growth-os-api-1 python - "$PLAN_ID" "$DECISION_ID" <<'PY'
-          import json, sys
-          print(json.dumps({
-              "plan_artifact_id": sys.argv[1],
-              "decision_id": sys.argv[2],
-          }))
-          PY
-          )
-          EXP_JSON=$(curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/experiments/from-content-plan"             -H 'Content-Type: application/json'             --data-binary "$EXP_PAYLOAD")
-          echo "$EXP_JSON"
-          EXPERIMENT_ID=$(printf '%s' "$EXP_JSON" | docker exec -i ai-growth-os-api-1 python -c 'import json,sys; print(json.load(sys.stdin)["experiment_id"])')
 
           echo "=== ARTICLE_FACTORY ==="
           ARTICLE_PAYLOAD=$(docker exec -i ai-growth-os-api-1 python - "$EXPERIMENT_ID" "$DECISION_ID" <<'PY'
@@ -64,7 +51,7 @@ jobs:
                   "through optional specialist and time slot to contact details, optional "
                   "prepayment proof, manual owner verification, booking status and notifications."
               ),
-              "request_publication": True,
+              "request_publication": False,
           }))
           PY
           )
