@@ -48,12 +48,12 @@ def valid_outputs():
         angle='Practical diagnosis before buying', titles=['A booking checklist', 'Evaluate appointment friction'], hypothesis='Clear information may improve demo interest'),
         dict(primary_query='online service booking', related_queries=['appointment checklist'], title='A booking checklist',
         hook='Start with the customer journey', outline=['Understand the problem', 'Map the workflow', 'Plan an experiment'], adaptation_notes='Educational draft'),
-        dict(sections=[dict(heading=h, kind='advice', claim_ids=[], body=(b + ' ') * 12) for h, b in [
+        dict(sections=[dict(heading=h, kind='advice', body=(b + ' ') * 12) for h, b in [
             ('Map the journey', 'Consider writing down each booking step and asking an owner which steps need clarification.'),
             ('Discuss expectations', 'Try discussing scheduling expectations with a small group before deciding what to change.'),
             ('Prepare an experiment', 'Consider a limited trial with a clear stopping rule and a review of qualitative feedback.'),
             ('Review outcomes', 'Plan to inspect qualified inquiries and completed bookings rather than assuming views create customers.')]],
-            claims=[], proof_needed_notes=['Verify features and collect real funnel evidence']),
+            proof_needed_notes=['Verify features and collect real funnel evidence']),
         dict(cta='Request a demo to discuss your booking workflow', landing_page=dict(label='Proposed demo page', destination='/demo'),
             internal_links=[dict(label='Proposed guide', destination='/guides/booking')], measurement=measurement,
             distribution=[dict(channel='own_site', action='prepare_draft', rationale='Start with an owned draft', downstream_goal='lead')]),
@@ -94,6 +94,9 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
         "conversion_editor": 3500,
         "repurposing_editor": 4500,
     }
+    writer_request = next(r for r in provider.requests if r.metadata["team_role"] == "article_writer")
+    assert "claims" not in writer_request.response_schema["properties"]
+    assert set(writer_request.response_schema["$defs"]["ArticleBodySection"]["properties"]["kind"]["enum"]) == {"advice", "hypothesis"}
     content = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
     assert len(content.full_article) >= 2000 and len(content.draft.sections) >= 4
     assert content.conversion.cta
@@ -134,6 +137,37 @@ async def test_invalid_output_is_atomic(db, product, tmp_path, mutation):
     assert any(r.status == 'failed' for r in db.scalars(select(AgentRun)))
 
 
+
+
+@pytest.mark.asyncio
+async def test_verified_product_facts_are_injected_deterministically(db, product, tmp_path):
+    path = tmp_path / 'servgo' / '.claude'
+    path.mkdir(parents=True)
+    path.joinpath('product-marketing-context.md').write_text(
+        '## Product\n'
+        'ServGo is an online service booking system.\n'
+        'Current verified flow includes:\n'
+        '- customer selects a service;\n'
+        '- owner confirms the booking.\n'
+        '\n## Candidate business segments\n'
+        '- massage studios are a hypothesis, not a fact.\n'
+    )
+    workflow, provider, request = setup(db, product, tmp_path)
+
+    result = await workflow.run(request)
+
+    assert result.status == 'completed', result.error
+    content = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    facts = [section for section in content.draft.sections if section.kind == 'fact']
+    assert len(facts) == 1
+    assert 'ServGo is an online service booking system.' in facts[0].body
+    assert 'customer selects a service;' in facts[0].body
+    assert 'owner confirms the booking.' in facts[0].body
+    assert 'massage studios are a hypothesis' not in facts[0].body
+    assert len(content.draft.claims) == 3
+    assert all(claim.claim == claim.quote for claim in content.draft.claims)
+    writer_request = next(r for r in provider.requests if r.metadata["team_role"] == "article_writer")
+    assert "claims" not in writer_request.response_schema["properties"]
 
 
 @pytest.mark.asyncio
