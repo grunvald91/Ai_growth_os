@@ -1,0 +1,83 @@
+name: Execute latest ServGo CMO tasks
+
+on:
+  push:
+    branches:
+      - ops-execute-latest-cmo-tasks
+
+permissions:
+  contents: read
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+
+    steps:
+      - name: Guard SSH secret
+        run: |
+          [ -n "$SSHPASS" ] || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Clean superseded tasks and run latest pair
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=20 -o ServerAliveCountMax=15"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          PRODUCT_ID="04392041-ea09-4853-874e-8060bee7286c"
+
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          from uuid import UUID
+          from app.db.session import SessionLocal
+          from app.models.domain import Task, TaskStatus
+
+          cancel_ids = [
+              UUID("4356f54e-1906-4b32-b62a-a4066b4531a0"),
+              UUID("4e6ad18f-0499-4a52-98ac-68d1be0f6bd0"),
+              UUID("9dc8051e-db54-463e-b918-7e851e99ad47"),
+              UUID("b4fecd46-4233-4305-93df-08dc09ce0a42"),
+          ]
+          target_ids = [
+              UUID("1da9c757-5b28-4804-a7b3-fc5036daf9d6"),
+              UUID("a88d7f33-410a-473f-bd49-c451ce8b1465"),
+          ]
+
+          with SessionLocal() as db:
+              for task_id in cancel_ids:
+                  task = db.get(Task, task_id)
+                  if task is not None and task.status == TaskStatus.QUEUED:
+                      task.status = TaskStatus.CANCELLED
+                      print("CANCELLED", task_id, task.title)
+              for priority, task_id in zip((1000, 999), target_ids):
+                  task = db.get(Task, task_id)
+                  if task is None:
+                      raise SystemExit(f"Missing target task {task_id}")
+                  if task.status == TaskStatus.QUEUED:
+                      task.priority = priority
+                      print("PRIORITIZED", task_id, task.title, priority)
+                  else:
+                      print("TARGET_STATUS", task_id, task.status)
+              db.commit()
+          PY
+
+          echo "=== TEAM_CYCLE ==="
+          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/team-cycle"             -H 'Content-Type: application/json'             -d '{"max_tasks":2,"followup_cmo":true}'
+          echo
+          echo "=== TASKS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/tasks?limit=40"
+          echo
+          echo "=== DECISIONS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/decisions?limit=10"
+          echo
+          echo "=== APPROVALS ==="
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/approvals?limit=10"
+          echo
+          REMOTE
