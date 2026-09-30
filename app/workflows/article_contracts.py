@@ -108,6 +108,40 @@ class MeasurementPlan(Contract):
     success_hypothesis: Text
 
 
+class DerivativeDraft(Contract):
+    kind: DerivativeKind
+    audience: ShortText
+    framing: Text
+    hook: Text
+    outline: list[Text] = Field(min_length=2, max_length=10)
+    cta: Text
+    landing_page: LinkProposal
+    adaptation_notes: Text
+    video_mode: Literal['brief_only'] | None = None
+
+    @model_validator(mode='after')
+    def video_is_brief(self):
+        if (self.kind == 'short_video') != (self.video_mode == 'brief_only'):
+            raise ValueError('Short video is a brief only, never a rendering request')
+        return self
+
+
+class DerivativeSet(Contract):
+    derivatives: list[DerivativeDraft] = Field(min_length=7, max_length=7)
+
+    @model_validator(mode='after')
+    def distinct_derivatives(self):
+        expected = {'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video'}
+        if {brief.kind for brief in self.derivatives} != expected:
+            raise ValueError('Provide exactly one brief per derivative kind')
+        for field in ('framing', 'hook'):
+            texts = [' '.join(getattr(brief, field).casefold().split()) for brief in self.derivatives]
+            for i, text in enumerate(texts):
+                if any(SequenceMatcher(None, text, other).ratio() >= .85 for other in texts[:i]):
+                    raise ValueError('Derivative framing and hooks must be distinct, not blind copies')
+        return self
+
+
 class DerivativeBrief(Contract):
     kind: DerivativeKind
     audience: ShortText
@@ -134,12 +168,15 @@ class DistributionStep(Contract):
     downstream_goal: Literal['lead', 'activation', 'customer']
 
 
-class ConversionPackage(Contract):
+class ConversionCore(Contract):
     cta: Text
     landing_page: LinkProposal
     internal_links: list[LinkProposal] = Field(min_length=1, max_length=10)
     measurement: MeasurementPlan
     distribution: list[DistributionStep] = Field(min_length=1, max_length=10)
+
+
+class ConversionPackage(ConversionCore):
     derivatives: list[DerivativeBrief] = Field(min_length=7, max_length=7)
 
     @model_validator(mode='after')
