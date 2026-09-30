@@ -1,7 +1,10 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field
+
 from app.models.domain import TaskStatus, ArtifactStatus, DecisionType
 from app.workflows.article_contracts import ArticleProductionInput, ArticleProductionResult, Channel
 from app.workflows.team_contracts import TeamCycleResult
@@ -12,6 +15,7 @@ class ArticleCreate(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
     task_id: UUID | None = None
     decision_id: UUID | None = None
+    language: Literal['ru', 'en'] = 'ru'
     experiment_id: UUID | None = None
     channel: Channel = 'own_site'
     topic: str = Field(min_length=1, max_length=300)
@@ -38,8 +42,6 @@ class TeamCycleRead(TeamCycleResult):
     pass
 
 
-
-
 class ExperimentFromPlanCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     plan_artifact_id: UUID
@@ -49,11 +51,13 @@ class ExperimentFromPlanCreate(BaseModel):
 class ExperimentMaterializationRead(ExperimentMaterializationResult):
     pass
 
+
 class ProductCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=200)
     slug: str = Field(min_length=1, max_length=100, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     description: str | None = Field(default=None, max_length=10000)
+
 
 class GoalCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -64,17 +68,21 @@ class GoalCreate(BaseModel):
     starts_on: date | None = None
     ends_on: date | None = None
 
+
 class Record(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     created_at: datetime
 
+
 class ProductRead(Record, ProductCreate):
     pass
+
 
 class GoalRead(Record, GoalCreate):
     product_id: UUID
     status: str
+
 
 class TaskRead(Record):
     product_id: UUID
@@ -85,12 +93,14 @@ class TaskRead(Record):
     status: TaskStatus
     priority: int
 
+
 class ExperimentRead(Record):
     product_id: UUID
     name: str
     hypothesis: str
     channel: str | None
     status: str
+
 
 class ArtifactRead(Record):
     product_id: UUID
@@ -101,12 +111,14 @@ class ArtifactRead(Record):
     content: str
     status: ArtifactStatus
 
+
 class DecisionRead(Record):
     product_id: UUID
     agent_run_id: UUID | None
     decision_type: DecisionType
     rationale: str
     evidence_references: list[dict]
+
 
 class ApprovalRead(Record):
     product_id: UUID

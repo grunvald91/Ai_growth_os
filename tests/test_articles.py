@@ -37,13 +37,13 @@ def valid_outputs():
     measurement = {k: dict(event=k + '_event', metric=k + '_rate', attribution='Proposed campaign attribution')
         for k in ['content', 'traffic', 'lead', 'activation', 'customer']}
     measurement.update(activation_definition='demo', review_window_days=14, success_hypothesis='Useful guides may generate qualified inquiries')
-    kinds = ['dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video']
+    kinds = ['dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video', 'story', 'static_image']
     hooks = ['A missed appointment changes the day', 'Discuss an operations checklist with peers',
         'An editorial experiment in service design', 'Save these three booking reminders',
         'Which reservation questions need answers?', 'Why I would interview owners before building',
-        'Open on a calendar and cut to an empty chair']
+        'Open on a calendar and cut to an empty chair', 'Three vertical frames explain the booking path', 'One clear visual maps the booking flow']
     frames = ['Narrative educational reading', 'Professional network discussion', 'Analytical publication',
-        'Compact channel note', 'Question and answer reference', 'Personal reflective memo', 'Visual storyboard instructions']
+        'Compact channel note', 'Question and answer reference', 'Personal reflective memo', 'Visual storyboard instructions', 'Vertical story sequence', 'Static visual composition']
     return [dict(audience='Service business owners', pain='Manual scheduling friction', search_intent='Assess a booking workflow',
         angle='Practical diagnosis before buying', titles=['A booking checklist', 'Evaluate appointment friction'], hypothesis='Clear information may improve demo interest'),
         dict(primary_query='online service booking', related_queries=['appointment checklist'], title='A booking checklist',
@@ -81,7 +81,7 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
     workflow, provider, request = setup(db, product, tmp_path)
     result = await workflow.run(request)
     assert result.status == 'completed', result.error
-    assert len(result.artifact_ids) == 8 and len(result.run_ids) == len(provider.requests) == 5
+    assert len(result.artifact_ids) == 10 and len(result.run_ids) == len(provider.requests) == 5
     assert all(request.metadata["reasoning_effort"] == "low" for request in provider.requests)
     assert {request.metadata["team_role"] for request in provider.requests} == {
         "content_strategist", "seo_editor", "article_writer", "conversion_editor", "repurposing_editor"
@@ -100,8 +100,8 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
     content = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
     assert len(content.full_article) >= 2000 and len(content.draft.sections) >= 4
     assert content.conversion.cta
-    assert len({d.hook for d in content.conversion.derivatives}) == 7
-    assert len({d.framing for d in content.conversion.derivatives}) == 7
+    assert len({d.hook for d in content.conversion.derivatives}) == 9
+    assert len({d.framing for d in content.conversion.derivatives}) == 9
     assert next(d for d in content.conversion.derivatives if d.kind == 'short_video').video_mode == 'brief_only'
     for plan in [content.conversion.measurement] + [d.measurement for d in content.conversion.derivatives]:
         assert all(getattr(plan, k).event for k in ['content', 'traffic', 'lead', 'activation', 'customer'])
@@ -315,10 +315,10 @@ def test_api_ids_inspection_and_bad_references(tmp_path):
                 result = response.json()
                 assert result['status'] == 'completed', result
                 assert result['main_artifact_id'] == result['artifact_ids'][0]
-                assert len(result['derivative_artifact_ids']) == 7 and len(result['run_ids']) == 5
+                assert len(result['derivative_artifact_ids']) == 9 and len(result['run_ids']) == 5
                 aid = result['main_artifact_id']
                 assert client.get(f'/products/{pid}/artifacts/{aid}').status_code == 200
-                assert len(client.get(f'/products/{pid}/artifacts').json()) == 8
+                assert len(client.get(f'/products/{pid}/artifacts').json()) == 10
                 other = client.post('/products', json=dict(name='Other', slug='other')).json()['id']
                 assert client.get(f'/products/{other}/artifacts/{aid}').status_code == 404
                 for key in ['task_id', 'decision_id']:
@@ -330,3 +330,24 @@ def test_api_ids_inspection_and_bad_references(tmp_path):
         finally:
             app.dependency_overrides.clear()
     engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_russian_is_default_and_visual_assets_are_required(db, product, tmp_path):
+    workflow, provider, request = setup(db, product, tmp_path)
+    assert request.language == 'ru'
+
+    result = await workflow.run(request)
+
+    assert result.status == 'completed', result.error
+    first_prompt = provider.requests[0].system_prompt
+    assert 'request.language' in first_prompt
+    assert 'natural Russian' in first_prompt
+    package = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    kinds = {item.kind for item in package.conversion.derivatives}
+    assert {'story', 'short_video', 'static_image'} <= kinds
+
+
+def test_article_api_defaults_to_russian():
+    from app.api.schemas import ArticleCreate
+    assert ArticleCreate(topic='Тест').language == 'ru'
