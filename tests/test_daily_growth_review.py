@@ -85,6 +85,40 @@ async def test_policy_overrides_approval_claim(db, product, tmp_path, operation,
 
 
 @pytest.mark.asyncio
+async def test_ready_cold_start_can_request_publish_approval_without_execution(db, product, tmp_path):
+    data = {
+        'summary': 'Draft experiment is ready for a bounded approval-gated publish test.',
+        'decisions': [{
+            'decision_type': 'TEST',
+            'rationale': 'The remaining blocker is unpublished status, not negative evidence.',
+            'next_tasks': [{
+                'title': 'Request approval for one own-site experiment publish',
+                'description': 'Publish only the prepared own-site experiment artifact after human approval.',
+                'assigned_agent': 'distribution',
+                'task_type': 'action_request',
+                'operation': 'publish',
+                'requires_approval': True,
+                'priority': 100,
+            }],
+        }],
+    }
+    review, provider, tools = setup_review(db, data, tmp_path)
+    result = await review.run(product.id)
+
+    assert result.status == 'completed'
+    assert len(result.task_ids) == len(result.approval_ids) == 1
+    task = db.get(Task, result.task_ids[0])
+    approval = db.get(Approval, result.approval_ids[0])
+    assert task.status == TaskStatus.WAITING_APPROVAL
+    assert approval.status == 'pending'
+    assert approval.action_type == 'publish'
+    assert approval.risk_level == 'YELLOW'
+    assert tools.requests == []
+    assert 'Do not create a cold-start deadlock' in provider.last_request.system_prompt
+    assert 'operation=publish' in provider.last_request.system_prompt
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('content', ['not json', '{"summary":"x","decisions":[]}',
     json.dumps({'summary':'x','decisions':[{'decision_type':'BUY','rationale':'bad'}]}),
     json.dumps(output('launch_ad')), json.dumps(output('increase_budget'))])

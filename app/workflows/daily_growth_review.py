@@ -83,6 +83,14 @@ class DailyGrowthReview:
                 'and targeted non-spam outreach. Optimize traffic -> lead -> demo/registration/booking -> customer, '
                 'not volume or views alone. Paid advertising and budget increases are forbidden. '
                 'External action requests need an explicit operation; approval claims grant no authority. '
+                'Do not create a cold-start deadlock: zero traffic or lead observations are not evidence against '
+                'an unpublished experiment. When one bounded own-site experiment already has a persisted draft '
+                'experiment/manifest, a completed article artifact, and a measurement checklist, and the remaining '
+                'blocker is that the artifact is unpublished, propose exactly one action_request assigned to '
+                'distribution with operation=publish and requires_approval=true for that own-site artifact. '
+                'That proposal is a request for human approval only; never claim it is approved or executed. '
+                'Do not pair it with Dzen, Telegram, outreach, ads, or other distribution surfaces before evidence. '
+                'If any of those prerequisites are missing, delegate only the missing preparation work. '
                 'No tools are executed. SCALE means organic effort, not ad spend. '
                 '\nSchema: ' + json.dumps(CMOReview.model_json_schema()) + '\nSelected skill: ' + skill
             )
