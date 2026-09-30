@@ -56,9 +56,9 @@ def valid_outputs():
             claims=[], proof_needed_notes=['Verify features and collect real funnel evidence']),
         dict(cta='Request a demo to discuss your booking workflow', landing_page=dict(label='Proposed demo page', destination='/demo'),
             internal_links=[dict(label='Proposed guide', destination='/guides/booking')], measurement=measurement,
-            distribution=[dict(channel='own_site', action='prepare_draft', rationale='Start with an owned draft', downstream_goal='lead')],
-            derivatives=[dict(kind=k, audience='Service owners', framing=f, hook=h, outline=['Explain the problem', 'Invite a qualified next step'],
-                cta='Discuss a demo', landing_page=dict(label='Proposed demo', destination='/demo'), adaptation_notes='Draft only', measurement=measurement,
+            distribution=[dict(channel='own_site', action='prepare_draft', rationale='Start with an owned draft', downstream_goal='lead')]),
+        dict(derivatives=[dict(kind=k, audience='Service owners', framing=f, hook=h, outline=['Explain the problem', 'Invite a qualified next step'],
+                cta='Discuss a demo', landing_page=dict(label='Proposed demo', destination='/demo'), adaptation_notes='Draft only',
                 video_mode='brief_only' if k == 'short_video' else None) for k, h, f in zip(kinds, hooks, frames)])]
 
 
@@ -81,17 +81,18 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
     workflow, provider, request = setup(db, product, tmp_path)
     result = await workflow.run(request)
     assert result.status == 'completed', result.error
-    assert len(result.artifact_ids) == 8 and len(result.run_ids) == len(provider.requests) == 4
+    assert len(result.artifact_ids) == 8 and len(result.run_ids) == len(provider.requests) == 5
     assert all(request.metadata["reasoning_effort"] == "low" for request in provider.requests)
     assert {request.metadata["team_role"] for request in provider.requests} == {
-        "content_strategist", "seo_editor", "article_writer", "conversion_editor"
+        "content_strategist", "seo_editor", "article_writer", "conversion_editor", "repurposing_editor"
     }
     by_role = {request.metadata["team_role"]: request.max_tokens for request in provider.requests}
     assert by_role == {
         "content_strategist": 3000,
         "seo_editor": 3500,
         "article_writer": 8000,
-        "conversion_editor": 8000,
+        "conversion_editor": 3500,
+        "repurposing_editor": 4500,
     }
     content = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
     assert len(content.full_article) >= 2000 and len(content.draft.sections) >= 4
@@ -103,27 +104,27 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
         assert all(getattr(plan, k).event for k in ['content', 'traffic', 'lead', 'activation', 'customer'])
     assert all(db.get(Artifact, aid).task_id == result.task_id for aid in result.artifact_ids)
     assert all(db.get(AgentRun, rid).status == 'completed' for rid in result.run_ids)
-    assert len(list(db.scalars(select(CostRecord)))) == 4
+    assert len(list(db.scalars(select(CostRecord)))) == 5
     assert all(c.details['cost_known'] is False for c in db.scalars(select(CostRecord)))
     assert list(db.scalars(select(ToolCall))) == list(db.scalars(select(Publication))) == []
     assert result.approval_ids == []
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'copies', 'fake_claim', 'video', 'external_link', 'extra', 'derivative_measurement', 'source_copy'])
+@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'copies', 'fake_claim', 'video', 'external_link', 'extra', 'wrong_kind', 'source_copy'])
 async def test_invalid_output_is_atomic(db, product, tmp_path, mutation):
     outputs = valid_outputs()
     if mutation == 'malformed': outputs[0] = 'not json'
     elif mutation == 'short': outputs[2]['sections'] = outputs[2]['sections'][:1]
     elif mutation == 'missing_cta': del outputs[3]['cta']
     elif mutation == 'missing_measurement': del outputs[3]['measurement']['customer']
-    elif mutation == 'copies': outputs[3]['derivatives'][1]['hook'] = outputs[3]['derivatives'][0]['hook']
+    elif mutation == 'copies': outputs[4]['derivatives'][1]['hook'] = outputs[4]['derivatives'][0]['hook']
     elif mutation == 'fake_claim': outputs[2]['claims'] = [dict(claim='Guaranteed growth', quote='Guaranteed growth', source_id='invented')]
-    elif mutation == 'video': outputs[3]['derivatives'][-1]['video_mode'] = 'render_mp4'
+    elif mutation == 'video': outputs[4]['derivatives'][-1]['video_mode'] = 'render_mp4'
     elif mutation == 'external_link': outputs[3]['landing_page']['destination'] = 'https://unverified.example/demo'
     elif mutation == 'extra': outputs[0]['verified_revenue'] = 1000000
-    elif mutation == 'source_copy': outputs[3]['derivatives'][0]['hook'] = outputs[1]['hook']
-    elif mutation == 'derivative_measurement': del outputs[3]['derivatives'][0]['measurement']
+    elif mutation == 'source_copy': outputs[4]['derivatives'][0]['hook'] = outputs[1]['hook']
+    elif mutation == 'wrong_kind': outputs[4]['derivatives'][0]['kind'] = 'telegram'
     workflow, _, request = setup(db, product, tmp_path, outputs)
     result = await workflow.run(request)
     assert result.status == 'failed' and result.error
@@ -175,36 +176,35 @@ async def test_article_rejects_missing_or_foreign_experiment(db, product, tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_final_package_similarity_gets_one_conversion_retry(db, product, tmp_path):
+async def test_final_package_similarity_gets_one_repurposing_retry(db, product, tmp_path):
     outputs = valid_outputs()
-    bad_conversion = json.loads(json.dumps(outputs[3]))
-    bad_conversion['derivatives'][0]['hook'] = outputs[1]['hook']
-    corrected_conversion = json.loads(json.dumps(outputs[3]))
+    bad_derivatives = json.loads(json.dumps(outputs[4]))
+    bad_derivatives['derivatives'][0]['hook'] = outputs[1]['hook']
+    corrected_derivatives = json.loads(json.dumps(outputs[4]))
     workflow, provider, request = setup(
         db, product, tmp_path,
-        [outputs[0], outputs[1], outputs[2], bad_conversion, corrected_conversion],
+        [outputs[0], outputs[1], outputs[2], outputs[3], bad_derivatives, corrected_derivatives],
     )
 
     result = await workflow.run(request)
 
     assert result.status == 'completed', result.error
-    assert len(provider.requests) == 5
-    assert len(result.run_ids) == 5
+    assert len(provider.requests) == 6
+    assert len(result.run_ids) == 6
     assert all(request.metadata["reasoning_effort"] == "low" for request in provider.requests)
-    assert provider.requests[-1].metadata["team_role"] == "conversion_editor_retry"
-    assert provider.requests[-1].max_tokens == 8000
+    assert provider.requests[-1].metadata["team_role"] == "repurposing_editor_retry"
+    assert provider.requests[-1].max_tokens == 4500
     retry_run = db.get(AgentRun, result.run_ids[-1])
-    assert retry_run.agent_name == 'conversion_editor_retry'
+    assert retry_run.agent_name == 'repurposing_editor_retry'
     assert retry_run.status == 'completed'
-    assert len(list(db.scalars(select(CostRecord)))) == 5
+    assert len(list(db.scalars(select(CostRecord)))) == 6
 
 
 @pytest.mark.asyncio
 async def test_measurement_window_may_remain_unset(db, product, tmp_path):
     outputs = valid_outputs()
     outputs[3]['measurement']['review_window_days'] = None
-    for derivative in outputs[3]['derivatives']:
-        derivative['measurement']['review_window_days'] = None
+
     workflow, _, request = setup(db, product, tmp_path, outputs)
 
     result = await workflow.run(request)
@@ -281,7 +281,7 @@ def test_api_ids_inspection_and_bad_references(tmp_path):
                 result = response.json()
                 assert result['status'] == 'completed', result
                 assert result['main_artifact_id'] == result['artifact_ids'][0]
-                assert len(result['derivative_artifact_ids']) == 7 and len(result['run_ids']) == 4
+                assert len(result['derivative_artifact_ids']) == 7 and len(result['run_ids']) == 5
                 aid = result['main_artifact_id']
                 assert client.get(f'/products/{pid}/artifacts/{aid}').status_code == 200
                 assert len(client.get(f'/products/{pid}/artifacts').json()) == 8
