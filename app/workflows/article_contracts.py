@@ -65,6 +65,23 @@ class ArticleSection(Contract):
     claim_ids: list[ShortText] = Field(default_factory=list, max_length=10)
 
 
+class ArticleBodySection(Contract):
+    heading: ShortText
+    body: Text
+    kind: Literal['advice', 'hypothesis']
+
+
+class ArticleBodyDraft(Contract):
+    sections: list[ArticleBodySection] = Field(min_length=4, max_length=20)
+    proof_needed_notes: list[Text] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode='after')
+    def long_form(self):
+        if sum(len(section.body) for section in self.sections) < 2000:
+            raise ValueError('A full long-form article requires at least 2000 body characters')
+        return self
+
+
 class ArticleDraft(Contract):
     sections: list[ArticleSection] = Field(min_length=4, max_length=25)
     claims: list[GroundedClaim] = Field(default_factory=list, max_length=30)
