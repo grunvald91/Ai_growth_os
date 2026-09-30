@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 Text = Annotated[str, Field(min_length=1, max_length=4000)]
 ShortText = Annotated[str, Field(min_length=1, max_length=300)]
 Channel = Literal['own_site', 'dzen', 'tenchat', 'vc_ru', 'telegram']
-DerivativeKind = Literal['dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video']
+DerivativeKind = Literal['dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video', 'story', 'static_image']
 
 
 class Contract(BaseModel):
@@ -17,6 +17,7 @@ class Contract(BaseModel):
 
 class ArticleProductionInput(Contract):
     product_id: UUID
+    language: Literal['ru', 'en'] = 'ru'
     task_id: UUID | None = None
     decision_id: UUID | None = None
     experiment_id: UUID | None = None
@@ -144,11 +145,11 @@ class DerivativeDraft(Contract):
 
 
 class DerivativeSet(Contract):
-    derivatives: list[DerivativeDraft] = Field(min_length=7, max_length=7)
+    derivatives: list[DerivativeDraft] = Field(min_length=9, max_length=9)
 
     @model_validator(mode='after')
     def distinct_derivatives(self):
-        expected = {'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video'}
+        expected = {'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video', 'story', 'static_image'}
         if {brief.kind for brief in self.derivatives} != expected:
             raise ValueError('Provide exactly one brief per derivative kind')
         for field in ('framing', 'hook'):
@@ -194,11 +195,11 @@ class ConversionCore(Contract):
 
 
 class ConversionPackage(ConversionCore):
-    derivatives: list[DerivativeBrief] = Field(min_length=7, max_length=7)
+    derivatives: list[DerivativeBrief] = Field(min_length=9, max_length=9)
 
     @model_validator(mode='after')
     def distinct_derivatives(self):
-        expected = {'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video'}
+        expected = {'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video', 'story', 'static_image'}
         if {brief.kind for brief in self.derivatives} != expected:
             raise ValueError('Provide exactly one brief per derivative kind')
         for field in ('framing', 'hook'):
