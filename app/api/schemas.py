@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from app.models.domain import TaskStatus, ArtifactStatus, DecisionType
 from app.workflows.article_contracts import ArticleProductionInput, ArticleProductionResult, Channel
@@ -12,7 +13,7 @@ class ArticleCreate(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
     task_id: UUID | None = None
     decision_id: UUID | None = None
-    language: str = Field(default='ru', pattern='^(ru|en)
+    language: Literal['ru', 'en'] = 'ru'
     experiment_id: UUID | None = None
     channel: Channel = 'own_site'
     topic: str = Field(min_length=1, max_length=300)
