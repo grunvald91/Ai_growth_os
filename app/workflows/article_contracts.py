@@ -258,6 +258,50 @@ CreativeProductionBrief = (
 )
 
 
+TextDerivativeKind = Literal['dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder']
+
+
+class DerivativeCore(Contract):
+    audience: ShortText
+    framing: Text
+    hook: Text
+    outline: list[Text] = Field(min_length=2, max_length=10)
+    cta: Text
+    landing_page: LinkProposal
+    adaptation_notes: Text
+
+
+class TextDerivativeDraft(DerivativeCore):
+    kind: TextDerivativeKind
+
+
+class TextDerivativeSet(Contract):
+    derivatives: list[TextDerivativeDraft] = Field(min_length=6, max_length=6)
+
+    @model_validator(mode='after')
+    def complete_text_set(self):
+        expected = {'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder'}
+        if {item.kind for item in self.derivatives} != expected:
+            raise ValueError('Provide exactly the six supported text derivatives')
+        return self
+
+
+class ShortVideoDerivativeDraft(DerivativeCore):
+    kind: Literal['short_video'] = 'short_video'
+    video_mode: Literal['brief_only'] = 'brief_only'
+    production_brief: ShortVideoProductionBrief
+
+
+class StoryDerivativeDraft(DerivativeCore):
+    kind: Literal['story'] = 'story'
+    production_brief: StoryProductionBrief
+
+
+class StaticImageDerivativeDraft(DerivativeCore):
+    kind: Literal['static_image'] = 'static_image'
+    production_brief: StaticImageProductionBrief
+
+
 class DerivativeDraft(Contract):
     kind: DerivativeKind
     audience: ShortText
