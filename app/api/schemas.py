@@ -9,6 +9,7 @@ from app.models.domain import TaskStatus, ArtifactStatus, DecisionType
 from app.workflows.article_contracts import ArticleProductionInput, ArticleProductionResult, Channel
 from app.workflows.team_contracts import TeamCycleResult
 from app.workflows.experiment_materialization import ExperimentMaterializationResult
+from app.policies.experiment_preflight import ExperimentPreflight
 
 
 class ArticleCreate(BaseModel):
@@ -168,3 +169,7 @@ class ApprovalRead(Record):
     risk_level: str
     status: str
     reason: str | None
+
+
+class ExperimentPreflightRead(ExperimentPreflight):
+    pass

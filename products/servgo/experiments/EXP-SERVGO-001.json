@@ -1,0 +1,42 @@
+{
+  "schema_version": "experiment-spec-v1",
+  "launch_ready": false,
+  "launch_blockers": [
+    "baseline_summary is UNMEASURED; record the preceding 7-day attributable ServGo lead/demo figures before launch"
+  ],
+  "notes": "Thresholds below are deliberate test design, not historical facts. No baseline or performance data has been measured.",
+  "experiment": {
+    "experiment_key": "EXP-SERVGO-001",
+    "name": "Founder outreach to Sochi massage/spa businesses",
+    "hypothesis": "Personalized founder outreach to a bounded cohort of 20 Sochi massage/spa and small service businesses with manual or fragmented booking produces at least 2 qualified ServGo leads within 7 days.",
+    "audience": "Owners/managers of massage studios, spas and small service businesses in Sochi that take bookings manually or through fragmented channels.",
+    "channel": "founder_outreach",
+    "action": "Manually select 20 relevant businesses and send one personalized, non-spam outreach message with a ServGo demo/landing link. No bulk automation. One follow-up maximum when appropriate.",
+    "target_metric": "qualified_leads",
+    "secondary_signals": [
+      "replies",
+      "demo_requests",
+      "landing_visits",
+      "booking_flow_opens"
+    ],
+    "attribution_method": "Unique campaign UTM plus per-lead identifier where practical, and mandatory manual source field for each lead. Campaign: servgo_exp_001.",
+    "baseline_summary": "UNMEASURED — record the immediately preceding 7-day attributable ServGo lead/demo figures before launch. Do not substitute zero unless verified.",
+    "observation_window_days": 7,
+    "time_budget_minutes": 180,
+    "success_condition": "KEEP if at least 2 qualified leads are attributable to EXP-SERVGO-001 after all 20 targeted contacts and the 7-day observation window.",
+    "stop_condition": "STOP if all 20 targeted contacts were completed with valid attribution, the 7-day window elapsed, and 0 qualified leads were attributable to the experiment.",
+    "inconclusive_condition": "INCONCLUSIVE if fewer than 20 contacts were completed, attribution is incomplete, the observation window has not elapsed, or the baseline was not recorded before launch.",
+    "budget": "0",
+    "currency": "RUB",
+    "status": "draft"
+  },
+  "qualified_lead_definition": "A business owner/manager who replies with concrete interest in evaluating ServGo, asks for a demo/price/setup details, or agrees to a follow-up conversation. A generic acknowledgement is not a qualified lead.",
+  "cohort_size": 20,
+  "max_followups_per_contact": 1,
+  "utm_campaign": "servgo_exp_001",
+  "constraints": [
+    "Organic/free acquisition only; no paid ads.",
+    "No bulk automation, scraping, or automated sending.",
+    "Each outreach message is written and sent manually by the founder."
+  ]
+}

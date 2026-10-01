@@ -5,11 +5,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.api.schemas import (ProductCreate, ProductRead, GoalCreate, GoalRead, TaskRead,
     ExperimentCreate, ExperimentRead, ArtifactRead, DecisionRead, ApprovalRead, ArticleCreate, ArticleProductionRead,
-    TeamCycleCreate, TeamCycleRead, ExperimentFromPlanCreate, ExperimentMaterializationRead)
+    TeamCycleCreate, TeamCycleRead, ExperimentFromPlanCreate, ExperimentMaterializationRead,
+    ExperimentPreflightRead)
 from app.core.config import get_settings
 from app.core.composition import build_review, build_article_production, build_team_cycle
 from app.db.session import get_db
 from app.models.domain import Product, Goal, Task, Experiment, Artifact, Decision, Approval
+from app.policies.experiment_preflight import evaluate_experiment
 from app.services.experiments import ExperimentService
 from app.workflows.contracts import ReviewResult
 from app.workflows.experiment_materialization import ExperimentFromPlanInput, ExperimentMaterialization
@@ -74,6 +76,16 @@ def create_experiment(product_id: UUID, body: ExperimentCreate, db: Session = De
         raise HTTPException(409, "Experiment key already exists for product") from None
     db.refresh(experiment)
     return experiment
+
+
+@router.get('/products/{product_id}/experiments/{experiment_id}/preflight', response_model=ExperimentPreflightRead)
+def experiment_preflight(product_id: UUID, experiment_id: UUID, db: Session = Depends(get_db)):
+    """Read-only launch-readiness check. Performs no external action and launches nothing."""
+    require_product(db, product_id)
+    experiment = db.get(Experiment, experiment_id)
+    if experiment is None or experiment.product_id != product_id:
+        raise HTTPException(404, 'Experiment not found')
+    return evaluate_experiment(experiment)
 
 
 @router.post('/products/{product_id}/daily-growth-review', response_model=ReviewResult)

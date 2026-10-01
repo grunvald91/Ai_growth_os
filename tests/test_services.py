@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Product
 from app.models.domain import ArtifactStatus, DecisionType, TaskStatus
+from app.policies.experiment_preflight import ExperimentNotReadyError
 from app.services import ApprovalService, ArtifactService, DecisionService, ExperimentService, TaskService
 
 
@@ -46,11 +47,15 @@ def test_experiment_service_crud(db: Session) -> None:
     service = ExperimentService(db)
 
     experiment = service.create(product_id=owner.id, name="Segment test", hypothesis="Studios convert")
-    service.update(experiment.id, status="running", channel="search")
+    service.update(experiment.id, channel="search")
 
     assert service.get(experiment.id) is experiment
-    assert experiment.status == "running"
+    assert experiment.status == "draft"
     assert experiment.channel == "search"
+
+    # An incomplete draft cannot be moved to running without passing preflight.
+    with pytest.raises(ExperimentNotReadyError):
+        service.update(experiment.id, status="running")
 
 
 def test_decision_service_preserves_types_and_empty_evidence(db: Session) -> None:
