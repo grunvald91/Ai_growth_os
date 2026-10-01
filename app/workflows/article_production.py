@@ -7,6 +7,7 @@ from pathlib import Path
 
 from sqlalchemy import update
 from sqlalchemy.orm import Session
+from pydantic import ValidationError
 
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
@@ -292,8 +293,17 @@ class ArticleProduction:
                 error = f'invalid_article_output:{name}'
                 if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
                     raise ValueError('Incomplete or oversized response')
-                parsed = schema.model_validate_json(response.content)
-                parsed = schema.model_validate(self._sanitize(parsed.model_dump(mode='json')))
+                try:
+                    parsed = schema.model_validate_json(response.content)
+                    parsed = schema.model_validate(self._sanitize(parsed.model_dump(mode='json')))
+                except ValidationError as exc:
+                    locations = []
+                    for item in exc.errors(include_url=False, include_input=False):
+                        loc = ".".join(str(part) for part in item.get("loc", ()))
+                        err_type = item.get("type", "validation")
+                        locations.append(f"{loc}:{err_type}" if loc else err_type)
+                    error = f'invalid_article_output:{name}:' + ",".join(locations[:8])
+                    raise
                 outputs.append(parsed)
                 if name not in {'repurposing_editor', 'video_director', 'story_director', 'visual_designer'}:
                     inputs['prior_stage_outputs'][name] = parsed.model_dump(mode='json')
