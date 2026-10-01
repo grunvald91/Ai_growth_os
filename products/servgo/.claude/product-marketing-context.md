@@ -16,6 +16,27 @@ Current known client flow includes:
 - owner manually verifies receipt before the booking is confirmed;
 - booking status page and notifications.
 
+## Verified commercial terms
+
+Current agreed ServGo commercial terms:
+- implementation/setup: 9,900 RUB one-time;
+- monthly service: 1,490 RUB for up to 5 employees;
+- monthly service: 3,000 RUB for 6 to 15 employees.
+
+Treat older promotional pricing as superseded unless a new explicitly approved experiment defines a temporary offer.
+
+## Current measurement baseline
+
+As of the initial growth-baseline audit:
+- website traffic: UNKNOWN;
+- historical marketing leads: UNKNOWN;
+- demo requests: UNKNOWN;
+- acquisition cost: UNKNOWN;
+- source attribution was absent before the new marketing-lead instrumentation;
+- production currently contains demo/test businesses, so raw user/business/booking totals must not be treated as acquisition metrics without filtering.
+
+For growth experiments, prefer attributed business leads over raw user counts.
+
 ## Initial growth objective
 
 Use ServGo as the first real product to validate AI Growth OS.
