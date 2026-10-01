@@ -15,7 +15,7 @@ CONTEXT_LIMIT = 150_000
 FIELDS = {
     'goal': (Goal, ('name', 'description', 'target_metric', 'target_value', 'starts_on', 'ends_on', 'status')),
     'metric': (Metric, ('name', 'value', 'unit', 'source', 'observed_at', 'goal_id', 'experiment_id')),
-    'experiment': (Experiment, ('name', 'hypothesis', 'channel', 'target_metric', 'success_condition', 'status', 'conclusion')),
+    'experiment': (Experiment, ('experiment_key', 'name', 'hypothesis', 'audience', 'channel', 'action', 'target_metric', 'secondary_signals', 'attribution_method', 'baseline_summary', 'observation_window_days', 'time_budget_minutes', 'success_condition', 'stop_condition', 'inconclusive_condition', 'budget', 'currency', 'status', 'conclusion')),
     'decision': (Decision, ('decision_type', 'rationale')),
     'task': (Task, ('title', 'description', 'assigned_agent', 'status', 'priority')),
     'artifact': (Artifact, ('kind', 'title', 'content', 'status')),
