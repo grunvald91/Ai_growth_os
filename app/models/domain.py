@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, JSON, Numeric, String, Text
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
@@ -122,15 +122,27 @@ class Artifact(UUIDMixin, TimestampMixin, Base):
 
 class Experiment(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "experiments"
+    __table_args__ = (
+        UniqueConstraint("product_id", "experiment_key", name="uq_experiments_product_key"),
+    )
 
     product_id: Mapped[UUID] = mapped_column(ForeignKey("products.id"), index=True, nullable=False)
     goal_id: Mapped[UUID | None] = mapped_column(ForeignKey("goals.id"), index=True)
+    experiment_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     name: Mapped[str] = mapped_column(String(300), nullable=False)
     hypothesis: Mapped[str] = mapped_column(Text, nullable=False)
     audience: Mapped[str | None] = mapped_column(Text)
     channel: Mapped[str | None] = mapped_column(String(100))
+    action: Mapped[str | None] = mapped_column(Text)
     target_metric: Mapped[str | None] = mapped_column(String(100))
+    secondary_signals: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    attribution_method: Mapped[str | None] = mapped_column(Text)
+    baseline_summary: Mapped[str | None] = mapped_column(Text)
+    observation_window_days: Mapped[int | None] = mapped_column(Integer)
+    time_budget_minutes: Mapped[int | None] = mapped_column(Integer)
     success_condition: Mapped[str | None] = mapped_column(Text)
+    stop_condition: Mapped[str | None] = mapped_column(Text)
+    inconclusive_condition: Mapped[str | None] = mapped_column(Text)
     budget: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
     currency: Mapped[str | None] = mapped_column(String(3))
     status: Mapped[str] = mapped_column(String(50), default="draft", nullable=False)
