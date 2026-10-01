@@ -1,4 +1,4 @@
-name: Inspect ServGo article failure
+name: Validate Russian Content Studio
 
 on:
   push:
@@ -9,9 +9,9 @@ permissions:
   contents: read
 
 jobs:
-  inspect:
+  validate-content:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     env:
       SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
       SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
@@ -26,29 +26,81 @@ jobs:
       - name: Install sshpass
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
 
-      - name: Inspect runtime and persisted state
+      - name: Generate review-only Russian content package
         run: |
           set -euo pipefail
-          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=20 -o ServerAliveCountMax=15"
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=20 -o ServerAliveCountMax=30"
           sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           PRODUCT_ID="04392041-ea09-4853-874e-8060bee7286c"
-          echo "=== HEALTH ==="
-          curl -sS -i "http://127.0.0.1:8091/health" | tail -n 20 || true
-          echo "=== CONTAINERS ==="
-          docker ps --format '{{.Names}} {{.Status}}' | grep 'ai-growth-os' || true
-          echo "=== TASKS ==="
-          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/tasks?limit=20" || true
-          echo
-          echo "=== EXPERIMENTS ==="
-          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/experiments?limit=10" || true
-          echo
-          echo "=== APPROVALS ==="
-          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/approvals?limit=10" || true
-          echo
-          echo "=== ARTIFACTS ==="
-          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/artifacts?limit=20" || true
-          echo
-          echo "=== API LOG TAIL ==="
-          docker logs --tail 160 ai-growth-os-api-1 2>&1 || true
+          EXPERIMENT_ID="6a59dfeb-10e6-4fe4-bca9-e218dd31b5f0"
+
+          RESULT=$(mktemp)
+          curl --max-time 1500 -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/articles"             -H 'Content-Type: application/json'             -d "{\"language\":\"ru\",\"experiment_id\":\"$EXPERIMENT_ID\",\"channel\":\"own_site\",\"topic\":\"Как устроить понятную онлайн-запись для небольшой массажной студии\",\"audience\":\"Владелец или управляющий небольшой массажной студии\",\"problem\":\"Показать понятный путь клиента от выбора услуги до подтверждения записи без неподтверждённых обещаний и сравнений с конкурентами.\",\"request_publication\":false}" > "$RESULT"
+
+          echo "=== RESULT ==="
+          python3 - "$RESULT" <<'PY'
+          import json, sys
+          data=json.load(open(sys.argv[1]))
+          print(json.dumps({
+              "status": data.get("status"),
+              "error": data.get("error"),
+              "task_id": data.get("task_id"),
+              "main_artifact_id": data.get("main_artifact_id"),
+              "derivative_artifact_ids": data.get("derivative_artifact_ids", []),
+              "approval_ids": data.get("approval_ids", []),
+          }, ensure_ascii=False))
+          PY
+
+          MAIN_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("main_artifact_id") or "")' "$RESULT")
+          [ -n "$MAIN_ID" ] || exit 0
+
+          ART=$(mktemp)
+          curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/artifacts/$MAIN_ID" > "$ART"
+          echo "=== ARTICLE_PREVIEW ==="
+          python3 - "$ART" <<'PY'
+          import json, sys
+          row=json.load(open(sys.argv[1]))
+          pkg=json.loads(row["content"])
+          reader=pkg.get("reader_article") or {}
+          print(json.dumps({
+              "artifact_id": row["id"],
+              "title": row["title"],
+              "language": reader.get("language"),
+              "lead": reader.get("lead"),
+              "section_headings": [s.get("heading") for s in reader.get("sections", [])],
+              "closing": reader.get("closing"),
+              "full_article_chars": len(pkg.get("full_article","")),
+              "internal_labels_leaked": any(x in pkg.get("full_article","") for x in ["[HYPOTHESIS]","[ADVICE]"]),
+          }, ensure_ascii=False))
+          derivs=pkg.get("conversion",{}).get("derivatives",[])
+          for kind in ("short_video","story","static_image"):
+              item=next((d for d in derivs if d.get("kind")==kind), None)
+              if not item:
+                  print(kind.upper()+"_MISSING")
+                  continue
+              pb=item.get("production_brief") or {}
+              if kind=="short_video":
+                  summary={
+                    "kind":kind,"hook":item.get("hook"),"duration_seconds":pb.get("duration_seconds"),
+                    "aspect_ratio":pb.get("aspect_ratio"),"shots":len(pb.get("shots",[])),
+                    "script":pb.get("voiceover_or_dialogue_script"),"cover_frame":pb.get("cover_frame"),
+                    "export_spec":pb.get("export_spec"),
+                  }
+              elif kind=="story":
+                  summary={
+                    "kind":kind,"hook":item.get("hook"),"aspect_ratio":pb.get("aspect_ratio"),
+                    "frames":len(pb.get("frames",[])),"narrative_arc":pb.get("narrative_arc"),
+                    "final_cta":pb.get("final_cta"),"export_spec":pb.get("export_spec"),
+                  }
+              else:
+                  summary={
+                    "kind":kind,"hook":item.get("hook"),"target_formats":pb.get("target_formats"),
+                    "visual_style":pb.get("visual_style"),"overlay_text":pb.get("overlay_text"),
+                    "image_generation_prompt":pb.get("image_generation_prompt"),
+                    "export_spec":pb.get("export_spec"),
+                  }
+              print("=== "+kind.upper()+" ===")
+              print(json.dumps(summary, ensure_ascii=False))
+          PY
           REMOTE
