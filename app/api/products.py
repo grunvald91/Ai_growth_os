@@ -66,8 +66,8 @@ def create_experiment(product_id: UUID, body: ExperimentCreate, db: Session = De
         goal = db.get(Goal, body.goal_id)
         if goal is None or goal.product_id != product_id:
             raise HTTPException(404, "Goal not found for product")
-    experiment = ExperimentService(db).create(product_id=product_id, **body.model_dump())
     try:
+        experiment = ExperimentService(db).create(product_id=product_id, **body.model_dump())
         db.commit()
     except IntegrityError:
         db.rollback()
