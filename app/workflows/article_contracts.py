@@ -103,11 +103,17 @@ class ReaderSection(Contract):
     body: Text
 
 
+class RenderedFact(Contract):
+    source_id: ShortText
+    text: Text
+
+
 class HumanEditedArticle(Contract):
     """Reader-facing copy. Verified product facts are injected separately by application code."""
     language: Literal['ru', 'en']
     title: ShortText
     lead: Text
+    fact_renderings: list[RenderedFact] = Field(default_factory=list, max_length=30)
     sections: list[ReaderSection] = Field(min_length=4, max_length=20)
     closing: Text
     editorial_notes: list[Text] = Field(default_factory=list, max_length=10)
@@ -383,9 +389,10 @@ class ArticleArtifact(Contract):
     reader_article: HumanEditedArticle | None = None
     full_article: str = Field(min_length=2000, max_length=110000)
     conversion: ConversionPackage
-    grounding_policy: Literal['verbatim_product_facts_and_labeled_advice'] = (
-        'verbatim_product_facts_and_labeled_advice'
-    )
+    grounding_policy: Literal[
+        'verbatim_product_facts_and_labeled_advice',
+        'source_traced_human_edit',
+    ] = 'source_traced_human_edit'
 
     @model_validator(mode='after')
     def derivatives_adapt_source(self):
