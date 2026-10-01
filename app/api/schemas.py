@@ -94,12 +94,53 @@ class TaskRead(Record):
     priority: int
 
 
+class ExperimentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    experiment_key: str = Field(min_length=5, max_length=100, pattern=r"^EXP-[A-Z0-9-]+$")
+    goal_id: UUID | None = None
+    name: str = Field(min_length=1, max_length=300)
+    hypothesis: str = Field(min_length=1, max_length=4000)
+    audience: str = Field(min_length=1, max_length=2000)
+    channel: str = Field(min_length=1, max_length=100)
+    action: str = Field(min_length=1, max_length=4000)
+    target_metric: str = Field(min_length=1, max_length=100)
+    secondary_signals: list[str] = Field(default_factory=list, max_length=20)
+    attribution_method: str = Field(min_length=1, max_length=4000)
+    baseline_summary: str = Field(min_length=1, max_length=4000)
+    observation_window_days: int = Field(ge=1, le=180, strict=True)
+    time_budget_minutes: int = Field(ge=1, le=100000, strict=True)
+    success_condition: str = Field(min_length=1, max_length=4000)
+    stop_condition: str = Field(min_length=1, max_length=4000)
+    inconclusive_condition: str = Field(min_length=1, max_length=4000)
+    budget: Decimal = Field(ge=0, max_digits=18, decimal_places=4)
+    currency: str = Field(min_length=3, max_length=3)
+    status: Literal["draft"] = "draft"
+
+
 class ExperimentRead(Record):
     product_id: UUID
+    goal_id: UUID | None
+    experiment_key: str | None
     name: str
     hypothesis: str
+    audience: str | None
     channel: str | None
+    action: str | None
+    target_metric: str | None
+    secondary_signals: list
+    attribution_method: str | None
+    baseline_summary: str | None
+    observation_window_days: int | None
+    time_budget_minutes: int | None
+    success_condition: str | None
+    stop_condition: str | None
+    inconclusive_condition: str | None
+    budget: Decimal | None
+    currency: str | None
     status: str
+    conclusion: str | None
+    starts_at: datetime | None
+    ends_at: datetime | None
 
 
 class ArtifactRead(Record):

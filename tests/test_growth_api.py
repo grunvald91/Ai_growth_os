@@ -27,7 +27,39 @@ def test_api_vertical_slice(tmp_path):
                 assert response.status_code == 201
                 pid = response.json()['id']
                 assert client.post('/products', json={'name': 'Duplicate', 'slug': 'servgo'}).status_code == 409
-                assert client.post(f'/products/{pid}/goals', json={'name': 'Organic leads'}).status_code == 201
+                goal_response = client.post(f'/products/{pid}/goals', json={'name': 'Organic leads'})
+                assert goal_response.status_code == 201
+                goal_id = goal_response.json()['id']
+                experiment_body = {
+                    'experiment_key': 'EXP-SERVGO-001',
+                    'goal_id': goal_id,
+                    'name': 'Direct outreach validation',
+                    'hypothesis': 'A bounded direct-outreach cohort may produce qualified ServGo leads.',
+                    'audience': 'Small appointment-based service businesses',
+                    'channel': 'direct_outreach',
+                    'action': 'Contact one bounded cohort with a tracked ServGo evaluation link.',
+                    'target_metric': 'qualified_leads',
+                    'secondary_signals': ['positive_replies', 'demo_requests'],
+                    'attribution_method': 'experiment_id + UTM + self-report + manual verification',
+                    'baseline_summary': 'Website traffic, marketing leads and CAC are currently UNKNOWN.',
+                    'observation_window_days': 14,
+                    'time_budget_minutes': 240,
+                    'success_condition': 'KEEP if the predefined qualified-lead threshold is met.',
+                    'stop_condition': 'STOP if the full cohort produces zero qualified leads after the observation window.',
+                    'inconclusive_condition': 'INCONCLUSIVE if the cohort or attribution coverage is incomplete.',
+                    'budget': '0',
+                    'currency': 'RUB',
+                }
+                experiment_response = client.post(f'/products/{pid}/experiments', json=experiment_body)
+                assert experiment_response.status_code == 201, experiment_response.text
+                experiment = experiment_response.json()
+                assert experiment['experiment_key'] == 'EXP-SERVGO-001'
+                assert experiment['status'] == 'draft'
+                assert experiment['observation_window_days'] == 14
+                assert experiment['secondary_signals'] == ['positive_replies', 'demo_requests']
+                assert client.post(f'/products/{pid}/experiments', json=experiment_body).status_code == 409
+                invalid = dict(experiment_body, experiment_key='bad-key')
+                assert client.post(f'/products/{pid}/experiments', json=invalid).status_code == 422
                 assert client.get(f'/products/{pid}').json()['name'] == 'ServGo'
                 assert len(client.get('/products').json()) == 1
                 result = client.post(f'/products/{pid}/daily-growth-review').json()
