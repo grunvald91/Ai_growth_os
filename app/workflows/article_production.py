@@ -273,6 +273,7 @@ class ArticleProduction:
                     raise ValueError('Stage context exceeds bound')
             strategy, seo, body_draft, conversion_core, reader_article, derivative_set = outputs
 
+            error = 'invalid_human_editor_grounding'
             reader_fact_ids = [item.source_id for item in reader_article.fact_renderings]
             if len(reader_fact_ids) != len(set(reader_fact_ids)):
                 raise ValueError('Human editor duplicated a verified fact source')
