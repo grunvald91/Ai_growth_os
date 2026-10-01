@@ -31,6 +31,9 @@ class AgentRole(StrEnum):
     SCRIPTWRITER = "scriptwriter"
     CREATIVE_DIRECTOR = "creative_director"
     VIDEO_PRODUCER = "video_producer"
+    VIDEO_DIRECTOR = "video_director"
+    STORY_DIRECTOR = "story_director"
+    VISUAL_DESIGNER = "visual_designer"
     CRO = "cro"
     COMMUNITY_MANAGER = "community_manager"
     RESEARCH_LEAD = "research_lead"
@@ -117,6 +120,21 @@ AGENT_CONFIGS = MappingProxyType({
     AgentRole.VIDEO_PRODUCER: AgentConfig(
         role=AgentRole.VIDEO_PRODUCER,
         responsibilities=("Prepare bounded video production packages; no external rendering without a future adapter.",),
+        allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
+    ),
+    AgentRole.VIDEO_DIRECTOR: AgentConfig(
+        role=AgentRole.VIDEO_DIRECTOR,
+        responsibilities=("Write text-only director-ready short-video briefs with timed shots, camera, action, dialogue, overlays, sound, editing and export instructions; never render or publish.",),
+        allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
+    ),
+    AgentRole.STORY_DIRECTOR: AgentConfig(
+        role=AgentRole.STORY_DIRECTOR,
+        responsibilities=("Write text-only frame-by-frame vertical story briefs with composition, screen copy, interaction, transitions and safe-area guidance; never render or publish.",),
+        allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
+    ),
+    AgentRole.VISUAL_DESIGNER: AgentConfig(
+        role=AgentRole.VISUAL_DESIGNER,
+        responsibilities=("Write text-only static-image design briefs with format, composition, style, typography, overlay copy and generation/design prompts; never render or publish.",),
         allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
     ),
     AgentRole.CRO: AgentConfig(
