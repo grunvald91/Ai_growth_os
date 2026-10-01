@@ -295,9 +295,10 @@ class ArticleProduction:
                 parsed = schema.model_validate_json(response.content)
                 parsed = schema.model_validate(self._sanitize(parsed.model_dump(mode='json')))
                 outputs.append(parsed)
-                inputs['prior_stage_outputs'][name] = parsed.model_dump(mode='json')
-                if len(json.dumps(inputs)) > 250000:
-                    raise ValueError('Stage context exceeds bound')
+                if name not in {'repurposing_editor', 'video_director', 'story_director', 'visual_designer'}:
+                    inputs['prior_stage_outputs'][name] = parsed.model_dump(mode='json')
+                    if len(json.dumps(inputs)) > 250000:
+                        raise ValueError('Stage context exceeds bound')
             (
                 strategy,
                 seo,
