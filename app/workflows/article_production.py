@@ -20,7 +20,7 @@ from app.tools import ToolOperation
 from app.workflows.article_contracts import (
     ArticleArtifact, ArticleBodyDraft, ArticleDraft, ArticleProductionInput, ArticleProductionResult,
     ArticleSection, ArticleStrategy, ConversionCore, ConversionPackage, DerivativeBrief, DerivativeSet,
-    GroundedClaim, SEOPlan,
+    GroundedClaim, HumanEditedArticle, SEOPlan,
 )
 from app.workflows.context import load_context
 
@@ -42,7 +42,8 @@ STAGES = (
     ('seo_editor', SEOPlan, 'Choose query, title, hook and long-form outline adapted to the requested channel.'),
     ('article_writer', ArticleBodyDraft, 'Write the complete long-form article body as advice and hypotheses only. Verified facts are injected deterministically.'),
     ('conversion_editor', ConversionCore, 'Design the CTA, proposed links, funnel measurement and bounded distribution plan. Do not create derivatives.'),
-    ('repurposing_editor', DerivativeSet, 'Create nine genuinely distinct review-ready derivatives, including story, short video and static image packages.'),
+    ('human_editor', HumanEditedArticle, 'Turn the safe draft into a complete, engaging reader-facing article without adding unsupported product facts.'),
+    ('repurposing_editor', DerivativeSet, 'Create nine genuinely distinct review-ready derivatives, including detailed textual story, short-video and static-image production briefs.'),
 )
 
 STAGE_TIMEOUT_SECONDS = {
@@ -50,7 +51,8 @@ STAGE_TIMEOUT_SECONDS = {
     'seo_editor': 240,
     'article_writer': 240,
     'conversion_editor': 180,
-    'repurposing_editor': 180,
+    'human_editor': 240,
+    'repurposing_editor': 240,
     'repurposing_editor_retry': 180,
 }
 
@@ -59,8 +61,9 @@ STAGE_MAX_TOKENS = {
     'seo_editor': 3500,
     'article_writer': 8000,
     'conversion_editor': 3500,
-    'repurposing_editor': 4500,
-    'repurposing_editor_retry': 4500,
+    'human_editor': 8000,
+    'repurposing_editor': 7500,
+    'repurposing_editor_retry': 7500,
 }
 
 
@@ -178,7 +181,8 @@ class ArticleProduction:
                 'seo_editor': ('content_strategist',),
                 'article_writer': ('content_strategist', 'seo_editor'),
                 'conversion_editor': ('content_strategist', 'seo_editor'),
-                'repurposing_editor': ('content_strategist', 'seo_editor', 'conversion_editor'),
+                'human_editor': ('content_strategist', 'seo_editor', 'article_writer', 'conversion_editor'),
+                'repurposing_editor': ('content_strategist', 'seo_editor', 'human_editor', 'conversion_editor'),
             }
             for run_id, (name, schema, responsibility) in zip(run_ids, STAGES):
                 run = self.db.get(AgentRun, run_id)
@@ -202,15 +206,34 @@ class ArticleProduction:
                         ' Return only conversion core fields: CTA, proposed local links, one funnel measurement '
                         'plan and bounded distribution steps. Do not create derivative briefs.'
                     )
+                elif name == 'human_editor':
+                    stage_rule = (
+                        ' Rewrite the safe article into a polished human-facing article for an actual reader. '
+                        'Make it complete, engaging, clear and useful, with a strong lead, natural transitions, '
+                        'specific examples framed as examples, and a satisfying closing. Do not expose internal '
+                        'research labels, uncertainty bookkeeping, schemas, proof-gap notes or agent language. '
+                        'Do not invent testimonials, metrics, prices, integrations, competitor superiority or '
+                        'product capabilities. Product facts may appear ONLY through fact_renderings, exactly one '
+                        'rendering per supplied verified_product_facts source_id. Each rendering must be a faithful '
+                        'translation or reader-friendly restatement of that one source fact and must not add detail. '
+                        'The ordinary sections must focus on reader explanation, advice, questions and carefully '
+                        'worded hypotheses; they must not introduce new ServGo feature claims. '
+                    )
                 elif name == 'repurposing_editor':
                     stage_rule = (
                         ' Return exactly nine derivative drafts: dzen, tenchat, vc_ru, telegram, faq, founder, '
                         'short_video, story and static_image. Do not output measurement fields; the validated core '
                         'measurement is injected deterministically after this stage. Each derivative must change '
-                        'framing, hook, outline and treatment. For short_video, outline is the scene sequence and '
-                        'video_mode is brief_only. For story, outline is the ordered 9:16 frame sequence with '
-                        'screen copy and visual direction. For static_image, outline describes composition, '
-                        'overlay text, visual prompt and target aspect ratio.'
+                        'framing, hook, outline and treatment. All three visual asset types are TEXT BRIEFS only; '
+                        'do not claim to render, film or generate files. short_video must include a full 9:16 '
+                        'director brief with total duration, complete voiceover/dialogue, numbered timed shots, '
+                        'shot type, camera movement, action, on-screen text, transition, sound/music direction, '
+                        'subtitle style, cover frame, editing rhythm, CTA frame and export specification. story '
+                        'must include a 9:16 frame-by-frame sequence with duration, visual description, composition, '
+                        'screen text, animation/transition, interaction where useful, safe-area notes, typography, '
+                        'final CTA and export specification. static_image must include target formats, visual style, '
+                        'subject, composition, background, lighting/mood, typography, overlay text, brand elements, '
+                        'a detailed image-generation/design prompt, what to avoid, CTA treatment and export spec.'
                     )
                 prompt = (
                     f'You are the {name}. {responsibility} Return ONLY JSON matching the schema. '
@@ -248,7 +271,17 @@ class ArticleProduction:
                 inputs['prior_stage_outputs'][name] = parsed.model_dump(mode='json')
                 if len(json.dumps(inputs)) > 250000:
                     raise ValueError('Stage context exceeds bound')
-            strategy, seo, body_draft, conversion_core, derivative_set = outputs
+            strategy, seo, body_draft, conversion_core, reader_article, derivative_set = outputs
+
+            error = 'invalid_human_editor_grounding'
+            reader_fact_ids = [item.source_id for item in reader_article.fact_renderings]
+            if len(reader_fact_ids) != len(set(reader_fact_ids)):
+                raise ValueError('Human editor duplicated a verified fact source')
+            if set(reader_fact_ids) != set(facts):
+                raise ValueError('Human editor must render exactly the verified product facts')
+            for item in reader_article.fact_renderings:
+                if item.source_id not in facts:
+                    raise ValueError('Human editor referenced an unknown verified fact')
 
             grounded_claims = [
                 GroundedClaim(claim=quote, source_id=source_id, quote=quote)
@@ -295,8 +328,26 @@ class ArticleProduction:
             conversion = assemble_conversion(conversion_core, derivative_set)
 
             def build_package(current_conversion):
-                body = '\n\n'.join(f'## {section.heading}\n\n' + section.body for section in draft.sections)
-                full_article = f'# {seo.title}\n\n{seo.hook}\n\n{body}\n\n{current_conversion.cta}'
+                rendered_facts = ''
+                if reader_article.fact_renderings:
+                    fact_heading = 'Что умеет ServGo' if request.language == 'ru' else 'What ServGo supports'
+                    rendered_facts = (
+                        f'## {fact_heading}\n\n'
+                        + '\n'.join(f'- {item.text}' for item in reader_article.fact_renderings)
+                        + '\n\n'
+                    )
+                reader_body = '\n\n'.join(
+                    f'## {section.heading}\n\n{section.body}'
+                    for section in reader_article.sections
+                )
+                full_article = (
+                    f'# {reader_article.title}\n\n'
+                    f'{reader_article.lead}\n\n'
+                    f'{rendered_facts}'
+                    f'{reader_body}\n\n'
+                    f'{reader_article.closing}\n\n'
+                    f'{current_conversion.cta}'
+                )
                 return ArticleArtifact(
                     product_id=product_id,
                     task_id=task_id,
@@ -307,6 +358,7 @@ class ArticleProduction:
                     strategy=strategy,
                     seo=seo,
                     draft=draft,
+                    reader_article=reader_article,
                     full_article=full_article,
                     conversion=current_conversion,
                 )
@@ -333,11 +385,11 @@ class ArticleProduction:
                 retry_inputs = json.loads(json.dumps(inputs))
                 retry_inputs['prior_stage_outputs'] = {
                     key: value for key, value in inputs['prior_stage_outputs'].items()
-                    if key in {'content_strategist', 'seo_editor', 'conversion_editor'}
+                    if key in {'content_strategist', 'seo_editor', 'human_editor', 'conversion_editor'}
                 }
                 retry_inputs['package_retry_note'] = (
                     'The first derivative set satisfied its local schema but the final article package failed '
-                    'adaptation validation. Rebuild only the nine derivative drafts. Make every hook, framing '
+                    'adaptation validation. Rebuild only the nine derivative drafts, preserving the complete textual production briefs for short_video, story and static_image. Make every hook, framing '
                     'and outline substantially different from the source SEO hook, strategy angle and source '
                     'outline, and distinct from every other derivative.'
                 )
@@ -388,7 +440,7 @@ class ArticleProduction:
             error = 'article_persistence_failed'
             artifacts = ArtifactService(self.db)
             main = artifacts.create(product_id=product_id, task_id=task_id, agent_run_id=run_ids[-1],
-                kind='article', title=seo.title, content=package.model_dump_json(),
+                kind='article', title=reader_article.title, content=package.model_dump_json(),
                 status='awaiting_approval' if request.request_publication else 'draft')
             artifact_ids, approval_ids = [main.id], []
             for brief in conversion.derivatives:
@@ -400,7 +452,7 @@ class ArticleProduction:
                 policy = PolicyEvaluator().evaluate(ToolOperation.PUBLISH)
                 approval = ApprovalService(self.db).create(product_id=product_id, artifact_id=main.id,
                     action_type=ToolOperation.PUBLISH.value, risk_level=policy.risk_level.value,
-                    status='pending', requested_by='conversion_editor',
+                    status='pending', requested_by='human_editor',
                     reason='Publication request only. Human review required; no tools executed.')
                 approval_ids.append(approval.id)
             for run_id in run_ids:

@@ -1,4 +1,4 @@
-"""Bounded contracts for the four-stage, draft-only article production pipeline."""
+"""Typed contracts for grounded content production and human-review-ready creative briefs."""
 from difflib import SequenceMatcher
 from typing import Annotated, Literal
 from uuid import UUID
@@ -6,9 +6,13 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Text = Annotated[str, Field(min_length=1, max_length=4000)]
+LongText = Annotated[str, Field(min_length=1, max_length=12000)]
 ShortText = Annotated[str, Field(min_length=1, max_length=300)]
 Channel = Literal['own_site', 'dzen', 'tenchat', 'vc_ru', 'telegram']
-DerivativeKind = Literal['dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video', 'story', 'static_image']
+DerivativeKind = Literal[
+    'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder',
+    'short_video', 'story', 'static_image'
+]
 
 
 class Contract(BaseModel):
@@ -47,7 +51,6 @@ class SEOPlan(Contract):
 
 
 class GroundedClaim(Contract):
-    """Only verbatim, explicitly factual product-context lines qualify as evidence."""
     claim: Text
     source_id: ShortText
     quote: Text
@@ -95,6 +98,45 @@ class ArticleDraft(Contract):
         return self
 
 
+class ReaderSection(Contract):
+    heading: ShortText
+    body: Text
+
+
+class RenderedFact(Contract):
+    source_id: ShortText
+    text: Text
+
+
+class HumanEditedArticle(Contract):
+    """Reader-facing copy. Verified product facts are injected separately by application code."""
+    language: Literal['ru', 'en']
+    title: ShortText
+    lead: Text
+    fact_renderings: list[RenderedFact] = Field(default_factory=list, max_length=30)
+    sections: list[ReaderSection] = Field(min_length=4, max_length=20)
+    closing: Text
+    editorial_notes: list[Text] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode='after')
+    def readable_long_form(self):
+        body = '\n'.join([self.lead, *(s.body for s in self.sections), self.closing])
+        if len(body) < 2500:
+            raise ValueError('Human-facing article must be a complete long-form read')
+        forbidden = ('[HYPOTHESIS]', '[ADVICE]', 'proof_needed_notes', 'schema:', 'agent note')
+        if any(token.casefold() in body.casefold() for token in forbidden):
+            raise ValueError('Internal workflow labels must not leak into reader-facing copy')
+        if self.language == 'ru':
+            letters = [ch for ch in body if ch.isalpha()]
+            cyrillic = [
+                ch for ch in letters
+                if ('а' <= ch.casefold() <= 'я') or ch.casefold() == 'ё'
+            ]
+            if letters and len(cyrillic) / len(letters) < 0.55:
+                raise ValueError('Russian reader-facing article must be predominantly Russian')
+        return self
+
+
 class LinkProposal(Contract):
     label: ShortText
     destination: ShortText
@@ -126,6 +168,96 @@ class MeasurementPlan(Contract):
     success_hypothesis: Text
 
 
+class VideoShot(Contract):
+    number: int = Field(ge=1, le=30, strict=True)
+    start_second: float = Field(ge=0, le=90)
+    end_second: float = Field(gt=0, le=90)
+    purpose: ShortText
+    shot_type: ShortText
+    visual_description: Text
+    camera_and_movement: Text
+    action: Text
+    spoken_text: Text | None = None
+    on_screen_text: ShortText | None = None
+    transition: ShortText
+    sound_or_music_note: Text
+
+    @model_validator(mode='after')
+    def valid_timing(self):
+        if self.end_second <= self.start_second:
+            raise ValueError('Video shot end must be after start')
+        return self
+
+
+class ShortVideoProductionBrief(Contract):
+    asset_type: Literal['short_video'] = 'short_video'
+    aspect_ratio: Literal['9:16'] = '9:16'
+    duration_seconds: int = Field(ge=15, le=90, strict=True)
+    objective: Text
+    creative_concept: Text
+    visual_style: Text
+    setting_and_props: Text
+    talent_direction: Text
+    voiceover_or_dialogue_script: LongText
+    shots: list[VideoShot] = Field(min_length=3, max_length=20)
+    subtitle_style: Text
+    music_direction: Text
+    cover_frame: Text
+    editing_rhythm: Text
+    cta_frame: Text
+    export_spec: Text
+    production_notes: list[Text] = Field(min_length=1, max_length=15)
+
+
+class StoryFrame(Contract):
+    number: int = Field(ge=1, le=12, strict=True)
+    duration_seconds: int = Field(ge=2, le=15, strict=True)
+    purpose: ShortText
+    visual_description: Text
+    composition: Text
+    on_screen_text: ShortText
+    animation_or_transition: Text
+    interaction: Text | None = None
+    safe_area_note: Text
+
+
+class StoryProductionBrief(Contract):
+    asset_type: Literal['story'] = 'story'
+    aspect_ratio: Literal['9:16'] = '9:16'
+    objective: Text
+    narrative_arc: Text
+    visual_style: Text
+    typography_direction: Text
+    frames: list[StoryFrame] = Field(min_length=3, max_length=10)
+    final_cta: Text
+    export_spec: Text
+    production_notes: list[Text] = Field(min_length=1, max_length=15)
+
+
+class StaticImageProductionBrief(Contract):
+    asset_type: Literal['static_image'] = 'static_image'
+    target_formats: list[Literal['1:1', '4:5', '9:16']] = Field(min_length=1, max_length=3)
+    objective: Text
+    visual_style: Text
+    subject: Text
+    composition: Text
+    background_and_environment: Text
+    lighting_and_mood: Text
+    typography_direction: Text
+    overlay_text: ShortText
+    brand_elements: Text
+    image_generation_prompt: LongText
+    avoid_in_visual: Text
+    cta_treatment: Text
+    export_spec: Text
+    production_notes: list[Text] = Field(min_length=1, max_length=15)
+
+
+CreativeProductionBrief = (
+    ShortVideoProductionBrief | StoryProductionBrief | StaticImageProductionBrief
+)
+
+
 class DerivativeDraft(Contract):
     kind: DerivativeKind
     audience: ShortText
@@ -136,11 +268,27 @@ class DerivativeDraft(Contract):
     landing_page: LinkProposal
     adaptation_notes: Text
     video_mode: Literal['brief_only'] | None = None
+    production_brief: CreativeProductionBrief | None = None
 
     @model_validator(mode='after')
-    def video_is_brief(self):
-        if (self.kind == 'short_video') != (self.video_mode == 'brief_only'):
-            raise ValueError('Short video is a brief only, never a rendering request')
+    def creative_brief_matches_kind(self):
+        expected = {
+            'short_video': ShortVideoProductionBrief,
+            'story': StoryProductionBrief,
+            'static_image': StaticImageProductionBrief,
+        }
+        expected_type = expected.get(self.kind)
+        if expected_type is None:
+            if self.production_brief is not None or self.video_mode is not None:
+                raise ValueError('Non-visual derivatives must not contain production briefs')
+            return self
+        if not isinstance(self.production_brief, expected_type):
+            raise ValueError(f'{self.kind} requires its full textual production brief')
+        if self.kind == 'short_video':
+            if self.video_mode != 'brief_only':
+                raise ValueError('Short video is a text production brief only')
+        elif self.video_mode is not None:
+            raise ValueError('video_mode belongs only to short_video')
         return self
 
 
@@ -149,13 +297,16 @@ class DerivativeSet(Contract):
 
     @model_validator(mode='after')
     def distinct_derivatives(self):
-        expected = {'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video', 'story', 'static_image'}
+        expected = {
+            'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder',
+            'short_video', 'story', 'static_image'
+        }
         if {brief.kind for brief in self.derivatives} != expected:
             raise ValueError('Provide exactly one brief per derivative kind')
         for field in ('framing', 'hook'):
             texts = [' '.join(getattr(brief, field).casefold().split()) for brief in self.derivatives]
-            for i, text in enumerate(texts):
-                if any(SequenceMatcher(None, text, other).ratio() >= .85 for other in texts[:i]):
+            for i, value in enumerate(texts):
+                if any(SequenceMatcher(None, value, other).ratio() >= .85 for other in texts[:i]):
                     raise ValueError('Derivative framing and hooks must be distinct, not blind copies')
         return self
 
@@ -171,11 +322,27 @@ class DerivativeBrief(Contract):
     measurement: MeasurementPlan
     adaptation_notes: Text
     video_mode: Literal['brief_only'] | None = None
+    production_brief: CreativeProductionBrief | None = None
 
     @model_validator(mode='after')
-    def video_is_brief(self):
-        if (self.kind == 'short_video') != (self.video_mode == 'brief_only'):
-            raise ValueError('Short video is a brief only, never a rendering request')
+    def creative_brief_matches_kind(self):
+        expected = {
+            'short_video': ShortVideoProductionBrief,
+            'story': StoryProductionBrief,
+            'static_image': StaticImageProductionBrief,
+        }
+        expected_type = expected.get(self.kind)
+        if expected_type is None:
+            if self.production_brief is not None or self.video_mode is not None:
+                raise ValueError('Non-visual derivatives must not contain production briefs')
+            return self
+        if not isinstance(self.production_brief, expected_type):
+            raise ValueError(f'{self.kind} requires its full textual production brief')
+        if self.kind == 'short_video':
+            if self.video_mode != 'brief_only':
+                raise ValueError('Short video is a text production brief only')
+        elif self.video_mode is not None:
+            raise ValueError('video_mode belongs only to short_video')
         return self
 
 
@@ -199,19 +366,17 @@ class ConversionPackage(ConversionCore):
 
     @model_validator(mode='after')
     def distinct_derivatives(self):
-        expected = {'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video', 'story', 'static_image'}
+        expected = {
+            'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder',
+            'short_video', 'story', 'static_image'
+        }
         if {brief.kind for brief in self.derivatives} != expected:
             raise ValueError('Provide exactly one brief per derivative kind')
-        for field in ('framing', 'hook'):
-            texts = [' '.join(getattr(brief, field).casefold().split()) for brief in self.derivatives]
-            for i, text in enumerate(texts):
-                if any(SequenceMatcher(None, text, other).ratio() >= .85 for other in texts[:i]):
-                    raise ValueError('Derivative framing and hooks must be distinct, not blind copies')
         return self
 
 
 class ArticleArtifact(Contract):
-    schema_version: Literal['2A1'] = '2A1'
+    schema_version: Literal['2A1', '2A2'] = '2A2'
     product_id: UUID
     task_id: UUID
     decision_id: UUID | None
@@ -221,9 +386,13 @@ class ArticleArtifact(Contract):
     strategy: ArticleStrategy
     seo: SEOPlan
     draft: ArticleDraft
+    reader_article: HumanEditedArticle | None = None
     full_article: str = Field(min_length=2000, max_length=110000)
     conversion: ConversionPackage
-    grounding_policy: Literal['verbatim_product_facts_and_labeled_advice'] = 'verbatim_product_facts_and_labeled_advice'
+    grounding_policy: Literal[
+        'verbatim_product_facts_and_labeled_advice',
+        'source_traced_human_edit',
+    ] = 'source_traced_human_edit'
 
     @model_validator(mode='after')
     def derivatives_adapt_source(self):

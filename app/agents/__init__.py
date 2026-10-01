@@ -27,6 +27,7 @@ class AgentRole(StrEnum):
     SEO_EDITOR = "seo_editor"
     ARTICLE_WRITER = "article_writer"
     CONVERSION_EDITOR = "conversion_editor"
+    HUMAN_FACING_EDITOR = "human_editor"
     SCRIPTWRITER = "scriptwriter"
     CREATIVE_DIRECTOR = "creative_director"
     VIDEO_PRODUCER = "video_producer"
@@ -94,6 +95,14 @@ AGENT_CONFIGS = MappingProxyType({
         role=AgentRole.CONVERSION_EDITOR,
         responsibilities=("Design CTA, landing and funnel hypotheses from verified product context.",),
         allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT, ToolOperation.CALCULATE}),
+    ),
+    AgentRole.HUMAN_FACING_EDITOR: AgentConfig(
+        role=AgentRole.HUMAN_FACING_EDITOR,
+        responsibilities=(
+            "Turn safe grounded drafts into complete, engaging human-readable copy without adding unsupported facts.",
+            "Keep internal research labels and proof-gap bookkeeping out of reader-facing material.",
+        ),
+        allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
     ),
     AgentRole.SCRIPTWRITER: AgentConfig(
         role=AgentRole.SCRIPTWRITER,
