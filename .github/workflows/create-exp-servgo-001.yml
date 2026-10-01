@@ -1,0 +1,76 @@
+name: Create EXP-SERVGO-001 draft
+
+on:
+  push:
+    branches:
+      - ops/create-exp-servgo-001
+
+permissions:
+  contents: read
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Guard
+        run: '[ -n "$SSHPASS" ] || exit 1'
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Create draft contract
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          PRODUCT_ID="04392041-ea09-4853-874e-8060bee7286c"
+
+          EXISTING=$(curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/experiments?limit=100")
+          FOUND=$(printf '%s' "$EXISTING" | python3 -c 'import json,sys; d=json.load(sys.stdin); x=[r for r in d if r.get("experiment_key")=="EXP-SERVGO-001"]; print(x[0]["id"] if x else "")')
+          if [ -n "$FOUND" ]; then
+            echo "EXPERIMENT_ALREADY_EXISTS=$FOUND"
+            printf '%s' "$EXISTING" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(next(r for r in d if r.get("experiment_key")=="EXP-SERVGO-001"),ensure_ascii=False,indent=2))'
+            exit 0
+          fi
+
+          GOALS=$(curl -fsS "http://127.0.0.1:8091/products/$PRODUCT_ID/goals?limit=20")
+          GOAL_ID=$(printf '%s' "$GOALS" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["id"] if d else "")')
+
+          python3 - "$GOAL_ID" >/tmp/exp-servgo-001.json <<'PY'
+          import json,sys
+          goal_id=sys.argv[1] or None
+          body={
+            "experiment_key":"EXP-SERVGO-001",
+            "goal_id":goal_id,
+            "name":"Прямой outreach: массажные и SPA-студии Сочи/Адлера",
+            "hypothesis":"Если персонально предложить ServGo небольшим массажным и SPA-бизнесам Сочи/Адлера как способ структурировать онлайн-запись, то часть владельцев или управляющих проявит явный интерес к оценке продукта.",
+            "audience":"Небольшие массажные и SPA-студии Сочи и Адлера, ориентировочно до 15 сотрудников; владелец или управляющий принимает решение о записи клиентов.",
+            "channel":"direct_outreach",
+            "action":"Сформировать ограниченную выборку из 30 реальных бизнесов. Для каждого сделать один персонализированный первый контакт по публично доступному прямому каналу и не более одного follow-up. Использовать единый базовый оффер ServGo и отслеживаемую ссылку на promo.servgo.ru с experiment_id=EXP-SERVGO-001, utm_source=direct_outreach, utm_medium=manual, utm_campaign=exp_servgo_001; канал контакта фиксировать отдельно. Никакие сообщения не отправляются до отдельного human approval.",
+            "target_metric":"qualified_leads",
+            "secondary_signals":["valid_contacts","replies","positive_replies","demo_requests","attributed_form_submissions"],
+            "attribution_method":"Каждая ссылка содержит experiment_id=EXP-SERVGO-001 и UTM. Promo-форма сохраняет UTM, referrer, self-reported source и attribution confidence. Для ответов вне формы источник подтверждается вручную. Qualified lead = конкретный сервисный бизнес + способ связи + явный интерес оценить ServGo для собственной записи.",
+            "baseline_summary":"После включения attribution marketing_leads=0. Исторический website traffic=UNKNOWN, marketing leads=UNKNOWN, demo requests=UNKNOWN, CAC=UNKNOWN. В production 3 не-demo бизнеса, но их источник привлечения неизвестен; они не используются как baseline эффективности канала.",
+            "observation_window_days":14,
+            "time_budget_minutes":240,
+            "success_condition":"KEEP и перейти к подтверждающему второму cohort-тесту, если из 30 валидно достигнутых бизнесов получено не менее 3 qualified leads, при этом источник каждого такого лида установлен. Это операционный порог ранней проверки, а не статистическое доказательство масштабируемости.",
+            "stop_condition":"STOP текущую гипотезу segment+offer, если выполнены 30 валидных первых контактов, предусмотренный follow-up, прошло 14 дней и получено 0 qualified leads при исправно работающей атрибуции.",
+            "inconclusive_condition":"INCONCLUSIVE/MODIFY, если валидно достигнуто менее 25 бизнесов, attribution отсутствует более чем у 20% ответивших, оффер/цена materially изменились во время теста, либо получено только 1–2 qualified leads. В таком случае не объявлять ни успех, ни провал — изменить один фактор и повторить ограниченный cohort.",
+            "budget":"0",
+            "currency":"RUB",
+            "status":"draft"
+          }
+          print(json.dumps(body,ensure_ascii=False))
+          PY
+
+          echo "=== CONTRACT ==="
+          cat /tmp/exp-servgo-001.json | python3 -m json.tool
+          echo "=== CREATE ==="
+          curl -fsS -X POST "http://127.0.0.1:8091/products/$PRODUCT_ID/experiments"             -H 'Content-Type: application/json'             --data-binary @/tmp/exp-servgo-001.json
+          echo
+          REMOTE
