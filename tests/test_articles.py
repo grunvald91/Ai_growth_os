@@ -36,31 +36,190 @@ class SequenceProvider:
 def valid_outputs():
     measurement = {k: dict(event=k + '_event', metric=k + '_rate', attribution='Proposed campaign attribution')
         for k in ['content', 'traffic', 'lead', 'activation', 'customer']}
-    measurement.update(activation_definition='demo', review_window_days=14, success_hypothesis='Useful guides may generate qualified inquiries')
-    kinds = ['dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video', 'story', 'static_image']
-    hooks = ['A missed appointment changes the day', 'Discuss an operations checklist with peers',
-        'An editorial experiment in service design', 'Save these three booking reminders',
-        'Which reservation questions need answers?', 'Why I would interview owners before building',
-        'Open on a calendar and cut to an empty chair', 'Three vertical frames explain the booking path', 'One clear visual maps the booking flow']
-    frames = ['Narrative educational reading', 'Professional network discussion', 'Analytical publication',
-        'Compact channel note', 'Question and answer reference', 'Personal reflective memo', 'Visual storyboard instructions', 'Vertical story sequence', 'Static visual composition']
-    return [dict(audience='Service business owners', pain='Manual scheduling friction', search_intent='Assess a booking workflow',
-        angle='Practical diagnosis before buying', titles=['A booking checklist', 'Evaluate appointment friction'], hypothesis='Clear information may improve demo interest'),
-        dict(primary_query='online service booking', related_queries=['appointment checklist'], title='A booking checklist',
-        hook='Start with the customer journey', outline=['Understand the problem', 'Map the workflow', 'Plan an experiment'], adaptation_notes='Educational draft'),
-        dict(sections=[dict(heading=h, kind='advice', body=(b + ' ') * 12) for h, b in [
-            ('Map the journey', 'Consider writing down each booking step and asking an owner which steps need clarification.'),
-            ('Discuss expectations', 'Try discussing scheduling expectations with a small group before deciding what to change.'),
-            ('Prepare an experiment', 'Consider a limited trial with a clear stopping rule and a review of qualitative feedback.'),
-            ('Review outcomes', 'Plan to inspect qualified inquiries and completed bookings rather than assuming views create customers.')]],
-            proof_needed_notes=['Verify features and collect real funnel evidence']),
-        dict(cta='Request a demo to discuss your booking workflow', landing_page=dict(label='Proposed demo page', destination='/demo'),
-            internal_links=[dict(label='Proposed guide', destination='/guides/booking')], measurement=measurement,
-            distribution=[dict(channel='own_site', action='prepare_draft', rationale='Start with an owned draft', downstream_goal='lead')]),
-        dict(derivatives=[dict(kind=k, audience='Service owners', framing=f, hook=h, outline=['Explain the problem', 'Invite a qualified next step'],
-                cta='Discuss a demo', landing_page=dict(label='Proposed demo', destination='/demo'), adaptation_notes='Draft only',
-                video_mode='brief_only' if k == 'short_video' else None) for k, h, f in zip(kinds, hooks, frames)])]
+    measurement.update(
+        activation_definition='demo',
+        review_window_days=14,
+        success_hypothesis='Useful guides may generate qualified inquiries',
+    )
 
+    video_brief = dict(
+        asset_type='short_video',
+        aspect_ratio='9:16',
+        duration_seconds=35,
+        objective='Объяснить владельцу бизнеса логику онлайн-записи и привести к осмысленному запросу демо.',
+        creative_concept='Один ведущий в кадре плюс крупные текстовые акценты и простые предметные перебивки.',
+        visual_style='Чистый современный деловой стиль, естественный свет, спокойный фон, крупные читаемые титры.',
+        setting_and_props='Вертикальная съёмка в рабочем пространстве; телефон и календарь как нейтральный реквизит.',
+        talent_direction='Говорить живо и уверенно, без дикторской манеры; смотреть в камеру; короткие фразы.',
+        voiceover_or_dialogue_script='Если клиенту приходится писать вам, чтобы узнать услугу, время и подтверждение, часть пути всё ещё держится на ручной переписке. Разберите путь записи по шагам и проверьте, какие из них можно сделать понятнее.',
+        shots=[
+            dict(number=1, start_second=0, end_second=4, purpose='Хук', shot_type='Средний план',
+                 visual_description='Ведущий смотрит в камеру, рядом телефон с открытым календарём.',
+                 camera_and_movement='Статичная вертикальная камера на уровне глаз.',
+                 action='Ведущий произносит первую фразу и показывает телефон.',
+                 spoken_text='Сколько сообщений нужно клиенту, чтобы просто записаться?',
+                 on_screen_text='Сколько сообщений до записи?', transition='Жёсткая склейка',
+                 sound_or_music_note='Тихий современный ритм под голосом.'),
+            dict(number=2, start_second=4, end_second=22, purpose='Основная мысль', shot_type='Чередование среднего и крупного плана',
+                 visual_description='Ведущий перечисляет шаги, между фразами — крупные планы телефона и календаря.',
+                 camera_and_movement='Лёгкие цифровые приближения на ключевых словах.',
+                 action='На каждом шаге появляется одно короткое слово: услуга, специалист, время, контакты.',
+                 spoken_text='Разложите путь на шаги: услуга, при необходимости специалист, свободное время, контакты и понятное подтверждение.',
+                 on_screen_text='Услуга → специалист → время → контакты', transition='Быстрые склейки по речи',
+                 sound_or_music_note='Музыка без вокала; акценты на появлении текста.'),
+            dict(number=3, start_second=22, end_second=35, purpose='Вывод и CTA', shot_type='Крупный план',
+                 visual_description='Ведущий снова напрямую обращается к зрителю; фон остаётся чистым.',
+                 camera_and_movement='Статичный крупный план.',
+                 action='В финале появляется короткий CTA.',
+                 spoken_text='Если хотите сравнить этот путь со своей записью, сохраните ролик и выпишите, где клиенту сегодня приходится писать менеджеру.',
+                 on_screen_text='Сохраните и проверьте свой путь записи', transition='Плавное затемнение',
+                 sound_or_music_note='Музыка слегка поднимается и уходит в финале.'),
+        ],
+        subtitle_style='Белые крупные субтитры по 3–6 слов, ключевые слова выделять жирным; нижняя безопасная зона.',
+        music_direction='Нейтральная современная инструментальная музыка 95–110 BPM, без драматического напряжения.',
+        cover_frame='Портрет ведущего по пояс, телефон в руке; крупный текст: «Сколько сообщений до записи?»',
+        editing_rhythm='Первые 4 секунды без пауз, далее смена визуального акцента каждые 2–4 секунды.',
+        cta_frame='Финальные 2 секунды: «Сохраните и проверьте свой путь записи».',
+        export_spec='1080×1920, H.264, 25/30 fps, длительность около 35 секунд, без встроенного водяного знака.',
+        production_notes=['Не показывать интерфейс несуществующей функции.', 'Не использовать обещания роста или снижения no-show без данных.'],
+    )
+
+    story_brief = dict(
+        asset_type='story',
+        aspect_ratio='9:16',
+        objective='Дать владельцу бизнеса быстрый чек-лист пути записи.',
+        narrative_arc='Проблема → четыре шага → вопрос к своему процессу → CTA.',
+        visual_style='Минималистичный деловой стиль, много воздуха, крупная типографика, один смысл на экран.',
+        typography_direction='Крупный гротеск, 1–2 начертания, не более 12–16 слов на основном экране.',
+        frames=[
+            dict(number=1, duration_seconds=5, purpose='Хук',
+                 visual_description='Фон: телефон и блокнот на рабочем столе, без узнаваемых чужих интерфейсов.',
+                 composition='Объект в нижней трети, текст в верхней и средней безопасной зоне.',
+                 on_screen_text='Клиент всё ещё пишет менеджеру, чтобы записаться?',
+                 animation_or_transition='Лёгкое появление текста снизу вверх.',
+                 interaction='Опрос: «Да / Уже онлайн»',
+                 safe_area_note='Не размещать текст в верхних 250 px и нижних 350 px.'),
+            dict(number=2, duration_seconds=5, purpose='Структура',
+                 visual_description='Четыре простых текстовых шага с тонкими стрелками между ними.',
+                 composition='Вертикальная цепочка по центру.',
+                 on_screen_text='Услуга → специалист → время → контакты',
+                 animation_or_transition='Шаги появляются последовательно.',
+                 interaction=None, safe_area_note='CTA-зона свободна внизу.'),
+            dict(number=3, duration_seconds=6, purpose='Проверка',
+                 visual_description='Чек-лист на светлом фоне, один пункт подсвечен.',
+                 composition='Заголовок сверху, три строки по центру.',
+                 on_screen_text='Где сегодня клиент ждёт ответа человека?',
+                 animation_or_transition='Мягкое увеличение ключевой строки.',
+                 interaction='Стикер-вопрос: «На каком шаге?»',
+                 safe_area_note='Стикер не перекрывает основной текст.'),
+            dict(number=4, duration_seconds=5, purpose='CTA',
+                 visual_description='Чистый брендовый экран с коротким финальным сообщением.',
+                 composition='Текст по центру, логотип/название небольшим внизу.',
+                 on_screen_text='Сохраните чек-лист и разберите свой путь записи',
+                 animation_or_transition='Плавное появление.',
+                 interaction=None, safe_area_note='Основной текст в центральной безопасной зоне.'),
+        ],
+        final_cta='Сохраните серию и выпишите один шаг, который сейчас требует ручной переписки.',
+        export_spec='1080×1920, PNG/JPG для статичных кадров или MP4 H.264 для анимированных, 9:16.',
+        production_notes=['Не использовать чужие логотипы и интерфейсы.', 'Не обещать результат без измерений.'],
+    )
+
+    image_brief = dict(
+        asset_type='static_image',
+        target_formats=['4:5', '1:1'],
+        objective='Остановить внимание владельца сервисного бизнеса и визуально показать последовательность записи.',
+        visual_style='Современный минимализм, editorial SaaS, реалистичный предметный фон без псевдоинтерфейсов.',
+        subject='Телефон, календарь и четыре лаконичных шага записи как визуальная схема.',
+        composition='В 4:5 телефон справа, цепочка из четырёх шагов слева; в 1:1 схема перестраивается в две строки.',
+        background_and_environment='Светлый тёплый рабочий стол, минимум предметов, мягкая глубина резкости.',
+        lighting_and_mood='Мягкий дневной свет, спокойное профессиональное настроение, без неонового tech-клише.',
+        typography_direction='Крупный нейтральный гротеск, высокий контраст, максимум две гарнитуры/начертания.',
+        overlay_text='Сколько шагов проходит клиент до записи?',
+        brand_elements='Небольшое название ServGo; без выдуманных UI-экранов и неподтверждённых бейджей.',
+        image_generation_prompt='Фотореалистичный современный рабочий стол небольшого сервисного бизнеса, смартфон и бумажный календарь, много свободного пространства для типографики, чистая editorial SaaS эстетика, мягкий естественный дневной свет, вертикальная композиция 4:5, без текста внутри самой генерации, без логотипов сторонних сервисов, без фантастического интерфейса.',
+        avoid_in_visual='Неон, киберпанк, перегруженный интерфейс, фальшивые графики роста, чужие бренды, мелкий нечитаемый текст, лишние руки.',
+        cta_treatment='CTA не обязателен на изображении; при необходимости маленькая строка внизу: «Проверьте свой путь записи».',
+        export_spec='Основной 1080×1350 (4:5), адаптация 1080×1080 (1:1), PNG/JPG, текст наносить после генерации изображения.',
+        production_notes=['Сначала создавать чистый визуал без текста, затем верстать типографику отдельно.', 'Проверить читаемость на экране телефона.'],
+    )
+
+    kinds = ['dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder', 'short_video', 'story', 'static_image']
+    hooks = ['Разберём путь записи без лишних обещаний', 'Обсудим рабочий чек-лист записи',
+        'Эксперимент с процессом онлайн-записи', 'Сохраните четыре шага записи',
+        'Какие вопросы задать системе записи?', 'Что бы я проверил до автоматизации',
+        'Сколько сообщений до записи?', 'Четыре экрана про путь клиента', 'Одна схема пути записи']
+    frames = ['Образовательный материал', 'Профессиональное обсуждение', 'Аналитический разбор',
+        'Короткий пост', 'FAQ', 'Авторская заметка', 'Режиссёрский сценарий',
+        'Покадровые сторис', 'Техническое задание на изображение']
+
+    derivatives = []
+    for kind, hook, framing in zip(kinds, hooks, frames):
+        item = dict(
+            kind=kind,
+            audience='Владельцы сервисного бизнеса',
+            framing=framing,
+            hook=hook,
+            outline=['Объяснить проблему', 'Дать один практический следующий шаг'],
+            cta='Проверить свой путь записи',
+            landing_page=dict(label='Предлагаемая страница', destination='/demo'),
+            adaptation_notes='Только текстовый материал для последующего производства и проверки.',
+            video_mode='brief_only' if kind == 'short_video' else None,
+        )
+        if kind == 'short_video':
+            item['production_brief'] = video_brief
+        elif kind == 'story':
+            item['production_brief'] = story_brief
+        elif kind == 'static_image':
+            item['production_brief'] = image_brief
+        derivatives.append(item)
+
+    safe_body = dict(
+        sections=[dict(heading=h, kind='advice', body=(b + ' ') * 12) for h, b in [
+            ('Путь клиента', 'Разложите путь записи на понятные шаги и проверьте, где человеку приходится ждать ответа.'),
+            ('Ожидания клиента', 'Сравните желаемый путь клиента с тем, как запись происходит сегодня, и отметьте ручные точки.'),
+            ('Небольшой эксперимент', 'Проверяйте изменения на ограниченном сценарии и заранее определите, какие наблюдения будут полезны.'),
+            ('Результат проверки', 'Смотрите на реальные обращения и действия бизнеса, а не считайте просмотры доказательством продаж.'),
+        ]],
+        proof_needed_notes=['Проверить продуктовые факты и собрать реальные данные воронки'],
+    )
+
+    human_article = dict(
+        language='ru',
+        title='Как устроить понятный путь онлайн-записи в небольшом сервисном бизнесе',
+        lead='Когда запись держится на переписке, клиенту приходится задавать одни и те же вопросы: какая услуга доступна, кто может принять, когда есть свободное время и что делать дальше. Полезнее смотреть не на отдельную кнопку «Записаться», а на весь путь от первого выбора до понятного подтверждения.',
+        fact_renderings=[],
+        sections=[
+            dict(heading='Начните не с сервиса, а с пути клиента',
+                 body=('Сначала выпишите реальный сценарий человека: что он знает в начале, что должен выбрать и где ему требуется помощь менеджера. Чем меньше скрытых шагов, тем легче увидеть, что стоит автоматизировать, а что разумно оставить под контролем человека. ')*4),
+            dict(heading='Где обычно возникает ручная работа',
+                 body=('Ручная работа появляется там, где информация разбросана между сообщениями, календарём и памятью сотрудников. Проверьте, сколько раз клиенту приходится уточнять условия и сколько решений менеджер принимает просто для того, чтобы довести запись до понятного статуса. ')*4),
+            dict(heading='Предоплата — отдельный процесс, а не одна кнопка',
+                 body=('Если бизнес использует предоплату, заранее определите, кто проверяет перевод, что видит клиент во время ожидания и в какой момент запись считается подтверждённой. Такой процесс важно описать до автоматизации, иначе система лишь ускорит существующую путаницу. ')*4),
+            dict(heading='Проверяйте на небольшом сценарии',
+                 body=('Не нужно сразу перестраивать все каналы. Возьмите один тип услуги или один сценарий записи, запустите ограниченную проверку и фиксируйте реальные обращения. Так станет понятно, какие шаги действительно помогают клиенту, а какие требуют доработки. ')*4),
+        ],
+        closing='Хорошая онлайн-запись — это не максимальное количество функций. Это понятный маршрут, в котором клиент знает следующий шаг, а бизнес понимает, где требуется человеческое решение. Начните с карты своего процесса — и уже по ней сравнивайте инструменты.',
+        editorial_notes=['Не добавлялись неподтверждённые обещания и сравнения с конкурентами.'],
+    )
+
+    return [
+        dict(audience='Владельцы сервисного бизнеса', pain='Ручная координация записи',
+             search_intent='Разобраться в процессе онлайн-записи',
+             angle='Практический разбор пути клиента', titles=['Чек-лист онлайн-записи', 'Путь клиента до записи'],
+             hypothesis='Понятное объяснение процесса может привести к осмысленным обращениям'),
+        dict(primary_query='онлайн запись для сервисного бизнеса',
+             related_queries=['как организовать онлайн запись'], title='Чек-лист онлайн-записи',
+             hook='Начните с пути клиента', outline=['Проблема', 'Путь', 'Проверка'], adaptation_notes='Русский материал'),
+        safe_body,
+        dict(cta='Сравните этот путь со своей текущей записью',
+             landing_page=dict(label='Предлагаемая страница', destination='/demo'),
+             internal_links=[dict(label='Предлагаемый материал', destination='/guides/booking')],
+             measurement=measurement,
+             distribution=[dict(channel='own_site', action='prepare_draft',
+                                rationale='Начать с собственного черновика', downstream_goal='lead')]),
+        human_article,
+        dict(derivatives=derivatives),
+    ]
 
 @pytest.fixture
 def product(db):
@@ -81,10 +240,10 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
     workflow, provider, request = setup(db, product, tmp_path)
     result = await workflow.run(request)
     assert result.status == 'completed', result.error
-    assert len(result.artifact_ids) == 10 and len(result.run_ids) == len(provider.requests) == 5
+    assert len(result.artifact_ids) == 10 and len(result.run_ids) == len(provider.requests) == 6
     assert all(request.metadata["reasoning_effort"] == "low" for request in provider.requests)
     assert {request.metadata["team_role"] for request in provider.requests} == {
-        "content_strategist", "seo_editor", "article_writer", "conversion_editor", "repurposing_editor"
+        "content_strategist", "seo_editor", "article_writer", "conversion_editor", "human_editor", "repurposing_editor"
     }
     by_role = {request.metadata["team_role"]: request.max_tokens for request in provider.requests}
     assert by_role == {
@@ -92,7 +251,8 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
         "seo_editor": 3500,
         "article_writer": 8000,
         "conversion_editor": 3500,
-        "repurposing_editor": 4500,
+        "human_editor": 8000,
+        "repurposing_editor": 7500,
     }
     writer_request = next(r for r in provider.requests if r.metadata["team_role"] == "article_writer")
     assert "claims" not in writer_request.response_schema["properties"]
@@ -102,12 +262,19 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
     assert content.conversion.cta
     assert len({d.hook for d in content.conversion.derivatives}) == 9
     assert len({d.framing for d in content.conversion.derivatives}) == 9
-    assert next(d for d in content.conversion.derivatives if d.kind == 'short_video').video_mode == 'brief_only'
+    video = next(d for d in content.conversion.derivatives if d.kind == 'short_video')
+    story = next(d for d in content.conversion.derivatives if d.kind == 'story')
+    image = next(d for d in content.conversion.derivatives if d.kind == 'static_image')
+    assert video.video_mode == 'brief_only' and len(video.production_brief.shots) >= 3
+    assert story.production_brief.aspect_ratio == '9:16' and len(story.production_brief.frames) >= 3
+    assert image.production_brief.image_generation_prompt and image.production_brief.target_formats
+    assert content.reader_article is not None
+    assert '[HYPOTHESIS]' not in content.full_article and '[ADVICE]' not in content.full_article
     for plan in [content.conversion.measurement] + [d.measurement for d in content.conversion.derivatives]:
         assert all(getattr(plan, k).event for k in ['content', 'traffic', 'lead', 'activation', 'customer'])
     assert all(db.get(Artifact, aid).task_id == result.task_id for aid in result.artifact_ids)
     assert all(db.get(AgentRun, rid).status == 'completed' for rid in result.run_ids)
-    assert len(list(db.scalars(select(CostRecord)))) == 5
+    assert len(list(db.scalars(select(CostRecord)))) == 7
     assert all(c.details['cost_known'] is False for c in db.scalars(select(CostRecord)))
     assert list(db.scalars(select(ToolCall))) == list(db.scalars(select(Publication))) == []
     assert result.approval_ids == []
@@ -121,13 +288,13 @@ async def test_invalid_output_is_atomic(db, product, tmp_path, mutation):
     elif mutation == 'short': outputs[2]['sections'] = outputs[2]['sections'][:1]
     elif mutation == 'missing_cta': del outputs[3]['cta']
     elif mutation == 'missing_measurement': del outputs[3]['measurement']['customer']
-    elif mutation == 'copies': outputs[4]['derivatives'][1]['hook'] = outputs[4]['derivatives'][0]['hook']
+    elif mutation == 'copies': outputs[5]['derivatives'][1]['hook'] = outputs[5]['derivatives'][0]['hook']
     elif mutation == 'fake_claim': outputs[2]['claims'] = [dict(claim='Guaranteed growth', quote='Guaranteed growth', source_id='invented')]
-    elif mutation == 'video': outputs[4]['derivatives'][-1]['video_mode'] = 'render_mp4'
+    elif mutation == 'video': next(d for d in outputs[5]['derivatives'] if d['kind'] == 'short_video')['video_mode'] = 'render_mp4'
     elif mutation == 'external_link': outputs[3]['landing_page']['destination'] = 'https://unverified.example/demo'
     elif mutation == 'extra': outputs[0]['verified_revenue'] = 1000000
-    elif mutation == 'source_copy': outputs[4]['derivatives'][0]['hook'] = outputs[1]['hook']
-    elif mutation == 'wrong_kind': outputs[4]['derivatives'][0]['kind'] = 'telegram'
+    elif mutation == 'source_copy': outputs[5]['derivatives'][0]['hook'] = outputs[1]['hook']
+    elif mutation == 'wrong_kind': outputs[5]['derivatives'][0]['kind'] = 'telegram'
     workflow, _, request = setup(db, product, tmp_path, outputs)
     result = await workflow.run(request)
     assert result.status == 'failed' and result.error
@@ -152,7 +319,15 @@ async def test_verified_product_facts_are_injected_deterministically(db, product
         '\n## Candidate business segments\n'
         '- massage studios are a hypothesis, not a fact.\n'
     )
-    workflow, provider, request = setup(db, product, tmp_path)
+    from app.workflows.article_production import product_facts
+    context_text = path.joinpath('product-marketing-context.md').read_text()
+    facts_map = product_facts(context_text)
+    outputs = valid_outputs()
+    outputs[4]['fact_renderings'] = [
+        {'source_id': source_id, 'text': f'Проверенный факт ServGo: {index + 1}.'}
+        for index, source_id in enumerate(facts_map)
+    ]
+    workflow, provider, request = setup(db, product, tmp_path, outputs)
 
     result = await workflow.run(request)
 
@@ -212,22 +387,22 @@ async def test_article_rejects_missing_or_foreign_experiment(db, product, tmp_pa
 @pytest.mark.asyncio
 async def test_final_package_similarity_gets_one_repurposing_retry(db, product, tmp_path):
     outputs = valid_outputs()
-    bad_derivatives = json.loads(json.dumps(outputs[4]))
+    bad_derivatives = json.loads(json.dumps(outputs[5]))
     bad_derivatives['derivatives'][0]['hook'] = outputs[1]['hook']
-    corrected_derivatives = json.loads(json.dumps(outputs[4]))
+    corrected_derivatives = json.loads(json.dumps(outputs[5]))
     workflow, provider, request = setup(
         db, product, tmp_path,
-        [outputs[0], outputs[1], outputs[2], outputs[3], bad_derivatives, corrected_derivatives],
+        [outputs[0], outputs[1], outputs[2], outputs[3], outputs[4], bad_derivatives, corrected_derivatives],
     )
 
     result = await workflow.run(request)
 
     assert result.status == 'completed', result.error
-    assert len(provider.requests) == 6
-    assert len(result.run_ids) == 6
+    assert len(provider.requests) == 7
+    assert len(result.run_ids) == 7
     assert all(request.metadata["reasoning_effort"] == "low" for request in provider.requests)
     assert provider.requests[-1].metadata["team_role"] == "repurposing_editor_retry"
-    assert provider.requests[-1].max_tokens == 4500
+    assert provider.requests[-1].max_tokens == 7500
     retry_run = db.get(AgentRun, result.run_ids[-1])
     assert retry_run.agent_name == 'repurposing_editor_retry'
     assert retry_run.status == 'completed'
@@ -351,3 +526,37 @@ async def test_russian_is_default_and_visual_assets_are_required(db, product, tm
 def test_article_api_defaults_to_russian():
     from app.api.schemas import ArticleCreate
     assert ArticleCreate(topic='Тест').language == 'ru'
+
+
+@pytest.mark.asyncio
+async def test_human_editor_requires_all_verified_fact_sources(db, product, tmp_path):
+    path = tmp_path / 'servgo' / '.claude'
+    path.mkdir(parents=True)
+    text_context = '## Product\nServGo поддерживает выбор услуги.\n'
+    path.joinpath('product-marketing-context.md').write_text(text_context)
+    outputs = valid_outputs()
+    outputs[4]['fact_renderings'] = []
+
+    workflow, _, request = setup(db, product, tmp_path, outputs)
+    result = await workflow.run(request)
+
+    assert result.status == 'failed'
+    assert result.error == 'invalid_article_package'
+
+
+@pytest.mark.asyncio
+async def test_visual_assets_are_text_briefs_not_render_requests(db, product, tmp_path):
+    workflow, _, request = setup(db, product, tmp_path)
+    result = await workflow.run(request)
+    assert result.status == 'completed', result.error
+
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    video = next(d for d in article.conversion.derivatives if d.kind == 'short_video')
+    story = next(d for d in article.conversion.derivatives if d.kind == 'story')
+    image = next(d for d in article.conversion.derivatives if d.kind == 'static_image')
+
+    assert video.production_brief.export_spec
+    assert all(shot.visual_description and shot.camera_and_movement for shot in video.production_brief.shots)
+    assert all(frame.on_screen_text and frame.composition for frame in story.production_brief.frames)
+    assert image.production_brief.image_generation_prompt
+    assert image.production_brief.export_spec
