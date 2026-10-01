@@ -320,12 +320,13 @@ class ArticleProduction:
                 story_derivative,
                 image_derivative,
             ) = outputs
+            error = 'invalid_derivative_assembly'
             derivative_set = DerivativeSet(
                 derivatives=[
-                    *text_derivatives.derivatives,
-                    video_derivative,
-                    story_derivative,
-                    image_derivative,
+                    *[item.model_dump(mode='json') for item in text_derivatives.derivatives],
+                    video_derivative.model_dump(mode='json'),
+                    story_derivative.model_dump(mode='json'),
+                    image_derivative.model_dump(mode='json'),
                 ]
             )
 
