@@ -2,7 +2,7 @@
   "schema_version": "servgo-outreach-cohort-v1",
   "experiment_key": "EXP-SERVGO-001",
   "generated_at": "2026-10-01",
-  "status": "candidate_cohort_uncontacted",
+  "status": "technical_preflight_passed_human_approval_pending",
   "target_valid_contacts": 30,
   "rules": {
     "no_automatic_sending": true,
@@ -403,5 +403,25 @@
       "outreach_status": "not_contacted",
       "tracking_url": "https://promo.servgo.ru/?experiment_id=EXP-SERVGO-001&utm_source=direct_outreach&utm_medium=manual&utm_campaign=exp_servgo_001&utm_content=SG001-030"
     }
+  ],
+  "launch_evidence": {
+    "verified_at_utc": "2026-10-01T13:23:18Z",
+    "promo_http_status": 200,
+    "frontend_attribution_capture": "passed",
+    "backend_persistence_and_cleanup": "passed",
+    "baseline": {
+      "marketing_leads_total": 0,
+      "exp_servgo_001_leads": 0,
+      "smoke_rows_remaining": 0
+    },
+    "evidence": {
+      "readiness_run": "https://github.com/grunvald91/booking_bot/actions/runs/36867753460",
+      "smoke_run": "https://github.com/grunvald91/booking_bot/actions/runs/36868114626",
+      "baseline_run": "https://github.com/grunvald91/booking_bot/actions/runs/36868278346"
+    }
+  },
+  "pending_gates": [
+    "Human approval of first-contact copy and experiment start",
+    "Manual validation of each candidate immediately before contact"
   ]
 }

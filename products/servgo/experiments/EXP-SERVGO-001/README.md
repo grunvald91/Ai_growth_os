@@ -62,3 +62,20 @@ For every contacted lead record:
 - final_note
 
 No KEEP / STOP / INCONCLUSIVE decision should be made until the experiment contract conditions are satisfied.
+
+## Technical preflight evidence — 2026-10-01
+
+Verified before outreach:
+
+- `https://promo.servgo.ru` returned HTTP 200 from the production server.
+- The production landing page loads the attribution-aware `landing.js` and exposes the self-reported source field.
+- Frontend capture contract contains `experiment_id`, `utm_source`, `utm_medium`, `utm_campaign`, and `utm_content` persistence.
+- A non-notifying smoke test persisted a temporary lead with the expected attribution fields, read it back successfully, and deleted it.
+- Current production baseline after smoke cleanup: total marketing leads = 0; EXP-SERVGO-001 leads = 0; remaining smoke rows = 0.
+
+Evidence:
+- readiness: https://github.com/grunvald91/booking_bot/actions/runs/36867753460
+- persistence smoke: https://github.com/grunvald91/booking_bot/actions/runs/36868114626
+- current baseline: https://github.com/grunvald91/booking_bot/actions/runs/36868278346
+
+Technical attribution gates are therefore passed. Outreach remains blocked until human approval of the copy/start and manual validation of each candidate immediately before contact.
