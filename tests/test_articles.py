@@ -274,7 +274,7 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
         assert all(getattr(plan, k).event for k in ['content', 'traffic', 'lead', 'activation', 'customer'])
     assert all(db.get(Artifact, aid).task_id == result.task_id for aid in result.artifact_ids)
     assert all(db.get(AgentRun, rid).status == 'completed' for rid in result.run_ids)
-    assert len(list(db.scalars(select(CostRecord)))) == 7
+    assert len(list(db.scalars(select(CostRecord)))) == 6
     assert all(c.details['cost_known'] is False for c in db.scalars(select(CostRecord)))
     assert list(db.scalars(select(ToolCall))) == list(db.scalars(select(Publication))) == []
     assert result.approval_ids == []
@@ -406,7 +406,7 @@ async def test_final_package_similarity_gets_one_repurposing_retry(db, product, 
     retry_run = db.get(AgentRun, result.run_ids[-1])
     assert retry_run.agent_name == 'repurposing_editor_retry'
     assert retry_run.status == 'completed'
-    assert len(list(db.scalars(select(CostRecord)))) == 6
+    assert len(list(db.scalars(select(CostRecord)))) == 7
 
 
 @pytest.mark.asyncio
@@ -446,9 +446,17 @@ async def test_provider_failure_does_not_expose_credentials(db, product, tmp_pat
 async def test_privacy_on_all_requests_and_output(db, product, tmp_path):
     path = tmp_path / 'servgo' / '.claude'
     path.mkdir(parents=True)
-    (path / 'product-marketing-context.md').write_text('## Product\nServGo is a booking service. api_key=private-context-secret')
+    raw_context = '## Product\nServGo is a booking service. api_key=private-context-secret'
+    (path / 'product-marketing-context.md').write_text(raw_context)
+    from app.privacy import PrivacyGateway
+    from app.workflows.article_production import product_facts
     outputs = valid_outputs()
     outputs[0]['hypothesis'] += ' api_key=private-response-secret'
+    sanitized_facts = product_facts(PrivacyGateway().sanitize_text(raw_context))
+    outputs[4]['fact_renderings'] = [
+        {'source_id': source_id, 'text': 'ServGo — сервис для онлайн-записи.'}
+        for source_id in sanitized_facts
+    ]
     workflow, provider, request = setup(db, product, tmp_path, outputs)
     request.problem += ' password=private-input-secret'
     result = await workflow.run(request)
@@ -490,7 +498,7 @@ def test_api_ids_inspection_and_bad_references(tmp_path):
                 result = response.json()
                 assert result['status'] == 'completed', result
                 assert result['main_artifact_id'] == result['artifact_ids'][0]
-                assert len(result['derivative_artifact_ids']) == 9 and len(result['run_ids']) == 5
+                assert len(result['derivative_artifact_ids']) == 9 and len(result['run_ids']) == 6
                 aid = result['main_artifact_id']
                 assert client.get(f'/products/{pid}/artifacts/{aid}').status_code == 200
                 assert len(client.get(f'/products/{pid}/artifacts').json()) == 10
@@ -541,7 +549,7 @@ async def test_human_editor_requires_all_verified_fact_sources(db, product, tmp_
     result = await workflow.run(request)
 
     assert result.status == 'failed'
-    assert result.error == 'invalid_article_package'
+    assert result.error == 'invalid_human_editor_grounding'
 
 
 @pytest.mark.asyncio
