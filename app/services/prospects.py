@@ -168,6 +168,11 @@ class ProspectService:
         prospects = self.list_for_experiment(experiment_id)
         return {
             "total": len(prospects),
+            "contact_found": sum(
+                bool(p.public_phone or p.email or p.whatsapp or p.telegram or p.website)
+                for p in prospects
+            ),
+            "phone": sum(bool(p.public_phone) for p in prospects),
             "validated": sum(p.validation_status == "validated" for p in prospects),
             "needs_review": sum(p.validation_status == "needs_review" for p in prospects),
             "email": sum(bool(p.email) for p in prospects),
