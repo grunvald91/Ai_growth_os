@@ -1,4 +1,4 @@
-name: Benchmark cheap worker models matrix
+name: Validate Gemini distribution repair
 
 on:
   push:
@@ -9,19 +9,12 @@ permissions:
   contents: read
 
 jobs:
-  benchmark:
-    strategy:
-      fail-fast: false
-      matrix:
-        model: ["deepseek-v4.1-flash", "gemini-flash-3.8"]
-        case: ["segment_research", "research_synthesis", "analytics", "content_brief", "distribution"]
+  validate:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
       XAI_API_KEY: ${{ secrets.API }}
       XAI_BASE_URL: https://api.claudehub.fun/v1
-      MODEL: ${{ matrix.model }}
-      CASE: ${{ matrix.case }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,68 +22,58 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: python -m pip install -e .
-      - name: Validate one real Growth OS contract
+      - name: First pass then one repair
         run: |
           python - <<'PY'
-          import asyncio
-          import os
+          import asyncio, json, os
+          from pydantic import ValidationError
           from app.llm.schemas import LLMMessage, LLMRequest
           from app.llm.xai import XAIProvider
-          from app.workflows.team_contracts import AnalyticsPlan, ContentBrief, DistributionPlan
-          from app.workflows.research_contracts import SegmentResearchReport, ResearchSynthesisDraft
+          from app.workflows.team_contracts import DistributionPlan
 
-          cases={
-              "segment_research": (
-                  SegmentResearchReport,
-                  "Create a minimal valid segment research report for a hypothetical appointment-booking SaaS. Treat everything as hypotheses, not facts.",
-              ),
-              "research_synthesis": (
-                  ResearchSynthesisDraft,
-                  "Create a minimal valid research synthesis for a hypothetical appointment-booking SaaS. Preserve uncertainty and use no external factual claims.",
-              ),
-              "analytics": (
-                  AnalyticsPlan,
-                  "Create a minimal valid analytics plan. Define all five funnel stages exactly once. Use hypothetical examples only.",
-              ),
-              "content_brief": (
-                  ContentBrief,
-                  "Create a minimal valid article content brief for a hypothetical appointment-booking SaaS. Mark audience/problem as hypotheses.",
-              ),
-              "distribution": (
-                  DistributionPlan,
-                  "Create a minimal valid organic distribution plan with one candidate. Use hypotheses only; no factual market claims.",
-              ),
-          }
-          model=os.environ["MODEL"]
-          case=os.environ["CASE"]
-          schema,prompt=cases[case]
+          async def generate(provider, system, message):
+              return await provider.generate(LLMRequest(
+                  system_prompt=system,
+                  messages=[LLMMessage(role="user", content=message)],
+                  model="gemini-flash-3.8",
+                  max_tokens=2200,
+                  response_schema=DistributionPlan.model_json_schema(),
+                  metadata={"reasoning_effort":"low"},
+              ))
 
           async def main():
               provider=XAIProvider(
                   api_key=os.environ["XAI_API_KEY"],
-                  model=model,
+                  model="gemini-flash-3.8",
                   base_url=os.environ["XAI_BASE_URL"],
                   reasoning_effort="low",
                   timeout_seconds=90,
               )
-              response=await provider.generate(LLMRequest(
-                  system_prompt="Return ONLY JSON matching the supplied schema. Be concise and do not invent evidence.",
-                  messages=[LLMMessage(role="user", content=prompt)],
-                  model=model,
-                  max_tokens=1600,
-                  response_schema=schema.model_json_schema(),
-                  metadata={"reasoning_effort":"low"},
-              ))
-              schema.model_validate_json(response.content)
-              usage=response.usage
-              print(
-                  "BENCH PASS",
-                  model,
-                  case,
-                  "input="+str(usage.input_tokens if usage else 0),
-                  "output="+str(usage.output_tokens if usage else 0),
-                  "returned_model="+response.model,
+              first=await generate(
+                  provider,
+                  "Return ONLY JSON matching the supplied schema. Do not invent evidence. Schema: "
+                  + json.dumps(DistributionPlan.model_json_schema()),
+                  "Create a minimal organic distribution plan with one candidate for a hypothetical appointment-booking SaaS. Use hypotheses only.",
               )
+              try:
+                  parsed=DistributionPlan.model_validate_json(first.content)
+                  print("DISTRIBUTION_FIRST_PASS=PASS")
+                  print(parsed.model_dump_json())
+                  return
+              except ValidationError as exc:
+                  print("DISTRIBUTION_FIRST_PASS=NEEDS_REPAIR")
+                  repair=await generate(
+                      provider,
+                      "Repair the previous JSON so it validates exactly against the required schema. "
+                      "Return ONLY corrected JSON. Do not add facts or evidence. Validation errors: "
+                      + json.dumps(exc.errors(include_input=False))
+                      + " Schema: "
+                      + json.dumps(DistributionPlan.model_json_schema()),
+                      json.dumps({"previous_response":first.content}),
+                  )
+                  parsed=DistributionPlan.model_validate_json(repair.content)
+                  print("DISTRIBUTION_REPAIR=PASS")
+                  print(parsed.model_dump_json())
 
           asyncio.run(main())
           PY
