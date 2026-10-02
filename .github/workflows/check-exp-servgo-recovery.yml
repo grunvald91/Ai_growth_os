@@ -76,3 +76,5 @@ jobs:
           REMOTE
 
 # rerun after worker rebuild
+
+# recheck after gpt-6-sol failover
