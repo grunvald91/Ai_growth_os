@@ -1,0 +1,65 @@
+name: Diagnose EXP-SERVGO-001 agent runs
+
+on:
+  push:
+    branches:
+      - ops/check-exp-servgo-001-after-launch
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Inspect failed agent runs
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import AgentRun, Artifact, Experiment, Task
+
+          with SessionLocal() as db:
+              exp = db.scalar(select(Experiment).where(Experiment.experiment_key=="EXP-SERVGO-001"))
+              tasks = list(db.scalars(
+                  select(Task).where(
+                      Task.product_id==exp.product_id,
+                      Task.title.like("EXP-SERVGO-001:%")
+                  ).order_by(Task.created_at.asc())
+              ))
+              task_ids = [task.id for task in tasks]
+              print("task_count=", len(tasks))
+              for task in tasks:
+                  print("task", task.id, task.assigned_agent, task.status.value if hasattr(task.status, "value") else task.status, task.title)
+
+              runs = list(db.scalars(
+                  select(AgentRun).where(AgentRun.task_id.in_(task_ids)).order_by(AgentRun.started_at.asc())
+              )) if task_ids else []
+              print("run_count=", len(runs))
+              for run in runs:
+                  print("run", run.id, run.agent_name, run.status, run.error or "", run.task_id)
+
+              artifacts = list(db.scalars(
+                  select(Artifact).where(Artifact.task_id.in_(task_ids)).order_by(Artifact.created_at.asc())
+              )) if task_ids else []
+              print("artifact_count=", len(artifacts))
+              for artifact in artifacts:
+                  status = artifact.status.value if hasattr(artifact.status, "value") else artifact.status
+                  print("artifact", artifact.id, artifact.kind, status, artifact.title)
+          PY
+          REMOTE
