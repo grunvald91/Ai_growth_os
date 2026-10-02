@@ -1,0 +1,54 @@
+name: Check ClaudeHub models
+
+on:
+  push:
+    branches:
+      - ops/check-claudehub-models
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: List model ids from configured gateway
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import os
+          import httpx
+
+          base=os.environ["XAI_BASE_URL"].rstrip("/") + "/"
+          key=os.environ["XAI_API_KEY"]
+          headers={"Authorization":f"Bearer {key}"}
+          try:
+              with httpx.Client(base_url=base, timeout=20) as client:
+                  r=client.get("models", headers=headers)
+                  print("status=", r.status_code)
+                  r.raise_for_status()
+                  data=r.json()
+              ids=sorted(str(row.get("id")) for row in data.get("data",[]) if row.get("id"))
+              print("model_count=", len(ids))
+              for model_id in ids[:200]:
+                  print("model", model_id)
+          except httpx.HTTPStatusError as exc:
+              print("http_error=", exc.response.status_code, (exc.response.text or "")[:500].replace("\n"," "))
+          except Exception as exc:
+              print("error=", type(exc).__name__, str(exc)[:500])
+          PY
+          REMOTE
