@@ -70,7 +70,7 @@ def test_control_status_and_inbox_are_derived_from_canonical_records():
                 )
                 assert "AI-команда" in status_text
                 assert "ServGo" in status_text
-                assert "EXP-SERVGO-001" in status_text
+                assert "Подготовлено тестов к запуску: 1" in status_text
 
                 item_model = __import__(
                     "app.control.contracts", fromlist=["ControlInboxItem"]
