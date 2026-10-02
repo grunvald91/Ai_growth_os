@@ -126,7 +126,7 @@ jobs:
           dc() {
             docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml "$@"
           }
-          dc build api
+          dc build api worker
           dc up -d postgres
           dc run -T --rm api alembic upgrade head </dev/null
           dc run -T --rm api python -m app.bootstrap </dev/null
