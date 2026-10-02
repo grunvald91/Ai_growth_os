@@ -55,7 +55,11 @@ async def _notify_owner(settings, *, product_name: str, result, decisions_waitin
 
 
 
-def _recover_transient_failed_experiment_tasks(db, current_model: str | None = None) -> int:
+def _recover_transient_failed_experiment_tasks(
+    db,
+    current_model: str | None = None,
+    fallback_enabled: bool = False,
+) -> int:
     """Recover a bounded transient failure, including one model-failover attempt.
 
     A first research attempt creates up to four child runs and may be retried once.
@@ -100,7 +104,8 @@ def _recover_transient_failed_experiment_tasks(db, current_model: str | None = N
             and len(runs) <= 8
             and all(run.model and run.model != current_model for run in runs)
         )
-        if transient_only and (first_generation or model_failover):
+        fallback_recovery = fallback_enabled and len(runs) <= 8
+        if transient_only and (first_generation or model_failover or fallback_recovery):
             parent.status = TaskStatus.QUEUED
             recovered += 1
     if recovered:
@@ -110,7 +115,11 @@ def _recover_transient_failed_experiment_tasks(db, current_model: str | None = N
 async def run_once() -> int:
     settings = get_settings()
     with SessionLocal() as db:
-        _recover_transient_failed_experiment_tasks(db, current_model=settings.llm_model)
+        _recover_transient_failed_experiment_tasks(
+            db,
+            current_model=settings.llm_model,
+            fallback_enabled=bool(settings.llm_fallback_models.strip()),
+        )
         product_ids = list(
             db.scalars(
                 select(Product.id)
