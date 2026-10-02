@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.llm.anthropic import AnthropicProvider
+from app.llm.fallback import FallbackProvider
 from app.llm.provider import LLMProvider
 from app.llm.service import LLMService
 from app.llm.xai import XAIProvider
@@ -28,13 +29,27 @@ def build_llm_provider(settings: Settings) -> LLMProvider:
     if settings.llm_provider == "xai":
         if not settings.xai_api_key:
             raise ValueError("Configure XAI_API_KEY")
-        return XAIProvider(
-            api_key=settings.xai_api_key,
-            model=settings.llm_model,
-            base_url=settings.xai_base_url,
-            reasoning_effort=settings.xai_reasoning_effort,
-            timeout_seconds=settings.xai_timeout_seconds,
-        )
+
+        def make_provider(model: str) -> XAIProvider:
+            return XAIProvider(
+                api_key=settings.xai_api_key,
+                model=model,
+                base_url=settings.xai_base_url,
+                reasoning_effort=settings.xai_reasoning_effort,
+                timeout_seconds=settings.xai_timeout_seconds,
+            )
+
+        primary = make_provider(settings.llm_model)
+        fallback_models = []
+        for raw in settings.llm_fallback_models.split(","):
+            model = raw.strip()
+            if model and model != settings.llm_model and model not in fallback_models:
+                fallback_models.append(model)
+        if not fallback_models:
+            return primary
+        chain: list[tuple[str, LLMProvider]] = [(settings.llm_model, primary)]
+        chain.extend((model, make_provider(model)) for model in fallback_models[:3])
+        return FallbackProvider(providers=chain)
     raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
 
