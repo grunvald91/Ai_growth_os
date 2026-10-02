@@ -60,5 +60,27 @@ services:
       postgres:
         condition: service_healthy
 
+  worker:
+    build:
+      context: .
+    restart: unless-stopped
+    command: ["python", "-m", "app.team_worker"]
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://ai_growth:${POSTGRES_PASSWORD}@postgres:5432/ai_growth
+      LLM_PROVIDER: xai
+      LLM_MODEL: ${LLM_MODEL:-grok-4.7}
+      XAI_API_KEY: ${XAI_API_KEY:?XAI_API_KEY is required}
+      XAI_BASE_URL: ${XAI_BASE_URL:-https://api.claudehub.fun/v1}
+      XAI_REASONING_EFFORT: ${XAI_REASONING_EFFORT:-medium}
+      PRODUCTS_ROOT: /app/products
+      SKILLS_ROOT: /app/skills
+      TEAM_WORKER_BATCH_SIZE: ${TEAM_WORKER_BATCH_SIZE:-3}
+      TEAM_WORKER_IDLE_POLL_SECONDS: ${TEAM_WORKER_IDLE_POLL_SECONDS:-20}
+      TEAM_WORKER_BUSY_POLL_SECONDS: ${TEAM_WORKER_BUSY_POLL_SECONDS:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
