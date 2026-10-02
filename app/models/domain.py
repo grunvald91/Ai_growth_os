@@ -169,6 +169,7 @@ class Prospect(UUIDMixin, TimestampMixin, Base):
     source_checked_at: Mapped[date | None] = mapped_column(Date)
     fit_status: Mapped[str] = mapped_column(String(50), default="needs_validation", nullable=False)
     validation_status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False)
+    enrichment_status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False)
     outreach_status: Mapped[str] = mapped_column(String(50), default="not_contacted", nullable=False)
     preferred_channel: Mapped[str | None] = mapped_column(String(50))
     email: Mapped[str | None] = mapped_column(String(320))
