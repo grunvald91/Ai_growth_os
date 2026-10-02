@@ -55,12 +55,13 @@ async def _notify_owner(settings, *, product_name: str, result, decisions_waitin
 
 
 
-def _recover_transient_failed_experiment_tasks(db) -> int:
-    """Requeue one failed EXP parent once when every worker failure was transient HTTP.
+def _recover_transient_failed_experiment_tasks(db, current_model: str | None = None) -> int:
+    """Recover a bounded transient failure, including one model-failover attempt.
 
-    The first failed research attempt creates up to four child agent runs. A retried
-    attempt creates additional children, so limiting recovery to <=4 runs prevents
-    an infinite retry loop.
+    A first research attempt creates up to four child runs and may be retried once.
+    If two generations (up to eight runs) all failed transiently on a *different*
+    model than the worker now uses, one additional failover attempt is allowed.
+    No recovery is allowed beyond that.
     """
     parents = list(
         db.scalars(
@@ -88,9 +89,18 @@ def _recover_transient_failed_experiment_tasks(db) -> int:
                 .order_by(AgentRun.started_at.asc(), AgentRun.id)
             )
         )
-        if not runs or len(runs) > 4:
+        if not runs:
             continue
-        if all(run.error == "research_worker_failed:HTTPStatusError" for run in runs):
+        transient_only = all(
+            run.error == "research_worker_failed:HTTPStatusError" for run in runs
+        )
+        first_generation = len(runs) <= 4
+        model_failover = (
+            current_model is not None
+            and len(runs) <= 8
+            and all(run.model and run.model != current_model for run in runs)
+        )
+        if transient_only and (first_generation or model_failover):
             parent.status = TaskStatus.QUEUED
             recovered += 1
     if recovered:
@@ -100,7 +110,7 @@ def _recover_transient_failed_experiment_tasks(db) -> int:
 async def run_once() -> int:
     settings = get_settings()
     with SessionLocal() as db:
-        _recover_transient_failed_experiment_tasks(db)
+        _recover_transient_failed_experiment_tasks(db, current_model=settings.llm_model)
         product_ids = list(
             db.scalars(
                 select(Product.id)
