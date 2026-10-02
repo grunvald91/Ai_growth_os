@@ -1,4 +1,4 @@
-"""xAI / Grok provider using the OpenAI-compatible Chat Completions API."""
+"""OpenAI-compatible provider used for Grok/ClaudeHub model routing."""
 import asyncio
 from typing import Literal
 
@@ -21,6 +21,7 @@ class XAIProvider:
         base_url: str = "https://api.x.ai/v1",
         reasoning_effort: ReasoningEffort = "medium",
         timeout_seconds: float = 300.0,
+        fallback_model: str | None = None,
     ) -> None:
         if not api_key:
             raise ValueError("An xAI API key is required")
@@ -28,6 +29,7 @@ class XAIProvider:
             raise ValueError("Unsupported xAI reasoning effort")
         self._api_key = api_key
         self._model = model
+        self._fallback_model = fallback_model.strip() if fallback_model and fallback_model.strip() else None
         self._base_url = base_url.rstrip("/") + "/"
         self._reasoning_effort = reasoning_effort
         self._timeout = httpx.Timeout(timeout_seconds)
@@ -42,8 +44,9 @@ class XAIProvider:
         if reasoning_effort not in {"low", "medium", "high", "xhigh"}:
             raise ValueError("Unsupported xAI reasoning effort")
 
+        requested_model = request.model or self._model
         payload: dict[str, object] = {
-            "model": request.model or self._model,
+            "model": requested_model,
             "messages": messages,
             "max_completion_tokens": request.max_tokens,
             "reasoning_effort": reasoning_effort,
@@ -68,26 +71,21 @@ class XAIProvider:
         if isinstance(conversation_id, str) and conversation_id:
             headers["x-grok-conv-id"] = conversation_id[:200]
 
+        effective_model = requested_model
         async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
-            response = None
-            for attempt in range(len(_RETRY_DELAYS_SECONDS) + 1):
-                try:
-                    response = await client.post("chat/completions", headers=headers, json=payload)
-                    response.raise_for_status()
-                    break
-                except httpx.HTTPStatusError as exc:
-                    if (
-                        exc.response.status_code not in _RETRYABLE_STATUS_CODES
-                        or attempt >= len(_RETRY_DELAYS_SECONDS)
-                    ):
-                        raise
-                except httpx.TransportError:
-                    if attempt >= len(_RETRY_DELAYS_SECONDS):
-                        raise
-                await asyncio.sleep(_RETRY_DELAYS_SECONDS[attempt])
-
-            if response is None:
-                raise RuntimeError("xAI request did not produce a response")
+            try:
+                response = await self._post_with_retries(client, headers=headers, payload=payload)
+            except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+                if not self._can_fallback(requested_model, exc):
+                    raise
+                effective_model = self._fallback_model or requested_model
+                fallback_payload = dict(payload)
+                fallback_payload["model"] = effective_model
+                response = await self._post_with_retries(
+                    client,
+                    headers=headers,
+                    payload=fallback_payload,
+                )
             data = response.json()
 
         try:
@@ -107,10 +105,53 @@ class XAIProvider:
 
         return LLMResponse(
             content=content,
-            model=str(data.get("model") or request.model or self._model),
+            model=str(data.get("model") or effective_model),
             usage=LLMUsage(
                 input_tokens=max(0, int(input_tokens or 0)),
                 output_tokens=max(0, int(output_tokens or 0)),
             ),
             stop_reason=stop_reason,
         )
+
+    async def _post_with_retries(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        headers: dict[str, str],
+        payload: dict[str, object],
+    ) -> httpx.Response:
+        response: httpx.Response | None = None
+        for attempt in range(len(_RETRY_DELAYS_SECONDS) + 1):
+            try:
+                response = await client.post("chat/completions", headers=headers, json=payload)
+                response.raise_for_status()
+                return response
+            except httpx.HTTPStatusError as exc:
+                if (
+                    exc.response.status_code not in _RETRYABLE_STATUS_CODES
+                    or attempt >= len(_RETRY_DELAYS_SECONDS)
+                ):
+                    raise
+            except httpx.TransportError:
+                if attempt >= len(_RETRY_DELAYS_SECONDS):
+                    raise
+            await asyncio.sleep(_RETRY_DELAYS_SECONDS[attempt])
+
+        if response is None:
+            raise RuntimeError("xAI request did not produce a response")
+        return response
+
+    def _can_fallback(
+        self,
+        requested_model: str,
+        error: httpx.HTTPStatusError | httpx.TransportError,
+    ) -> bool:
+        if not self._fallback_model or self._fallback_model == requested_model:
+            return False
+        # Only default-model requests are eligible. Explicit requests for another
+        # model keep their caller-selected semantics.
+        if requested_model != self._model:
+            return False
+        if isinstance(error, httpx.HTTPStatusError):
+            return error.response.status_code in _RETRYABLE_STATUS_CODES
+        return isinstance(error, httpx.TransportError)
