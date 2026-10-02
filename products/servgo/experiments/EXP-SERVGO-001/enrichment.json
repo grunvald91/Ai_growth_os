@@ -15,7 +15,7 @@
       "lead_id": "SG001-001",
       "validation_status": "validated",
       "website": "https://city-thai-spa.ru/",
-      "preferred_channel": "website",
+      "preferred_channel": "email",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
@@ -31,8 +31,17 @@
           "source_url": "https://city-thai-spa.ru/",
           "observed_at": "2026-10-02",
           "source_type": "official_website"
+        },
+        {
+          "field": "email",
+          "value": "vera380037@mail.ru",
+          "source_url": "https://city-thai-spa.ru/catalog",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
         }
-      ]
+      ],
+      "email": "vera380037@mail.ru",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-002",
@@ -63,7 +72,8 @@
           "source_type": "public_business_directory"
         }
       ],
-      "email": "spa@grace-gorizont.ru"
+      "email": "spa@grace-gorizont.ru",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-003",
@@ -76,9 +86,19 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJ16PFbIHM9UARzlMkWnpgHnU",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "whatsapp",
+          "value": "+79180037090",
+          "source_url": "https://sochi.gdekrasa.ru/center-massazha-evgeniya-chuklova",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79180037090."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79180037090.",
+      "whatsapp": "+79180037090",
+      "preferred_channel": "whatsapp",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-004",
@@ -118,7 +138,8 @@
           "source_type": "owner_verified_listing"
         }
       ],
-      "notes": "Круглосуточный SPA-House: баня, бассейн, массаж и SPA-программы."
+      "notes": "Круглосуточный SPA-House: баня, бассейн, массаж и SPA-программы.",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-005",
@@ -150,7 +171,8 @@
           "source_type": "official_website"
         }
       ],
-      "notes": "Sandera предлагает массаж и SPA-программы и публично принимает сообщения в WhatsApp."
+      "notes": "Sandera предлагает массаж и SPA-программы и публично принимает сообщения в WhatsApp.",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-006",
@@ -163,9 +185,19 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJL00KR5vJ9UARTni1ZFcLuBU",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "website",
+          "value": "https://thai-spa-centr.ru/",
+          "source_url": "https://href.ru/en/beauty_salon/thai_spa_v_grand_otele_zemcuzina_spa_salon_soci_taiskii_massaz_xammam_bania",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_profile"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79881802868."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79881802868. Подтверждён официальный сайт Thai Spa; отдельный публичный email/WhatsApp/Telegram не найден.",
+      "website": "https://thai-spa-centr.ru/",
+      "preferred_channel": "website",
+      "enrichment_status": "website_or_chat"
     },
     {
       "lead_id": "SG001-007",
@@ -178,9 +210,35 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJ_TDlHc_L9UARFYYQp0EdVJk",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "website",
+          "value": "https://amrita-space.ru",
+          "source_url": "https://sochi.gdekrasa.ru/amrita-spa-and-yoga",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        },
+        {
+          "field": "email",
+          "value": "amritasochi@gmail.com",
+          "source_url": "https://myamrita.ru/wp-content/uploads/2020/02/c-21.09-27.09-raspisanie.pdf",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "telegram",
+          "value": "@amritahealing",
+          "source_url": "https://telemetr.me/content/amritahealing",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_channel"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79628842524."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79628842524.",
+      "website": "https://amrita-space.ru",
+      "email": "amritasochi@gmail.com",
+      "telegram": "@amritahealing",
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-008",
@@ -204,7 +262,8 @@
       ],
       "notes": "Публичный контакт перепроверен 02.10.2026: +79384445000.",
       "email": "spa.greenwich@gmail.com",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-009",
@@ -236,7 +295,8 @@
       "notes": "Публичный контакт перепроверен 02.10.2026: +79996500963. Текущая публичная карточка указывает адрес: Виноградная ул., 2/3, к 1, Сочи.",
       "email": "svetlanaklmn@gmail.com",
       "website": "https://dikidi.net/146677",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-010",
@@ -268,7 +328,8 @@
       "notes": "Публичный контакт перепроверен 02.10.2026: +78622599464.",
       "email": "mail@luson-spa.ru",
       "website": "https://www.luson-spa.ru/",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-011",
@@ -281,9 +342,19 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJl1Rc1unJ9UARppg7b40RHgo",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "website",
+          "value": "https://blossom-spa.booknow.ru/",
+          "source_url": "https://blossom-spa.booknow.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_profile"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79284548089."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79284548089. Есть публичная онлайн-запись; также подтверждён Instagram blossomspa.sochi, но email/WhatsApp/Telegram в открытых источниках не найден.",
+      "website": "https://blossom-spa.booknow.ru/",
+      "preferred_channel": "website",
+      "enrichment_status": "website_or_chat"
     },
     {
       "lead_id": "SG001-012",
@@ -315,7 +386,8 @@
       "notes": "Публичный контакт перепроверен 02.10.2026: +79885033313.",
       "email": "reception@ghhsochi.ru",
       "website": "https://www.ghhsochi.ru/",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-013",
@@ -355,7 +427,8 @@
         }
       ],
       "notes": "SPADAY — SPA-салон в центре Сочи с массажами, SPA-программами и онлайн-записью.",
-      "telegram": "@spadaysochi"
+      "telegram": "@spadaysochi",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-014",
@@ -387,7 +460,8 @@
       "notes": "Публичный контакт перепроверен 02.10.2026: +79882381007.",
       "website": "https://mst.link/spadacha",
       "whatsapp": "+79882381007",
-      "preferred_channel": "whatsapp"
+      "preferred_channel": "whatsapp",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-015",
@@ -400,9 +474,19 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJ2WmnLw7L9UARjDIhFJfBQmA",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "website",
+          "value": "https://uslugi.yandex.ru/profile/MaksimVostrikov-2506794",
+          "source_url": "https://uslugi.yandex.ru/profile/MaksimVostrikov-2506794",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_profile"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79127651933."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79127651933. Публичный профиль Яндекс Услуг содержит встроенный чат; отдельный email/WhatsApp/Telegram не найден.",
+      "website": "https://uslugi.yandex.ru/profile/MaksimVostrikov-2506794",
+      "preferred_channel": "website",
+      "enrichment_status": "website_or_chat"
     },
     {
       "lead_id": "SG001-016",
@@ -415,9 +499,27 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJA4cBLpbL9UARbnhL2Ef7oT0",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "website",
+          "value": "http://www.8life.ru",
+          "source_url": "https://centry-netradicionnoy-mediciny-i-manualynoy-terapii.feech.org/sochi/org/3785477",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        },
+        {
+          "field": "email",
+          "value": "ekaterinash28@gmail.com",
+          "source_url": "https://centry-netradicionnoy-mediciny-i-manualynoy-terapii.feech.org/sochi/org/3785477",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79673181010."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79673181010.",
+      "website": "http://www.8life.ru",
+      "email": "ekaterinash28@gmail.com",
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-017",
@@ -449,7 +551,8 @@
       "notes": "Публичный контакт перепроверен 02.10.2026: +79180075978. Текущая публичная карточка указывает адрес: ул. Черноморская, 13г, Сочи.",
       "email": "thaidreamsspa@gmail.com",
       "website": "http://www.thaidreamsspa.ru",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-018",
@@ -481,7 +584,8 @@
           "source_type": "official_website"
         }
       ],
-      "notes": "Посольство красоты совмещает beauty- и SPA-направления в центре Сочи."
+      "notes": "Посольство красоты совмещает beauty- и SPA-направления в центре Сочи.",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-019",
@@ -496,7 +600,8 @@
           "source_type": "google_business_profile"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79181019130."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79181019130. Повторная проверка нашла несколько публичных телефонов студии, но не подтверждённый email/WhatsApp/Telegram.",
+      "enrichment_status": "phone_only"
     },
     {
       "lead_id": "SG001-020",
@@ -528,7 +633,8 @@
           "source_type": "official_website"
         }
       ],
-      "notes": "Feedback — сеть массажных студий; у сочинского филиала уже есть онлайн-запись."
+      "notes": "Feedback — сеть массажных студий; у сочинского филиала уже есть онлайн-запись.",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-021",
@@ -560,7 +666,8 @@
         }
       ],
       "telegram": "@adlermassageREZULTATadmin",
-      "notes": "REZULTAT — студия массажа и SPA в Адлере с онлайн-записью и публичным Telegram-контактом."
+      "notes": "REZULTAT — студия массажа и SPA в Адлере с онлайн-записью и публичным Telegram-контактом.",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-022",
@@ -573,9 +680,19 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJhSTg-5q_9UARyAyOes3ZV_8",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "website",
+          "value": "https://vk.ru/medovayalyna",
+          "source_url": "https://yandex.ru/medicine/clinic/medovaya_luna_51958919129",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_profile"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79649455590."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79649455590. Владелец подтвердил публичную страницу VK; отдельный email/WhatsApp/Telegram не найден.",
+      "website": "https://vk.ru/medovayalyna",
+      "preferred_channel": "website",
+      "enrichment_status": "website_or_chat"
     },
     {
       "lead_id": "SG001-023",
@@ -588,9 +705,27 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJZ0OU0KO_9UAR_u_mDGVrM1o",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "website",
+          "value": "https://adelfiya.ru/",
+          "source_url": "https://adelfiya.ru/contacts/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "email",
+          "value": "bron@adelfiya.ru",
+          "source_url": "https://adelfiya.ru/contacts/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79183031012."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79183031012.",
+      "website": "https://adelfiya.ru/",
+      "email": "bron@adelfiya.ru",
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-024",
@@ -603,9 +738,19 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJiciOZcW_9UARyeUyUXyZn_I",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "telegram",
+          "value": "@levashova_beauty_studia",
+          "source_url": "https://xn--n1al3a.xn--24-6kci4amthgkj1f.xn--80asehdb/сочи/здоровье-и-красота/массажист/страница-4",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79654823307."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79654823307.",
+      "telegram": "@levashova_beauty_studia",
+      "preferred_channel": "telegram",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-025",
@@ -636,7 +781,8 @@
           "source_type": "public_business_listing"
         }
       ],
-      "whatsapp": "+79184084840"
+      "whatsapp": "+79184084840",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-026",
@@ -649,9 +795,19 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJoZE_USO_9UARz0AjKwV-hXo",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "website",
+          "value": "https://uslugi.yandex.ru/profile/Silueht-2461216",
+          "source_url": "https://uslugi.yandex.ru/profile/Silueht-2461216",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_profile"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79024059066. Текущая публичная карточка указывает адрес: ул. Демократическая, 54А, офис 5, Адлер."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79024059066. Текущая публичная карточка указывает адрес: ул. Демократическая, 54А, офис 5, Адлер. Публичный профиль Яндекс Услуг содержит чат; отдельный email/WhatsApp/Telegram не подтверждён.",
+      "website": "https://uslugi.yandex.ru/profile/Silueht-2461216",
+      "preferred_channel": "website",
+      "enrichment_status": "website_or_chat"
     },
     {
       "lead_id": "SG001-027",
@@ -666,11 +822,12 @@
           "source_type": "google_business_profile"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79384192620."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79384192620. После повторного поиска подтверждён только публичный телефон; отдельный письменный канал не найден.",
+      "enrichment_status": "phone_only"
     },
     {
       "lead_id": "SG001-028",
-      "validation_status": "validated",
+      "validation_status": "needs_review",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
@@ -681,7 +838,9 @@
           "source_type": "google_business_profile"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79288523587."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79288523587. Текущие источники по бренду «Бархат» указывают другой адрес и другие телефоны; исходная карточка Ленина 1/1, +79288523587 требует повторной идентификации и исключена из outreach до подтверждения.",
+      "enrichment_status": "stale",
+      "preferred_channel": null
     },
     {
       "lead_id": "SG001-029",
@@ -721,7 +880,8 @@
           "source_type": "owner_verified_listing"
         }
       ],
-      "notes": "Студия Юлии Васиной в Адлере использует Telegram, WhatsApp и онлайн-запись."
+      "notes": "Студия Юлии Васиной в Адлере использует Telegram, WhatsApp и онлайн-запись.",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-030",
@@ -734,18 +894,43 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJPc9_-heV9UARCgZU3hIKU74",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "website",
+          "value": "https://thai-spa-sochi.clients.site/",
+          "source_url": "https://thai-spa-sochi.clients.site/",
+          "observed_at": "2026-10-02",
+          "source_type": "owner_verified_listing"
+        },
+        {
+          "field": "whatsapp",
+          "value": "+79182033150",
+          "source_url": "https://thai-spa-sochi.clients.site/",
+          "observed_at": "2026-10-02",
+          "source_type": "owner_verified_listing"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79182033150."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79182033150.",
+      "website": "https://thai-spa-sochi.clients.site/",
+      "whatsapp": "+79182033150",
+      "preferred_channel": "whatsapp",
+      "enrichment_status": "direct"
     }
   ],
   "summary": {
     "total_prospects": 30,
-    "validated": 30,
-    "with_email": 10,
-    "with_whatsapp": 5,
-    "with_telegram": 3,
-    "with_website": 15,
-    "direct_written_ready": 15
+    "validated": 29,
+    "needs_review": 1,
+    "enrichment_resolved": 30,
+    "enrichment_pending": 0,
+    "direct": 22,
+    "website_or_chat": 5,
+    "phone_only": 2,
+    "stale": 1,
+    "with_email": 14,
+    "with_whatsapp": 7,
+    "with_telegram": 5,
+    "with_website": 24,
+    "direct_written_ready": 22
   }
 }
