@@ -15,7 +15,10 @@ async def run_once() -> int:
             db.scalars(
                 select(Product.id)
                 .join(Task, Task.product_id == Product.id)
-                .where(Task.status == TaskStatus.QUEUED)
+                .where(
+                    Task.status == TaskStatus.QUEUED,
+                    Task.title.like("EXP-%"),
+                )
                 .distinct()
                 .limit(10)
             )
@@ -28,7 +31,7 @@ async def run_once() -> int:
                 cycle = build_team_cycle(db, settings)
                 result = await cycle.run(
                     product_id,
-                    max_tasks=settings.team_worker_batch_size,
+                    max_tasks=1,
                     followup_cmo=True,
                 )
                 if result.task_results:
