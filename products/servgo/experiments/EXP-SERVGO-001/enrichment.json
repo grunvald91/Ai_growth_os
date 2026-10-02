@@ -35,7 +35,8 @@
           "source_type": "official_website"
         }
       ],
-      "notes": "Официальный сайт и онлайн-запись подтверждены. Публичная почта vera380037@mail.ru на сайте явно обозначена для претензий/жалоб/предложений, поэтому не выбрана как канал холодного outreach."
+      "notes": "Официальный сайт и онлайн-запись подтверждены. Публичная почта vera380037@mail.ru на сайте явно обозначена для претензий/жалоб/предложений, поэтому не выбрана как канал холодного outreach.",
+      "enrichment_status": "website_or_chat"
     },
     {
       "lead_id": "SG001-002",
@@ -66,7 +67,8 @@
           "source_type": "public_business_directory"
         }
       ],
-      "email": "spa@grace-gorizont.ru"
+      "email": "spa@grace-gorizont.ru",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-003",
@@ -98,7 +100,8 @@
       "notes": "Публичный business-directory профиль совпадает по адресу Крымская 29г и телефону +79180037090; опубликованы сайт, email и наличие Telegram/WhatsApp.",
       "website": "https://chuklov.com/page3828067",
       "email": "info@chuklov.com",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-004",
@@ -138,7 +141,8 @@
           "source_type": "owner_verified_listing"
         }
       ],
-      "notes": "Круглосуточный SPA-House: баня, бассейн, массаж и SPA-программы."
+      "notes": "Круглосуточный SPA-House: баня, бассейн, массаж и SPA-программы.",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-005",
@@ -170,7 +174,8 @@
           "source_type": "official_website"
         }
       ],
-      "notes": "Sandera предлагает массаж и SPA-программы и публично принимает сообщения в WhatsApp."
+      "notes": "Sandera предлагает массаж и SPA-программы и публично принимает сообщения в WhatsApp.",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-006",
@@ -202,7 +207,8 @@
       "notes": "Официальная страница Гранд Отеля «Жемчужина» подтверждает THAI SPA, Черноморская 3, телефон +79881802868 и email.",
       "website": "https://www.zhem.ru/services/spa-kompleks/",
       "email": "thaispazhem@gmail.com",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-007",
@@ -234,7 +240,8 @@
       "notes": "Официальный сайт AMRITA подтверждает точку Московская 27, телефон +79628842524 и email.",
       "website": "https://myamrita.ru/",
       "email": "amritasochi@gmail.com",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-008",
@@ -258,7 +265,8 @@
       ],
       "notes": "Публичный контакт перепроверен 02.10.2026: +79384445000.",
       "email": "spa.greenwich@gmail.com",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-009",
@@ -290,7 +298,8 @@
       "notes": "Публичный контакт перепроверен 02.10.2026: +79996500963. Текущая публичная карточка указывает адрес: Виноградная ул., 2/3, к 1, Сочи.",
       "email": "svetlanaklmn@gmail.com",
       "website": "https://dikidi.net/146677",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-010",
@@ -322,7 +331,8 @@
       "notes": "Публичный контакт перепроверен 02.10.2026: +78622599464.",
       "email": "mail@luson-spa.ru",
       "website": "https://www.luson-spa.ru/",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-011",
@@ -346,7 +356,8 @@
       ],
       "notes": "Старый домен blossom-spa.ru сейчас продаётся; актуальный публичный профиль с совпадающими названием/телефоном/адресом ведёт на VK. Для автоматического email/WhatsApp outreach подтверждённого канала не найдено.",
       "website": "https://vk.com/blossomspa.sochi",
-      "preferred_channel": "website"
+      "preferred_channel": "website",
+      "enrichment_status": "website_or_chat"
     },
     {
       "lead_id": "SG001-012",
@@ -378,7 +389,8 @@
       "notes": "Публичный контакт перепроверен 02.10.2026: +79885033313.",
       "email": "reception@ghhsochi.ru",
       "website": "https://www.ghhsochi.ru/",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-013",
@@ -418,7 +430,8 @@
         }
       ],
       "notes": "SPADAY — SPA-салон в центре Сочи с массажами, SPA-программами и онлайн-записью.",
-      "telegram": "@spadaysochi"
+      "telegram": "@spadaysochi",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-014",
@@ -450,7 +463,8 @@
       "notes": "Публичный контакт перепроверен 02.10.2026: +79882381007.",
       "website": "https://mst.link/spadacha",
       "whatsapp": "+79882381007",
-      "preferred_channel": "whatsapp"
+      "preferred_channel": "whatsapp",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-015",
@@ -474,7 +488,8 @@
       ],
       "notes": "Актуальная VK-страница подтверждает бренд «Массаж без боли», адрес Горького 12 и телефон +79127651933; запись доступна через сообщения сообщества/страницу.",
       "website": "https://vk.link/massazhnaya_nebolno_sochi",
-      "preferred_channel": "website"
+      "preferred_channel": "website",
+      "enrichment_status": "website_or_chat"
     },
     {
       "lead_id": "SG001-016",
@@ -489,7 +504,8 @@
           "source_type": "google_business_profile"
         }
       ],
-      "notes": "Телефон +79673181010 и адрес Войкова 1/1 подтверждены. Указанный в каталогах старый сайт 8life.ru сейчас припаркован; подтверждённого email/WhatsApp/Telegram не найдено, поэтому канал остаётся телефонным."
+      "notes": "Телефон +79673181010 и адрес Войкова 1/1 подтверждены. Указанный в каталогах старый сайт 8life.ru сейчас припаркован; подтверждённого email/WhatsApp/Telegram не найдено, поэтому канал остаётся телефонным.",
+      "enrichment_status": "phone_only"
     },
     {
       "lead_id": "SG001-017",
@@ -521,7 +537,8 @@
       "notes": "Публичный контакт перепроверен 02.10.2026: +79180075978. Текущая публичная карточка указывает адрес: ул. Черноморская, 13г, Сочи.",
       "email": "thaidreamsspa@gmail.com",
       "website": "http://www.thaidreamsspa.ru",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-018",
@@ -553,7 +570,8 @@
           "source_type": "official_website"
         }
       ],
-      "notes": "Посольство красоты совмещает beauty- и SPA-направления в центре Сочи."
+      "notes": "Посольство красоты совмещает beauty- и SPA-направления в центре Сочи.",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-019",
@@ -577,7 +595,8 @@
       ],
       "notes": "Профиль подтверждён владельцем, совпадают Навагинская 9б и +79181019130; на странице есть функция «Написать». Отдельный email/WhatsApp/Telegram не подтверждён.",
       "website": "http://lyubimiigorod.ru/sochi/Kontur",
-      "preferred_channel": "website"
+      "preferred_channel": "website",
+      "enrichment_status": "website_or_chat"
     },
     {
       "lead_id": "SG001-020",
@@ -609,7 +628,8 @@
           "source_type": "official_website"
         }
       ],
-      "notes": "Feedback — сеть массажных студий; у сочинского филиала уже есть онлайн-запись."
+      "notes": "Feedback — сеть массажных студий; у сочинского филиала уже есть онлайн-запись.",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-021",
@@ -641,7 +661,8 @@
         }
       ],
       "telegram": "@adlermassageREZULTATadmin",
-      "notes": "REZULTAT — студия массажа и SPA в Адлере с онлайн-записью и публичным Telegram-контактом."
+      "notes": "REZULTAT — студия массажа и SPA в Адлере с онлайн-записью и публичным Telegram-контактом.",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-022",
@@ -665,7 +686,8 @@
       ],
       "notes": "Публичная карточка подтверждает Калинина 30 и телефоны +79649455590 / +79654743103, а также даёт письменный канал «Задать вопрос». Подтверждённого email/WhatsApp/Telegram не найдено.",
       "website": "https://zoon.ru/sochi/beauty/spa-studiya_medovaya_luna_na_ulitse_kalinina_30_v_adlere/",
-      "preferred_channel": "website"
+      "preferred_channel": "website",
+      "enrichment_status": "website_or_chat"
     },
     {
       "lead_id": "SG001-023",
@@ -697,7 +719,8 @@
       "notes": "Официальный сайт отеля по тому же адресу Просвещения 13 подтверждает SPA-комплекс и общий email отдела бронирования bron@adelfiya.ru.",
       "website": "https://adelfiya.ru/",
       "email": "bron@adelfiya.ru",
-      "preferred_channel": "email"
+      "preferred_channel": "email",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-024",
@@ -737,7 +760,8 @@
       "website": "https://t.me/levashova_beauty_studia",
       "whatsapp": "+79654823307",
       "telegram": "@levashova_beauty_studia",
-      "preferred_channel": "whatsapp"
+      "preferred_channel": "whatsapp",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-025",
@@ -768,7 +792,8 @@
           "source_type": "public_business_listing"
         }
       ],
-      "whatsapp": "+79184084840"
+      "whatsapp": "+79184084840",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-026",
@@ -792,7 +817,8 @@
       ],
       "notes": "Каталог с точным адресом Демократическая 54а публикует +79024059066 и +79181515070 и помечает оба контакта как WhatsApp.",
       "whatsapp": "+79024059066",
-      "preferred_channel": "whatsapp"
+      "preferred_channel": "whatsapp",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-027",
@@ -816,7 +842,8 @@
       ],
       "notes": "Телефон +79384192620 подтверждается, но свежие публичные карточки указывают Парусная 7 / Кирпичная 24А / Кирова 30, тогда как исходный cohort — Свердлова 78. До outreach карточка автоматически исключена как address mismatch.",
       "website": "https://lyubimiigorod.ru/sochi/EF4m9DH7UT",
-      "preferred_channel": "website"
+      "preferred_channel": null,
+      "enrichment_status": "stale"
     },
     {
       "lead_id": "SG001-028",
@@ -840,7 +867,8 @@
       ],
       "notes": "Публичный каталог с точным адресом Ленина 1/1 и телефоном +79288523587 указывает профиль Instagram massage_barhat. Не смешивать с современной клиникой «Бархат» на Ленина 156.",
       "website": "https://www.instagram.com/massage_barhat",
-      "preferred_channel": "website"
+      "preferred_channel": "website",
+      "enrichment_status": "website_or_chat"
     },
     {
       "lead_id": "SG001-029",
@@ -880,7 +908,8 @@
           "source_type": "owner_verified_listing"
         }
       ],
-      "notes": "Студия Юлии Васиной в Адлере использует Telegram, WhatsApp и онлайн-запись."
+      "notes": "Студия Юлии Васиной в Адлере использует Telegram, WhatsApp и онлайн-запись.",
+      "enrichment_status": "direct"
     },
     {
       "lead_id": "SG001-030",
@@ -912,17 +941,25 @@
       "notes": "Текущая owner/client-site карточка подтверждает Thai SPA и телефон +79182033150, WhatsApp; текущий публичный адрес указан как Сириус, ул. 65 лет Победы, 65 (вероятен переезд относительно исходного cohort).",
       "website": "https://thai-spa-sochi.clients.site/",
       "whatsapp": "+79182033150",
-      "preferred_channel": "whatsapp"
+      "preferred_channel": "whatsapp",
+      "enrichment_status": "direct"
     }
   ],
   "summary": {
     "total_prospects": 30,
-    "validated": 30,
-    "with_email": 10,
-    "with_whatsapp": 5,
-    "with_telegram": 3,
-    "with_website": 15,
-    "direct_written_ready": 15
+    "validated": 29,
+    "needs_review": 1,
+    "enrichment_resolved": 30,
+    "enrichment_pending": 0,
+    "direct": 22,
+    "website_or_chat": 6,
+    "phone_only": 1,
+    "stale": 1,
+    "with_email": 14,
+    "with_whatsapp": 8,
+    "with_telegram": 4,
+    "with_website": 27,
+    "direct_written_ready": 22
   },
   "completion": {
     "processed": 30,
