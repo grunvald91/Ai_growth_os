@@ -1,0 +1,44 @@
+name: Inspect available LLM models
+
+on:
+  push:
+    branches:
+      - cost/cheap-model-policy
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: List model ids
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import os, httpx
+          base=os.environ["XAI_BASE_URL"].rstrip("/")
+          key=os.environ["XAI_API_KEY"]
+          r=httpx.get(base+"/models", headers={"Authorization":f"Bearer {key}"}, timeout=30)
+          r.raise_for_status()
+          data=r.json()
+          models=data.get("data") or []
+          for row in sorted(models, key=lambda x: str(x.get("id",""))):
+              mid=str(row.get("id",""))
+              if mid:
+                  print(mid)
+          PY
+          REMOTE
