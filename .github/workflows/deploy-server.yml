@@ -135,7 +135,7 @@ jobs:
               --product servgo \
               --file /app/products/servgo/research_sources/initial-voc-2026-09-29.json </dev/null
           fi
-          dc up -d api
+          dc up -d api worker
           if grep -q "^TELEGRAM_BOT_TOKEN=." "$REMOTE_ROOT/.env" && grep -q "^TELEGRAM_OWNER_CHAT_ID=." "$REMOTE_ROOT/.env"; then
             dc --profile telegram build telegram
             dc --profile telegram up -d telegram
