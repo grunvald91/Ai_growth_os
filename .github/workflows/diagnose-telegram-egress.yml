@@ -1,0 +1,58 @@
+name: Diagnose Telegram egress
+
+on:
+  push:
+    branches:
+      - ops/diagnose-telegram-egress
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Test Telegram network from host and container
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set +e
+          echo "=== DNS ==="
+          getent ahosts api.telegram.org | head -n 12
+          echo "=== HOST IPV4 HTTPS ==="
+          curl -4 -I -sS --connect-timeout 8 --max-time 12 https://api.telegram.org/ -o /dev/null -w "host_ipv4_http=%{http_code} connect=%{time_connect} total=%{time_total}\n"
+          echo "host_ipv4_exit=$?"
+          echo "=== HOST IPV6 HTTPS ==="
+          curl -6 -I -sS --connect-timeout 8 --max-time 12 https://api.telegram.org/ -o /dev/null -w "host_ipv6_http=%{http_code} connect=%{time_connect} total=%{time_total}\n"
+          echo "host_ipv6_exit=$?"
+          echo "=== CONTAINER STATUS ==="
+          docker ps --filter name=ai-growth-os-telegram-1 --format 'name={{.Names}} status={{.Status}}'
+          echo "=== CONTAINER DNS/IPV4 ==="
+          docker exec ai-growth-os-telegram-1 python - <<'PY'
+          import socket
+          try:
+              print("dns", socket.getaddrinfo("api.telegram.org", 443, type=socket.SOCK_STREAM))
+          except Exception as exc:
+              print("dns_error", type(exc).__name__, str(exc))
+          PY
+          docker exec ai-growth-os-telegram-1 python - <<'PY'
+          import httpx
+          try:
+              r=httpx.get("https://api.telegram.org/", timeout=httpx.Timeout(12, connect=8))
+              print("container_http", r.status_code)
+          except Exception as exc:
+              print("container_error", type(exc).__name__, str(exc))
+          PY
+          echo "=== TELEGRAM CONTAINER LOG TAIL ==="
+          docker logs --tail 40 ai-growth-os-telegram-1 2>&1 | sed -E 's#bot[0-9]+:[A-Za-z0-9_-]+#bot***#g'
+          REMOTE
