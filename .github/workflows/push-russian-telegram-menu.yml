@@ -1,0 +1,56 @@
+name: Push Russian Telegram menu
+
+on:
+  push:
+    branches:
+      - ops/push-russian-telegram-menu
+
+permissions:
+  contents: read
+
+jobs:
+  push-menu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Push fresh menu
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml --profile telegram exec -T telegram python - <<'PY'
+          import asyncio
+          from app.core.config import get_settings
+          from app.telegram_control_bot import MAIN_MENU, TelegramAPI
+
+          async def main():
+              settings = get_settings()
+              api = TelegramAPI(settings.telegram_bot_token, settings.telegram_proxy_url)
+              await api.call(
+                  "sendMessage",
+                  {
+                      "chat_id": settings.telegram_owner_chat_id,
+                      "text": (
+                          "✅ Интерфейс бота обновлён.\n\n"
+                          "Теперь всё управление на русском и собрано в четыре понятных раздела. "
+                          "Начни с «📊 Главное»."
+                      ),
+                      "reply_markup": MAIN_MENU,
+                  },
+              )
+              print("Russian menu pushed")
+
+          asyncio.run(main())
+          PY
+          REMOTE
