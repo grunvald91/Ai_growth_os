@@ -51,6 +51,22 @@ jobs:
                           )
                       )
                       print("model", model, "ok", result.model, result.content[:120].replace("\n"," "))
+                      if model == "claude-opus-5-5":
+                          structured = await provider.generate(
+                              LLMRequest(
+                                  model=model,
+                                  messages=[LLMMessage(role="user", content='Return JSON with key "ok" and boolean true.')],
+                                  max_tokens=128,
+                                  metadata={"reasoning_effort":"low"},
+                                  response_schema={
+                                      "type":"object",
+                                      "properties":{"ok":{"type":"boolean"}},
+                                      "required":["ok"],
+                                      "additionalProperties":False,
+                                  },
+                              )
+                          )
+                          print("model", model, "schema_ok", structured.content[:200].replace("\n"," "))
                   except httpx.HTTPStatusError as exc:
                       body=(exc.response.text or "")[:500].replace("\n"," ")
                       print("model", model, "http_error", exc.response.status_code, body)
