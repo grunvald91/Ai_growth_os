@@ -2,7 +2,7 @@ from app.models.domain import AgentRun, Product, Task, TaskStatus
 from app.team_worker import _recover_transient_failed_experiment_tasks
 
 
-def _failed_parent_with_runs(db, run_errors):
+def _failed_parent_with_runs(db, run_errors, *, model=None):
     product = Product(name="ServGo", slug=f"servgo-{len(run_errors)}")
     db.add(product)
     db.flush()
@@ -30,6 +30,7 @@ def _failed_parent_with_runs(db, run_errors):
                 agent_name="segment_researcher",
                 status="failed",
                 error=error,
+                model=model,
             )
         )
     db.commit()
@@ -72,6 +73,41 @@ def test_worker_does_not_retry_after_one_full_retry_generation(db):
     )
 
     recovered = _recover_transient_failed_experiment_tasks(db)
+
+    db.refresh(parent)
+    assert recovered == 0
+    assert parent.status == TaskStatus.FAILED
+
+
+
+def test_worker_allows_one_retry_after_model_failover(db):
+    parent = _failed_parent_with_runs(
+        db,
+        ["research_worker_failed:HTTPStatusError"] * 8,
+        model="grok-4.7",
+    )
+
+    recovered = _recover_transient_failed_experiment_tasks(
+        db,
+        current_model="gpt-6-sol",
+    )
+
+    db.refresh(parent)
+    assert recovered == 1
+    assert parent.status == TaskStatus.QUEUED
+
+
+def test_worker_does_not_retry_same_model_after_two_generations(db):
+    parent = _failed_parent_with_runs(
+        db,
+        ["research_worker_failed:HTTPStatusError"] * 8,
+        model="gpt-6-sol",
+    )
+
+    recovered = _recover_transient_failed_experiment_tasks(
+        db,
+        current_model="gpt-6-sol",
+    )
 
     db.refresh(parent)
     assert recovered == 0
