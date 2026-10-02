@@ -65,10 +65,23 @@ def test_worker_does_not_retry_nontransient_failure(db):
     assert parent.status == TaskStatus.FAILED
 
 
-def test_worker_does_not_retry_after_one_full_retry_generation(db):
+def test_worker_allows_second_transient_recovery_generation(db):
     parent = _failed_parent_with_runs(
         db,
-        ["research_worker_failed:HTTPStatusError"] * 5,
+        ["research_worker_failed:HTTPStatusError"] * 8,
+    )
+
+    recovered = _recover_transient_failed_experiment_tasks(db)
+
+    db.refresh(parent)
+    assert recovered == 1
+    assert parent.status == TaskStatus.QUEUED
+
+
+def test_worker_stops_after_two_failed_recovery_generations(db):
+    parent = _failed_parent_with_runs(
+        db,
+        ["research_worker_failed:HTTPStatusError"] * 9,
     )
 
     recovered = _recover_transient_failed_experiment_tasks(db)
