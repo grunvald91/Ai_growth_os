@@ -75,4 +75,37 @@ jobs:
 
           asyncio.run(main())
           PY
+
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import asyncio
+          from app.core.composition import build_llm_provider
+          from app.core.config import get_settings
+          from app.llm.schemas import LLMMessage, LLMRequest
+          from app.workflows.research_contracts import ChannelResearchReport, ProblemResearchReport, CompetitorVOCReport
+
+          async def one(label, schema):
+              provider = build_llm_provider(get_settings())
+              result = await provider.generate(
+                  LLMRequest(
+                      model="claude-opus-5-5",
+                      system_prompt=(
+                          "Return ONLY JSON matching the supplied JSON schema. "
+                          "Be conservative. Do not invent evidence. Use empty lists and needs_sources/unknown states when appropriate."
+                      ),
+                      messages=[LLMMessage(role="user", content="Produce a minimal valid conservative research result for ServGo.")],
+                      max_tokens=1800,
+                      metadata={"reasoning_effort":"low"},
+                      response_schema=schema.model_json_schema(),
+                  )
+              )
+              parsed = schema.model_validate_json(result.content)
+              print("complex_schema", label, "ok", result.model, parsed.model_dump_json()[:400])
+
+          async def main():
+              await one("channel", ChannelResearchReport)
+              await one("problem", ProblemResearchReport)
+              await one("voc", CompetitorVOCReport)
+
+          asyncio.run(main())
+          PY
           REMOTE
