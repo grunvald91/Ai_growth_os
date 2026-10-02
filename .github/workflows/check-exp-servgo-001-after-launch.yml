@@ -1,0 +1,81 @@
+name: Check EXP-SERVGO-001 after launch
+
+on:
+  push:
+    branches:
+      - ops/check-exp-servgo-001-after-launch
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai-growth-os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Inspect production experiment
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          DC="docker compose --env-file $REMOTE_ROOT/.env -p ai-growth-os -f docker-compose.prod.yml"
+
+          echo "=== CONTAINERS ==="
+          docker ps --filter name=ai-growth-os --format 'name={{.Names}} status={{.Status}}'
+
+          echo "=== EXPERIMENT STATE ==="
+          $DC exec -T api python - <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Approval, Decision, Experiment, Prospect, Task
+
+          with SessionLocal() as db:
+              exp = db.scalar(select(Experiment).where(Experiment.experiment_key=="EXP-SERVGO-001"))
+              if exp is None:
+                  print("experiment=missing")
+                  raise SystemExit(2)
+              print("experiment_id=", exp.id)
+              print("status=", exp.status)
+              print("starts_at=", exp.starts_at)
+              print("ends_at=", exp.ends_at)
+
+              prospects = list(db.scalars(select(Prospect).where(Prospect.experiment_id==exp.id)))
+              print("prospects=", len(prospects))
+              print("validated=", sum(p.validation_status=="validated" for p in prospects))
+              print("outreach_not_contacted=", sum(p.outreach_status=="not_contacted" for p in prospects))
+              print("with_email=", sum(bool(p.email) for p in prospects))
+              print("with_whatsapp=", sum(bool(p.whatsapp) for p in prospects))
+              print("with_telegram=", sum(bool(p.telegram) for p in prospects))
+              print("with_website=", sum(bool(p.website) for p in prospects))
+
+              tasks = list(db.scalars(select(Task).where(Task.product_id==exp.product_id, Task.title.like("EXP-SERVGO-001:%")).order_by(Task.created_at.asc())))
+              print("tasks=", len(tasks))
+              for t in tasks:
+                  print("task", t.id, t.status.value if hasattr(t.status, "value") else t.status, t.assigned_agent, t.title)
+
+              decisions = list(db.scalars(select(Decision).where(Decision.experiment_id==exp.id).order_by(Decision.created_at.asc())))
+              print("decisions=", len(decisions))
+              for d in decisions:
+                  dtype = d.decision_type.value if hasattr(d.decision_type, "value") else d.decision_type
+                  print("decision", d.id, dtype, d.rationale[:500].replace("\n"," "))
+
+              approvals = list(db.scalars(select(Approval).where(Approval.product_id==exp.product_id, Approval.status=="pending").order_by(Approval.created_at.asc())))
+              print("pending_approvals=", len(approvals))
+              for a in approvals:
+                  print("approval", a.id, a.action_type, a.risk_level, (a.reason or "")[:500].replace("\n"," "))
+          PY
+
+          echo "=== WORKER LOG TAIL ==="
+          docker logs --tail 120 ai-growth-os-worker-1 2>&1 | sed -E 's#bot[0-9]+:[A-Za-z0-9_-]+#bot***#g' || true
+          REMOTE
