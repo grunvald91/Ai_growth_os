@@ -40,6 +40,7 @@ jobs:
                   "model": model,
                   "messages":[{"role":"user","content":'Return JSON with key "ok" and boolean true.'}],
                   "max_completion_tokens":128,
+                  "reasoning_effort":"low",
               }
               if structured:
                   payload["response_format"]={
