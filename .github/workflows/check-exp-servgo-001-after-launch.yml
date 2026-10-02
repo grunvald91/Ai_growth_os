@@ -17,7 +17,7 @@ jobs:
       SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
       SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
-      REMOTE_ROOT: /opt/ai-growth-os
+      REMOTE_ROOT: /opt/ai_growth_os
     steps:
       - name: Install sshpass
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
