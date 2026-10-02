@@ -1,0 +1,94 @@
+name: Benchmark cheap worker models
+
+on:
+  push:
+    branches:
+      - ops/benchmark-cheap-models
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Benchmark representative Growth OS contracts
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import asyncio
+          import json
+          from app.core.config import get_settings
+          from app.llm.schemas import LLMMessage, LLMRequest
+          from app.llm.xai import XAIProvider
+          from app.workflows.team_contracts import AnalyticsPlan, ContentBrief, DistributionPlan
+          from app.workflows.research_contracts import SegmentResearchReport, ResearchSynthesisDraft
+
+          settings=get_settings()
+          models=["deepseek-v4.1-flash","gemini-flash-3.8"]
+          cases=[
+              ("segment_research", SegmentResearchReport,
+               "Create a minimal valid segment research report for a hypothetical appointment-booking SaaS. Treat everything as hypotheses, not facts."),
+              ("research_synthesis", ResearchSynthesisDraft,
+               "Create a minimal valid research synthesis for a hypothetical appointment-booking SaaS. Preserve uncertainty and use no external factual claims."),
+              ("analytics", AnalyticsPlan,
+               "Create a minimal valid analytics plan. Define all five funnel stages exactly once. Use hypothetical examples only."),
+              ("content_brief", ContentBrief,
+               "Create a minimal valid article content brief for a hypothetical appointment-booking SaaS. Mark audience/problem as hypotheses."),
+              ("distribution", DistributionPlan,
+               "Create a minimal valid organic distribution plan with one candidate. Use hypotheses only; no factual market claims."),
+          ]
+
+          async def one(model,name,schema,prompt):
+              provider=XAIProvider(
+                  api_key=settings.xai_api_key,
+                  model=model,
+                  base_url=settings.xai_base_url,
+                  reasoning_effort="low",
+                  timeout_seconds=120,
+              )
+              try:
+                  response=await provider.generate(LLMRequest(
+                      system_prompt="Return ONLY JSON matching the supplied schema. Be concise and do not invent evidence.",
+                      messages=[LLMMessage(role="user", content=prompt)],
+                      model=model,
+                      max_tokens=1800,
+                      response_schema=schema.model_json_schema(),
+                      metadata={"reasoning_effort":"low"},
+                  ))
+                  parsed=schema.model_validate_json(response.content)
+                  usage=response.usage
+                  print(
+                      "BENCH",
+                      model,
+                      name,
+                      "PASS",
+                      "input="+str(usage.input_tokens if usage else 0),
+                      "output="+str(usage.output_tokens if usage else 0),
+                      "model="+response.model,
+                  )
+              except Exception as exc:
+                  print("BENCH",model,name,"FAIL",type(exc).__name__,str(exc)[:500].replace("\n"," "))
+
+          async def main():
+              for model in models:
+                  for name,schema,prompt in cases:
+                      await one(model,name,schema,prompt)
+
+          asyncio.run(main())
+          PY
+          REMOTE
