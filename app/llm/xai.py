@@ -1,4 +1,5 @@
 """xAI / Grok provider using the OpenAI-compatible Chat Completions API."""
+import asyncio
 from typing import Literal
 
 import httpx
@@ -6,6 +7,9 @@ import httpx
 from app.llm.schemas import LLMRequest, LLMResponse, LLMUsage
 
 ReasoningEffort = Literal["low", "medium", "high", "xhigh"]
+
+_RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+_RETRY_DELAYS_SECONDS = (1.0, 3.0, 7.0)
 
 
 class XAIProvider:
@@ -65,8 +69,25 @@ class XAIProvider:
             headers["x-grok-conv-id"] = conversation_id[:200]
 
         async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
-            response = await client.post("chat/completions", headers=headers, json=payload)
-            response.raise_for_status()
+            response = None
+            for attempt in range(len(_RETRY_DELAYS_SECONDS) + 1):
+                try:
+                    response = await client.post("chat/completions", headers=headers, json=payload)
+                    response.raise_for_status()
+                    break
+                except httpx.HTTPStatusError as exc:
+                    if (
+                        exc.response.status_code not in _RETRYABLE_STATUS_CODES
+                        or attempt >= len(_RETRY_DELAYS_SECONDS)
+                    ):
+                        raise
+                except httpx.TransportError:
+                    if attempt >= len(_RETRY_DELAYS_SECONDS):
+                        raise
+                await asyncio.sleep(_RETRY_DELAYS_SECONDS[attempt])
+
+            if response is None:
+                raise RuntimeError("xAI request did not produce a response")
             data = response.json()
 
         try:
