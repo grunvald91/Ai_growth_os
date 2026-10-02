@@ -1,0 +1,307 @@
+{
+  "experiment_key": "EXP-SERVGO-001",
+  "observed_at": "2026-10-02",
+  "status": "verified_batch_1",
+  "policy": {
+    "require_evidence_for_channels": true,
+    "no_invented_contacts": true,
+    "no_outreach": true,
+    "unresolved_mismatches_remain_unvalidated": true
+  },
+  "prospects": [
+    {
+      "lead_id": "SG001-001",
+      "validation_status": "validated",
+      "website": "https://city-thai-spa.ru/",
+      "preferred_channel": "website",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "СИТИ ТАЙ | Сочи, Черноморская 6 | +7 (918) 100-14-13",
+          "source_url": "https://city-thai-spa.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "website",
+          "value": "https://city-thai-spa.ru/",
+          "source_url": "https://city-thai-spa.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        }
+      ]
+    },
+    {
+      "lead_id": "SG001-002",
+      "validation_status": "validated",
+      "website": "https://spaodissey.ru/",
+      "preferred_channel": "website",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Цветок Одиссея — Горизонт | Сочи, Морской переулок 1/1Б | +7 (862) 277-73-86",
+          "source_url": "https://spaodissey.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "website",
+          "value": "https://spaodissey.ru/",
+          "source_url": "https://spaodissey.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        }
+      ]
+    },
+    {
+      "lead_id": "SG001-004",
+      "validation_status": "validated",
+      "website": "https://spa-house-sochi.ru/",
+      "email": "spahouse@yandex.ru",
+      "whatsapp": "+79881425338",
+      "preferred_channel": "email",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "SPA-House | Сочи, Пластунская 167/17 | +7 (988) 142-53-38",
+          "source_url": "https://spa-house-sochi.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "website",
+          "value": "https://spa-house-sochi.ru/",
+          "source_url": "https://spa-house-sochi.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "email",
+          "value": "spahouse@yandex.ru",
+          "source_url": "https://spa-house-sochi.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "whatsapp",
+          "value": "+79881425338",
+          "source_url": "https://spa-house-plastunskaja-ulitsa.clients.site/",
+          "observed_at": "2026-10-02",
+          "source_type": "owner_verified_listing"
+        }
+      ]
+    },
+    {
+      "lead_id": "SG001-005",
+      "validation_status": "validated",
+      "website": "https://xn--80aasiqpsac5d.xn--p1ai/",
+      "whatsapp": "+79897516121",
+      "preferred_channel": "whatsapp",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Sandera | Сочи, Войкова 35 | +7 (989) 751-61-21",
+          "source_url": "https://xn--80aasiqpsac5d.xn--p1ai/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "website",
+          "value": "https://xn--80aasiqpsac5d.xn--p1ai/",
+          "source_url": "https://xn--80aasiqpsac5d.xn--p1ai/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "whatsapp",
+          "value": "+79897516121",
+          "source_url": "https://xn--80aasiqpsac5d.xn--p1ai/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        }
+      ]
+    },
+    {
+      "lead_id": "SG001-013",
+      "validation_status": "validated",
+      "website": "https://spaday-sochi.ru/",
+      "email": "spadaysochi@yandex.ru",
+      "preferred_channel": "email",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "SPADAY | Сочи, Парковая 32а | +7 (862) 277-71-96",
+          "source_url": "https://spaday-sochi.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "website",
+          "value": "https://spaday-sochi.ru/",
+          "source_url": "https://spaday-sochi.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "email",
+          "value": "spadaysochi@yandex.ru",
+          "source_url": "https://spaday-sochi.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        }
+      ]
+    },
+    {
+      "lead_id": "SG001-018",
+      "validation_status": "validated",
+      "website": "https://posolstvosochi.com/",
+      "email": "mail@posolstvosochi.com",
+      "preferred_channel": "email",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Посольство красоты | Сочи, Островского 29 | +7 (988) 233-60-60",
+          "source_url": "https://posolstvosochi.com/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "website",
+          "value": "https://posolstvosochi.com/",
+          "source_url": "https://posolstvosochi.com/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "email",
+          "value": "mail@posolstvosochi.com",
+          "source_url": "https://posolstvosochi.com/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        }
+      ]
+    },
+    {
+      "lead_id": "SG001-020",
+      "validation_status": "validated",
+      "website": "https://feedback-massage.ru/sochi",
+      "email": "boss@feedback-massage.ru",
+      "preferred_channel": "email",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Feedback | Сочи, Воровского 4 | +7 (862) 555-29-31",
+          "source_url": "https://feedback-massage.ru/sochi/ourstudios",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "website",
+          "value": "https://feedback-massage.ru/sochi",
+          "source_url": "https://feedback-massage.ru/sochi",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "email",
+          "value": "boss@feedback-massage.ru",
+          "source_url": "https://feedback-massage.ru/sochi",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        }
+      ]
+    },
+    {
+      "lead_id": "SG001-021",
+      "validation_status": "validated",
+      "website": "https://rezultat-massage.ru/",
+      "preferred_channel": "website",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "REZULTAT | Адлер, Свердлова 53 | +7 (999) 655-40-60",
+          "source_url": "https://rezultat-massage.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "website",
+          "value": "https://rezultat-massage.ru/",
+          "source_url": "https://rezultat-massage.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        }
+      ]
+    },
+    {
+      "lead_id": "SG001-025",
+      "validation_status": "validated",
+      "website": "https://siame.ru/",
+      "preferred_channel": "website",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Тайны Сиама | Адлер, Карла Маркса 23 | +7 (918) 408-48-40",
+          "source_url": "https://siame.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "website",
+          "value": "https://siame.ru/",
+          "source_url": "https://siame.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        }
+      ]
+    },
+    {
+      "lead_id": "SG001-029",
+      "validation_status": "validated",
+      "website": "https://adler-massage.clients.site/",
+      "telegram": "@adlermassage",
+      "whatsapp": "+79952001795",
+      "preferred_channel": "telegram",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Студия массажа Юлии Васиной | Адлер, Ульянова 17/1 | +7 (995) 200-17-95",
+          "source_url": "https://adler-massage.clients.site/",
+          "observed_at": "2026-10-02",
+          "source_type": "owner_verified_listing"
+        },
+        {
+          "field": "website",
+          "value": "https://adler-massage.clients.site/",
+          "source_url": "https://adler-massage.clients.site/",
+          "observed_at": "2026-10-02",
+          "source_type": "owner_verified_listing"
+        },
+        {
+          "field": "telegram",
+          "value": "@adlermassage",
+          "source_url": "https://telegram.me/s/adlermassage",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_channel"
+        },
+        {
+          "field": "whatsapp",
+          "value": "+79952001795",
+          "source_url": "https://adler-massage.clients.site/",
+          "observed_at": "2026-10-02",
+          "source_type": "owner_verified_listing"
+        }
+      ]
+    }
+  ]
+}
