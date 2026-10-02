@@ -32,12 +32,8 @@ jobs:
           OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
           sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" '
             set -euo pipefail
-            code=$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 8 --max-time 15               -x http://188.120.254.223:8888 https://api.telegram.org || true)
+            code=$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 8 --max-time 15               -x http://188.120.254.223:8891 https://api.telegram.org || true)
             echo "PROXY_HTTP_STATUS=$code"
-            if [ "$code" = "407" ]; then
-              echo "PROXY_AUTH_REQUIRED=yes"
-              exit 0
-            fi
             if [ "$code" = "000" ]; then
               echo "PROXY_ROUTE_REACHABLE=no"
               exit 1
