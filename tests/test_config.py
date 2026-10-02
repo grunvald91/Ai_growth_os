@@ -17,6 +17,14 @@ def test_llm_settings_support_environment_overrides(monkeypatch) -> None:
 
 
 def test_llm_fallback_models_support_environment_override(monkeypatch) -> None:
-    monkeypatch.setenv("LLM_FALLBACK_MODELS", "claude-opus-5-5,gpt-6-sol")
+    monkeypatch.setenv("LLM_FALLBACK_MODELS", "deepseek-v4.1-flash,gemini-flash-3.8")
     settings = Settings(_env_file=None)
-    assert settings.llm_fallback_models == "claude-opus-5-5,gpt-6-sol"
+    assert settings.llm_fallback_models == "deepseek-v4.1-flash,gemini-flash-3.8"
+
+
+def test_default_llm_profile_is_cost_bounded() -> None:
+    settings = Settings(_env_file=None)
+    assert settings.llm_provider == "xai"
+    assert settings.llm_model == "deepseek-v4.1-flash"
+    assert settings.llm_fallback_models == "gemini-flash-3.8"
+    assert settings.xai_reasoning_effort == "low"
