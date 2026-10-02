@@ -26,6 +26,7 @@ services:
       XAI_API_KEY: ${XAI_API_KEY:?XAI_API_KEY is required}
       XAI_BASE_URL: ${XAI_BASE_URL:-https://api.claudehub.fun/v1}
       XAI_REASONING_EFFORT: ${XAI_REASONING_EFFORT:-medium}
+      XAI_FALLBACK_MODEL: ${XAI_FALLBACK_MODEL:-claude-opus-5-5}
       PRODUCTS_ROOT: /app/products
       SKILLS_ROOT: /app/skills
     depends_on:
@@ -73,6 +74,7 @@ services:
       XAI_API_KEY: ${XAI_API_KEY:?XAI_API_KEY is required}
       XAI_BASE_URL: ${XAI_BASE_URL:-https://api.claudehub.fun/v1}
       XAI_REASONING_EFFORT: ${XAI_REASONING_EFFORT:-medium}
+      XAI_FALLBACK_MODEL: ${XAI_FALLBACK_MODEL:-claude-opus-5-5}
       PRODUCTS_ROOT: /app/products
       SKILLS_ROOT: /app/skills
       TEAM_WORKER_BATCH_SIZE: ${TEAM_WORKER_BATCH_SIZE:-1}
