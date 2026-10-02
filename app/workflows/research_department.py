@@ -365,7 +365,8 @@ class ResearchDepartment:
         )
         active_run = self.db.get(AgentRun, run.id)
         active_run.status = "completed"
-        active_run.model = response.model
+        if response is not None:
+            active_run.model = response.model
         active_run.finished_at = datetime.now(timezone.utc)
         active_run.output_references = [{"kind": "artifact", "id": str(artifact.id)}]
         self.db.get(Task, child.id).status = TaskStatus.COMPLETED
