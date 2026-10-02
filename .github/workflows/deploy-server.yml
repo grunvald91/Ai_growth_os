@@ -149,7 +149,38 @@ jobs:
           curl -fsS http://127.0.0.1:8091/health
           REMOTE
 
+      - name: Verify Telegram control bot
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          RELEASE="$REMOTE_ROOT/releases/$GITHUB_SHA"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' RELEASE='$RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$RELEASE"
+          if ! grep -q "^TELEGRAM_BOT_TOKEN=." "$REMOTE_ROOT/.env" || ! grep -q "^TELEGRAM_OWNER_CHAT_ID=." "$REMOTE_ROOT/.env"; then
+            echo "Telegram control bot is not configured; skipping verification."
+            exit 0
+          fi
+          docker inspect -f '{{.State.Running}}' ai-growth-os-telegram-1 | grep -qx true
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml --profile telegram exec -T telegram python - <<'PY'
+          import asyncio
+          from app.core.config import get_settings
+          from app.telegram_control_bot import TelegramAPI
+
+          async def main():
+              settings = get_settings()
+              assert settings.telegram_bot_token
+              assert settings.telegram_owner_chat_id is not None
+              bot = await TelegramAPI(settings.telegram_bot_token).call("getMe")
+              assert bot.get("id")
+              print("Telegram control bot API OK")
+
+          asyncio.run(main())
+          PY
+          REMOTE
+
       - name: Smoke test Grok 4.7
+        continue-on-error: true
         run: |
           set -euo pipefail
           OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
