@@ -1,4 +1,4 @@
-name: Benchmark cheap worker models
+name: Benchmark cheap worker models matrix
 
 on:
   push:
@@ -10,11 +10,18 @@ permissions:
 
 jobs:
   benchmark:
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ["deepseek-v4.1-flash", "gemini-flash-3.8"]
+        case: ["segment_research", "research_synthesis", "analytics", "content_brief", "distribution"]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 8
     env:
       XAI_API_KEY: ${{ secrets.API }}
       XAI_BASE_URL: https://api.claudehub.fun/v1
+      MODEL: ${{ matrix.model }}
+      CASE: ${{ matrix.case }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,63 +29,68 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: python -m pip install -e .
-      - name: Benchmark representative Growth OS contracts
+      - name: Validate one real Growth OS contract
         run: |
           python - <<'PY'
           import asyncio
+          import os
           from app.llm.schemas import LLMMessage, LLMRequest
           from app.llm.xai import XAIProvider
           from app.workflows.team_contracts import AnalyticsPlan, ContentBrief, DistributionPlan
           from app.workflows.research_contracts import SegmentResearchReport, ResearchSynthesisDraft
 
-          models=["deepseek-v4.1-flash","gemini-flash-3.8"]
-          cases=[
-              ("segment_research", SegmentResearchReport,
-               "Create a minimal valid segment research report for a hypothetical appointment-booking SaaS. Treat everything as hypotheses, not facts."),
-              ("research_synthesis", ResearchSynthesisDraft,
-               "Create a minimal valid research synthesis for a hypothetical appointment-booking SaaS. Preserve uncertainty and use no external factual claims."),
-              ("analytics", AnalyticsPlan,
-               "Create a minimal valid analytics plan. Define all five funnel stages exactly once. Use hypothetical examples only."),
-              ("content_brief", ContentBrief,
-               "Create a minimal valid article content brief for a hypothetical appointment-booking SaaS. Mark audience/problem as hypotheses."),
-              ("distribution", DistributionPlan,
-               "Create a minimal valid organic distribution plan with one candidate. Use hypotheses only; no factual market claims."),
-          ]
+          cases={
+              "segment_research": (
+                  SegmentResearchReport,
+                  "Create a minimal valid segment research report for a hypothetical appointment-booking SaaS. Treat everything as hypotheses, not facts.",
+              ),
+              "research_synthesis": (
+                  ResearchSynthesisDraft,
+                  "Create a minimal valid research synthesis for a hypothetical appointment-booking SaaS. Preserve uncertainty and use no external factual claims.",
+              ),
+              "analytics": (
+                  AnalyticsPlan,
+                  "Create a minimal valid analytics plan. Define all five funnel stages exactly once. Use hypothetical examples only.",
+              ),
+              "content_brief": (
+                  ContentBrief,
+                  "Create a minimal valid article content brief for a hypothetical appointment-booking SaaS. Mark audience/problem as hypotheses.",
+              ),
+              "distribution": (
+                  DistributionPlan,
+                  "Create a minimal valid organic distribution plan with one candidate. Use hypotheses only; no factual market claims.",
+              ),
+          }
+          model=os.environ["MODEL"]
+          case=os.environ["CASE"]
+          schema,prompt=cases[case]
 
-          async def one(model,name,schema,prompt):
-              import os
+          async def main():
               provider=XAIProvider(
                   api_key=os.environ["XAI_API_KEY"],
                   model=model,
                   base_url=os.environ["XAI_BASE_URL"],
                   reasoning_effort="low",
-                  timeout_seconds=120,
+                  timeout_seconds=90,
               )
-              try:
-                  response=await provider.generate(LLMRequest(
-                      system_prompt="Return ONLY JSON matching the supplied schema. Be concise and do not invent evidence.",
-                      messages=[LLMMessage(role="user", content=prompt)],
-                      model=model,
-                      max_tokens=1600,
-                      response_schema=schema.model_json_schema(),
-                      metadata={"reasoning_effort":"low"},
-                  ))
-                  schema.model_validate_json(response.content)
-                  usage=response.usage
-                  print(
-                      "BENCH",model,name,"PASS",
-                      "input="+str(usage.input_tokens if usage else 0),
-                      "output="+str(usage.output_tokens if usage else 0),
-                      "model="+response.model,
-                      flush=True,
-                  )
-              except Exception as exc:
-                  print("BENCH",model,name,"FAIL",type(exc).__name__,str(exc)[:500].replace("\n"," "),flush=True)
-
-          async def main():
-              for model in models:
-                  for name,schema,prompt in cases:
-                      await one(model,name,schema,prompt)
+              response=await provider.generate(LLMRequest(
+                  system_prompt="Return ONLY JSON matching the supplied schema. Be concise and do not invent evidence.",
+                  messages=[LLMMessage(role="user", content=prompt)],
+                  model=model,
+                  max_tokens=1600,
+                  response_schema=schema.model_json_schema(),
+                  metadata={"reasoning_effort":"low"},
+              ))
+              schema.model_validate_json(response.content)
+              usage=response.usage
+              print(
+                  "BENCH PASS",
+                  model,
+                  case,
+                  "input="+str(usage.input_tokens if usage else 0),
+                  "output="+str(usage.output_tokens if usage else 0),
+                  "returned_model="+response.model,
+              )
 
           asyncio.run(main())
           PY
