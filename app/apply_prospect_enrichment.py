@@ -55,7 +55,13 @@ def apply_file(
         db.commit()
         stats = service.stats_for_experiment(experiment.id)
         outreach = None
-        if prepare_outreach and stats["ready_for_outreach"] > 0:
+        outreach_blocked_reason = None
+        if prepare_outreach and stats.get("enrichment_pending", 0) > 0:
+            outreach_blocked_reason = (
+                "Full-cohort enrichment is not finished; outreach packaging waits "
+                "until every prospect has a terminal enrichment status."
+            )
+        elif prepare_outreach and stats["ready_for_outreach"] > 0:
             package = OutreachPackageService(db).prepare(
                 experiment_id=experiment.id,
                 limit=100,
@@ -70,6 +76,7 @@ def apply_file(
             "rows_applied": len(rows),
             "stats": stats,
             "outreach_package": outreach,
+            "outreach_blocked_reason": outreach_blocked_reason,
         }
 
 
