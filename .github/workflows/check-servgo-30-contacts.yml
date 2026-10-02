@@ -1,0 +1,72 @@
+name: Check ServGo 30 contacts
+
+on:
+  push:
+    branches:
+      - ops/check-servgo-30-contacts
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Check production prospect coverage
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Approval, Experiment, Prospect
+          from app.services.prospects import ProspectService
+
+          with SessionLocal() as db:
+              exp = db.scalar(select(Experiment).where(Experiment.experiment_key=="EXP-SERVGO-001"))
+              stats = ProspectService(db).stats_for_experiment(exp.id)
+              prospects = ProspectService(db).list_for_experiment(exp.id)
+              print("experiment_status=", exp.status)
+              for key, value in stats.items():
+                  print(f"{key}={value}")
+              public_contacts = sum(
+                  bool(p.public_phone or p.email or p.whatsapp or p.telegram or p.website)
+                  for p in prospects
+              )
+              print("public_contacts=", public_contacts)
+              print("public_phone=", sum(bool(p.public_phone) for p in prospects))
+              print("missing_public_contact=", ",".join(
+                  p.lead_key for p in prospects
+                  if not (p.public_phone or p.email or p.whatsapp or p.telegram or p.website)
+              ) or "none")
+              direct = [
+                  p for p in prospects
+                  if p.validation_status=="validated"
+                  and p.preferred_channel in {"email","whatsapp","telegram"}
+                  and bool(getattr(p, p.preferred_channel))
+              ]
+              print("direct_ready_ids=", ",".join(p.lead_key for p in direct) or "none")
+              approvals = list(db.scalars(
+                  select(Approval).where(
+                      Approval.product_id==exp.product_id,
+                      Approval.status=="pending",
+                  ).order_by(Approval.created_at.asc())
+              ))
+              print("pending_approvals=", len(approvals))
+              for a in approvals:
+                  print("APPROVAL", a.action_type, a.risk_level, str(a.artifact_id or ""), (a.reason or "")[:250].replace("\n"," "))
+          PY
+          REMOTE
