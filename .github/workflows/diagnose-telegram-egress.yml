@@ -60,6 +60,24 @@ jobs:
           except Exception as exc:
               print("container_ipv4_error", type(exc).__name__, str(exc))
           PY
+          echo "=== CONTAINER URLLIB ==="
+          docker exec -i ai-growth-os-telegram-1 python - <<'PY'
+          import json
+          import os
+          import urllib.request
+          try:
+              with urllib.request.urlopen("https://api.telegram.org/", timeout=10) as response:
+                  print("urllib_root", response.status)
+          except Exception as exc:
+              print("urllib_root_error", type(exc).__name__, str(exc))
+          try:
+              token=os.environ["TELEGRAM_BOT_TOKEN"]
+              with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/getMe", timeout=10) as response:
+                  payload=json.load(response)
+              print("urllib_getme_ok", bool(payload.get("ok")), "bot_id_present", bool((payload.get("result") or {}).get("id")))
+          except Exception as exc:
+              print("urllib_getme_error", type(exc).__name__, str(exc))
+          PY
           echo "=== TELEGRAM CONTAINER LOG TAIL ==="
           docker logs --tail 40 ai-growth-os-telegram-1 2>&1 | sed -E 's#bot[0-9]+:[A-Za-z0-9_-]+#bot***#g'
           REMOTE
