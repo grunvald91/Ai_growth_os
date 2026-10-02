@@ -59,6 +59,7 @@ def _recover_transient_failed_experiment_tasks(
     db,
     current_model: str | None = None,
     fallback_enabled: bool = False,
+    repair_enabled: bool = False,
 ) -> int:
     """Recover a bounded transient failure, including one model-failover attempt.
 
@@ -105,7 +106,25 @@ def _recover_transient_failed_experiment_tasks(
             and all(run.model and run.model != current_model for run in runs)
         )
         fallback_recovery = fallback_enabled and len(runs) <= 8
-        if transient_only and (first_generation or model_failover or fallback_recovery):
+        validation_errors = sum(
+            run.error == "research_worker_failed:ValidationError" for run in runs
+        )
+        repair_recovery = (
+            repair_enabled
+            and 9 <= len(runs) <= 12
+            and 1 <= validation_errors <= 4
+            and all(
+                run.error in {
+                    None,
+                    "research_worker_failed:HTTPStatusError",
+                    "research_worker_failed:ValidationError",
+                }
+                for run in runs
+            )
+        )
+        if (
+            transient_only and (first_generation or model_failover or fallback_recovery)
+        ) or repair_recovery:
             parent.status = TaskStatus.QUEUED
             recovered += 1
     if recovered:
@@ -119,6 +138,7 @@ async def run_once() -> int:
             db,
             current_model=settings.llm_model,
             fallback_enabled=bool(settings.llm_fallback_models.strip()),
+            repair_enabled=True,
         )
         product_ids = list(
             db.scalars(

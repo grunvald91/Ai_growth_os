@@ -149,3 +149,70 @@ def test_worker_stops_after_fallback_recovery_generation(db):
     db.refresh(parent)
     assert recovered == 0
     assert parent.status == TaskStatus.FAILED
+
+
+
+def test_worker_allows_one_retry_after_repairable_validation_generation(db):
+    parent = _failed_parent_with_runs(
+        db,
+        ["research_worker_failed:HTTPStatusError"] * 8,
+        model="gpt-6-sol",
+    )
+    product_id = parent.product_id
+    for index, error in enumerate(
+        [
+            None,
+            "research_worker_failed:ValidationError",
+            "research_worker_failed:ValidationError",
+            "research_worker_failed:ValidationError",
+        ]
+    ):
+        child = Task(
+            product_id=product_id,
+            parent_id=parent.id,
+            title=f"EXP-SERVGO-001: repair child {index}",
+            assigned_agent="segment_researcher",
+            status=TaskStatus.COMPLETED if error is None else TaskStatus.FAILED,
+        )
+        db.add(child)
+        db.flush()
+        db.add(
+            AgentRun(
+                task_id=child.id,
+                agent_name="segment_researcher",
+                status="completed" if error is None else "failed",
+                error=error,
+                model="gpt-6-sol",
+            )
+        )
+    db.commit()
+
+    recovered = _recover_transient_failed_experiment_tasks(
+        db,
+        current_model="gpt-6-sol",
+        fallback_enabled=True,
+        repair_enabled=True,
+    )
+
+    db.refresh(parent)
+    assert recovered == 1
+    assert parent.status == TaskStatus.QUEUED
+
+
+def test_worker_stops_after_repair_recovery_generation(db):
+    parent = _failed_parent_with_runs(
+        db,
+        ["research_worker_failed:ValidationError"] * 16,
+        model="gpt-6-sol",
+    )
+
+    recovered = _recover_transient_failed_experiment_tasks(
+        db,
+        current_model="gpt-6-sol",
+        fallback_enabled=True,
+        repair_enabled=True,
+    )
+
+    db.refresh(parent)
+    assert recovered == 0
+    assert parent.status == TaskStatus.FAILED
