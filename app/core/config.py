@@ -9,14 +9,14 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "postgresql+psycopg://ai_growth:ai_growth@localhost:5432/ai_growth"
     llm_provider: str = "xai"
-    llm_model: str = "deepseek-v4.1-flash"
+    llm_model: str = "gemini-flash-3.8"
     anthropic_api_key: str | None = None
     anthropic_base_url: str = "https://api.anthropic.com"
     xai_api_key: str | None = None
     xai_base_url: str = "https://api.claudehub.fun/v1"
     xai_reasoning_effort: Literal["low", "medium", "high", "xhigh"] = "low"
     xai_timeout_seconds: float = 300.0
-    llm_fallback_models: str = "gemini-flash-3.8"
+    llm_fallback_models: str = ""
     skills_root: Path = Path("skills")
     products_root: Path = Path("products")
     review_skill: str | None = None

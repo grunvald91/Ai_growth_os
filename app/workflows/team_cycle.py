@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -247,9 +247,54 @@ class TeamCycle:
                 "stop_sequence",
             ):
                 raise ValueError("Incomplete or oversized specialist response")
-            parsed = schema.model_validate_json(response.content)
-            parsed = schema.model_validate(self._sanitize_tree(parsed.model_dump(mode="json")))
-            self._validate_task_specific(task_type, parsed)
+            try:
+                parsed = schema.model_validate_json(response.content)
+                parsed = schema.model_validate(
+                    self._sanitize_tree(parsed.model_dump(mode="json"))
+                )
+                self._validate_task_specific(task_type, parsed)
+            except (ValidationError, ValueError) as exc:
+                repair = await asyncio.wait_for(
+                    self.llm.generate(
+                        LLMRequest(
+                            system_prompt=self._repair_prompt(schema, task_type, exc),
+                            messages=[
+                                LLMMessage(
+                                    role="user",
+                                    content=json.dumps(
+                                        {
+                                            "previous_response": response.content,
+                                            "validation_error": str(exc)[:12000],
+                                        },
+                                        ensure_ascii=False,
+                                    ),
+                                )
+                            ],
+                            model=self.model,
+                            max_tokens=SPECIALIST_MAX_TOKENS.get(task_type, 4500),
+                            response_schema=schema.model_json_schema(),
+                            metadata={
+                                "reasoning_effort": "low",
+                                "team_role": role.value,
+                                "task_type": task_type,
+                                "repair": True,
+                            },
+                        )
+                    ),
+                    timeout=SPECIALIST_TIMEOUTS.get(task_type, 120),
+                )
+                response = self._merge_usage(response, repair)
+                if len(response.content) > 120_000 or response.stop_reason not in (
+                    None,
+                    "end_turn",
+                    "stop_sequence",
+                ):
+                    raise ValueError("Incomplete or oversized repaired specialist response")
+                parsed = schema.model_validate_json(response.content)
+                parsed = schema.model_validate(
+                    self._sanitize_tree(parsed.model_dump(mode="json"))
+                )
+                self._validate_task_specific(task_type, parsed)
 
             error_code = "specialist_persistence_failed"
             artifact = ArtifactService(self.db).create(
@@ -352,6 +397,25 @@ class TeamCycle:
             }[task_type]
             if parsed.format != expected:
                 raise ValueError("Content format does not match task type")
+
+    @staticmethod
+    def _repair_prompt(schema: type[BaseModel], task_type: str, error: Exception) -> str:
+        return (
+            "Repair the previous JSON so it validates exactly against the required schema. "
+            "Return ONLY the corrected JSON object. Do not add new facts, evidence, product "
+            "capabilities, customer outcomes, market claims, links, or external actions. "
+            "Preserve the original factual limits and hypotheses. Remove extra fields and add "
+            "required fields only when they can be expressed without inventing evidence. "
+            f"Task type: {task_type}. Validation error: {str(error)[:12000]} "
+            "Schema: " + json.dumps(schema.model_json_schema(), ensure_ascii=False)
+        )
+
+    @staticmethod
+    def _merge_usage(first, second):
+        if first.usage is not None and second.usage is not None:
+            second.usage.input_tokens += first.usage.input_tokens
+            second.usage.output_tokens += first.usage.output_tokens
+        return second
 
     def _sanitize_tree(self, value):
         if isinstance(value, str):

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.agents import AGENT_CONFIGS, AgentRole
@@ -103,7 +104,36 @@ class DailyGrowthReview:
             error_code = 'invalid_strategy_output'
             if len(response.content) > 100_000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
                 raise ValueError('Incomplete or oversized response')
-            review = CMOReview.model_validate_json(response.content)
+            try:
+                review = CMOReview.model_validate_json(response.content)
+            except ValidationError as exc:
+                repair = await asyncio.wait_for(
+                    self.llm.generate(LLMRequest(
+                        system_prompt=(
+                            "Repair the previous JSON so it validates exactly against the CMOReview schema. "
+                            "Return ONLY corrected JSON. Preserve factual limits and existing evidence references. "
+                            "Do not invent facts, metrics, approvals, actions, product capabilities, or outcomes. "
+                            "Validation errors: "
+                            + json.dumps(exc.errors(include_input=False), ensure_ascii=False)
+                            + " Schema: "
+                            + json.dumps(CMOReview.model_json_schema(), ensure_ascii=False)
+                        ),
+                        messages=[LLMMessage(role='user', content=json.dumps({
+                            'previous_response': response.content,
+                        }, ensure_ascii=False))],
+                        model=self.model,
+                        max_tokens=6000,
+                        response_schema=CMOReview.model_json_schema(),
+                        metadata={'reasoning_effort': 'low', 'team_role': AgentRole.CMO.value,
+                                  'task_type': 'cmo_review'},
+                    )),
+                    timeout=CMO_TIMEOUT_SECONDS,
+                )
+                if response.usage is not None and repair.usage is not None:
+                    repair.usage.input_tokens += response.usage.input_tokens
+                    repair.usage.output_tokens += response.usage.output_tokens
+                response = repair
+                review = CMOReview.model_validate_json(response.content)
             validate_references(review, context)
             # Sanitize only human-authored strings, not serialized JSON (redaction can
             # consume JSON punctuation). All records use this sanitized contract.

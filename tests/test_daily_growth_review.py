@@ -70,6 +70,45 @@ async def test_end_to_end_state_evidence_delegation_usage(db, product, tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_cmo_invalid_json_gets_one_bounded_repair(db, product, tmp_path):
+    class SequenceProvider:
+        def __init__(self):
+            self.requests = []
+            self.outputs = [
+                '{"summary":"wrong","decisions":"not-a-list"}',
+                json.dumps(output()),
+            ]
+
+        async def generate(self, request):
+            self.requests.append(request)
+            return LLMResponse(
+                content=self.outputs.pop(0),
+                model='gemini-flash-3.8',
+                usage=LLMUsage(input_tokens=5, output_tokens=7),
+                stop_reason='end_turn',
+            )
+
+    provider = SequenceProvider()
+    review = build_review(
+        db,
+        Settings(
+            _env_file=None,
+            products_root=tmp_path,
+            llm_model='gemini-flash-3.8',
+            llm_fallback_models='',
+        ),
+        provider,
+        FakeToolGateway(),
+    )
+
+    result = await review.run(product.id)
+
+    assert result.status == 'completed'
+    assert len(provider.requests) == 2
+    assert 'Repair the previous JSON' in provider.requests[1].system_prompt
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('operation,risk', [('publish', 'YELLOW'), ('send_email', 'YELLOW'),
     ('modify_website', 'YELLOW'), ('change_pricing', 'RED'), ('change_credentials', 'RED'),
     ('destructive_operation', 'RED')])
