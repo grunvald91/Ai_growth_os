@@ -60,6 +60,7 @@ def _recover_transient_failed_experiment_tasks(
     current_model: str | None = None,
     fallback_enabled: bool = False,
     repair_enabled: bool = False,
+    reuse_enabled: bool = False,
 ) -> int:
     """Recover a bounded transient failure, including one model-failover attempt.
 
@@ -82,9 +83,10 @@ def _recover_transient_failed_experiment_tasks(
     )
     recovered = 0
     for parent in parents:
-        child_ids = list(
-            db.scalars(select(Task.id).where(Task.parent_id == parent.id))
+        child_tasks = list(
+            db.scalars(select(Task).where(Task.parent_id == parent.id))
         )
+        child_ids = [task.id for task in child_tasks]
         if not child_ids:
             continue
         runs = list(
@@ -122,9 +124,19 @@ def _recover_transient_failed_experiment_tasks(
                 for run in runs
             )
         )
+        completed_roles = {
+            task.assigned_agent
+            for task in child_tasks
+            if task.status == TaskStatus.COMPLETED
+        }
+        reuse_recovery = (
+            reuse_enabled
+            and 13 <= len(runs) <= 16
+            and len(completed_roles) >= 2
+        )
         if (
             transient_only and (first_generation or model_failover or fallback_recovery)
-        ) or repair_recovery:
+        ) or repair_recovery or reuse_recovery:
             parent.status = TaskStatus.QUEUED
             recovered += 1
     if recovered:
@@ -139,6 +151,7 @@ async def run_once() -> int:
             current_model=settings.llm_model,
             fallback_enabled=bool(settings.llm_fallback_models.strip()),
             repair_enabled=True,
+            reuse_enabled=True,
         )
         product_ids = list(
             db.scalars(
