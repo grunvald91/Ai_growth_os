@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -176,7 +176,43 @@ class ResearchDepartment:
                     None, "end_turn", "stop_sequence"
                 ):
                     raise ValueError("Incomplete or oversized research worker response")
-                parsed = schema.model_validate_json(response.content)
+                try:
+                    parsed = schema.model_validate_json(response.content)
+                except ValidationError as exc:
+                    repair = await asyncio.wait_for(
+                        self.llm.generate(
+                            LLMRequest(
+                                system_prompt=self._repair_prompt(schema, exc),
+                                messages=[
+                                    LLMMessage(
+                                        role="user",
+                                        content=json.dumps(
+                                            {
+                                                "previous_response": response.content,
+                                                "validation_errors": exc.errors(include_input=False),
+                                            },
+                                            ensure_ascii=False,
+                                        ),
+                                    )
+                                ],
+                                model=self.model,
+                                max_tokens=3200,
+                                response_schema=schema.model_json_schema(),
+                                metadata={
+                                    "reasoning_effort": "low",
+                                    "team_role": role.value,
+                                    "task_type": "research",
+                                },
+                            )
+                        ),
+                        timeout=WORKER_TIMEOUT_SECONDS,
+                    )
+                    if len(repair.content) > 80_000 or repair.stop_reason not in (
+                        None, "end_turn", "stop_sequence"
+                    ):
+                        raise ValueError("Incomplete or oversized repaired research response")
+                    response = self._merge_usage(response, repair)
+                    parsed = schema.model_validate_json(response.content)
                 parsed = schema.model_validate(
                     self._sanitize_tree(parsed.model_dump(mode="json"))
                 )
@@ -260,7 +296,43 @@ class ResearchDepartment:
                 None, "end_turn", "stop_sequence"
             ):
                 raise ValueError("Incomplete or oversized research lead response")
-            draft = ResearchSynthesisDraft.model_validate_json(lead_response.content)
+            try:
+                draft = ResearchSynthesisDraft.model_validate_json(lead_response.content)
+            except ValidationError as exc:
+                repair = await asyncio.wait_for(
+                    self.llm.generate(
+                        LLMRequest(
+                            system_prompt=self._repair_prompt(ResearchSynthesisDraft, exc),
+                            messages=[
+                                LLMMessage(
+                                    role="user",
+                                    content=json.dumps(
+                                        {
+                                            "previous_response": lead_response.content,
+                                            "validation_errors": exc.errors(include_input=False),
+                                        },
+                                        ensure_ascii=False,
+                                    ),
+                                )
+                            ],
+                            model=self.model,
+                            max_tokens=4000,
+                            response_schema=ResearchSynthesisDraft.model_json_schema(),
+                            metadata={
+                                "reasoning_effort": "low",
+                                "team_role": AgentRole.RESEARCH_LEAD.value,
+                                "task_type": "research_synthesis",
+                            },
+                        )
+                    ),
+                    timeout=LEAD_TIMEOUT_SECONDS,
+                )
+                if len(repair.content) > 100_000 or repair.stop_reason not in (
+                    None, "end_turn", "stop_sequence"
+                ):
+                    raise ValueError("Incomplete or oversized repaired research lead response")
+                lead_response = self._merge_usage(lead_response, repair)
+                draft = ResearchSynthesisDraft.model_validate_json(lead_response.content)
             draft = ResearchSynthesisDraft.model_validate(
                 self._sanitize_tree(draft.model_dump(mode="json"))
             )
@@ -400,6 +472,26 @@ class ResearchDepartment:
         self.db.get(Task, task_id).status = TaskStatus.FAILED
         self._record_usage(product_id, run_id, response)
         self.db.commit()
+
+    @staticmethod
+    def _merge_usage(first, second):
+        if first.usage is not None and second.usage is not None:
+            second.usage.input_tokens += first.usage.input_tokens
+            second.usage.output_tokens += first.usage.output_tokens
+        return second
+
+    @staticmethod
+    def _repair_prompt(schema: type[BaseModel], error: ValidationError) -> str:
+        return (
+            "Repair the previous JSON so it validates against the required schema. "
+            "Return ONLY the corrected JSON object. Preserve the original factual/evidentiary limits. "
+            "Do not add new claims, market facts, customer evidence, URLs, product capabilities, or outcomes. "
+            "If a field violates a length/count/type constraint, shorten, remove, or restructure only what is "
+            "necessary to satisfy the schema. Validation errors: "
+            + json.dumps(error.errors(include_input=False), ensure_ascii=False)
+            + " Schema: "
+            + json.dumps(schema.model_json_schema(), ensure_ascii=False)
+        )
 
     @staticmethod
     def _validate_voc_urls(report: CompetitorVOCReport, bundles: list[ResearchSourceBundle]) -> None:
