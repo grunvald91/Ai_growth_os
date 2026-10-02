@@ -42,3 +42,21 @@ def render_decision_required(item: ControlInboxItem) -> str:
     if item.risk_level:
         lines.extend(["", f"Риск: {item.risk_level}"])
     return "\n".join(lines)
+
+
+def render_experiments(status: ControlStatus) -> str:
+    lines = ["🧪 Эксперименты"]
+    found = False
+    for product in status.products:
+        if not product.experiments:
+            continue
+        found = True
+        lines.extend(["", product.product_name])
+        for record in product.experiments:
+            key = record.experiment_key or str(record.id)
+            metric = f" · метрика: {record.target_metric}" if record.target_metric else ""
+            lines.append(f"• {key} — {record.status}{metric}")
+            lines.append(f"  {record.name}")
+    if not found:
+        lines.extend(["", "Активных или черновых экспериментов нет."])
+    return "\n".join(lines)
