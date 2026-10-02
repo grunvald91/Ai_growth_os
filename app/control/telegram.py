@@ -63,7 +63,7 @@ def render_experiments(status: ControlStatus) -> str:
 
 
 
-def render_experiment_detail(experiment, prospect_count: int | None = None) -> str:
+def render_experiment_detail(experiment, prospect_stats: dict[str, int] | None = None) -> str:
     key = experiment.experiment_key or str(experiment.id)
     lines = [
         f"🧪 {key}",
@@ -75,8 +75,21 @@ def render_experiment_detail(experiment, prospect_count: int | None = None) -> s
     ]
     if experiment.observation_window_days:
         lines.append(f"Окно наблюдения: {experiment.observation_window_days} дней")
-    if prospect_count is not None:
-        lines.append(f"Prospects: {prospect_count}")
+    if prospect_stats is not None:
+        lines.append(f"Prospects: {prospect_stats.get('total', 0)}")
+        lines.append(
+            "Проверено: "
+            f"{prospect_stats.get('validated', 0)} · "
+            f"готово к контакту: {prospect_stats.get('ready_for_outreach', 0)}"
+        )
+        lines.append(
+            "Каналы: "
+            f"email {prospect_stats.get('email', 0)} · "
+            f"WhatsApp {prospect_stats.get('whatsapp', 0)} · "
+            f"Telegram {prospect_stats.get('telegram', 0)} · "
+            f"сайт {prospect_stats.get('website', 0)}"
+        )
+        lines.append(f"Уже contacted: {prospect_stats.get('contacted', 0)}")
     if experiment.budget is not None:
         lines.append(f"Бюджет: {experiment.budget} {experiment.currency or ''}".rstrip())
     if experiment.starts_at:
