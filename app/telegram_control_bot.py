@@ -163,8 +163,8 @@ class TelegramControlBot:
             if experiment is None:
                 await self._send(chat_id, "Эксперимент не найден.")
                 return
-            prospect_count = len(ProspectService(db).list_for_experiment(experiment.id))
-            body = render_experiment_detail(experiment, prospect_count)
+            prospect_stats = ProspectService(db).stats_for_experiment(experiment.id)
+            body = render_experiment_detail(experiment, prospect_stats)
             keyboard = []
             if experiment.status == "draft":
                 keyboard.append(
