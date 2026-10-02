@@ -1,0 +1,84 @@
+name: Verify complete ServGo enrichment
+
+on:
+  push:
+    branches:
+      - ops/verify-complete-enrichment
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Verify production data and worker model
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          DC="docker compose --env-file $REMOTE_ROOT/.env -p ai-growth-os -f docker-compose.prod.yml"
+
+          echo "=== WORKER MODEL ==="
+          $DC exec -T worker python - <<'PY'
+          import os
+          print("worker_model=", os.getenv("LLM_MODEL"))
+          print("worker_fallback=", os.getenv("LLM_FALLBACK_MODELS"))
+          print("worker_reasoning=", os.getenv("XAI_REASONING_EFFORT"))
+          PY
+
+          echo "=== SERVGO ENRICHMENT ==="
+          $DC exec -T api python - <<'PY'
+          import json
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Approval, Artifact, Experiment, Prospect
+
+          with SessionLocal() as db:
+              exp=db.scalar(select(Experiment).where(Experiment.experiment_key=="EXP-SERVGO-001"))
+              rows=list(db.scalars(select(Prospect).where(Prospect.experiment_id==exp.id)))
+              print("total=",len(rows))
+              print("validated=",sum(p.validation_status=="validated" for p in rows))
+              print("needs_review=",sum(p.validation_status=="needs_review" for p in rows))
+              print("email=",sum(bool(p.email) for p in rows))
+              print("whatsapp=",sum(bool(p.whatsapp) for p in rows))
+              print("telegram=",sum(bool(p.telegram) for p in rows))
+              print("website=",sum(bool(p.website) for p in rows))
+              print("direct_written=",sum(bool(p.email or p.whatsapp or p.telegram) for p in rows))
+              print("ready_for_outreach=",sum(
+                  p.validation_status=="validated"
+                  and p.preferred_channel in {"email","whatsapp","telegram"}
+                  and bool(getattr(p,p.preferred_channel))
+                  for p in rows
+              ))
+              print("contacted=",sum(p.outreach_status!="not_contacted" for p in rows))
+
+              approvals=list(db.scalars(select(Approval).where(
+                  Approval.product_id==exp.product_id,
+                  Approval.status=="pending",
+                  Approval.action_type=="send_outreach_batch",
+              ).order_by(Approval.created_at.desc())))
+              print("pending_outreach_approvals=",len(approvals))
+
+              artifacts=list(db.scalars(select(Artifact).where(
+                  Artifact.product_id==exp.product_id,
+                  Artifact.kind=="outreach_package",
+              ).order_by(Artifact.created_at.desc())))
+              if artifacts:
+                  payload=json.loads(artifacts[0].content)
+                  print("latest_outreach_messages=",len(payload.get("messages") or []))
+                  print("latest_outreach_artifact=",artifacts[0].id)
+          PY
+          REMOTE
