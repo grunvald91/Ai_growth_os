@@ -262,6 +262,7 @@ class TeamCycle:
             )
             run = self.db.get(AgentRun, run_id)
             run.status = "completed"
+            run.model = response.model
             run.finished_at = datetime.now(timezone.utc)
             run.output_references = [{"kind": "artifact", "id": str(artifact.id)}]
             self.db.get(Task, task.id).status = TaskStatus.COMPLETED
@@ -377,6 +378,7 @@ class TeamCycle:
                 incurred_at=datetime.now(timezone.utc),
                 details={
                     "cost_known": False,
+                    "model": response.model,
                     "note": "Usage recorded; monetary price unavailable, zero is not a free-cost claim.",
                 },
             )
