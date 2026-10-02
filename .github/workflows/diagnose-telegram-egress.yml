@@ -38,20 +38,27 @@ jobs:
           echo "=== CONTAINER STATUS ==="
           docker ps --filter name=ai-growth-os-telegram-1 --format 'name={{.Names}} status={{.Status}}'
           echo "=== CONTAINER DNS/IPV4 ==="
-          docker exec ai-growth-os-telegram-1 python - <<'PY'
+          docker exec -i ai-growth-os-telegram-1 python - <<'PY'
           import socket
           try:
               print("dns", socket.getaddrinfo("api.telegram.org", 443, type=socket.SOCK_STREAM))
           except Exception as exc:
               print("dns_error", type(exc).__name__, str(exc))
           PY
-          docker exec ai-growth-os-telegram-1 python - <<'PY'
+          docker exec -i ai-growth-os-telegram-1 python - <<'PY'
           import httpx
           try:
               r=httpx.get("https://api.telegram.org/", timeout=httpx.Timeout(12, connect=8))
-              print("container_http", r.status_code)
+              print("container_http_default", r.status_code)
           except Exception as exc:
-              print("container_error", type(exc).__name__, str(exc))
+              print("container_default_error", type(exc).__name__, str(exc))
+          try:
+              transport=httpx.HTTPTransport(local_address="0.0.0.0")
+              with httpx.Client(transport=transport, timeout=httpx.Timeout(12, connect=8)) as client:
+                  r=client.get("https://api.telegram.org/")
+                  print("container_http_ipv4", r.status_code)
+          except Exception as exc:
+              print("container_ipv4_error", type(exc).__name__, str(exc))
           PY
           echo "=== TELEGRAM CONTAINER LOG TAIL ==="
           docker logs --tail 40 ai-growth-os-telegram-1 2>&1 | sed -E 's#bot[0-9]+:[A-Za-z0-9_-]+#bot***#g'
