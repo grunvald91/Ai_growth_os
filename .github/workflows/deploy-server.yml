@@ -138,7 +138,8 @@ jobs:
           if [ -f products/servgo/experiments/EXP-SERVGO-001/enrichment.json ]; then
             dc run -T --rm api python -m app.apply_prospect_enrichment \
               --experiment EXP-SERVGO-001 \
-              --file /app/products/servgo/experiments/EXP-SERVGO-001/enrichment.json </dev/null
+              --file /app/products/servgo/experiments/EXP-SERVGO-001/enrichment.json \
+              --prepare-outreach </dev/null
           fi
           dc up -d api worker
           if grep -q "^TELEGRAM_BOT_TOKEN=." "$REMOTE_ROOT/.env" && grep -q "^TELEGRAM_OWNER_CHAT_ID=." "$REMOTE_ROOT/.env"; then
