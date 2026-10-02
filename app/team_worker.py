@@ -17,23 +17,26 @@ async def _notify_owner(settings, *, product_name: str, result, decisions_waitin
     failed = len(result.failed_task_ids)
     skipped = len(result.skipped_task_ids)
     lines = [
-        "🤖 Внутренний цикл команды завершён",
+        "🤖 Команда завершила очередной этап работы",
         "",
-        product_name,
-        f"Выполнено задач: {completed}",
-        f"Ошибок: {failed}",
-        f"Пропущено: {skipped}",
-        f"Решений ждёт тебя: {decisions_waiting}",
+        f"📌 Проект: {product_name}",
+        f"✅ Выполнено задач: {completed}",
+        f"⚠️ С ошибкой: {failed}",
+        f"⏭ Пропущено: {skipped}",
+        "",
+        (
+            f"🙋 Нужно твоё решение: {decisions_waiting}"
+            if decisions_waiting
+            else "✅ От тебя сейчас ничего не требуется."
+        ),
     ]
-    if result.followup_review is not None:
-        lines.append(f"CMO review: {result.followup_review.status}")
     keyboard = {
         "inline_keyboard": [
             [
-                {"text": "📨 Решения", "callback_data": "menu:inbox"},
-                {"text": "📊 Статус", "callback_data": "menu:status"},
+                {"text": "✅ На согласование", "callback_data": "menu:inbox"},
+                {"text": "📊 Главное", "callback_data": "menu:status"},
             ],
-            [{"text": "🧪 Эксперименты", "callback_data": "menu:experiments"}],
+            [{"text": "🧪 Тесты", "callback_data": "menu:experiments"}],
         ]
     }
     try:
