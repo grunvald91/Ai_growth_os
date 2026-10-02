@@ -75,6 +75,12 @@ def test_enrichment_requires_evidence_and_is_idempotent(db):
     assert stats == {
         "total": 1,
         "validated": 1,
+        "enrichment_resolved": 0,
+        "enrichment_pending": 1,
+        "direct": 0,
+        "website_or_chat": 0,
+        "phone_only": 0,
+        "stale": 0,
         "phone": 1,
         "contact_found": 1,
         "needs_review": 0,
@@ -139,6 +145,12 @@ def test_validated_requires_identity_evidence_and_render_shows_stats(db):
         {
             "total": 30,
             "validated": 30,
+            "enrichment_resolved": 30,
+            "enrichment_pending": 0,
+            "direct": 22,
+            "website_or_chat": 5,
+            "phone_only": 2,
+            "stale": 1,
             "phone": 30,
             "contact_found": 30,
             "ready_for_outreach": 10,
@@ -150,6 +162,7 @@ def test_validated_requires_identity_evidence_and_render_shows_stats(db):
         },
     )
     assert "Prospects: 30" in text
+    assert "Enrichment: готово 30/30 · осталось 0" in text
     assert "найдено 30/30" in text
     assert "письменный outreach 10" in text
     assert "Проверено компаний: 30" in text
@@ -173,8 +186,42 @@ def test_servgo_enrichment_batch_covers_all_30_contacts():
     assert {row["lead_id"] for row in rows} == {
         f"SG001-{index:03d}" for index in range(1, 31)
     }
-    assert all(row["validation_status"] == "validated" for row in rows)
+    assert sum(row["validation_status"] == "validated" for row in rows) == 29
+    assert sum(row["validation_status"] == "needs_review" for row in rows) == 1
+    assert all(row["enrichment_status"] != "pending" for row in rows)
     assert all(
         any(item["field"] == "identity" for item in row["evidence"])
         for row in rows
     )
+
+
+
+def test_enrichment_resolution_requires_real_channel(db):
+    experiment, prospect = _setup(db)
+    service = ProspectService(db)
+
+    with pytest.raises(ValueError, match="direct status requires"):
+        service.apply_enrichment(
+            experiment_id=experiment.id,
+            rows=[
+                {
+                    "lead_id": "SG001-001",
+                    "enrichment_status": "direct",
+                    "evidence": [_evidence("identity", "Example SPA")],
+                }
+            ],
+        )
+
+    service.apply_enrichment(
+        experiment_id=experiment.id,
+        rows=[
+            {
+                "lead_id": "SG001-001",
+                "enrichment_status": "phone_only",
+                "evidence": [_evidence("identity", "Example SPA")],
+            }
+        ],
+    )
+    db.commit()
+    db.refresh(prospect)
+    assert prospect.enrichment_status == "phone_only"
