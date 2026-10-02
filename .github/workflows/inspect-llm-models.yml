@@ -1,4 +1,4 @@
-name: Inspect available LLM models
+name: Smoke cheap LLM models
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  inspect:
+  smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Install sshpass
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
-      - name: List model ids
+      - name: Smoke cheap candidates
         run: |
           set -euo pipefail
           OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
@@ -29,16 +29,46 @@ jobs:
           set -euo pipefail
           cd "$REMOTE_ROOT/current"
           docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
-          import os, httpx
-          base=os.environ["XAI_BASE_URL"].rstrip("/")
-          key=os.environ["XAI_API_KEY"]
-          r=httpx.get(base+"/models", headers={"Authorization":f"Bearer {key}"}, timeout=30)
-          r.raise_for_status()
-          data=r.json()
-          models=data.get("data") or []
-          for row in sorted(models, key=lambda x: str(x.get("id",""))):
-              mid=str(row.get("id",""))
-              if mid:
-                  print(mid)
+          import asyncio, os, httpx
+
+          BASE=os.environ["XAI_BASE_URL"].rstrip("/")
+          KEY=os.environ["XAI_API_KEY"]
+          MODELS=["deepseek-v4.1-flash","deepseek-v4-flash","gemini-flash-3.8"]
+
+          async def call(model, structured):
+              payload={
+                  "model": model,
+                  "messages":[{"role":"user","content":'Return JSON with key "ok" and boolean true.'}],
+                  "max_completion_tokens":128,
+              }
+              if structured:
+                  payload["response_format"]={
+                      "type":"json_schema",
+                      "json_schema":{
+                          "name":"structured_response",
+                          "strict":True,
+                          "schema":{
+                              "type":"object",
+                              "properties":{"ok":{"type":"boolean"}},
+                              "required":["ok"],
+                              "additionalProperties":False,
+                          },
+                      },
+                  }
+              async with httpx.AsyncClient(timeout=60) as client:
+                  r=await client.post(
+                      BASE+"/chat/completions",
+                      headers={"Authorization":f"Bearer {KEY}","Content-Type":"application/json"},
+                      json=payload,
+                  )
+              body=(r.text or "")[:500].replace("\n"," ")
+              print(model, "schema" if structured else "plain", r.status_code, body)
+
+          async def main():
+              for model in MODELS:
+                  await call(model, False)
+                  await call(model, True)
+
+          asyncio.run(main())
           PY
           REMOTE
