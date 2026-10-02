@@ -293,6 +293,7 @@ class ResearchDepartment:
             )
             lead = self.db.get(AgentRun, lead_run_id)
             lead.status = "completed"
+            lead.model = lead_response.model
             lead.finished_at = datetime.now(timezone.utc)
             lead.output_references = [{"kind": "artifact", "id": str(artifact.id)}]
             self.db.get(Task, parent.id).status = TaskStatus.COMPLETED
@@ -364,6 +365,8 @@ class ResearchDepartment:
         )
         active_run = self.db.get(AgentRun, run.id)
         active_run.status = "completed"
+        if response is not None:
+            active_run.model = response.model
         active_run.finished_at = datetime.now(timezone.utc)
         active_run.output_references = [{"kind": "artifact", "id": str(artifact.id)}]
         self.db.get(Task, child.id).status = TaskStatus.COMPLETED

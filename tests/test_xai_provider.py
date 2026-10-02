@@ -5,6 +5,7 @@ import pytest
 
 from app.core.composition import build_llm_provider
 from app.core.config import Settings
+from app.llm.fallback import FallbackProvider
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.xai import XAIProvider
 
@@ -207,3 +208,50 @@ async def test_xai_provider_does_not_retry_nontransient_http_error(monkeypatch):
 
     assert SequenceAsyncClient.calls == 1
     assert sleeps == []
+
+
+
+@pytest.mark.asyncio
+async def test_non_grok_model_omits_grok_specific_fields(monkeypatch):
+    monkeypatch.setattr("app.llm.xai.httpx.AsyncClient", FakeAsyncClient)
+    provider = XAIProvider(
+        api_key="xai-test-secret",
+        model="gpt-6-sol",
+        reasoning_effort="medium",
+    )
+
+    await provider.generate(
+        LLMRequest(
+            messages=[LLMMessage(role="user", content="hello")],
+            model="gpt-6-sol",
+            metadata={
+                "reasoning_effort": "low",
+                "conversation_id": "should-not-be-grok-header",
+            },
+        )
+    )
+
+    sent = FakeAsyncClient.last.request
+    assert sent["json"]["model"] == "gpt-6-sol"
+    assert "reasoning_effort" not in sent["json"]
+    assert "x-grok-conv-id" not in sent["headers"]
+
+
+
+def test_composition_builds_model_fallback_chain():
+    settings = Settings(
+        _env_file=None,
+        llm_provider="xai",
+        llm_model="gpt-6-sol",
+        llm_fallback_models="claude-opus-5-5,grok-4.7,gpt-6-sol",
+        xai_api_key="xai-test-secret",
+    )
+
+    provider = build_llm_provider(settings)
+
+    assert isinstance(provider, FallbackProvider)
+    assert [model for model, _ in provider._providers] == [
+        "gpt-6-sol",
+        "claude-opus-5-5",
+        "grok-4.7",
+    ]

@@ -112,3 +112,40 @@ def test_worker_does_not_retry_same_model_after_two_generations(db):
     db.refresh(parent)
     assert recovered == 0
     assert parent.status == TaskStatus.FAILED
+
+
+
+def test_worker_allows_one_retry_after_fallback_chain_activation(db):
+    parent = _failed_parent_with_runs(
+        db,
+        ["research_worker_failed:HTTPStatusError"] * 8,
+        model="gpt-6-sol",
+    )
+
+    recovered = _recover_transient_failed_experiment_tasks(
+        db,
+        current_model="gpt-6-sol",
+        fallback_enabled=True,
+    )
+
+    db.refresh(parent)
+    assert recovered == 1
+    assert parent.status == TaskStatus.QUEUED
+
+
+def test_worker_stops_after_fallback_recovery_generation(db):
+    parent = _failed_parent_with_runs(
+        db,
+        ["research_worker_failed:HTTPStatusError"] * 12,
+        model="gpt-6-sol",
+    )
+
+    recovered = _recover_transient_failed_experiment_tasks(
+        db,
+        current_model="gpt-6-sol",
+        fallback_enabled=True,
+    )
+
+    db.refresh(parent)
+    assert recovered == 0
+    assert parent.status == TaskStatus.FAILED
