@@ -44,6 +44,7 @@ jobs:
                       "model":model,
                       "messages":[{"role":"user","content":'Return JSON: {"ok": true}'}],
                       "max_completion_tokens":128,
+                      "reasoning_effort":"medium",
                   }
                   if mode=="schema":
                       payload["response_format"]={
