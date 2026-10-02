@@ -126,7 +126,7 @@ async def test_team_cycle_executes_nonresearch_specialists_and_persists_results(
 async def test_bad_specialist_output_fails_one_task_and_continues(db, product, tmp_path):
     first = add_task(db, product, role="content_seo", task_type="article_brief", title="Bad content", priority=90)
     second = add_task(db, product, role="analytics", task_type="analytics", title="Good analytics", priority=80)
-    provider = SequenceProvider(["not-json", analytics_output()])
+    provider = SequenceProvider(["not-json", "still-not-json", analytics_output()])
     cycle = build_team_cycle(db, Settings(products_root=tmp_path), provider)
 
     result = await cycle.run(product.id, followup_cmo=False)
@@ -136,6 +136,42 @@ async def test_bad_specialist_output_fails_one_task_and_continues(db, product, t
     assert db.get(Task, first.id).status == TaskStatus.FAILED
     assert db.get(Task, second.id).status == TaskStatus.COMPLETED
     assert len(result.artifact_ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_structured_output_gets_one_repair_attempt(db, product, tmp_path):
+    task = add_task(
+        db,
+        product,
+        role="content_seo",
+        task_type="article_brief",
+        title="Repair content",
+    )
+    provider = SequenceProvider([
+        {"wrong": "shape"},
+        content_output(),
+    ])
+    cycle = build_team_cycle(
+        db,
+        Settings(
+            _env_file=None,
+            products_root=tmp_path,
+            llm_model="gemini-flash-3.8",
+            llm_fallback_models="",
+        ),
+        provider,
+    )
+
+    result = await cycle.run(product.id, followup_cmo=False)
+
+    assert result.completed_task_ids == [task.id]
+    assert result.failed_task_ids == []
+    assert len(provider.requests) == 2
+    assert provider.requests[0].response_schema is not None
+    assert provider.requests[1].response_schema is not None
+    assert "Repair the previous JSON" in provider.requests[1].system_prompt
+    artifact = db.get(Artifact, result.artifact_ids[0])
+    assert artifact.kind == "article_brief"
 
 
 @pytest.mark.asyncio
