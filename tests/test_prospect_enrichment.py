@@ -74,6 +74,8 @@ def test_enrichment_requires_evidence_and_is_idempotent(db):
     stats = service.stats_for_experiment(experiment.id)
     assert stats == {
         "total": 1,
+        "contact_found": 1,
+        "phone": 1,
         "validated": 1,
         "needs_review": 0,
         "email": 1,
@@ -136,6 +138,8 @@ def test_validated_requires_identity_evidence_and_render_shows_stats(db):
         experiment,
         {
             "total": 30,
+            "contact_found": 30,
+            "phone": 30,
             "validated": 10,
             "ready_for_outreach": 10,
             "email": 4,
@@ -146,6 +150,8 @@ def test_validated_requires_identity_evidence_and_render_shows_stats(db):
         },
     )
     assert "Prospects: 30" in text
+    assert "Контакты найдены: 30/30" in text
+    assert "телефоны 30" in text
     assert "Проверено: 10" in text
     assert "готово к контакту: 10" in text
     assert "email 4" in text
