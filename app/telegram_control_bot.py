@@ -1,4 +1,5 @@
 import asyncio
+import os
 from uuid import UUID
 
 import httpx
@@ -18,7 +19,7 @@ class TelegramAPIError(RuntimeError):
 class TelegramAPI:
     def __init__(self, token: str, proxy_url: str | None = None) -> None:
         self.base_url = f"https://api.telegram.org/bot{token}"
-        self.proxy_url = proxy_url
+        self.proxy_url = proxy_url or os.getenv("TELEGRAM_PROXY_URL")
 
     async def call(self, method: str, payload: dict | None = None) -> dict:
         async with httpx.AsyncClient(timeout=35.0, proxy=self.proxy_url) as client:
