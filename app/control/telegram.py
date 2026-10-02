@@ -56,6 +56,7 @@ def user_text(value: str | None, fallback: str = "не указано") -> str:
     replacements = {
         "Direct outreach": "Прямые обращения",
         "direct outreach": "прямые обращения",
+        "Outreach": "Обращения",
         "outreach": "обращения",
         "qualified leads": "заинтересованные потенциальные клиенты",
         "qualified lead": "заинтересованный потенциальный клиент",
