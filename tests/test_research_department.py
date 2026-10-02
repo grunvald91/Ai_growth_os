@@ -224,3 +224,47 @@ async def test_research_department_uses_supplied_review_sources(db, product, tmp
         if r.metadata.get("team_role") == "competitor_voc_researcher"
     )
     assert "https://reviews.example/a" in voc_request.messages[0].content
+
+
+
+class RepairingRoleProvider(RoleProvider):
+    def __init__(self):
+        super().__init__(voc_available=False)
+        self.invalid_channel_once = True
+
+    async def generate(self, request):
+        role = request.metadata.get("team_role")
+        if role == "channel_researcher" and self.invalid_channel_once:
+            self.invalid_channel_once = False
+            self.requests.append(request.model_copy(deep=True))
+            return LLMResponse(
+                content=json.dumps({
+                    "summary": "",
+                    "hypotheses": [],
+                    "evidence_gaps": [],
+                }),
+                model="fake-invalid",
+                usage=LLMUsage(input_tokens=4, output_tokens=5),
+                stop_reason="end_turn",
+            )
+        return await super().generate(request)
+
+
+@pytest.mark.asyncio
+async def test_research_department_repairs_one_invalid_worker_json(db, product, tmp_path):
+    parent = add_research_task(db, product)
+    provider = RepairingRoleProvider()
+    cycle = build_team_cycle(db, Settings(products_root=tmp_path), provider)
+
+    result = await cycle.run(product.id, max_tasks=1, followup_cmo=False)
+
+    assert result.completed_task_ids == [parent.id]
+    channel_requests = [
+        req for req in provider.requests
+        if req.metadata.get("team_role") == "channel_researcher"
+    ]
+    assert len(channel_requests) == 2
+    channel_artifact = db.scalar(
+        select(Artifact).where(Artifact.kind == "channel_research")
+    )
+    assert channel_artifact is not None
