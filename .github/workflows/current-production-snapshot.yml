@@ -1,0 +1,69 @@
+name: Current production snapshot
+
+on:
+  push:
+    branches:
+      - ops/current-snapshot-1604
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Snapshot production
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          DC="docker compose --env-file $REMOTE_ROOT/.env -p ai-growth-os -f docker-compose.prod.yml"
+          echo "=== ENV ==="
+          $DC exec -T worker python - <<'PY'
+          import os
+          print("worker_model=", os.getenv("LLM_MODEL"))
+          print("worker_fallbacks=", os.getenv("LLM_FALLBACK_MODELS"))
+          print("worker_reasoning=", os.getenv("XAI_REASONING_EFFORT"))
+          PY
+
+          echo "=== DB ==="
+          $DC exec -T api python - <<'PY'
+          import json
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Approval, Experiment, Prospect
+          from app.services.prospects import ProspectService
+
+          with SessionLocal() as db:
+              exp=db.scalar(select(Experiment).where(Experiment.experiment_key=="EXP-SERVGO-001"))
+              stats=ProspectService(db).stats_for_experiment(exp.id)
+              print("experiment_status=", exp.status)
+              print("STATS="+json.dumps(stats,sort_keys=True))
+              prospects=list(db.scalars(select(Prospect).where(Prospect.experiment_id==exp.id).order_by(Prospect.lead_key)))
+              missing=[]
+              for p in prospects:
+                  if not any([p.email,p.whatsapp,p.telegram,p.website]):
+                      missing.append({"lead_key":p.lead_key,"business_name":p.business_name,"phone":p.public_phone,"validation":p.validation_status})
+              print("MISSING_DIRECT="+json.dumps(missing,ensure_ascii=False))
+              pending=list(db.scalars(select(Approval).where(
+                  Approval.product_id==exp.product_id,
+                  Approval.action_type=="send_outreach_batch",
+                  Approval.status=="pending",
+              ).order_by(Approval.created_at.desc())))
+              print("pending_send_approvals=", len(pending))
+              for a in pending[:1]:
+                  print("approval_reason=", a.reason or "")
+          PY
+          REMOTE
