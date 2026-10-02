@@ -9,6 +9,7 @@ from app.models.domain import Prospect
 
 _ENRICHMENT_FIELDS = ("website", "email", "whatsapp", "telegram")
 _VALIDATION_STATUSES = {"pending", "needs_review", "validated"}
+_ENRICHMENT_STATUSES = {"pending", "direct", "website_or_chat", "phone_only", "stale"}
 _PREFERRED_CHANNELS = set(_ENRICHMENT_FIELDS)
 
 
@@ -35,6 +36,8 @@ class ProspectService:
                     Prospect.lead_key == lead_key,
                 )
             )
+            self._validate_enrichment_resolution(lead_key, prospect)
+
             checked_at = self._date(row.get("source_checked_at"))
             if prospect is None:
                 prospect = Prospect(
@@ -50,6 +53,7 @@ class ProspectService:
                     source_checked_at=checked_at,
                     fit_status=self._text(row.get("fit_status")) or "needs_validation",
                     validation_status="pending",
+                    enrichment_status="pending",
                     outreach_status=self._text(row.get("outreach_status")) or "not_contacted",
                     tracking_url=self._text(row.get("tracking_url")),
                     evidence=[],
@@ -114,6 +118,14 @@ class ProspectService:
                     )
                 prospect.validation_status = validation_status
 
+            enrichment_status = self._text(row.get("enrichment_status"))
+            if enrichment_status is not None:
+                if enrichment_status not in _ENRICHMENT_STATUSES:
+                    raise ValueError(
+                        f"{lead_key}: unsupported enrichment_status {enrichment_status}"
+                    )
+                prospect.enrichment_status = enrichment_status
+
             for field in _ENRICHMENT_FIELDS:
                 value = self._text(row.get(field))
                 if value is None:
@@ -169,6 +181,12 @@ class ProspectService:
         return {
             "total": len(prospects),
             "validated": sum(p.validation_status == "validated" for p in prospects),
+            "enrichment_resolved": sum(p.enrichment_status != "pending" for p in prospects),
+            "enrichment_pending": sum(p.enrichment_status == "pending" for p in prospects),
+            "direct": sum(p.enrichment_status == "direct" for p in prospects),
+            "website_or_chat": sum(p.enrichment_status == "website_or_chat" for p in prospects),
+            "phone_only": sum(p.enrichment_status == "phone_only" for p in prospects),
+            "stale": sum(p.enrichment_status == "stale" for p in prospects),
             "phone": sum(bool(p.public_phone) for p in prospects),
             "contact_found": sum(
                 p.validation_status == "validated"
@@ -203,6 +221,21 @@ class ProspectService:
                 .order_by(Prospect.lead_key.asc(), Prospect.id)
             )
         )
+
+    @staticmethod
+    def _validate_enrichment_resolution(lead_key: str, prospect: Prospect) -> None:
+        status = prospect.enrichment_status
+        if status == "pending":
+            return
+        direct_available = bool(prospect.email or prospect.whatsapp or prospect.telegram)
+        if status == "direct" and not direct_available:
+            raise ValueError(f"{lead_key}: direct status requires email/whatsapp/telegram")
+        if status == "website_or_chat" and not prospect.website:
+            raise ValueError(f"{lead_key}: website_or_chat status requires website")
+        if status == "phone_only" and not prospect.public_phone:
+            raise ValueError(f"{lead_key}: phone_only status requires public_phone")
+        if status == "stale":
+            prospect.preferred_channel = None
 
     @staticmethod
     def _normalize_evidence(lead_key: str, item) -> dict:
