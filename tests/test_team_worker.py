@@ -216,3 +216,66 @@ def test_worker_stops_after_repair_recovery_generation(db):
     db.refresh(parent)
     assert recovered == 0
     assert parent.status == TaskStatus.FAILED
+
+
+
+def test_worker_allows_one_final_retry_when_prior_roles_are_reusable(db):
+    parent = _failed_parent_with_runs(
+        db,
+        ["research_worker_failed:ValidationError"] * 16,
+        model="gpt-6-sol",
+    )
+    children = list(
+        db.query(Task)
+        .filter(Task.parent_id == parent.id)
+        .order_by(Task.created_at.asc(), Task.id.asc())
+        .all()
+    )
+    children[0].assigned_agent = "segment_researcher"
+    children[0].status = TaskStatus.COMPLETED
+    children[1].assigned_agent = "channel_researcher"
+    children[1].status = TaskStatus.COMPLETED
+    db.commit()
+
+    recovered = _recover_transient_failed_experiment_tasks(
+        db,
+        current_model="gpt-6-sol",
+        fallback_enabled=True,
+        repair_enabled=True,
+        reuse_enabled=True,
+    )
+
+    db.refresh(parent)
+    assert recovered == 1
+    assert parent.status == TaskStatus.QUEUED
+
+
+def test_worker_does_not_retry_reuse_after_more_than_sixteen_runs(db):
+    parent = _failed_parent_with_runs(
+        db,
+        ["research_worker_failed:ValidationError"] * 20,
+        model="gpt-6-sol",
+    )
+    children = list(
+        db.query(Task)
+        .filter(Task.parent_id == parent.id)
+        .order_by(Task.created_at.asc(), Task.id.asc())
+        .all()
+    )
+    children[0].assigned_agent = "segment_researcher"
+    children[0].status = TaskStatus.COMPLETED
+    children[1].assigned_agent = "channel_researcher"
+    children[1].status = TaskStatus.COMPLETED
+    db.commit()
+
+    recovered = _recover_transient_failed_experiment_tasks(
+        db,
+        current_model="gpt-6-sol",
+        fallback_enabled=True,
+        repair_enabled=True,
+        reuse_enabled=True,
+    )
+
+    db.refresh(parent)
+    assert recovered == 0
+    assert parent.status == TaskStatus.FAILED
