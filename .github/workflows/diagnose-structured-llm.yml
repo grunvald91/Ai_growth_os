@@ -1,0 +1,71 @@
+name: Diagnose structured LLM request
+
+on:
+  push:
+    branches:
+      - ops/check-exp-servgo-001-after-launch
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Compare plain and structured model calls
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import asyncio
+          import httpx
+          from app.core.composition import build_llm_provider
+          from app.core.config import get_settings
+          from app.llm.schemas import LLMMessage, LLMRequest
+
+          async def attempt(label, schema):
+              provider = build_llm_provider(get_settings())
+              try:
+                  result = await provider.generate(
+                      LLMRequest(
+                          messages=[LLMMessage(role="user", content='Return JSON with key "ok" and value true.')],
+                          max_tokens=128,
+                          response_schema=schema,
+                          metadata={"reasoning_effort":"low"},
+                      )
+                  )
+                  print(label, "ok", result.model, result.content[:300].replace("\n"," "))
+              except httpx.HTTPStatusError as exc:
+                  body = (exc.response.text or "")[:1000].replace("\n"," ")
+                  print(label, "http_error", exc.response.status_code, body)
+              except Exception as exc:
+                  print(label, "error", type(exc).__name__, str(exc)[:1000])
+
+          async def main():
+              await attempt("plain", None)
+              await attempt(
+                  "schema",
+                  {
+                      "type":"object",
+                      "properties":{"ok":{"type":"boolean"}},
+                      "required":["ok"],
+                      "additionalProperties":False,
+                  },
+              )
+
+          asyncio.run(main())
+          PY
+          REMOTE
