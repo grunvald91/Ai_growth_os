@@ -1,0 +1,62 @@
+name: Test LLM fallback models
+
+on:
+  push:
+    branches:
+      - ops/test-llm-fallback
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Probe fallback models through ClaudeHub
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import asyncio
+          import httpx
+          from app.core.composition import build_llm_provider
+          from app.core.config import get_settings
+          from app.llm.schemas import LLMMessage, LLMRequest
+
+          MODELS = ["grok-4.7", "claude-opus-5-5"]
+
+          async def main():
+              provider = build_llm_provider(get_settings())
+              for model in MODELS:
+                  try:
+                      result = await provider.generate(
+                          LLMRequest(
+                              model=model,
+                              messages=[LLMMessage(role="user", content="Reply with exactly: OK")],
+                              max_tokens=64,
+                              metadata={"reasoning_effort":"low"},
+                          )
+                      )
+                      print("model", model, "ok", result.model, result.content[:120].replace("\n"," "))
+                  except httpx.HTTPStatusError as exc:
+                      body=(exc.response.text or "")[:500].replace("\n"," ")
+                      print("model", model, "http_error", exc.response.status_code, body)
+                  except Exception as exc:
+                      print("model", model, "error", type(exc).__name__, str(exc)[:500])
+
+          asyncio.run(main())
+          PY
+          REMOTE
