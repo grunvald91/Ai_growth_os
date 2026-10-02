@@ -87,6 +87,18 @@ class OutreachPackageService:
                 status=ArtifactStatus.AWAITING_APPROVAL,
             )
 
+        channel_counts: dict[str, int] = {}
+        for message in messages:
+            channel_counts[message["channel"]] = channel_counts.get(message["channel"], 0) + 1
+        counts = ", ".join(
+            f"{name}: {count}" for name, count in sorted(channel_counts.items())
+        )
+        reason = (
+            f"{len(messages)} exact first-contact drafts are ready ({counts}). "
+            "Approve only if these messages may be sent to these exact prospects. "
+            "Approval does not itself send anything until Communication Gateway execution is connected."
+        )
+
         approval = self.db.scalar(
             select(Approval)
             .where(
@@ -98,12 +110,17 @@ class OutreachPackageService:
             .limit(1)
         )
         if approval is None:
-            channel_counts: dict[str, int] = {}
-            for message in messages:
-                channel_counts[message["channel"]] = channel_counts.get(message["channel"], 0) + 1
-            counts = ", ".join(
-                f"{name}: {count}" for name, count in sorted(channel_counts.items())
+            approval = self.db.scalar(
+                select(Approval)
+                .where(
+                    Approval.product_id == experiment.product_id,
+                    Approval.action_type == "send_outreach_batch",
+                    Approval.status == "pending",
+                )
+                .order_by(Approval.created_at.desc(), Approval.id)
+                .limit(1)
             )
+        if approval is None:
             approval = ApprovalService(self.db).create(
                 product_id=experiment.product_id,
                 artifact_id=artifact.id,
@@ -111,11 +128,14 @@ class OutreachPackageService:
                 risk_level="YELLOW",
                 status="pending",
                 requested_by="growth_os:outreach_preparer",
-                reason=(
-                    f"{len(messages)} exact first-contact drafts are ready ({counts}). "
-                    "Approve only if these messages may be sent to these exact prospects. "
-                    "Approval does not itself send anything until Communication Gateway execution is connected."
-                ),
+                reason=reason,
+            )
+        elif approval.artifact_id != artifact.id or approval.reason != reason:
+            approval = ApprovalService(self.db).update(
+                approval.id,
+                artifact_id=artifact.id,
+                reason=reason,
+                risk_level="YELLOW",
             )
 
         self.db.commit()
