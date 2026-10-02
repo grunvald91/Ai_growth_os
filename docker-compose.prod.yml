@@ -49,6 +49,11 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "app.telegram_control_bot"]
     profiles: ["telegram"]
+    # This host's Docker resolver currently returns a Telegram edge that is unreachable
+    # from the container, while 149.154.167.220 is reachable from both host and container.
+    # Keep this scoped to the Telegram service; deployment verifies Bot API connectivity.
+    extra_hosts:
+      - "api.telegram.org:149.154.167.220"
     environment:
       APP_ENV: production
       DATABASE_URL: postgresql+psycopg://ai_growth:${POSTGRES_PASSWORD}@postgres:5432/ai_growth
