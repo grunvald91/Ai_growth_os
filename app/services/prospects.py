@@ -169,6 +169,18 @@ class ProspectService:
         return {
             "total": len(prospects),
             "validated": sum(p.validation_status == "validated" for p in prospects),
+            "phone": sum(bool(p.public_phone) for p in prospects),
+            "contact_found": sum(
+                p.validation_status == "validated"
+                and bool(
+                    p.public_phone
+                    or p.email
+                    or p.whatsapp
+                    or p.telegram
+                    or p.website
+                )
+                for p in prospects
+            ),
             "needs_review": sum(p.validation_status == "needs_review" for p in prospects),
             "email": sum(bool(p.email) for p in prospects),
             "whatsapp": sum(bool(p.whatsapp) for p in prospects),
