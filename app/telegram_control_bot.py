@@ -7,6 +7,7 @@ from app.control.decisions import ApprovalDecisionError, decide_approval
 from app.control.telegram import render_decision_required, render_status
 from app.core.config import get_settings
 from app.db.session import SessionLocal
+from app.models.domain import Approval
 from app.services.control import ControlService
 
 
@@ -146,7 +147,7 @@ class TelegramControlBot:
 
         if action == "open":
             with SessionLocal() as db:
-                record = db.get(__import__("app.models.domain", fromlist=["Approval"]).Approval, approval_id)
+                record = db.get(Approval, approval_id)
                 if record is None:
                     text = "Решение не найдено."
                 else:
