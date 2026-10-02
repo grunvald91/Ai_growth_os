@@ -200,7 +200,7 @@ class TelegramControlBot:
             if experiment.status != "draft":
                 await self._send(
                     chat_id,
-                    f"Эксперимент уже имеет статус {experiment.status}.",
+                    f"Этот тест уже имеет состояние «{status_label(experiment.status)}».",
                     reply_markup={
                         "inline_keyboard": [
                             [{"text": "🧪 Тесты", "callback_data": "menu:experiments"}]
@@ -353,7 +353,11 @@ class TelegramControlBot:
                         },
                     )
                 except ExperimentLaunchError as exc:
-                    await self._send(chat_id, f"Не удалось запустить: {exc}")
+                    await self._send(
+                        chat_id,
+                        "Не удалось запустить тест из-за неполных настроек. "
+                        "Система не выполнила никаких внешних действий."
+                    )
                 except LookupError:
                     await self._send(chat_id, "Эксперимент не найден.")
                 return
