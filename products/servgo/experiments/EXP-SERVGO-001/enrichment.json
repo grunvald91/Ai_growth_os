@@ -92,7 +92,8 @@
           "observed_at": "2026-10-02",
           "source_type": "owner_verified_listing"
         }
-      ]
+      ],
+      "notes": "Круглосуточный SPA-House: баня, бассейн, массаж и SPA-программы."
     },
     {
       "lead_id": "SG001-005",
@@ -123,7 +124,8 @@
           "observed_at": "2026-10-02",
           "source_type": "official_website"
         }
-      ]
+      ],
+      "notes": "Sandera предлагает массаж и SPA-программы и публично принимает сообщения в WhatsApp."
     },
     {
       "lead_id": "SG001-013",
@@ -154,7 +156,8 @@
           "observed_at": "2026-10-02",
           "source_type": "official_website"
         }
-      ]
+      ],
+      "notes": "SPADAY — SPA-салон в центре Сочи с массажами, SPA-программами и онлайн-записью."
     },
     {
       "lead_id": "SG001-018",
@@ -185,7 +188,8 @@
           "observed_at": "2026-10-02",
           "source_type": "official_website"
         }
-      ]
+      ],
+      "notes": "Посольство красоты совмещает beauty- и SPA-направления в центре Сочи."
     },
     {
       "lead_id": "SG001-020",
@@ -216,13 +220,14 @@
           "observed_at": "2026-10-02",
           "source_type": "official_website"
         }
-      ]
+      ],
+      "notes": "Feedback — сеть массажных студий; у сочинского филиала уже есть онлайн-запись."
     },
     {
       "lead_id": "SG001-021",
       "validation_status": "validated",
       "website": "https://rezultat-massage.ru/",
-      "preferred_channel": "website",
+      "preferred_channel": "telegram",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
@@ -238,8 +243,17 @@
           "source_url": "https://rezultat-massage.ru/",
           "observed_at": "2026-10-02",
           "source_type": "official_website"
+        },
+        {
+          "field": "telegram",
+          "value": "@adlermassageREZULTATadmin",
+          "source_url": "https://t.me/adlermassageREZULTATadmin",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_channel"
         }
-      ]
+      ],
+      "telegram": "@adlermassageREZULTATadmin",
+      "notes": "REZULTAT — студия массажа и SPA в Адлере с онлайн-записью и публичным Telegram-контактом."
     },
     {
       "lead_id": "SG001-025",
@@ -301,7 +315,8 @@
           "observed_at": "2026-10-02",
           "source_type": "owner_verified_listing"
         }
-      ]
+      ],
+      "notes": "Студия Юлии Васиной в Адлере использует Telegram, WhatsApp и онлайн-запись."
     }
   ]
 }
