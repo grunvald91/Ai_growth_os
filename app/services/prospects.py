@@ -176,7 +176,8 @@ class ProspectService:
             "website": sum(bool(p.website) for p in prospects),
             "ready_for_outreach": sum(
                 p.validation_status == "validated"
-                and bool(p.preferred_channel)
+                and p.preferred_channel in {"email", "whatsapp", "telegram"}
+                and bool(getattr(p, p.preferred_channel))
                 for p in prospects
             ),
             "contacted": sum(p.outreach_status != "not_contacted" for p in prospects),
