@@ -98,13 +98,22 @@ jobs:
                       response_schema=schema.model_json_schema(),
                   )
               )
+              import re
               content = result.content.strip()
-              if content.startswith("```") and content.endswith("```"):
-                  first_newline = content.find("\n")
-                  if first_newline != -1:
-                      content = content[first_newline + 1:-3].strip()
-              parsed = schema.model_validate_json(content)
-              print("complex_schema", label, "ok", result.model, parsed.model_dump_json()[:400])
+              candidates = []
+              for match in re.finditer(r"```(?:json)?\\s*(.*?)```", content, re.DOTALL | re.IGNORECASE):
+                  candidates.append(match.group(1).strip())
+              candidates.append(content)
+              last_error = None
+              for candidate in reversed(candidates):
+                  try:
+                      parsed = schema.model_validate_json(candidate)
+                      print("complex_schema", label, "ok", result.model, parsed.model_dump_json()[:400])
+                      return
+                  except Exception as exc:
+                      last_error = exc
+              print("complex_schema", label, "raw", repr(content[:1800]))
+              raise last_error
 
           async def main():
               await one("channel", ChannelResearchReport)
