@@ -48,6 +48,57 @@ _RISK_LABELS = {
 }
 
 
+
+def user_text(value: str | None, fallback: str = "не указано") -> str:
+    if not value:
+        return fallback
+    text = str(value)
+    replacements = {
+        "Direct outreach": "Прямые обращения",
+        "direct outreach": "прямые обращения",
+        "outreach": "обращения",
+        "qualified leads": "заинтересованные потенциальные клиенты",
+        "qualified lead": "заинтересованный потенциальный клиент",
+        "valid reached businesses": "проверенные компании, с которыми удалось связаться",
+        "valid reached": "проверенные контакты",
+        "follow-up": "повторное обращение",
+        "baseline": "исходные данные",
+        "KEEP": "ПРОДОЛЖАЕМ",
+        "STOP": "ОСТАНАВЛИВАЕМ",
+        "INCONCLUSIVE": "ДАННЫХ НЕДОСТАТОЧНО",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    return text
+
+
+def success_condition_text(value: str | None, experiment_key: str | None = None) -> str:
+    raw = value or ""
+    if experiment_key == "EXP-SERVGO-001" or (
+        ">=3" in raw and "qualified" in raw.lower()
+    ):
+        return (
+            "Не менее 3 заинтересованных потенциальных клиентов "
+            "из 30 проверенных компаний, при понятном источнике каждого обращения."
+        )
+    if raw and any("А" <= char <= "я" or char in "Ёё" for char in raw):
+        return user_text(raw)
+    return "Условие успеха задано в системе."
+
+
+def stop_condition_text(value: str | None, experiment_key: str | None = None) -> str:
+    raw = value or ""
+    if experiment_key == "EXP-SERVGO-001" or (
+        "0 qualified" in raw.lower() and "14" in raw
+    ):
+        return (
+            "После работы со всей проверенной выборкой, одного повторного обращения "
+            "и 14 дней — ни одного заинтересованного потенциального клиента."
+        )
+    if raw and any("А" <= char <= "я" or char in "Ёё" for char in raw):
+        return user_text(raw)
+    return "Условие остановки задано в системе."
+
 def status_label(value: str | None) -> str:
     if not value:
         return "неизвестно"
@@ -107,7 +158,7 @@ def render_status(
         )
         if active is not None:
             key = active.experiment_key or str(active.id)
-            lines.append(f"🟢 Сейчас идёт: {active.name}")
+            lines.append(f"🟢 Сейчас идёт: {user_text(active.name)}")
             stats = experiment_stats.get(str(active.id))
             if stats:
                 total = stats.get("total", 0)
@@ -203,7 +254,7 @@ def render_experiments(status: ControlStatus) -> str:
         for record in product.experiments:
             key = record.experiment_key or str(record.id)
             icon = "🟢" if record.status in {"running", "active"} else "🟡"
-            lines.append(f"{icon} {record.name}")
+            lines.append(f"{icon} {user_text(record.name)}")
             lines.append(f"Состояние: {status_label(record.status)}")
             lines.append(f"Цель: {metric_label(record.target_metric)}")
             lines.append(f"Код: {key}")
@@ -215,7 +266,7 @@ def render_experiments(status: ControlStatus) -> str:
 def render_experiment_detail(experiment, prospect_stats: dict[str, int] | None = None) -> str:
     key = experiment.experiment_key or str(experiment.id)
     lines = [
-        f"🧪 {experiment.name}",
+        f"🧪 {user_text(experiment.name)}",
         f"Код: {key}",
         "",
         f"Состояние: {status_label(experiment.status)}",
@@ -267,13 +318,13 @@ def render_experiment_detail(experiment, prospect_stats: dict[str, int] | None =
         [
             "",
             "💡 Что проверяем",
-            experiment.hypothesis,
+            user_text(experiment.hypothesis),
             "",
             "✅ Когда считаем подход рабочим",
-            experiment.success_condition or "Условие ещё не задано.",
+            success_condition_text(experiment.success_condition, experiment.experiment_key),
             "",
             "🛑 Когда останавливаем",
-            experiment.stop_condition or "Условие ещё не задано.",
+            stop_condition_text(experiment.stop_condition, experiment.experiment_key),
         ]
     )
     return "\n".join(lines)
@@ -285,7 +336,7 @@ def render_experiment_launch_confirmation(experiment) -> str:
         [
             "▶️ Запустить маркетинговый тест?",
             "",
-            experiment.name,
+            user_text(experiment.name),
             f"Код: {key}",
             f"Срок проверки: {experiment.observation_window_days} дней",
             f"Бюджет: {experiment.budget} {experiment.currency or ''}".rstrip(),
