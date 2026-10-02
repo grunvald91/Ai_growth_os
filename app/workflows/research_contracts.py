@@ -116,5 +116,5 @@ class ResearchSynthesisDraft(Contract):
 class ResearchDepartmentReport(ResearchSynthesisDraft):
     parent_task_id: UUID
     worker_task_ids: list[UUID] = Field(min_length=4, max_length=4)
-    worker_artifact_ids: list[UUID] = Field(min_length=4, max_length=4)
+    worker_artifact_ids: list[UUID] = Field(min_length=3, max_length=4)
     lead_run_id: UUID

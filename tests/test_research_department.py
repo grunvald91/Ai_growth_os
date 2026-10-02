@@ -268,3 +268,67 @@ async def test_research_department_repairs_one_invalid_worker_json(db, product, 
         select(Artifact).where(Artifact.kind == "channel_research")
     )
     assert channel_artifact is not None
+
+
+
+@pytest.mark.asyncio
+async def test_research_department_reuses_prior_successful_role_artifact(db, product, tmp_path):
+    parent = add_research_task(db, product)
+    prior_child = Task(
+        product_id=product.id,
+        parent_id=parent.id,
+        title="Prior successful segment research",
+        description="Reusable segment result.",
+        assigned_agent="segment_researcher",
+        status=TaskStatus.COMPLETED,
+        priority=parent.priority,
+    )
+    db.add(prior_child)
+    db.flush()
+    db.add(
+        Artifact(
+            product_id=product.id,
+            task_id=prior_child.id,
+            kind="segment_research",
+            title="Prior segment result",
+            content=json.dumps(
+                {
+                    "summary": "Test a small set of service-business segments.",
+                    "hypotheses": [
+                        {
+                            "segment": "Small massage studios",
+                            "booking_job": "Coordinate service, optional specialist, slot and confirmation.",
+                            "servgo_relevance": "ServGo has a verified booking flow covering those steps.",
+                            "evidence_to_support": ["Owners explicitly report this coordination problem."],
+                            "evidence_to_kill": ["Target owners say this workflow is already trivial."],
+                        }
+                    ],
+                    "evidence_gaps": ["No segment demand observations yet."],
+                }
+            ),
+        )
+    )
+    db.commit()
+
+    provider = RoleProvider(voc_available=False)
+    cycle = build_team_cycle(db, Settings(products_root=tmp_path), provider)
+
+    result = await cycle.run(product.id, max_tasks=1, followup_cmo=False)
+
+    assert result.completed_task_ids == [parent.id]
+    roles = [request.metadata.get("team_role") for request in provider.requests]
+    assert "segment_researcher" not in roles
+    assert "channel_researcher" in roles
+    assert "problem_researcher" in roles
+    assert "research_lead" in roles
+
+    reused_run = db.scalar(
+        select(AgentRun)
+        .join(Task, AgentRun.task_id == Task.id)
+        .where(
+            Task.parent_id == parent.id,
+            Task.assigned_agent == "segment_researcher",
+            AgentRun.model == "reused-artifact",
+        )
+    )
+    assert reused_run is not None
