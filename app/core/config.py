@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_owner_chat_id: int | None = None
     telegram_poll_timeout_seconds: int = 25
+    team_worker_batch_size: int = 1
+    team_worker_idle_poll_seconds: int = 20
+    team_worker_busy_poll_seconds: int = 2
     telegram_proxy_url: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

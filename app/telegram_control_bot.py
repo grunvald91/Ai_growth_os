@@ -5,11 +5,18 @@ from uuid import UUID
 import httpx
 
 from app.control.decisions import ApprovalDecisionError, decide_approval
-from app.control.telegram import render_decision_required, render_experiments, render_status
+from app.control.telegram import (
+    render_decision_required,
+    render_experiment_detail,
+    render_experiment_launch_confirmation,
+    render_experiments,
+    render_status,
+)
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.models.domain import Approval
+from app.models.domain import Approval, Experiment
 from app.services.control import ControlService
+from app.services.experiment_launch import ExperimentLaunchError, ExperimentLaunchService
 
 
 MAIN_MENU = {
@@ -126,15 +133,79 @@ class TelegramControlBot:
 
     async def _send_experiments(self, chat_id: int) -> None:
         with SessionLocal() as db:
-            body = render_experiments(ControlService(db).all_status())
+            status = ControlService(db).all_status()
+            body = render_experiments(status)
+            buttons = []
+            for product in status.products:
+                for record in product.experiments:
+                    prefix = "▶️" if record.status == "draft" else "📈"
+                    key = record.experiment_key or str(record.id)
+                    buttons.append(
+                        [{"text": f"{prefix} {key}", "callback_data": f"experiment:open:{record.id}"}]
+                    )
+        buttons.extend(
+            [
+                [{"text": "📊 Статус", "callback_data": "menu:status"}],
+                [{"text": "📨 Решения", "callback_data": "menu:inbox"}],
+                [{"text": "🔄 Обновить", "callback_data": "menu:experiments"}],
+            ]
+        )
+        await self._send(
+            chat_id,
+            body,
+            reply_markup={"inline_keyboard": buttons},
+        )
+
+    async def _send_experiment_detail(self, chat_id: int, experiment_id: UUID) -> None:
+        with SessionLocal() as db:
+            experiment = db.get(Experiment, experiment_id)
+            if experiment is None:
+                await self._send(chat_id, "Эксперимент не найден.")
+                return
+            body = render_experiment_detail(experiment)
+            keyboard = []
+            if experiment.status == "draft":
+                keyboard.append(
+                    [{"text": "▶️ Запустить", "callback_data": f"experiment:start:{experiment.id}"}]
+                )
+            keyboard.extend(
+                [
+                    [{"text": "🧪 Ко всем экспериментам", "callback_data": "menu:experiments"}],
+                    [{"text": "📊 Статус", "callback_data": "menu:status"}],
+                ]
+            )
+        await self._send(chat_id, body, reply_markup={"inline_keyboard": keyboard})
+
+    async def _send_launch_confirmation(self, chat_id: int, experiment_id: UUID) -> None:
+        with SessionLocal() as db:
+            experiment = db.get(Experiment, experiment_id)
+            if experiment is None:
+                await self._send(chat_id, "Эксперимент не найден.")
+                return
+            if experiment.status != "draft":
+                await self._send(
+                    chat_id,
+                    f"Эксперимент уже имеет статус {experiment.status}.",
+                    reply_markup={
+                        "inline_keyboard": [
+                            [{"text": "🧪 Эксперименты", "callback_data": "menu:experiments"}]
+                        ]
+                    },
+                )
+                return
+            body = render_experiment_launch_confirmation(experiment)
         await self._send(
             chat_id,
             body,
             reply_markup={
                 "inline_keyboard": [
-                    [{"text": "📊 Статус", "callback_data": "menu:status"}],
-                    [{"text": "📨 Решения", "callback_data": "menu:inbox"}],
-                    [{"text": "🔄 Обновить", "callback_data": "menu:experiments"}],
+                    [
+                        {
+                            "text": "✅ Подтвердить запуск",
+                            "callback_data": f"experiment:confirm:{experiment_id}",
+                        }
+                    ],
+                    [{"text": "↩️ Отмена", "callback_data": f"experiment:open:{experiment_id}"}],
                 ]
             },
         )
@@ -217,6 +288,60 @@ class TelegramControlBot:
             elif target == "experiments":
                 await self._send_experiments(chat_id)
             return
+
+        if data.startswith("experiment:"):
+            try:
+                _, action, raw_id = data.split(":", 2)
+                experiment_id = UUID(raw_id)
+            except (ValueError, TypeError):
+                if callback_id:
+                    await self._answer_callback(callback_id, "Некорректный эксперимент")
+                return
+
+            if callback_id:
+                await self._answer_callback(callback_id, "Открываю")
+            if action == "open":
+                await self._send_experiment_detail(chat_id, experiment_id)
+                return
+            if action == "start":
+                await self._send_launch_confirmation(chat_id, experiment_id)
+                return
+            if action == "confirm":
+                try:
+                    with SessionLocal() as db:
+                        result = ExperimentLaunchService(
+                            db,
+                            get_settings().products_root,
+                        ).launch(
+                            experiment_id,
+                            actor=f"telegram:{self.owner_chat_id}",
+                        )
+                    await self._send(
+                        chat_id,
+                        (
+                            "✅ Эксперимент запущен.\n\n"
+                            f"Старт: {result.starts_at}\n"
+                            f"Окончание окна: {result.ends_at}\n"
+                            "Подготовительная задача передана внутреннему worker.\n"
+                            "Внешние контакты всё ещё требуют отдельного одобрения."
+                        ),
+                        reply_markup={
+                            "inline_keyboard": [
+                                [
+                                    {
+                                        "text": "🧪 Открыть эксперимент",
+                                        "callback_data": f"experiment:open:{experiment_id}",
+                                    }
+                                ],
+                                [{"text": "📊 Статус", "callback_data": "menu:status"}],
+                            ]
+                        },
+                    )
+                except ExperimentLaunchError as exc:
+                    await self._send(chat_id, f"Не удалось запустить: {exc}")
+                except LookupError:
+                    await self._send(chat_id, "Эксперимент не найден.")
+                return
 
         try:
             action, raw_id = data.split(":", 1)
