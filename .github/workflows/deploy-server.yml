@@ -25,6 +25,8 @@ jobs:
       AI_GROWTH_PORT: "8091"
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
       HUB_API_KEY: ${{ secrets.API }}
+      TG_BOT_TOKEN: ${{ secrets.AI_GROWTH_TELEGRAM_BOT_TOKEN }}
+      TG_OWNER_CHAT_ID: ${{ secrets.AI_GROWTH_TELEGRAM_OWNER_CHAT_ID }}
 
     steps:
       - name: Guard required secrets
@@ -71,15 +73,25 @@ jobs:
           set -euo pipefail
           OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
           printf '%s' "$HUB_API_KEY" | sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "umask 077; mkdir -p '$REMOTE_ROOT'; cat > '$REMOTE_ROOT/.xai_key.new'"
+          printf '%s' "$TG_BOT_TOKEN" | sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "umask 077; cat > '$REMOTE_ROOT/.telegram_token.new'"
+          printf '%s' "$TG_OWNER_CHAT_ID" | sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "umask 077; cat > '$REMOTE_ROOT/.telegram_owner.new'"
           sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" '
             set -euo pipefail
             ROOT=/opt/ai_growth_os
             KEY=$(cat "$ROOT/.xai_key.new")
-            rm -f "$ROOT/.xai_key.new"
+            TG_TOKEN=$(cat "$ROOT/.telegram_token.new" 2>/dev/null || true)
+            TG_OWNER=$(cat "$ROOT/.telegram_owner.new" 2>/dev/null || true)
+            rm -f "$ROOT/.xai_key.new" "$ROOT/.telegram_token.new" "$ROOT/.telegram_owner.new"
             DB_PASSWORD=""
+            OLD_TG_TOKEN=""
+            OLD_TG_OWNER=""
             if [ -f "$ROOT/.env" ]; then
               DB_PASSWORD=$(grep "^POSTGRES_PASSWORD=" "$ROOT/.env" | head -n1 | cut -d= -f2- || true)
+              OLD_TG_TOKEN=$(grep "^TELEGRAM_BOT_TOKEN=" "$ROOT/.env" | head -n1 | cut -d= -f2- || true)
+              OLD_TG_OWNER=$(grep "^TELEGRAM_OWNER_CHAT_ID=" "$ROOT/.env" | head -n1 | cut -d= -f2- || true)
             fi
+            [ -n "$TG_TOKEN" ] || TG_TOKEN="$OLD_TG_TOKEN"
+            [ -n "$TG_OWNER" ] || TG_OWNER="$OLD_TG_OWNER"
             if [ -z "$DB_PASSWORD" ]; then
               DB_PASSWORD=$(openssl rand -hex 24)
             fi
@@ -93,6 +105,11 @@ jobs:
               echo "XAI_BASE_URL=https://api.claudehub.fun/v1"
               echo "XAI_REASONING_EFFORT=medium"
               echo "AI_GROWTH_PORT=8091"
+              if [ -n "$TG_TOKEN" ] && [ -n "$TG_OWNER" ]; then
+                printf "TELEGRAM_BOT_TOKEN=%s\n" "$TG_TOKEN"
+                printf "TELEGRAM_OWNER_CHAT_ID=%s\n" "$TG_OWNER"
+                echo "TELEGRAM_POLL_TIMEOUT_SECONDS=25"
+              fi
             } > "$ROOT/.env.new"
             mv "$ROOT/.env.new" "$ROOT/.env"
             chmod 600 "$ROOT/.env"
@@ -119,6 +136,10 @@ jobs:
               --file /app/products/servgo/research_sources/initial-voc-2026-09-29.json </dev/null
           fi
           dc up -d api
+          if grep -q "^TELEGRAM_BOT_TOKEN=." "$REMOTE_ROOT/.env" && grep -q "^TELEGRAM_OWNER_CHAT_ID=." "$REMOTE_ROOT/.env"; then
+            dc --profile telegram build telegram
+            dc --profile telegram up -d telegram
+          fi
           for i in $(seq 1 30); do
             if curl -fsS --max-time 3 http://127.0.0.1:8091/health >/dev/null; then
               break
