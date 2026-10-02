@@ -74,3 +74,5 @@ jobs:
           echo "=== WORKER ==="
           docker ps --filter name=ai-growth-os-worker-1 --format 'name={{.Names}} status={{.Status}}'
           REMOTE
+
+# rerun after worker rebuild
