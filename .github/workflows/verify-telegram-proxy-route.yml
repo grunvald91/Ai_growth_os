@@ -1,0 +1,46 @@
+name: Verify Telegram proxy route
+
+on:
+  push:
+    branches:
+      - ops/verify-telegram-token
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Guard SSH secret
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Test Telegram through existing proxy without credentials
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" '
+            set -euo pipefail
+            code=$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 8 --max-time 15               -x http://188.120.254.223:8888 https://api.telegram.org || true)
+            echo "PROXY_HTTP_STATUS=$code"
+            if [ "$code" = "407" ]; then
+              echo "PROXY_AUTH_REQUIRED=yes"
+              exit 0
+            fi
+            if [ "$code" = "000" ]; then
+              echo "PROXY_ROUTE_REACHABLE=no"
+              exit 1
+            fi
+            echo "PROXY_ROUTE_REACHABLE=yes"
+          '
