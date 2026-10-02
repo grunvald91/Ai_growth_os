@@ -35,106 +35,88 @@ jobs:
 
           BASE=os.environ["XAI_BASE_URL"].rstrip("/")
           KEY=os.environ["XAI_API_KEY"]
-          MODELS=["deepseek-v4.1-flash","gemini-flash-3.8"]
-
-          CASES=[
-            {
-              "id":"official_email",
-              "evidence":"Official website contact page: business Example SPA, exact address matches. Email hello@example.com. Phone +70000000001.",
-              "expected":{"status":"direct","channel":"email","needs_review":False},
-            },
-            {
-              "id":"verified_whatsapp",
-              "evidence":"Owner-verified business listing matches exact name/address/phone. WhatsApp button resolves to +70000000002. No email is shown.",
-              "expected":{"status":"direct","channel":"whatsapp","needs_review":False},
-            },
-            {
-              "id":"telegram_only",
-              "evidence":"Official business site matches identity. It links a public Telegram contact @example_admin. No email or WhatsApp is shown.",
-              "expected":{"status":"direct","channel":"telegram","needs_review":False},
-            },
-            {
-              "id":"website_chat",
-              "evidence":"Owner-confirmed booking page matches business identity and has a built-in contact/chat form. No public email, WhatsApp or Telegram contact is shown.",
-              "expected":{"status":"website_or_chat","channel":"website","needs_review":False},
-            },
-            {
-              "id":"phone_only",
-              "evidence":"Current business profile matches exact name, address and public phone +70000000005. Repeated public-source checks show no website, email, WhatsApp or Telegram.",
-              "expected":{"status":"phone_only","channel":"phone","needs_review":False},
-            },
-            {
-              "id":"stale_conflict",
-              "evidence":"Original lead says Barhat, Lenin 1/1, phone +70000000006. Current sources for Barhat show different addresses and different phones, with no source tying the original address/phone to the current business.",
-              "expected":{"status":"stale","channel":"none","needs_review":True},
-            },
+          MODELS=[
+            "deepseek-v4.1-flash",
+            "gemini-flash-3.8",
+            "kimi-2.7",
+            "grok-4.7",
+            "gpt-6-luna",
+            "glm-5.3-flash",
+            "Qwen-3.8-Max",
           ]
 
-          SCHEMA={
+          CASES=[
+            {"id":"official_email","evidence":"Official website matches the lead. Email hello@example.com is published.","status":"direct","channel":"email","needs_review":False},
+            {"id":"verified_whatsapp","evidence":"Owner-verified listing matches identity. WhatsApp button resolves to +70000000002. No email.","status":"direct","channel":"whatsapp","needs_review":False},
+            {"id":"telegram_only","evidence":"Official business page matches identity and links public Telegram @example_admin. No email or WhatsApp.","status":"direct","channel":"telegram","needs_review":False},
+            {"id":"website_chat","evidence":"Owner-confirmed booking page matches identity and has built-in chat. No public email, WhatsApp or Telegram.","status":"website_or_chat","channel":"website","needs_review":False},
+            {"id":"phone_only","evidence":"Current profile matches identity and public phone +70000000005. Repeated checks found no website, email, WhatsApp or Telegram.","status":"phone_only","channel":"phone","needs_review":False},
+            {"id":"stale_conflict","evidence":"Original lead says Barhat, Lenin 1/1, +70000000006. Current sources for Barhat show different addresses and phones, with no source connecting them to the original lead.","status":"stale","channel":"none","needs_review":True},
+          ]
+          EXPECTED=[{k:c[k] for k in ("id","status","channel","needs_review")} for c in CASES]
+
+          ITEM={
             "type":"object",
             "properties":{
+              "id":{"type":"string"},
               "status":{"type":"string","enum":["direct","website_or_chat","phone_only","stale"]},
               "channel":{"type":"string","enum":["email","whatsapp","telegram","website","phone","none"]},
               "needs_review":{"type":"boolean"},
             },
-            "required":["status","channel","needs_review"],
+            "required":["id","status","channel","needs_review"],
             "additionalProperties":False,
           }
+          SCHEMA={
+            "type":"object",
+            "properties":{"results":{"type":"array","items":ITEM,"minItems":6,"maxItems":6}},
+            "required":["results"],
+            "additionalProperties":False,
+          }
+          SYSTEM="""Classify supplied already-collected business contact evidence. Never invent contacts.
+          Rules: direct if verified email/WhatsApp/Telegram exists; prefer email then WhatsApp then Telegram.
+          website_or_chat if no direct channel but verified website/booking/chat exists.
+          phone_only if only verified phone remains after checks.
+          stale if current evidence conflicts with lead identity and continuity is unsafe.
+          stale => channel none, needs_review true. Otherwise needs_review false.
+          Preserve each case id exactly. Return only schema JSON."""
 
-          SYSTEM="""You classify already-collected business contact evidence. Never invent a contact.
-          Rules:
-          - direct if verified email, WhatsApp, or Telegram exists.
-          - if multiple direct channels exist, prefer email, then WhatsApp, then Telegram.
-          - website_or_chat if no direct channel exists but a verified website/booking/chat page exists.
-          - phone_only if only a verified public phone remains after checks.
-          - stale if current evidence conflicts with the lead identity and cannot safely establish continuity.
-          - stale => channel none and needs_review true. Otherwise needs_review false.
-          Return only the requested JSON."""
-
-          async def classify(model, case):
+          async def evaluate(model):
               payload={
                 "model":model,
                 "messages":[
                   {"role":"system","content":SYSTEM},
-                  {"role":"user","content":case["evidence"]},
+                  {"role":"user","content":json.dumps(CASES,ensure_ascii=False)},
                 ],
-                "max_completion_tokens":180,
+                "max_completion_tokens":700,
                 "reasoning_effort":"low",
-                "response_format":{
-                  "type":"json_schema",
-                  "json_schema":{
-                    "name":"enrichment_classification",
-                    "strict":True,
-                    "schema":SCHEMA,
-                  },
-                },
+                "response_format":{"type":"json_schema","json_schema":{"name":"batch_enrichment","strict":True,"schema":SCHEMA}},
               }
-              async with httpx.AsyncClient(timeout=90) as client:
+              async with httpx.AsyncClient(timeout=150) as client:
                 r=await client.post(
                   BASE+"/chat/completions",
                   headers={"Authorization":f"Bearer {KEY}","Content-Type":"application/json"},
                   json=payload,
                 )
               r.raise_for_status()
-              data=r.json()
-              out=json.loads(data["choices"][0]["message"]["content"])
-              return out
+              body=r.json()["choices"][0]["message"]["content"]
+              parsed=json.loads(body)
+              results=parsed.get("results")
+              exact=results==EXPECTED
+              per_case=[]
+              if isinstance(results,list):
+                for expected in EXPECTED:
+                  got=next((x for x in results if x.get("id")==expected["id"]),None)
+                  per_case.append({"id":expected["id"],"ok":got==expected,"got":got})
+              return {"exact":exact,"passed":sum(x["ok"] for x in per_case),"total":6,"per_case":per_case}
 
           async def main():
               overall={}
               for model in MODELS:
-                passed=0
-                rows=[]
-                for case in CASES:
-                  try:
-                    out=await classify(model,case)
-                    ok=out==case["expected"]
-                    passed+=int(ok)
-                    rows.append({"id":case["id"],"ok":ok,"output":out,"expected":case["expected"]})
-                  except Exception as exc:
-                    rows.append({"id":case["id"],"ok":False,"error":type(exc).__name__+":"+str(exc)[:200]})
-                overall[model]={"passed":passed,"total":len(CASES),"rows":rows}
-              print(json.dumps(overall,ensure_ascii=False,sort_keys=True))
+                try:
+                  overall[model]=await evaluate(model)
+                except Exception as exc:
+                  overall[model]={"exact":False,"passed":0,"total":6,"error":type(exc).__name__+":"+str(exc)[:300]}
+              print("BENCHMARK_RESULT="+json.dumps(overall,ensure_ascii=False,sort_keys=True))
           asyncio.run(main())
           PY
           REMOTE
