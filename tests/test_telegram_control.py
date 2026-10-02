@@ -1,7 +1,7 @@
 import pytest
 
 from app.control.decisions import ApprovalDecisionError, decide_approval
-from app.control.telegram import render_experiments
+from app.control.telegram import render_experiment_detail, render_experiments
 from app.models.domain import Approval, Experiment, Product
 from app.services.control import ControlService
 from app.telegram_control_bot import MAIN_MENU, STATUS_INLINE, TelegramAPI
@@ -99,7 +99,7 @@ def test_explicit_telegram_proxy_overrides_environment(monkeypatch):
 
 def test_button_menu_exposes_primary_controls():
     labels = [button["text"] for row in MAIN_MENU["keyboard"] for button in row]
-    assert labels == ["📊 Статус", "📨 Решения", "🧪 Эксперименты", "🔄 Обновить"]
+    assert labels == ["📊 Главное", "✅ На согласование", "🧪 Тесты", "🔄 Обновить"]
     callbacks = [
         button["callback_data"]
         for row in STATUS_INLINE["inline_keyboard"]
@@ -126,5 +126,51 @@ def test_render_experiments_shows_current_experiment(db):
     text = render_experiments(status)
 
     assert "EXP-SERVGO-001" in text
-    assert "qualified_leads" in text
-    assert "Direct outreach" in text
+    assert "заинтересованные потенциальные клиенты" in text
+    assert "Прямые обращения" in text
+
+
+
+def test_experiment_detail_hides_internal_english_terms(db):
+    product = _product(db)
+    experiment = Experiment(
+        product_id=product.id,
+        experiment_key="EXP-SERVGO-001",
+        name="Direct outreach",
+        hypothesis="Personalized outreach may produce qualified leads.",
+        target_metric="qualified_leads",
+        channel="direct_outreach",
+        status="running",
+        observation_window_days=14,
+        success_condition="KEEP if >=3 qualified leads from 30 valid reached businesses.",
+        stop_condition="STOP after 14 days with 0 qualified leads.",
+    )
+    db.add(experiment)
+    db.commit()
+
+    text = render_experiment_detail(
+        experiment,
+        {
+            "total": 30,
+            "enrichment_resolved": 15,
+            "enrichment_pending": 15,
+            "ready_for_outreach": 8,
+            "website_or_chat": 4,
+            "phone_only": 3,
+            "stale": 0,
+            "contacted": 0,
+            "email": 5,
+            "whatsapp": 4,
+            "telegram": 1,
+            "website": 12,
+            "phone": 30,
+        },
+    )
+
+    assert "Прямые обращения" in text
+    assert "заинтересованные потенциальные клиенты" in text
+    assert "Контакты проверены: 15/30" in text
+    assert "outreach" not in text
+    assert "qualified_leads" not in text
+    assert "KEEP" not in text
+    assert "STOP" not in text
