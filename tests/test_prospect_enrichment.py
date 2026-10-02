@@ -161,14 +161,14 @@ def test_validated_requires_identity_evidence_and_render_shows_stats(db):
             "contacted": 0,
         },
     )
-    assert "Prospects: 30" in text
-    assert "Enrichment: готово 30/30 · осталось 0" in text
-    assert "найдено 30/30" in text
-    assert "письменный outreach 10" in text
-    assert "Проверено компаний: 30" in text
-    assert "телефон 30" in text
-    assert "email 4" in text
-    assert "Уже contacted: 0" in text
+    assert "Всего в базе: 30" in text
+    assert "Контакты проверены: 30/30" in text
+    assert "Ещё нужно проверить: 0" in text
+    assert "Можно написать напрямую: 10" in text
+    assert "Телефон: 30" in text
+    assert "Телефон: 30" in text
+    assert "Email: 4" in text
+    assert "Уже связались: 0" in text
 
 
 

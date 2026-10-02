@@ -7,11 +7,15 @@ import httpx
 
 from app.control.decisions import ApprovalDecisionError, decide_approval
 from app.control.telegram import (
+    action_label,
+    channel_label,
     render_decision_required,
     render_experiment_detail,
     render_experiment_launch_confirmation,
     render_experiments,
     render_status,
+    risk_label,
+    status_label,
 )
 from app.core.config import get_settings
 from app.db.session import SessionLocal
@@ -23,8 +27,8 @@ from app.services.prospects import ProspectService
 
 MAIN_MENU = {
     "keyboard": [
-        [{"text": "📊 Статус"}, {"text": "📨 Решения"}],
-        [{"text": "🧪 Эксперименты"}, {"text": "🔄 Обновить"}],
+        [{"text": "📊 Главное"}, {"text": "✅ На согласование"}],
+        [{"text": "🧪 Тесты"}, {"text": "🔄 Обновить"}],
     ],
     "resize_keyboard": True,
     "is_persistent": True,
@@ -33,8 +37,8 @@ MAIN_MENU = {
 STATUS_INLINE = {
     "inline_keyboard": [
         [
-            {"text": "📨 Решения", "callback_data": "menu:inbox"},
-            {"text": "🧪 Эксперименты", "callback_data": "menu:experiments"},
+            {"text": "✅ На согласование", "callback_data": "menu:inbox"},
+            {"text": "🧪 Тесты", "callback_data": "menu:experiments"},
         ],
         [{"text": "🔄 Обновить", "callback_data": "menu:status"}],
     ]
@@ -101,36 +105,44 @@ class TelegramControlBot:
         text = (message.get("text") or "").strip()
         command = text.split()[0].split("@")[0].lower() if text.startswith("/") else ""
 
-        if command == "/status" or text in {"📊 Статус", "🔄 Обновить"}:
+        if command == "/status" or text in {"📊 Главное", "📊 Статус", "🔄 Обновить"}:
             await self._send_status(chat_id)
             return
 
-        if command == "/inbox" or text == "📨 Решения":
+        if command == "/inbox" or text in {"✅ На согласование", "📨 Решения"}:
             await self._send_inbox(chat_id)
             return
 
-        if command == "/experiments" or text == "🧪 Эксперименты":
+        if command == "/experiments" or text in {"🧪 Тесты", "🧪 Эксперименты"}:
             await self._send_experiments(chat_id)
             return
 
         if command in {"/start", "/help"}:
             await self._send(
                 chat_id,
-                "AI Growth OS\n\nУправляй системой кнопками ниже. "
-                "Внешние действия по-прежнему требуют отдельного одобрения.",
+                "🤖 AI Growth OS — твоя ИИ-команда по маркетингу.\n\n"
+                "Здесь видно, что команда делает сейчас, какой есть прогресс "
+                "и где требуется твоё решение.\n\n"
+                "Начни с кнопки «📊 Главное».",
                 reply_markup=MAIN_MENU,
             )
             return
 
         await self._send(
             chat_id,
-            "Выбери действие кнопками ниже.",
+            "Выбери раздел кнопками ниже. Если не знаешь, куда идти — нажми «📊 Главное».",
             reply_markup=MAIN_MENU,
         )
 
     async def _send_status(self, chat_id: int) -> None:
         with SessionLocal() as db:
-            body = render_status(ControlService(db).all_status())
+            status = ControlService(db).all_status()
+            experiment_stats = {}
+            for product in status.products:
+                for record in product.experiments:
+                    if record.status in {"running", "active"}:
+                        experiment_stats[str(record.id)] = ProspectService(db).stats_for_experiment(record.id)
+            body = render_status(status, experiment_stats)
         await self._send(chat_id, body, reply_markup=STATUS_INLINE)
 
     async def _send_experiments(self, chat_id: int) -> None:
@@ -147,8 +159,8 @@ class TelegramControlBot:
                     )
         buttons.extend(
             [
-                [{"text": "📊 Статус", "callback_data": "menu:status"}],
-                [{"text": "📨 Решения", "callback_data": "menu:inbox"}],
+                [{"text": "📊 Главное", "callback_data": "menu:status"}],
+                [{"text": "✅ На согласование", "callback_data": "menu:inbox"}],
                 [{"text": "🔄 Обновить", "callback_data": "menu:experiments"}],
             ]
         )
@@ -173,8 +185,8 @@ class TelegramControlBot:
                 )
             keyboard.extend(
                 [
-                    [{"text": "🧪 Ко всем экспериментам", "callback_data": "menu:experiments"}],
-                    [{"text": "📊 Статус", "callback_data": "menu:status"}],
+                    [{"text": "🧪 Ко всем тестам", "callback_data": "menu:experiments"}],
+                    [{"text": "📊 Главное", "callback_data": "menu:status"}],
                 ]
             )
         await self._send(chat_id, body, reply_markup={"inline_keyboard": keyboard})
@@ -188,10 +200,10 @@ class TelegramControlBot:
             if experiment.status != "draft":
                 await self._send(
                     chat_id,
-                    f"Эксперимент уже имеет статус {experiment.status}.",
+                    f"Этот тест уже имеет состояние «{status_label(experiment.status)}».",
                     reply_markup={
                         "inline_keyboard": [
-                            [{"text": "🧪 Эксперименты", "callback_data": "menu:experiments"}]
+                            [{"text": "🧪 Тесты", "callback_data": "menu:experiments"}]
                         ]
                     },
                 )
@@ -224,10 +236,11 @@ class TelegramControlBot:
         if not items:
             await self._send(
                 chat_id,
-                "Decision Inbox пуст. Решений, требующих твоего участия, нет.",
+                "✅ Сейчас от тебя ничего не требуется.\n\n"
+                "Команда продолжает работу сама. Если появится действие, которое нельзя выполнять без тебя, оно появится здесь.",
                 reply_markup={
                     "inline_keyboard": [
-                        [{"text": "📊 Статус", "callback_data": "menu:status"}],
+                        [{"text": "📊 Главное", "callback_data": "menu:status"}],
                         [{"text": "🔄 Обновить", "callback_data": "menu:inbox"}],
                     ]
                 },
@@ -258,8 +271,8 @@ class TelegramControlBot:
             )
             keyboard.append(
                 [
-                    {"text": "📊 Статус", "callback_data": "menu:status"},
-                    {"text": "🔄 Inbox", "callback_data": "menu:inbox"},
+                    {"text": "📊 Главное", "callback_data": "menu:status"},
+                    {"text": "🔄 Обновить", "callback_data": "menu:inbox"},
                 ]
             )
             await self._send(
@@ -322,12 +335,10 @@ class TelegramControlBot:
                     await self._send(
                         chat_id,
                         (
-                            "✅ Эксперимент запущен.\n\n"
-                            f"Старт: {result.starts_at}\n"
-                            f"Окончание окна: {result.ends_at}\n"
-                            f"Prospects импортировано: {result.prospect_count}.\n"
-                            "Подготовительная задача передана внутреннему worker.\n"
-                            "Внешние контакты всё ещё требуют отдельного одобрения."
+                            "✅ Маркетинговый тест запущен.\n\n"
+                            f"Компаний в базе: {result.prospect_count}.\n"
+                            "ИИ-команда начала внутреннюю подготовку и проверку данных.\n"
+                            "Письма и сообщения без отдельного согласования отправляться не будут."
                         ),
                         reply_markup={
                             "inline_keyboard": [
@@ -337,12 +348,16 @@ class TelegramControlBot:
                                         "callback_data": f"experiment:open:{experiment_id}",
                                     }
                                 ],
-                                [{"text": "📊 Статус", "callback_data": "menu:status"}],
+                                [{"text": "📊 Главное", "callback_data": "menu:status"}],
                             ]
                         },
                     )
                 except ExperimentLaunchError as exc:
-                    await self._send(chat_id, f"Не удалось запустить: {exc}")
+                    await self._send(
+                        chat_id,
+                        "Не удалось запустить тест из-за неполных настроек. "
+                        "Система не выполнила никаких внешних действий."
+                    )
                 except LookupError:
                     await self._send(chat_id, "Эксперимент не найден.")
                 return
@@ -363,11 +378,14 @@ class TelegramControlBot:
                     detail_text = "Решение не найдено."
                 else:
                     detail_text = (
-                        f"Действие: {record.action_type}\n"
-                        f"Риск: {record.risk_level}\n"
-                        f"Статус: {record.status}\n"
-                        f"Причина: {record.reason or 'не указана'}"
+                        "📋 Подробности решения\n\n"
+                        f"Что предлагается: {action_label(record.action_type)}\n"
+                        f"Состояние: {status_label(record.status)}\n"
+                        f"Уровень контроля: {risk_label(record.risk_level)}"
                     )
+                    reason = (record.reason or "").strip()
+                    if reason and any("А" <= char <= "я" or char in "Ёё" for char in reason):
+                        detail_text += f"\n\nПочему:\n{reason}"
                     if record.action_type == "send_outreach_batch" and record.artifact_id:
                         artifact = db.get(Artifact, record.artifact_id)
                         if artifact is not None:
@@ -381,8 +399,8 @@ class TelegramControlBot:
                 detail_text,
                 reply_markup={
                     "inline_keyboard": [
-                        [{"text": "📨 К решениям", "callback_data": "menu:inbox"}],
-                        [{"text": "📊 Статус", "callback_data": "menu:status"}],
+                        [{"text": "✅ К согласованиям", "callback_data": "menu:inbox"}],
+                        [{"text": "📊 Главное", "callback_data": "menu:status"}],
                     ]
                 },
             )
@@ -390,7 +408,7 @@ class TelegramControlBot:
                 subject = item.get("subject")
                 header = (
                     f"✉️ {item.get('lead_id')} · {item.get('business_name')}\n"
-                    f"Канал: {item.get('channel')} → {item.get('target')}"
+                    f"Канал: {channel_label(item.get('channel'))} → {item.get('target')}"
                 )
                 if subject:
                     header += f"\nТема: {subject}"
@@ -418,7 +436,7 @@ class TelegramControlBot:
                 )
             result_text = "✅ Одобрено" if record.status == "approved" else "❌ Отклонено"
         except ApprovalDecisionError:
-            result_text = "🔴 RED-действие нельзя одобрить одной кнопкой. Открой детали."
+            result_text = "🔴 Это действие требует дополнительной проверки. Открой подробности."
         except LookupError:
             result_text = "Решение не найдено."
 
@@ -429,8 +447,8 @@ class TelegramControlBot:
             result_text,
             reply_markup={
                 "inline_keyboard": [
-                    [{"text": "📨 Следующее решение", "callback_data": "menu:inbox"}],
-                    [{"text": "📊 Статус", "callback_data": "menu:status"}],
+                    [{"text": "✅ Следующее согласование", "callback_data": "menu:inbox"}],
+                    [{"text": "📊 Главное", "callback_data": "menu:status"}],
                 ]
             },
         )
