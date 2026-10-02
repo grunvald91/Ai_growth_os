@@ -1,0 +1,76 @@
+name: Check EXP-SERVGO-001 recovery
+
+on:
+  push:
+    branches:
+      - ops/check-exp-servgo-recovery
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Inspect recovery state
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import AgentRun, Artifact, Decision, Experiment, Task
+
+          with SessionLocal() as db:
+              exp = db.scalar(select(Experiment).where(Experiment.experiment_key=="EXP-SERVGO-001"))
+              print("experiment_status=", exp.status)
+              tasks = list(db.scalars(
+                  select(Task).where(
+                      Task.product_id==exp.product_id,
+                      Task.title.like("EXP-SERVGO-001:%")
+                  ).order_by(Task.created_at.asc())
+              ))
+              print("task_count=", len(tasks))
+              for task in tasks:
+                  status = task.status.value if hasattr(task.status, "value") else task.status
+                  print("task", task.id, task.assigned_agent, status, task.title)
+
+              task_ids=[task.id for task in tasks]
+              runs=list(db.scalars(
+                  select(AgentRun).where(AgentRun.task_id.in_(task_ids)).order_by(AgentRun.started_at.asc())
+              )) if task_ids else []
+              print("run_count=", len(runs))
+              for run in runs:
+                  print("run", run.agent_name, run.status, run.error or "")
+
+              artifacts=list(db.scalars(
+                  select(Artifact).where(Artifact.task_id.in_(task_ids)).order_by(Artifact.created_at.asc())
+              )) if task_ids else []
+              print("artifact_count=", len(artifacts))
+              for artifact in artifacts:
+                  print("artifact", artifact.kind, artifact.title)
+
+              decisions=list(db.scalars(
+                  select(Decision).where(Decision.experiment_id==exp.id).order_by(Decision.created_at.asc())
+              ))
+              print("decision_count=", len(decisions))
+              for decision in decisions:
+                  kind=decision.decision_type.value if hasattr(decision.decision_type, "value") else decision.decision_type
+                  print("decision", kind, decision.rationale[:300].replace("\n"," "))
+          PY
+          echo "=== WORKER ==="
+          docker ps --filter name=ai-growth-os-worker-1 --format 'name={{.Names}} status={{.Status}}'
+          REMOTE
