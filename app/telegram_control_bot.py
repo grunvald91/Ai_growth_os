@@ -16,11 +16,12 @@ class TelegramAPIError(RuntimeError):
 
 
 class TelegramAPI:
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, proxy_url: str | None = None) -> None:
         self.base_url = f"https://api.telegram.org/bot{token}"
+        self.proxy_url = proxy_url
 
     async def call(self, method: str, payload: dict | None = None) -> dict:
-        async with httpx.AsyncClient(timeout=35.0) as client:
+        async with httpx.AsyncClient(timeout=35.0, proxy=self.proxy_url) as client:
             response = await client.post(
                 f"{self.base_url}/{method}",
                 json=payload or {},
@@ -207,7 +208,7 @@ async def main() -> None:
     if not settings.telegram_bot_token or settings.telegram_owner_chat_id is None:
         raise SystemExit("Configure TELEGRAM_BOT_TOKEN and TELEGRAM_OWNER_CHAT_ID")
     bot = TelegramControlBot(
-        TelegramAPI(settings.telegram_bot_token),
+        TelegramAPI(settings.telegram_bot_token, settings.telegram_proxy_url),
         settings.telegram_owner_chat_id,
         settings.telegram_poll_timeout_seconds,
     )
