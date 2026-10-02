@@ -59,3 +59,5 @@ jobs:
                   print("OUTREACH_APPROVAL",a.id,(a.reason or "")[:220].replace("\n"," "))
           PY
           REMOTE
+
+# rerun after outreach approval cleanup
