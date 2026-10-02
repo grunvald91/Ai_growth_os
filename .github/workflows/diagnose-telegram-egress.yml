@@ -60,6 +60,22 @@ jobs:
           except Exception as exc:
               print("container_ipv4_error", type(exc).__name__, str(exc))
           PY
+          echo "=== CONTAINER RAW IPV4 ==="
+          docker exec -i ai-growth-os-telegram-1 python - <<'PY'
+          import socket
+          for host, port in [("149.154.166.110",443),("149.154.167.220",443),("1.1.1.1",443)]:
+              s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+              s.settimeout(5)
+              try:
+                  s.connect((host,port))
+                  print("raw_ipv4_ok", host, port)
+              except Exception as exc:
+                  print("raw_ipv4_error", host, port, type(exc).__name__, str(exc))
+              finally:
+                  s.close()
+          PY
+          echo "=== CONTAINER ROUTE ==="
+          docker exec ai-growth-os-telegram-1 sh -c 'cat /proc/net/route; cat /proc/net/if_inet6 || true'
           echo "=== CONTAINER URLLIB ==="
           docker exec -i ai-growth-os-telegram-1 python - <<'PY'
           import json
