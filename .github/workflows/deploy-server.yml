@@ -135,6 +135,11 @@ jobs:
               --product servgo \
               --file /app/products/servgo/research_sources/initial-voc-2026-09-29.json </dev/null
           fi
+          if [ -f products/servgo/experiments/EXP-SERVGO-001/enrichment.json ]; then
+            dc run -T --rm api python -m app.apply_prospect_enrichment \
+              --experiment EXP-SERVGO-001 \
+              --file /app/products/servgo/experiments/EXP-SERVGO-001/enrichment.json </dev/null
+          fi
           dc up -d api worker
           if grep -q "^TELEGRAM_BOT_TOKEN=." "$REMOTE_ROOT/.env" && grep -q "^TELEGRAM_OWNER_CHAT_ID=." "$REMOTE_ROOT/.env"; then
             dc --profile telegram build telegram
