@@ -1,0 +1,140 @@
+name: Benchmark cheap enrichment models
+
+on:
+  push:
+    branches:
+      - ops/benchmark-cheap-enrichment-models
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Benchmark structured enrichment decisions
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import asyncio, json, os
+          import httpx
+
+          BASE=os.environ["XAI_BASE_URL"].rstrip("/")
+          KEY=os.environ["XAI_API_KEY"]
+          MODELS=["deepseek-v4.1-flash","gemini-flash-3.8"]
+
+          CASES=[
+            {
+              "id":"official_email",
+              "evidence":"Official website contact page: business Example SPA, exact address matches. Email hello@example.com. Phone +70000000001.",
+              "expected":{"status":"direct","channel":"email","needs_review":False},
+            },
+            {
+              "id":"verified_whatsapp",
+              "evidence":"Owner-verified business listing matches exact name/address/phone. WhatsApp button resolves to +70000000002. No email is shown.",
+              "expected":{"status":"direct","channel":"whatsapp","needs_review":False},
+            },
+            {
+              "id":"telegram_only",
+              "evidence":"Official business site matches identity. It links a public Telegram contact @example_admin. No email or WhatsApp is shown.",
+              "expected":{"status":"direct","channel":"telegram","needs_review":False},
+            },
+            {
+              "id":"website_chat",
+              "evidence":"Owner-confirmed booking page matches business identity and has a built-in contact/chat form. No public email, WhatsApp or Telegram contact is shown.",
+              "expected":{"status":"website_or_chat","channel":"website","needs_review":False},
+            },
+            {
+              "id":"phone_only",
+              "evidence":"Current business profile matches exact name, address and public phone +70000000005. Repeated public-source checks show no website, email, WhatsApp or Telegram.",
+              "expected":{"status":"phone_only","channel":"phone","needs_review":False},
+            },
+            {
+              "id":"stale_conflict",
+              "evidence":"Original lead says Barhat, Lenin 1/1, phone +70000000006. Current sources for Barhat show different addresses and different phones, with no source tying the original address/phone to the current business.",
+              "expected":{"status":"stale","channel":"none","needs_review":True},
+            },
+          ]
+
+          SCHEMA={
+            "type":"object",
+            "properties":{
+              "status":{"type":"string","enum":["direct","website_or_chat","phone_only","stale"]},
+              "channel":{"type":"string","enum":["email","whatsapp","telegram","website","phone","none"]},
+              "needs_review":{"type":"boolean"},
+            },
+            "required":["status","channel","needs_review"],
+            "additionalProperties":False,
+          }
+
+          SYSTEM="""You classify already-collected business contact evidence. Never invent a contact.
+          Rules:
+          - direct if verified email, WhatsApp, or Telegram exists.
+          - if multiple direct channels exist, prefer email, then WhatsApp, then Telegram.
+          - website_or_chat if no direct channel exists but a verified website/booking/chat page exists.
+          - phone_only if only a verified public phone remains after checks.
+          - stale if current evidence conflicts with the lead identity and cannot safely establish continuity.
+          - stale => channel none and needs_review true. Otherwise needs_review false.
+          Return only the requested JSON."""
+
+          async def classify(model, case):
+              payload={
+                "model":model,
+                "messages":[
+                  {"role":"system","content":SYSTEM},
+                  {"role":"user","content":case["evidence"]},
+                ],
+                "max_completion_tokens":180,
+                "reasoning_effort":"low",
+                "response_format":{
+                  "type":"json_schema",
+                  "json_schema":{
+                    "name":"enrichment_classification",
+                    "strict":True,
+                    "schema":SCHEMA,
+                  },
+                },
+              }
+              async with httpx.AsyncClient(timeout=90) as client:
+                r=await client.post(
+                  BASE+"/chat/completions",
+                  headers={"Authorization":f"Bearer {KEY}","Content-Type":"application/json"},
+                  json=payload,
+                )
+              r.raise_for_status()
+              data=r.json()
+              out=json.loads(data["choices"][0]["message"]["content"])
+              return out
+
+          async def main():
+              overall={}
+              for model in MODELS:
+                passed=0
+                rows=[]
+                for case in CASES:
+                  try:
+                    out=await classify(model,case)
+                    ok=out==case["expected"]
+                    passed+=int(ok)
+                    rows.append({"id":case["id"],"ok":ok,"output":out,"expected":case["expected"]})
+                  except Exception as exc:
+                    rows.append({"id":case["id"],"ok":False,"error":type(exc).__name__+":"+str(exc)[:200]})
+                overall[model]={"passed":passed,"total":len(CASES),"rows":rows}
+              print(json.dumps(overall,ensure_ascii=False,sort_keys=True))
+          asyncio.run(main())
+          PY
+          REMOTE
