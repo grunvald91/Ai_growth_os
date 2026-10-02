@@ -60,3 +60,56 @@ def render_experiments(status: ControlStatus) -> str:
     if not found:
         lines.extend(["", "Активных или черновых экспериментов нет."])
     return "\n".join(lines)
+
+
+
+def render_experiment_detail(experiment) -> str:
+    key = experiment.experiment_key or str(experiment.id)
+    lines = [
+        f"🧪 {key}",
+        experiment.name,
+        "",
+        f"Статус: {experiment.status}",
+        f"Канал: {experiment.channel or 'не указан'}",
+        f"Главная метрика: {experiment.target_metric or 'не указана'}",
+    ]
+    if experiment.observation_window_days:
+        lines.append(f"Окно наблюдения: {experiment.observation_window_days} дней")
+    if experiment.budget is not None:
+        lines.append(f"Бюджет: {experiment.budget} {experiment.currency or ''}".rstrip())
+    if experiment.starts_at:
+        lines.append(f"Старт: {experiment.starts_at}")
+    if experiment.ends_at:
+        lines.append(f"Окончание окна: {experiment.ends_at}")
+    lines.extend([
+        "",
+        "Гипотеза:",
+        experiment.hypothesis,
+        "",
+        "Условие KEEP:",
+        experiment.success_condition or "не задано",
+        "",
+        "Условие STOP:",
+        experiment.stop_condition or "не задано",
+    ])
+    return "\n".join(lines)
+
+
+def render_experiment_launch_confirmation(experiment) -> str:
+    key = experiment.experiment_key or str(experiment.id)
+    return "\n".join([
+        f"▶️ Запуск {key}",
+        "",
+        f"{experiment.name}",
+        f"Окно: {experiment.observation_window_days} дней",
+        f"Бюджет: {experiment.budget} {experiment.currency or ''}".rstrip(),
+        "",
+        "После подтверждения:",
+        "• эксперимент станет RUNNING;",
+        "• зафиксируются дата старта и конец окна;",
+        "• создастся запись TEST в Decision Journal;",
+        "• worker получит внутреннюю задачу подготовки cohort;",
+        "• никакие письма, сообщения или публикации автоматически не отправятся.",
+        "",
+        "Подтвердить запуск?",
+    ])
