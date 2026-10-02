@@ -1,0 +1,64 @@
+name: Verify cheap models and enrichment
+
+on:
+  push:
+    branches:
+      - ops/verify-cheap-models-enrichment
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Verify production runtime
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          DC="docker compose --env-file $REMOTE_ROOT/.env -p ai-growth-os -f docker-compose.prod.yml"
+
+          echo "=== WORKER MODEL ==="
+          $DC exec -T worker python - <<'PY'
+          from app.core.config import get_settings
+          s=get_settings()
+          print("provider=", s.llm_provider)
+          print("model=", s.llm_model)
+          print("fallbacks=", s.llm_fallback_models)
+          print("reasoning=", s.xai_reasoning_effort)
+          PY
+
+          echo "=== ENRICHMENT STATS ==="
+          $DC exec -T api python - <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Experiment, Prospect
+          from app.services.prospects import ProspectService
+
+          with SessionLocal() as db:
+              exp=db.scalar(select(Experiment).where(Experiment.experiment_key=="EXP-SERVGO-001"))
+              stats=ProspectService(db).stats_for_experiment(exp.id)
+              for key,value in stats.items():
+                  print(f"{key}={value}")
+              rows=list(db.scalars(
+                  select(Prospect)
+                  .where(Prospect.experiment_id==exp.id, Prospect.validation_status=="validated")
+                  .order_by(Prospect.lead_key)
+              ))
+              print("validated_leads="+",".join(p.lead_key for p in rows))
+              print("outreach_sent="+str(sum(p.outreach_status!="not_contacted" for p in rows)))
+          PY
+          REMOTE
