@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     xai_base_url: str = "https://api.claudehub.fun/v1"
     xai_reasoning_effort: Literal["low", "medium", "high", "xhigh"] = "medium"
     xai_timeout_seconds: float = 300.0
+    xai_fallback_model: str | None = None
     skills_root: Path = Path("skills")
     products_root: Path = Path("products")
     review_skill: str | None = None
