@@ -100,11 +100,11 @@ jobs:
               echo "APP_ENV=production"
               echo "POSTGRES_PASSWORD=$DB_PASSWORD"
               echo "LLM_PROVIDER=xai"
-              echo "LLM_MODEL=grok-4.7"
+              echo "LLM_MODEL=deepseek-v4.1-flash"
               echo "XAI_API_KEY=$KEY"
               echo "XAI_BASE_URL=https://api.claudehub.fun/v1"
-              echo "XAI_REASONING_EFFORT=medium"
-              echo "AI_GROWTH_PORT=8091"
+              echo "XAI_REASONING_EFFORT=low"
+              echo "LLM_FALLBACK_MODELS=gemini-flash-3.8"\n              echo "TEAM_LLM_MODEL=deepseek-v4.1-flash"\n              echo "TEAM_LLM_FALLBACK_MODELS=gemini-flash-3.8"\n              echo "AI_GROWTH_PORT=8091"
               if [ -n "$TG_TOKEN" ] && [ -n "$TG_OWNER" ]; then
                 printf "TELEGRAM_BOT_TOKEN=%s\n" "$TG_TOKEN"
                 printf "TELEGRAM_OWNER_CHAT_ID=%s\n" "$TG_OWNER"
@@ -179,7 +179,7 @@ jobs:
           PY
           REMOTE
 
-      - name: Smoke test Grok 4.7
+      - name: Smoke test cheap runtime model
         continue-on-error: true
         run: |
           set -euo pipefail
@@ -202,7 +202,7 @@ jobs:
               ))
               if not result.content.strip():
                   raise SystemExit("empty model response")
-              print("Grok smoke OK:", result.model)
+              print("Runtime model smoke OK:", result.model)
 
           asyncio.run(main())
           PY
