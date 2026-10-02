@@ -42,12 +42,14 @@ class XAIProvider:
         if reasoning_effort not in {"low", "medium", "high", "xhigh"}:
             raise ValueError("Unsupported xAI reasoning effort")
 
+        selected_model = request.model or self._model
         payload: dict[str, object] = {
-            "model": request.model or self._model,
+            "model": selected_model,
             "messages": messages,
             "max_completion_tokens": request.max_tokens,
-            "reasoning_effort": reasoning_effort,
         }
+        if selected_model.lower().startswith("grok-"):
+            payload["reasoning_effort"] = reasoning_effort
         if request.temperature is not None:
             payload["temperature"] = request.temperature
         if request.response_schema is not None:
@@ -65,7 +67,11 @@ class XAIProvider:
             "Content-Type": "application/json",
         }
         conversation_id = request.metadata.get("conversation_id")
-        if isinstance(conversation_id, str) and conversation_id:
+        if (
+            selected_model.lower().startswith("grok-")
+            and isinstance(conversation_id, str)
+            and conversation_id
+        ):
             headers["x-grok-conv-id"] = conversation_id[:200]
 
         async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
