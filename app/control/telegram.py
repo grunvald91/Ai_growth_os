@@ -78,6 +78,11 @@ def render_experiment_detail(experiment, prospect_stats: dict[str, int] | None =
     if prospect_stats is not None:
         lines.append(f"Prospects: {prospect_stats.get('total', 0)}")
         lines.append(
+            "Контакты найдены: "
+            f"{prospect_stats.get('contact_found', 0)}/{prospect_stats.get('total', 0)} · "
+            f"телефоны {prospect_stats.get('phone', 0)}"
+        )
+        lines.append(
             "Проверено: "
             f"{prospect_stats.get('validated', 0)} · "
             f"готово к контакту: {prospect_stats.get('ready_for_outreach', 0)}"
