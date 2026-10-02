@@ -63,7 +63,7 @@ def render_experiments(status: ControlStatus) -> str:
 
 
 
-def render_experiment_detail(experiment) -> str:
+def render_experiment_detail(experiment, prospect_count: int | None = None) -> str:
     key = experiment.experiment_key or str(experiment.id)
     lines = [
         f"🧪 {key}",
@@ -75,6 +75,8 @@ def render_experiment_detail(experiment) -> str:
     ]
     if experiment.observation_window_days:
         lines.append(f"Окно наблюдения: {experiment.observation_window_days} дней")
+    if prospect_count is not None:
+        lines.append(f"Prospects: {prospect_count}")
     if experiment.budget is not None:
         lines.append(f"Бюджет: {experiment.budget} {experiment.currency or ''}".rstrip())
     if experiment.starts_at:
