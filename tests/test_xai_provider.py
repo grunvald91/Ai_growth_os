@@ -1,5 +1,6 @@
 import json
 
+import httpx
 import pytest
 
 from app.core.composition import build_llm_provider
@@ -116,3 +117,93 @@ def test_composition_selects_xai_and_requires_key():
 def test_xai_reasoning_effort_fails_closed():
     with pytest.raises(ValueError, match="reasoning effort"):
         XAIProvider(api_key="secret", reasoning_effort="turbo")  # type: ignore[arg-type]
+
+
+
+class SequenceAsyncClient:
+    responses = []
+    calls = 0
+
+    def __init__(self, *, base_url, timeout):
+        self.base_url = base_url
+        self.timeout = timeout
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def post(self, path, *, headers, json):
+        type(self).calls += 1
+        item = type(self).responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+def _http_response(status_code: int, payload: dict):
+    request = httpx.Request("POST", "https://api.example/v1/chat/completions")
+    return httpx.Response(status_code, request=request, json=payload)
+
+
+@pytest.mark.asyncio
+async def test_xai_provider_retries_transient_gateway_failures(monkeypatch):
+    SequenceAsyncClient.calls = 0
+    SequenceAsyncClient.responses = [
+        _http_response(502, {"error": {"message": "upstream failed"}}),
+        _http_response(503, {"error": {"message": "temporarily unavailable"}}),
+        _http_response(
+            200,
+            {
+                "model": "grok-4.7",
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": '{"ok":true}'},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+        ),
+    ]
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("app.llm.xai.httpx.AsyncClient", SequenceAsyncClient)
+    monkeypatch.setattr("app.llm.xai.asyncio.sleep", fake_sleep)
+
+    provider = XAIProvider(api_key="secret")
+    response = await provider.generate(
+        LLMRequest(messages=[LLMMessage(role="user", content="hello")])
+    )
+
+    assert response.content == '{"ok":true}'
+    assert SequenceAsyncClient.calls == 3
+    assert sleeps == [1.0, 3.0]
+
+
+@pytest.mark.asyncio
+async def test_xai_provider_does_not_retry_nontransient_http_error(monkeypatch):
+    SequenceAsyncClient.calls = 0
+    SequenceAsyncClient.responses = [
+        _http_response(400, {"error": {"message": "bad request"}}),
+    ]
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("app.llm.xai.httpx.AsyncClient", SequenceAsyncClient)
+    monkeypatch.setattr("app.llm.xai.asyncio.sleep", fake_sleep)
+
+    provider = XAIProvider(api_key="secret")
+    with pytest.raises(httpx.HTTPStatusError):
+        await provider.generate(
+            LLMRequest(messages=[LLMMessage(role="user", content="hello")])
+        )
+
+    assert SequenceAsyncClient.calls == 1
+    assert sleeps == []
