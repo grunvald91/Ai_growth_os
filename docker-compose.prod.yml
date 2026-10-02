@@ -46,6 +46,8 @@ services:
   telegram:
     build:
       context: .
+    extra_hosts:
+      - "api.telegram.org:149.154.167.220"
     restart: unless-stopped
     command: ["python", "-m", "app.telegram_control_bot"]
     profiles: ["telegram"]
