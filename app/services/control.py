@@ -113,9 +113,16 @@ class ControlService:
             risk_level=record.risk_level,
             action_type=record.action_type,
             created_at=record.created_at,
-            actions=[
-                ControlAction(key="approve", label="Одобрить"),
-                ControlAction(key="reject", label="Отклонить"),
-                ControlAction(key="open", label="Подробнее"),
-            ],
+            actions=(
+                [
+                    ControlAction(key="reject", label="Отклонить"),
+                    ControlAction(key="open", label="Подробнее"),
+                ]
+                if record.risk_level.lower() == "red"
+                else [
+                    ControlAction(key="approve", label="Одобрить"),
+                    ControlAction(key="reject", label="Отклонить"),
+                    ControlAction(key="open", label="Подробнее"),
+                ]
+            ),
         )

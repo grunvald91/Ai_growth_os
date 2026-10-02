@@ -43,5 +43,21 @@ services:
       timeout: 5s
       retries: 10
 
+  telegram:
+    build:
+      context: .
+    restart: unless-stopped
+    command: ["python", "-m", "app.telegram_control_bot"]
+    profiles: ["telegram"]
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://ai_growth:${POSTGRES_PASSWORD}@postgres:5432/ai_growth
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_OWNER_CHAT_ID: ${TELEGRAM_OWNER_CHAT_ID:-}
+      TELEGRAM_POLL_TIMEOUT_SECONDS: ${TELEGRAM_POLL_TIMEOUT_SECONDS:-25}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
