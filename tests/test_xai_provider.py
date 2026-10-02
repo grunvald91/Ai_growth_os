@@ -103,6 +103,7 @@ def test_composition_selects_xai_and_requires_key():
     provider = build_llm_provider(settings)
     assert isinstance(provider, XAIProvider)
     assert provider._timeout.read == 321
+    assert provider._fallback_model is None
 
     missing = Settings(
         _env_file=None,
@@ -123,6 +124,7 @@ def test_xai_reasoning_effort_fails_closed():
 class SequenceAsyncClient:
     responses = []
     calls = 0
+    models = []
 
     def __init__(self, *, base_url, timeout):
         self.base_url = base_url
@@ -136,6 +138,7 @@ class SequenceAsyncClient:
 
     async def post(self, path, *, headers, json):
         type(self).calls += 1
+        type(self).models.append(json.get("model"))
         item = type(self).responses.pop(0)
         if isinstance(item, Exception):
             raise item
@@ -207,3 +210,111 @@ async def test_xai_provider_does_not_retry_nontransient_http_error(monkeypatch):
 
     assert SequenceAsyncClient.calls == 1
     assert sleeps == []
+
+
+
+@pytest.mark.asyncio
+async def test_xai_provider_falls_back_to_secondary_model_after_exhausted_transient_errors(monkeypatch):
+    SequenceAsyncClient.calls = 0
+    SequenceAsyncClient.models = []
+    SequenceAsyncClient.responses = [
+        _http_response(502, {"error": {"message": "upstream failed"}}),
+        _http_response(502, {"error": {"message": "upstream failed"}}),
+        _http_response(502, {"error": {"message": "upstream failed"}}),
+        _http_response(502, {"error": {"message": "upstream failed"}}),
+        _http_response(
+            200,
+            {
+                "model": "claude-opus-5-5",
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": '{"ok":true}'},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+            },
+        ),
+    ]
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("app.llm.xai.httpx.AsyncClient", SequenceAsyncClient)
+    monkeypatch.setattr("app.llm.xai.asyncio.sleep", fake_sleep)
+
+    provider = XAIProvider(
+        api_key="secret",
+        model="grok-4.7",
+        fallback_model="claude-opus-5-5",
+    )
+    response = await provider.generate(
+        LLMRequest(
+            model="grok-4.7",
+            messages=[LLMMessage(role="user", content="hello")],
+            response_schema={
+                "type": "object",
+                "properties": {"ok": {"type": "boolean"}},
+                "required": ["ok"],
+                "additionalProperties": False,
+            },
+        )
+    )
+
+    assert response.model == "claude-opus-5-5"
+    assert response.content == '{"ok":true}'
+    assert SequenceAsyncClient.models == [
+        "grok-4.7",
+        "grok-4.7",
+        "grok-4.7",
+        "grok-4.7",
+        "claude-opus-5-5",
+    ]
+    assert sleeps == [1.0, 3.0, 7.0]
+
+
+@pytest.mark.asyncio
+async def test_xai_provider_does_not_fallback_for_explicit_nondefault_model(monkeypatch):
+    SequenceAsyncClient.calls = 0
+    SequenceAsyncClient.models = []
+    SequenceAsyncClient.responses = [
+        _http_response(502, {"error": {"message": "upstream failed"}}),
+        _http_response(502, {"error": {"message": "upstream failed"}}),
+        _http_response(502, {"error": {"message": "upstream failed"}}),
+        _http_response(502, {"error": {"message": "upstream failed"}}),
+    ]
+
+    async def fake_sleep(seconds):
+        return None
+
+    monkeypatch.setattr("app.llm.xai.httpx.AsyncClient", SequenceAsyncClient)
+    monkeypatch.setattr("app.llm.xai.asyncio.sleep", fake_sleep)
+
+    provider = XAIProvider(
+        api_key="secret",
+        model="grok-4.7",
+        fallback_model="claude-opus-5-5",
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        await provider.generate(
+            LLMRequest(
+                model="some-other-model",
+                messages=[LLMMessage(role="user", content="hello")],
+            )
+        )
+
+    assert SequenceAsyncClient.models == ["some-other-model"] * 4
+
+
+def test_composition_wires_fallback_model():
+    settings = Settings(
+        _env_file=None,
+        llm_provider="xai",
+        llm_model="grok-4.7",
+        xai_api_key="secret",
+        xai_fallback_model="claude-opus-5-5",
+    )
+    provider = build_llm_provider(settings)
+    assert isinstance(provider, XAIProvider)
+    assert provider._fallback_model == "claude-opus-5-5"
