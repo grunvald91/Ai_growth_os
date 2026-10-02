@@ -151,6 +151,36 @@ class Experiment(UUIDMixin, TimestampMixin, Base):
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class Prospect(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "prospects"
+    __table_args__ = (
+        UniqueConstraint("experiment_id", "lead_key", name="uq_prospects_experiment_lead"),
+    )
+
+    product_id: Mapped[UUID] = mapped_column(ForeignKey("products.id"), index=True, nullable=False)
+    experiment_id: Mapped[UUID] = mapped_column(ForeignKey("experiments.id"), index=True, nullable=False)
+    lead_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    business_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    area: Mapped[str | None] = mapped_column(String(100))
+    category: Mapped[str | None] = mapped_column(String(200))
+    public_phone: Mapped[str | None] = mapped_column(String(50))
+    address: Mapped[str | None] = mapped_column(String(500))
+    source_place_id: Mapped[str | None] = mapped_column(String(200))
+    source_checked_at: Mapped[date | None] = mapped_column(Date)
+    fit_status: Mapped[str] = mapped_column(String(50), default="needs_validation", nullable=False)
+    validation_status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False)
+    outreach_status: Mapped[str] = mapped_column(String(50), default="not_contacted", nullable=False)
+    preferred_channel: Mapped[str | None] = mapped_column(String(50))
+    email: Mapped[str | None] = mapped_column(String(320))
+    whatsapp: Mapped[str | None] = mapped_column(String(100))
+    telegram: Mapped[str | None] = mapped_column(String(200))
+    website: Mapped[str | None] = mapped_column(String(500))
+    tracking_url: Mapped[str | None] = mapped_column(String(1000))
+    evidence: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    last_contact_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Decision(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "decisions"
 
