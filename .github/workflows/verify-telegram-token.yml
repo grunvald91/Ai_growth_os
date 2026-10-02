@@ -1,0 +1,44 @@
+name: Verify Telegram token
+
+on:
+  push:
+    branches:
+      - ops/verify-telegram-token
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      TG_BOT_TOKEN: ${{ secrets.AI_GROWTH_TELEGRAM_BOT_TOKEN }}
+      TG_OWNER_CHAT_ID: ${{ secrets.AI_GROWTH_TELEGRAM_OWNER_CHAT_ID }}
+    steps:
+      - name: Verify secrets exist
+        run: |
+          set -euo pipefail
+          [ -n "$TG_BOT_TOKEN" ] || { echo "::error::Missing bot token"; exit 1; }
+          [ -n "$TG_OWNER_CHAT_ID" ] || { echo "::error::Missing owner chat id"; exit 1; }
+
+      - name: Verify Telegram Bot API from GitHub runner
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          token = os.environ["TG_BOT_TOKEN"]
+          request = urllib.request.Request(
+              f"https://api.telegram.org/bot{token}/getMe",
+              method="GET",
+          )
+          with urllib.request.urlopen(request, timeout=15) as response:
+              body = json.load(response)
+          if not body.get("ok") or not body.get("result", {}).get("id"):
+              raise SystemExit("Telegram Bot API rejected the configured token")
+          print("TELEGRAM_TOKEN_OK")
+          print("BOT_USERNAME=" + str(body["result"].get("username", "")))
+          print("OWNER_CHAT_ID_CONFIGURED=yes")
+          PY
