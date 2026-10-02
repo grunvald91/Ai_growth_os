@@ -106,17 +106,20 @@ def _recover_transient_failed_experiment_tasks(
             and all(run.model and run.model != current_model for run in runs)
         )
         fallback_recovery = fallback_enabled and len(runs) <= 8
-        latest_generation = runs[-4:]
+        validation_errors = sum(
+            run.error == "research_worker_failed:ValidationError" for run in runs
+        )
         repair_recovery = (
             repair_enabled
             and 9 <= len(runs) <= 12
-            and any(
-                run.error == "research_worker_failed:ValidationError"
-                for run in latest_generation
-            )
+            and 1 <= validation_errors <= 4
             and all(
-                run.error in {None, "research_worker_failed:ValidationError"}
-                for run in latest_generation
+                run.error in {
+                    None,
+                    "research_worker_failed:HTTPStatusError",
+                    "research_worker_failed:ValidationError",
+                }
+                for run in runs
             )
         )
         if (
