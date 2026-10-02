@@ -34,6 +34,7 @@ def build_llm_provider(settings: Settings) -> LLMProvider:
             base_url=settings.xai_base_url,
             reasoning_effort=settings.xai_reasoning_effort,
             timeout_seconds=settings.xai_timeout_seconds,
+            fallback_model=settings.xai_fallback_model,
         )
     raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
