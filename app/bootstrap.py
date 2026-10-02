@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.domain import Experiment, Goal, Product
+from app.services.outreach import OutreachPackageService
 from app.services.prospects import ProspectService
 
 
@@ -70,6 +71,21 @@ def bootstrap(db):
         )
     db.commit()
     _apply_servgo_enrichment(db, product)
+
+    experiment = db.scalar(
+        select(Experiment).where(
+            Experiment.product_id == product.id,
+            Experiment.experiment_key == "EXP-SERVGO-001",
+            Experiment.status == "running",
+        )
+    )
+    if experiment is not None:
+        try:
+            OutreachPackageService(db).prepare(experiment_id=experiment.id)
+        except ValueError as exc:
+            if "No validated prospects with direct channels" not in str(exc):
+                raise
+
     return product.id
 
 

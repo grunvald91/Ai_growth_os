@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from uuid import UUID
 
@@ -14,7 +15,7 @@ from app.control.telegram import (
 )
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.models.domain import Approval, Experiment
+from app.models.domain import Approval, Artifact, Experiment
 from app.services.control import ControlService
 from app.services.experiment_launch import ExperimentLaunchError, ExperimentLaunchService
 from app.services.prospects import ProspectService
@@ -355,6 +356,7 @@ class TelegramControlBot:
             return
 
         if action == "open":
+            package_messages = []
             with SessionLocal() as db:
                 record = db.get(Approval, approval_id)
                 if record is None:
@@ -366,6 +368,14 @@ class TelegramControlBot:
                         f"Статус: {record.status}\n"
                         f"Причина: {record.reason or 'не указана'}"
                     )
+                    if record.action_type == "send_outreach_batch" and record.artifact_id:
+                        artifact = db.get(Artifact, record.artifact_id)
+                        if artifact is not None:
+                            try:
+                                package = json.loads(artifact.content)
+                                package_messages = package.get("messages") or []
+                            except json.JSONDecodeError:
+                                package_messages = []
             await self._send(
                 chat_id,
                 detail_text,
@@ -376,6 +386,18 @@ class TelegramControlBot:
                     ]
                 },
             )
+            for item in package_messages:
+                subject = item.get("subject")
+                header = (
+                    f"✉️ {item.get('lead_id')} · {item.get('business_name')}\n"
+                    f"Канал: {item.get('channel')} → {item.get('target')}"
+                )
+                if subject:
+                    header += f"\nТема: {subject}"
+                await self._send(
+                    chat_id,
+                    header + "\n\n" + str(item.get("body") or ""),
+                )
             if callback_id:
                 await self._answer_callback(callback_id, "Открыто")
             return
