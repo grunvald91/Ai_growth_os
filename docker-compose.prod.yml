@@ -69,7 +69,7 @@ services:
       APP_ENV: production
       DATABASE_URL: postgresql+psycopg://ai_growth:${POSTGRES_PASSWORD}@postgres:5432/ai_growth
       LLM_PROVIDER: xai
-      LLM_MODEL: ${LLM_MODEL:-grok-4.7}
+      LLM_MODEL: ${TEAM_LLM_MODEL:-gpt-6-sol}
       XAI_API_KEY: ${XAI_API_KEY:?XAI_API_KEY is required}
       XAI_BASE_URL: ${XAI_BASE_URL:-https://api.claudehub.fun/v1}
       XAI_REASONING_EFFORT: ${XAI_REASONING_EFFORT:-medium}
