@@ -59,8 +59,8 @@ def _recover_transient_failed_experiment_tasks(db) -> int:
     """Requeue one failed EXP parent once when every worker failure was transient HTTP.
 
     The first failed research attempt creates up to four child agent runs. A retried
-    attempt creates additional children, so limiting recovery to <=4 runs prevents
-    an infinite retry loop.
+    attempt creates additional children. Allow at most two failed generations
+    (8 worker runs); a third generation is never auto-requeued.
     """
     parents = list(
         db.scalars(
@@ -88,7 +88,7 @@ def _recover_transient_failed_experiment_tasks(db) -> int:
                 .order_by(AgentRun.started_at.asc(), AgentRun.id)
             )
         )
-        if not runs or len(runs) > 4:
+        if not runs or len(runs) > 8:
             continue
         if all(run.error == "research_worker_failed:HTTPStatusError" for run in runs):
             parent.status = TaskStatus.QUEUED
