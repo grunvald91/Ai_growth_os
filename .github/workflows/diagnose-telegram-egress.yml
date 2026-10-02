@@ -94,6 +94,18 @@ jobs:
           except Exception as exc:
               print("urllib_getme_error", type(exc).__name__, str(exc))
           PY
+          echo "=== PIN WORKING TELEGRAM IPV4 + GETME ==="
+          docker exec ai-growth-os-telegram-1 sh -c 'echo "149.154.167.220 api.telegram.org" >> /etc/hosts'
+          docker exec -i ai-growth-os-telegram-1 python - <<'PY'
+          import asyncio
+          from app.core.config import get_settings
+          from app.telegram_control_bot import TelegramAPI
+          async def main():
+              s=get_settings()
+              result=await TelegramAPI(s.telegram_bot_token).call("getMe")
+              print("pinned_getme_ok", bool(result.get("id")), result.get("username"))
+          asyncio.run(main())
+          PY
           echo "=== TELEGRAM CONTAINER LOG TAIL ==="
           docker logs --tail 40 ai-growth-os-telegram-1 2>&1 | sed -E 's#bot[0-9]+:[A-Za-z0-9_-]+#bot***#g'
           REMOTE
