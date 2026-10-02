@@ -36,8 +36,6 @@ class ProspectService:
                     Prospect.lead_key == lead_key,
                 )
             )
-            self._validate_enrichment_resolution(lead_key, prospect)
-
             checked_at = self._date(row.get("source_checked_at"))
             if prospect is None:
                 prospect = Prospect(
@@ -155,6 +153,8 @@ class ProspectService:
                         f"{lead_key}: preferred channel has no verified value"
                     )
                 prospect.preferred_channel = preferred_channel
+
+            self._validate_enrichment_resolution(lead_key, prospect)
 
             checked_at = self._date(row.get("source_checked_at"))
             if checked_at is not None:
