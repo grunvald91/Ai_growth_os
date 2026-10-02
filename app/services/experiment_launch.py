@@ -10,6 +10,7 @@ from app.models.domain import Experiment, Product, TaskStatus
 from app.services.artifacts import ArtifactService
 from app.services.decisions import DecisionService
 from app.services.experiments import ExperimentService
+from app.services.prospects import ProspectService
 from app.services.tasks import TaskService
 
 
@@ -24,6 +25,7 @@ class ExperimentLaunchResult:
     task_id: UUID
     starts_at: datetime
     ends_at: datetime
+    prospect_count: int
 
 
 _REQUIRED_FIELDS = (
@@ -95,6 +97,13 @@ class ExperimentLaunchService:
             ],
         )
 
+        cohort = self._load_cohort(product.slug, key)
+        prospects = ProspectService(self.db).import_cohort(
+            product_id=experiment.product_id,
+            experiment_id=experiment.id,
+            leads=cohort.get("leads", []),
+        )
+
         title = f"{key}: prepare outreach cohort"
         tasks = TaskService(self.db)
         task = tasks.find_active_duplicate(
@@ -134,7 +143,7 @@ class ExperimentLaunchService:
                         "priority": 100,
                         "operation": None,
                         "requires_approval": False,
-                        "cohort_snapshot": self._load_cohort(product.slug, key),
+                        "cohort_snapshot": cohort,
                         "hard_constraints": [
                             "No outreach or publication.",
                             "No invented email, WhatsApp, Telegram, website, or decision-maker data.",
@@ -154,6 +163,7 @@ class ExperimentLaunchService:
             task_id=task.id,
             starts_at=refreshed.starts_at,
             ends_at=refreshed.ends_at,
+            prospect_count=len(prospects),
         )
 
     @staticmethod
@@ -200,6 +210,7 @@ class ExperimentLaunchService:
                     "source_checked_at": row.get("source_checked_at"),
                     "fit_status": row.get("fit_status"),
                     "outreach_status": row.get("outreach_status"),
+                    "tracking_url": row.get("tracking_url"),
                 }
             )
         return {
