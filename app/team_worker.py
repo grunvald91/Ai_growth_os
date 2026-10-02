@@ -5,7 +5,7 @@ from sqlalchemy import select
 from app.core.composition import build_team_cycle
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.models.domain import Product, Task, TaskStatus
+from app.models.domain import AgentRun, Product, Task, TaskStatus
 from app.services.control import ControlService
 from app.telegram_control_bot import TelegramAPI
 
@@ -53,9 +53,54 @@ async def _notify_owner(settings, *, product_name: str, result, decisions_waitin
         return
 
 
+
+
+def _recover_transient_failed_experiment_tasks(db) -> int:
+    """Requeue one failed EXP parent once when every worker failure was transient HTTP.
+
+    The first failed research attempt creates up to four child agent runs. A retried
+    attempt creates additional children, so limiting recovery to <=4 runs prevents
+    an infinite retry loop.
+    """
+    parents = list(
+        db.scalars(
+            select(Task)
+            .where(
+                Task.status == TaskStatus.FAILED,
+                Task.parent_id.is_(None),
+                Task.title.like("EXP-%"),
+            )
+            .order_by(Task.created_at.asc(), Task.id)
+            .limit(20)
+        )
+    )
+    recovered = 0
+    for parent in parents:
+        child_ids = list(
+            db.scalars(select(Task.id).where(Task.parent_id == parent.id))
+        )
+        if not child_ids:
+            continue
+        runs = list(
+            db.scalars(
+                select(AgentRun)
+                .where(AgentRun.task_id.in_(child_ids))
+                .order_by(AgentRun.started_at.asc(), AgentRun.id)
+            )
+        )
+        if not runs or len(runs) > 4:
+            continue
+        if all(run.error == "research_worker_failed:HTTPStatusError" for run in runs):
+            parent.status = TaskStatus.QUEUED
+            recovered += 1
+    if recovered:
+        db.commit()
+    return recovered
+
 async def run_once() -> int:
     settings = get_settings()
     with SessionLocal() as db:
+        _recover_transient_failed_experiment_tasks(db)
         product_ids = list(
             db.scalars(
                 select(Product.id)
