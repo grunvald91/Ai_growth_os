@@ -25,6 +25,6 @@ def test_llm_fallback_models_support_environment_override(monkeypatch) -> None:
 def test_default_llm_profile_is_cost_bounded() -> None:
     settings = Settings(_env_file=None)
     assert settings.llm_provider == "xai"
-    assert settings.llm_model == "deepseek-v4.1-flash"
-    assert settings.llm_fallback_models == "gemini-flash-3.8"
+    assert settings.llm_model == "kimi-2.7"
+    assert settings.llm_fallback_models == "grok-4.7"
     assert settings.xai_reasoning_effort == "low"
