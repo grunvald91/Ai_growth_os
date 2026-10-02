@@ -30,7 +30,7 @@ class OutreachPackageService:
         self,
         *,
         experiment_id: UUID,
-        limit: int = 10,
+        limit: int = 30,
     ) -> OutreachPackageResult:
         experiment = self.db.get(Experiment, experiment_id)
         if experiment is None:
@@ -87,23 +87,41 @@ class OutreachPackageService:
                 status=ArtifactStatus.AWAITING_APPROVAL,
             )
 
-        approval = self.db.scalar(
-            select(Approval)
-            .where(
-                Approval.product_id == experiment.product_id,
-                Approval.artifact_id == artifact.id,
-                Approval.action_type == "send_outreach_batch",
-            )
-            .order_by(Approval.created_at.desc(), Approval.id)
-            .limit(1)
+        channel_counts: dict[str, int] = {}
+        for message in messages:
+            channel_counts[message["channel"]] = channel_counts.get(message["channel"], 0) + 1
+        counts = ", ".join(
+            f"{name}: {count}" for name, count in sorted(channel_counts.items())
         )
-        if approval is None:
-            channel_counts: dict[str, int] = {}
-            for message in messages:
-                channel_counts[message["channel"]] = channel_counts.get(message["channel"], 0) + 1
-            counts = ", ".join(
-                f"{name}: {count}" for name, count in sorted(channel_counts.items())
+        reason = (
+            f"{len(messages)} exact first-contact drafts are ready ({counts}). "
+            "Approve only if these messages may be sent to these exact prospects. "
+            "Approval does not itself send anything until Communication Gateway execution is connected."
+        )
+
+        pending = list(
+            self.db.scalars(
+                select(Approval)
+                .where(
+                    Approval.product_id == experiment.product_id,
+                    Approval.action_type == "send_outreach_batch",
+                    Approval.status == "pending",
+                )
+                .order_by(Approval.created_at.desc(), Approval.id.desc())
             )
+        )
+        approval = next(
+            (item for item in pending if item.artifact_id == artifact.id),
+            None,
+        )
+        if approval is None and pending:
+            approval = ApprovalService(self.db).update(
+                pending[0].id,
+                artifact_id=artifact.id,
+                reason=reason,
+                risk_level="YELLOW",
+            )
+        elif approval is None:
             approval = ApprovalService(self.db).create(
                 product_id=experiment.product_id,
                 artifact_id=artifact.id,
@@ -111,11 +129,23 @@ class OutreachPackageService:
                 risk_level="YELLOW",
                 status="pending",
                 requested_by="growth_os:outreach_preparer",
-                reason=(
-                    f"{len(messages)} exact first-contact drafts are ready ({counts}). "
-                    "Approve only if these messages may be sent to these exact prospects. "
-                    "Approval does not itself send anything until Communication Gateway execution is connected."
-                ),
+                reason=reason,
+            )
+        elif approval.reason != reason:
+            approval = ApprovalService(self.db).update(
+                approval.id,
+                reason=reason,
+                risk_level="YELLOW",
+            )
+
+        for stale in pending:
+            if stale.id == approval.id:
+                continue
+            ApprovalService(self.db).update(
+                stale.id,
+                status="rejected",
+                decided_by="growth_os:superseded",
+                reason="Superseded by a newer outreach package before execution.",
             )
 
         self.db.commit()
