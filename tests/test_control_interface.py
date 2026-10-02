@@ -68,7 +68,7 @@ def test_control_status_and_inbox_are_derived_from_canonical_records():
                         **payload
                     )
                 )
-                assert "AI Growth OS" in status_text
+                assert "AI-команда" in status_text
                 assert "ServGo" in status_text
                 assert "EXP-SERVGO-001" in status_text
 
