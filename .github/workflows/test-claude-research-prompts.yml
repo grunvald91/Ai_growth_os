@@ -1,0 +1,166 @@
+name: Test Claude research prompts
+
+on:
+  push:
+    branches:
+      - ops/test-claude-research-prompts
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Run real research prompts with Claude
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import asyncio
+          import json
+          import re
+
+          from app.agents import AgentRole
+          from app.core.composition import build_llm_provider
+          from app.core.config import get_settings
+          from app.llm.schemas import LLMMessage, LLMRequest
+          from app.workflows.research_contracts import (
+              ChannelResearchReport,
+              CompetitorVOCReport,
+              ProblemResearchReport,
+              ResearchSynthesisDraft,
+              SegmentResearchReport,
+          )
+          from app.workflows.research_department import ResearchDepartment
+
+          MODEL = "claude-opus-5-5"
+
+          def parse_structured(schema, content):
+              text = content.strip()
+              candidates = [
+                  match.group(1).strip()
+                  for match in re.finditer(r"\`\`\`(?:json)?\\s*(.*?)\`\`\`", text, re.DOTALL | re.IGNORECASE)
+              ]
+              candidates.append(text)
+              error = None
+              for candidate in reversed(candidates):
+                  try:
+                      return schema.model_validate_json(candidate)
+                  except Exception as exc:
+                      error = exc
+              print("RAW_FAILURE", schema.__name__, repr(text[:2400]))
+              raise error
+
+          async def main():
+              provider = build_llm_provider(get_settings())
+              base_payload = {
+                  "parent_task": {
+                      "title": "EXP-SERVGO-001: prepare outreach cohort",
+                      "description": "Prepare a conservative outreach research plan. No contact.",
+                  },
+                  "task_brief": {
+                      "experiment_key": "EXP-SERVGO-001",
+                      "requires_approval": False,
+                      "hard_constraints": ["No outreach or publication.", "No invented evidence."],
+                  },
+                  "product": {"name": "ServGo"},
+                  "stable_product_context": (
+                      "ServGo is an online appointment booking system. "
+                      "Clients choose service, specialist, date and time. "
+                      "The business receives structured bookings and reminders. "
+                      "Current pricing: 9900 RUB setup; 1490 RUB/month up to 5 staff; "
+                      "3000 RUB/month for 6-15 staff."
+                  ),
+                  "goal_records": [],
+                  "metric_records": [],
+                  "experiment_records": [],
+                  "prior_research_artifacts": [],
+              }
+              workers = [
+                  (AgentRole.SEGMENT_RESEARCHER, SegmentResearchReport),
+                  (AgentRole.CHANNEL_RESEARCHER, ChannelResearchReport),
+                  (AgentRole.PROBLEM_RESEARCHER, ProblemResearchReport),
+                  (AgentRole.COMPETITOR_VOC_RESEARCHER, CompetitorVOCReport),
+              ]
+              outputs = {}
+              for role, schema in workers:
+                  payload = dict(base_payload)
+                  if role == AgentRole.COMPETITOR_VOC_RESEARCHER:
+                      payload["review_source_bundles"] = [{
+                          "label": "bounded-test-source",
+                          "sources": [{
+                              "url": "https://example.com/review/1",
+                              "title": "Example review",
+                              "platform": "Example",
+                              "competitor": "Competitor X",
+                              "excerpt": "Booking was confusing and reminder messages did not arrive.",
+                              "rating": 2.0,
+                              "observed_at": "2026-10-01",
+                          }],
+                      }]
+                  result = await provider.generate(
+                      LLMRequest(
+                          model=MODEL,
+                          system_prompt=ResearchDepartment._worker_prompt(role, schema),
+                          messages=[LLMMessage(role="user", content=json.dumps(payload))],
+                          max_tokens=3200,
+                          response_schema=schema.model_json_schema(),
+                          metadata={
+                              "reasoning_effort": "low",
+                              "team_role": role.value,
+                              "task_type": "research",
+                          },
+                      )
+                  )
+                  parsed = parse_structured(schema, result.content)
+                  if role == AgentRole.COMPETITOR_VOC_RESEARCHER:
+                      allowed = {"https://example.com/review/1"}
+                      for pattern in parsed.patterns:
+                          assert all(str(url) in allowed for url in pattern.source_urls)
+                  outputs[role.value] = parsed.model_dump(mode="json")
+                  print("WORKER_OK", role.value, result.model)
+
+              lead_result = await provider.generate(
+                  LLMRequest(
+                      model=MODEL,
+                      system_prompt=ResearchDepartment._lead_prompt(),
+                      messages=[LLMMessage(
+                          role="user",
+                          content=json.dumps({
+                              "parent_task": {
+                                  "title": "EXP-SERVGO-001: prepare outreach cohort",
+                                  "description": "Prepare a conservative outreach research plan. No contact.",
+                              },
+                              "worker_results": outputs,
+                          }),
+                      )],
+                      max_tokens=4000,
+                      response_schema=ResearchSynthesisDraft.model_json_schema(),
+                      metadata={
+                          "reasoning_effort": "low",
+                          "team_role": AgentRole.RESEARCH_LEAD.value,
+                          "task_type": "research_synthesis",
+                      },
+                  )
+              )
+              lead = parse_structured(ResearchSynthesisDraft, lead_result.content)
+              print("LEAD_OK", lead_result.model, lead.department_status, lead.competitor_voc_status)
+              print("ALL_OK")
+
+          asyncio.run(main())
+          PY
+          REMOTE
