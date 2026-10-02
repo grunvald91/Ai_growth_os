@@ -40,6 +40,17 @@ def apply_file(
             raise LookupError(f"Experiment not found: {experiment_key}")
 
         service = ProspectService(db)
+        canonical = service.list_for_experiment(experiment.id)
+        canonical_ids = {item.lead_key for item in canonical}
+        supplied_ids = set(lead_ids)
+        if canonical_ids != supplied_ids:
+            missing = sorted(canonical_ids - supplied_ids)
+            unexpected = sorted(supplied_ids - canonical_ids)
+            raise ValueError(
+                "Enrichment must cover the entire experiment cohort before it is applied. "
+                f"missing={missing} unexpected={unexpected}"
+            )
+
         service.apply_enrichment(experiment_id=experiment.id, rows=rows)
         db.commit()
         stats = service.stats_for_experiment(experiment.id)

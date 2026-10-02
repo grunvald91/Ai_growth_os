@@ -173,8 +173,33 @@ def test_servgo_enrichment_batch_covers_all_30_contacts():
     assert {row["lead_id"] for row in rows} == {
         f"SG001-{index:03d}" for index in range(1, 31)
     }
-    assert all(row["validation_status"] == "validated" for row in rows)
+    assert all(
+        row["validation_status"] in {"validated", "needs_review"}
+        for row in rows
+    )
+    assert sum(row["validation_status"] == "validated" for row in rows) == 29
+    assert sum(row["validation_status"] == "needs_review" for row in rows) == 1
     assert all(
         any(item["field"] == "identity" for item in row["evidence"])
         for row in rows
     )
+
+
+def test_servgo_enrichment_has_full_processing_and_direct_channel_depth():
+    import json
+    from pathlib import Path
+
+    payload = json.loads(
+        Path("products/servgo/experiments/EXP-SERVGO-001/enrichment.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    rows = payload["prospects"]
+    assert payload["completion"]["processed"] == 30
+    assert payload["completion"]["total"] == 30
+    assert payload["policy"]["no_partial_stop"] is True
+    assert sum(
+        bool(row.get("email") or row.get("whatsapp") or row.get("telegram"))
+        for row in rows
+    ) >= 22
+    assert sum(bool(row.get("website")) for row in rows) >= 27
