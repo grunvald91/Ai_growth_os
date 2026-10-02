@@ -1,24 +1,32 @@
 {
   "experiment_key": "EXP-SERVGO-001",
   "observed_at": "2026-10-02",
-  "status": "verified_batch_1",
+  "status": "verified_30_of_30",
   "policy": {
     "require_evidence_for_channels": true,
     "no_invented_contacts": true,
     "no_outreach": true,
     "unresolved_mismatches_remain_unvalidated": true
   },
+  "summary": {
+    "total_prospects": 30,
+    "identity_checked": 30,
+    "needs_review": 2,
+    "validated": 28,
+    "with_email": 4,
+    "with_whatsapp": 6,
+    "with_telegram": 3,
+    "with_website": 15
+  },
   "prospects": [
     {
       "lead_id": "SG001-001",
       "validation_status": "validated",
-      "website": "https://city-thai-spa.ru/",
-      "preferred_channel": "website",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
           "field": "identity",
-          "value": "СИТИ ТАЙ | Сочи, Черноморская 6 | +7 (918) 100-14-13",
+          "value": "City Thai SPA | Сочи, ул. Черноморская, 6 | +79181001413",
           "source_url": "https://city-thai-spa.ru/",
           "observed_at": "2026-10-02",
           "source_type": "official_website"
@@ -30,18 +38,19 @@
           "observed_at": "2026-10-02",
           "source_type": "official_website"
         }
-      ]
+      ],
+      "website": "https://city-thai-spa.ru/",
+      "preferred_channel": "website",
+      "notes": "Публичный телефон подтверждён: +79181001413. Дополнительные каналы записаны только при наличии подтверждённого источника."
     },
     {
       "lead_id": "SG001-002",
       "validation_status": "validated",
-      "website": "https://spaodissey.ru/",
-      "preferred_channel": "website",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
           "field": "identity",
-          "value": "Цветок Одиссея — Горизонт | Сочи, Морской переулок 1/1Б | +7 (862) 277-73-86",
+          "value": "SPA Цветок Одиссея | Сочи, Морской пер., 1/1Б | +78622777386",
           "source_url": "https://spaodissey.ru/",
           "observed_at": "2026-10-02",
           "source_type": "official_website"
@@ -53,20 +62,34 @@
           "observed_at": "2026-10-02",
           "source_type": "official_website"
         }
-      ]
+      ],
+      "website": "https://spaodissey.ru/",
+      "preferred_channel": "website",
+      "notes": "Публичный телефон подтверждён: +78622777386. Дополнительные каналы записаны только при наличии подтверждённого источника."
     },
     {
-      "lead_id": "SG001-004",
+      "lead_id": "SG001-003",
       "validation_status": "validated",
-      "website": "https://spa-house-sochi.ru/",
-      "email": "spahouse@yandex.ru",
-      "whatsapp": "+79881425338",
-      "preferred_channel": "email",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
           "field": "identity",
-          "value": "SPA-House | Сочи, Пластунская 167/17 | +7 (988) 142-53-38",
+          "value": "АКАДЕМИЯ МАССАЖА ЕВГЕНИЯ ЧУКЛОВА | Сочи, ул. Крымская, 29Г | +79180037090",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=%D0%90%D0%9A%D0%90%D0%94%D0%95%D0%9C%D0%98%D0%AF%20%D0%9C%D0%90%D0%A1%D0%A1%D0%90%D0%96%D0%90%20%D0%95%D0%92%D0%93%D0%95%D0%9D%D0%98%D0%AF%20%D0%A7%D0%A3%D0%9A%D0%9B%D0%9E%D0%92%D0%90&query_place_id=ChIJ16PFbIHM9UARzlMkWnpgHnU",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичный телефон подтверждён: +79180037090. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-004",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "SPA-House | Сочи, ул. Пластунская, 167/17 | +79881425338",
           "source_url": "https://spa-house-sochi.ru/",
           "observed_at": "2026-10-02",
           "source_type": "official_website"
@@ -93,19 +116,20 @@
           "source_type": "owner_verified_listing"
         }
       ],
-      "notes": "Круглосуточный SPA-House: баня, бассейн, массаж и SPA-программы."
+      "website": "https://spa-house-sochi.ru/",
+      "email": "spahouse@yandex.ru",
+      "whatsapp": "+79881425338",
+      "preferred_channel": "email",
+      "notes": "Публичный телефон подтверждён: +79881425338. Дополнительные каналы записаны только при наличии подтверждённого источника."
     },
     {
       "lead_id": "SG001-005",
       "validation_status": "validated",
-      "website": "https://xn--80aasiqpsac5d.xn--p1ai/",
-      "whatsapp": "+79897516121",
-      "preferred_channel": "whatsapp",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
           "field": "identity",
-          "value": "Sandera | Сочи, Войкова 35 | +7 (989) 751-61-21",
+          "value": "Sandera | Сочи, ул. Войкова, 35 | +79897516121",
           "source_url": "https://xn--80aasiqpsac5d.xn--p1ai/",
           "observed_at": "2026-10-02",
           "source_type": "official_website"
@@ -125,19 +149,167 @@
           "source_type": "official_website"
         }
       ],
-      "notes": "Sandera предлагает массаж и SPA-программы и публично принимает сообщения в WhatsApp."
+      "website": "https://xn--80aasiqpsac5d.xn--p1ai/",
+      "whatsapp": "+79897516121",
+      "preferred_channel": "whatsapp",
+      "notes": "Публичный телефон подтверждён: +79897516121. Дополнительные каналы записаны только при наличии подтверждённого источника."
     },
     {
-      "lead_id": "SG001-013",
+      "lead_id": "SG001-006",
       "validation_status": "validated",
-      "website": "https://spaday-sochi.ru/",
-      "email": "spadaysochi@yandex.ru",
-      "preferred_channel": "email",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
           "field": "identity",
-          "value": "SPADAY | Сочи, Парковая 32а | +7 (862) 277-71-96",
+          "value": "Thai Spa в Гранд Отеле «Жемчужина» | Сочи, ул. Черноморская, 3 | +79881802868",
+          "source_url": "https://thai-spa-centr.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "website",
+          "value": "https://thai-spa-centr.ru/",
+          "source_url": "https://thai-spa-centr.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        }
+      ],
+      "website": "https://thai-spa-centr.ru/",
+      "preferred_channel": "website",
+      "notes": "Публичный телефон подтверждён: +79881802868. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-007",
+      "validation_status": "needs_review",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Amrita | Сочи, ул. Московская, 27 | +79628842524",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=Amrita&query_place_id=ChIJ_TDlHc_L9UARFYYQp0EdVJk",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичная карточка подтверждает исходный телефон/адрес, но официальный сайт показывает другой адрес/номер; перед outreach требуется ручная сверка."
+    },
+    {
+      "lead_id": "SG001-008",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "SPA GREENWICH | Сочи, ул. Черноморская, 6 | +79384445000",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=SPA%20GREENWICH&query_place_id=ChIJv_IdHjbJ9UARTeB45Tc01c8",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичный телефон подтверждён: +79384445000. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-009",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Tropical Healer | Сочи, Виноградная ул., 2/3, к 1 | +79996500963",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=Tropical%20Healer&query_place_id=ChIJ_9Acag_N9UARJ9RTkYI3Wjg",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичный телефон подтверждён: +79996500963. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-010",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Лусон, СПА-центр | Сочи, ул. Пирогова, 10/5 | +78622599464",
+          "source_url": "https://lusonspa.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "website",
+          "value": "https://lusonspa.ru/",
+          "source_url": "https://lusonspa.ru/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        }
+      ],
+      "website": "https://lusonspa.ru/",
+      "preferred_channel": "website",
+      "notes": "Публичный телефон подтверждён: +78622599464. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-011",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "BLOSSOM массаж лица и тела | Сочи, ул. Кубанская, 15 | +79284548089",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=BLOSSOM%20%D0%BC%D0%B0%D1%81%D1%81%D0%B0%D0%B6%20%D0%BB%D0%B8%D1%86%D0%B0%20%D0%B8%20%D1%82%D0%B5%D0%BB%D0%B0&query_place_id=ChIJl1Rc1unJ9UARppg7b40RHgo",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичный телефон подтверждён: +79284548089. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-012",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Наутилус Спа | Сочи, Дивноморская ул., 26 | +79885033313",
+          "source_url": "https://nautilus-wellness-beauty.clients.site/",
+          "observed_at": "2026-10-02",
+          "source_type": "owner_verified_listing"
+        },
+        {
+          "field": "website",
+          "value": "https://nautilus-wellness-beauty.clients.site/",
+          "source_url": "https://nautilus-wellness-beauty.clients.site/",
+          "observed_at": "2026-10-02",
+          "source_type": "owner_verified_listing"
+        },
+        {
+          "field": "whatsapp",
+          "value": "+79885033313",
+          "source_url": "https://nautilus-wellness-beauty.clients.site/",
+          "observed_at": "2026-10-02",
+          "source_type": "owner_verified_listing"
+        },
+        {
+          "field": "telegram",
+          "value": "@Nautilus_UDS_bot",
+          "source_url": "https://telegram.me/Nautilus_UDS_bot",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_channel"
+        }
+      ],
+      "website": "https://nautilus-wellness-beauty.clients.site/",
+      "whatsapp": "+79885033313",
+      "telegram": "@Nautilus_UDS_bot",
+      "preferred_channel": "whatsapp",
+      "notes": "Публичный телефон подтверждён: +79885033313. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-013",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "SPADAY | Сочи, ул. Парковая, 32А | +78622777196",
           "source_url": "https://spaday-sochi.ru/",
           "observed_at": "2026-10-02",
           "source_type": "official_website"
@@ -157,19 +329,88 @@
           "source_type": "official_website"
         }
       ],
-      "notes": "SPADAY — SPA-салон в центре Сочи с массажами, SPA-программами и онлайн-записью."
+      "website": "https://spaday-sochi.ru/",
+      "email": "spadaysochi@yandex.ru",
+      "preferred_channel": "email",
+      "notes": "Публичный телефон подтверждён: +78622777196. Дополнительные каналы записаны только при наличии подтверждённого источника."
     },
     {
-      "lead_id": "SG001-018",
+      "lead_id": "SG001-014",
       "validation_status": "validated",
-      "website": "https://posolstvosochi.com/",
-      "email": "mail@posolstvosochi.com",
-      "preferred_channel": "email",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
           "field": "identity",
-          "value": "Посольство красоты | Сочи, Островского 29 | +7 (988) 233-60-60",
+          "value": "СПА ДАЧА | Сочи, ул. Учительская, 3А | +79882381007",
+          "source_url": "https://spa-dacha.com/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "website",
+          "value": "https://spa-dacha.com/",
+          "source_url": "https://spa-dacha.com/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        }
+      ],
+      "website": "https://spa-dacha.com/",
+      "preferred_channel": "website",
+      "notes": "Публичный телефон подтверждён: +79882381007. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-015",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Массаж без боли | Обучение массажу | Сочи | Сочи, пер. Горького, 12 | +79127651933",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=%D0%9C%D0%B0%D1%81%D1%81%D0%B0%D0%B6%20%D0%B1%D0%B5%D0%B7%20%D0%B1%D0%BE%D0%BB%D0%B8%20%7C%20%D0%9E%D0%B1%D1%83%D1%87%D0%B5%D0%BD%D0%B8%D0%B5%20%D0%BC%D0%B0%D1%81%D1%81%D0%B0%D0%B6%D1%83%20%7C%20%D0%A1%D0%BE%D1%87%D0%B8&query_place_id=ChIJ2WmnLw7L9UARjDIhFJfBQmA",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичный телефон подтверждён: +79127651933. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-016",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Восьмая жизнь, СПА-центр | Сочи, ул. Войкова, 1/1 | +79673181010",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=%D0%92%D0%BE%D1%81%D1%8C%D0%BC%D0%B0%D1%8F%20%D0%B6%D0%B8%D0%B7%D0%BD%D1%8C%2C%20%D0%A1%D0%9F%D0%90-%D1%86%D0%B5%D0%BD%D1%82%D1%80&query_place_id=ChIJA4cBLpbL9UARbnhL2Ef7oT0",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичный телефон подтверждён: +79673181010. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-017",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Thai Dreams Spa | Сочи, ул. Черноморская, 13г | +79180075978",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=Thai%20Dreams%20Spa&query_place_id=ChIJvVY4AanJ9UAREspXA1R9d-I",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичный телефон подтверждён: +79180075978. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-018",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "ПОСОЛЬСТВО КРАСОТЫ | Сочи, ул. Островского, 29 | +79882336060",
           "source_url": "https://posolstvosochi.com/",
           "observed_at": "2026-10-02",
           "source_type": "official_website"
@@ -187,22 +428,45 @@
           "source_url": "https://posolstvosochi.com/",
           "observed_at": "2026-10-02",
           "source_type": "official_website"
+        },
+        {
+          "field": "whatsapp",
+          "value": "+79882336060",
+          "source_url": "https://biologique-recherche-ambassade.clients.site/",
+          "observed_at": "2026-10-02",
+          "source_type": "owner_verified_listing"
         }
       ],
-      "notes": "Посольство красоты совмещает beauty- и SPA-направления в центре Сочи."
+      "website": "https://posolstvosochi.com/",
+      "email": "mail@posolstvosochi.com",
+      "whatsapp": "+79882336060",
+      "preferred_channel": "email",
+      "notes": "Публичный телефон подтверждён: +79882336060. Дополнительные каналы записаны только при наличии подтверждённого источника."
     },
     {
-      "lead_id": "SG001-020",
+      "lead_id": "SG001-019",
       "validation_status": "validated",
-      "website": "https://feedback-massage.ru/sochi",
-      "email": "boss@feedback-massage.ru",
-      "preferred_channel": "email",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
           "field": "identity",
-          "value": "Feedback | Сочи, Воровского 4 | +7 (862) 555-29-31",
-          "source_url": "https://feedback-massage.ru/sochi/ourstudios",
+          "value": "Студия КОНТУР | Сочи, Навагинская ул., 9-б | +79181019130",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=%D0%A1%D1%82%D1%83%D0%B4%D0%B8%D1%8F%20%D0%9A%D0%9E%D0%9D%D0%A2%D0%A3%D0%A0&query_place_id=ChIJWVQjFdDL9UARbIe6Lc1vMEU",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичный телефон подтверждён: +79181019130. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-020",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Feedback - массажный салон | Сочи, ул. Воровского, 4 | +78625552931",
+          "source_url": "https://feedback-massage.ru/sochi",
           "observed_at": "2026-10-02",
           "source_type": "official_website"
         },
@@ -221,18 +485,19 @@
           "source_type": "official_website"
         }
       ],
-      "notes": "Feedback — сеть массажных студий; у сочинского филиала уже есть онлайн-запись."
+      "website": "https://feedback-massage.ru/sochi",
+      "email": "boss@feedback-massage.ru",
+      "preferred_channel": "email",
+      "notes": "Публичный телефон подтверждён: +78625552931. Дополнительные каналы записаны только при наличии подтверждённого источника."
     },
     {
       "lead_id": "SG001-021",
       "validation_status": "validated",
-      "website": "https://rezultat-massage.ru/",
-      "preferred_channel": "telegram",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
           "field": "identity",
-          "value": "REZULTAT | Адлер, Свердлова 53 | +7 (999) 655-40-60",
+          "value": "Студия массажа «Результат» | Адлер, ул. Свердлова, 53 | +79996554060",
           "source_url": "https://rezultat-massage.ru/",
           "observed_at": "2026-10-02",
           "source_type": "official_website"
@@ -252,19 +517,64 @@
           "source_type": "public_business_channel"
         }
       ],
+      "website": "https://rezultat-massage.ru/",
       "telegram": "@adlermassageREZULTATadmin",
-      "notes": "REZULTAT — студия массажа и SPA в Адлере с онлайн-записью и публичным Telegram-контактом."
+      "preferred_channel": "telegram",
+      "notes": "Публичный телефон подтверждён: +79996554060. Дополнительные каналы записаны только при наличии подтверждённого источника."
     },
     {
-      "lead_id": "SG001-025",
-      "validation_status": "validated",
-      "website": "https://siame.ru/",
-      "preferred_channel": "website",
+      "lead_id": "SG001-022",
+      "validation_status": "needs_review",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
           "field": "identity",
-          "value": "Тайны Сиама | Адлер, Карла Маркса 23 | +7 (918) 408-48-40",
+          "value": "SPA Studio Медовая Луна | Адлер, ул. Калинина, 30 | +79649455590",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=SPA%20Studio%20%D0%9C%D0%B5%D0%B4%D0%BE%D0%B2%D0%B0%D1%8F%20%D0%9B%D1%83%D0%BD%D0%B0&query_place_id=ChIJhSTg-5q_9UARyAyOes3ZV_8",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Карточка бизнеса подтверждает исходный телефон, но отдельный публичный листинг по тому же адресу показывает другое название/номер; перед outreach нужна ручная сверка."
+    },
+    {
+      "lead_id": "SG001-023",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Адельфия | Оздоровительный SPA комплекс | Адлер, ул. Просвещения, 13 | +79183031012",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=%D0%90%D0%B4%D0%B5%D0%BB%D1%8C%D1%84%D0%B8%D1%8F%20%7C%20%D0%9E%D0%B7%D0%B4%D0%BE%D1%80%D0%BE%D0%B2%D0%B8%D1%82%D0%B5%D0%BB%D1%8C%D0%BD%D1%8B%D0%B9%20SPA%20%D0%BA%D0%BE%D0%BC%D0%BF%D0%BB%D0%B5%D0%BA%D1%81&query_place_id=ChIJZ0OU0KO_9UAR_u_mDGVrM1o",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичный телефон подтверждён: +79183031012. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-024",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "LA Massage Studio | Адлер, ул. Кирпичная, 24/1 | +79654823307",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=LA%20Massage%20Studio&query_place_id=ChIJiciOZcW_9UARyeUyUXyZn_I",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичный телефон подтверждён: +79654823307. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-025",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Тайны Сиама | Адлер, ул. Карла Маркса, 23 | +79184084840",
           "source_url": "https://siame.ru/",
           "observed_at": "2026-10-02",
           "source_type": "official_website"
@@ -276,20 +586,64 @@
           "observed_at": "2026-10-02",
           "source_type": "official_website"
         }
-      ]
+      ],
+      "website": "https://siame.ru/",
+      "preferred_channel": "website",
+      "notes": "Публичный телефон подтверждён: +79184084840. Дополнительные каналы записаны только при наличии подтверждённого источника."
     },
     {
-      "lead_id": "SG001-029",
+      "lead_id": "SG001-026",
       "validation_status": "validated",
-      "website": "https://adler-massage.clients.site/",
-      "telegram": "@adlermassage",
-      "whatsapp": "+79952001795",
-      "preferred_channel": "telegram",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
           "field": "identity",
-          "value": "Студия массажа Юлии Васиной | Адлер, Ульянова 17/1 | +7 (995) 200-17-95",
+          "value": "Студия массажа «Силуэт» | Адлер, ул. Демократическая, 54А | +79024059066",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=%D0%A1%D1%82%D1%83%D0%B4%D0%B8%D1%8F%20%D0%BC%D0%B0%D1%81%D1%81%D0%B0%D0%B6%D0%B0%20%C2%AB%D0%A1%D0%B8%D0%BB%D1%83%D1%8D%D1%82%C2%BB&query_place_id=ChIJoZE_USO_9UARz0AjKwV-hXo",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичный телефон подтверждён: +79024059066. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-027",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Студия массажа LPG | Адлер, ул. Свердлова, 78 | +79384192620",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=%D0%A1%D1%82%D1%83%D0%B4%D0%B8%D1%8F%20%D0%BC%D0%B0%D1%81%D1%81%D0%B0%D0%B6%D0%B0%20LPG&query_place_id=ChIJvzWt5vmV9UAROOsOdIfuAK0",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичный телефон подтверждён: +79384192620. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-028",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Студия коррекции фигуры «Бархат» | Адлер, ул. Ленина, 1/1 | +79288523587",
+          "source_url": "https://www.google.com/maps/search/?api=1&query=%D0%A1%D1%82%D1%83%D0%B4%D0%B8%D1%8F%20%D0%BA%D0%BE%D1%80%D1%80%D0%B5%D0%BA%D1%86%D0%B8%D0%B8%20%D1%84%D0%B8%D0%B3%D1%83%D1%80%D1%8B%20%C2%AB%D0%91%D0%B0%D1%80%D1%85%D0%B0%D1%82%C2%BB&query_place_id=ChIJpa7a78S_9UARBAEYp97OuO4",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_listing"
+        }
+      ],
+      "notes": "Публичный телефон подтверждён: +79288523587. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-029",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Студия массажа Юлии Васиной | Адлер, ул. Ульянова, 17 | +79952001795",
           "source_url": "https://adler-massage.clients.site/",
           "observed_at": "2026-10-02",
           "source_type": "owner_verified_listing"
@@ -302,21 +656,57 @@
           "source_type": "owner_verified_listing"
         },
         {
-          "field": "telegram",
-          "value": "@adlermassage",
-          "source_url": "https://telegram.me/s/adlermassage",
-          "observed_at": "2026-10-02",
-          "source_type": "public_business_channel"
-        },
-        {
           "field": "whatsapp",
           "value": "+79952001795",
           "source_url": "https://adler-massage.clients.site/",
           "observed_at": "2026-10-02",
           "source_type": "owner_verified_listing"
+        },
+        {
+          "field": "telegram",
+          "value": "@adlermassage",
+          "source_url": "https://telegram.me/adlermassage",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_channel"
         }
       ],
-      "notes": "Студия Юлии Васиной в Адлере использует Telegram, WhatsApp и онлайн-запись."
+      "website": "https://adler-massage.clients.site/",
+      "whatsapp": "+79952001795",
+      "telegram": "@adlermassage",
+      "preferred_channel": "telegram",
+      "notes": "Публичный телефон подтверждён: +79952001795. Дополнительные каналы записаны только при наличии подтверждённого источника."
+    },
+    {
+      "lead_id": "SG001-030",
+      "validation_status": "validated",
+      "source_checked_at": "2026-10-02",
+      "evidence": [
+        {
+          "field": "identity",
+          "value": "Thai SPA | Сириус, ул. 65 лет Победы, 65 | +79182033150",
+          "source_url": "https://www.thaispa-club.ru/sirius-65-let-pobedy-65/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "website",
+          "value": "https://www.thaispa-club.ru/sirius-65-let-pobedy-65/",
+          "source_url": "https://www.thaispa-club.ru/sirius-65-let-pobedy-65/",
+          "observed_at": "2026-10-02",
+          "source_type": "official_website"
+        },
+        {
+          "field": "whatsapp",
+          "value": "+79182033150",
+          "source_url": "https://thai-spa-sochi.clients.site/",
+          "observed_at": "2026-10-02",
+          "source_type": "owner_verified_listing"
+        }
+      ],
+      "website": "https://www.thaispa-club.ru/sirius-65-let-pobedy-65/",
+      "whatsapp": "+79182033150",
+      "preferred_channel": "whatsapp",
+      "notes": "Публичный телефон подтверждён: +79182033150. Дополнительные каналы записаны только при наличии подтверждённого источника."
     }
   ]
 }
