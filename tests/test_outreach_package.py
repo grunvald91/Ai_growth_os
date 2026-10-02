@@ -116,3 +116,53 @@ def test_prepare_outreach_package_never_marks_prospect_contacted(db):
 
     assert prospect.outreach_status == "not_contacted"
     assert prospect.last_contact_at is None
+
+
+
+def test_prepare_outreach_package_includes_more_than_ten_ready_prospects(db):
+    product, experiment = _setup(db)
+    for index in range(1, 16):
+        db.add(
+            _prospect(
+                product,
+                experiment,
+                f"SG001-{index:03d}",
+                "email",
+                f"lead{index}@example.com",
+            )
+        )
+    db.commit()
+
+    result = OutreachPackageService(db).prepare(experiment_id=experiment.id)
+
+    assert result.message_count == 15
+    package = json.loads(result.artifact.content)
+    assert len(package["messages"]) == 15
+
+
+def test_new_package_reuses_one_pending_approval_and_supersedes_stale(db):
+    product, experiment = _setup(db)
+    prospect = _prospect(product, experiment, "SG001-004", "email", "old@example.com")
+    db.add(prospect)
+    db.commit()
+
+    first = OutreachPackageService(db).prepare(experiment_id=experiment.id)
+
+    prospect.email = "new@example.com"
+    prospect.evidence = [{"field": "identity"}, {"field": "email"}]
+    db.commit()
+
+    second = OutreachPackageService(db).prepare(experiment_id=experiment.id)
+
+    assert first.approval.id == second.approval.id
+    assert second.approval.status == "pending"
+    assert second.approval.artifact_id == second.artifact.id
+    pending = list(
+        db.scalars(
+            select(Approval).where(
+                Approval.action_type == "send_outreach_batch",
+                Approval.status == "pending",
+            )
+        )
+    )
+    assert len(pending) == 1
