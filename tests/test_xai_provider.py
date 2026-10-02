@@ -100,6 +100,7 @@ def test_composition_selects_xai_and_requires_key():
         xai_api_key="xai-test-secret",
         xai_reasoning_effort="low",
         xai_timeout_seconds=321,
+        llm_fallback_models="",
     )
     provider = build_llm_provider(settings)
     assert isinstance(provider, XAIProvider)
