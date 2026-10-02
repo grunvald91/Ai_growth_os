@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.models.domain import Artifact, Decision, DecisionType, Experiment, Product, Task, TaskStatus
+from app.models.domain import Artifact, Decision, DecisionType, Experiment, Product, Prospect, Task, TaskStatus
 from app.services.experiment_launch import ExperimentLaunchError, ExperimentLaunchService
 
 
@@ -62,6 +62,7 @@ def test_launch_sets_window_records_decision_and_queues_preparation(db, tmp_path
                         "source_checked_at": "2026-10-01",
                         "fit_status": "needs_manual_validation",
                         "outreach_status": "not_contacted",
+                        "tracking_url": "https://promo.servgo.ru/?utm_content=SG001-001",
                     }
                 ],
             }
@@ -79,6 +80,14 @@ def test_launch_sets_window_records_decision_and_queues_preparation(db, tmp_path
     assert experiment.starts_at == result.starts_at
     assert experiment.ends_at == result.ends_at
     assert (experiment.ends_at - experiment.starts_at).days == 14
+    assert result.prospect_count == 1
+
+    prospect = db.scalar(select(Prospect).where(Prospect.experiment_id == experiment.id))
+    assert prospect.lead_key == "SG001-001"
+    assert prospect.business_name == "Example SPA"
+    assert prospect.validation_status == "pending"
+    assert prospect.outreach_status == "not_contacted"
+    assert prospect.tracking_url.endswith("SG001-001")
 
     decision = db.get(Decision, result.decision_id)
     assert decision.decision_type == DecisionType.TEST

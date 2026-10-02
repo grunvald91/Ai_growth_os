@@ -8,6 +8,7 @@ from app.models.domain import (
     Goal,
     Metric,
     Product,
+    Prospect,
     Publication,
     Task,
     ToolCall,
@@ -15,5 +16,5 @@ from app.models.domain import (
 
 __all__ = [
     "Product", "Goal", "Task", "AgentRun", "Artifact", "Decision",
-    "Experiment", "Metric", "Approval", "ToolCall", "CostRecord", "Publication",
+    "Experiment", "Prospect", "Metric", "Approval", "ToolCall", "CostRecord", "Publication",
 ]

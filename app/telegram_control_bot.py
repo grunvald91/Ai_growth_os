@@ -17,6 +17,7 @@ from app.db.session import SessionLocal
 from app.models.domain import Approval, Experiment
 from app.services.control import ControlService
 from app.services.experiment_launch import ExperimentLaunchError, ExperimentLaunchService
+from app.services.prospects import ProspectService
 
 
 MAIN_MENU = {
@@ -162,7 +163,8 @@ class TelegramControlBot:
             if experiment is None:
                 await self._send(chat_id, "Эксперимент не найден.")
                 return
-            body = render_experiment_detail(experiment)
+            prospect_count = len(ProspectService(db).list_for_experiment(experiment.id))
+            body = render_experiment_detail(experiment, prospect_count)
             keyboard = []
             if experiment.status == "draft":
                 keyboard.append(
@@ -322,6 +324,7 @@ class TelegramControlBot:
                             "✅ Эксперимент запущен.\n\n"
                             f"Старт: {result.starts_at}\n"
                             f"Окончание окна: {result.ends_at}\n"
+                            f"Prospects импортировано: {result.prospect_count}.\n"
                             "Подготовительная задача передана внутреннему worker.\n"
                             "Внешние контакты всё ещё требуют отдельного одобрения."
                         ),
