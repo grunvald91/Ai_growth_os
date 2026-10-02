@@ -1,0 +1,75 @@
+name: Verify all 30 ServGo contacts
+
+on:
+  push:
+    branches:
+      - ops/verify-all-30-contacts
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Verify contacts and worker model
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          DC="docker compose --env-file $REMOTE_ROOT/.env -p ai-growth-os -f docker-compose.prod.yml"
+          $DC exec -T api python - <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Approval, Experiment, Prospect
+          from app.services.prospects import ProspectService
+
+          with SessionLocal() as db:
+              exp=db.scalar(select(Experiment).where(Experiment.experiment_key=="EXP-SERVGO-001"))
+              assert exp is not None
+              stats=ProspectService(db).stats_for_experiment(exp.id)
+              for key in sorted(stats):
+                  print(f"{key}={stats[key]}")
+              rows=list(db.scalars(select(Prospect).where(Prospect.experiment_id==exp.id).order_by(Prospect.lead_key)))
+              missing=[p.lead_key for p in rows if not (p.public_phone or p.email or p.whatsapp or p.telegram or p.website)]
+              unvalidated=[p.lead_key for p in rows if p.validation_status!="validated"]
+              print("missing_contact=", ",".join(missing) or "none")
+              print("unvalidated=", ",".join(unvalidated) or "none")
+              for p in rows:
+                  chans=[]
+                  if p.public_phone: chans.append("phone")
+                  if p.email: chans.append("email")
+                  if p.whatsapp: chans.append("whatsapp")
+                  if p.telegram: chans.append("telegram")
+                  if p.website: chans.append("website")
+                  print("PROSPECT", p.lead_key, "|", ",".join(chans), "| preferred=", p.preferred_channel or "none")
+
+              approvals=list(db.scalars(select(Approval).where(
+                  Approval.product_id==exp.product_id,
+                  Approval.status=="pending",
+              ).order_by(Approval.created_at)))
+              print("pending_approvals=",len(approvals))
+              for a in approvals:
+                  print("APPROVAL", a.action_type, a.risk_level, a.id)
+          PY
+
+          echo "=== WORKER MODEL ENV ==="
+          $DC exec -T worker python - <<'PY'
+          import os
+          print("worker_model=", os.getenv("LLM_MODEL"))
+          print("worker_fallback=", os.getenv("LLM_FALLBACK_MODELS"))
+          print("worker_reasoning=", os.getenv("XAI_REASONING_EFFORT"))
+          PY
+          REMOTE
