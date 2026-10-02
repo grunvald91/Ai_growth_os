@@ -1,0 +1,74 @@
+name: Probe fallback LLM models
+
+on:
+  push:
+    branches:
+      - ops/list-llm-models
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      REMOTE_ROOT: /opt/ai_growth_os
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Probe candidate models
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$REMOTE_ROOT/current"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import os
+          import httpx
+
+          base=os.environ["XAI_BASE_URL"].rstrip("/")
+          key=os.environ["XAI_API_KEY"]
+          headers={"Authorization": f"Bearer {key}", "Content-Type":"application/json"}
+
+          models=["claude-opus-5-5","gpt-6-sol"]
+          for model in models:
+              for mode in ("plain","schema"):
+                  payload={
+                      "model":model,
+                      "messages":[{"role":"user","content":'Return JSON: {"ok": true}'}],
+                      "max_completion_tokens":128,
+                  }
+                  if mode=="schema":
+                      payload["response_format"]={
+                          "type":"json_schema",
+                          "json_schema":{
+                              "name":"probe",
+                              "strict":True,
+                              "schema":{
+                                  "type":"object",
+                                  "properties":{"ok":{"type":"boolean"}},
+                                  "required":["ok"],
+                                  "additionalProperties":False,
+                              },
+                          },
+                      }
+                  try:
+                      r=httpx.post(base+"/chat/completions",headers=headers,json=payload,timeout=60)
+                      print(model, mode, "status", r.status_code)
+                      if r.status_code == 200:
+                          data=r.json()
+                          content=((data.get("choices") or [{}])[0].get("message") or {}).get("content")
+                          print(model, mode, "content", repr(content)[:300])
+                      else:
+                          print(model, mode, "error", (r.text or "")[:500].replace("\n"," "))
+                  except Exception as exc:
+                      print(model, mode, "exception", type(exc).__name__, str(exc)[:300])
+          PY
+          REMOTE
