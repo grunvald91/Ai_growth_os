@@ -148,6 +148,27 @@ class ResearchDepartment:
                 worker_artifact_ids.append(artifact.id)
                 continue
 
+            reusable = self._load_reusable_worker_result(
+                parent.id,
+                role,
+                artifact_kind,
+                schema,
+            )
+            if reusable is not None:
+                parsed, prior_artifact_id = reusable
+                if role == AgentRole.COMPETITOR_VOC_RESEARCHER:
+                    self._validate_voc_urls(parsed, source_bundles)
+                run.input_references = [
+                    *run.input_references,
+                    {"kind": "artifact", "id": str(prior_artifact_id)},
+                ]
+                artifact = self._persist_worker_result(
+                    product, child, run, artifact_kind, parsed, None
+                )
+                worker_outputs.append((role, parsed, child.id, artifact.id))
+                worker_artifact_ids.append(artifact.id)
+                continue
+
             payload = dict(base_payload)
             if role == AgentRole.COMPETITOR_VOC_RESEARCHER:
                 payload["review_source_bundles"] = [
@@ -389,6 +410,47 @@ class ResearchDepartment:
                 error="research_synthesis_failed",
             )
 
+    def _load_reusable_worker_result(
+        self,
+        parent_task_id: UUID,
+        role: AgentRole,
+        artifact_kind: str,
+        schema: type[BaseModel],
+    ):
+        prior_tasks = list(
+            self.db.scalars(
+                select(Task)
+                .where(
+                    Task.parent_id == parent_task_id,
+                    Task.assigned_agent == role.value,
+                    Task.status == TaskStatus.COMPLETED,
+                )
+                .order_by(Task.updated_at.desc(), Task.id.desc())
+                .limit(8)
+            )
+        )
+        for prior_task in prior_tasks:
+            artifact = self.db.scalar(
+                select(Artifact)
+                .where(
+                    Artifact.task_id == prior_task.id,
+                    Artifact.kind == artifact_kind,
+                )
+                .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+                .limit(1)
+            )
+            if artifact is None:
+                continue
+            try:
+                parsed = schema.model_validate_json(artifact.content)
+                parsed = schema.model_validate(
+                    self._sanitize_tree(parsed.model_dump(mode="json"))
+                )
+            except ValidationError:
+                continue
+            return parsed, artifact.id
+        return None
+
     def _load_source_bundles(self, product_id: UUID) -> list[ResearchSourceBundle]:
         rows = list(self.db.scalars(
             select(Artifact)
@@ -439,6 +501,9 @@ class ResearchDepartment:
         active_run.status = "completed"
         if response is not None:
             active_run.model = response.model
+        else:
+            active_run.provider = "internal"
+            active_run.model = "reused-artifact"
         active_run.finished_at = datetime.now(timezone.utc)
         active_run.output_references = [{"kind": "artifact", "id": str(artifact.id)}]
         self.db.get(Task, child.id).status = TaskStatus.COMPLETED
