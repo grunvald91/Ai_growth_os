@@ -76,8 +76,8 @@ def test_control_status_and_inbox_are_derived_from_canonical_records():
                     "app.control.contracts", fromlist=["ControlInboxItem"]
                 ).ControlInboxItem(**inbox[0])
                 decision_text = render_decision_required(item_model)
-                assert "Нужно решение" in decision_text
-                assert "start_outreach" in decision_text
+                assert "Нужно твоё решение" in decision_text
+                assert "Начать работу с потенциальными клиентами" in decision_text
 
                 missing = client.get(
                     "/products/00000000-0000-0000-0000-000000000000/control/status"
