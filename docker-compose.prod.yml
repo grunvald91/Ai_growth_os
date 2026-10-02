@@ -73,7 +73,7 @@ services:
       LLM_MODEL: ${TEAM_LLM_MODEL:-deepseek-v4.1-flash}
       XAI_API_KEY: ${XAI_API_KEY:?XAI_API_KEY is required}
       XAI_BASE_URL: ${XAI_BASE_URL:-https://api.claudehub.fun/v1}
-      XAI_REASONING_EFFORT: ${XAI_REASONING_EFFORT:-medium}
+      XAI_REASONING_EFFORT: ${XAI_REASONING_EFFORT:-low}
       LLM_FALLBACK_MODELS: ${TEAM_LLM_FALLBACK_MODELS:-gemini-flash-3.8}
       PRODUCTS_ROOT: /app/products
       SKILLS_ROOT: /app/skills
