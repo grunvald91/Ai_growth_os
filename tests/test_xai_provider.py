@@ -207,3 +207,30 @@ async def test_xai_provider_does_not_retry_nontransient_http_error(monkeypatch):
 
     assert SequenceAsyncClient.calls == 1
     assert sleeps == []
+
+
+
+@pytest.mark.asyncio
+async def test_non_grok_model_omits_grok_specific_fields(monkeypatch):
+    monkeypatch.setattr("app.llm.xai.httpx.AsyncClient", FakeAsyncClient)
+    provider = XAIProvider(
+        api_key="xai-test-secret",
+        model="gpt-6-sol",
+        reasoning_effort="medium",
+    )
+
+    await provider.generate(
+        LLMRequest(
+            messages=[LLMMessage(role="user", content="hello")],
+            model="gpt-6-sol",
+            metadata={
+                "reasoning_effort": "low",
+                "conversation_id": "should-not-be-grok-header",
+            },
+        )
+    )
+
+    sent = FakeAsyncClient.last.request
+    assert sent["json"]["model"] == "gpt-6-sol"
+    assert "reasoning_effort" not in sent["json"]
+    assert "x-grok-conv-id" not in sent["headers"]
