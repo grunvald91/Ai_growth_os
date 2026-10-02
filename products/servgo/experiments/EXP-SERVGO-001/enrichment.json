@@ -1,7 +1,7 @@
 {
   "experiment_key": "EXP-SERVGO-001",
   "observed_at": "2026-10-02",
-  "status": "verified_all_30_public_contacts",
+  "status": "verified_all_30_public_contacts_plus_direct_channels",
   "policy": {
     "require_evidence_for_channels": true,
     "no_invented_contacts": true,
@@ -38,7 +38,7 @@
       "lead_id": "SG001-002",
       "validation_status": "validated",
       "website": "https://spaodissey.ru/",
-      "preferred_channel": "website",
+      "preferred_channel": "email",
       "source_checked_at": "2026-10-02",
       "evidence": [
         {
@@ -54,8 +54,16 @@
           "source_url": "https://spaodissey.ru/",
           "observed_at": "2026-10-02",
           "source_type": "official_website"
+        },
+        {
+          "field": "email",
+          "value": "spa@grace-gorizont.ru",
+          "source_url": "https://sochi.spravka.city/company/spa-cvetok-odisseya",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_directory"
         }
-      ]
+      ],
+      "email": "spa@grace-gorizont.ru"
     },
     {
       "lead_id": "SG001-003",
@@ -185,9 +193,18 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJv_IdHjbJ9UARTeB45Tc01c8",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "email",
+          "value": "spa.greenwich@gmail.com",
+          "source_url": "https://www.bizkontakte.com/spa-greenwich-8-938-444-50-00",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_directory"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79384445000."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79384445000.",
+      "email": "spa.greenwich@gmail.com",
+      "preferred_channel": "email"
     },
     {
       "lead_id": "SG001-009",
@@ -200,9 +217,26 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJ_9Acag_N9UARJ9RTkYI3Wjg",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "email",
+          "value": "svetlanaklmn@gmail.com",
+          "source_url": "https://2gis.ru/sochi/firm/70000001091791021",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_directory"
+        },
+        {
+          "field": "website",
+          "value": "https://dikidi.net/146677",
+          "source_url": "https://yandex.ru/medicine/clinic/tropical-healer_35844291190",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_directory"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79996500963. Текущая публичная карточка указывает адрес: Виноградная ул., 2/3, к 1, Сочи."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79996500963. Текущая публичная карточка указывает адрес: Виноградная ул., 2/3, к 1, Сочи.",
+      "email": "svetlanaklmn@gmail.com",
+      "website": "https://dikidi.net/146677",
+      "preferred_channel": "email"
     },
     {
       "lead_id": "SG001-010",
@@ -215,9 +249,26 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJUQPh25fL9UARuv5pBUsiY64",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "email",
+          "value": "mail@luson-spa.ru",
+          "source_url": "https://asktel.ru/sochi/spa-salony/",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_directory"
+        },
+        {
+          "field": "website",
+          "value": "https://www.luson-spa.ru/",
+          "source_url": "https://asktel.ru/sochi/spa-salony/",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_directory"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +78622599464."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +78622599464.",
+      "email": "mail@luson-spa.ru",
+      "website": "https://www.luson-spa.ru/",
+      "preferred_channel": "email"
     },
     {
       "lead_id": "SG001-011",
@@ -245,9 +296,26 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJKSeNjJzJ9UARahPiiH3q5Uc",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "email",
+          "value": "reception@ghhsochi.ru",
+          "source_url": "https://asktel.ru/sochi/spa-salony/",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_directory"
+        },
+        {
+          "field": "website",
+          "value": "https://www.ghhsochi.ru/",
+          "source_url": "https://asktel.ru/sochi/spa-salony/",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_directory"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79885033313."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79885033313.",
+      "email": "reception@ghhsochi.ru",
+      "website": "https://www.ghhsochi.ru/",
+      "preferred_channel": "email"
     },
     {
       "lead_id": "SG001-013",
@@ -362,9 +430,26 @@
           "source_url": "https://www.google.com/maps/search/?api=1&query_place_id=ChIJvVY4AanJ9UAREspXA1R9d-I",
           "observed_at": "2026-10-02",
           "source_type": "google_business_profile"
+        },
+        {
+          "field": "email",
+          "value": "thaidreamsspa@gmail.com",
+          "source_url": "https://sochi.spravka.city/company/thai-dreams-spa",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_directory"
+        },
+        {
+          "field": "website",
+          "value": "http://www.thaidreamsspa.ru",
+          "source_url": "https://sochi.spravka.city/company/thai-dreams-spa",
+          "observed_at": "2026-10-02",
+          "source_type": "public_business_directory"
         }
       ],
-      "notes": "Публичный контакт перепроверен 02.10.2026: +79180075978. Текущая публичная карточка указывает адрес: ул. Черноморская, 13г, Сочи."
+      "notes": "Публичный контакт перепроверен 02.10.2026: +79180075978. Текущая публичная карточка указывает адрес: ул. Черноморская, 13г, Сочи.",
+      "email": "thaidreamsspa@gmail.com",
+      "website": "http://www.thaidreamsspa.ru",
+      "preferred_channel": "email"
     },
     {
       "lead_id": "SG001-018",
@@ -653,5 +738,14 @@
       ],
       "notes": "Публичный контакт перепроверен 02.10.2026: +79182033150."
     }
-  ]
+  ],
+  "summary": {
+    "total_prospects": 30,
+    "validated": 30,
+    "with_email": 10,
+    "with_whatsapp": 5,
+    "with_telegram": 3,
+    "with_website": 15,
+    "direct_written_ready": 15
+  }
 }
