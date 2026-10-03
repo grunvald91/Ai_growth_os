@@ -77,8 +77,7 @@ jobs:
               "  edit_format: diff\n"
               "  use_repo_map: false\n"
               "  use_temperature: false\n"
-              "  extra_params:\n"
-              "    max_tokens: 3200\n",
+
               encoding="utf-8",
           )
           PY
