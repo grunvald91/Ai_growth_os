@@ -23,12 +23,14 @@ from app.models.domain import Approval, Artifact, Experiment
 from app.services.control import ControlService
 from app.services.experiment_launch import ExperimentLaunchError, ExperimentLaunchService
 from app.services.prospects import ProspectService
+from app.intake.telegram import TelegramCompanyIntake
 
 
 MAIN_MENU = {
     "keyboard": [
         [{"text": "📊 Главное"}, {"text": "✅ На согласование"}],
         [{"text": "🧪 Тесты"}, {"text": "🔄 Обновить"}],
+        [{"text": "🏢 Компания"}],
     ],
     "resize_keyboard": True,
     "is_persistent": True,
@@ -66,12 +68,32 @@ class TelegramAPI:
             raise TelegramAPIError(body.get("description") or "Telegram API error")
         return body["result"]
 
+    async def download_file(self, file_id: str, max_bytes: int) -> bytes:
+        from pathlib import PurePosixPath
+        metadata = await self.call("getFile", {"file_id": file_id})
+        path = metadata.get("file_path", "")
+        if not path or PurePosixPath(path).is_absolute() or ".." in PurePosixPath(path).parts:
+            raise TelegramAPIError("Invalid Telegram file path")
+        if metadata.get("file_size", 0) > max_bytes:
+            raise TelegramAPIError("File too large")
+        url = self.base_url.replace("/bot", "/file/bot", 1) + "/" + path
+        async with httpx.AsyncClient(timeout=35, proxy=self.proxy_url, follow_redirects=False) as client:
+            async with client.stream("GET", url) as response:
+                response.raise_for_status()
+                data = bytearray()
+                async for chunk in response.aiter_bytes():
+                    data.extend(chunk)
+                    if len(data) > max_bytes:
+                        raise TelegramAPIError("File too large")
+        return bytes(data)
+
 
 class TelegramControlBot:
     def __init__(self, api: TelegramAPI, owner_chat_id: int, poll_timeout: int = 25) -> None:
         self.api = api
         self.owner_chat_id = owner_chat_id
         self.poll_timeout = poll_timeout
+        self.company_intake = TelegramCompanyIntake(self, SessionLocal, get_settings)
 
     async def run(self) -> None:
         offset: int | None = None
@@ -100,6 +122,9 @@ class TelegramControlBot:
         sender_id = (message.get("from") or {}).get("id")
         chat_id = (message.get("chat") or {}).get("id")
         if sender_id != self.owner_chat_id or chat_id != self.owner_chat_id:
+            return
+
+        if await self.company_intake.message(message):
             return
 
         text = (message.get("text") or "").strip()
@@ -291,6 +316,12 @@ class TelegramControlBot:
         message = callback.get("message") or {}
         chat_id = (message.get("chat") or {}).get("id")
         if chat_id != self.owner_chat_id:
+            return
+
+        if data.startswith("company:"):
+            if callback_id:
+                await self._answer_callback(callback_id, "Открываю")
+            await self.company_intake.callback(chat_id, data)
             return
 
         if data.startswith("menu:"):
