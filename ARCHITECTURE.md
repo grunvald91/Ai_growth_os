@@ -256,3 +256,24 @@ The API and worker use the same image/codebase.
 ## 15. First product
 
 ServGo is the initial product used to validate the architecture. Product-specific assumptions must stay in `products/servgo/`, not in generic orchestration code.
+
+
+## 16. Company intake
+
+COMPANY_INTAKE is a bounded draft/research role without publication capabilities.
+CompanyIntakeService uses existing tasks and versioned artifacts for source
+provenance, candidates, hypotheses, unknowns, reviews, history and apply intents.
+LLMService/PrivacyGateway provide the configured reasoning boundary; exact quote
+and schema validation are deterministic. Public web retrieval pins validated global
+IP addresses and rejects redirects; file parsers are bounded and never execute files.
+Telegram's existing owner authorization encloses every intake interaction. The
+loopback-only HTTP API treats its authenticated operator as local_owner.
+
+Canonical mutation is possible only after explicit approval of a current review,
+with unchanged base digest, under a shared filesystem lock. Previous bytes and
+apply intent are durable before atomic file replacement. Interrupted cross-store
+operations require operator reconciliation. Compose shares a persistent products
+volume across API/bot/worker and initializes repository assets without overwriting
+approved canonical profiles. Readiness and onboarding state are product-scoped;
+existing experiments continue, while outreach retains its independent approvals.
+
