@@ -221,6 +221,16 @@ jobs:
           from app.communications.mail import MailStore
           assert MailStore(get_settings().products_root).root.parent == get_settings().products_root
           print('Content renderer and persistent integrations store OK')
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Task, AgentRun, Artifact
+          with SessionLocal() as db:
+              task = db.scalar(select(Task).where(Task.assigned_agent == 'content_factory').order_by(Task.created_at.desc()).limit(1))
+              assert task is not None, 'First content package was not queued'
+              print('First content task:', task.id, task.status.value)
+              for run in db.scalars(select(AgentRun).where(AgentRun.task_id == task.id)):
+                  print('Content stage:', run.agent_name, run.model, run.status, run.error or '-')
+          
           PY
           docker inspect -f '{{.State.Running}}' ai-growth-os-worker-1 | grep -qx true
           if grep -q "^TELEGRAM_BOT_TOKEN=." "$REMOTE_ROOT/.env" && grep -q "^TELEGRAM_OWNER_CHAT_ID=." "$REMOTE_ROOT/.env"; then
