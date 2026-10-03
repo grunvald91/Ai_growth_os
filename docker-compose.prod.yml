@@ -116,4 +116,3 @@ services:
 volumes:
   postgres_data:
   company_products:
-
