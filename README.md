@@ -287,4 +287,3 @@ ClaudeHub configuration (`TEAM_LLM_MODEL`, default `kimi-2.7`); API uses its con
 provider/model. Sources are untrusted data; websites forbid private/reserved IPs,
 credentials, redirects and nonstandard ports, and pin public DNS results for fetch.
 Pattern redaction does not detect all possible secrets: do not upload credentials.
-
