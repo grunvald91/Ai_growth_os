@@ -38,6 +38,12 @@ jobs:
           git config user.email "grok-code[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
 
+      - name: Prepare bounded coding files
+        run: |
+          set -euo pipefail
+          touch app/company_profile.py
+          touch tests/test_company_profile.py
+
       - name: Build bounded task prompt
         env:
           ISSUE_TITLE: ${{ github.event.issue.title }}
@@ -55,12 +61,13 @@ jobs:
               "Implement ONLY this bounded instruction:",
               comment,
               "",
+              "You may edit ONLY app/company_profile.py and tests/test_company_profile.py in this run.",
+              "Do not merely describe code. Write the implementation into those files.",
               "Rules:",
               "- Make the smallest correct change for this instruction.",
-              "- Do not edit .github/workflows, secrets, credentials, or deployment credentials.",
               "- Do not invent business facts.",
               "- Preserve backward compatibility.",
-              "- Add focused tests when the instruction requires code behavior.",
+              "- Add focused tests for the requested behavior.",
               "- Do not perform external side effects.",
           ])
           Path("/tmp/grok-task.md").write_text(prompt, encoding="utf-8")
@@ -70,7 +77,7 @@ jobs:
               "  use_repo_map: false\n"
               "  use_temperature: false\n"
               "  extra_params:\n"
-              "    max_tokens: 1200\n",
+              "    max_tokens: 1800\n",
               encoding="utf-8",
           )
           PY
@@ -81,29 +88,43 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$OPENAI_API_KEY"
-          BEFORE="$(git status --porcelain)"
           set +e
-          aider             --model openai/grok-4.7             --openai-api-base https://api.claudehub.fun/v1             --model-settings-file /tmp/aider-model-settings.yml             --map-tokens 0             --max-chat-history-tokens 3000             --message-file /tmp/grok-task.md             --yes-always             --no-auto-commits             --no-suggest-shell-commands             --no-stream             --no-pretty             --no-gitignore             --edit-format diff             pyproject.toml             app/workflows/context.py             products/servgo/.claude/product-marketing-context.md             README.md             ARCHITECTURE.md
+          aider \
+            --model openai/grok-4.7 \
+            --openai-api-base https://api.claudehub.fun/v1 \
+            --model-settings-file /tmp/aider-model-settings.yml \
+            --map-tokens 0 \
+            --max-chat-history-tokens 3000 \
+            --message-file /tmp/grok-task.md \
+            --yes-always \
+            --no-auto-commits \
+            --no-suggest-shell-commands \
+            --no-stream \
+            --no-pretty \
+            --no-gitignore \
+            --edit-format diff \
+            app/company_profile.py \
+            tests/test_company_profile.py
           AIDER_STATUS=$?
           set -e
-          AFTER="$(git status --porcelain)"
           if [ "$AIDER_STATUS" -ne 0 ]; then
             echo "::error::Grok/Aider exited with status $AIDER_STATUS"
             exit "$AIDER_STATUS"
           fi
-          if [ "$BEFORE" = "$AFTER" ]; then
-            echo "::error::Grok completed without repository changes."
+          if [ ! -s app/company_profile.py ] || [ ! -s tests/test_company_profile.py ]; then
+            echo "::error::Grok did not write the required code/test files."
             exit 1
           fi
 
-      - name: Run tests
+      - name: Run focused tests
         run: |
           python -m pip install --disable-pip-version-check -q -e ".[test]"
+          pytest -q tests/test_company_profile.py
           pytest -q
 
       - name: Commit and push
         run: |
           set -euo pipefail
-          git add -A
-          git commit -m "Implement issue #${{ github.event.issue.number }} with Grok 4.7"
+          git add app/company_profile.py tests/test_company_profile.py
+          git commit -m "Implement Company Profile contract with Grok 4.7"
           git push origin "$BRANCH"
