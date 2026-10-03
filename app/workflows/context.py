@@ -49,6 +49,13 @@ def load_context(db: Session, product: Product, products_root: Path) -> dict:
             query = query.where(Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.WAITING_APPROVAL]))
         elif model is Approval:
             query = query.where(Approval.status == 'pending')
+        elif model is Artifact:
+            # Unreviewed company material is confined to intake. Marketing sees
+            # the canonical profile and onboarding state, never pending sources.
+            query = query.where(Artifact.kind.not_in([
+                'company_intake_sources', 'company_profile_draft', 'company_profile_review',
+                'company_profile_previous', 'company_profile_apply_intent',
+            ]))
         # Active experiments first, then recent history; metrics by observation time.
         if model is Experiment:
             query = query.order_by(Experiment.status.in_(['active', 'running']).desc())
