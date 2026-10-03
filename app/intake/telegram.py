@@ -3,6 +3,7 @@ import json
 import re
 from uuid import UUID, uuid4
 
+import httpx
 from sqlalchemy import select
 
 from app.company_profile import load_company_profile, profile_snapshot
@@ -195,7 +196,7 @@ class TelegramCompanyIntake:
                             raw = await self.bot.api.download_file(file_id, MAX_FILE_BYTES)
                             result = service.add_file(product_id, session_id, filename, raw, actor=self.actor,
                                                       reference=f"telegram-file:{file_id}")
-                        except (OSError, ValueError, RuntimeError):
+                        except (OSError, ValueError, RuntimeError, httpx.HTTPError):
                             result = service.add_source(product_id, session_id,
                                 make_source("owner_file", f"telegram-file:{file_id}", filename=filename,
                                     status="unavailable", note="Файл не удалось скачать. Можно прислать текст."),
