@@ -12,7 +12,7 @@ from pathlib import Path
 import json
 import re
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class _Strict(BaseModel):
@@ -25,6 +25,13 @@ class VerifiedFact(_Strict):
     statement: str
     evidence_ref: str | None = None
     fact_type: Literal["verified"] = "verified"
+
+    @field_validator("statement")
+    @classmethod
+    def nonblank_statement(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("A verified fact must have a nonblank statement")
+        return value
 
 
 class Identity(_Strict):
@@ -145,7 +152,7 @@ class Unknown(_Strict):
 
 
 class CompanyProfile(_Strict):
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0"]
     identity: Identity = Field(default_factory=Identity)
     offer: Offer = Field(default_factory=Offer)
     customers: Customers = Field(default_factory=Customers)
@@ -328,7 +335,7 @@ def render_company_profile(profile: CompanyProfile) -> str:
 
 
 def profile_snapshot(result: ProfileLoadResult) -> dict:
-    readiness = evaluate_readiness(result.profile or CompanyProfile())
+    readiness = evaluate_readiness(result.profile or CompanyProfile(schema_version="1.0"))
     if result.profile is None:
         for gate in readiness.values():
             gate["warnings"].append("No validated JSON profile; readiness is not established.")
