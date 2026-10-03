@@ -49,6 +49,13 @@ def load_context(db: Session, product: Product, products_root: Path) -> dict:
             query = query.where(Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.WAITING_APPROVAL]))
         elif model is Approval:
             query = query.where(Approval.status == 'pending')
+        elif model is Artifact:
+            # Unreviewed company material is confined to intake. Marketing sees
+            # the canonical profile and onboarding state, never pending sources.
+            query = query.where(Artifact.kind.not_in([
+                'company_intake_sources', 'company_profile_draft', 'company_profile_review',
+                'company_profile_previous', 'company_profile_apply_intent',
+            ]))
         # Active experiments first, then recent history; metrics by observation time.
         if model is Experiment:
             query = query.order_by(Experiment.status.in_(['active', 'running']).desc())
@@ -60,6 +67,16 @@ def load_context(db: Session, product: Product, products_root: Path) -> dict:
         context['records'][kind] = [dict(id=str(row.id), **{
             field: str(getattr(row, field))[:TEXT_LIMIT] if getattr(row, field) is not None else None
             for field in fields}) for row in rows[:ROW_LIMIT]]
+    active_intake = db.scalar(select(Task.id).where(
+        Task.product_id == product.id, Task.assigned_agent == 'company_intake',
+        Task.status.in_([TaskStatus.QUEUED, TaskStatus.WAITING_APPROVAL, TaskStatus.RUNNING])
+    ).limit(1)) is not None
+    readiness = context['company_profile']['readiness']
+    state = ('intake_in_progress' if active_intake else
+             'no_profile' if loaded.profile is None else
+             'profile_incomplete' if not readiness['strategy']['ready'] else
+             'ready' if all(gate['ready'] for gate in readiness.values()) else 'partially_ready')
+    context['company_onboarding'] = {'state': state, 'intake_in_progress': active_intake}
     if len(json.dumps(context)) > CONTEXT_LIMIT:
         raise ValueError('Context exceeds bound')
     return context

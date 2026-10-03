@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 
 class AgentRole(StrEnum):
+    COMPANY_INTAKE = "company_intake"
     CMO = "cmo"
     RESEARCH_PMM = "research_pmm"
     CONTENT_SEO = "content_seo"
@@ -52,6 +53,12 @@ class AgentConfig(BaseModel):
 
 
 AGENT_CONFIGS = MappingProxyType({
+    AgentRole.COMPANY_INTAKE: AgentConfig(
+        role=AgentRole.COMPANY_INTAKE,
+        responsibilities=("Collect source-grounded company inputs, expose conflicts and missing data.",
+                          "Prepare a profile draft; canonical changes require explicit owner review."),
+        allowed_operations=frozenset({ToolOperation.RESEARCH, ToolOperation.GENERATE_DRAFT}),
+    ),
     AgentRole.CMO: AgentConfig(
         role=AgentRole.CMO,
         responsibilities=("Review evidence and propose strategy decisions.",

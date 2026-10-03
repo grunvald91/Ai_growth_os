@@ -221,11 +221,11 @@ against inventing it. Profile readiness does not authorize external actions.
 
 `GET /products/{product_id}/company-profile` returns sanitized structured
 `profile`, `source`, `readiness` and safe `validation_errors`; unknown products
-return 404. There is no write endpoint. Legacy-only or missing profiles do not
+return 404. Writes require a separate explicit intake review confirmation. Legacy-only or missing profiles do not
 establish readiness; raw legacy text is not returned by this endpoint.
 Invalid JSON never falls back to markdown. Slugs are ASCII alphanumeric/hyphen
 only, symlink components are rejected, UTF-8 file reads are bounded at 256 KiB.
-The trusted product directory must remain read-only during runtime.
+The trusted product directory must be writable only by the application/operator; sources cannot choose paths.
 
 Workflows prefer validated JSON and disclose readiness without globally blocking
 research or strategy. Invalid canonical JSON fails context preparation safely.
@@ -240,5 +240,50 @@ The migrated ServGo profile contains only facts already in the canonical
 markdown. Candidate segments remain hypotheses. Geography/languages, approved
 segments, CTA, brand tone, outreach permissions and measurement definitions still
 need owner verification. Its gates therefore remain unready; this is an explicit
-data gap, not inferred readiness. Company Intake Agent (#80) is the next layer for
-collecting and confirming those inputs.
+data gap, not inferred readiness. Company Intake Agent collects and confirms those inputs.
+
+
+## Company Intake Agent
+
+In the owner-authorized Telegram chat, open **🏢 Компания**, choose an existing
+company or create one, then send several ordinary messages, public website links,
+a company name/INN, or documents. Sources are retained separately with references
+and read/unavailable/unsupported/truncated status. TXT, Markdown, JSON, CSV and
+DOCX are supported (2 MiB upload; bounded extraction). PDF, XLSX, images, audio,
+and macro documents are explicitly unsupported; supply text or DOCX instead.
+There is no registry adapter configured by default: an INN/name alone is retained
+as an identifier and cannot establish registry facts.
+
+Choose **Собрать профиль** to produce a review. Extracted candidates carry exact
+source quotes; unsupported model claims fail validation. Hypotheses and unknowns
+stay separate, conflicts show alternatives, and at most three blocker questions
+are asked at once. **Не знаю**, **Изменить**, **Добавить источник**, and **Отмена**
+are supported. Review changes old → new and confirm the exact current review to
+write the canonical profile. Adding materials invalidates the previous approval.
+Canceling or drafting never changes the canonical file. Company approval does not
+authorize outreach, publishing, payments or other external actions.
+
+The local trusted API exposes product-scoped `POST /products/{id}/intake`,
+`GET /products/{id}/intake/{session}`, and `sources`, `draft`, `unknown`,
+`approve`, `cancel` POST suffixes. See `/docs` for typed bodies. Approval requires
+`{"review_id":"<current review UUID>","confirmed":true}` exactly. This API has no
+user authentication and must remain on loopback or behind operator authentication.
+Telegram checks the configured owner chat before processing company input.
+
+Existing Task/Artifact/AgentRun/CostRecord tables hold sessions, source versions,
+review/draft/history and usage; no schema migration is added. The prior canonical
+bytes and an apply intent are committed before atomic replacement, under a shared
+filesystem lock. Approval rejects changed base files or stale reviews. If a process
+or database fails during apply, operators must reconcile the saved apply intent,
+canonical digest and prior-file artifact before retrying; DB and filesystem are
+not one atomic transaction.
+
+Compose shares a durable `company_products` volume between API, Telegram and
+worker. The one-shot `profile-init` seeds packaged products, preserves every
+existing canonical profile and refreshes ancillary repository files at deployment.
+Do not remove this volume when recreating containers. Outside Compose, provide a
+persistent writable `PRODUCTS_ROOT` explicitly. Telegram uses the worker's existing
+ClaudeHub configuration (`TEAM_LLM_MODEL`, default `kimi-2.7`); API uses its configured
+provider/model. Sources are untrusted data; websites forbid private/reserved IPs,
+credentials, redirects and nonstandard ports, and pin public DNS results for fetch.
+Pattern redaction does not detect all possible secrets: do not upload credentials.

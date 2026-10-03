@@ -14,6 +14,12 @@ services:
       timeout: 5s
       retries: 20
 
+  profile-init:
+    build: .
+    command: ["python", "-m", "app.intake.profile_store"]
+    volumes:
+      - company_products:/app/company_products
+
   api:
     build:
       context: .
@@ -27,9 +33,13 @@ services:
       XAI_BASE_URL: ${XAI_BASE_URL:-https://api.claudehub.fun/v1}
       XAI_REASONING_EFFORT: ${XAI_REASONING_EFFORT:-medium}
       LLM_FALLBACK_MODELS: ${LLM_FALLBACK_MODELS:-gemini-flash-3.8}
-      PRODUCTS_ROOT: /app/products
+      PRODUCTS_ROOT: /app/company_products
       SKILLS_ROOT: /app/skills
+    volumes:
+      - company_products:/app/company_products
     depends_on:
+      profile-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     ports:
@@ -55,9 +65,21 @@ services:
       DATABASE_URL: postgresql+psycopg://ai_growth:${POSTGRES_PASSWORD}@postgres:5432/ai_growth
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_OWNER_CHAT_ID: ${TELEGRAM_OWNER_CHAT_ID:-}
+      LLM_PROVIDER: xai
+      LLM_MODEL: ${TEAM_LLM_MODEL:-kimi-2.7}
+      XAI_API_KEY: ${XAI_API_KEY:?XAI_API_KEY is required}
+      XAI_BASE_URL: ${XAI_BASE_URL:-https://api.claudehub.fun/v1}
+      XAI_REASONING_EFFORT: ${TEAM_XAI_REASONING_EFFORT:-low}
+      LLM_FALLBACK_MODELS: ${TEAM_LLM_FALLBACK_MODELS:-grok-4.7}
+      PRODUCTS_ROOT: /app/company_products
+      SKILLS_ROOT: /app/skills
       TELEGRAM_POLL_TIMEOUT_SECONDS: ${TELEGRAM_POLL_TIMEOUT_SECONDS:-25}
       TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-http://188.120.254.223:8891}
+    volumes:
+      - company_products:/app/company_products
     depends_on:
+      profile-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
 
@@ -75,7 +97,7 @@ services:
       XAI_BASE_URL: ${XAI_BASE_URL:-https://api.claudehub.fun/v1}
       XAI_REASONING_EFFORT: ${TEAM_XAI_REASONING_EFFORT:-low}
       LLM_FALLBACK_MODELS: ${TEAM_LLM_FALLBACK_MODELS:-grok-4.7}
-      PRODUCTS_ROOT: /app/products
+      PRODUCTS_ROOT: /app/company_products
       SKILLS_ROOT: /app/skills
       TEAM_WORKER_BATCH_SIZE: ${TEAM_WORKER_BATCH_SIZE:-1}
       TEAM_WORKER_IDLE_POLL_SECONDS: ${TEAM_WORKER_IDLE_POLL_SECONDS:-20}
@@ -83,9 +105,14 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_OWNER_CHAT_ID: ${TELEGRAM_OWNER_CHAT_ID:-}
       TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-http://188.120.254.223:8891}
+    volumes:
+      - company_products:/app/company_products
     depends_on:
+      profile-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
 
 volumes:
   postgres_data:
+  company_products:

@@ -17,6 +17,16 @@ from app.workflows.team_cycle import TeamCycle
 SAFE_LLM_METADATA_FIELDS = {"reasoning_effort", "team_role", "task_type", "conversation_id"}
 
 
+def build_intake(db: Session, settings: Settings, provider: LLMProvider | None = None):
+    from app.intake.service import CompanyIntakeService
+    privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
+    return CompanyIntakeService(
+        db, products_root=settings.products_root,
+        llm=LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings)),
+        model=settings.llm_model, provider_name=settings.llm_provider,
+    )
+
+
 def build_llm_provider(settings: Settings) -> LLMProvider:
     if settings.llm_provider == "anthropic":
         if not settings.anthropic_api_key:
