@@ -5,7 +5,7 @@ from uuid import UUID
 
 import httpx
 
-from app.control.decisions import ApprovalDecisionError, decide_approval
+from app.control.decisions import ApprovalDecisionError, decide_approval, approval_review_token
 from app.control.telegram import (
     action_label,
     channel_label,
@@ -278,10 +278,16 @@ class TelegramControlBot:
             for action in item.actions:
                 if action.key == "open":
                     continue
+                with SessionLocal() as db:
+                    approval = db.get(Approval, item.id)
+                    token = approval_review_token(db, approval) if approval else None
+                callback_data = f"{action.key}:{item.id}"
+                if token:
+                    callback_data += f":{token}"
                 row.append(
                     {
                         "text": action.label,
-                        "callback_data": f"{action.key}:{item.id}",
+                        "callback_data": callback_data,
                     }
                 )
             if row:
@@ -394,7 +400,11 @@ class TelegramControlBot:
                 return
 
         try:
-            action, raw_id = data.split(":", 1)
+            parts = data.split(":")
+            if len(parts) not in {2, 3}:
+                raise ValueError("Invalid decision callback")
+            action, raw_id = parts[:2]
+            review_token = parts[2] if len(parts) == 3 else None
             approval_id = UUID(raw_id)
         except (ValueError, TypeError):
             if callback_id:
@@ -464,10 +474,11 @@ class TelegramControlBot:
                     approval_id,
                     decision=decision,
                     actor=f"telegram:{self.owner_chat_id}",
+                    expected_review_token=review_token,
                 )
             result_text = "✅ Одобрено" if record.status == "approved" else "❌ Отклонено"
-        except ApprovalDecisionError:
-            result_text = "🔴 Это действие требует дополнительной проверки. Открой подробности."
+        except ApprovalDecisionError as exc:
+            result_text = "🔴 " + str(exc)
         except LookupError:
             result_text = "Решение не найдено."
 
