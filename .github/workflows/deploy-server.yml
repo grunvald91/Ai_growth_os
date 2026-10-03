@@ -281,4 +281,3 @@ jobs:
           echo "AI Growth OS active release: $(basename "$RELEASE")"
           docker ps --filter label=com.docker.compose.project=ai-growth-os --format 'table {{.Names}}	{{.Status}}	{{.Ports}}'
           REMOTE
-

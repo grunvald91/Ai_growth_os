@@ -160,8 +160,23 @@ class TelegramContent:
                     if item is None or item.kind not in {'channel_text','video_script','content_distribution'}:
                         raise LookupError('Материал не найден')
                     value = json.loads(item.content)
-                    text = ('# '+value['title']+'\n\n'+value['body'] if item.kind == 'channel_text'
-                            else json.dumps(value, ensure_ascii=False, indent=2))
+                    if item.kind == 'channel_text':
+                        text = '# ' + value['title'] + '\n\n' + value['body']
+                    elif item.kind == 'video_script':
+                        brief = value['production_brief']
+                        text = ('🎬 ' + item.title + '\n\nЗадача: ' + brief['objective']
+                                + '\n\nТекст для озвучки:\n' + brief['voiceover_or_dialogue_script']
+                                + '\n\nСцены:')
+                        for shot in brief['shots']:
+                            text += (f"\n\n{shot['start_second']}–{shot['end_second']} сек."
+                                     + '\nНа экране: ' + (shot.get('on_screen_text') or '')
+                                     + '\nИдея кадра: ' + shot['visual_description'])
+                        text += '\n\nОбложка: ' + brief['cover_frame']
+                        text += '\n\nПервый рендер использует текстовые карточки. Снятые кадры, голос и музыка в него не входят.'
+                    else:
+                        text = ('📈 Публикация и измерение\n\nПлощадки: сайт, Дзен, TenChat, vc.ru, Telegram, Shorts, VK Клипы, Reels.'
+                                + '\nПосле проверки размести материал вручную и сохрани ссылку. Отмечай просмотры, переходы, обращения, демо/регистрации/записи и клиентов.'
+                                + '\nАвтоматические публикации и получение статистики ещё не подключены.')
                 await self.bot._send(chat, text)
             elif action == 'video':
                 with self.sessions() as db:

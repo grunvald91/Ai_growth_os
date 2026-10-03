@@ -92,6 +92,10 @@ async def execute_email(session_factory, root, approval_id, token, actor, sender
         prospect = db.scalar(select(Prospect).where(Prospect.id == prospect_id).with_for_update())
         if prospect is None or prospect.product_id != approval.product_id:
             raise ValueError('Неверная компания контакта')
+        approval = db.scalar(select(Approval).where(Approval.id == approval_id).with_for_update()
+            .execution_options(populate_existing=True))
+        if approval.status not in {'pending', 'approved'} or not hmac.compare_digest(token, approval_review_token(db, approval)):
+            raise ValueError('Письмо изменилось или отклонено. Открой карточку заново')
         prospect, profile = eligible(db, prospect_id, root, 'email')
         current = draft_for(prospect, profile, 'email')
         if any(data.get(key) != value for key, value in current.items()):
