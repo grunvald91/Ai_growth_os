@@ -115,6 +115,15 @@ jobs:
             exit 1
           fi
 
+      - name: Verify requested code changes exist
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- app/company_profile.py tests/test_company_profile.py; then
+            echo "::error::No implementation changes were produced; refusing to validate unchanged code as task progress."
+            exit 1
+          fi
+          git diff --check
+
       - name: Run focused tests
         run: |
           python -m pip install --disable-pip-version-check -q -e ".[test]"
