@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
   issues: write
 
 jobs:
@@ -39,91 +38,72 @@ jobs:
           git config user.email "grok-code[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
 
-      - name: Build task prompt
+      - name: Build bounded task prompt
         env:
           ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
           COMMENT_BODY: ${{ github.event.comment.body }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
           python - <<'PY'
           import os
           from pathlib import Path
-
           comment = os.environ["COMMENT_BODY"].replace("@grok", "").strip()
           prompt = "\n".join([
-              "Implement the requested GitHub issue scope in repository grunvald91/Ai_growth_os.",
-              "",
+              "Repository: grunvald91/Ai_growth_os",
               "Issue #" + os.environ["ISSUE_NUMBER"] + ": " + os.environ["ISSUE_TITLE"],
               "",
-              "Full issue specification:",
-              os.environ["ISSUE_BODY"],
-              "",
-              "Current scoped instruction:",
+              "Implement ONLY this bounded instruction:",
               comment,
               "",
               "Rules:",
-              "- Implement only the current scoped instruction.",
+              "- Make the smallest correct change for this instruction.",
               "- Do not edit .github/workflows, secrets, credentials, or deployment credentials.",
               "- Do not invent business facts.",
               "- Preserve backward compatibility.",
-              "- Add or update focused tests.",
-              "- Do not perform external publishing, outreach, purchases, or other side effects.",
-              "- Only edit repository files; CI will run tests and handle git/PR operations.",
+              "- Add focused tests when the instruction requires code behavior.",
+              "- Do not perform external side effects.",
           ])
           Path("/tmp/grok-task.md").write_text(prompt, encoding="utf-8")
+          Path("/tmp/aider-model-settings.yml").write_text(
+              "- name: openai/grok-4.7\n"
+              "  edit_format: diff\n"
+              "  use_repo_map: false\n"
+              "  use_temperature: false\n"
+              "  extra_params:\n"
+              "    max_tokens: 1200\n",
+              encoding="utf-8",
+          )
           PY
 
-      - name: Run Grok 4.7
+      - name: Run bounded Grok 4.7 task
         env:
           OPENAI_API_KEY: ${{ secrets.API }}
         run: |
           set -euo pipefail
           test -n "$OPENAI_API_KEY"
-          aider \
-            --model openai/grok-4.7 \
-            --openai-api-base https://api.claudehub.fun/v1 \
-            --message-file /tmp/grok-task.md \
-            --yes-always \
-            --no-auto-commits \
-            --no-suggest-shell-commands \
-            --no-stream \
-            --no-pretty \
-            --edit-format diff
+          BEFORE="$(git status --porcelain)"
+          set +e
+          aider             --model openai/grok-4.7             --openai-api-base https://api.claudehub.fun/v1             --model-settings-file /tmp/aider-model-settings.yml             --map-tokens 0             --max-chat-history-tokens 3000             --message-file /tmp/grok-task.md             --yes-always             --no-auto-commits             --no-suggest-shell-commands             --no-stream             --no-pretty             --no-gitignore             --edit-format diff             pyproject.toml             app/workflows/context.py             products/servgo/.claude/product-marketing-context.md             README.md             ARCHITECTURE.md
+          AIDER_STATUS=$?
+          set -e
+          AFTER="$(git status --porcelain)"
+          if [ "$AIDER_STATUS" -ne 0 ]; then
+            echo "::error::Grok/Aider exited with status $AIDER_STATUS"
+            exit "$AIDER_STATUS"
+          fi
+          if [ "$BEFORE" = "$AFTER" ]; then
+            echo "::error::Grok completed without repository changes."
+            exit 1
+          fi
 
       - name: Run tests
         run: |
-          set +e
           python -m pip install --disable-pip-version-check -q -e ".[test]"
           pytest -q
-          STATUS=$?
-          echo "TEST_STATUS=$STATUS" >> "$GITHUB_ENV"
-          exit 0
 
       - name: Commit and push
         run: |
           set -euo pipefail
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "::error::Grok produced no repository changes."
-            exit 1
-          fi
           git add -A
           git commit -m "Implement issue #${{ github.event.issue.number }} with Grok 4.7"
           git push origin "$BRANCH"
-
-      - name: Create pull request
-        if: ${{ env.TEST_STATUS == '0' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh pr create \
-            --base main \
-            --head "$BRANCH" \
-            --title "Company Profile: issue #${{ github.event.issue.number }} implementation" \
-            --body "Implements the scoped Grok 4.7 task from #${{ github.event.issue.number }}. Tests passed in the Grok Code workflow."
-
-      - name: Fail if tests failed
-        if: ${{ env.TEST_STATUS != '0' }}
-        run: |
-          echo "::error::Grok produced changes, but tests failed. The branch was pushed for inspection."
-          exit 1
