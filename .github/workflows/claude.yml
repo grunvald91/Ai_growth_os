@@ -76,8 +76,7 @@ jobs:
               "- name: openai/grok-4.7\n"
               "  edit_format: diff\n"
               "  use_repo_map: false\n"
-              "  use_temperature: false\n"
-
+              "  use_temperature: false\n",
               encoding="utf-8",
           )
           PY
