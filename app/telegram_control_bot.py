@@ -463,12 +463,12 @@ class TelegramControlBot:
                     reason = (record.reason or "").strip()
                     if reason and any("А" <= char <= "я" or char in "Ёё" for char in reason):
                         detail_text += f"\n\nПочему:\n{reason}"
-                    if record.action_type == "send_outreach_batch" and record.artifact_id:
+                    if record.action_type in {"send_outreach_batch", "send_outreach_message"} and record.artifact_id:
                         artifact = db.get(Artifact, record.artifact_id)
                         if artifact is not None:
                             try:
                                 package = json.loads(artifact.content)
-                                package_messages = package.get("messages") or []
+                                package_messages = ([package] if record.action_type == "send_outreach_message" else package.get("messages") or [])
                             except json.JSONDecodeError:
                                 package_messages = []
             await self._send(
@@ -489,9 +489,16 @@ class TelegramControlBot:
                 )
                 if subject:
                     header += f"\nТема: {subject}"
+                card_buttons = []
+                if item.get('prospect_id'):
+                    card_buttons.append([{'text':'📇 Открыть карточку контакта',
+                        'callback_data':f"contact:open:{item['prospect_id']}"}])
+                if item.get('from_email'):
+                    header += f"\nОт: {item.get('from_name') or ''} <{item['from_email']}>"
                 await self._send(
                     chat_id,
                     header + "\n\n" + str(item.get("body") or ""),
+                    reply_markup={'inline_keyboard':card_buttons} if card_buttons else None,
                 )
             if callback_id:
                 await self._answer_callback(callback_id, "Открыто")

@@ -19,6 +19,7 @@ _STATUS_LABELS = {
 _ACTION_LABELS = {
     "start_outreach": "Начать работу с потенциальными клиентами",
     "send_outreach_batch": "Отправить подготовленные обращения",
+    "send_outreach_message": "Отправить одно подготовленное письмо",
     "publish": "Опубликовать подготовленный материал",
     "change_pricing": "Изменить цены",
     "delete_data": "Удалить данные",
