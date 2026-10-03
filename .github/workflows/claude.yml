@@ -49,6 +49,6 @@ jobs:
           additional_permissions: |
             actions: read
           claude_args: |
-            --model claude-haiku-4.5
+            --model grok-4.7
             --max-turns 60
             --allowedTools Edit,Read,Write,Bash
