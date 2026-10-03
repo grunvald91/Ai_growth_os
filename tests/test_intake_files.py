@@ -146,3 +146,10 @@ async def test_xlsx_isolated():
     book.save(output)
     source = await parse_file_async('price.xlsx', output.getvalue(), 'xlsx-process')
     assert source.status == 'read' and 'Массаж | 5000' in source.text
+
+
+@pytest.mark.asyncio
+async def test_long_filename_keeps_format_extension():
+    source = await parse_file_async('company-' + 'x' * 210 + '.csv', b'service;price\nMassage;5000', 'long-name')
+    assert source.status == 'read' and 'Massage | 5000' in source.text
+    assert len(source.filename) == 200
