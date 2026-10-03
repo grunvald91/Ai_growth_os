@@ -186,6 +186,18 @@ products/<slug>/
 
 Dynamic evidence stays in PostgreSQL.
 
+Company Profile Contract v1 adds the preferred canonical file
+`products/<slug>/company-profile.json`.
+**Company profile = stable business truth; DB = dynamic operating truth.**
+The strict typed loader validates schema version, rejects arbitrary paths and
+symlinks, bounds reads, and falls back to legacy markdown only when JSON is absent.
+Hypotheses/unknowns remain structurally separate from approved proof.
+Deterministic readiness exposes missing strategy/content/outreach/measurement
+fields. The product-scoped GET API reads sanitized profiles without mutation.
+Workflow context uses JSON first; outreach package preparation requires a ready
+profile and still creates a pending approval without sending anything.
+An incomplete profile does not globally stop existing research/strategy work.
+
 ## 10. Skills
 
 SkillLoader resolves a skill name to a single `SKILL.md`.
