@@ -14,3 +14,6 @@ app.include_router(research_sources_router)
 
 from app.api.control import router as control_router
 app.include_router(control_router)
+
+from app.api.company_profiles import router as company_profiles_router
+app.include_router(company_profiles_router)
