@@ -265,6 +265,7 @@ def test_workflows_discover_intake_state(db, tmp_path):
     product, session, service, _ = setup(db, tmp_path)
     context = load_context(db, product, tmp_path)
     assert context["company_onboarding"]["state"] == "intake_in_progress"
+    assert context["records"]["artifact"] == []
     service.cancel(product.id, session, actor="owner")
     assert load_context(db, product, tmp_path)["company_onboarding"]["state"] == "no_profile"
 
