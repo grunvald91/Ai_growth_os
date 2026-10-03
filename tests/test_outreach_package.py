@@ -1,9 +1,33 @@
 import json
+import pytest
+from types import SimpleNamespace
 
 from sqlalchemy import select
 
 from app.models.domain import Approval, Artifact, Experiment, Product, Prospect
 from app.services.outreach import OutreachPackageService
+from app.company_profile import CompanyProfileNotReady
+
+
+@pytest.fixture(autouse=True)
+def supplied_profile(tmp_path, monkeypatch):
+    payload = {
+        "schema_version": "1.0",
+        "identity": {"name": "ServGo", "one_liner": "Online booking", "languages": ["ru"]},
+        "offer": {"products_services": [{"name": "Booking", "description": "Online booking"}],
+                  "primary_conversion_action": "Запросить демо"},
+        "customers": {"primary_segments": ["Service businesses"]},
+        "brand": {"prohibited_claims": []},
+        "constraints": {"privacy": [], "legal_compliance": [], "operational": [], "approval_rules": []},
+        "outreach": {"icp_criteria": ["Service businesses"], "allowed_channels": ["email", "whatsapp", "telegram"],
+                     "sender_identity": "Артур, GrunvaldLab", "approval_required": True, "do_not_contact": []},
+    }
+    product = tmp_path / "servgo-outreach"
+    product.mkdir()
+    path = product / "company-profile.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr("app.services.outreach.get_settings", lambda: SimpleNamespace(products_root=tmp_path))
+    return path
 
 
 def _setup(db):
@@ -166,3 +190,53 @@ def test_new_package_reuses_one_pending_approval_and_supersedes_stale(db):
         )
     )
     assert len(pending) == 1
+
+
+@pytest.mark.parametrize("invalid", ["missing", "malformed", "incomplete", "legacy_only"])
+def test_unready_profile_blocks_without_mutation(db, supplied_profile, invalid):
+    product, experiment = _setup(db)
+    prospect = _prospect(product, experiment, "SG001-004", "email", "spa@example.com")
+    db.add(prospect)
+    db.commit()
+    if invalid in {"missing", "legacy_only"}:
+        supplied_profile.unlink()
+        if invalid == "legacy_only":
+            legacy = supplied_profile.parent / ".claude"
+            legacy.mkdir()
+            (legacy / "product-marketing-context.md").write_text("Legacy ServGo")
+    elif invalid == "malformed":
+        supplied_profile.write_text("{bad-json")
+    else:
+        data = json.loads(supplied_profile.read_text())
+        del data["outreach"]["sender_identity"]
+        supplied_profile.write_text(json.dumps(data))
+    with pytest.raises(CompanyProfileNotReady) as error:
+        OutreachPackageService(db).prepare(experiment_id=experiment.id)
+    assert error.value.gate == "outreach"
+    assert "outreach.sender_identity" in error.value.missing_fields
+    assert list(db.scalars(select(Artifact))) == []
+    assert list(db.scalars(select(Approval))) == []
+    db.refresh(experiment)
+    db.refresh(prospect)
+    assert experiment.status == "running"
+    assert prospect.outreach_status == "not_contacted"
+
+
+def test_profile_controls_channels_sender_and_claims(db, supplied_profile):
+    data = json.loads(supplied_profile.read_text())
+    data["identity"]["name"] = "Example"
+    data["identity"]["one_liner"] = "Verified service description"
+    data["outreach"]["sender_identity"] = "Example founder"
+    data["outreach"]["allowed_channels"] = ["email"]
+    supplied_profile.write_text(json.dumps(data))
+    product, experiment = _setup(db)
+    db.add_all([_prospect(product, experiment, "SG001-004", "email", "spa@example.com"),
+                _prospect(product, experiment, "SG001-005", "telegram", "@example")])
+    db.commit()
+    result = OutreachPackageService(db).prepare(experiment_id=experiment.id)
+    messages = json.loads(result.artifact.content)["messages"]
+    assert len(messages) == 1 and messages[0]["channel"] == "email"
+    assert "Example founder" in messages[0]["body"]
+    assert "Verified service description" in messages[0]["body"]
+    assert "ServGo" not in messages[0]["body"]
+    assert "напоминания" not in messages[0]["body"]
