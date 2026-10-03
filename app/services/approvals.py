@@ -20,6 +20,11 @@ class ApprovalService(CRUDService[Approval]):
 
     def update(self, entity_id: UUID, **values: Any) -> Approval:
         self._validate_status(values.get("status"))
+        approval = self.get(entity_id)
+        if approval is None:
+            raise ValueError("Approval not found")
+        if "artifact_id" in values and values["artifact_id"] != approval.artifact_id:
+            raise ValueError("Approval artifact binding is immutable; create a new approval")
         return self._update(entity_id, values)
 
     @classmethod

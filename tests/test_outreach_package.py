@@ -164,7 +164,7 @@ def test_prepare_outreach_package_includes_more_than_ten_ready_prospects(db):
     assert len(package["messages"]) == 15
 
 
-def test_new_package_reuses_one_pending_approval_and_supersedes_stale(db):
+def test_new_package_creates_new_approval_and_supersedes_stale(db):
     product, experiment = _setup(db)
     prospect = _prospect(product, experiment, "SG001-004", "email", "old@example.com")
     db.add(prospect)
@@ -178,7 +178,9 @@ def test_new_package_reuses_one_pending_approval_and_supersedes_stale(db):
 
     second = OutreachPackageService(db).prepare(experiment_id=experiment.id)
 
-    assert first.approval.id == second.approval.id
+    assert first.approval.id != second.approval.id
+    assert first.approval.artifact_id == first.artifact.id
+    assert first.approval.status == "rejected"
     assert second.approval.status == "pending"
     assert second.approval.artifact_id == second.artifact.id
     pending = list(
@@ -190,6 +192,105 @@ def test_new_package_reuses_one_pending_approval_and_supersedes_stale(db):
         )
     )
     assert len(pending) == 1
+
+
+def test_old_button_cannot_approve_replacement_package(db):
+    from app.control.decisions import decide_approval, approval_review_token, ApprovalDecisionError
+    product, experiment = _setup(db)
+    prospect = _prospect(product, experiment, "lead1", "email", "old@example.com")
+    db.add(prospect)
+    db.commit()
+    first = OutreachPackageService(db).prepare(experiment_id=experiment.id)
+    token = approval_review_token(db, first.approval)
+    prospect.email = "changed@example.com"
+    db.commit()
+    second = OutreachPackageService(db).prepare(experiment_id=experiment.id)
+    with pytest.raises(ApprovalDecisionError, match="заменён"):
+        decide_approval(db, first.approval.id, decision="approved", actor="owner",
+                        expected_review_token=token)
+    assert second.approval.status == "pending"
+
+
+def test_two_experiments_keep_independent_pending_approvals(db):
+    product, experiment = _setup(db)
+    second_experiment = Experiment(product_id=product.id, experiment_key="EXP-SECOND",
+        name="Second", hypothesis="Second", status="running")
+    db.add(second_experiment)
+    db.flush()
+    db.add_all([_prospect(product, experiment, "lead1", "email", "first@example.com"),
+                _prospect(product, second_experiment, "lead2", "email", "second@example.com")])
+    db.commit()
+    first = OutreachPackageService(db).prepare(experiment_id=experiment.id)
+    second = OutreachPackageService(db).prepare(experiment_id=second_experiment.id)
+    assert first.approval.id != second.approval.id
+    assert first.approval.status == second.approval.status == "pending"
+    assert first.approval.artifact_id == first.artifact.id
+
+
+def test_outreach_decision_requires_unchanged_review_and_immutable_binding(db):
+    from app.control.decisions import decide_approval, approval_review_token, ApprovalDecisionError
+    from app.services.approvals import ApprovalService
+    from app.services.artifacts import ArtifactService
+    product, experiment = _setup(db)
+    db.add(_prospect(product, experiment, "lead1", "email", "first@example.com"))
+    db.commit()
+    package = OutreachPackageService(db).prepare(experiment_id=experiment.id)
+    token = approval_review_token(db, package.approval)
+    assert len(f"approve:{package.approval.id}:{token}".encode()) <= 64
+    with pytest.raises(ValueError, match="immutable"):
+        ApprovalService(db).update(package.approval.id, artifact_id=None)
+    with pytest.raises(ValueError, match="immutable"):
+        ArtifactService(db).update(package.artifact.id, content="changed")
+    with pytest.raises(ApprovalDecisionError, match="изменился"):
+        decide_approval(db, package.approval.id, decision="approved", actor="old-button")
+    original = package.artifact.content
+    package.artifact.content += " "
+    db.commit()
+    with pytest.raises(ApprovalDecisionError, match="изменился"):
+        decide_approval(db, package.approval.id, decision="approved", actor="owner",
+                        expected_review_token=token)
+    package.artifact.content = original
+    db.commit()
+    decided = decide_approval(db, package.approval.id, decision="approved", actor="owner",
+                              expected_review_token=token)
+    assert decided.status == "approved"
+
+
+@pytest.mark.asyncio
+async def test_telegram_buttons_bind_review_and_reject_changed_content(db, monkeypatch):
+    from app.telegram_control_bot import TelegramControlBot
+    product, experiment = _setup(db)
+    db.add(_prospect(product, experiment, "lead1", "email", "first@example.com"))
+    db.commit()
+    package = OutreachPackageService(db).prepare(experiment_id=experiment.id)
+    class Borrow:
+        def __enter__(self): return db
+        def __exit__(self, *args): pass
+    class API:
+        def __init__(self): self.calls = []
+        async def call(self, method, payload):
+            self.calls.append((method, payload))
+            return {}
+    monkeypatch.setattr("app.telegram_control_bot.SessionLocal", lambda: Borrow())
+    api = API()
+    bot = TelegramControlBot(api, owner_chat_id=42)
+    await bot._send_inbox(42)
+    keyboard = next(payload["reply_markup"]["inline_keyboard"] for method, payload in api.calls
+                    if method == "sendMessage" and "Что предлагается" in payload["text"])
+    callback = next(button["callback_data"] for row in keyboard for button in row
+                    if button["callback_data"].startswith("approve:"))
+    assert len(callback.encode()) <= 64 and len(callback.split(":")) == 3
+    original = package.artifact.content
+    package.artifact.content += " "
+    db.commit()
+    update = {"id": "callback", "from": {"id": 42}, "message": {"chat": {"id": 42}}, "data": callback}
+    await bot._handle_callback(update)
+    assert package.approval.status == "pending"
+    assert any("изменился" in payload.get("text", "") for _, payload in api.calls)
+    package.artifact.content = original
+    db.commit()
+    await bot._handle_callback(update)
+    assert package.approval.status == "approved"
 
 
 @pytest.mark.parametrize("invalid", ["missing", "malformed", "incomplete", "legacy_only"])

@@ -8,6 +8,7 @@ from app.db.session import SessionLocal
 from app.models.domain import Experiment
 from app.services.outreach import OutreachPackageService
 from app.services.prospects import ProspectService
+from app.company_profile import CompanyProfileNotReady
 
 
 def apply_file(
@@ -62,15 +63,19 @@ def apply_file(
                 "until every prospect has a terminal enrichment status."
             )
         elif prepare_outreach and stats["ready_for_outreach"] > 0:
-            package = OutreachPackageService(db).prepare(
-                experiment_id=experiment.id,
-                limit=100,
-            )
-            outreach = {
-                "artifact_id": str(package.artifact.id),
-                "approval_id": str(package.approval.id),
-                "message_count": package.message_count,
-            }
+            try:
+                package = OutreachPackageService(db).prepare(
+                    experiment_id=experiment.id,
+                    limit=100,
+                )
+            except CompanyProfileNotReady as exc:
+                outreach_blocked_reason = str(exc)
+            else:
+                outreach = {
+                    "artifact_id": str(package.artifact.id),
+                    "approval_id": str(package.approval.id),
+                    "message_count": package.message_count,
+                }
         return {
             "experiment_key": experiment_key,
             "rows_applied": len(rows),

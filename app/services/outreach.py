@@ -36,7 +36,9 @@ class OutreachPackageService:
         experiment_id: UUID,
         limit: int = 30,
     ) -> OutreachPackageResult:
-        experiment = self.db.get(Experiment, experiment_id)
+        # Serialize package replacement and its immutable approval binding.
+        experiment = self.db.scalar(select(Experiment).where(
+            Experiment.id == experiment_id).with_for_update())
         if experiment is None:
             raise LookupError("Experiment not found")
         if experiment.status != "running":
@@ -112,10 +114,13 @@ class OutreachPackageService:
         pending = list(
             self.db.scalars(
                 select(Approval)
+                .join(Artifact, Approval.artifact_id == Artifact.id)
                 .where(
                     Approval.product_id == experiment.product_id,
                     Approval.action_type == "send_outreach_batch",
                     Approval.status == "pending",
+                    Artifact.kind == "outreach_package",
+                    Artifact.title == title,
                 )
                 .order_by(Approval.created_at.desc(), Approval.id.desc())
             )
@@ -124,14 +129,7 @@ class OutreachPackageService:
             (item for item in pending if item.artifact_id == artifact.id),
             None,
         )
-        if approval is None and pending:
-            approval = ApprovalService(self.db).update(
-                pending[0].id,
-                artifact_id=artifact.id,
-                reason=reason,
-                risk_level="YELLOW",
-            )
-        elif approval is None:
+        if approval is None:
             approval = ApprovalService(self.db).create(
                 product_id=experiment.product_id,
                 artifact_id=artifact.id,

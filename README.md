@@ -287,3 +287,13 @@ ClaudeHub configuration (`TEAM_LLM_MODEL`, default `kimi-2.7`); API uses its con
 provider/model. Sources are untrusted data; websites forbid private/reserved IPs,
 credentials, redirects and nonstandard ports, and pin public DNS results for fetch.
 Pattern redaction does not detect all possible secrets: do not upload credentials.
+
+Outreach packages and approval-to-artifact bindings are immutable. A replacement
+package receives a new approval ID and supersedes only pending approvals for the
+same experiment. Telegram decision buttons carry a digest of the displayed review;
+stale or legacy outreach approval buttons cannot authorize changed content. Open
+the current Decision Inbox to review and decide again. The deployment enrichment
+importer returns a blocked reason for incomplete company profiles while preserving
+enrichment and the running experiment; it does not bypass the outreach gate.
+Canonical JSON must supply schema_version explicitly, and verified facts must have
+nonblank statements.
