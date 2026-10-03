@@ -28,7 +28,7 @@ jobs:
           docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
           from sqlalchemy import select
           from app.db.session import SessionLocal
-          from app.models.domain import Task, AgentRun, Product
+          from app.models.domain import Task, AgentRun, Product, CostRecord
           from app.core.config import get_settings
           import importlib.util
           print('Runtime model:', get_settings().llm_model)
@@ -46,5 +46,7 @@ jobs:
                       print('Content task state:', task.id, task.status.value)
                       for run in db.scalars(select(AgentRun).where(AgentRun.task_id == task.id)):
                           print('Stage:', run.agent_name, run.status, run.error or '-')
+                          for cost in db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)):
+                              print('Usage:', run.agent_name, cost.input_tokens, cost.output_tokens)
           PY
           REMOTE
