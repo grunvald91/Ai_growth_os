@@ -89,12 +89,12 @@ jobs:
           test -n "$OPENAI_API_KEY"
           set +e
           aider \
-            --model openai/grok-4.7 \
+            --model openai/gpt-6.1-sol \
             --openai-api-base https://api.claudehub.fun/v1 \
             --model-settings-file /tmp/aider-model-settings.yml \
             --map-tokens 0 \
             --max-chat-history-tokens 3000 \
-            --message-file /tmp/grok-task.md \
+            --message-file /tmp/sol-task.md \
             --yes-always \
             --no-auto-commits \
             --no-suggest-shell-commands \
