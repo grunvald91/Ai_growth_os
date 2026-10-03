@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import smtplib
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 from sqlalchemy import select
@@ -120,11 +121,16 @@ async def execute_email(session_factory, root, approval_id, token, actor, sender
         await asyncio.to_thread(sender, config, recipient=data['target'], subject=data['subject'],
                                 body=data['body'], message_id=message_id)
     except (Exception, asyncio.CancelledError) as exc:
+        definitely_not_sent = isinstance(exc, (smtplib.SMTPAuthenticationError, smtplib.SMTPConnectError,
+            smtplib.SMTPHeloError, smtplib.SMTPNotSupportedError, smtplib.SMTPSenderRefused,
+            smtplib.SMTPRecipientsRefused, smtplib.SMTPDataError))
         with session_factory() as db:
             call = db.get(ToolCall, call_id)
-            call.status, call.error = 'delivery_unknown', type(exc).__name__
-            db.get(Prospect, prospect_id).outreach_status = 'delivery_unknown'
+            call.status, call.error = ('not_sent' if definitely_not_sent else 'delivery_unknown'), type(exc).__name__
+            db.get(Prospect, prospect_id).outreach_status = 'not_contacted' if definitely_not_sent else 'delivery_unknown'
             db.commit()
+        if definitely_not_sent:
+            return 'Почтовый сервер отказал в отправке. Письмо не принято. Проверь подключение; после исправления можно открыть карточку и повторить.'
         if isinstance(exc, asyncio.CancelledError):
             raise
         return 'Не могу подтвердить отправку. Проверь почту: повторная отправка заблокирована, чтобы не продублировать письмо.'

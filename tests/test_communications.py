@@ -112,3 +112,16 @@ def test_message_immutable_and_stale_contact_rejected(db,tmp_path,contact):
     with pytest.raises(ValueError):ArtifactService(db).update(approval.artifact_id,content='changed')
     prospect.source_checked_at=date.today()-timedelta(days=31)
     with pytest.raises(ValueError,match='актуальность'):eligible(db,prospect.id,tmp_path,'email')
+
+@pytest.mark.asyncio
+async def test_definite_smtp_rejection_allows_retry_after_configuration_fix(db,tmp_path,contact):
+    import smtplib
+    p,e,prospect,config=contact
+    aid,token,_=prepare_email(db,prospect.id,tmp_path)
+    @contextmanager
+    def sessions():yield db
+    def refused(*a,**k):raise smtplib.SMTPAuthenticationError(535,b'Authentication failed')
+    result=await execute_email(sessions,tmp_path,aid,token,'telegram:1',refused)
+    assert 'не принято' in result
+    assert prospect.outreach_status=='not_contacted'
+    assert db.scalar(select(ToolCall)).status=='not_sent'
