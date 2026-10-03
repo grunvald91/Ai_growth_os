@@ -335,3 +335,44 @@ async def test_telegram_new_company_does_not_capture_control_buttons(db, tmp_pat
     assert not list(db.scalars(select(Product)))
     assert await ui.message({"chat": {"id": 42}, "text": "Новая компания"})
     assert len(list(db.scalars(select(Product)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_telegram_download_failure_retains_unavailable_source(db, tmp_path):
+    import httpx
+    product, _, service, _ = setup(db, tmp_path)
+    bot = Bot()
+    async def failed_download(*args):
+        raise httpx.ConnectError("network unavailable")
+    bot.api.download_file = failed_download
+    ui = TelegramCompanyIntake(bot, lambda: BorrowSession(db),
+        lambda: SimpleNamespace(products_root=tmp_path, llm_model="kimi-2.7", llm_provider="xai"))
+    await ui.callback(42, f"company:open:{product.id}")
+    await ui.message({"chat": {"id": 42}, "document": {
+        "file_id": "failed", "file_name": "price.csv", "file_size": 30}})
+    source = service.get(product.id, ui.selected, actor="telegram:42")["sources"][-1]
+    assert source["status"] == "unavailable" and source["text"] == ""
+    assert source["filename"] == "price.csv"
+    assert "не удалось скачать" in bot.messages[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_failed_profile_replace_preserves_history_and_canonical(db, tmp_path, monkeypatch):
+    product, session, service, _ = setup(db, tmp_path)
+    service.cancel(product.id, session, actor="owner")
+    parent = tmp_path / product.slug
+    parent.mkdir()
+    path = parent / "company-profile.json"
+    original = b'{"schema_version":"1.0","identity":{"name":"Original"}}'
+    path.write_bytes(original)
+    session = UUID(service.start(product.id, actor="owner")["session_id"])
+    review = await service.build(product.id, session, actor="owner")
+    def fail_replace(*args):
+        raise OSError("disk failure")
+    monkeypatch.setattr("app.intake.service.os.replace", fail_replace)
+    with pytest.raises(IntakeError, match="истории"):
+        service.approve(product.id, session, review["review_id"], actor="owner", confirmed=True)
+    assert path.read_bytes() == original
+    previous = db.scalar(select(Artifact).where(Artifact.kind == "company_profile_previous"))
+    assert base64.b64decode(json.loads(previous.content)["previous_bytes_base64"]) == original
+    assert service.get(product.id, session, actor="owner")["status"] == "failed"
