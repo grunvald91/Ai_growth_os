@@ -69,7 +69,7 @@ STAGE_MAX_TOKENS = {
     'article_writer': 8000,
     'conversion_editor': 3500,
     'human_editor': 8000,
-    'repurposing_editor': 4000,
+    'repurposing_editor': 8000,
     'video_director': 5500,
     'story_director': 4500,
     'visual_designer': 4000,
@@ -292,16 +292,21 @@ class ArticleProduction:
                     + stage_rule
                     + '\nSchema: ' + json.dumps(schema.model_json_schema())
                 )
-                error = f'provider_request_failed:{name}'
-                response = await asyncio.wait_for(self.llm.generate(LLMRequest(system_prompt=prompt,
-                    messages=[LLMMessage(role='user', content=json.dumps(stage_inputs))], model=self.model,
-                    max_tokens=STAGE_MAX_TOKENS.get(name, 10000), response_schema=schema.model_json_schema(),
-                    metadata={'reasoning_effort': 'low', 'team_role': name, 'task_type': 'article_production'})),
-                    timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
-                responses[run_id] = response
-                error = f'invalid_article_output:{name}'
-                if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
-                    raise ValueError('Incomplete or oversized response')
+                for attempt in range(2):
+                    error = f'provider_request_failed:{name}'
+                    response = await asyncio.wait_for(self.llm.generate(LLMRequest(system_prompt=prompt,
+                        messages=[LLMMessage(role='user', content=json.dumps(stage_inputs, ensure_ascii=False))], model=self.model,
+                        max_tokens=min(20000, STAGE_MAX_TOKENS.get(name, 10000) * (2 ** attempt)),
+                        response_schema=schema.model_json_schema(),
+                        metadata={'reasoning_effort': 'low', 'team_role': name, 'task_type': 'article_production'})),
+                        timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
+                    responses.setdefault(run_id, []).append(response)
+                    error = f'invalid_article_output:{name}'
+                    if response.stop_reason in {'length', 'max_tokens'} and attempt == 0:
+                        continue
+                    if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
+                        raise ValueError('Incomplete or oversized response')
+                    break
                 try:
                     parsed = schema.model_validate_json(response.content)
                     parsed = schema.model_validate(self._sanitize(parsed.model_dump(mode='json')))
@@ -316,7 +321,7 @@ class ArticleProduction:
                 outputs.append(parsed)
                 if name not in {'repurposing_editor', 'video_director', 'story_director', 'visual_designer'}:
                     inputs['prior_stage_outputs'][name] = parsed.model_dump(mode='json')
-                    if len(json.dumps(inputs)) > 250000:
+                    if len(json.dumps(inputs, ensure_ascii=False)) > 250000:
                         raise ValueError('Stage context exceeds bound')
             (
                 strategy,
@@ -503,10 +508,11 @@ class ArticleProduction:
         return value
 
     def _record_usage(self, product_id, responses):
-        for run_id, response in responses.items():
-            if response.usage is not None:
-                self.db.add(CostRecord(product_id=product_id, agent_run_id=run_id, category='llm',
-                    provider=self.provider_name, amount=0, currency='USD',
-                    input_tokens=max(0, response.usage.input_tokens),
-                    output_tokens=max(0, response.usage.output_tokens), incurred_at=datetime.now(timezone.utc),
-                    details={'cost_known': False, 'note': 'Usage recorded; monetary price unavailable.'}))
+        for run_id, attempts in responses.items():
+            for response in attempts:
+                if response.usage is not None:
+                    self.db.add(CostRecord(product_id=product_id, agent_run_id=run_id, category='llm',
+                        provider=self.provider_name, amount=0, currency='USD',
+                        input_tokens=max(0, response.usage.input_tokens),
+                        output_tokens=max(0, response.usage.output_tokens), incurred_at=datetime.now(timezone.utc),
+                        details={'cost_known': False, 'note': 'Usage recorded; monetary price unavailable.'}))
