@@ -15,15 +15,28 @@ services:
       timeout: 5s
       retries: 10
 
+  profile-init:
+    build: .
+    command: ["python", "-m", "app.intake.profile_store"]
+    volumes:
+      - company_products:/app/company_products
+
   api:
     build: .
     environment:
       DATABASE_URL: postgresql+psycopg://ai_growth:ai_growth@postgres:5432/ai_growth
+      PRODUCTS_ROOT: /app/company_products
     depends_on:
+      profile-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
+    volumes:
+      - company_products:/app/company_products
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
 volumes:
   postgres_data:
+  company_products:
+
