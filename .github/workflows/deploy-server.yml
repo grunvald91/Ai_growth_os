@@ -230,7 +230,7 @@ jobs:
               print('First content task:', task.id, task.status.value)
               for run in db.scalars(select(AgentRun).where(AgentRun.task_id == task.id)):
                   print('Content stage:', run.agent_name, run.model, run.status, run.error or '-')
-          
+
           PY
           docker inspect -f '{{.State.Running}}' ai-growth-os-worker-1 | grep -qx true
           if grep -q "^TELEGRAM_BOT_TOKEN=." "$REMOTE_ROOT/.env" && grep -q "^TELEGRAM_OWNER_CHAT_ID=." "$REMOTE_ROOT/.env"; then
