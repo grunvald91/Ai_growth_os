@@ -269,7 +269,7 @@ def load_company_profile(products_root: Path, slug: str) -> ProfileLoadResult:
             from pydantic import ValidationError
             try:
                 profile = parse_company_profile(json.loads(_read_bounded(canonical)))
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
                 return ProfileLoadResult(source, validation_errors=("Invalid UTF-8 JSON profile.",))
             except ValidationError:
                 return ProfileLoadResult(source, validation_errors=("Invalid Company Profile v1 schema.",))
@@ -284,3 +284,73 @@ def load_company_profile(products_root: Path, slug: str) -> ProfileLoadResult:
         return ProfileLoadResult("missing")
     except (OSError, ValueError, UnicodeError):
         return ProfileLoadResult(source, validation_errors=("Profile path or file could not be read safely.",))
+
+
+def sanitized_profile(profile: CompanyProfile) -> dict:
+    """Retain explicit field presence; reuse the application's privacy boundary."""
+    from app.privacy.gateway import PrivacyGateway
+    sanitizer = PrivacyGateway()
+
+    def clean(value):
+        if isinstance(value, str):
+            return sanitizer.sanitize_text(value)
+        if isinstance(value, list):
+            return [clean(item) for item in value]
+        if isinstance(value, dict):
+            return {key: clean(item) for key, item in value.items()}
+        return value
+
+    return clean(profile.model_dump(mode="json", exclude_unset=True))
+
+
+def render_company_profile(profile: CompanyProfile) -> str:
+    """Deterministic text; only approved proof enters the factual quote section."""
+    data = sanitized_profile(profile)
+    identity = data.get("identity", {})
+    proof = data.get("proof", {})
+    facts = proof.get("approved_facts", []) + proof.get("approved_numbers", [])
+    lines = ["# Company Profile v1", "## Product"]
+    for field in ("name", "one_liner"):
+        if identity.get(field):
+            lines.append(" ".join(identity[field].split()))
+    lines.append("## Verified facts")
+    lines.extend("- " + " ".join(fact["statement"].split()) for fact in facts if fact["statement"].strip())
+    stable = {key: value for key, value in data.items() if key not in {"hypotheses", "unknowns"}}
+    lines += ["## Stable business truth and constraints",
+              json.dumps(stable, ensure_ascii=False, sort_keys=True),
+              "## Hypotheses — not verified facts",
+              json.dumps(data.get("hypotheses", []), ensure_ascii=False, sort_keys=True),
+              "## Unknowns — do not infer values",
+              json.dumps(data.get("unknowns", []), ensure_ascii=False, sort_keys=True),
+              "## Readiness",
+              json.dumps(evaluate_readiness(profile), ensure_ascii=False, sort_keys=True)]
+    return "\n".join(lines)
+
+
+def profile_snapshot(result: ProfileLoadResult) -> dict:
+    readiness = evaluate_readiness(result.profile or CompanyProfile())
+    if result.profile is None:
+        for gate in readiness.values():
+            gate["warnings"].append("No validated JSON profile; readiness is not established.")
+    return {
+        "profile": sanitized_profile(result.profile) if result.profile else None,
+        "source": result.source,
+        "readiness": readiness,
+        "validation_errors": list(result.validation_errors),
+    }
+
+
+class CompanyProfileNotReady(ValueError):
+    """Safe deterministic rejection, before any package/approval mutation."""
+
+    def __init__(self, gate: str, missing_fields: list[str]):
+        self.gate = gate
+        self.missing_fields = tuple(missing_fields)
+        super().__init__(f"company_profile_{gate}_not_ready: " + ", ".join(missing_fields))
+
+
+def require_profile_ready(result: ProfileLoadResult, gate: str) -> CompanyProfile:
+    readiness = profile_snapshot(result)["readiness"][gate]
+    if result.profile is None or result.validation_errors or not readiness["ready"]:
+        raise CompanyProfileNotReady(gate, readiness["missing_fields"])
+    return result.profile
