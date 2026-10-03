@@ -1,4 +1,4 @@
-name: Verify live Company Intake runtime
+name: Verify deployed Company Intake runtime
 on:
   push:
     branches: [verify/runtime-company-intake]
@@ -27,6 +27,7 @@ jobs:
           set -euo pipefail
           printf 'ACTIVE_RELEASE='
           basename "$(readlink -f /opt/ai_growth_os/current)"
+          test "$(basename "$(readlink -f /opt/ai_growth_os/current)")" = "bead4c92bc7bf727ddae557beec86c5b046983f8"
           docker ps --filter label=com.docker.compose.project=ai-growth-os --format 'table {{.Names}}\t{{.Status}}'
           printf 'API_HEALTH='
           curl -fsS --max-time 10 http://127.0.0.1:8091/health
@@ -39,6 +40,8 @@ jobs:
           from pathlib import Path
           doc = json.loads(urllib.request.urlopen("http://127.0.0.1:8000/openapi.json", timeout=10).read())
           paths = doc.get("paths", {})
+          assert "/products/{product_id}/company-profile" in paths
+          assert "/products/{product_id}/intake" in paths
           print("PROFILE_API_PRESENT=" + str("/products/{product_id}/company-profile" in paths))
           print("INTAKE_API_PRESENT=" + str("/products/{product_id}/intake" in paths))
           print("PROFILE_CODE_PRESENT=" + str(Path("/app/app/company_profile.py").is_file()))
@@ -47,6 +50,7 @@ jobs:
           docker exec -i ai-growth-os-telegram-1 python - <<'PY'
           from pathlib import Path
           text = Path("/app/app/telegram_control_bot.py").read_text()
+          assert "🏢 Компания" in text
           print("TELEGRAM_COMPANY_MENU_PRESENT=" + str("🏢 Компания" in text))
           PY
           REMOTE
