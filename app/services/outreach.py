@@ -1,11 +1,14 @@
 import json
+from pathlib import Path
 from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.domain import Approval, Artifact, ArtifactStatus, Experiment, Prospect
+from app.models.domain import Approval, Artifact, ArtifactStatus, Experiment, Prospect, Product
+from app.core.config import get_settings
+from app.company_profile import CompanyProfile, load_company_profile, require_profile_ready, sanitized_profile
 from app.services.approvals import ApprovalService
 from app.services.artifacts import ArtifactService
 
@@ -23,8 +26,9 @@ class OutreachPackageResult:
 class OutreachPackageService:
     """Prepare an immutable, reviewable outreach batch. Never sends messages."""
 
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, *, products_root: Path | None = None) -> None:
         self.db = db
+        self.products_root = products_root if products_root is not None else get_settings().products_root
 
     def prepare(
         self,
@@ -38,6 +42,12 @@ class OutreachPackageService:
         if experiment.status != "running":
             raise ValueError("Outreach packages require a running experiment")
 
+        product = self.db.get(Product, experiment.product_id)
+        if product is None:
+            raise LookupError("Product not found")
+        profile = require_profile_ready(load_company_profile(self.products_root, product.slug), "outreach")
+        allowed_channels = _DIRECT_CHANNELS.intersection(profile.outreach.allowed_channels)
+
         prospects = list(
             self.db.scalars(
                 select(Prospect)
@@ -45,13 +55,13 @@ class OutreachPackageService:
                     Prospect.experiment_id == experiment.id,
                     Prospect.validation_status == "validated",
                     Prospect.outreach_status == "not_contacted",
-                    Prospect.preferred_channel.in_(sorted(_DIRECT_CHANNELS)),
+                    Prospect.preferred_channel.in_(sorted(allowed_channels)),
                 )
                 .order_by(Prospect.lead_key.asc(), Prospect.id)
                 .limit(limit)
             )
         )
-        messages = [self._draft(prospect) for prospect in prospects]
+        messages = [self._draft(prospect, profile) for prospect in prospects]
         if not messages:
             raise ValueError("No validated prospects with direct channels are ready")
 
@@ -156,7 +166,7 @@ class OutreachPackageService:
         )
 
     @staticmethod
-    def _draft(prospect: Prospect) -> dict:
+    def _draft(prospect: Prospect, profile: CompanyProfile) -> dict:
         channel = prospect.preferred_channel
         if channel not in _DIRECT_CHANNELS:
             raise ValueError(f"{prospect.lead_key}: direct preferred channel required")
@@ -170,17 +180,19 @@ class OutreachPackageService:
         if not fact:
             fact = f"{prospect.business_name} работает в сфере {prospect.category or 'услуг'}."
 
+        safe = sanitized_profile(profile)
+        sender = " ".join(safe["outreach"]["sender_identity"].split())
+        name = " ".join(safe["identity"]["name"].split())
+        description = " ".join(safe["identity"]["one_liner"].split())
+        action = " ".join(safe["offer"]["primary_conversion_action"].split())
         body = (
-            "Здравствуйте! Меня зовут Артур, GrunvaldLab. "
-            f"Увидел, что {fact} "
-            "Я делаю ServGo — онлайн-запись для сервисного бизнеса: клиент выбирает "
-            "услугу, специалиста, дату и время, а бизнес получает структурированную "
-            "запись и напоминания. "
-            f"Если это актуально, могу показать короткое демо под ваш формат: {prospect.tracking_url} "
-            "Если неактуально — всё нормально, больше писать не буду."
+            f"Здравствуйте! Это {sender}. Увидел, что {fact} "
+            f"{name} — {description}. "
+            f"Если это актуально: {action}: {prospect.tracking_url} "
+            "Если неактуально — больше писать не буду."
         )
         subject = (
-            f"ServGo для {prospect.business_name}: короткое демо онлайн-записи"
+            f"{name} для {prospect.business_name}: {action}"
             if channel == "email"
             else None
         )
