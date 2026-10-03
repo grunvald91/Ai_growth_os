@@ -276,4 +276,3 @@ operations require operator reconciliation. Compose shares a persistent products
 volume across API/bot/worker and initializes repository assets without overwriting
 approved canonical profiles. Readiness and onboarding state are product-scoped;
 existing experiments continue, while outreach retains its independent approvals.
-
