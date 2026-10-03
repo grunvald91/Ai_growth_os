@@ -10,7 +10,7 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.intake.contracts import IntakeError
 from app.intake.service import CompanyIntakeService
-from app.intake.sources import make_source
+from app.intake.sources import make_source, parse_file_async, MAX_FILE_BYTES
 
 router = APIRouter()
 ACTOR = "local_owner"
@@ -22,7 +22,7 @@ class SourceInput(BaseModel):
     text: str = Field(default="", max_length=12000)
     reference: str = Field(default="owner input", max_length=500)
     filename: str | None = Field(default=None, max_length=200)
-    content_base64: str | None = Field(default=None, max_length=3_000_000)
+    content_base64: str | None = Field(default=None, max_length=4 * ((MAX_FILE_BYTES + 2) // 3))
 
 
 class UnknownAnswer(BaseModel):
@@ -88,8 +88,8 @@ async def add_source(product_id: UUID, session_id: UUID, body: SourceInput, serv
             raw = base64.b64decode(body.content_base64, validate=True)
         except ValueError:
             raise IntakeError("Не удалось прочитать данные файла.") from None
-        return service.add_file(product_id, session_id, body.filename, raw, actor=ACTOR,
-                                reference=body.reference)
+        source = await parse_file_async(body.filename, raw, body.reference)
+        return service.add_source(product_id, session_id, source, actor=ACTOR)
     except (IntakeError, LookupError) as exc:
         intake_error(exc)
 

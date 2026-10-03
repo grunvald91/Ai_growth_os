@@ -221,6 +221,20 @@ jobs:
           from app.communications.mail import MailStore
           assert MailStore(get_settings().products_root).root.parent == get_settings().products_root
           print('Content renderer and persistent integrations store OK')
+          import asyncio, io, subprocess
+          from PIL import Image, ImageDraw, ImageFont
+          from app.intake.sources import parse_file_async, MAX_FILE_BYTES
+          assert MAX_FILE_BYTES == 20_000_000
+          assert shutil.which('tesseract') and shutil.which('pdftoppm')
+          langs = subprocess.run(['tesseract', '--list-langs'], capture_output=True, text=True, check=True).stdout
+          assert 'rus' in langs and 'eng' in langs
+          image = Image.new('RGB', (1200, 160), 'white')
+          ImageDraw.Draw(image).text((20, 40), 'МАССАЖ ЦЕНА 5000', fill='black', font=ImageFont.truetype(FONT, 48))
+          output = io.BytesIO()
+          image.save(output, format='PNG')
+          parsed = asyncio.run(parse_file_async('runtime-smoke.png', output.getvalue(), 'runtime-smoke'))
+          assert parsed.status == 'read' and '5000' in parsed.text and 'МАССАЖ' in parsed.text
+          print('Company file parser subprocess and Russian OCR OK; file limit 20 MB')
           from sqlalchemy import select
           from app.db.session import SessionLocal
           from app.models.domain import Task, AgentRun, Artifact

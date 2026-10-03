@@ -37,6 +37,12 @@ def test_api_start_sources_preview_apply_requires_exact_explicit_review(tmp_path
             path = prefix + "/" + session
             source = client.post(path + "/sources", json={
                 "kind": "text", "text": "Company Example"}).json()["sources"][-1]
+            import base64
+            file_result = client.post(path + "/sources", json={
+                "kind": "file", "filename": "price.csv",
+                "content_base64": base64.b64encode("Массаж;5000".encode()).decode()})
+            assert file_result.status_code == 200
+            assert "Массаж | 5000" in file_result.json()["sources"][-1]["text"]
             provider.response = LLMResponse(model="kimi-2.7", content=json.dumps({"claims": [{
                 "source_id": source["id"], "field_path": "identity.name",
                 "proposed_value": "Example", "evidence_excerpt": "Company Example",
