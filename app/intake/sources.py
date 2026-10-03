@@ -9,6 +9,8 @@ import json
 import re
 import socket
 import ssl
+import subprocess
+import sys
 import zipfile
 from html.parser import HTMLParser
 from pathlib import PurePosixPath
@@ -18,7 +20,8 @@ from xml.etree import ElementTree
 from app.intake.contracts import IntakeError, IntakeSource
 from app.privacy.gateway import PrivacyGateway
 
-MAX_FILE_BYTES = 2 * 1024 * 1024
+MAX_FILE_BYTES = 20_000_000
+FILE_HELP = "TXT, MD, JSON, CSV, DOCX, PDF, XLSX, XLS, JPG, PNG, WEBP, TIFF и BMP — до 20 МБ. PDF-сканы и изображения: распознавание русского и английского текста."
 MAX_TEXT = 12_000
 MAX_WEB_BYTES = 1024 * 1024
 
@@ -37,6 +40,7 @@ def make_source(kind, reference, text="", **values) -> IntakeSource:
     status = values.pop("status", "read")
     if len(safe) > MAX_TEXT:
         status = "truncated"
+        values["note"] = (values.get("note", "") + " Материал прочитан частично: сохранены первые 12 000 символов. Пришлите нужный раздел отдельно.").strip()
     reference = clean_text(str(reference))[:500]
     digest = hashlib.sha256((kind + reference + safe).encode()).hexdigest()
     return IntakeSource(id=digest[:24], source_type=kind, reference=reference,
@@ -50,37 +54,95 @@ def parse_file(filename: str, data: bytes, reference: str) -> IntakeSource:
                 "sha256": hashlib.sha256(data).hexdigest()}
     if len(data) > MAX_FILE_BYTES:
         return make_source("owner_file", reference, status="unsupported",
-                           note="Файл слишком большой; предел — 2 МиБ.", **metadata)
+                           note="Файл слишком большой; предел — 20 МБ.", **metadata)
     try:
+        note, partial = "", False
         if suffix in {".txt", ".md", ".json", ".csv"}:
-            text = data.decode("utf-8-sig")
+            if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+                text = data.decode("utf-16")
+            else:
+                try:
+                    text = data.decode("utf-8-sig")
+                except UnicodeError:
+                    if len(data) < 2 or suffix == ".json":
+                        raise
+                    text = data.decode("cp1251")
+                    if any(ord(c) < 32 and c not in "\n\r\t" for c in text):
+                        raise ValueError("Binary input")
+                    note = "Прочитана кодировка Windows-1251; проверьте текст."
             if suffix == ".json":
                 text = json.dumps(json.loads(text), ensure_ascii=False)
             elif suffix == ".csv":
-                rows = csv.reader(io.StringIO(text))
-                text = "\n".join(" | ".join(row) for _, row in zip(range(1000), rows))
+                try:
+                    dialect = csv.Sniffer().sniff(text[:8192], delimiters=",;\t|")
+                except csv.Error:
+                    dialect = csv.excel
+                parts, length = [], 0
+                for row in csv.reader(io.StringIO(text), dialect):
+                    line = " | ".join(row)
+                    parts.append(line)
+                    length += len(line) + 1
+                    if length > MAX_TEXT:
+                        partial = True
+                        break
+                text = "\n".join(parts)
         elif suffix == ".docx":
-            with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                infos = archive.infolist()
-                if len(infos) > 500 or any("vba" in i.filename.casefold() for i in infos):
-                    raise IntakeError("Unsafe office container")
-                if sum(i.file_size for i in infos) > 8 * MAX_FILE_BYTES:
-                    raise IntakeError("Oversized office extraction")
-                xml = archive.read("word/document.xml")
-            if b"<!DOCTYPE" in xml.upper() or b"<!ENTITY" in xml.upper():
-                raise IntakeError("Unsafe XML")
-            root = ElementTree.fromstring(xml)
-            text = " ".join(node.text or "" for node in root.iter()
-                            if node.tag.endswith("}t"))
+            from app.intake.file_extract import office_archive, xml_root
+            with office_archive(data) as archive:
+                root = xml_root(archive.read("word/document.xml"))
+            text = "\n".join(" ".join(n.text or "" for n in paragraph.iter() if n.tag.endswith("}t"))
+                             for paragraph in root.iter() if paragraph.tag.endswith("}p"))
+            # Also read minimal WordprocessingML exports without paragraphs.
+            if not text:
+                text = " ".join(n.text or "" for n in root.iter() if n.tag.endswith("}t"))
+        elif suffix == ".pdf":
+            from app.intake.file_extract import extract_pdf
+            text, partial, note = extract_pdf(data)
+        elif suffix in {".xlsx", ".xls"}:
+            from app.intake.file_extract import extract_spreadsheet
+            text, partial, note = extract_spreadsheet(suffix, data)
+        elif suffix in {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp"}:
+            from app.intake.file_extract import ocr_image
+            text = ocr_image(data)
+            from PIL import Image
+            with Image.open(io.BytesIO(data)) as image:
+                partial = getattr(image, "n_frames", 1) > 1
+            note = "Текст распознан автоматически; проверьте названия, числа и цены."
+            if partial:
+                note += " Прочитан только первый кадр многостраничного изображения; пришлите остальные страницы отдельно."
         else:
             return make_source("owner_file", reference, status="unsupported",
-                               note="Формат пока не читается. Пришлите TXT, MD, JSON, CSV или DOCX.",
-                               **metadata)
-        return make_source("owner_file", reference, text, **metadata)
-    except (ValueError, UnicodeError, zipfile.BadZipFile, KeyError, ElementTree.ParseError,
-            RecursionError, csv.Error):
+                               note="Формат пока не читается. Пришлите " + FILE_HELP, **metadata)
+        if not text.strip():
+            return make_source("owner_file", reference, status="unavailable",
+                               note="Читаемый текст не найден. Пришлите другой файл или напишите данные сообщением.", **metadata)
+        if partial and not note:
+            note = "Материал прочитан частично; пришлите нужный раздел отдельно."
+        return make_source("owner_file", reference, text,
+                           status="truncated" if partial else "read", note=note, **metadata)
+    except Exception:
+        # Parsers process untrusted files; never expose their error messages or file contents.
         return make_source("owner_file", reference, status="unsupported",
-                           note="Не удалось безопасно прочитать содержимое файла.", **metadata)
+                           note="Не удалось безопасно прочитать файл. Возможно, он повреждён, защищён паролем или требует другого формата.", **metadata)
+
+
+async def parse_file_async(filename: str, data: bytes, reference: str) -> IntakeSource:
+    """Keep OCR, PDF decoding and decompression off the API/bot event loop.
+
+    A killable child process bounds memory, CPU and wall time independently of DB sessions.
+    """
+    if len(data) > MAX_FILE_BYTES:
+        return parse_file(filename, data, reference)
+    def run():
+        try:
+            result = subprocess.run([sys.executable, "-m", "app.intake.file_extract", filename[:200], reference[:500]],
+                                    input=data, capture_output=True, timeout=90, check=True)
+            return IntakeSource.model_validate_json(result.stdout)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return make_source("owner_file", reference, filename=clean_text(PurePosixPath(filename).name)[:200],
+                               sha256=hashlib.sha256(data).hexdigest(), status="unavailable",
+                               note="Файл не удалось обработать за отведённое время или не хватает ресурсов. Пришлите нужный раздел отдельно.")
+    return await asyncio.to_thread(run)
 
 
 class _VisibleHTML(HTMLParser):

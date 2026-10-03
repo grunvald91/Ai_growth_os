@@ -376,3 +376,50 @@ async def test_failed_profile_replace_preserves_history_and_canonical(db, tmp_pa
     previous = db.scalar(select(Artifact).where(Artifact.kind == "company_profile_previous"))
     assert base64.b64decode(json.loads(previous.content)["previous_bytes_base64"]) == original
     assert service.get(product.id, session, actor="owner")["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_telegram_photo_caption_and_partial_notice(db, tmp_path, monkeypatch):
+    from app.intake.sources import make_source
+    product, _, service, _ = setup(db, tmp_path)
+    bot = Bot()
+    downloads = []
+    async def download(file_id, max_bytes):
+        downloads.append(file_id)
+        return b'image'
+    async def parse(filename, raw, reference):
+        return make_source('owner_file', reference, 'Массаж 5000', filename=filename,
+                           status='truncated', note='Материал прочитан частично.')
+    bot.api.download_file = download
+    monkeypatch.setattr('app.intake.telegram.parse_file_async', parse)
+    ui = TelegramCompanyIntake(bot, lambda: BorrowSession(db),
+        lambda: SimpleNamespace(products_root=tmp_path, llm_model='kimi-2.7', llm_provider='xai'))
+    await ui.callback(42, f'company:open:{product.id}')
+    await ui.message({'chat': {'id': 42}, 'message_id': 10, 'caption': 'Прайс компании', 'photo': [
+        {'file_id': 'small', 'width': 100, 'height': 100},
+        {'file_id': 'large', 'width': 1000, 'height': 1000}]})
+    assert downloads == ['large']
+    sources = service.get(product.id, ui.selected, actor='telegram:42')['sources']
+    assert sources[-2]['filename'] == 'photo.jpg' and sources[-1]['text'] == 'Прайс компании'
+    assert bot.messages[-1][0] == 'Материал прочитан частично.'
+
+
+@pytest.mark.asyncio
+async def test_telegram_failed_website_is_visible(db, tmp_path):
+    from app.intake.sources import make_source
+    product, _, service, _ = setup(db, tmp_path)
+    bot = Bot()
+    class Fetcher:
+        async def fetch(self, url):
+            return make_source('owned_website', url, status='unavailable', note='Страница недоступна.')
+    ui = TelegramCompanyIntake(bot, lambda: BorrowSession(db),
+        lambda: SimpleNamespace(products_root=tmp_path, llm_model='kimi-2.7', llm_provider='xai'))
+    original = ui.service
+    def configured(db):
+        instance = original(db)
+        instance.website_fetcher = Fetcher()
+        return instance
+    ui.service = configured
+    await ui.callback(42, f'company:open:{product.id}')
+    await ui.message({'chat': {'id': 42}, 'message_id': 11, 'text': 'https://example.com'})
+    assert 'Страница недоступна.' in bot.messages[-1][0]

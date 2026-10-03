@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.company_profile import load_company_profile, profile_snapshot
 from app.intake.contracts import IntakeError
 from app.intake.service import CompanyIntakeService
-from app.intake.sources import make_source, MAX_FILE_BYTES, clean_text
+from app.intake.sources import make_source, MAX_FILE_BYTES, clean_text, FILE_HELP, parse_file_async
 from app.models.domain import Artifact, Product, Task, TaskStatus
 
 COMPANY_BUTTONS = {"🏢 Компания", "➕ Добавить данные", "🌐 Сайт", "🏷 ИНН / название",
@@ -134,7 +134,8 @@ class TelegramCompanyIntake:
     async def _help(self, chat_id, task_id):
         await self.bot._send(chat_id,
             "Пришли то, что уже есть: описание, ссылку, название / ИНН или прайс. "
-            "Можно отправить несколько сообщений и файлов. Когда закончишь, нажми «Проверить профиль».",
+            "Можно отправить несколько сообщений и файлов. "
+            + FILE_HELP + " Когда закончишь, нажми «Проверить профиль».",
             reply_markup={"keyboard": [
                 [{"text": "🌐 Сайт"}, {"text": "🏷 ИНН / название"}],
                 [{"text": "📎 Файл / прайс"}, {"text": "✍️ Написать своими словами"}],
@@ -175,7 +176,7 @@ class TelegramCompanyIntake:
             return True
         if text in {"🌐 Сайт", "🏷 ИНН / название", "📎 Файл / прайс", "✍️ Написать своими словами", "➕ Добавить данные"}:
             self.mode = "identifier" if text.startswith("🏷") else ("link" if text.startswith("🌐") else None)
-            await self.bot._send(chat_id, "Пришли данные обычным сообщением или файлом. Можно отвечать своими словами.")
+            await self.bot._send(chat_id, "Пришли данные обычным сообщением или файлом. " + FILE_HELP)
             return True
         if text.startswith("/") or text in {"📊 Главное", "✅ На согласование", "🧪 Тесты", "🔄 Обновить"}:
             return False
@@ -183,19 +184,19 @@ class TelegramCompanyIntake:
             with self.session_factory() as db:
                 service = self.service(db)
                 reference = f"telegram:{chat_id}:{message.get('message_id')}"
-                if message.get("document"):
-                    document = message["document"]
-                    filename = document.get("file_name") or "unknown"
+                if message.get("document") or message.get("photo"):
+                    document = message.get("document") or max(message["photo"], key=lambda p: p.get("width", 0) * p.get("height", 0))
+                    filename = document.get("file_name") or ("photo.jpg" if message.get("photo") else "unknown")
                     file_id = document.get("file_id", "")
                     if document.get("file_size", 0) > MAX_FILE_BYTES:
                         source = make_source("owner_file", f"telegram-file:{file_id}",
-                            filename=filename, status="unsupported", note="Файл слишком большой; предел — 2 МиБ.")
+                            filename=filename, status="unsupported", note="Файл слишком большой; предел — 20 МБ.")
                         result = service.add_source(product_id, session_id, source, actor=self.actor)
                     else:
                         try:
                             raw = await self.bot.api.download_file(file_id, MAX_FILE_BYTES)
-                            result = service.add_file(product_id, session_id, filename, raw, actor=self.actor,
-                                                      reference=f"telegram-file:{file_id}")
+                            parsed = await parse_file_async(filename, raw, f"telegram-file:{file_id}")
+                            result = service.add_source(product_id, session_id, parsed, actor=self.actor)
                         except (OSError, ValueError, RuntimeError, httpx.HTTPError):
                             result = service.add_source(product_id, session_id,
                                 make_source("owner_file", f"telegram-file:{file_id}", filename=filename,
@@ -205,7 +206,8 @@ class TelegramCompanyIntake:
                     if caption:
                         result = service.add_text(product_id, session_id, caption, actor=self.actor, reference=reference)
                     source = next((s for s in result["sources"] if s["reference"] == f"telegram-file:{file_id}"), None)
-                    notice = (source["note"] if source and source["status"] != "read" else "Файл прочитан и добавлен.")
+                    notice = ((source["note"] or "Материал прочитан частично.") if source and source["status"] != "read"
+                              else "Файл прочитан и добавлен." + (" " + source["note"] if source else ""))
                 elif text.casefold() == "не знаю":
                     state = service.get(product_id, session_id, actor=self.actor)
                     if not state["review_current"] or not state["review"]["questions"]:
@@ -225,14 +227,19 @@ class TelegramCompanyIntake:
                         if not links:
                             links = ["https://" + domain for domain in re.findall(
                                 r"\b(?:[a-zA-Z0-9-]+\.)+(?:ru|com|net|org|site)\b", text)]
+                        issues = []
                         for link in links[:3]:
-                            await service.add_link(product_id, session_id, link.rstrip(".;)"), actor=self.actor)
+                            link = link.rstrip(".;)")
+                            state = await service.add_link(product_id, session_id, link, actor=self.actor)
+                            issues.extend(s["note"] for s in state["sources"] if s["reference"] == clean_text(link)[:500] and s["status"] != "read")
                         notice = "Материалы добавлены. Можно прислать ещё или проверить профиль."
-                elif message.get("voice") or message.get("photo"):
+                        if issues:
+                            notice += "\n" + "\n".join(dict.fromkeys(issues))
+                elif message.get("voice") or message.get("audio"):
                     service.add_source(product_id, session_id,
                         make_source("owner_file", reference, status="unsupported",
-                                    note="Распознавание фото и аудио пока не поддерживается."), actor=self.actor)
-                    notice = "Фото и аудио пока не распознаю. Пришлите текст или поддерживаемый документ."
+                                    note="Распознавание аудио пока не поддерживается."), actor=self.actor)
+                    notice = "Аудио пока не распознаю. Пришлите текст или поддерживаемый документ."
                 else:
                     return False
             self.mode = None
@@ -298,6 +305,7 @@ class TelegramCompanyIntake:
             with self.session_factory() as db:
                 service = self.service(db)
                 if action == "open":
+                    self.mode = None
                     session = service.start(record_id, actor=self.actor)
                     self.selected = UUID(session["session_id"])
                     await self._help(chat_id, self.selected)
@@ -317,6 +325,7 @@ class TelegramCompanyIntake:
                 self.selected = task.id
                 product_id, session_id = task.product_id, task.id
                 if action == "cancel":
+                    self.mode = None
                     service.cancel(product_id, session_id, actor=self.actor)
                     await self.bot._send(chat_id, "Сбор данных отменён. Профиль не изменён.")
                     return True
