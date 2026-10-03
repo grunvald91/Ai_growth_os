@@ -30,6 +30,7 @@ class ArticleProductionInput(Contract):
     audience: ShortText | None = None
     problem: Text | None = None
     request_publication: bool = False
+    produce_ready_assets: bool = False
 
 
 class ArticleStrategy(Contract):

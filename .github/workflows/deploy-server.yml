@@ -143,6 +143,7 @@ jobs:
               --file /app/products/servgo/experiments/EXP-SERVGO-001/enrichment.json \
               --prepare-outreach </dev/null
           fi
+          dc run -T --rm api python -m app.content.bootstrap </dev/null
           dc up -d api worker
           if grep -q "^TELEGRAM_BOT_TOKEN=." "$REMOTE_ROOT/.env" && grep -q "^TELEGRAM_OWNER_CHAT_ID=." "$REMOTE_ROOT/.env"; then
             dc --profile telegram build telegram
@@ -213,6 +214,13 @@ jobs:
           loaded = load_company_profile(get_settings().products_root, "servgo")
           assert loaded.profile is not None and not loaded.validation_errors
           print("Company Profile and Intake API OK; shared profile store OK")
+          import shutil
+          from app.content.render import FONT
+          from pathlib import Path
+          assert shutil.which('ffmpeg') and shutil.which('ffprobe') and Path(FONT).exists()
+          from app.communications.mail import MailStore
+          assert MailStore(get_settings().products_root).root.parent == get_settings().products_root
+          print('Content renderer and persistent integrations store OK')
           PY
           docker inspect -f '{{.State.Running}}' ai-growth-os-worker-1 | grep -qx true
           if grep -q "^TELEGRAM_BOT_TOKEN=." "$REMOTE_ROOT/.env" && grep -q "^TELEGRAM_OWNER_CHAT_ID=." "$REMOTE_ROOT/.env"; then
@@ -224,6 +232,9 @@ jobs:
           loaded = load_company_profile(get_settings().products_root, "servgo")
           assert loaded.profile is not None and not loaded.validation_errors
           print("Telegram Company menu and shared profile store OK")
+          for label in ('📝 Контент', '📇 Контакты', '📧 Почта'):
+              assert any(button['text'] == label for row in MAIN_MENU['keyboard'] for button in row)
+          print('Telegram Content, Contacts and Mail menus OK')
           PY
           fi
           REMOTE
@@ -270,3 +281,4 @@ jobs:
           echo "AI Growth OS active release: $(basename "$RELEASE")"
           docker ps --filter label=com.docker.compose.project=ai-growth-os --format 'table {{.Names}}	{{.Status}}	{{.Ports}}'
           REMOTE
+

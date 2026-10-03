@@ -297,3 +297,54 @@ importer returns a blocked reason for incomplete company profiles while preservi
 enrichment and the running experiment; it does not bypass the outreach gate.
 Canonical JSON must supply schema_version explicitly, and verified facts must have
 nonblank statements.
+
+## Issue #8: owner-operated content factory
+
+Telegram **📝 Контент** selects a product, queues a default topic or accepts a custom topic,
+shows job states and opens completed packages. The persistent worker prioritizes these jobs
+independently of outreach experiments. The existing article workflow is extended only when
+`produce_ready_assets=true`: SEO article + six complete channel adaptations
+(Dzen, TenChat, vc.ru, Telegram, FAQ, proposed founder post) + three distinct 30-second
+video scripts + a distribution/measurement plan. Packages are drafts requiring human review;
+no automatic publishing or claim of SEO performance. ZIP download contains actual texts,
+scripts and measurement metadata. The first ServGo package is queued idempotently by
+`python -m app.content.bootstrap` during deployment.
+
+After reviewing scripts, **Одобрить рендер трёх MP4** queues local ffmpeg production.
+The first renderer produces 720×1280 H.264 typography videos, 25 fps, exactly 30 seconds,
+with a cover, SRT subtitles and narration script. These are silent animated text-card videos:
+voice/music, filmed footage and paid generative video are not connected. Rendered media,
+profiles and integrations persist in the shared `company_products` Docker volume.
+Publication is manual until a channel-specific adapter is connected. The bot accepts manual
+cumulative views/clicks/leads/activation/customer snapshots linked to the article, channel and
+publication URL. These are owner-reported observations, not verified platform analytics.
+Missing metrics remain unknown; snapshots must not be summed as increments.
+
+Issue #8 remains open: connected platform publishing/analytics, voice/music, research-backed
+iterative topic selection and content improvement are subsequent work, not claimed complete.
+
+## Contact cards and mail
+
+**📇 Контакты** provides paginated business cards, public evidence URLs and validation dates.
+Selecting Telegram/WhatsApp displays an exact draft and an official direct-chat link with
+prefilled text. The user sends from their own messenger account. Opening the link is not
+counted as contact; **Я отправил сообщение** explicitly records the owner's report.
+Drafts/actions require a ready outreach profile, allowed channel, verified matching evidence,
+a running experiment, a recently checked contact and no previous contact or exclusion.
+
+**📧 Почта** stores SMTP settings per product: public SMTP hostname, TLS 465 or STARTTLS
+587, login, sender address/name and an application password. The secret message must be deleted
+successfully before persistence. Telegram bot chats are not end-to-end encrypted; use only a
+revocable application password. Configuration is encrypted with a local Fernet key; both are
+private files in the persistent server volume, never LLM context, artifacts, database or logs.
+Host resolution rejects all private/reserved destinations and SMTP sockets pin the validated
+public IP while TLS verifies the configured hostname. Connection test only authenticates/NOOP;
+it does not send email.
+
+Each email card previews From/To/subject/body. **Отправить это письмо** authorizes that exact
+individual message, not a batch. Immutable drafts and review tokens invalidate changed profile,
+contact or mailbox settings. A durable locked prospect reservation precedes SMTP; double taps
+and cross-channel repeats are blocked. SMTP acceptance is recorded separately from inbox
+receipt/read status. Network failures/crashes are left `delivery_unknown`/`sending` without
+automatic retry, because delivery cannot safely be inferred. Check the mailbox before any
+operator-led recovery. No credentials are supplied or emails sent as part of deployment.

@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "Safe, auditable AI growth operating system"
 requires-python = ">=3.12"
 dependencies = [
+  "Pillow>=11,<13",
+  "cryptography>=44,<48",
   "alembic>=1.13,<2",
   "anthropic>=0.40,<1",
   "fastapi>=0.115,<1",

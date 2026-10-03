@@ -1,0 +1,85 @@
+import copy
+import json
+from uuid import uuid4
+from pathlib import Path
+from types import SimpleNamespace
+import pytest
+from sqlalchemy import select
+from app.content.contracts import ReadyTextSet, VideoVariants
+from app.content.service import queue_content, queue_render
+from app.content.render import render_video, asset_path
+from app.core.config import Settings
+from app.core.composition import build_article_production
+from app.models.domain import Artifact, Product, TaskStatus, ToolCall, Publication
+from app.workflows.article_contracts import ArticleProductionInput
+from test_articles import valid_outputs, SequenceProvider
+
+
+def ready_outputs():
+    outputs = valid_outputs()
+    bodies = [
+        'Начните с маршрута клиента. Подумайте, какую услугу он ищет и что должен узнать перед записью. ',
+        'Коллеги, предлагаю обсудить организацию расписания. Проверьте, где менеджер повторяет одну операцию вручную. ',
+        'Рассмотрим процесс через ограничения и выбор инструментов. Автоматизация требует описания этапов и проверки исходных условий. ',
+        'Чек-лист на сегодня: откройте путь записи и выпишите три вопроса посетителя. Выберите один шаг для проверки. ',
+        'Вопрос: что проверить первым? Ответ: доступность услуг и времени. Вопрос: как проверить результат? Ответ: записывать реальные обращения. ',
+        'Тема для авторского обсуждения: почему важно начинать с понятного процесса. Это предложение для поста основателя о выборе следующего шага. ',
+    ]
+    texts = {'texts':[dict(channel=c, title=c, body=b*30, editorial_checks=['Проверить CTA и ссылки'])
+        for c,b in zip(['dzen','tenchat','vc_ru','telegram','faq','founder'],bodies)]}
+    videos=[]
+    for hook in ['Проверьте путь записи','Где клиент ждёт ответа','Что видно в расписании']:
+        video=copy.deepcopy(outputs[6])
+        video['hook']=hook
+        video['production_brief']['duration_seconds']=30
+        video['production_brief']['shots'][-1]['end_second']=30
+        videos.append(video)
+    return outputs + [texts, {'videos': videos}]
+
+@pytest.mark.asyncio
+async def test_complete_factory_outputs_ready_texts_and_three_scripts(db, tmp_path):
+    product=Product(name='ServGo',slug='servgo');db.add(product);db.commit()
+    provider=SequenceProvider(ready_outputs())
+    result=await build_article_production(db,Settings(products_root=tmp_path),provider).run(
+        ArticleProductionInput(product_id=product.id,topic='Онлайн-запись',produce_ready_assets=True,request_publication=True))
+    assert result.status == 'completed',result.error
+    assert len(provider.requests)==11
+    assert len(list(db.scalars(select(Artifact).where(Artifact.kind=='channel_text'))))==6
+    assert len(list(db.scalars(select(Artifact).where(Artifact.kind=='video_script'))))==3
+    assert len(result.approval_ids)==1
+    assert list(db.scalars(select(ToolCall)))==list(db.scalars(select(Publication)))==[]
+    main=db.get(Artifact,result.artifact_ids[0])
+    first=queue_render(db,main.id);second=queue_render(db,main.id)
+    assert first.id==second.id
+
+@pytest.mark.asyncio
+async def test_factory_duplicate_channel_copy_fails_atomically(db,tmp_path):
+    p=Product(name='P',slug='p');db.add(p);db.commit()
+    outputs=ready_outputs();outputs[9]['texts'][1]['body']=outputs[9]['texts'][0]['body']
+    result=await build_article_production(db,Settings(products_root=tmp_path),SequenceProvider(outputs)).run(
+        ArticleProductionInput(product_id=p.id,topic='Test',produce_ready_assets=True))
+    assert result.status=='failed'
+    assert list(db.scalars(select(Artifact)))==[]
+
+
+def test_queue_content_is_idempotent_and_distinct_from_outreach(db):
+    p=Product(name='P',slug='p');db.add(p);db.commit()
+    first=queue_content(db,p.id);second=queue_content(db,p.id)
+    assert first.id==second.id and first.assigned_agent=='content_factory'
+    assert first.title.startswith('CONTENT:')
+
+
+def test_actual_renderer_outputs_mp4_cover_and_cyrillic_subtitles(tmp_path):
+    brief=VideoVariants.model_validate(ready_outputs()[-1]).videos[0].production_brief
+    metadata=render_video(brief,tmp_path/'assets','ServGo')
+    assert metadata['duration_seconds']==30 and metadata['audio']=='none'
+    assert (tmp_path/'assets/video.mp4').stat().st_size>10000
+    assert 'Сколько' in (tmp_path/'assets/subtitles.srt').read_text()
+    from PIL import Image
+    assert Image.open(tmp_path/'assets/cover.png').size==(720,1280)
+
+
+def test_reject_overlapping_timeline_and_path_injection(tmp_path):
+    video=ready_outputs()[-1];video['videos'][0]['production_brief']['shots'][1]['start_second']=3
+    with pytest.raises(ValueError):VideoVariants.model_validate(video)
+    with pytest.raises(ValueError):asset_path(tmp_path,uuid4(),uuid4(),'../../x')

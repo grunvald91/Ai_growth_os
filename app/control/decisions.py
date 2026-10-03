@@ -58,7 +58,7 @@ def decide_approval(
             raise ApprovalDecisionError("Пакет заменён. Откройте актуальное согласование.")
         return approval
     if expected_review_token is not None or (decision == "approved" and
-                                              approval.action_type == "send_outreach_batch"):
+                                              approval.action_type in {"send_outreach_batch", "send_outreach_message"}):
         if not expected_review_token or not hmac.compare_digest(
                 expected_review_token, approval_review_token(db, approval)):
             raise ApprovalDecisionError("Материал изменился. Откройте актуальное согласование.")

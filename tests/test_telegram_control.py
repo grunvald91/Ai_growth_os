@@ -99,7 +99,7 @@ def test_explicit_telegram_proxy_overrides_environment(monkeypatch):
 
 def test_button_menu_exposes_primary_controls():
     labels = [button["text"] for row in MAIN_MENU["keyboard"] for button in row]
-    assert labels == ["📊 Главное", "✅ На согласование", "🧪 Тесты", "🔄 Обновить", "🏢 Компания"]
+    assert labels == ["📊 Главное", "✅ На согласование", "🧪 Тесты", "🔄 Обновить", "📝 Контент", "📇 Контакты", "🏢 Компания", "📧 Почта"]
     callbacks = [
         button["callback_data"]
         for row in STATUS_INLINE["inline_keyboard"]
