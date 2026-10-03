@@ -135,7 +135,7 @@ async def parse_file_async(filename: str, data: bytes, reference: str) -> Intake
         return parse_file(filename, data, reference)
     def run():
         try:
-            result = subprocess.run([sys.executable, "-m", "app.intake.file_extract", filename[:200], reference[:500]],
+            result = subprocess.run([sys.executable, "-m", "app.intake.file_extract", filename, reference[:500]],
                                     input=data, capture_output=True, timeout=90, check=True)
             return IntakeSource.model_validate_json(result.stdout)
         except (OSError, ValueError, subprocess.SubprocessError):

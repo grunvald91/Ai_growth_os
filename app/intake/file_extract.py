@@ -38,7 +38,7 @@ def ocr_image(data):
             image.convert("RGB").save(path)
             result = subprocess.run(["tesseract", str(path), "stdout", "-l", "rus+eng"],
                                     capture_output=True, timeout=20, check=True)
-            return result.stdout.decode("utf-8")[:LIMIT]
+            return result.stdout.decode("utf-8")
 
 
 def extract_pdf(data):
