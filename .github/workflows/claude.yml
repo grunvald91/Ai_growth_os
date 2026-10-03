@@ -1,4 +1,4 @@
-name: Grok Code
+name: GPT-6.1 Sol Code
 
 on:
   issue_comment:
@@ -9,8 +9,8 @@ permissions:
   issues: write
 
 jobs:
-  grok:
-    if: ${{ github.actor == 'grunvald91' && contains(github.event.comment.body, '@grok') }}
+  sol:
+    if: ${{ github.actor == 'grunvald91' && contains(github.event.comment.body, '@sol') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -32,10 +32,10 @@ jobs:
       - name: Create working branch
         run: |
           set -euo pipefail
-          BRANCH="grok/issue-${{ github.event.issue.number }}-${{ github.run_id }}"
+          BRANCH="sol/issue-${{ github.event.issue.number }}-${{ github.run_id }}"
           echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
-          git config user.name "grok-code[bot]"
-          git config user.email "grok-code[bot]@users.noreply.github.com"
+          git config user.name "sol-code[bot]"
+          git config user.email "sol-code[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
 
       - name: Prepare bounded coding files
@@ -53,7 +53,7 @@ jobs:
           python - <<'PY'
           import os
           from pathlib import Path
-          comment = os.environ["COMMENT_BODY"].replace("@grok", "").strip()
+          comment = os.environ["COMMENT_BODY"].replace("@sol", "").strip()
           prompt = "\n".join([
               "Repository: grunvald91/Ai_growth_os",
               "Issue #" + os.environ["ISSUE_NUMBER"] + ": " + os.environ["ISSUE_TITLE"],
@@ -71,9 +71,9 @@ jobs:
               "- Add focused tests for the requested behavior.",
               "- Do not perform external side effects.",
           ])
-          Path("/tmp/grok-task.md").write_text(prompt, encoding="utf-8")
+          Path("/tmp/sol-task.md").write_text(prompt, encoding="utf-8")
           Path("/tmp/aider-model-settings.yml").write_text(
-              "- name: openai/grok-4.7\n"
+              "- name: openai/gpt-6.1-sol\n"
               "  edit_format: diff\n"
               "  use_repo_map: false\n"
               "  use_temperature: false\n",
@@ -81,7 +81,7 @@ jobs:
           )
           PY
 
-      - name: Run bounded Grok 4.7 task
+      - name: Run bounded GPT-6.1 Sol task
         env:
           OPENAI_API_KEY: ${{ secrets.API }}
         run: |
@@ -107,11 +107,11 @@ jobs:
           AIDER_STATUS=$?
           set -e
           if [ "$AIDER_STATUS" -ne 0 ]; then
-            echo "::error::Grok/Aider exited with status $AIDER_STATUS"
+            echo "::error::GPT-6.1 Sol/Aider exited with status $AIDER_STATUS"
             exit "$AIDER_STATUS"
           fi
           if [ ! -s app/company_profile.py ] || [ ! -s tests/test_company_profile.py ]; then
-            echo "::error::Grok did not write the required code/test files."
+            echo "::error::GPT-6.1 Sol did not write the required code/test files."
             exit 1
           fi
 
@@ -125,5 +125,5 @@ jobs:
         run: |
           set -euo pipefail
           git add app/company_profile.py tests/test_company_profile.py
-          git commit -m "Implement Company Profile contract with Grok 4.7"
+          git commit -m "Implement Company Profile contract with GPT-6.1 Sol"
           git push origin "$BRANCH"
