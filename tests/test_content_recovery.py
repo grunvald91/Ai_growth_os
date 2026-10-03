@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from sqlalchemy import select
 from app.content.bootstrap import recover_truncated_package
 from app.models.domain import Product, Task, TaskStatus, Artifact, AgentRun, CostRecord
@@ -18,7 +19,7 @@ def test_first_failed_package_recovery_is_once_and_preserves_audit(db):
     db.add_all([request, run])
     db.flush()
     cost = CostRecord(product_id=product.id, agent_run_id=run.id, category='llm', provider='xai',
-                      amount=0, currency='USD', input_tokens=100, output_tokens=3999)
+                      amount=0, currency='USD', input_tokens=100, output_tokens=3999, incurred_at=datetime.now(timezone.utc))
     db.add(cost)
     db.commit()
     assert not recover_truncated_package(db, request)
