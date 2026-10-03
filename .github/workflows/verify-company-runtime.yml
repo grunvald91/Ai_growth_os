@@ -1,0 +1,52 @@
+name: Verify live Company Intake runtime
+on:
+  push:
+    branches: [verify/runtime-company-intake]
+permissions:
+  contents: read
+concurrency:
+  group: ai-growth-production
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install SSH client
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Read-only server and API verification
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::Server access is not configured"; exit 1; }
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          printf 'ACTIVE_RELEASE='
+          basename "$(readlink -f /opt/ai_growth_os/current)"
+          docker ps --filter label=com.docker.compose.project=ai-growth-os --format 'table {{.Names}}\t{{.Status}}'
+          printf 'API_HEALTH='
+          curl -fsS --max-time 10 http://127.0.0.1:8091/health
+          printf '\n'
+          docker inspect -f 'TELEGRAM running={{.State.Running}} restarts={{.RestartCount}}' ai-growth-os-telegram-1
+          docker inspect -f 'WORKER running={{.State.Running}} restarts={{.RestartCount}}' ai-growth-os-worker-1
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          import json
+          import urllib.request
+          from pathlib import Path
+          doc = json.loads(urllib.request.urlopen("http://127.0.0.1:8000/openapi.json", timeout=10).read())
+          paths = doc.get("paths", {})
+          print("PROFILE_API_PRESENT=" + str("/products/{product_id}/company-profile" in paths))
+          print("INTAKE_API_PRESENT=" + str("/products/{product_id}/intake" in paths))
+          print("PROFILE_CODE_PRESENT=" + str(Path("/app/app/company_profile.py").is_file()))
+          print("INTAKE_CODE_PRESENT=" + str(Path("/app/app/intake/service.py").is_file()))
+          PY
+          docker exec -i ai-growth-os-telegram-1 python - <<'PY'
+          from pathlib import Path
+          text = Path("/app/app/telegram_control_bot.py").read_text()
+          print("TELEGRAM_COMPANY_MENU_PRESENT=" + str("🏢 Компания" in text))
+          PY
+          REMOTE
