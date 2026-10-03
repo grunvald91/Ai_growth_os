@@ -24,13 +24,16 @@ from app.services.control import ControlService
 from app.services.experiment_launch import ExperimentLaunchError, ExperimentLaunchService
 from app.services.prospects import ProspectService
 from app.intake.telegram import TelegramCompanyIntake
+from app.content.telegram import TelegramContent
+from app.communications.telegram import TelegramCommunications
 
 
 MAIN_MENU = {
     "keyboard": [
         [{"text": "📊 Главное"}, {"text": "✅ На согласование"}],
         [{"text": "🧪 Тесты"}, {"text": "🔄 Обновить"}],
-        [{"text": "🏢 Компания"}],
+        [{"text": "📝 Контент"}, {"text": "📇 Контакты"}],
+        [{"text": "🏢 Компания"}, {"text": "📧 Почта"}],
     ],
     "resize_keyboard": True,
     "is_persistent": True,
@@ -68,6 +71,18 @@ class TelegramAPI:
             raise TelegramAPIError(body.get("description") or "Telegram API error")
         return body["result"]
 
+    async def upload(self, chat_id: int, method: str, field: str, name: str, data: bytes):
+        if len(data) > 49_000_000:
+            raise ValueError('File exceeds Telegram upload limit')
+        async with httpx.AsyncClient(timeout=120, proxy=self.proxy_url) as client:
+            response = await client.post(f'{self.base_url}/{method}',
+                data={'chat_id': str(chat_id)}, files={field: (name, data)})
+            response.raise_for_status()
+            body = response.json()
+        if not body.get('ok'):
+            raise TelegramAPIError('Telegram upload failed')
+        return body['result']
+
     async def download_file(self, file_id: str, max_bytes: int) -> bytes:
         from pathlib import PurePosixPath
         metadata = await self.call("getFile", {"file_id": file_id})
@@ -94,6 +109,8 @@ class TelegramControlBot:
         self.owner_chat_id = owner_chat_id
         self.poll_timeout = poll_timeout
         self.company_intake = TelegramCompanyIntake(self, SessionLocal, get_settings)
+        self.content = TelegramContent(self, SessionLocal, get_settings)
+        self.communications = TelegramCommunications(self, SessionLocal, get_settings)
 
     async def run(self) -> None:
         offset: int | None = None
@@ -124,6 +141,10 @@ class TelegramControlBot:
         if sender_id != self.owner_chat_id or chat_id != self.owner_chat_id:
             return
 
+        if await self.communications.message(message):
+            return
+        if await self.content.message(message):
+            return
         if await self.company_intake.message(message):
             return
 
@@ -324,7 +345,22 @@ class TelegramControlBot:
         if chat_id != self.owner_chat_id:
             return
 
+        if data.startswith(('contact:', 'mail:', 'e:')):
+            self.content.topic_product = self.content.metrics_article = None
+            if callback_id:
+                await self._answer_callback(callback_id, 'Открываю')
+            await self.communications.callback(chat_id, data)
+            return
+        if data.startswith('content:'):
+            self.communications.mail_step, self.communications.mail_draft = None, {}
+            if callback_id:
+                await self._answer_callback(callback_id, 'Открываю')
+            await self.content.callback(chat_id, data)
+            return
+
         if data.startswith("company:"):
+            self.communications.mail_step, self.communications.mail_draft = None, {}
+            self.content.topic_product = self.content.metrics_article = None
             if callback_id:
                 await self._answer_callback(callback_id, "Открываю")
             await self.company_intake.callback(chat_id, data)
@@ -427,12 +463,12 @@ class TelegramControlBot:
                     reason = (record.reason or "").strip()
                     if reason and any("А" <= char <= "я" or char in "Ёё" for char in reason):
                         detail_text += f"\n\nПочему:\n{reason}"
-                    if record.action_type == "send_outreach_batch" and record.artifact_id:
+                    if record.action_type in {"send_outreach_batch", "send_outreach_message"} and record.artifact_id:
                         artifact = db.get(Artifact, record.artifact_id)
                         if artifact is not None:
                             try:
                                 package = json.loads(artifact.content)
-                                package_messages = package.get("messages") or []
+                                package_messages = ([package] if record.action_type == "send_outreach_message" else package.get("messages") or [])
                             except json.JSONDecodeError:
                                 package_messages = []
             await self._send(
@@ -453,9 +489,16 @@ class TelegramControlBot:
                 )
                 if subject:
                     header += f"\nТема: {subject}"
+                card_buttons = []
+                if item.get('prospect_id'):
+                    card_buttons.append([{'text':'📇 Открыть карточку контакта',
+                        'callback_data':f"contact:open:{item['prospect_id']}"}])
+                if item.get('from_email'):
+                    header += f"\nОт: {item.get('from_name') or ''} <{item['from_email']}>"
                 await self._send(
                     chat_id,
                     header + "\n\n" + str(item.get("body") or ""),
+                    reply_markup={'inline_keyboard':card_buttons} if card_buttons else None,
                 )
             if callback_id:
                 await self._answer_callback(callback_id, "Открыто")
@@ -496,7 +539,21 @@ class TelegramControlBot:
         )
 
     async def _send(self, chat_id: int, text: str, reply_markup: dict | None = None) -> None:
-        payload = {"chat_id": chat_id, "text": text}
+        # Telegram counts UTF-16 code units, not Python code points.
+        chunks, current, units = [], '', 0
+        for char in text:
+            count = len(char.encode('utf-16-le')) // 2
+            if units + count > 3900:
+                chunks.append(current)
+                current, units = '', 0
+            current += char
+            units += count
+        if current:
+            chunks.append(current)
+        if len(chunks) > 1:
+            for chunk in chunks[:-1]:
+                await self.api.call('sendMessage', {'chat_id':chat_id, 'text':chunk})
+        payload = {"chat_id": chat_id, "text": chunks[-1] if chunks else ' ', 'link_preview_options': {'is_disabled':True}}
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         await self.api.call("sendMessage", payload)

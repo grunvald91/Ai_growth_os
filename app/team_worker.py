@@ -148,6 +148,10 @@ def _recover_transient_failed_experiment_tasks(
 
 async def run_once() -> int:
     settings = get_settings()
+    from app.content.worker import run_content_once
+    content_count = await run_content_once(SessionLocal, settings)
+    if content_count:
+        return content_count
     with SessionLocal() as db:
         _recover_transient_failed_experiment_tasks(
             db,

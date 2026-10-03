@@ -151,9 +151,16 @@ class ArticleProduction:
             references.append({'kind': 'decision', 'id': str(decision.id)})
         if experiment:
             references.append({'kind': 'experiment', 'id': str(experiment.id)})
+        stages = STAGES
+        if request.produce_ready_assets:
+            from app.content.contracts import ReadyTextSet, VideoVariants
+            stages = (*STAGES,
+                ('platform_writer', ReadyTextSet, 'Write SIX complete reader-facing adaptations, not outlines: Dzen and vc.ru full articles >=2000 characters each; TenChat professional post; Telegram standalone post; FAQ actual questions and answers; founder proposed post without invented first-person experience. Use the edited source article and each channel profile.'),
+                ('video_variations', VideoVariants, 'Create THREE distinct 30-second vertical typography video scripts based on the article. Use different hooks and angles. Every shot has concise exact on_screen_text readable on a phone. Timelines start at zero, are contiguous and end at 30. No filmed footage or audio assets are available: the renderer uses animated typography cards. Include cover, subtitles, spoken script and CTA for each.'),
+            )
         runs = [AgentRun(task_id=task_id, agent_name=name, provider=self.provider_name,
                          model=self.model, status='queued', input_references=references)
-                for name, _, _ in STAGES]
+                for name, _, _ in stages]
         self.db.add_all(runs)
         self.db.flush()
         run_ids = [run.id for run in runs]
@@ -196,7 +203,9 @@ class ArticleProduction:
                 'story_director': ('content_strategist', 'human_editor', 'conversion_editor'),
                 'visual_designer': ('content_strategist', 'human_editor', 'conversion_editor'),
             }
-            for run_id, (name, schema, responsibility) in zip(run_ids, STAGES):
+            stage_dependencies['platform_writer'] = ('content_strategist', 'seo_editor', 'human_editor', 'conversion_editor')
+            stage_dependencies['video_variations'] = ('content_strategist', 'human_editor', 'conversion_editor')
+            for run_id, (name, schema, responsibility) in zip(run_ids, stages):
                 run = self.db.get(AgentRun, run_id)
                 run.status, run.started_at = 'running', datetime.now(timezone.utc)
                 self.db.commit()
@@ -286,9 +295,9 @@ class ArticleProduction:
                 error = f'provider_request_failed:{name}'
                 response = await asyncio.wait_for(self.llm.generate(LLMRequest(system_prompt=prompt,
                     messages=[LLMMessage(role='user', content=json.dumps(stage_inputs))], model=self.model,
-                    max_tokens=STAGE_MAX_TOKENS[name], response_schema=schema.model_json_schema(),
+                    max_tokens=STAGE_MAX_TOKENS.get(name, 10000), response_schema=schema.model_json_schema(),
                     metadata={'reasoning_effort': 'low', 'team_role': name, 'task_type': 'article_production'})),
-                    timeout=STAGE_TIMEOUT_SECONDS[name])
+                    timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
                 responses[run_id] = response
                 error = f'invalid_article_output:{name}'
                 if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
@@ -319,7 +328,7 @@ class ArticleProduction:
                 video_derivative,
                 story_derivative,
                 image_derivative,
-            ) = outputs
+            ) = outputs[:9]
             error = 'invalid_derivative_assembly'
             derivative_set = DerivativeSet(
                 derivatives=[
@@ -434,6 +443,27 @@ class ArticleProduction:
                     kind=f'{brief.kind}_brief', title=f'{brief.kind} derivative brief',
                     content=json.dumps({'article_id': str(main.id), **brief.model_dump(mode='json')}))
                 artifact_ids.append(derivative.id)
+            if request.produce_ready_assets:
+                for text in outputs[9].texts:
+                    ready = artifacts.create(product_id=product_id, task_id=task_id,
+                        kind='channel_text', title=text.title,
+                        content=json.dumps({'article_id': str(main.id), **text.model_dump(mode='json')}, ensure_ascii=False),
+                        status='awaiting_approval')
+                    artifact_ids.append(ready.id)
+                for index, video in enumerate(outputs[10].videos, 1):
+                    ready = artifacts.create(product_id=product_id, task_id=task_id,
+                        kind='video_script', title=f'Ролик {index}: {video.hook}',
+                        content=json.dumps({'article_id': str(main.id), **video.model_dump(mode='json')}, ensure_ascii=False),
+                        status='awaiting_approval')
+                    artifact_ids.append(ready.id)
+                ready = artifacts.create(product_id=product_id, task_id=task_id,
+                    kind='content_distribution', title='План публикации и измерения',
+                    content=json.dumps({'article_id': str(main.id),
+                        'channels': ['own_site', 'dzen', 'tenchat', 'vc_ru', 'telegram', 'youtube_shorts', 'vk_clips', 'reels'],
+                        'status': 'requires_owner_review', 'measurement': conversion.measurement.model_dump(mode='json'),
+                        'publication': 'manual_until_channel_connected',
+                        'metrics': 'Record reach/views, clicks, leads, activation and customers; unavailable values stay unknown.'}, ensure_ascii=False))
+                artifact_ids.append(ready.id)
             if request.request_publication:
                 policy = PolicyEvaluator().evaluate(ToolOperation.PUBLISH)
                 approval = ApprovalService(self.db).create(product_id=product_id, artifact_id=main.id,
