@@ -59,6 +59,19 @@ def test_unsupported_schema_version():
         parse_company_profile(payload)
 
 
+def test_missing_schema_version_is_not_inferred():
+    payload = _valid_payload()
+    payload.pop("schema_version")
+    with pytest.raises(ValidationError):
+        parse_company_profile(payload)
+
+
+@pytest.mark.parametrize("statement", ["", " ", "\n\t"])
+def test_verified_fact_requires_nonblank_statement(statement):
+    with pytest.raises(ValidationError):
+        VerifiedFact(statement=statement)
+
+
 def _ready_payload():
     return {
         "schema_version": "1.0",
