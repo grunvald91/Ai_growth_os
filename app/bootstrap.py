@@ -7,6 +7,7 @@ from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.domain import Experiment, Goal, Product
 from app.services.outreach import OutreachPackageService
+from app.company_profile import CompanyProfileNotReady
 from app.services.prospects import ProspectService
 
 
@@ -82,6 +83,9 @@ def bootstrap(db):
     if experiment is not None:
         try:
             OutreachPackageService(db).prepare(experiment_id=experiment.id)
+        except CompanyProfileNotReady:
+            # An incomplete profile blocks preparation, not startup or the experiment.
+            pass
         except ValueError as exc:
             if "No validated prospects with direct channels" not in str(exc):
                 raise

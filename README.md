@@ -111,8 +111,9 @@ inspect that field. Missing runtime configuration returns HTTP 503.
 Each trigger performs one deterministic analytics snapshot and one CMO request
 (timeout 90 seconds, output 6,000 tokens). It loads up to 20 records per context
 kind, truncates text to 1,500 characters, and includes canonical product context
-from `PRODUCTS_ROOT/<slug>/.claude/product-marketing-context.md` (up to 12,000
-characters). Arbitrary database `context_path` values are not opened. Context
+from validated `PRODUCTS_ROOT/<slug>/company-profile.json` when present. Only
+when JSON is absent, the legacy `.claude/product-marketing-context.md` is read
+(up to 12,000 characters). Arbitrary database `context_path` values are not opened. Context
 truncation is disclosed to the CMO; analytics reports observations rather than
 inventing totals, attribution or conversion rates.
 
@@ -194,3 +195,50 @@ without a task ID create a new task each time; no automatic retry or scheduler i
 introduced. This phase reuses the existing database schema.
 
 Run article acceptance tests offline with `python -m pytest tests/test_articles.py`.
+
+## Company Profile Contract v1
+
+**Company profile = stable business truth; DB = dynamic operating truth.**
+Keep company identity, offer, customers, commercial terms, approved proof, brand,
+channels, outreach rules, measurement definitions and constraints in versioned
+`products/<slug>/company-profile.json` with `schema_version: "1.0"`.
+Keep goals, experiments, approvals, metrics and prospects in PostgreSQL.
+Never place credentials or customer PII in profiles.
+
+The typed contract preserves hypotheses and unknowns separately. Incomplete
+profiles are valid. Legacy contract fields remain parseable for migration but do
+not silently satisfy canonical readiness requirements. Only approved proof is
+rendered in the factual quote section consumed by article grounding.
+Rendering and the read API reuse PrivacyGateway; this is pattern-based redaction,
+not a guarantee that arbitrary personal data will be detected.
+
+`evaluate_readiness` returns `strategy`, `content`, `outreach` and
+`measurement`, each with `ready`, `missing_fields` and `warnings`.
+Omitted constraints, prohibited claims and do-not-contact rules differ from
+explicitly supplied empty lists. Unknown data is never filled automatically.
+`proof.no_proof_yet=true` explicitly allows content without evidence and warns
+against inventing it. Profile readiness does not authorize external actions.
+
+`GET /products/{product_id}/company-profile` returns sanitized structured
+`profile`, `source`, `readiness` and safe `validation_errors`; unknown products
+return 404. There is no write endpoint. Legacy-only or missing profiles do not
+establish readiness; raw legacy text is not returned by this endpoint.
+Invalid JSON never falls back to markdown. Slugs are ASCII alphanumeric/hyphen
+only, symlink components are rejected, UTF-8 file reads are bounded at 256 KiB.
+The trusted product directory must remain read-only during runtime.
+
+Workflows prefer validated JSON and disclose readiness without globally blocking
+research or strategy. Invalid canonical JSON fails context preparation safely.
+`OutreachPackageService.prepare` requires `outreach.ready=true` before any
+package/approval mutation; `CompanyProfileNotReady` reports the missing fields.
+It selects only profile-allowed direct channels and uses profile sender, product
+description and conversion action in drafts. Existing send approvals remain
+required; preparation never sends messages. Bootstrap skips unready preparation
+without changing an experiment's running state.
+
+The migrated ServGo profile contains only facts already in the canonical
+markdown. Candidate segments remain hypotheses. Geography/languages, approved
+segments, CTA, brand tone, outreach permissions and measurement definitions still
+need owner verification. Its gates therefore remain unready; this is an explicit
+data gap, not inferred readiness. Company Intake Agent (#80) is the next layer for
+collecting and confirming those inputs.
