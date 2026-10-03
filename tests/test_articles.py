@@ -273,7 +273,7 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
         "article_writer": 8000,
         "conversion_editor": 3500,
         "human_editor": 8000,
-        "repurposing_editor": 4000,
+        "repurposing_editor": 8000,
         "video_director": 5500,
         "story_director": 4500,
         "visual_designer": 4000,
@@ -583,3 +583,36 @@ async def test_visual_assets_are_text_briefs_not_render_requests(db, product, tm
     assert all(frame.on_screen_text and frame.composition for frame in story.production_brief.frames)
     assert image.production_brief.image_generation_prompt
     assert image.production_brief.export_spec
+
+
+@pytest.mark.asyncio
+async def test_truncated_stage_retries_once_and_accounts_both_calls(db, product, tmp_path):
+    outputs = valid_outputs()
+    workflow, provider, request = setup(db, product, tmp_path, [*outputs[:5], {}, *outputs[5:]])
+    original = provider.generate
+    async def generate(req):
+        result = await original(req)
+        if len(provider.requests) == 6:
+            return result.model_copy(update={'stop_reason': 'length'})
+        return result
+    provider.generate = generate
+    result = await workflow.run(request)
+    assert result.status == 'completed', result.error
+    attempts = [r for r in provider.requests if r.metadata['team_role'] == 'repurposing_editor']
+    assert [r.max_tokens for r in attempts] == [8000, 16000]
+    assert len(list(db.scalars(select(CostRecord)))) == 10
+    assert 'Владельцы' in provider.requests[1].messages[0].content
+    assert r'\u0412' not in provider.requests[1].messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_repeated_truncation_fails_atomically_without_third_attempt(db, product, tmp_path):
+    workflow, provider, request = setup(db, product, tmp_path, [{}, {}])
+    original = provider.generate
+    async def generate(req):
+        return (await original(req)).model_copy(update={'stop_reason': 'length'})
+    provider.generate = generate
+    result = await workflow.run(request)
+    assert result.status == 'failed' and len(provider.requests) == 2
+    assert not result.artifact_ids and not list(db.scalars(select(Artifact)))
+    assert len(list(db.scalars(select(CostRecord)))) == 2
