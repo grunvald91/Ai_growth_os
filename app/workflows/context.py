@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
+from app.company_profile import load_company_profile, profile_snapshot, render_company_profile
 
 from app.models.domain import Approval, Artifact, Decision, Experiment, Goal, Metric, Product, Task, TaskStatus
 
@@ -30,12 +31,14 @@ def load_context(db: Session, product: Product, products_root: Path) -> dict:
                'text_characters': TEXT_LIMIT, 'truncated_kinds': []}}
     # Caller-supplied context_path is deliberately not read. Only the versioned
     # canonical file under this product's directory is eligible.
-    if product.slug and all(c.isascii() and (c.isalnum() or c == '-') for c in product.slug):
-        root = products_root.resolve()
-        candidate = (root / product.slug / '.claude' / 'product-marketing-context.md').resolve()
-        if candidate.is_relative_to(root) and candidate.is_file():
-            with candidate.open(encoding='utf-8') as stream:
-                context['stable_context'] = stream.read(12_000)
+    loaded = load_company_profile(products_root, product.slug)
+    context['company_profile'] = profile_snapshot(loaded)
+    if loaded.profile is not None:
+        context['stable_context'] = render_company_profile(loaded.profile)
+    elif loaded.source == 'legacy_markdown' and loaded.legacy_text is not None:
+        context['stable_context'] = loaded.legacy_text[:12_000]
+    elif loaded.validation_errors:
+        raise ValueError('Invalid canonical company profile')
     today = date.today()
     for kind, (model, fields) in FIELDS.items():
         query = select(model).where(model.product_id == product.id)
