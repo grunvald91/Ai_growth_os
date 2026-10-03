@@ -126,7 +126,9 @@ jobs:
           dc() {
             docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml "$@"
           }
-          dc build api worker
+          dc build profile-init api worker
+          # Refresh packaged assets in the persistent store, preserving approved profiles.
+          dc up --no-deps --abort-on-container-exit --exit-code-from profile-init profile-init </dev/null
           dc up -d postgres
           dc run -T --rm api alembic upgrade head </dev/null
           dc run -T --rm api python -m app.bootstrap </dev/null
@@ -183,6 +185,47 @@ jobs:
 
           asyncio.run(main())
           PY
+          REMOTE
+
+      - name: Verify Company Intake runtime
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          RELEASE="$REMOTE_ROOT/releases/$GITHUB_SHA"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' RELEASE='$RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$RELEASE"
+          docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import json
+          import urllib.request
+          from app.core.config import get_settings
+          from app.company_profile import load_company_profile
+
+          base = "http://127.0.0.1:8000"
+          def read(path):
+              return json.loads(urllib.request.urlopen(base + path, timeout=10).read())
+          paths = read("/openapi.json")["paths"]
+          assert "/products/{product_id}/company-profile" in paths
+          assert "/products/{product_id}/intake" in paths
+          for product in read("/products"):
+              result = read("/products/" + product["id"] + "/company-profile")
+              assert not result["validation_errors"], "Invalid runtime company profile"
+          loaded = load_company_profile(get_settings().products_root, "servgo")
+          assert loaded.profile is not None and not loaded.validation_errors
+          print("Company Profile and Intake API OK; shared profile store OK")
+          PY
+          docker inspect -f '{{.State.Running}}' ai-growth-os-worker-1 | grep -qx true
+          if grep -q "^TELEGRAM_BOT_TOKEN=." "$REMOTE_ROOT/.env" && grep -q "^TELEGRAM_OWNER_CHAT_ID=." "$REMOTE_ROOT/.env"; then
+            docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml --profile telegram exec -T telegram python - <<'PY'
+          from app.core.config import get_settings
+          from app.company_profile import load_company_profile
+          from app.telegram_control_bot import MAIN_MENU
+          assert any(button["text"] == "🏢 Компания" for row in MAIN_MENU["keyboard"] for button in row)
+          loaded = load_company_profile(get_settings().products_root, "servgo")
+          assert loaded.profile is not None and not loaded.validation_errors
+          print("Telegram Company menu and shared profile store OK")
+          PY
+          fi
           REMOTE
 
       - name: Smoke test Grok 4.7
