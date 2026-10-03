@@ -1,0 +1,50 @@
+name: Verify content rollout runtime
+on:
+  push:
+    branches: [verify/content-rollout]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Read runtime state
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ]
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@155.212.162.47 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          readlink /opt/ai_growth_os/current
+          docker ps -a --filter label=com.docker.compose.project=ai-growth-os --format 'table {{.Names}}\t{{.Status}}'
+          docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}'
+          free -m
+          df -h /
+          cd /opt/ai_growth_os/current
+          docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Task, AgentRun, Product
+          from app.core.config import get_settings
+          import importlib.util
+          print('Runtime model:', get_settings().llm_model)
+          try:
+              content_present = importlib.util.find_spec('app.content.worker') is not None
+          except ModuleNotFoundError:
+              content_present = False
+          print('Content worker module present:', content_present)
+          with SessionLocal() as db:
+              product = db.scalar(select(Product).where(Product.slug == 'servgo'))
+              if product:
+                  task = db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == 'content_factory').order_by(Task.created_at.desc()).limit(1))
+                  print('Content task present:', task is not None)
+                  if task:
+                      print('Content task state:', task.id, task.status.value)
+                      for run in db.scalars(select(AgentRun).where(AgentRun.task_id == task.id)):
+                          print('Stage:', run.agent_name, run.status, run.error or '-')
+          PY
+          REMOTE
