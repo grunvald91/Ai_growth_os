@@ -28,6 +28,10 @@ class ArtifactService(CRUDService[Artifact]):
         unknown = set(values) - self.update_fields
         if unknown:
             raise ValueError(f"Unsupported fields: {', '.join(sorted(unknown))}")
+        if artifact.kind == "outreach_package" and any(
+                key in values and values[key] != getattr(artifact, key)
+                for key in ("kind", "title", "content")):
+            raise ValueError("Outreach package content is immutable; create a new package")
         for key, value in values.items():
             setattr(artifact, key, value)
         artifact.version += 1
