@@ -1,54 +1,115 @@
-name: Claude Code
+name: Grok Code
 
 on:
   issue_comment:
     types: [created]
-  pull_request_review_comment:
-    types: [created]
-  pull_request_review:
-    types: [submitted]
-  issues:
-    types: [opened, edited]
 
 permissions:
   contents: write
   pull-requests: write
   issues: write
-  actions: read
 
 jobs:
-  claude:
-    if: github.actor == 'grunvald91'
+  grok:
+    if: github.actor == 'grunvald91' && contains(github.event.comment.body, '@grok')
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      ANTHROPIC_BASE_URL: https://api.claudehub.fun
 
     steps:
-      - name: Verify ClaudeHub API secret
-        env:
-          CLAUDEHUB_API_KEY: ${{ secrets.API }}
-        run: |
-          if [ -z "$CLAUDEHUB_API_KEY" ]; then
-            echo "::error::Repository Actions secret 'API' is missing or unavailable."
-            exit 1
-          fi
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ github.token }}
 
-      - name: Run Claude Code
-        uses: anthropics/claude-code-action@v1
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          anthropic_api_key: ${{ secrets.API }}
-          github_token: ${{ github.token }}
-          trigger_phrase: "@claude"
-          additional_permissions: |
-            actions: read
-          claude_args: |
-            --model grok-4.7
-            --max-turns 60
-            --allowedTools Edit,Read,Write,Bash
+          python-version: '3.12'
+
+      - name: Install Aider
+        run: python -m pip install --disable-pip-version-check -q aider-chat
+
+      - name: Create working branch
+        run: |
+          set -euo pipefail
+          BRANCH="grok/issue-${{ github.event.issue.number }}-${{ github.run_id }}"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+          git config user.name "grok-code[bot]"
+          git config user.email "grok-code[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+
+      - name: Build task prompt
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          comment = os.environ["COMMENT_BODY"].replace("@grok", "").strip()
+          prompt = f"""Implement GitHub issue #{os.environ['ISSUE_NUMBER']} in repository grunvald91/Ai_growth_os.
+
+Title:
+{os.environ['ISSUE_TITLE']}
+
+Full issue specification:
+{os.environ['ISSUE_BODY']}
+
+Current scoped instruction:
+{comment}
+
+Rules:
+- Implement only the current scoped instruction.
+- Do not edit .github/workflows, secrets, credentials, or deployment credentials.
+- Do not invent business facts.
+- Preserve backward compatibility.
+- Add or update focused tests.
+- Do not perform external publishing, outreach, purchases, or other side effects.
+- Only edit repository files; CI will run tests and handle git/PR operations.
+"""
+          Path("/tmp/grok-task.md").write_text(prompt, encoding="utf-8")
+          PY
+
+      - name: Run Grok 4.7
+        env:
+          OPENAI_API_KEY: ${{ secrets.API }}
+        run: |
+          set -euo pipefail
+          test -n "$OPENAI_API_KEY"
+          aider             --model openai/grok-4.7             --openai-api-base https://api.claudehub.fun/v1             --message-file /tmp/grok-task.md             --yes-always             --no-auto-commits             --no-suggest-shell-commands             --no-stream             --no-pretty             --edit-format diff
+
+      - name: Run tests
+        run: |
+          set +e
+          python -m pip install --disable-pip-version-check -q -e ".[test]"
+          pytest -q
+          STATUS=$?
+          echo "TEST_STATUS=$STATUS" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "::error::Grok produced no repository changes."
+            exit 1
+          fi
+          git add -A
+          git commit -m "Implement issue #${{ github.event.issue.number }} with Grok 4.7"
+          git push origin "$BRANCH"
+
+      - name: Create pull request
+        if: env.TEST_STATUS == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create             --base main             --head "$BRANCH"             --title "Company Profile: issue #${{ github.event.issue.number }} implementation"             --body "Implements the scoped Grok 4.7 task from #${{ github.event.issue.number }}. Tests passed in the Grok Code workflow."
+
+      - name: Fail if tests failed
+        if: env.TEST_STATUS != '0'
+        run: |
+          echo "::error::Grok produced changes, but tests failed. The branch was pushed for inspection."
+          exit 1
