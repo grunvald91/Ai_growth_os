@@ -12,7 +12,7 @@ from app.core.config import Settings
 from app.llm.fake import FakeLLMProvider
 from app.llm.schemas import LLMResponse, LLMUsage
 from app.llm.service import LLMService
-from app.models.domain import Artifact, CostRecord, Metric, Product, Task, TaskStatus, ToolCall, Publication
+from app.models.domain import AgentRun, Artifact, CostRecord, Metric, Product, Task, TaskStatus, ToolCall, Publication
 from app.privacy import PrivacyGateway
 from app.content.telegram import TelegramContent
 
@@ -204,6 +204,28 @@ async def test_real_schema_feedback_repairs_once_and_accounts_both_attempts(db,t
     assert len(provider.requests)==2 and 'validation_errors' in provider.requests[1].messages[-1].content
     assert db.scalar(select(Artifact).where(Artifact.kind=='editorial_plan')) is not None
     assert len(list(db.scalars(select(CostRecord))))==2
+
+
+def test_interrupted_planner_recovers_once_and_preserves_fresh_calls(db,tmp_path):
+    from app.content.calendar import recover_stale_planner
+    p,settings=setup(db,tmp_path)
+    task=db.scalar(select(Task).where(Task.assigned_agent=='editorial_planner'))
+    task.status=TaskStatus.RUNNING
+    now=datetime.now(timezone.utc)
+    run=AgentRun(task_id=task.id,agent_name='editorial_planner',provider='xai',model='kimi-2.7',
+                 status='running',started_at=now-timedelta(minutes=5))
+    db.add(run);db.commit()
+    assert recover_stale_planner(db,now)==0 and task.status==TaskStatus.RUNNING
+    run.started_at=now-timedelta(minutes=13);db.commit()
+    assert recover_stale_planner(db,now)==1 and task.status==TaskStatus.QUEUED
+    assert run.status=='failed' and run.error=='editorial_plan_interrupted:stale_run'
+    assert recover_stale_planner(db,now)==0
+    task.status=TaskStatus.RUNNING
+    second=AgentRun(task_id=task.id,agent_name='editorial_planner',provider='xai',model='kimi-2.7',
+                    status='running',started_at=now-timedelta(minutes=13))
+    db.add(second);db.commit()
+    assert recover_stale_planner(db,now)==0 and task.status==TaskStatus.FAILED
+    assert second.status=='failed' and db.get(AgentRun,run.id).error=='editorial_plan_interrupted:stale_run'
 
 
 @pytest.mark.asyncio

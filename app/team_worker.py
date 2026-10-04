@@ -148,8 +148,9 @@ def _recover_transient_failed_experiment_tasks(
 
 async def run_once() -> int:
     settings = get_settings()
-    from app.content.calendar import run_planner_once, tick_calendar
+    from app.content.calendar import run_planner_once, tick_calendar, recover_stale_planner
     with SessionLocal() as db:
+        recover_stale_planner(db)
         tick_calendar(db, settings)
     if await run_planner_once(SessionLocal, settings):
         return 1

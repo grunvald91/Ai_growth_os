@@ -143,6 +143,9 @@ jobs:
               --file /app/products/servgo/experiments/EXP-SERVGO-001/enrichment.json \
               --prepare-outreach </dev/null
           fi
+          # Queue content only while the old worker is stopped: it must not claim
+          # a task immediately before its container is replaced.
+          dc stop worker
           dc run -T --rm api python -m app.content.bootstrap </dev/null
           dc up -d api worker
           if grep -q "^TELEGRAM_BOT_TOKEN=." "$REMOTE_ROOT/.env" && grep -q "^TELEGRAM_OWNER_CHAT_ID=." "$REMOTE_ROOT/.env"; then
