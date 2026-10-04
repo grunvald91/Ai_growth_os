@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 from app.content.contracts import ReadyTextSet, VideoVariants
-from app.content.service import queue_content, queue_render
+from app.content.service import queue_content
 from app.content.render import render_video, asset_path
 from app.core.config import Settings
 from app.core.composition import build_article_production
@@ -28,16 +28,17 @@ def ready_outputs():
     texts = {'texts':[dict(channel=c, title=c, body=b*30, editorial_checks=['Проверить CTA и ссылки'])
         for c,b in zip(['dzen','tenchat','vc_ru','telegram','faq','founder'],bodies)]}
     videos=[]
-    for hook in ['Проверьте путь записи','Где клиент ждёт ответа','Что видно в расписании']:
+    for platform,hook in [('youtube_shorts','Проверьте путь записи'),('instagram_reels','Где клиент ждёт ответа')]:
         video=copy.deepcopy(outputs[6])
         video['hook']=hook
+        video['production_brief']['target_platform']=platform
         video['production_brief']['duration_seconds']=30
         video['production_brief']['shots'][-1]['end_second']=30
         videos.append(video)
     return outputs + [texts, {'videos': videos}]
 
 @pytest.mark.asyncio
-async def test_complete_factory_outputs_ready_texts_and_three_scripts(db, tmp_path):
+async def test_complete_factory_outputs_ready_texts_and_two_platform_video_briefs(db, tmp_path):
     product=Product(name='ServGo',slug='servgo');db.add(product);db.commit()
     provider=SequenceProvider(ready_outputs())
     result=await build_article_production(db,Settings(products_root=tmp_path),provider).run(
@@ -45,12 +46,12 @@ async def test_complete_factory_outputs_ready_texts_and_three_scripts(db, tmp_pa
     assert result.status == 'completed',result.error
     assert len(provider.requests)==11
     assert len(list(db.scalars(select(Artifact).where(Artifact.kind=='channel_text'))))==6
-    assert len(list(db.scalars(select(Artifact).where(Artifact.kind=='video_script'))))==3
+    scripts=list(db.scalars(select(Artifact).where(Artifact.kind=='video_script')))
+    assert len(scripts)==2
+    assert {json.loads(s.content)['production_brief']['target_platform'] for s in scripts}=={'youtube_shorts','instagram_reels'}
     assert len(result.approval_ids)==1
     assert list(db.scalars(select(ToolCall)))==list(db.scalars(select(Publication)))==[]
-    main=db.get(Artifact,result.artifact_ids[0])
-    first=queue_render(db,main.id);second=queue_render(db,main.id)
-    assert first.id==second.id
+    assert not list(db.scalars(select(Artifact).where(Artifact.kind=='render_request')))
 
 @pytest.mark.asyncio
 async def test_factory_duplicate_channel_copy_fails_atomically(db,tmp_path):

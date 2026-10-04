@@ -27,18 +27,24 @@ class ReadyTextSet(Contract):
         return self
 
 class VideoVariants(Contract):
-    videos: list[ShortVideoDerivativeDraft] = Field(min_length=3, max_length=3)
+    videos: list[ShortVideoDerivativeDraft] = Field(min_length=2, max_length=2)
 
     @model_validator(mode='after')
-    def thirty_seconds(self):
+    def platform_briefs(self):
+        platforms = set()
         for v in self.videos:
             b = v.production_brief
             if b.duration_seconds != 30 or b.shots[0].start_second != 0 or b.shots[-1].end_second != 30:
-                raise ValueError('Videos must cover exactly 30 seconds')
+                raise ValueError('Video briefs must cover exactly 30 seconds')
             if any(a.end_second != z.start_second for a, z in zip(b.shots, b.shots[1:])):
                 raise ValueError('Shot timeline must be contiguous')
             if not all(s.on_screen_text for s in b.shots):
-                raise ValueError('Every rendered scene needs visible copy')
-        if len({v.hook.casefold() for v in self.videos}) != 3:
-            raise ValueError('Three distinct video hooks required')
+                raise ValueError('Every scene needs exact visible copy')
+            if not all(s.generation_prompt for s in b.shots):
+                raise ValueError('Every scene needs a future-generation prompt')
+            platforms.add(b.target_platform)
+        if platforms != {'youtube_shorts', 'instagram_reels'}:
+            raise ValueError('Provide exactly one YouTube Shorts brief and one Instagram Reels brief')
+        if len({v.hook.casefold() for v in self.videos}) != 2:
+            raise ValueError('Platform video hooks must be distinct')
         return self

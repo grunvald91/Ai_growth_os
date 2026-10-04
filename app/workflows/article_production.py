@@ -156,7 +156,7 @@ class ArticleProduction:
             from app.content.contracts import ReadyTextSet, VideoVariants
             stages = (*STAGES,
                 ('platform_writer', ReadyTextSet, 'Write SIX complete reader-facing adaptations, not outlines: Dzen and vc.ru full articles >=2000 characters each; TenChat professional post; Telegram standalone post; FAQ actual questions and answers; founder proposed post without invented first-person experience. Use the edited source article and each channel profile.'),
-                ('video_variations', VideoVariants, 'Create THREE distinct 30-second vertical typography video scripts based on the article. Use different hooks and angles. Every shot has concise exact on_screen_text readable on a phone. Timelines start at zero, are contiguous and end at 30. No filmed footage or audio assets are available: the renderer uses animated typography cards. Include cover, subtitles, spoken script and CTA for each.'),
+                ('video_variations', VideoVariants, 'Create TWO distinct 30-second vertical production briefs based on the article: exactly one for YouTube Shorts and one for Instagram Reels. Use platform-adapted hooks and angles. Every shot must include exact on_screen_text, camera/movement direction, transition, edit/mix guidance and a detailed generation_prompt suitable for a future external video-generation adapter. Timelines start at zero, are contiguous and end at 30. Do not render or generate any video. Include cover, captions, spoken script and CTA for each.'),
             )
         runs = [AgentRun(task_id=task_id, agent_name=name, provider=self.provider_name,
                          model=self.model, status='queued', input_references=references)
@@ -250,11 +250,13 @@ class ArticleProduction:
                 elif name == 'video_director':
                     stage_rule = (
                         ' Return ONE short_video text brief only. No rendering or file generation. Build a complete '
-                        '9:16 director-ready plan with 15-90 second total duration, full voiceover/dialogue, numbered '
-                        'timed shots, purpose, shot type, visual description, camera movement, action, on-screen '
-                        'text, transition, sound/music note, subtitle style, cover frame, edit rhythm, CTA frame, '
-                        'export spec and production notes. The brief must be detailed enough that a human can film '
-                        'and edit it without asking what happens in each shot.'
+                        '9:16 director-ready plan with target_platform, 15-90 second total duration, 2-3 hook variants, '
+                        'full voiceover/dialogue, numbered timed shots, purpose, shot type, visual description, camera '
+                        'movement, action, on-screen text, transition, sound/music note and a detailed generation_prompt '
+                        'for every shot. Include avoid_in_generation where useful, subtitle style, cover frame, edit '
+                        'rhythm, editing/mix notes, CTA frame, caption variants, export spec and production notes. The '
+                        'brief must be detailed enough for a human editor or future video-generation adapter without '
+                        'asking what happens in each shot.'
                     )
                 elif name == 'story_director':
                     stage_rule = (
@@ -457,14 +459,14 @@ class ArticleProduction:
                     artifact_ids.append(ready.id)
                 for index, video in enumerate(outputs[10].videos, 1):
                     ready = artifacts.create(product_id=product_id, task_id=task_id,
-                        kind='video_script', title=f'Ролик {index}: {video.hook}',
+                        kind='video_script', title=f"{video.production_brief.target_platform}: {video.hook}",
                         content=json.dumps({'article_id': str(main.id), **video.model_dump(mode='json')}, ensure_ascii=False),
                         status='awaiting_approval')
                     artifact_ids.append(ready.id)
                 ready = artifacts.create(product_id=product_id, task_id=task_id,
                     kind='content_distribution', title='План публикации и измерения',
                     content=json.dumps({'article_id': str(main.id),
-                        'channels': ['own_site', 'dzen', 'tenchat', 'vc_ru', 'telegram', 'youtube_shorts', 'vk_clips', 'reels'],
+                        'channels': ['own_site', 'dzen', 'telegram', 'youtube_shorts', 'instagram_reels'],
                         'status': 'requires_owner_review', 'measurement': conversion.measurement.model_dump(mode='json'),
                         'publication': 'manual_until_channel_connected',
                         'metrics': 'Record reach/views, clicks, leads, activation and customers; unavailable values stay unknown.'}, ensure_ascii=False))
