@@ -179,7 +179,7 @@ def product_dashboard(db: Session, product: Product) -> str:
         chips = "".join(f'<span class="chip">{esc(platform_label(s.get("platform","")))}</span>' for s in group)
         states = ", ".join(sorted({str(s.get("state") or "planned") for s in group}))
         queue_button = ""
-        if plan_row and not task_ids:
+        if plan_row and plan.get("approval_state") == "active" and not task_ids:
             queue_button = (
                 f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/packages/{esc(key)}/queue">'
                 '<button class="btn secondary">Подготовить пакет сейчас</button></form>'
@@ -277,6 +277,8 @@ def studio_queue_package(product_id: UUID, plan_id: UUID, package_key: str, db: 
     if row is None or row.product_id != product_id or row.kind != "editorial_plan":
         raise HTTPException(404, "Plan not found")
     plan = parse_json(row)
+    if plan.get("approval_state") != "active":
+        raise HTTPException(409, "Approve the editorial plan before queueing its packages")
     slots = [s for s in (plan.get("slots") or []) if s.get("package_key") == package_key]
     if not slots:
         raise HTTPException(404, "Package not found")
