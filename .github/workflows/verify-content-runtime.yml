@@ -56,6 +56,6 @@ jobs:
                   if content.status.value == 'failed':
                       errors = {r.error for r in db.scalars(select(AgentRun).where(AgentRun.task_id == content.id)) if r.error}
                       print('Latest content errors:', sorted(errors))
-          print('Calendar and worker imports OK')
+          print('Calendar and worker imports OK; verification after format repair')
           PY
           REMOTE
