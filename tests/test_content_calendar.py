@@ -68,6 +68,10 @@ async def test_owner_approval_then_due_preparation_once_and_shared_package(db,tm
     assert tick_calendar(db,settings,due)==0
     tasks=list(db.scalars(select(Task).where(Task.assigned_agent=='content_factory')))
     assert len(tasks)==1
+    request=db.scalar(select(Artifact).where(Artifact.task_id==tasks[0].id,Artifact.kind=='content_request'))
+    material=json.loads(request.content)
+    assert material['audience']=='Владельцы сервисного бизнеса'
+    assert 'релевантные обращения' in material['editorial_brief'] and 'dzen' in material['editorial_brief']
     stored=json.loads(row.content)
     assert {s['task_id'] for s in stored['slots']}=={str(tasks[0].id)}
     tasks[0].status=TaskStatus.COMPLETED;db.commit()

@@ -9,11 +9,11 @@ from app.workflows.article_contracts import ArticleProductionInput
 
 DEFAULT_TOPIC = 'Как организовать онлайн-запись в небольшом сервисном бизнесе: путь клиента и чек-лист владельца'
 
-def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC, *, commit=True, dedupe_key=None):
+def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC, *, commit=True, dedupe_key=None, audience=None, editorial_brief=None):
     product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     if product is None:
         raise LookupError('Компания не найдена')
-    request = ArticleProductionInput(product_id=product.id, topic=topic,
+    request = ArticleProductionInput(product_id=product.id, topic=topic, audience=audience, editorial_brief=editorial_brief,
                                     request_publication=True, produce_ready_assets=True)
     title = 'CONTENT: ' + request.topic
     if dedupe_key:

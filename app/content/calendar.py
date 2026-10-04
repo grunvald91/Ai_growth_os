@@ -356,7 +356,11 @@ def tick_calendar(db, settings, now=None):
                 if task is None and eligible and any(datetime.fromisoformat(s['prepare_at']) <= now for s in eligible):
                     # queue_content participates in the surrounding calendar transaction.
                     task = queue_content(db, row.product_id, group[0]['topic'], commit=False,
-                                         dedupe_key=f'calendar:{row.id}:{key}')
+                                         dedupe_key=f'calendar:{row.id}:{key}', audience=group[0]['audience'],
+                                         editorial_brief=('Цель пакета: ' + group[0]['objective']
+                                             + '\nПлощадки подтверждённого календаря: ' + ', '.join(sorted({s['platform'] for s in group}))
+                                             + '\nФорматы: ' + ', '.join(sorted({s['format'] for s in group}))
+                                             + '\nСтратегия: ' + plan['strategy'][:2000]))
                     queued += 1
                 if task:
                     state = {'queued': 'queued', 'running': 'preparing', 'completed': 'ready_for_review',
