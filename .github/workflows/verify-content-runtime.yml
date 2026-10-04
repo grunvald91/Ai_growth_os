@@ -22,7 +22,7 @@ jobs:
           readlink /opt/ai_growth_os/current
           docker ps --filter label=com.docker.compose.project=ai-growth-os --format 'table {{.Names}}\t{{.Status}}'
           cd /opt/ai_growth_os/current
-          docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml logs --tail 120 team-worker 2>&1 | python3 -c 'import sys,re; lines=sys.stdin.read(); print("Worker exception types:", sorted(set(re.findall(r"\b[A-Za-z_]*(?:Error|Exception)\b", lines)))); print("Worker stack:", "\n".join(x for x in lines.splitlines() if "File \"" in x))'
+          docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml logs --tail 120 worker 2>&1 | python3 -c 'import sys,re; lines=sys.stdin.read(); print("Worker exception types:", sorted(set(re.findall(r"\b[A-Za-z_]*(?:Error|Exception)\b", lines)))); print("Worker stack:", "\n".join(x for x in lines.splitlines() if "File \"" in x))'
           docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
           import json, time
           from collections import Counter
