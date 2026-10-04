@@ -42,6 +42,13 @@ def main():
                 planner.description = (planner.description or '') + ' [schema_recovery_once]'
                 db.commit()
                 print('Initial editorial draft requeued once after schema repair:', planner.id)
+        if planner is not None and planner.status == TaskStatus.FAILED and '[calendar_coherence_recovery_once]' not in (planner.description or ''):
+            run = db.scalar(select(AgentRun).where(AgentRun.task_id == planner.id, AgentRun.error == 'editorial_plan_failed:schema::value_error:ValidationError').limit(1))
+            if run:
+                planner.status = TaskStatus.QUEUED
+                planner.description = (planner.description or '') + ' [calendar_coherence_recovery_once]'
+                db.commit()
+                print('Initial editorial task requeued once after explicit calendar constraints:', planner.id)
         existing = db.scalar(select(Artifact).where(Artifact.product_id == product.id,
             Artifact.kind == 'content_request').order_by(Artifact.created_at).limit(1))
         if existing:
