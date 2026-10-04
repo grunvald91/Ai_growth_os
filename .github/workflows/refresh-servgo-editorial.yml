@@ -1,0 +1,64 @@
+name: Refresh ServGo editorial plan
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/refresh-servgo-editorial.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      EXPECTED_RELEASE: 916fbfb37bfab3820557a09c834645f99243df5e
+
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Save owner editorial preferences and queue fresh plan
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ]
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "EXPECTED_RELEASE='$EXPECTED_RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          CURRENT="$(basename "$(readlink /opt/ai_growth_os/current)")"
+          echo "Current release: $CURRENT"
+          [ "$CURRENT" = "$EXPECTED_RELEASE" ] || { echo "Expected deployed release $EXPECTED_RELEASE; refusing to mutate editorial state."; exit 42; }
+          cd /opt/ai_growth_os/current
+          docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Artifact, Product
+          from app.content.calendar import save_preferences, queue_plan
+
+          desired = "План на 14 дней. Базовая частота: новый смысловой контент-пакет каждые 3 дня, то есть 5 основных тем за 14 дней. Основные площадки стартового теста: собственный сайт/SEO, Дзен, Telegram, YouTube Shorts и Instagram Reels. Каждый основной пакет адаптировать под эти пять площадок; публикации внутри пакета можно разнести по времени для ручной проверки и публикации.\n\nДля видео не создавать и не рендерить видеофайлы. Нужен production-ready сценарий и раскадровка отдельно для YouTube Shorts и Instagram Reels: 2–3 варианта хука, полный текст озвучки/диалога, точный тайминг сцен, визуальное описание, кадрирование и движение камеры, действие, текст на экране, переходы и темп, рекомендации по музыке/звуку и сведению, CTA, концепция обложки, подписи/описания и отдельный подробный prompt для будущей генерации каждой сцены внешним видеогенератором. Внешний генератор пока не подключать.\n\nСтартовый рынок и язык контента: Россия, русский язык. Основное целевое действие: запросить демонстрацию/оценку ServGo для своего бизнеса и дальнейшее подключение. Рабочая воронка измерения: публикация → переход → обращение/контакт → демонстрация → подключение → платный клиент. Атрибуция: различать площадку и контент-пакет, используя channel/source и package_key; при публикации использовать отдельные UTM там, где это возможно.\n\nТон бренда: простой деловой русский, понятный владельцу малого сервисного бизнеса, без маркетингового пафоса, ложных гарантий, выдуманных отзывов и неподтверждённых функций. Исторические показатели контента пока считать неизвестными; первый спринт создаёт baseline. Пересмотр через 7 дней: менять частоту, темы и площадки по фактическим просмотрам, переходам, обращениям и клиентам, а не по универсальным «лучшим часам».\n\nНе включать в неизвестные редактора вопросы enrichment/outreach, которые не влияют на контент-план: принадлежность публичных телефонов, актуальность адресов конкретных prospects, правила холодного контакта."
+          with SessionLocal() as db:
+              product = db.scalar(select(Product).where(Product.slug == 'servgo'))
+              if product is None:
+                  raise SystemExit('ServGo not found')
+              latest = db.scalar(
+                  select(Artifact)
+                  .where(Artifact.product_id == product.id, Artifact.kind == 'editorial_preferences')
+                  .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+                  .limit(1)
+              )
+              if latest is None or latest.content != desired:
+                  save_preferences(db, product.id, desired)
+                  print('Saved fresh editorial preferences')
+              else:
+                  print('Editorial preferences already current')
+              task = queue_plan(db, product.id)
+              print('Editorial planner task:', task.id, task.status.value)
+          PY
+          REMOTE
