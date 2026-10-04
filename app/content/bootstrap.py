@@ -31,10 +31,17 @@ def main():
         if product is None:
             raise LookupError('ServGo not found')
         from app.content.calendar import queue_plan
-        planner = db.scalar(select(Task.id).where(Task.product_id == product.id, Task.assigned_agent == 'editorial_planner').limit(1))
+        planner = db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == 'editorial_planner').order_by(Task.created_at).limit(1))
         if planner is None:
             planning = queue_plan(db, product.id)
             print('First editorial plan queued:', planning.id)
+        elif planner.status == TaskStatus.FAILED and '[schema_recovery_once]' not in (planner.description or ''):
+            run = db.scalar(select(AgentRun).where(AgentRun.task_id == planner.id, AgentRun.error == 'editorial_plan_failed:ValidationError').limit(1))
+            if run:
+                planner.status = TaskStatus.QUEUED
+                planner.description = (planner.description or '') + ' [schema_recovery_once]'
+                db.commit()
+                print('Initial editorial draft requeued once after schema repair:', planner.id)
         existing = db.scalar(select(Artifact).where(Artifact.product_id == product.id,
             Artifact.kind == 'content_request').order_by(Artifact.created_at).limit(1))
         if existing:

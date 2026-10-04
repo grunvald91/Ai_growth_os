@@ -9,7 +9,7 @@ from typing import Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, ValidationError
 from sqlalchemy import select, update
 
 from app.company_profile import load_company_profile, profile_snapshot
@@ -198,6 +198,8 @@ async def run_planner_once(session_factory, settings, llm=None):
         db.add(run)
         db.commit()
         response = None
+        attempts = []
+        error_code = "context"
         try:
             context, digest = planning_context(db, settings, task.product_id)
             if llm is None:
@@ -227,14 +229,36 @@ async def run_planner_once(session_factory, settings, llm=None):
                 'Missing profile fields must remain unknown, company hypotheses must remain hypotheses. '
                 'review_after_days is a proposed review, no automatic approval of changes. Write human-facing text '
                 'in natural Russian. No external actions. Schema: ' + encode(EditorialPlan.model_json_schema()))
-            response = await asyncio.wait_for(llm.generate(LLMRequest(model=settings.llm_model,
-                system_prompt=prompt, messages=[LLMMessage(role='user', content=encode({'now': now_utc(), **context}))],
-                response_schema=EditorialPlan.model_json_schema(), max_tokens=10000,
-                metadata={'team_role': 'editorial_planner', 'reasoning_effort': 'low', 'task_type': 'content_calendar'})), 300)
-            if response.stop_reason not in {None, 'end_turn', 'stop_sequence'} or len(response.content) > 150000:
-                raise ValueError('Incomplete planner response')
-            plan = EditorialPlan.model_validate_json(PrivacyGateway().sanitize_text(response.content))
+            messages = [LLMMessage(role='user', content=encode({'now': now_utc(), **context}))]
+            for attempt in range(2):
+                error_code = 'provider'
+                response = await asyncio.wait_for(llm.generate(LLMRequest(model=settings.llm_model,
+                    system_prompt=prompt, messages=messages,
+                    response_schema=EditorialPlan.model_json_schema(), max_tokens=10000,
+                    metadata={'team_role': 'editorial_planner', 'reasoning_effort': 'low', 'task_type': 'content_calendar'})), 300)
+                attempts.append(response)
+                error_code = 'incomplete_response'
+                if response.stop_reason not in {None, 'end_turn', 'stop_sequence'} or len(response.content) > 150000:
+                    if attempt == 0 and response.stop_reason in {'length', 'max_tokens'}:
+                        messages = [*messages[:1], LLMMessage(role='user', content='The previous reply was truncated. Return a compact complete plan with fewer shared packages, retaining all required fields and owner constraints. Do not weaken validation.')]
+                        continue
+                    raise ValueError('Incomplete planner response')
+                try:
+                    error_code = 'schema'
+                    plan = EditorialPlan.model_validate_json(PrivacyGateway().sanitize_text(response.content))
+                    break
+                except ValidationError as exc:
+                    issues = [{'field': '.'.join(map(str, e['loc'])), 'type': e['type'], 'message': e['msg']}
+                              for e in exc.errors(include_url=False, include_input=False)]
+                    error_code = 'schema:' + ','.join((i['field'] + ':' + i['type']) for i in issues[:8])
+                    if attempt:
+                        raise
+                    messages = [messages[0], LLMMessage(role='user', content=encode({
+                        'action': 'Repair this draft to match the schema and supplied resources exactly. Fix each validation error. Never repeat the same asset on one platform; use separate package_key for a new article/topic, share one key only for genuine cross-channel reuse. Return complete JSON only.',
+                        'validation_errors': issues[:15],
+                        'invalid_draft_excerpt': PrivacyGateway().sanitize_text(response.content[:35000])}))]
             refs = {r['id'] for r in context['research'] + context['observations'] + GUIDANCE}
+            error_code = 'evidence'
             owner_ref = context['owner_requirements_ref']
             if owner_ref:
                 refs.add(owner_ref)
@@ -270,16 +294,17 @@ async def run_planner_once(session_factory, settings, llm=None):
             task = db.get(Task, task.id)
             run = db.get(AgentRun, run.id)
             task.status = TaskStatus.FAILED
-            run.status, run.error = 'failed', 'editorial_plan_failed:' + type(exc).__name__
+            run.status, run.error = 'failed', ('editorial_plan_failed:' + error_code + ':' + type(exc).__name__)[:1000]
             if isinstance(exc, asyncio.CancelledError):
                 run.finished_at = now_utc()
                 db.commit()
                 raise
-        if response and response.usage:
-            db.add(CostRecord(product_id=task.product_id, agent_run_id=run.id, category='llm',
-                provider=settings.llm_provider, amount=0, currency='USD', incurred_at=now_utc(),
-                input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens,
-                details={'cost_known': False}))
+        for attempt_response in attempts:
+            if attempt_response.usage:
+                db.add(CostRecord(product_id=task.product_id, agent_run_id=run.id, category='llm',
+                    provider=settings.llm_provider, amount=0, currency='USD', incurred_at=now_utc(),
+                    input_tokens=attempt_response.usage.input_tokens, output_tokens=attempt_response.usage.output_tokens,
+                    details={'cost_known': False}))
         run.finished_at = now_utc()
         db.commit()
         return 1

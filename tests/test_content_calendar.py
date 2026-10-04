@@ -187,3 +187,20 @@ def test_malformed_calendar_cannot_break_worker(db,tmp_path):
     db.add(Artifact(product_id=p.id,kind='editorial_plan',title='Invalid',content='bad json',status=ArtifactStatus.APPROVED))
     db.commit()
     assert tick_calendar(db,settings)==0
+
+
+@pytest.mark.asyncio
+async def test_real_schema_feedback_repairs_once_and_accounts_both_attempts(db,tmp_path):
+    p,settings=setup(db,tmp_path)
+    bad=draft();bad['slots'][0]['format']='short_video'
+    class Provider:
+        def __init__(self):self.requests=[]
+        async def generate(self,request):
+            self.requests.append(request)
+            value=bad if len(self.requests)==1 else draft()
+            return LLMResponse(content=json.dumps(value),model='kimi-2.7',usage=LLMUsage(input_tokens=12,output_tokens=34))
+    provider=Provider();llm=LLMService(privacy_gateway=PrivacyGateway(),provider=provider)
+    await run_planner_once(lambda:Borrow(db),settings,llm)
+    assert len(provider.requests)==2 and 'validation_errors' in provider.requests[1].messages[-1].content
+    assert db.scalar(select(Artifact).where(Artifact.kind=='editorial_plan')) is not None
+    assert len(list(db.scalars(select(CostRecord))))==2
