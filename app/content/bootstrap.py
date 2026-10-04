@@ -30,6 +30,11 @@ def main():
         product = db.scalar(select(Product).where(Product.slug == 'servgo').with_for_update())
         if product is None:
             raise LookupError('ServGo not found')
+        from app.content.calendar import queue_plan
+        planner = db.scalar(select(Task.id).where(Task.product_id == product.id, Task.assigned_agent == 'editorial_planner').limit(1))
+        if planner is None:
+            planning = queue_plan(db, product.id)
+            print('First editorial plan queued:', planning.id)
         existing = db.scalar(select(Artifact).where(Artifact.product_id == product.id,
             Artifact.kind == 'content_request').order_by(Artifact.created_at).limit(1))
         if existing:
