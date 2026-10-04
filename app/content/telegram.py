@@ -28,9 +28,10 @@ class TelegramContent:
         self.bot, self.sessions, self.settings = bot, session_factory, settings_factory
         self.topic_product = None
         self.metrics_article = None
+        self.plan_product = None
 
     async def menu(self, chat_id):
-        self.topic_product = self.metrics_article = None
+        self.topic_product = self.metrics_article = self.plan_product = None
         with self.sessions() as db:
             products = list(db.scalars(select(Product).order_by(Product.name).limit(20)))
             buttons = [[{'text':p.name, 'callback_data':f'content:product:{p.id}'}] for p in products]
@@ -53,6 +54,7 @@ class TelegramContent:
                 text += '\n\nПоследние задачи:\n' + '\n'.join(f'• {t.title[:65]} — {statuses.get(t.status.value, t.status.value)}' for t in tasks)
             buttons = [[{'text':'▶️ Создать пакет', 'callback_data':f'content:queue:{product.id}'},
                         {'text':'✍️ Своя тема', 'callback_data':f'content:topic:{product.id}'}]]
+            buttons.append([{'text':'📅 Контент-план', 'callback_data':f'content:calendar:{product.id}'}])
             buttons += [[{'text':a.title[:60], 'callback_data':f'content:article:{a.id}'}] for a in articles]
             buttons.append([{'text':'🔄 Обновить', 'callback_data':f'content:product:{product.id}'}])
         await self.bot._send(chat_id, text, reply_markup={'inline_keyboard':buttons})
@@ -64,8 +66,19 @@ class TelegramContent:
             await self.menu(chat)
             return True
         if text.startswith('/') or text in {'📊 Главное','✅ На согласование','🧪 Тесты','🔄 Обновить','🏢 Компания','📇 Контакты','📧 Почта'}:
-            self.topic_product = self.metrics_article = None
+            self.topic_product = self.metrics_article = self.plan_product = None
             return False
+        if self.plan_product:
+            try:
+                from app.content.calendar import save_preferences, queue_plan
+                with self.sessions() as db:
+                    save_preferences(db, self.plan_product, text)
+                    queue_plan(db, self.plan_product)
+                self.plan_product = None
+                await self.bot._send(chat, '✅ Требования сохранены. Редактор готовит новый контент-план для подтверждения.')
+            except (ValueError, LookupError) as exc:
+                await self.bot._send(chat, str(exc))
+            return True
         if self.topic_product:
             try:
                 with self.sessions() as db:
@@ -89,6 +102,8 @@ class TelegramContent:
                                 unit='count', source='owner_report', observed_at=datetime.now(timezone.utc),
                                 dimensions={'article_id':str(article.id), 'channel':observation.channel, 'url':observation.url,
                                     'measurement_type':'cumulative_snapshot', 'verified_externally':False}))
+                    from app.content.calendar import record_publication
+                    record_publication(db, article, observation.channel, observation.url)
                     db.commit()
                 self.metrics_article = None
                 await self.bot._send(chat, '✅ Показатели сохранены как наблюдения владельца. Неуказанные значения остаются неизвестными.')
@@ -133,11 +148,77 @@ class TelegramContent:
             buttons.append([{'text':'📈 Записать результаты публикации', 'callback_data':f'content:metrics:{article.id}'}])
         await self.bot._send(chat, data['full_article'], reply_markup={'inline_keyboard':buttons})
 
+    async def calendar(self, chat, product_id):
+        from app.content.calendar import render_calendar
+        with self.sessions() as db:
+            product = db.get(Product, product_id)
+            if product is None:
+                raise LookupError('Компания не найдена')
+            plans = list(db.scalars(select(Artifact).where(Artifact.product_id == product_id,
+                Artifact.kind == 'editorial_plan').order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(5)))
+            plans.sort(key=lambda p: json.loads(p.content)['generated_at'], reverse=True)
+            tasks = list(db.scalars(select(Task).where(Task.product_id == product_id,
+                Task.assigned_agent == 'editorial_planner').order_by(Task.created_at.desc()).limit(1)))
+            buttons = [[{'text':'🗓 Составить / пересмотреть', 'callback_data':f'content:plan:{product_id}'}],
+                       [{'text':'✏️ Мои площадки и ресурсы', 'callback_data':f'content:preferences:{product_id}'}]]
+            text = '📅 Контент-план: ' + product.name + '\nРедактор выбирает площадки, частоту и форматы, назначает подготовку заранее. Расписание запускается после подтверждения. Публикация пока вручную.'
+            if tasks:
+                text += '\nПоследняя работа редактора: ' + {'queued':'в очереди', 'running':'готовит план', 'completed':'план готов', 'failed':'ошибка; можно повторить'}.get(tasks[0].status.value, tasks[0].status.value)
+            if plans:
+                latest = json.loads(plans[0].content)
+                text += '\n\n' + render_calendar(latest)
+                for item in plans:
+                    value = json.loads(item.content)
+                    if value['approval_state'] == 'draft':
+                        buttons.append([{'text':'👀 Проверить новый план', 'callback_data':f'content:planview:{item.id}'}])
+                    elif value['approval_state'] == 'active':
+                        buttons.append([{'text':'📅 Действующий календарь', 'callback_data':f'content:planview:{item.id}'},
+                                        {'text':'⏸ Пауза', 'callback_data':f'content:planpause:{item.id}'}])
+                task_ids = {slot['task_id'] for item in plans for slot in json.loads(item.content)['slots'] if slot['task_id']}
+                if task_ids:
+                    for article in db.scalars(select(Artifact).where(Artifact.kind == 'article',
+                        Artifact.product_id == product_id, Artifact.task_id.in_([UUID(i) for i in task_ids]))):
+                        buttons.append([{'text':'📦 ' + article.title[:50], 'callback_data':f'content:article:{article.id}'}])
+            buttons.append([{'text':'🔄 Обновить календарь', 'callback_data':f'content:calendar:{product_id}'}])
+        await self.bot._send(chat, text, reply_markup={'inline_keyboard':buttons})
+
     async def callback(self, chat, data):
         try:
             _, action, raw = data.split(':',2)
             record_id = UUID(raw)
-            if action == 'product':
+            if action == 'calendar':
+                await self.calendar(chat, record_id)
+            elif action == 'plan':
+                from app.content.calendar import queue_plan
+                with self.sessions() as db:
+                    queue_plan(db, record_id)
+                await self.bot._send(chat, '✅ Редактору поручен план. Он учтёт профиль, доступные исследования и записанные результаты. Открой календарь и нажми «Обновить».')
+            elif action == 'preferences':
+                self.topic_product = self.metrics_article = None
+                self.plan_product = record_id
+                await self.bot._send(chat, 'Напиши своими словами: какие аккаунты уже есть, кого привлекаем, сколько времени есть на проверку, какие форматы доступны, на какой период нужен план. Можно указать желаемую частоту, даты и бюджет. Например: «Есть Telegram и Дзен; Shorts хочу протестировать. На проверку — два часа в неделю. План на 14 дней». Неизвестное можно так и назвать.')
+            elif action == 'planview':
+                from app.content.calendar import plan_record, render_calendar
+                with self.sessions() as db:
+                    row, value = plan_record(db, record_id)
+                    buttons = [[{'text':'↩️ Календарь', 'callback_data':f'content:calendar:{row.product_id}'}]]
+                    if value['approval_state'] == 'draft':
+                        buttons.insert(0, [{'text':'✅ Подтвердить и готовить', 'callback_data':f'content:planapprove:{record_id}'}])
+                    if value['approval_state'] == 'active':
+                        buttons.insert(0, [{'text':'⏸ Пауза', 'callback_data':f'content:planpause:{record_id}'}])
+                    body = render_calendar(value)
+                await self.bot._send(chat, body, reply_markup={'inline_keyboard':buttons})
+            elif action == 'planapprove':
+                from app.content.calendar import approve_plan
+                with self.sessions() as db:
+                    approve_plan(db, self.settings(), record_id)
+                await self.bot._send(chat, '✅ Расписание подтверждено. Подготовка запускается к указанным срокам. Готовые тексты и сценарии — на проверку; публикация и рендер требуют отдельного действия.')
+            elif action == 'planpause':
+                from app.content.calendar import pause_plan
+                with self.sessions() as db:
+                    pause_plan(db, record_id)
+                await self.bot._send(chat, '⏸ Будущая подготовка остановлена. Уже поставленные задачи продолжаются. Для нового расписания составь и подтверди новый план.')
+            elif action == 'product':
                 await self.product(chat, record_id)
             elif action in {'queue','topic'}:
                 if action == 'topic':
@@ -190,6 +271,6 @@ class TelegramContent:
                 self.metrics_article = record_id
                 await self.bot._send(chat, 'Пришли показатели опубликованного материала. Например:\n{"channel":"dzen","url":"https://...","views":120,"clicks":5,"leads":1}\nНеизвестные показатели не указывай. Это снимок на текущую дату, не прибавление к предыдущим числам.')
             return True
-        except (ValueError, LookupError, OSError):
-            await self.bot._send(chat, 'Материал недоступен или команда устарела. Открой «Контент» заново.')
+        except (ValueError, LookupError, OSError) as exc:
+            await self.bot._send(chat, str(exc) if action in {'planapprove','planpause','preferences'} and isinstance(exc, (ValueError, LookupError)) else 'Материал недоступен. Открой «Контент» заново.')
             return True

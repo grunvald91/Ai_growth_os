@@ -221,6 +221,21 @@ jobs:
           from app.communications.mail import MailStore
           assert MailStore(get_settings().products_root).root.parent == get_settings().products_root
           print('Content renderer and persistent integrations store OK')
+          from app.content.calendar import tick_calendar, EditorialPlan, plan_record
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Task, Artifact
+          from app.models.domain import TaskStatus
+          with SessionLocal() as db:
+              planning = db.scalar(select(Task).where(Task.assigned_agent == 'editorial_planner').order_by(Task.created_at.desc()).limit(1))
+              assert planning is not None, 'Editorial planner was not queued'
+              print('Editorial planner runtime:', planning.id, planning.status.value)
+              draft = db.scalar(select(Artifact).where(Artifact.kind == 'editorial_plan').order_by(Artifact.created_at.desc()).limit(1))
+              if draft:
+                  value = json.loads(draft.content)
+                  print('Editorial calendar state:', value['approval_state'], 'slots:', len(value['slots']))
+                  assert value['approval_state'] in {'draft', 'active', 'paused', 'superseded'}
+          print('Editorial planner and durable calendar modules OK')
           import asyncio, io, subprocess
           from PIL import Image, ImageDraw, ImageFont
           from app.intake.sources import parse_file_async, MAX_FILE_BYTES

@@ -9,13 +9,15 @@ from app.workflows.article_contracts import ArticleProductionInput
 
 DEFAULT_TOPIC = 'Как организовать онлайн-запись в небольшом сервисном бизнесе: путь клиента и чек-лист владельца'
 
-def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC):
+def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC, *, commit=True, dedupe_key=None):
     product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     if product is None:
         raise LookupError('Компания не найдена')
     request = ArticleProductionInput(product_id=product.id, topic=topic,
                                     request_publication=True, produce_ready_assets=True)
     title = 'CONTENT: ' + request.topic
+    if dedupe_key:
+        title = dedupe_key
     task = TaskService(db).find_active_duplicate(product_id=product.id, title=title,
                                                assigned_agent='content_factory')
     if task:
@@ -25,7 +27,8 @@ def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC):
                                  description='Issue #8: SEO article, six channel texts, three 30s videos. Owner review before publication.')
     ArtifactService(db).create(product_id=product.id, task_id=task.id, kind='content_request',
                               title='Пакет контента', content=request.model_dump_json())
-    db.commit()
+    if commit:
+        db.commit()
     return task
 
 def queue_render(db, article_id: UUID):

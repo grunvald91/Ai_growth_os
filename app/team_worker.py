@@ -148,6 +148,11 @@ def _recover_transient_failed_experiment_tasks(
 
 async def run_once() -> int:
     settings = get_settings()
+    from app.content.calendar import run_planner_once, tick_calendar
+    with SessionLocal() as db:
+        tick_calendar(db, settings)
+    if await run_planner_once(SessionLocal, settings):
+        return 1
     from app.content.worker import run_content_once
     content_count = await run_content_once(SessionLocal, settings)
     if content_count:
@@ -202,15 +207,35 @@ async def run_once() -> int:
     return completed_products
 
 
+async def _calendar_loop(settings):
+    from app.content.calendar import tick_calendar
+    while True:
+        try:
+            with SessionLocal() as db:
+                tick_calendar(db, settings)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning('calendar_tick_failed')
+        await asyncio.sleep(settings.team_worker_idle_poll_seconds)
+
+
 async def main() -> None:
     settings = get_settings()
-    while True:
-        count = await run_once()
-        await asyncio.sleep(
-            settings.team_worker_busy_poll_seconds
-            if count
-            else settings.team_worker_idle_poll_seconds
-        )
+    calendar_task = asyncio.create_task(_calendar_loop(settings))
+    try:
+        while True:
+            count = await run_once()
+            await asyncio.sleep(
+                settings.team_worker_busy_poll_seconds
+                if count
+                else settings.team_worker_idle_poll_seconds
+            )
+    finally:
+        calendar_task.cancel()
+        try:
+            await calendar_task
+        except asyncio.CancelledError:
+            pass
 
 
 if __name__ == "__main__":
