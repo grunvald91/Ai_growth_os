@@ -24,7 +24,7 @@ def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC, *, commit=Tr
         return task
     task = TaskService(db).create(product_id=product.id, title=title, assigned_agent='content_factory',
                                  status=TaskStatus.QUEUED, priority=100,
-                                 description='Issue #8: SEO article, six channel texts, three 30s videos. Owner review before publication.')
+                                 description='Issue #8: SEO article, channel adaptations, YouTube Shorts and Instagram Reels production briefs. No video rendering; owner review before publication.')
     ArtifactService(db).create(product_id=product.id, task_id=task.id, kind='content_request',
                               title='Пакет контента', content=request.model_dump_json())
     if commit:
