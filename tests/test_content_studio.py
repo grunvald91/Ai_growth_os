@@ -138,3 +138,24 @@ def test_studio_rejects_queue_from_unapproved_plan(studio_db):
         assert db.query(Task).filter(Task.assigned_agent=="content_factory").count()==0
     finally:
         app.dependency_overrides.clear()
+
+
+def test_studio_library_includes_content_outside_current_plan(studio_db):
+    db=studio_db
+    product=Product(name="ServGo",slug="servgo")
+    db.add(product);db.flush()
+    plan=Artifact(product_id=product.id,kind="editorial_plan",title="План",content=json.dumps(make_plan(),ensure_ascii=False))
+    manual=Task(product_id=product.id,title="CONTENT: Внеплановая тема",assigned_agent="content_factory",status=TaskStatus.COMPLETED)
+    db.add_all([plan,manual]);db.flush()
+    article=Artifact(product_id=product.id,task_id=manual.id,kind="article",title="Внеплановая статья",
+        content=json.dumps({"full_article":"Полный внеплановый материал"},ensure_ascii=False))
+    db.add(article);db.commit()
+    client=client_for(db)
+    try:
+        response=client.get(f"/studio/products/{product.id}")
+        assert response.status_code==200
+        assert "Библиотека всех материалов" in response.text
+        assert "Внеплановая статья" in response.text
+        assert "Полный внеплановый материал" in response.text
+    finally:
+        app.dependency_overrides.clear()
