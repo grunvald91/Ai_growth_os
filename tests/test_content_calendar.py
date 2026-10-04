@@ -204,3 +204,25 @@ async def test_real_schema_feedback_repairs_once_and_accounts_both_attempts(db,t
     assert len(provider.requests)==2 and 'validation_errors' in provider.requests[1].messages[-1].content
     assert db.scalar(select(Artifact).where(Artifact.kind=='editorial_plan')) is not None
     assert len(list(db.scalars(select(CostRecord))))==2
+
+
+@pytest.mark.asyncio
+async def test_invented_evidence_is_repaired_with_exact_allowed_ids(db,tmp_path):
+    p,settings=setup(db,tmp_path)
+    bad=draft();bad['channels'][0]['evidence_refs']=['https://invented.example/research']
+    class Provider:
+        def __init__(self):self.requests=[]
+        async def generate(self,request):
+            self.requests.append(request)
+            value=bad if len(self.requests)==1 else draft()
+            return LLMResponse(content=json.dumps(value),model='kimi-2.7')
+    provider=Provider();llm=LLMService(privacy_gateway=PrivacyGateway(),provider=provider)
+    await run_planner_once(lambda:Borrow(db),settings,llm)
+    assert len(provider.requests)==2
+    feedback=json.loads(provider.requests[1].messages[-1].content)
+    allowed=feedback['allowed_evidence_ids']
+    assert allowed and 'https://invented.example/research' not in allowed
+    schema=provider.requests[0].response_schema
+    assert schema['$defs']['ChannelChoice']['properties']['evidence_refs']['items']['enum']==allowed
+    assert schema['$defs']['Slot']['properties']['evidence_refs']['items']['enum']==allowed
+    assert db.scalar(select(Artifact).where(Artifact.kind=='editorial_plan')) is not None

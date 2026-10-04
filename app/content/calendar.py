@@ -218,6 +218,11 @@ async def run_planner_once(session_factory, settings, llm=None):
         error_code = "context"
         try:
             context, digest = planning_context(db, settings, task.product_id)
+            evidence_ids = sorted({r['id'] for r in context['research'] + context['observations'] + GUIDANCE}
+                                  | ({context['owner_requirements_ref']} if context['owner_requirements_ref'] else set()))
+            response_schema = EditorialPlan.model_json_schema()
+            for definition in ('ChannelChoice', 'Slot'):
+                response_schema['$defs'][definition]['properties']['evidence_refs']['items']['enum'] = evidence_ids
             if llm is None:
                 from app.core.composition import build_llm_provider, SAFE_LLM_METADATA_FIELDS
                 from app.llm.service import LLMService
@@ -241,7 +246,9 @@ async def run_planner_once(session_factory, settings, llm=None):
                 'business objective, success_metric and open questions. Default account_status=needs_confirmation; '
                 'confirmed_by_owner is allowed ONLY when owner_requirements explicitly confirms that account, '
                 'and evidence_refs includes owner_requirements_ref. owner_constraint timing also requires that ref. '
-                'Evidence_refs must be supplied artifact:/metric: IDs or platform_guidance IDs only. '
+                'Evidence_refs must be exact strings from this allowed list: ' + encode(evidence_ids) + '. '
+                'Use [] when no supplied source supports a choice. Never put a URL, source title, inferred ID, '
+                'or changed prefix in evidence_refs. '
                 'Missing profile fields must remain unknown, company hypotheses must remain hypotheses. '
                 'HARD CALENDAR RULES: 1 <= review_after_days <= horizon_days. EVERY day_offset must be '
                 '0 <= day_offset < horizon_days; for 14 days use 0..13, NEVER 14. Each platform occurs '
@@ -254,13 +261,13 @@ async def run_planner_once(session_factory, settings, llm=None):
                 'unknown, propose a modest test with a few shared topics and 2-3 channels, not a filled '
                 'calendar across every network. These are resource hypotheses, not scientifically optimal quotas. '
                 'review_after_days is a proposed review, no automatic approval of changes. Write human-facing text '
-                'in natural Russian. No external actions. Schema: ' + encode(EditorialPlan.model_json_schema()))
+                'in natural Russian. No external actions. Schema: ' + encode(response_schema))
             messages = [LLMMessage(role='user', content=encode({'now': now_utc(), **context}))]
             for attempt in range(2):
                 error_code = 'provider'
                 response = await asyncio.wait_for(llm.generate(LLMRequest(model=settings.llm_model,
                     system_prompt=prompt, messages=messages,
-                    response_schema=EditorialPlan.model_json_schema(), max_tokens=10000,
+                    response_schema=response_schema, max_tokens=10000,
                     metadata={'team_role': 'editorial_planner', 'reasoning_effort': 'low', 'task_type': 'content_calendar'})), 300)
                 attempts.append(response)
                 error_code = 'incomplete_response'
@@ -286,6 +293,7 @@ async def run_planner_once(session_factory, settings, llm=None):
                     messages = [messages[0], LLMMessage(role='user', content=encode({
                         'action': 'Repair this draft to match the schema and supplied resources exactly. Fix each validation error. Never repeat the same asset on one platform; use separate package_key for a new article/topic, share one key only for genuine cross-channel reuse. Return complete JSON only.',
                         'validation_errors': issues[:15],
+                        'allowed_evidence_ids': evidence_ids,
                         'invalid_draft_excerpt': PrivacyGateway().sanitize_text(response.content[:35000])}))]
             owner_ref = context['owner_requirements_ref']
             base = (now_utc().astimezone(ZoneInfo(plan.timezone)) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
