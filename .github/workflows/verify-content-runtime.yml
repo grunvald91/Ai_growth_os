@@ -1,4 +1,4 @@
-name: Verify content rollout runtime
+name: Verify editorial calendar runtime
 on:
   push:
     branches: [verify/content-rollout]
@@ -20,33 +20,42 @@ jobs:
           sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@155.212.162.47 'bash -s' <<'REMOTE'
           set -euo pipefail
           readlink /opt/ai_growth_os/current
-          docker ps -a --filter label=com.docker.compose.project=ai-growth-os --format 'table {{.Names}}\t{{.Status}}'
-          docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}'
-          free -m
-          df -h /
+          docker ps --filter label=com.docker.compose.project=ai-growth-os --format 'table {{.Names}}\t{{.Status}}'
           cd /opt/ai_growth_os/current
           docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import json
+          from collections import Counter
           from sqlalchemy import select
           from app.db.session import SessionLocal
-          from app.models.domain import Task, AgentRun, Product, CostRecord
+          from app.models.domain import Task, AgentRun, Artifact, Product
           from app.core.config import get_settings
-          import importlib.util
-          print('Runtime model:', get_settings().llm_model)
-          try:
-              content_present = importlib.util.find_spec('app.content.worker') is not None
-          except ModuleNotFoundError:
-              content_present = False
-          print('Content worker module present:', content_present)
+          from app.content.calendar import EditorialPlan
+          from app.team_worker import _calendar_loop
           with SessionLocal() as db:
               product = db.scalar(select(Product).where(Product.slug == 'servgo'))
-              if product:
-                  task = db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == 'content_factory').order_by(Task.created_at.desc()).limit(1))
-                  print('Content task present:', task is not None)
-                  if task:
-                      print('Content task state:', task.id, task.status.value)
-                      for run in db.scalars(select(AgentRun).where(AgentRun.task_id == task.id)):
-                          print('Stage:', run.agent_name, run.status, run.error or '-')
-                          for cost in db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)):
-                              print('Usage:', run.agent_name, cost.input_tokens, cost.output_tokens)
+              assert product is not None
+              task = db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == 'editorial_planner').order_by(Task.created_at.desc()).limit(1))
+              assert task is not None
+              print('Editorial task:', task.id, task.status.value)
+              for run in db.scalars(select(AgentRun).where(AgentRun.task_id == task.id)):
+                  print('Editorial run:', run.model, run.status, run.error or '-')
+              rows = list(db.scalars(select(Artifact).where(Artifact.product_id == product.id, Artifact.kind == 'editorial_plan')))
+              rows.sort(key=lambda r: json.loads(r.content)['generated_at'], reverse=True)
+              print('Editorial calendars:', len(rows))
+              if rows:
+                  row = rows[0]
+                  value = json.loads(row.content)
+                  print('Editorial calendar:', row.id, value['approval_state'], value['timezone'], 'horizon_days:', value['horizon_days'], 'review_after_days:', value['review_after_days'])
+                  print('Calendar counts:', dict(Counter(s['platform'] for s in value['slots'])))
+                  print('Calendar packages:', len({s['package_key'] for s in value['slots']}))
+                  print('Calendar unresolved questions:', len(value['unknowns']))
+                  print('Calendar preparation authorized:', value['approval_state'] == 'active')
+              content = db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == 'content_factory').order_by(Task.created_at.desc()).limit(1))
+              if content:
+                  print('Latest content job:', content.id, content.status.value)
+                  if content.status.value == 'failed':
+                      errors = {r.error for r in db.scalars(select(AgentRun).where(AgentRun.task_id == content.id)) if r.error}
+                      print('Latest content errors:', sorted(errors))
+          print('Calendar and worker imports OK')
           PY
           REMOTE
