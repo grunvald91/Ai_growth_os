@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict, Field
 from app.content.render import asset_path
-from app.content.service import queue_content, queue_render
+from app.content.service import queue_content
 from app.models.domain import Artifact, Metric, Product, Task
 
 LABELS = {'own_site':'SEO / сайт', 'dzen':'Дзен', 'tenchat':'TenChat', 'vc_ru':'vc.ru',
@@ -49,7 +49,7 @@ class TelegramContent:
             articles = list(db.scalars(select(Artifact).where(Artifact.product_id == product.id,
                 Artifact.kind == 'article').order_by(Artifact.created_at.desc()).limit(8)))
             statuses = {'queued':'в очереди','running':'готовится','completed':'готово', 'failed':'ошибка'}
-            text = f'📝 {product.name}\n\nПакет: SEO-статья, Дзен, TenChat, vc.ru, Telegram, FAQ, пост автора и три сценария по 30 секунд.\nРендер MP4 запускается после просмотра сценариев. Публикация — после проверки, вручную до подключения площадок.'
+            text = f'📝 {product.name}\n\nПакет: SEO-статья и адаптации, включая Дзен и Telegram, плюс отдельные production-ready сценарии/раскадровки для YouTube Shorts и Instagram Reels.\nВидео здесь не генерируется и не рендерится. Публикация — после проверки, вручную до подключения площадок.'
             if tasks:
                 text += '\n\nПоследние задачи:\n' + '\n'.join(f'• {t.title[:65]} — {statuses.get(t.status.value, t.status.value)}' for t in tasks)
             buttons = [[{'text':'▶️ Создать пакет', 'callback_data':f'content:queue:{product.id}'},
@@ -142,7 +142,6 @@ class TelegramContent:
             for item in related:
                 buttons.append([{'text': (LABELS.get(json.loads(item.content).get('channel')) or item.title)[:60],
                     'callback_data':f'content:asset:{item.id}'}])
-            buttons.append([{'text':'🎬 Одобрить рендер трёх MP4', 'callback_data':f'content:render:{article.id}'}])
             for item in renders:
                 buttons.append([{'text':'🎞 ' + item.title[:55], 'callback_data':f'content:video:{item.id}'}])
             buttons.append([{'text':'📈 Записать результаты публикации', 'callback_data':f'content:metrics:{article.id}'}])
@@ -212,7 +211,7 @@ class TelegramContent:
                 from app.content.calendar import approve_plan
                 with self.sessions() as db:
                     approve_plan(db, self.settings(), record_id)
-                await self.bot._send(chat, '✅ Расписание подтверждено. Подготовка запускается к указанным срокам. Готовые тексты и сценарии — на проверку; публикация и рендер требуют отдельного действия.')
+                await self.bot._send(chat, '✅ Расписание подтверждено. Подготовка запускается к указанным срокам. Готовые тексты и видеобрифы — на проверку; публикация остаётся отдельным ручным действием.')
             elif action == 'planpause':
                 from app.content.calendar import pause_plan
                 with self.sessions() as db:
@@ -231,10 +230,6 @@ class TelegramContent:
                     await self.product(chat, record_id)
             elif action in {'article','download'}:
                 await self.article(chat, record_id, download=action == 'download')
-            elif action == 'render':
-                with self.sessions() as db:
-                    queue_render(db, record_id)
-                await self.bot._send(chat, '✅ Рендер одобрен и поставлен в очередь. Три вертикальных MP4 будут доступны в статье. Это ролики с движущимися текстовыми карточками; озвучка и музыка пока не подключены.')
             elif action == 'asset':
                 with self.sessions() as db:
                     item = db.get(Artifact, record_id)
@@ -245,15 +240,22 @@ class TelegramContent:
                         text = '# ' + value['title'] + '\n\n' + value['body']
                     elif item.kind == 'video_script':
                         brief = value['production_brief']
-                        text = ('🎬 ' + item.title + '\n\nЗадача: ' + brief['objective']
-                                + '\n\nТекст для озвучки:\n' + brief['voiceover_or_dialogue_script']
+                        text = ('🎬 ' + item.title
+                                + '\nПлощадка: ' + brief.get('target_platform', 'short_video')
+                                + '\n\nЗадача: ' + brief['objective']
+                                + '\n\nХуки:\n• ' + '\n• '.join(brief.get('hook_variants', []))
+                                + '\n\nТекст для озвучки/диалога:\n' + brief['voiceover_or_dialogue_script']
                                 + '\n\nСцены:')
                         for shot in brief['shots']:
                             text += (f"\n\n{shot['start_second']}–{shot['end_second']} сек."
                                      + '\nНа экране: ' + (shot.get('on_screen_text') or '')
-                                     + '\nИдея кадра: ' + shot['visual_description'])
+                                     + '\nКадр: ' + shot['visual_description']
+                                     + '\nКамера/движение: ' + shot['camera_and_movement']
+                                     + '\nПереход: ' + shot['transition']
+                                     + '\nПромпт для будущей генерации: ' + shot.get('generation_prompt', ''))
+                        text += '\n\nМонтаж/сведение: ' + brief.get('editing_mix_notes', brief.get('editing_rhythm', ''))
                         text += '\n\nОбложка: ' + brief['cover_frame']
-                        text += '\n\nПервый рендер использует текстовые карточки. Снятые кадры, голос и музыка в него не входят.'
+                        text += '\n\nЭто только production-brief. AI Growth OS не генерирует и не рендерит видео.'
                     else:
                         text = ('📈 Публикация и измерение\n\nПлощадки: сайт, Дзен, TenChat, vc.ru, Telegram, Shorts, VK Клипы, Reels.'
                                 + '\nПосле проверки размести материал вручную и сохрани ссылку. Отмечай просмотры, переходы, обращения, демо/регистрации/записи и клиентов.'
