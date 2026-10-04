@@ -183,6 +183,8 @@ class VideoShot(Contract):
     on_screen_text: ShortText | None = None
     transition: ShortText
     sound_or_music_note: Text
+    generation_prompt: LongText
+    avoid_in_generation: Text | None = None
 
     @model_validator(mode='after')
     def valid_timing(self):
@@ -193,9 +195,11 @@ class VideoShot(Contract):
 
 class ShortVideoProductionBrief(Contract):
     asset_type: Literal['short_video'] = 'short_video'
+    target_platform: Literal['youtube_shorts', 'instagram_reels']
     aspect_ratio: Literal['9:16'] = '9:16'
     duration_seconds: int = Field(ge=15, le=90, strict=True)
     objective: Text
+    hook_variants: list[ShortText] = Field(min_length=2, max_length=3)
     creative_concept: Text
     visual_style: Text
     setting_and_props: Text
@@ -204,9 +208,11 @@ class ShortVideoProductionBrief(Contract):
     shots: list[VideoShot] = Field(min_length=3, max_length=20)
     subtitle_style: Text
     music_direction: Text
-    cover_frame: Text
     editing_rhythm: Text
+    editing_mix_notes: Text
+    cover_frame: Text
     cta_frame: Text
+    caption_variants: list[Text] = Field(min_length=2, max_length=4)
     export_spec: Text
     production_notes: list[Text] = Field(min_length=1, max_length=15)
 
