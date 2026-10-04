@@ -243,6 +243,16 @@ async def run_planner_once(session_factory, settings, llm=None):
                 'and evidence_refs includes owner_requirements_ref. owner_constraint timing also requires that ref. '
                 'Evidence_refs must be supplied artifact:/metric: IDs or platform_guidance IDs only. '
                 'Missing profile fields must remain unknown, company hypotheses must remain hypotheses. '
+                'HARD CALENDAR RULES: 1 <= review_after_days <= horizon_days. EVERY day_offset must be '
+                '0 <= day_offset < horizon_days; for 14 days use 0..13, NEVER 14. Each platform occurs '
+                'ONCE in channels. Every slot platform must have decision=test. Exact supported mapping: '
+                'own_site/dzen/vc_ru -> article; telegram/tenchat -> post; youtube_shorts/vk_clips/instagram_reels '
+                '-> short_video. All slots sharing package_key MUST have IDENTICAL topic text; assign another '
+                'key to another topic. A text package can appear only ONCE on the SAME platform. '
+                'For repeat video slots on the same platform use DISTINCT asset_index 0,1,2, maximum three per '
+                'topic. Do not schedule two materials at identical platform/day/hour/minute. If capacity is '
+                'unknown, propose a modest test with a few shared topics and 2-3 channels, not a filled '
+                'calendar across every network. These are resource hypotheses, not scientifically optimal quotas. '
                 'review_after_days is a proposed review, no automatic approval of changes. Write human-facing text '
                 'in natural Russian. No external actions. Schema: ' + encode(EditorialPlan.model_json_schema()))
             messages = [LLMMessage(role='user', content=encode({'now': now_utc(), **context}))]
@@ -270,7 +280,7 @@ async def run_planner_once(session_factory, settings, llm=None):
                                   for e in exc.errors(include_url=False, include_input=False)]
                     else:
                         issues = [{'field':'context', 'type':'unsupported_evidence', 'message':str(exc)}]
-                    error_code = 'schema:' + ','.join((i['field'] + ':' + i['type']) for i in issues[:8])
+                    error_code = 'schema:' + ','.join((i['field'] + ':' + i['type'] + ':' + PrivacyGateway().sanitize_text(i['message'])[:150]) for i in issues[:4])
                     if attempt:
                         raise
                     messages = [messages[0], LLMMessage(role='user', content=encode({
