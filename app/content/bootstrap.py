@@ -30,7 +30,9 @@ def main():
         product = db.scalar(select(Product).where(Product.slug == 'servgo').with_for_update())
         if product is None:
             raise LookupError('ServGo not found')
-        from app.content.calendar import queue_plan
+        from app.content.calendar import queue_plan, recover_stale_planner
+        if recover_stale_planner(db):
+            print('Interrupted editorial task recovered once; attempt history preserved')
         planner = db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == 'editorial_planner').order_by(Task.created_at).limit(1))
         if planner is None:
             planning = queue_plan(db, product.id)

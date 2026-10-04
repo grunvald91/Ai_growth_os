@@ -198,6 +198,36 @@ def validate_plan_context(plan, context):
         raise ValueError('Audience-by-hour analytics are not connected; use test_hypothesis')
 
 
+def recover_stale_planner(db, now=None):
+    """Bounded recovery after process loss; never reclaim a live bounded model call."""
+    now = now or now_utc()
+    cutoff = now - timedelta(minutes=12)  # two 300s calls plus shutdown/DB grace
+    ids = set(db.scalars(select(Task.id).join(AgentRun, AgentRun.task_id == Task.id).where(
+        Task.assigned_agent == 'editorial_planner', Task.status == TaskStatus.RUNNING,
+        AgentRun.status == 'running', AgentRun.started_at < cutoff)))
+    recovered = 0
+    for task_id in ids:
+        task = db.scalar(select(Task).where(Task.id == task_id, Task.status == TaskStatus.RUNNING)
+                         .with_for_update(skip_locked=True).execution_options(populate_existing=True))
+        if task is None:
+            continue
+        runs = list(db.scalars(select(AgentRun).where(AgentRun.task_id == task.id, AgentRun.status == 'running')))
+        if not runs or any((r.started_at.replace(tzinfo=timezone.utc) if r.started_at.tzinfo is None else r.started_at) >= cutoff for r in runs):
+            continue
+        for run in runs:
+            run.status, run.error, run.finished_at = 'failed', 'editorial_plan_interrupted:stale_run', now
+        marker = '[interrupted_planner_recovery_once]'
+        if marker not in (task.description or ''):
+            task.description = (task.description or '') + ' ' + marker
+            task.status = TaskStatus.QUEUED
+            recovered += 1
+        else:
+            task.status = TaskStatus.FAILED
+    if ids:
+        db.commit()
+    return recovered
+
+
 async def run_planner_once(session_factory, settings, llm=None):
     with session_factory() as db:
         task = db.scalar(select(Task).where(Task.assigned_agent == 'editorial_planner', Task.status == TaskStatus.QUEUED)
