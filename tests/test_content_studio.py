@@ -34,10 +34,10 @@ def client_for(db):
     return TestClient(app)
 
 
-def make_plan(task_id=None):
+def make_plan(task_id=None, approval_state="draft"):
     return {
         "generated_at": "2026-10-04T12:00:00+00:00",
-        "approval_state": "draft",
+        "approval_state": approval_state,
         "horizon_days": 14,
         "review_at": "2026-10-12T00:00:00+03:00",
         "slots": [
@@ -112,7 +112,7 @@ def test_studio_can_queue_planned_package_without_publishing(studio_db):
     db=studio_db
     product=Product(name="ServGo",slug="servgo")
     db.add(product);db.flush()
-    plan=Artifact(product_id=product.id,kind="editorial_plan",title="План",content=json.dumps(make_plan(),ensure_ascii=False))
+    plan=Artifact(product_id=product.id,kind="editorial_plan",title="План",content=json.dumps(make_plan(approval_state="active"),ensure_ascii=False))
     db.add(plan);db.commit()
     client=client_for(db)
     try:
@@ -121,5 +121,20 @@ def test_studio_can_queue_planned_package_without_publishing(studio_db):
         task=db.query(Task).filter(Task.assigned_agent=="content_factory").one()
         assert task.status==TaskStatus.QUEUED
         assert db.query(Artifact).filter(Artifact.kind=="content_request",Artifact.task_id==task.id).count()==1
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_studio_rejects_queue_from_unapproved_plan(studio_db):
+    db=studio_db
+    product=Product(name="ServGo",slug="servgo")
+    db.add(product);db.flush()
+    plan=Artifact(product_id=product.id,kind="editorial_plan",title="План",content=json.dumps(make_plan(),ensure_ascii=False))
+    db.add(plan);db.commit()
+    client=client_for(db)
+    try:
+        response=client.post(f"/studio/products/{product.id}/plans/{plan.id}/packages/pkg-1/queue",follow_redirects=False)
+        assert response.status_code==409
+        assert db.query(Task).filter(Task.assigned_agent=="content_factory").count()==0
     finally:
         app.dependency_overrides.clear()
