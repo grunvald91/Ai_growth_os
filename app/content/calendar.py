@@ -182,6 +182,22 @@ def queue_plan(db, product_id, *, commit=True):
     return task
 
 
+def validate_plan_context(plan, context):
+    refs = {r['id'] for r in context['research'] + context['observations'] + GUIDANCE}
+    owner_ref = context['owner_requirements_ref']
+    if owner_ref:
+        refs.add(owner_ref)
+    for item in [*plan.channels, *plan.slots]:
+        if set(item.evidence_refs) - refs:
+            raise ValueError('Use supplied evidence IDs only, not invented IDs or URLs')
+    if any(c.account_status == 'confirmed_by_owner' and (not owner_ref or owner_ref not in c.evidence_refs) for c in plan.channels):
+        raise ValueError('Without owner evidence the account_status must be needs_confirmation')
+    if any(s.timing_basis == 'owner_constraint' and (not owner_ref or owner_ref not in s.evidence_refs) for s in plan.slots):
+        raise ValueError('Without owner evidence the timing_basis must be test_hypothesis')
+    if any(s.timing_basis == 'measured_audience' for s in plan.slots):
+        raise ValueError('Audience-by-hour analytics are not connected; use test_hypothesis')
+
+
 async def run_planner_once(session_factory, settings, llm=None):
     with session_factory() as db:
         task = db.scalar(select(Task).where(Task.assigned_agent == 'editorial_planner', Task.status == TaskStatus.QUEUED)
@@ -246,10 +262,14 @@ async def run_planner_once(session_factory, settings, llm=None):
                 try:
                     error_code = 'schema'
                     plan = EditorialPlan.model_validate_json(PrivacyGateway().sanitize_text(response.content))
+                    validate_plan_context(plan, context)
                     break
-                except ValidationError as exc:
-                    issues = [{'field': '.'.join(map(str, e['loc'])), 'type': e['type'], 'message': e['msg']}
-                              for e in exc.errors(include_url=False, include_input=False)]
+                except (ValidationError, ValueError) as exc:
+                    if isinstance(exc, ValidationError):
+                        issues = [{'field': '.'.join(map(str, e['loc'])), 'type': e['type'], 'message': e['msg']}
+                                  for e in exc.errors(include_url=False, include_input=False)]
+                    else:
+                        issues = [{'field':'context', 'type':'unsupported_evidence', 'message':str(exc)}]
                     error_code = 'schema:' + ','.join((i['field'] + ':' + i['type']) for i in issues[:8])
                     if attempt:
                         raise
@@ -257,21 +277,7 @@ async def run_planner_once(session_factory, settings, llm=None):
                         'action': 'Repair this draft to match the schema and supplied resources exactly. Fix each validation error. Never repeat the same asset on one platform; use separate package_key for a new article/topic, share one key only for genuine cross-channel reuse. Return complete JSON only.',
                         'validation_errors': issues[:15],
                         'invalid_draft_excerpt': PrivacyGateway().sanitize_text(response.content[:35000])}))]
-            refs = {r['id'] for r in context['research'] + context['observations'] + GUIDANCE}
-            error_code = 'evidence'
             owner_ref = context['owner_requirements_ref']
-            if owner_ref:
-                refs.add(owner_ref)
-            for item in [*plan.channels, *plan.slots]:
-                if set(item.evidence_refs) - refs:
-                    raise ValueError('Unknown evidence reference')
-            if any(c.account_status == 'confirmed_by_owner' and (not owner_ref or owner_ref not in c.evidence_refs) for c in plan.channels):
-                raise ValueError('Owner account confirmation needs owner evidence')
-            if any(s.timing_basis == 'owner_constraint' and (not owner_ref or owner_ref not in s.evidence_refs) for s in plan.slots):
-                raise ValueError('Owner timing constraint needs owner evidence')
-            # Broad snapshots have no audience-by-hour evidence. Never promote a guessed hour to measured.
-            if any(s.timing_basis == 'measured_audience' for s in plan.slots):
-                raise ValueError('Audience-by-hour analytics are not connected')
             base = (now_utc().astimezone(ZoneInfo(plan.timezone)) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
             slots = []
             for i, slot in enumerate(plan.slots):
@@ -425,7 +431,7 @@ def render_calendar(plan):
     for s in sorted(plan['slots'], key=lambda s: s['publish_at']):
         publication = datetime.fromisoformat(s['publish_at']).strftime('%d.%m %H:%M')
         preparation = datetime.fromisoformat(s['prepare_at']).strftime('%d.%m %H:%M')
-        lines.append(f"• {publication} — {PLATFORMS[s['platform']][0]} / { {'article':'статья', 'post':'пост', 'short_video':'сценарий ролика 30 секунд'}[s['format']]}\n  {s['topic']}\n  Подготовить: {preparation}; {states.get(s['state'], s['state'])}\n  Цель: {s['objective']}; показатель: { {'views':'просмотры', 'clicks':'переходы', 'leads':'обращения', 'activations':'демо / записи', 'customers':'клиенты'}[s['success_metric']]}\n  Основание: {s['rationale']} ({ {'test_hypothesis':'гипотеза для проверки', 'owner_constraint':'условие владельца', 'measured_audience':'измерения аудитории'}[s['timing_basis']]})")
+        lines.append(f"• {publication} — {PLATFORMS[s['platform']][0]} / { {'article':'статья', 'post':'пост', 'short_video':'сценарий ролика 30 секунд'}[s['format']]}\n  {s['topic']}\n  Вариант: {s['asset_index'] + 1}\n  Подготовить: {preparation}; {states.get(s['state'], s['state'])}\n  Цель: {s['objective']}; показатель: { {'views':'просмотры', 'clicks':'переходы', 'leads':'обращения', 'activations':'демо / записи', 'customers':'клиенты'}[s['success_metric']]}\n  Основание: {s['rationale']} ({ {'test_hypothesis':'гипотеза для проверки', 'owner_constraint':'условие владельца', 'measured_audience':'измерения аудитории'}[s['timing_basis']]})")
         if s.get('publication_url'):
             lines.append('  Публикация сообщена владельцем: ' + s['publication_url'])
     lines += ['', 'Неизвестное:', *['• ' + x for x in plan['unknowns']],
