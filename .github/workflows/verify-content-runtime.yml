@@ -54,7 +54,6 @@ jobs:
                   value = json.loads(row.content)
                   print('Editorial calendar:', row.id, value['approval_state'], value['timezone'], 'horizon_days:', value['horizon_days'], 'review_after_days:', value['review_after_days'])
                   print('Calendar counts:', dict(Counter(s['platform'] for s in value['slots'])))
-                  print('Calendar draft start:', value['starts_at'], 'review:', value['review_at'])
                   print('Calendar packages:', len({s['package_key'] for s in value['slots']}))
                   print('Calendar unresolved questions:', len(value['unknowns']))
                   print('Calendar preparation authorized:', value['approval_state'] == 'active')
@@ -68,4 +67,4 @@ jobs:
           PY
           REMOTE
 
-# Verify explicit calendar constraints after PR 91.
+# Verify calendar evidence constraints after PR 92.
