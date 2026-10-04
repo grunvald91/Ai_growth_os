@@ -198,6 +198,33 @@ def product_dashboard(db: Session, product: Product) -> str:
         )
     packages = '<div class="panel"><h2>Контент-пакеты</h2><div class="packages">' + "".join(packages_html) + '</div></div>'
 
+    # Library is intentionally independent of the current calendar: owner-created and older
+    # content must remain discoverable even when no plan slot points at its task.
+    content_tasks = [t for t in tasks if t.assigned_agent == "content_factory"]
+    library_cards = []
+    for task in content_tasks[:30]:
+        task_assets = [
+            a for a in by_task.get(str(task.id), [])
+            if a.kind in {"article", "channel_text", "video_script", "content_distribution",
+                          "dzen_brief", "telegram_brief", "short_video_brief",
+                          "story_brief", "static_image_brief"}
+        ]
+        if not task_assets:
+            continue
+        library_cards.append(
+            '<div class="card package">'
+            f'<h3>{esc(task.title)}</h3>'
+            f'<p class="muted">Статус: {esc(task.status.value)} · задача {esc(task.id)}</p>'
+            f'<details><summary>Открыть все материалы ({len(task_assets)})</summary>'
+            + "".join(artifact_html(a) for a in task_assets)
+            + '</details></div>'
+        )
+    library = (
+        '<div class="panel"><h2>Библиотека всех материалов</h2>'
+        '<p class="muted">Здесь остаются и плановые, и вручную созданные пакеты — независимо от текущего календаря.</p>'
+        '<div class="packages">' + ("".join(library_cards) or '<p class="muted">Готовых материалов пока нет.</p>') + '</div></div>'
+    )
+
     plan_meta = ""
     if plan:
         plan_meta = (
@@ -217,6 +244,7 @@ def product_dashboard(db: Session, product: Product) -> str:
 {stats}
 <div style="height:16px"></div>{calendar}
 <div style="height:16px"></div>{packages}
+<div style="height:16px"></div>{library}
 <div style="height:20px"></div><p class="muted">Публикация и видео-генерация здесь не выполняются. Production API должен оставаться за защищённой границей.</p>
 </main></body></html>"""
 
