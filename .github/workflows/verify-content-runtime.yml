@@ -23,7 +23,7 @@ jobs:
           docker ps --filter label=com.docker.compose.project=ai-growth-os --format 'table {{.Names}}\t{{.Status}}'
           cd /opt/ai_growth_os/current
           docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
-          import json
+          import json, time
           from collections import Counter
           from sqlalchemy import select
           from app.db.session import SessionLocal
@@ -31,6 +31,13 @@ jobs:
           from app.core.config import get_settings
           from app.content.calendar import EditorialPlan
           from app.team_worker import _calendar_loop
+          for attempt in range(16):
+              with SessionLocal() as waiting_db:
+                  pending = waiting_db.scalar(select(Task).where(Task.assigned_agent == 'editorial_planner').order_by(Task.created_at.desc()).limit(1))
+                  state = pending.status.value if pending else 'missing'
+              if state not in {'queued', 'running'}:
+                  break
+              time.sleep(10)
           with SessionLocal() as db:
               product = db.scalar(select(Product).where(Product.slug == 'servgo'))
               assert product is not None
@@ -56,6 +63,6 @@ jobs:
                   if content.status.value == 'failed':
                       errors = {r.error for r in db.scalars(select(AgentRun).where(AgentRun.task_id == content.id)) if r.error}
                       print('Latest content errors:', sorted(errors))
-          print('Calendar and worker imports OK; verification after format repair')
+          print('Calendar and worker imports OK')
           PY
           REMOTE
