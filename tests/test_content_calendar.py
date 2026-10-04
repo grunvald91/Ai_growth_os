@@ -126,6 +126,18 @@ async def test_unsupported_claims_fail_without_calendar(db,tmp_path,change):
     assert db.scalar(select(Task).where(Task.assigned_agent=='editorial_planner')).status==TaskStatus.FAILED
 
 
+@pytest.mark.asyncio
+async def test_default_planner_guidance_uses_faster_five_channel_sprint(db,tmp_path):
+    p,settings=setup(db,tmp_path)
+    _,provider=await make_plan(db,settings)
+    prompt=provider.requests[0].system_prompt
+    assert 'five core package topics across 14 days' in prompt
+    assert 'own_site, dzen, telegram, youtube_shorts and instagram_reels' in prompt
+    assert 'roughly one new package every three days' in prompt
+    assert 'prospect-enrichment/outreach-only gaps' in prompt
+
+
+
 def test_latest_snapshots_keep_distinct_urls_and_do_not_sum(db,tmp_path):
     p,settings=setup(db,tmp_path)
     for url,value,days in [('one',10,1),('one',12,0),('two',5,0)]:
