@@ -54,8 +54,6 @@ jobs:
                   value = json.loads(row.content)
                   print('Editorial calendar:', row.id, value['approval_state'], value['timezone'], 'horizon_days:', value['horizon_days'], 'review_after_days:', value['review_after_days'])
                   print('Calendar counts:', dict(Counter(s['platform'] for s in value['slots'])))
-                  print('Calendar dates:', value['starts_at'], value['review_at'])
-                  print('Calendar slot outline:', [(s['platform'], s['format'], s['publish_at'], s['prepare_at'], s['topic']) for s in value['slots']])
                   print('Calendar packages:', len({s['package_key'] for s in value['slots']}))
                   print('Calendar unresolved questions:', len(value['unknowns']))
                   print('Calendar preparation authorized:', value['approval_state'] == 'active')
@@ -69,4 +67,4 @@ jobs:
           PY
           REMOTE
 
-# Observe ongoing Kimi task without queuing additional model calls.
+# Final read of current planner attempt; no task requeue or approval.
