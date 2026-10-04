@@ -1,0 +1,78 @@
+name: Diagnostic editorial plan
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/diag-editorial-plan.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Read latest production editorial plan
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ]
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/ai_growth_os/current
+          docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import json
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Artifact, Product
+
+          with SessionLocal() as db:
+              product = db.scalar(select(Product).where(Product.slug == 'servgo'))
+              row = db.scalar(
+                  select(Artifact)
+                  .where(Artifact.product_id == product.id, Artifact.kind == 'editorial_plan')
+                  .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+                  .limit(1)
+              )
+              if row is None:
+                  raise SystemExit('NO_EDITORIAL_PLAN')
+              value = json.loads(row.content)
+              result = {
+                  'artifact_id': str(row.id),
+                  'generated_at': value.get('generated_at'),
+                  'approval_state': value.get('approval_state'),
+                  'timezone': value.get('timezone'),
+                  'horizon_days': value.get('horizon_days'),
+                  'review_after_days': value.get('review_after_days'),
+                  'strategy': value.get('strategy'),
+                  'capacity_assumptions': value.get('capacity_assumptions'),
+                  'unknowns': value.get('unknowns'),
+                  'channels': value.get('channels'),
+                  'slots': [
+                      {k: s.get(k) for k in (
+                          'package_key','topic','platform','format','asset_index',
+                          'day_offset','hour','minute','prepare_lead_hours',
+                          'audience','objective','rationale','evidence_refs',
+                          'success_metric','timing_basis','publication_at',
+                          'prepare_at','status','task_id'
+                      )}
+                      for s in value.get('slots', [])
+                  ],
+              }
+              print('EDITORIAL_PLAN_JSON_START')
+              print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+              print('EDITORIAL_PLAN_JSON_END')
+          PY
+          REMOTE
