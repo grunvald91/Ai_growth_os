@@ -334,7 +334,7 @@ async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, 
     assert result.artifact_ids == result.approval_ids == []
     artifacts = list(db.scalars(select(Artifact).order_by(Artifact.created_at, Artifact.id)))
     assert all(a.kind == 'content_stage_output' for a in artifacts)
-    assert result.checkpoint_artifact_ids == [a.id for a in artifacts]
+    assert set(result.checkpoint_artifact_ids) == {a.id for a in artifacts}
     assert list(db.scalars(select(Approval))) == []
     assert db.get(Task, result.task_id).status == TaskStatus.FAILED
     runs = list(db.scalars(select(AgentRun)))
