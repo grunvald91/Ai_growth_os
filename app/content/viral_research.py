@@ -34,6 +34,7 @@ class Contract(BaseModel):
 class ViralVideoCandidate(Contract):
     source_id: str = Field(min_length=1, max_length=80)
     platform: Literal["youtube"] = "youtube"
+    discovery_mode: Literal["shorts_filter", "general_search"] = "general_search"
     url: AnyHttpUrl
     query: str = Field(min_length=1, max_length=300)
     title: str = Field(min_length=1, max_length=500)
@@ -54,10 +55,10 @@ class ViralPattern(Contract):
 
 class ViralAnalysisDraft(Contract):
     summary: str = Field(min_length=20, max_length=4000)
-    hook_patterns: list[ViralPattern] = Field(default_factory=list, max_length=10)
-    topic_patterns: list[ViralPattern] = Field(default_factory=list, max_length=10)
-    seo_topic_seeds: list[str] = Field(default_factory=list, max_length=15)
-    content_angles: list[str] = Field(default_factory=list, max_length=15)
+    hook_patterns: list[ViralPattern] = Field(min_length=1, max_length=10)
+    topic_patterns: list[ViralPattern] = Field(min_length=2, max_length=10)
+    seo_topic_seeds: list[str] = Field(min_length=3, max_length=15)
+    content_angles: list[str] = Field(min_length=3, max_length=15)
     cautions: list[str] = Field(default_factory=list, max_length=12)
 
 
@@ -65,6 +66,9 @@ class ViralVideoResearch(Contract):
     observed_at: datetime
     source_status: Literal["evidence_available", "insufficient_evidence", "source_unavailable"]
     analysis_status: Literal["completed", "not_run", "failed"]
+    research_quality: Literal["strong_short_form", "mixed_short_form", "adjacent_long_form", "insufficient"]
+    short_form_candidates: int = Field(default=0, ge=0)
+    long_form_candidates: int = Field(default=0, ge=0)
     niche: str = Field(min_length=1, max_length=500)
     search_queries: list[str] = Field(min_length=1, max_length=8)
     virality_basis: str = Field(min_length=10, max_length=1200)
@@ -137,7 +141,7 @@ def _extract_json_object(text: str, markers: tuple[str, ...]) -> dict | None:
 
 def _walk_renderers(value):
     if isinstance(value, dict):
-        for key in ("videoRenderer", "reelItemRenderer"):
+        for key in ("videoRenderer", "reelItemRenderer", "shortsLockupViewModel"):
             renderer = value.get(key)
             if isinstance(renderer, dict):
                 yield key, renderer
@@ -186,33 +190,52 @@ def _duration_seconds(text: str | None) -> int | None:
     return seconds
 
 
-def parse_youtube_search_page(page: str, query: str) -> list[ViralVideoCandidate]:
+def parse_youtube_search_page(
+    page: str,
+    query: str,
+    *,
+    discovery_mode: Literal["shorts_filter", "general_search"] = "general_search",
+) -> list[ViralVideoCandidate]:
     data = _extract_json_object(page, ("var ytInitialData =", "ytInitialData =", "window[\"ytInitialData\"] ="))
     if not data:
         return []
     rows: list[ViralVideoCandidate] = []
     seen: set[str] = set()
     for kind, renderer in _walk_renderers(data):
-        video_id = renderer.get("videoId")
+        if kind == "shortsLockupViewModel":
+            video_id = ((((renderer.get("onTap") or {}).get("innertubeCommand") or {})
+                         .get("reelWatchEndpoint") or {}).get("videoId"))
+            overlay = renderer.get("overlayMetadata") or {}
+            title = _compact_text(overlay.get("primaryText"))
+            views_text = _compact_text(overlay.get("secondaryText")) or None
+            duration_text = None
+            channel = None
+            published_text = None
+            is_short = True
+        else:
+            video_id = renderer.get("videoId")
+            title = _compact_text(renderer.get("title") or renderer.get("headline"))
+            views_text = _compact_text(renderer.get("shortViewCountText") or renderer.get("viewCountText")) or None
+            duration_text = _compact_text(renderer.get("lengthText")) or None
+            seconds = _duration_seconds(duration_text)
+            is_short = kind == "reelItemRenderer" or (seconds is not None and seconds <= 60)
+            channel = _compact_text(renderer.get("ownerText") or renderer.get("shortBylineText")) or None
+            published_text = _compact_text(renderer.get("publishedTimeText")) or None
         if not isinstance(video_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{6,20}", video_id) or video_id in seen:
             continue
-        title = _compact_text(renderer.get("title") or renderer.get("headline"))
         if not title:
             continue
         seen.add(video_id)
-        views_text = _compact_text(renderer.get("shortViewCountText") or renderer.get("viewCountText")) or None
-        duration_text = _compact_text(renderer.get("lengthText")) or None
-        seconds = _duration_seconds(duration_text)
-        is_short = kind == "reelItemRenderer" or (seconds is not None and seconds <= 60)
         rows.append(ViralVideoCandidate(
             source_id="yt:" + video_id,
+            discovery_mode=discovery_mode,
             url=f"https://www.youtube.com/{'shorts/' if is_short else 'watch?v='}{video_id}",
             query=query,
             title=title,
-            channel=_compact_text(renderer.get("ownerText") or renderer.get("shortBylineText")) or None,
+            channel=channel,
             view_count=parse_view_count(views_text),
             view_count_text=views_text,
-            published_text=_compact_text(renderer.get("publishedTimeText")) or None,
+            published_text=published_text,
             duration_text=duration_text,
             is_short=is_short,
         ))
@@ -225,15 +248,15 @@ def _profile_terms(context: dict) -> tuple[str, list[str]]:
     offer = company.get("offer") or {}
     customers = company.get("customers") or {}
     terms: list[str] = []
-    # Use several independent descriptions of the niche instead of locking research
-    # to the product's own SaaS/category label. For a platform such as ServGo this
-    # lets us sample the concrete customer niches as well.
-    for value in [
-        identity.get("category"), offer.get("category"), identity.get("industry"),
-    ]:
+    # Viral research should start with the customer's concrete operating niche,
+    # not the software vendor's own category. Product/category labels are useful
+    # only as secondary context.
+    for value in customers.get("primary_segments") or []:
         if isinstance(value, str) and value.strip():
             terms.append(value.strip())
-    for value in customers.get("primary_segments") or []:
+    for value in [
+        offer.get("category"), identity.get("industry"), identity.get("category"),
+    ]:
         if isinstance(value, str) and value.strip():
             terms.append(value.strip())
     for item in offer.get("products_services") or []:
@@ -248,29 +271,35 @@ def _profile_terms(context: dict) -> tuple[str, list[str]]:
         if key not in seen:
             seen.add(key)
             deduped.append(term)
-    niche = deduped[0] if deduped else ((company.get("identity") or {}).get("name") or "business")
+    specific_markers = ("салон", "студи", "барбер", "прокат", "клиник", "мастерск", "школ", "центр")
+    business_markers = ("владел", "управ", "бизнес", "предприним")
+    niche = next((term for term in deduped if any(marker in term.casefold() for marker in specific_markers)), None)
+    if niche is None:
+        niche = next((term for term in deduped if any(marker in term.casefold() for marker in business_markers)), None)
+    niche = niche or (deduped[0] if deduped else ((company.get("identity") or {}).get("name") or "business"))
     return niche[:500], deduped[:4] or [niche]
 
 
 def build_search_queries(context: dict, limit: int = 4) -> tuple[str, list[str]]:
     niche, terms = _profile_terms(context)
-    queries: list[str] = []
-    templates = (
-        "{term} ошибки shorts",
-        "{term} клиенты shorts",
-        "{term} запись клиентов shorts",
-        "{term} привлечение клиентов shorts",
+    themes = (
+        "ошибки",
+        "как увеличить запись клиентов",
+        "почему клиенты не записываются",
+        "автоматизация записи",
+        "как привлечь клиентов",
+        "онлайн запись",
     )
-    # Breadth first: sample several concrete niche descriptions before spending
-    # all query budget on wording variations of the first one.
-    for template in templates:
-        for term in terms:
-            query = template.format(term=term)
-            if query.casefold() not in {q.casefold() for q in queries}:
-                queries.append(query)
-            if len(queries) >= limit:
-                return niche, queries
-    return niche, queries[:limit]
+    queries: list[str] = []
+    for index in range(max(limit * 2, len(terms))):
+        term = terms[index % len(terms)]
+        theme = themes[index % len(themes)]
+        query = f"{term} {theme}"
+        if query.casefold() not in {q.casefold() for q in queries}:
+            queries.append(query)
+        if len(queries) >= limit:
+            break
+    return niche, queries
 
 
 class YouTubePublicScout:
@@ -283,22 +312,59 @@ class YouTubePublicScout:
             "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.7",
         }
         found: dict[str, ViralVideoCandidate] = {}
+
+        def keep(candidate: ViralVideoCandidate) -> None:
+            current = found.get(candidate.source_id)
+            score = (candidate.is_short, candidate.view_count is not None, candidate.view_count or -1)
+            current_score = (
+                (current.is_short, current.view_count is not None, current.view_count or -1)
+                if current is not None else (False, False, -1)
+            )
+            if current is None or score > current_score:
+                found[candidate.source_id] = candidate
+
         async with httpx.AsyncClient(timeout=self.timeout_seconds, follow_redirects=True, headers=headers) as client:
+            # YouTube introduced a dedicated Shorts type filter in 2026. Use the
+            # public filter first so a query containing the word "shorts" cannot
+            # silently degrade into a page of old long-form videos.
             for query in queries:
                 try:
                     response = await client.get("https://www.youtube.com/results", params={
-                        "search_query": query, "hl": "ru", "gl": "RU",
+                        "search_query": query, "sp": "EgIQCQ==", "hl": "ru", "gl": "RU",
                     })
                     response.raise_for_status()
                 except httpx.HTTPError:
                     continue
-                for candidate in parse_youtube_search_page(response.text, query):
-                    current = found.get(candidate.source_id)
-                    if current is None or (candidate.view_count or -1) > (current.view_count or -1):
-                        found[candidate.source_id] = candidate
+                for candidate in parse_youtube_search_page(
+                    response.text, query, discovery_mode="shorts_filter"
+                ):
+                    if candidate.is_short:
+                        keep(candidate)
+
+            # Long-form results are an adjacent evidence layer for SEO themes,
+            # never a substitute that is mislabeled as short-form virality.
+            if len(found) < max(3, min(max_candidates, 8)):
+                for query in queries:
+                    try:
+                        response = await client.get("https://www.youtube.com/results", params={
+                            "search_query": query, "hl": "ru", "gl": "RU",
+                        })
+                        response.raise_for_status()
+                    except httpx.HTTPError:
+                        continue
+                    for candidate in parse_youtube_search_page(
+                        response.text, query, discovery_mode="general_search"
+                    ):
+                        keep(candidate)
+
         ranked = sorted(
             found.values(),
-            key=lambda item: (item.is_short, item.view_count is not None, item.view_count or -1),
+            key=lambda item: (
+                item.is_short,
+                item.discovery_mode == "shorts_filter",
+                item.view_count is not None,
+                item.view_count or -1,
+            ),
             reverse=True,
         )[:max_candidates]
         if not ranked:
@@ -360,10 +426,16 @@ def _analysis_prompt() -> str:
         "Return ONLY JSON matching the schema. The goal is to identify reusable audience pains, "
         "topic patterns, opening-hook mechanics and content angles for an editorial/SEO plan. "
         "A high public view count is a reach signal, NOT proof of buyer demand, conversion, product-market fit "
-        "or causation. Never invent video content that is absent from title/transcript_excerpt. "
+        "or causation. Prefer actual Shorts discovered through the Shorts filter when extracting short-form hook "
+        "mechanics; long-form videos are adjacent SEO/topic evidence only. Never call an old long-form video a current "
+        "viral Short. Never invent video content, audience pain, business loss, regulation, feature, or outcome that "
+        "is absent from title/transcript_excerpt. "
         "Every pattern must cite exact source_ids from the supplied candidates. Do not copy creators' wording "
         "or scripts; abstract the mechanism and propose original topic seeds. Write in natural Russian. "
-        "SEO topic seeds should be useful search/content themes, not fabricated keyword-volume claims. "
+        "Return at least one grounded hook pattern, two grounded topic patterns, three original SEO topic seeds "
+        "and three original content angles. Proposed seeds/angles may creatively adapt the observed mechanism, but "
+        "must be clearly proposals rather than claims about what a source video proved. SEO topic seeds should be "
+        "useful search/content themes, not fabricated keyword-volume claims. "
         "Schema: " + json.dumps(ViralAnalysisDraft.model_json_schema(), ensure_ascii=False)
     )
 
@@ -407,12 +479,26 @@ async def run_viral_video_research(
         candidates = await collector.collect(queries, max_candidates=int(settings.viral_research_max_candidates))
         candidates = [ViralVideoCandidate.model_validate_json(privacy.sanitize_text(c.model_dump_json())) for c in candidates]
         with_views = [c for c in candidates if c.view_count is not None]
+        short_with_views = [c for c in with_views if c.is_short]
+        long_with_views = [c for c in with_views if not c.is_short]
+        if len(short_with_views) >= 3:
+            research_quality = "strong_short_form"
+        elif short_with_views:
+            research_quality = "mixed_short_form"
+        elif len(long_with_views) >= 3:
+            research_quality = "adjacent_long_form"
+        else:
+            research_quality = "insufficient"
         if candidates:
             source_status = "evidence_available" if len(with_views) >= 3 else "insufficient_evidence"
             payload = {
                 "niche": niche,
                 "queries": queries,
-                "virality_basis": "public YouTube search discovery + public view counts; creator-baseline normalization is unavailable",
+                "research_quality": research_quality,
+                "virality_basis": (
+                    "public YouTube Shorts-filter/general-search discovery + public view counts; "
+                    "creator-baseline normalization is unavailable"
+                ),
                 "candidates": [c.model_dump(mode="json") for c in candidates],
             }
             try:
@@ -437,6 +523,9 @@ async def run_viral_video_research(
                 analysis_status = "failed"
                 cautions.append("Автоматический разбор собранных роликов не завершился; планировщик видит только проверяемые исходные ролики.")
         else:
+            research_quality = "insufficient"
+            short_with_views = []
+            long_with_views = []
             source_status = "source_unavailable"
             cautions.append("Публичный поиск YouTube не вернул проверяемых роликов; темы нельзя выдавать за основанные на вирусных примерах.")
 
@@ -444,10 +533,14 @@ async def run_viral_video_research(
             observed_at=datetime.now(timezone.utc),
             source_status=source_status,
             analysis_status=analysis_status,
+            research_quality=research_quality,
+            short_form_candidates=len(short_with_views),
+            long_form_candidates=len(long_with_views),
             niche=niche,
             search_queries=queries,
             virality_basis=(
-                "Кандидаты ранжируются по публично отображаемым просмотрам в выдаче YouTube. "
+                "Сначала используется публичный фильтр YouTube Shorts, затем при нехватке данных добавляется "
+                "отдельный слой long-form результатов. Внутри слоя кандидаты ранжируются по публичным просмотрам. "
                 "Это не нормализованный коэффициент вирусности относительно аудитории автора."
             ),
             candidates=candidates,
@@ -509,6 +602,9 @@ async def run_viral_video_research(
             observed_at=datetime.now(timezone.utc),
             source_status="source_unavailable",
             analysis_status="failed",
+            research_quality="insufficient",
+            short_form_candidates=0,
+            long_form_candidates=0,
             niche=niche,
             search_queries=queries,
             virality_basis="No verified reach sample was available.",
