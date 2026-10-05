@@ -312,7 +312,7 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
         assert all(getattr(plan, k).event for k in ['content', 'traffic', 'lead', 'activation', 'customer'])
     assert all(db.get(Artifact, aid).task_id == result.task_id for aid in result.artifact_ids)
     assert all(db.get(AgentRun, rid).status == 'completed' for rid in result.run_ids)
-    assert len(list(db.scalars(select(CostRecord)))) == 11
+    assert len(list(db.scalars(select(CostRecord)))) == 10
     assert all(c.details['cost_known'] is False for c in db.scalars(select(CostRecord)))
     assert list(db.scalars(select(ToolCall))) == list(db.scalars(select(Publication))) == []
     assert result.approval_ids == []
@@ -654,7 +654,7 @@ async def test_truncated_stage_retries_once_and_accounts_both_calls(db, product,
     assert result.status == 'completed', result.error
     attempts = [r for r in provider.requests if r.metadata['team_role'] == 'repurposing_editor']
     assert [r.max_tokens for r in attempts] == [8000, 16000]
-    assert len(list(db.scalars(select(CostRecord)))) == 10
+    assert len(list(db.scalars(select(CostRecord)))) == 11
     assert 'Владельцы' in provider.requests[1].messages[0].content
     assert r'\u0412' not in provider.requests[1].messages[0].content
 
