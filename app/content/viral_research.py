@@ -224,9 +224,11 @@ def _profile_terms(context: dict) -> tuple[str, list[str]]:
     offer = company.get("offer") or {}
     customers = company.get("customers") or {}
     terms: list[str] = []
+    # Use several independent descriptions of the niche instead of locking research
+    # to the product's own SaaS/category label. For a platform such as ServGo this
+    # lets us sample the concrete customer niches as well.
     for value in [
-        identity.get("category"), identity.get("industry"),
-        offer.get("category"), customers.get("ideal_customer"),
+        identity.get("category"), offer.get("category"), identity.get("industry"),
     ]:
         if isinstance(value, str) and value.strip():
             terms.append(value.strip())
@@ -236,6 +238,8 @@ def _profile_terms(context: dict) -> tuple[str, list[str]]:
     for item in offer.get("products_services") or []:
         if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"].strip():
             terms.append(item["name"].strip())
+    if isinstance(customers.get("ideal_customer"), str) and customers["ideal_customer"].strip():
+        terms.append(customers["ideal_customer"].strip())
     deduped = []
     seen = set()
     for term in terms:
@@ -251,13 +255,15 @@ def build_search_queries(context: dict, limit: int = 4) -> tuple[str, list[str]]
     niche, terms = _profile_terms(context)
     queries: list[str] = []
     templates = (
-        "{term} shorts",
-        "{term} ошибки клиентов shorts",
-        "{term} как привлечь клиентов shorts",
-        "{term} автоматизация записи shorts",
+        "{term} ошибки shorts",
+        "{term} клиенты shorts",
+        "{term} запись клиентов shorts",
+        "{term} привлечение клиентов shorts",
     )
-    for term in terms:
-        for template in templates:
+    # Breadth first: sample several concrete niche descriptions before spending
+    # all query budget on wording variations of the first one.
+    for template in templates:
+        for term in terms:
             query = template.format(term=term)
             if query.casefold() not in {q.casefold() for q in queries}:
                 queries.append(query)
