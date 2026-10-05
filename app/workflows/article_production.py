@@ -5,13 +5,13 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
-from app.models.domain import AgentRun, CostRecord, Decision, Experiment, Product, Task, TaskStatus
+from app.models.domain import AgentRun, Artifact, CostRecord, Decision, Experiment, Product, Task, TaskStatus
 from app.policies import PolicyEvaluator
 from app.privacy import PrivacyGateway
 from app.services.approvals import ApprovalService
@@ -182,10 +182,45 @@ class ArticleProduction:
             # No arbitrary dynamic record contents or unrelated customer data enter this workflow.
             stable = self.privacy.sanitize_text(context['stable_context'])
             facts = product_facts(stable)
-            marketing_research = [
-                row for row in context['records'].get('artifact', [])
-                if row.get('kind') in {'viral_content_research', 'viral_video_research', 'research_report', 'editorial_plan'}
-            ][:4]
+            research_rows = list(self.db.scalars(
+                select(Artifact).where(
+                    Artifact.product_id == product.id,
+                    Artifact.kind.in_(['viral_content_research', 'viral_video_research', 'research_report', 'editorial_plan']),
+                ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(4)
+            ))
+            marketing_research = []
+            for row in research_rows:
+                if row.kind == 'viral_content_research':
+                    try:
+                        raw = json.loads(row.content)
+                        compact = {
+                            'source_status': raw.get('source_status'),
+                            'analysis_status': raw.get('analysis_status'),
+                            'research_quality': raw.get('research_quality'),
+                            'niche': raw.get('niche'),
+                            'summary': raw.get('summary'),
+                            'audience_pains': (raw.get('audience_pains') or [])[:6],
+                            'hook_patterns': (raw.get('hook_patterns') or [])[:5],
+                            'topic_patterns': (raw.get('topic_patterns') or [])[:5],
+                            'article_patterns': (raw.get('article_patterns') or [])[:4],
+                            'seo_topic_seeds': (raw.get('seo_topic_seeds') or [])[:8],
+                            'content_angles': (raw.get('content_angles') or [])[:8],
+                            'white_space_angles': (raw.get('white_space_angles') or [])[:5],
+                            'humor_angles': (raw.get('humor_angles') or [])[:5],
+                            'counterexamples': (raw.get('counterexamples') or [])[:4],
+                            'cautions': (raw.get('cautions') or [])[:5],
+                        }
+                        content = json.dumps(compact, ensure_ascii=False)[:12000]
+                    except (TypeError, json.JSONDecodeError):
+                        content = row.content[:3000]
+                else:
+                    content = row.content[:3000]
+                marketing_research.append({
+                    'id': str(row.id),
+                    'kind': row.kind,
+                    'title': row.title,
+                    'content': self.privacy.sanitize_text(content),
+                })
             inputs = {'request': safe_request.model_dump(mode='json'), 'product_context': stable,
                       'channel_profile': CHANNEL_PROFILES[request.channel],
                       'derivative_profiles': {key: value for key, value in CHANNEL_PROFILES.items() if key != 'own_site'},
