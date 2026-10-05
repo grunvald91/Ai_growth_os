@@ -40,7 +40,8 @@ class Borrow:
 
 def setup(db, tmp_path):
     p=Product(name='ServGo',slug='servgo');db.add(p);db.commit()
-    settings=Settings(products_root=tmp_path, llm_provider='xai', llm_model='kimi-2.7')
+    settings=Settings(products_root=tmp_path, llm_provider='xai', llm_model='kimi-2.7',
+                      viral_research_mode='disabled')
     queue_plan(db,p.id)
     return p,settings
 
