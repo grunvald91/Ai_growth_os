@@ -99,10 +99,13 @@ def test_servgo_parses_and_keeps_unknowns_unready():
     assert result.validation_errors == () and result.profile is not None
     profile = result.profile
     assert profile.identity.name == "ServGo"
-    assert len(profile.hypotheses) == 4
-    assert len(profile.proof.approved_numbers) == 3
-    assert profile.customers.primary_segments == []
-    assert all(not gate["ready"] for gate in evaluate_readiness(profile).values())
+    assert len(profile.hypotheses) == 5
+    assert profile.proof.approved_numbers == []
+    assert profile.customers.primary_segments
+    readiness = evaluate_readiness(profile)
+    assert readiness["measurement"]["ready"] is True
+    assert readiness["strategy"]["ready"] is False
+    assert readiness["content"]["ready"] is False
 
 
 @pytest.mark.parametrize("source", ["json", "invalid", "missing", "legacy"])

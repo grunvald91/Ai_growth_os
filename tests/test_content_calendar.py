@@ -40,7 +40,8 @@ class Borrow:
 
 def setup(db, tmp_path):
     p=Product(name='ServGo',slug='servgo');db.add(p);db.commit()
-    settings=Settings(products_root=tmp_path, llm_provider='xai', llm_model='kimi-2.7')
+    settings=Settings(products_root=tmp_path, llm_provider='xai', llm_model='kimi-2.7',
+                      viral_research_mode='disabled')
     queue_plan(db,p.id)
     return p,settings
 
@@ -52,6 +53,53 @@ async def make_plan(db, settings, data=None):
     task=db.scalar(select(Task).where(Task.assigned_agent=='editorial_planner',Task.status==TaskStatus.QUEUED))
     assert await run_planner_once(lambda:Borrow(db),settings,llm)==1
     return db.scalar(select(Artifact).where(Artifact.kind=='editorial_plan',Artifact.task_id==task.id)),provider
+
+
+@pytest.mark.asyncio
+async def test_viral_research_runs_before_editorial_planner_and_enters_evidence(db,tmp_path,monkeypatch):
+    p,settings=setup(db,tmp_path)
+    settings.viral_research_mode='youtube_public'
+    events=[]
+
+    async def fake_viral_research(*, db, settings, llm, task, context):
+        events.append('viral')
+        row=Artifact(
+            product_id=task.product_id,
+            task_id=task.id,
+            kind='viral_video_research',
+            title='Viral video research before editorial plan',
+            content=json.dumps({
+                'source_status':'evidence_available',
+                'analysis_status':'completed',
+                'summary':'Повторяется боль долгой переписки до записи.',
+                'hook_patterns':[{'pattern':'Сколько сообщений до записи?', 'source_ids':['yt:demo']}],
+                'seo_topic_seeds':['как сократить переписку при записи'],
+            },ensure_ascii=False),
+        )
+        db.add(row);db.commit();db.refresh(row)
+        return row
+
+    monkeypatch.setattr('app.content.calendar.run_viral_video_research', fake_viral_research)
+
+    class Provider:
+        def __init__(self): self.requests=[]
+        async def generate(self,request):
+            events.append('planner')
+            self.requests.append(request)
+            return LLMResponse(content=json.dumps(draft(),ensure_ascii=False),model='kimi-2.7',
+                               usage=LLMUsage(input_tokens=12,output_tokens=34))
+
+    provider=Provider()
+    llm=LLMService(privacy_gateway=PrivacyGateway(),provider=provider)
+    assert await run_planner_once(lambda:Borrow(db),settings,llm)==1
+
+    assert events[:2]==['viral','planner']
+    payload=json.loads(provider.requests[0].messages[0].content)
+    research=[item for item in payload['research'] if item['kind']=='viral_video_research']
+    assert research and 'долгой переписки' in research[0]['bounded_excerpt']
+    plan=db.scalar(select(Artifact).where(Artifact.kind=='editorial_plan'))
+    stored=json.loads(plan.content)
+    assert any(source.get('kind')=='viral_video_research' for source in stored['sources'])
 
 
 @pytest.mark.asyncio
@@ -228,13 +276,13 @@ def test_interrupted_planner_recovers_once_and_preserves_fresh_calls(db,tmp_path
                  status='running',started_at=now-timedelta(minutes=5))
     db.add(run);db.commit()
     assert recover_stale_planner(db,now)==0 and task.status==TaskStatus.RUNNING
-    run.started_at=now-timedelta(minutes=13);db.commit()
+    run.started_at=now-timedelta(minutes=21);db.commit()
     assert recover_stale_planner(db,now)==1 and task.status==TaskStatus.QUEUED
     assert run.status=='failed' and run.error=='editorial_plan_interrupted:stale_run'
     assert recover_stale_planner(db,now)==0
     task.status=TaskStatus.RUNNING
     second=AgentRun(task_id=task.id,agent_name='editorial_planner',provider='xai',model='kimi-2.7',
-                    status='running',started_at=now-timedelta(minutes=13))
+                    status='running',started_at=now-timedelta(minutes=21))
     db.add(second);db.commit()
     assert recover_stale_planner(db,now)==0 and task.status==TaskStatus.FAILED
     assert second.status=='failed' and db.get(AgentRun,run.id).error=='editorial_plan_interrupted:stale_run'

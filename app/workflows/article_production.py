@@ -179,10 +179,15 @@ class ArticleProduction:
             # No arbitrary dynamic record contents or unrelated customer data enter this workflow.
             stable = self.privacy.sanitize_text(context['stable_context'])
             facts = product_facts(stable)
+            marketing_research = [
+                row for row in context['records'].get('artifact', [])
+                if row.get('kind') in {'viral_video_research', 'research_report', 'editorial_plan'}
+            ][:4]
             inputs = {'request': safe_request.model_dump(mode='json'), 'product_context': stable,
                       'channel_profile': CHANNEL_PROFILES[request.channel],
                       'derivative_profiles': {key: value for key, value in CHANNEL_PROFILES.items() if key != 'own_site'},
-                      'verified_product_facts': facts, 'prior_stage_outputs': {}}
+                      'verified_product_facts': facts, 'marketing_research': marketing_research,
+                      'prior_stage_outputs': {}}
             if decision:
                 inputs['decision'] = {'id': str(decision.id), 'type': decision.decision_type.value,
                                       'rationale': self.privacy.sanitize_text(decision.rationale)}
@@ -223,7 +228,23 @@ class ArticleProduction:
                     if key in allowed_prior
                 }
                 stage_rule = ''
-                if name == 'article_writer':
+                if name == 'content_strategist':
+                    stage_rule = (
+                        ' Build the content hypothesis around a recognizable reader pain, the cost/friction of the '
+                        'current workflow, and a concrete useful outcome the reader can pursue. When marketing_research '
+                        'contains viral_video_research, use its grounded topic/hook patterns as creative demand signals '
+                        'without copying wording and without treating views as buyer demand. The brief must create a '
+                        'clear bridge from the reader problem to verified ServGo relevance.'
+                    )
+                elif name == 'seo_editor':
+                    stage_rule = (
+                        ' Create a search/content plan that is commercially useful as well as helpful. Use supplied '
+                        'viral-video topic patterns to sharpen angles and hooks when available, but never invent search '
+                        'volume or rankings. Prefer specific problem-led titles over generic educational wording. '
+                        'A title may be declarative and strong when it describes a real problem, a process explained '
+                        'by the article, or an achievable reader benefit; it does not have to be a question.'
+                    )
+                elif name == 'article_writer':
                     stage_rule = (
                         ' Include >=2000 body characters across >=4 sections. Output only advice or hypothesis '
                         'sections. Do not output factual sections, claim IDs or grounded claims; verified ServGo '
@@ -236,16 +257,29 @@ class ArticleProduction:
                     )
                 elif name == 'human_editor':
                     stage_rule = (
-                        ' Rewrite the safe article into a polished human-facing article for an actual reader. '
-                        'Make it complete, engaging, clear and useful, with a strong lead, natural transitions, '
-                        'specific examples framed as examples, and a satisfying closing. Do not expose internal '
+                        ' Rewrite the safe article into a polished human-facing article for an actual reader AND '
+                        'make it commercially useful. Open with a recognizable pain or costly friction in the first '
+                        'two sentences; make the stakes concrete; show a before/after contrast in workflow; explain '
+                        'the useful mechanism; connect the reader problem naturally to verified ServGo capabilities; '
+                        'and end with one clear next step. Use confident, concrete Russian, not corporate filler. '
+                        'Do not weaken every paragraph with defensive disclaimers. Mention uncertainty only where it '
+                        'materially changes the reader decision. Make it complete, engaging, clear and useful, with '
+                        'natural transitions, specific examples framed as examples, and a satisfying closing. Do not expose internal '
                         'research labels, uncertainty bookkeeping, schemas, proof-gap notes or agent language. '
                         'Do not invent testimonials, metrics, prices, integrations, competitor superiority or '
                         'product capabilities. Product facts may appear ONLY through fact_renderings, exactly one '
                         'rendering per supplied verified_product_facts source_id. Each rendering must be a faithful '
                         'translation or reader-friendly restatement of that one source fact and must not add detail. '
                         'The ordinary sections must focus on reader explanation, advice, questions and carefully '
-                        'worded hypotheses; they must not introduce new ServGo feature claims. '
+                        'worded hypotheses; they must not introduce new ServGo feature claims. Strong declarative '
+                        'problem statements and benefits-to-pursue are allowed; guaranteed business outcomes are not. '
+                    )
+                elif name == 'platform_writer':
+                    stage_rule = (
+                        ' Make each adaptation publishable and persuasive, not merely safe. Lead with a platform-fit '
+                        'pain/hook, deliver one useful insight quickly, connect it to the verified product mechanism, '
+                        'and use one concrete CTA. Do not repeat internal caveats such as “this is only a hypothesis” '
+                        'unless uncertainty is genuinely necessary for the reader. Do not invent proof or outcomes.'
                     )
                 elif name == 'repurposing_editor':
                     stage_rule = (
@@ -301,10 +335,13 @@ class ArticleProduction:
                     'stories, testimonials, prices, integrations, outcomes or product features. '
                     'Only verified_product_facts can support factual sections: copy the exact quote and source_id; '
                     'claim equals quote; fact section body equals quote and claim_ids contains that source_id. '
-                    'All other article sections are clearly labeled advice or hypotheses and must not assert '
-                    'product capabilities or results. Titles/hooks/CTAs must be questions or proposals, not '
-                    'unsupported factual promises. Missing evidence belongs in proof_needed_notes, not copy. '
-                    'Links are proposed local paths requiring verification. '
+                    'All other article sections must not assert unverified product capabilities or achieved results. '
+                    'Reader-facing copy must NOT expose internal labels such as “hypothesis” merely to be safe. '
+                    'Titles, hooks and CTAs may be strong declarative statements when they describe a supported reader '
+                    'problem, the process being explained, or a benefit the reader can pursue. They must never promise '
+                    'guaranteed growth, revenue, conversion, rankings or other unsupported outcomes. Prefer concrete '
+                    'pain -> mechanism -> value -> next-step writing over cautious abstract wording. Missing evidence '
+                    'belongs in proof_needed_notes, not repetitive disclaimers. Links are proposed local paths requiring verification. '
                     'Measure content -> traffic -> lead -> demo/registration/booking -> customer; targets are '
                     'hypotheses, never achieved results. If no observation window is supplied in context, set '
                     'review_window_days to null and never invent a window. '

@@ -571,6 +571,34 @@ def test_article_api_defaults_to_russian():
 
 
 @pytest.mark.asyncio
+async def test_editor_prompts_are_commercially_useful_without_weakening_grounding(db, product, tmp_path):
+    db.add(Artifact(
+        product_id=product.id,
+        kind='viral_video_research',
+        title='Viral research',
+        content=json.dumps({
+            'source_status': 'evidence_available',
+            'summary': 'Повторяется боль длинной переписки до записи.',
+            'seo_topic_seeds': ['как сократить переписку при записи'],
+        }, ensure_ascii=False),
+    ))
+    db.commit()
+    workflow, provider, request = setup(db, product, tmp_path)
+
+    result = await workflow.run(request)
+
+    assert result.status == 'completed', result.error
+    by_role = {r.metadata['team_role']: r for r in provider.requests}
+    assert 'recognizable reader pain' in by_role['content_strategist'].system_prompt
+    assert 'commercially useful' in by_role['seo_editor'].system_prompt
+    assert 'commercially useful' in by_role['human_editor'].system_prompt
+    assert 'defensive disclaimers' in by_role['human_editor'].system_prompt
+    assert 'Titles/hooks/CTAs must be questions or proposals' not in by_role['human_editor'].system_prompt
+    first_payload = json.loads(by_role['content_strategist'].messages[0].content)
+    assert any(item['kind'] == 'viral_video_research' for item in first_payload['marketing_research'])
+
+
+@pytest.mark.asyncio
 async def test_human_editor_requires_all_verified_fact_sources(db, product, tmp_path):
     path = tmp_path / 'servgo' / '.claude'
     path.mkdir(parents=True)

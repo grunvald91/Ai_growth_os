@@ -42,6 +42,7 @@ class AgentRole(StrEnum):
     CHANNEL_RESEARCHER = "channel_researcher"
     PROBLEM_RESEARCHER = "problem_researcher"
     COMPETITOR_VOC_RESEARCHER = "competitor_voc_researcher"
+    VIRAL_VIDEO_RESEARCHER = "viral_video_researcher"
 
 
 class AgentConfig(BaseModel):
@@ -178,6 +179,14 @@ AGENT_CONFIGS = MappingProxyType({
     AgentRole.COMPETITOR_VOC_RESEARCHER: AgentConfig(
         role=AgentRole.COMPETITOR_VOC_RESEARCHER,
         responsibilities=("Analyze only supplied competitor-review evidence and preserve source-level traceability.",),
+        allowed_operations=frozenset({ToolOperation.RESEARCH}),
+    ),
+    AgentRole.VIRAL_VIDEO_RESEARCHER: AgentConfig(
+        role=AgentRole.VIRAL_VIDEO_RESEARCHER,
+        responsibilities=(
+            "Inspect public high-reach video evidence in the business niche before editorial planning.",
+            "Extract reusable hooks, pains and topic patterns without treating views as proof of buyer demand.",
+        ),
         allowed_operations=frozenset({ToolOperation.RESEARCH}),
     ),
 })

@@ -14,6 +14,7 @@ from sqlalchemy import select, update
 
 from app.company_profile import load_company_profile, profile_snapshot
 from app.content.service import queue_content
+from app.content.viral_research import run_viral_video_research
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, CostRecord, Metric, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
@@ -129,7 +130,7 @@ def planning_context(db, settings, product_id):
     preference = db.scalar(select(Artifact).where(Artifact.product_id == product_id,
         Artifact.kind == 'editorial_preferences').order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
     reports = list(db.scalars(select(Artifact).where(Artifact.product_id == product_id,
-        Artifact.kind.in_(['research_report', 'research_source_bundle', 'measurement_spec']))
+        Artifact.kind.in_(['viral_video_research', 'research_report', 'research_source_bundle', 'measurement_spec']))
         .order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(6)))
     observations, keys = [], set()
     for metric in db.scalars(select(Metric).where(Metric.product_id == product_id, Metric.name.like('content_%'))
@@ -201,7 +202,7 @@ def validate_plan_context(plan, context):
 def recover_stale_planner(db, now=None):
     """Bounded recovery after process loss; never reclaim a live bounded model call."""
     now = now or now_utc()
-    cutoff = now - timedelta(minutes=12)  # two 300s calls plus shutdown/DB grace
+    cutoff = now - timedelta(minutes=20)  # viral research + bounded planner retries + shutdown/DB grace
     ids = set(db.scalars(select(Task.id).join(AgentRun, AgentRun.task_id == Task.id).where(
         Task.assigned_agent == 'editorial_planner', Task.status == TaskStatus.RUNNING,
         AgentRun.status == 'running', AgentRun.started_at < cutoff)))
@@ -248,6 +249,14 @@ async def run_planner_once(session_factory, settings, llm=None):
         error_code = "context"
         try:
             context, digest = planning_context(db, settings, task.product_id)
+            if settings.viral_research_mode != 'disabled':
+                if llm is None:
+                    from app.core.composition import build_llm_provider, SAFE_LLM_METADATA_FIELDS
+                    from app.llm.service import LLMService
+                    llm = LLMService(privacy_gateway=PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS),
+                                     provider=build_llm_provider(settings))
+                await run_viral_video_research(db=db, settings=settings, llm=llm, task=task, context=context)
+                context, digest = planning_context(db, settings, task.product_id)
             evidence_ids = sorted({r['id'] for r in context['research'] + context['observations'] + GUIDANCE}
                                   | ({context['owner_requirements_ref']} if context['owner_requirements_ref'] else set()))
             response_schema = EditorialPlan.model_json_schema()
@@ -270,8 +279,16 @@ async def run_planner_once(session_factory, settings, llm=None):
                 'supported networks may be deferred. Missing accounts, audience, resources and research are unknowns, '
                 'not facts. All numerical cadence and hours are test hypotheses unless supported by relevant owner '
                 'constraints or actual measured audience. Do not invent best hours, platform rules, statistics or ROI. '
-                'Never generalize YouTube guidance to Dzen/other platforms. SEO prioritizes useful audience topics. '
-                'Choose only available_formats. Video slots mean production-ready SCRIPT/STORYBOARD briefs only, never '
+                'Never generalize YouTube guidance to Dzen/other platforms. Before this plan, viral_video_research '
+                'is collected for the specific business niche when the public source is available. Treat its views '
+                'as creative/topic reach signals, NOT proof of buyer demand, keyword volume or conversion. When the '
+                'latest viral_video_research has source_status=evidence_available and completed analysis, use its '
+                'grounded hook/topic patterns to sharpen the plan and make at least three of the five default package '
+                'topics visibly traceable to those patterns through evidence_refs. Do not copy creators or scripts. '
+                'When the source is unavailable or insufficient, say so in unknowns and do not pretend the plan is '
+                'based on viral evidence. SEO prioritizes useful audience problems and search intent, with viral '
+                'signals used to improve framing rather than replace search usefulness. Choose only available_formats. '
+                'Video slots mean production-ready SCRIPT/STORYBOARD briefs only, never '
                 'video rendering or generation. For YouTube Shorts and Instagram Reels specify a platform-adapted '
                 'director brief; future generation may be delegated to a separate adapter, but this planner never calls '
                 'one. Share package_key for one topic reused across channels, reducing redundant production. A package '
@@ -445,6 +462,8 @@ def tick_calendar(db, settings, now=None):
                                          editorial_brief=('Цель пакета: ' + group[0]['objective']
                                              + '\nПлощадки подтверждённого календаря: ' + ', '.join(sorted({s['platform'] for s in group}))
                                              + '\nФорматы: ' + ', '.join(sorted({s['format'] for s in group}))
+                                             + '\nОснование темы: ' + group[0]['rationale'][:1500]
+                                             + '\nИсточники/сигналы: ' + ', '.join(group[0].get('evidence_refs', []))
                                              + '\nСтратегия: ' + plan['strategy'][:2000]))
                     queued += 1
                 if task:

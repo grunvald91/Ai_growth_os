@@ -2,7 +2,14 @@
   "schema_version": "1.0",
   "identity": {
     "name": "ServGo",
-    "one_liner": "ServGo is an online service booking/reservation system for small service businesses."
+    "one_liner": "ServGo is an online service booking/reservation system for small service businesses.",
+    "category": "B2B SaaS / online booking for service businesses",
+    "languages": [
+      "ru"
+    ],
+    "service_geography": [
+      "Russia"
+    ]
   },
   "offer": {
     "products_services": [
@@ -10,10 +17,11 @@
         "name": "ServGo online booking",
         "description": "Client flow includes business/service selection, optional specialist selection, date/time-slot selection, contact details and confirmation. Client flow includes optional prepayment instructions; the customer can mark payment as sent and attach proof. The owner manually verifies receipt before the booking is confirmed. Client flow includes a booking status page and notifications."
       }
-    ]
+    ],
+    "primary_conversion_action": "Запросить демонстрацию ServGo"
   },
   "commercial": {
-    "pricing_model": "One-time setup plus monthly service",
+    "pricing_model": "Pricing under review for the combined ServGo Growth offer; legacy pricing is paused for new marketing materials.",
     "currency": "RUB"
   },
   "proof": {
@@ -39,25 +47,29 @@
         "evidence_ref": "products/servgo/.claude/product-marketing-context.md#product"
       }
     ],
-    "approved_numbers": [
-      {
-        "statement": "Implementation/setup: 9,900 RUB one-time.",
-        "evidence_ref": "products/servgo/.claude/product-marketing-context.md#verified-commercial-terms"
-      },
-      {
-        "statement": "Monthly service: 1,490 RUB for up to 5 employees.",
-        "evidence_ref": "products/servgo/.claude/product-marketing-context.md#verified-commercial-terms"
-      },
-      {
-        "statement": "Monthly service: 3,000 RUB for 6 to 15 employees.",
-        "evidence_ref": "products/servgo/.claude/product-marketing-context.md#verified-commercial-terms"
-      }
-    ]
+    "approved_numbers": []
   },
   "brand": {
+    "tone": [
+      "живой",
+      "конкретный",
+      "уверенный",
+      "предпринимательский",
+      "без канцелярита"
+    ],
+    "required_phrases": [],
+    "prohibited_phrases": [
+      "это не обещание роста",
+      "это только гипотеза",
+      "гарантированно увеличит продажи"
+    ],
+    "voice": "Сначала узнаваемая боль владельца, затем цена текущего хаоса, понятный новый путь и конкретный следующий шаг.",
+    "positioning": "ServGo Growth: путь от внимания к записи — маркетинговый контент, понятная онлайн-запись и измеримый цикл улучшений. AI-маркетинг и сквозная атрибуция являются направлением объединённого продукта и не должны описываться как уже полностью доступные функции, пока это не подтверждено.",
     "prohibited_claims": [
       "Unverified product features",
       "Invented market evidence",
+      "Guaranteed growth or revenue outcomes",
+      "Legacy ServGo pricing presented as current",
       "Unfiltered demo/test user or business counts presented as acquisition results"
     ]
   },
@@ -90,32 +102,65 @@
     {
       "statement": "Rentals and appointment-based small businesses is a candidate segment to test.",
       "rationale": "products/servgo/.claude/product-marketing-context.md#candidate-business-segments"
+    },
+    {
+      "statement": "ServGo Growth can become one combined offer that connects AI-assisted content production with ServGo booking and later closed-loop attribution.",
+      "rationale": "Current product direction; integration and commercial packaging still require verification before being marketed as live capability."
     }
   ],
   "unknowns": [
     {
-      "question": "Approved primary customer segments"
+      "question": "Approved current pricing and packaging for ServGo Growth"
     },
     {
-      "question": "Service geography and supported languages"
+      "question": "Which AI-marketing capabilities are live in the customer-facing ServGo offer versus still being integrated"
     },
     {
-      "question": "Primary conversion action"
+      "question": "Approved primary customer segment after initial niche tests"
     },
     {
-      "question": "Brand tone"
-    },
-    {
-      "question": "Outreach sender identity, allowed channels, ICP and do-not-contact rules"
-    },
-    {
-      "question": "Legal compliance constraints"
-    },
-    {
-      "question": "Primary conversion event, funnel stages and attribution rules"
+      "question": "Verified public demo/landing URL for the primary conversion action"
     },
     {
       "question": "Historical website traffic, marketing leads, demo requests and acquisition cost"
     }
-  ]
+  ],
+  "customers": {
+    "primary_segments": [
+      "Владельцы и управляющие небольших сервисных бизнесов с записью по времени",
+      "Массажные и beauty-студии",
+      "Барбершопы и салоны",
+      "Прокаты и другие бизнесы с бронированием ресурса или слота"
+    ],
+    "pains": [
+      "Заявки и запись разбросаны по мессенджерам и требуют ручных уточнений",
+      "Клиенту приходится уточнять услугу, специалиста и свободное время в переписке",
+      "Владелец плохо видит, какой контент и канал реально приводит к записи"
+    ],
+    "jobs_to_be_done": [
+      "Довести интерес клиента до понятной самостоятельной записи",
+      "Снизить ручную переписку вокруг выбора услуги, специалиста и времени",
+      "Связать маркетинговый контент с измеримыми обращениями и записями"
+    ],
+    "exclusions": [],
+    "segments": [],
+    "ideal_customer": "Небольшой сервисный бизнес, где владелец или администратор вручную ведёт запись и хочет одновременно систематизировать привлечение клиентов."
+  },
+  "measurement": {
+    "funnel_stages": [
+      "content_view",
+      "click_or_visit",
+      "lead",
+      "demo_or_booking",
+      "customer",
+      "repeat_or_revenue"
+    ],
+    "primary_conversion_event": "Запрос демонстрации или атрибутированная запись",
+    "attribution_rules": [
+      "Do not infer attribution when source/package identifiers are absent.",
+      "Treat demo/test businesses and bookings separately from acquisition outcomes.",
+      "Viral-video reach is a creative signal, not a conversion metric."
+    ],
+    "metrics": []
+  }
 }
