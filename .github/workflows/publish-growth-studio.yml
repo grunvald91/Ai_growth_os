@@ -1,0 +1,94 @@
+name: Publish Growth Studio
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-growth-studio.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Configure HTTPS reverse proxy and auth
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          test "$(getent ahostsv4 growth.servgo.ru | awk 'NR==1{print $1}')" = "155.212.162.47"
+
+          cat >/etc/nginx/.htpasswd-growth-studio <<'EOF'
+          artur:$apr1$ORnIkZGx$2psNUPOl7cuRnUnIUJOQG/
+          EOF
+          chmod 640 /etc/nginx/.htpasswd-growth-studio
+          chown root:www-data /etc/nginx/.htpasswd-growth-studio
+
+          cat >/etc/nginx/sites-available/growth-servgo <<'EOF'
+          server {
+              listen 80;
+              listen [::]:80;
+              server_name growth.servgo.ru;
+
+              location = / {
+                  return 302 /studio;
+              }
+
+              location /studio {
+                  auth_basic "AI Growth OS";
+                  auth_basic_user_file /etc/nginx/.htpasswd-growth-studio;
+
+                  proxy_pass http://127.0.0.1:8091;
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_read_timeout 120s;
+
+                  add_header X-Content-Type-Options nosniff always;
+                  add_header X-Frame-Options DENY always;
+                  add_header Referrer-Policy no-referrer always;
+              }
+
+              location / {
+                  return 404;
+              }
+          }
+          EOF
+          ln -sfn /etc/nginx/sites-available/growth-servgo /etc/nginx/sites-enabled/growth-servgo
+          nginx -t
+          systemctl reload nginx
+
+          if [ ! -e /etc/letsencrypt/live/growth.servgo.ru/fullchain.pem ]; then
+            certbot --nginx -d growth.servgo.ru --non-interactive --agree-tos --redirect --register-unsafely-without-email
+          else
+            certbot --nginx -d growth.servgo.ru --non-interactive --agree-tos --redirect --keep-until-expiring
+          fi
+
+          nginx -t
+          systemctl reload nginx
+
+          echo "== unauthenticated =="
+          code="$(curl -k -sS -o /dev/null -w '%{http_code}' https://growth.servgo.ru/studio)"
+          echo "$code"
+          test "$code" = "401"
+
+          echo "== direct upstream =="
+          upstream="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8091/studio)"
+          echo "$upstream"
+          test "$upstream" = "200"
+
+          echo "Growth Studio published with HTTPS and Basic Auth"
+          REMOTE
