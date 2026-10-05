@@ -1,0 +1,40 @@
+name: Inspect web edge for Growth Studio
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-growth-edge.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Inspect edge
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "== RELEASE =="; readlink /opt/ai_growth_os/current || true
+          echo "== PORTS =="; ss -lntp | sed -n '1,120p'
+          echo "== NGINX =="; nginx -v 2>&1 || true
+          echo "== CADDY =="; caddy version 2>&1 || true
+          echo "== APACHE =="; apache2 -v 2>&1 | head -n 2 || true
+          echo "== SYSTEMD WEB =="; systemctl --no-pager --type=service --state=running | grep -Ei 'nginx|caddy|apache|traefik' || true
+          echo "== NGINX SITES =="; find /etc/nginx -maxdepth 3 -type f \( -name '*.conf' -o -path '*/sites-enabled/*' \) -print 2>/dev/null || true
+          echo "== NGINX SERVER NAMES/PROXIES =="; grep -RHE 'server_name|proxy_pass|listen 443|ssl_certificate' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null || true
+          echo "== CERTBOT =="; certbot --version 2>&1 || true
+          echo "== CERT NAMES =="; certbot certificates 2>/dev/null | grep -E 'Certificate Name:|Domains:|Expiry Date:' || true
+          echo "== DNS =="; getent ahostsv4 servgo.ru || true; getent ahostsv4 growth.servgo.ru || true
+          REMOTE
