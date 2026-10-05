@@ -465,6 +465,7 @@ class ArticleProductionResult(Contract):
     task_id: UUID
     run_ids: list[UUID] = Field(default_factory=list)
     artifact_ids: list[UUID] = Field(default_factory=list)
+    checkpoint_artifact_ids: list[UUID] = Field(default_factory=list)
     approval_ids: list[UUID] = Field(default_factory=list)
     status: Literal['completed', 'failed']
     error: str | None = None
