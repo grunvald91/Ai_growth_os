@@ -13,6 +13,7 @@ import json
 import re
 from datetime import datetime, timezone
 from typing import Literal
+from urllib.parse import urlparse
 
 import httpx
 from defusedxml import ElementTree as SafeET
@@ -297,7 +298,7 @@ class YouTubePublicScout:
                         found[candidate.source_id] = candidate
         ranked = sorted(
             found.values(),
-            key=lambda item: (item.view_count is not None, item.view_count or -1, item.is_short),
+            key=lambda item: (item.is_short, item.view_count is not None, item.view_count or -1),
             reverse=True,
         )[:max_candidates]
         if not ranked:
@@ -335,6 +336,9 @@ class YouTubePublicScout:
         track = next((x for x in tracks if str(x.get("languageCode", "")).startswith("ru")), tracks[0])
         base_url = html.unescape(str(track.get("baseUrl") or ""))
         if not base_url.startswith("https://"):
+            return None
+        host = (urlparse(base_url).hostname or "").casefold()
+        if not (host == "youtube.com" or host.endswith(".youtube.com") or host.endswith(".googlevideo.com")):
             return None
         try:
             transcript = await client.get(base_url)
