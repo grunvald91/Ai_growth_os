@@ -1,0 +1,130 @@
+name: E2E ServGo content package
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/e2e-servgo-content.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      EXPECTED_RELEASE: 70597684ba6f3d4fa0e9ea7d852b40a1954a357c
+
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Run one complete ServGo content package without publication
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ]
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "EXPECTED_RELEASE='$EXPECTED_RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          CURRENT="$(basename "$(readlink /opt/ai_growth_os/current)")"
+          echo "Current release: $CURRENT"
+          [ "$CURRENT" = "$EXPECTED_RELEASE" ] || { echo "Expected deployed release $EXPECTED_RELEASE; refusing E2E run."; exit 42; }
+          cd /opt/ai_growth_os/current
+          docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import asyncio
+          import json
+          from sqlalchemy import select
+
+          from app.core.composition import build_article_production
+          from app.core.config import get_settings
+          from app.db.session import SessionLocal
+          from app.models.domain import Artifact, Product
+          from app.workflows.article_contracts import ArticleProductionInput
+
+          PACKAGE_KEY = "pkg_booking_path"
+
+          with SessionLocal() as db:
+              product = db.scalar(select(Product).where(Product.slug == "servgo"))
+              if product is None:
+                  raise SystemExit("ServGo not found")
+
+              plan_row = db.scalar(
+                  select(Artifact)
+                  .where(Artifact.product_id == product.id, Artifact.kind == "editorial_plan")
+                  .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+                  .limit(1)
+              )
+              if plan_row is None:
+                  raise SystemExit("No editorial plan")
+              plan = json.loads(plan_row.content)
+              slots = [s for s in (plan.get("slots") or []) if s.get("package_key") == PACKAGE_KEY]
+              if not slots:
+                  raise SystemExit("Package not found in latest plan")
+
+              topic = slots[0]["topic"]
+              audience = slots[0].get("audience")
+              objective = slots[0].get("objective") or ""
+              channels = ", ".join(sorted({s.get("platform", "") for s in slots if s.get("platform")}))
+              brief = (
+                  f"Тестовый полный E2E-прогон по свежему редакционному плану. "
+                  f"Цель пакета: {objective}\nПлощадки: {channels}\n"
+                  "Подготовить готовые черновики материалов и production-ready брифы Shorts/Reels. "
+                  "Ничего не публиковать и не отправлять наружу."
+              )
+
+              settings = get_settings()
+              workflow = build_article_production(db, settings)
+              request = ArticleProductionInput(
+                  product_id=product.id,
+                  language="ru",
+                  channel="own_site",
+                  topic=topic,
+                  audience=audience,
+                  editorial_brief=brief,
+                  request_publication=False,
+                  produce_ready_assets=True,
+              )
+              result = asyncio.run(workflow.run(request))
+
+              artifacts = list(db.scalars(
+                  select(Artifact)
+                  .where(Artifact.task_id == result.task_id)
+                  .order_by(Artifact.created_at, Artifact.id)
+              ))
+              payload = {
+                  "production_release": CURRENT if False else None,
+                  "plan_artifact_id": str(plan_row.id),
+                  "package_key": PACKAGE_KEY,
+                  "topic": topic,
+                  "audience": audience,
+                  "channels": channels,
+                  "llm_provider": settings.llm_provider,
+                  "llm_model": settings.llm_model,
+                  "status": result.status,
+                  "error": result.error,
+                  "task_id": str(result.task_id),
+                  "run_ids": [str(x) for x in result.run_ids],
+                  "approval_ids": [str(x) for x in result.approval_ids],
+                  "artifacts": [
+                      {
+                          "id": str(a.id),
+                          "kind": a.kind,
+                          "title": a.title,
+                          "status": a.status,
+                          "content": a.content[:16000],
+                          "truncated": len(a.content) > 16000,
+                      }
+                      for a in artifacts
+                  ],
+              }
+              print("E2E_CONTENT_JSON_START")
+              print(json.dumps(payload, ensure_ascii=False, indent=2))
+              print("E2E_CONTENT_JSON_END")
+          PY
+          REMOTE
