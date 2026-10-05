@@ -46,7 +46,7 @@ def test_parse_youtube_search_page_extracts_verifiable_candidate():
     assert row.source_id == "yt:AbCdEf12345"
     assert row.view_count == 1_400_000
     assert row.is_short is True
-    assert "watch?v=" in str(row.url)
+    assert "/shorts/" in str(row.url)
 
 
 def test_search_queries_are_niche_specific():
