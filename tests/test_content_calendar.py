@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
-from app.content.calendar import (EditorialPlan, approve_plan, pause_plan, plan_record, planning_context,
+from app.content.calendar import (EditorialPlan, _expand_anchor_slots, approve_plan, pause_plan, plan_record, planning_context,
     queue_plan, record_publication, render_calendar, run_planner_once, save_preferences, tick_calendar)
 from app.core.config import Settings
 from app.llm.fake import FakeLLMProvider
@@ -30,6 +30,26 @@ def draft():
                   'rationale':'Начальный график для проверки, без утверждения оптимального часа.',
                   'success_metric':'leads', 'timing_basis':'test_hypothesis', 'evidence_refs':[]}
                  for i,p in enumerate(['own_site','dzen'])]}
+
+
+def test_compact_anchor_expands_across_tested_channels():
+    value=draft()
+    value['channels']=[
+        {'platform':p,'decision':'test','rationale':'Проверить канал на одном общем пакете без обещания результата.','evidence_refs':[]}
+        for p in ['own_site','dzen','telegram','youtube_shorts','instagram_reels']
+    ]
+    value['slots']=[copy.deepcopy(value['slots'][0])]
+    value['slots'][0]['day_offset']=3
+    plan=_expand_anchor_slots(EditorialPlan.model_validate(value))
+    assert len(plan.slots)==5
+    by_platform={slot.platform:slot for slot in plan.slots}
+    assert set(by_platform)=={'own_site','dzen','telegram','youtube_shorts','instagram_reels'}
+    assert by_platform['own_site'].day_offset==3
+    assert by_platform['dzen'].day_offset==3
+    assert by_platform['telegram'].day_offset==4
+    assert by_platform['youtube_shorts'].format=='short_video'
+    assert by_platform['instagram_reels'].day_offset==5
+    assert by_platform['instagram_reels'].prepare_lead_hours==72
 
 
 class Borrow:
