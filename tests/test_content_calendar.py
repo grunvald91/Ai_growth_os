@@ -282,7 +282,7 @@ def test_interrupted_planner_recovers_once_and_preserves_fresh_calls(db,tmp_path
     assert recover_stale_planner(db,now)==0
     task.status=TaskStatus.RUNNING
     second=AgentRun(task_id=task.id,agent_name='editorial_planner',provider='xai',model='kimi-2.7',
-                    status='running',started_at=now-timedelta(minutes=13))
+                    status='running',started_at=now-timedelta(minutes=21))
     db.add(second);db.commit()
     assert recover_stale_planner(db,now)==0 and task.status==TaskStatus.FAILED
     assert second.status=='failed' and db.get(AgentRun,run.id).error=='editorial_plan_interrupted:stale_run'
