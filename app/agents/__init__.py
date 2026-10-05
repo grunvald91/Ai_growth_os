@@ -42,7 +42,7 @@ class AgentRole(StrEnum):
     CHANNEL_RESEARCHER = "channel_researcher"
     PROBLEM_RESEARCHER = "problem_researcher"
     COMPETITOR_VOC_RESEARCHER = "competitor_voc_researcher"
-    VIRAL_VIDEO_RESEARCHER = "viral_video_researcher"
+    VIRAL_VIDEO_RESEARCHER = "viral_video_researcher"\n    VIRAL_CONTENT_RESEARCHER = "viral_content_researcher"\n    MARKETING_EDITOR = "marketing_editor"
 
 
 class AgentConfig(BaseModel):
@@ -188,6 +188,22 @@ AGENT_CONFIGS = MappingProxyType({
             "Extract reusable hooks, pains and topic patterns without treating views as proof of buyer demand.",
         ),
         allowed_operations=frozenset({ToolOperation.RESEARCH}),
+    ),
+    AgentRole.VIRAL_CONTENT_RESEARCHER: AgentConfig(
+        role=AgentRole.VIRAL_CONTENT_RESEARCHER,
+        responsibilities=(
+            "Rank public video and article evidence with transparent freshness, outlier and recurrence signals.",
+            "Map grounded audience pains to verified product facts, white-space angles and reusable hooks without inventing demand.",
+        ),
+        allowed_operations=frozenset({ToolOperation.RESEARCH}),
+    ),
+    AgentRole.MARKETING_EDITOR: AgentConfig(
+        role=AgentRole.MARKETING_EDITOR,
+        responsibilities=(
+            "Turn a grounded human-readable draft into sharper pain-led marketing copy without adding unsupported claims.",
+            "Use specificity, tension, contrast and tasteful situational humor; preserve verified facts and one clear CTA.",
+        ),
+        allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
     ),
 })
 
