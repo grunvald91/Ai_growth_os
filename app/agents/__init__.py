@@ -42,7 +42,9 @@ class AgentRole(StrEnum):
     CHANNEL_RESEARCHER = "channel_researcher"
     PROBLEM_RESEARCHER = "problem_researcher"
     COMPETITOR_VOC_RESEARCHER = "competitor_voc_researcher"
-    VIRAL_VIDEO_RESEARCHER = "viral_video_researcher"\n    VIRAL_CONTENT_RESEARCHER = "viral_content_researcher"\n    MARKETING_EDITOR = "marketing_editor"
+    VIRAL_VIDEO_RESEARCHER = "viral_video_researcher"
+    VIRAL_CONTENT_RESEARCHER = "viral_content_researcher"
+    MARKETING_EDITOR = "marketing_editor"
 
 
 class AgentConfig(BaseModel):
