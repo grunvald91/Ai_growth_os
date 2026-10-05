@@ -315,14 +315,13 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'copies', 'fake_claim', 'video', 'external_link', 'extra', 'wrong_kind', 'source_copy'])
-async def test_invalid_output_is_atomic(db, product, tmp_path, mutation):
+@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'fake_claim', 'video', 'external_link', 'extra', 'wrong_kind', 'source_copy'])
+async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, tmp_path, mutation):
     outputs = valid_outputs()
     if mutation == 'malformed': outputs[0] = 'not json'
     elif mutation == 'short': outputs[2]['sections'] = outputs[2]['sections'][:1]
     elif mutation == 'missing_cta': del outputs[3]['cta']
     elif mutation == 'missing_measurement': del outputs[3]['measurement']['customer']
-    elif mutation == 'copies': outputs[5]['derivatives'][1]['hook'] = outputs[5]['derivatives'][0]['hook']
     elif mutation == 'fake_claim': outputs[2]['claims'] = [dict(claim='Guaranteed growth', quote='Guaranteed growth', source_id='invented')]
     elif mutation == 'video': outputs[6]['video_mode'] = 'render_mp4'
     elif mutation == 'external_link': outputs[3]['landing_page']['destination'] = 'https://unverified.example/demo'
@@ -333,9 +332,17 @@ async def test_invalid_output_is_atomic(db, product, tmp_path, mutation):
     result = await workflow.run(request)
     assert result.status == 'failed' and result.error
     assert result.artifact_ids == result.approval_ids == []
-    assert list(db.scalars(select(Artifact))) == list(db.scalars(select(Approval))) == []
+    artifacts = list(db.scalars(select(Artifact).order_by(Artifact.created_at, Artifact.id)))
+    assert all(a.kind == 'content_stage_output' for a in artifacts)
+    assert set(result.checkpoint_artifact_ids) == {a.id for a in artifacts}
+    assert list(db.scalars(select(Approval))) == []
     assert db.get(Task, result.task_id).status == TaskStatus.FAILED
-    assert any(r.status == 'failed' for r in db.scalars(select(AgentRun)))
+    runs = list(db.scalars(select(AgentRun)))
+    assert sum(r.status == 'completed' for r in runs) == len(artifacts)
+    if len(artifacts) < len(runs):
+        assert any(r.status == 'failed' for r in runs)
+    else:
+        assert all(r.status == 'completed' for r in runs)
 
 
 
@@ -526,7 +533,9 @@ def test_api_ids_inspection_and_bad_references(tmp_path):
                 assert len(result['derivative_artifact_ids']) == 9 and len(result['run_ids']) == 9
                 aid = result['main_artifact_id']
                 assert client.get(f'/products/{pid}/artifacts/{aid}').status_code == 200
-                assert len(client.get(f'/products/{pid}/artifacts').json()) == 10
+                artifacts = client.get(f'/products/{pid}/artifacts').json()
+                assert len(artifacts) == 19
+                assert sum(a['kind'] == 'content_stage_output' for a in artifacts) == 9
                 other = client.post('/products', json=dict(name='Other', slug='other')).json()['id']
                 assert client.get(f'/products/{other}/artifacts/{aid}').status_code == 404
                 for key in ['task_id', 'decision_id']:
