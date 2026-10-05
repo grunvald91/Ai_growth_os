@@ -325,7 +325,7 @@ class YouTubePublicScout:
             for query in queries:
                 try:
                     response = await client.get("https://www.youtube.com/results", params={
-                        "search_query": query, "sp": "EgIQCQ%3D%3D", "hl": "ru", "gl": "RU",
+                        "search_query": query, "sp": "EgIQCQ==", "hl": "ru", "gl": "RU",
                     })
                     response.raise_for_status()
                 except httpx.HTTPError:
