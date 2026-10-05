@@ -1,0 +1,339 @@
+name: E2E ServGo Growth viral-to-content
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/e2e-servgo-growth.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      EXPECTED_RELEASE: f27a4eb6bd9a900f1ae21f7d950d57289ae8c544
+
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Apply approved positioning, run fresh plan and safe content E2E
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ]
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15 -o ServerAliveCountMax=20"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "EXPECTED_RELEASE='$EXPECTED_RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          CURRENT="$(basename "$(readlink /opt/ai_growth_os/current)")"
+          echo "Current release: $CURRENT"
+          [ "$CURRENT" = "$EXPECTED_RELEASE" ] || { echo "Expected $EXPECTED_RELEASE, got $CURRENT"; exit 42; }
+          cd /opt/ai_growth_os/current
+
+          docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import tempfile
+          from pathlib import Path
+          from sqlalchemy import select
+
+          from app.company_profile import parse_company_profile
+          from app.content.calendar import queue_plan
+          from app.core.config import get_settings
+          from app.db.session import SessionLocal
+          from app.models.domain import Artifact, Product, Task, TaskStatus
+
+          settings = get_settings()
+          packaged = Path("/app/products/servgo/company-profile.json")
+          runtime = settings.products_root / "servgo" / "company-profile.json"
+          desired_raw = packaged.read_bytes()
+          desired = parse_company_profile(json.loads(desired_raw))
+          assert desired.proof.approved_numbers == []
+          assert desired.commercial.pricing_model and "under review" in desired.commercial.pricing_model.lower()
+          assert "ServGo Growth" in (desired.brand.positioning or "")
+
+          with SessionLocal() as db:
+              product = db.scalar(select(Product).where(Product.slug == "servgo"))
+              if product is None:
+                  raise SystemExit("ServGo not found")
+              old_raw = runtime.read_bytes() if runtime.exists() else b""
+              old_sha = hashlib.sha256(old_raw).hexdigest()
+              new_sha = hashlib.sha256(desired_raw).hexdigest()
+              if old_raw != desired_raw:
+                  if old_raw:
+                      parse_company_profile(json.loads(old_raw))
+                  db.add(Artifact(
+                      product_id=product.id,
+                      kind="company_profile_previous",
+                      title="ServGo profile before owner-approved Growth positioning update",
+                      content=json.dumps({
+                          "reason": "Owner explicitly requested positioning update on 2026-10-05",
+                          "sha256": old_sha,
+                          "profile": json.loads(old_raw) if old_raw else None,
+                      }, ensure_ascii=False),
+                  ))
+                  db.add(Artifact(
+                      product_id=product.id,
+                      kind="company_profile_apply_intent",
+                      title="Apply ServGo Growth positioning",
+                      content=json.dumps({
+                          "reason": "Owner explicitly requested positioning update on 2026-10-05",
+                          "old_sha256": old_sha,
+                          "new_sha256": new_sha,
+                          "profile": json.loads(desired_raw),
+                      }, ensure_ascii=False),
+                  ))
+                  db.commit()
+                  runtime.parent.mkdir(parents=True, exist_ok=True)
+                  fd, name = tempfile.mkstemp(dir=runtime.parent, prefix=".growth-profile-")
+                  try:
+                      with os.fdopen(fd, "wb") as out:
+                          out.write(desired_raw)
+                          out.flush()
+                          os.fsync(out.fileno())
+                      os.replace(name, runtime)
+                      dfd = os.open(runtime.parent, os.O_RDONLY | os.O_DIRECTORY)
+                      try:
+                          os.fsync(dfd)
+                      finally:
+                          os.close(dfd)
+                  finally:
+                      if os.path.exists(name):
+                          os.unlink(name)
+                  db.add(Artifact(
+                      product_id=product.id,
+                      kind="company_profile_applied",
+                      title="ServGo Growth positioning applied",
+                      content=json.dumps({"old_sha256": old_sha, "new_sha256": new_sha}, ensure_ascii=False),
+                  ))
+                  db.commit()
+                  print("PROFILE_APPLIED=1")
+              else:
+                  print("PROFILE_APPLIED=0_ALREADY_CURRENT")
+
+              task = Task(
+                  product_id=product.id,
+                  assigned_agent="editorial_planner",
+                  title="Редактор: ServGo Growth viral E2E plan",
+                  description="[growth_viral_e2e_20261005] Fresh owner-approved positioning + live viral research.",
+                  priority=125,
+                  status=TaskStatus.QUEUED,
+              )
+              db.add(task)
+              db.commit()
+              print("PLAN_TASK_ID=" + str(task.id))
+          PY
+
+          PLAN_TASK_ID="$(
+            docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Task
+          with SessionLocal() as db:
+              row=db.scalar(select(Task).where(Task.description.like('%[growth_viral_e2e_20261005]%')).order_by(Task.created_at.desc()).limit(1))
+              print(row.id if row else '')
+          PY
+          )"
+          PLAN_TASK_ID="$(echo "$PLAN_TASK_ID" | tr -d '\r' | tail -n1)"
+          [ -n "$PLAN_TASK_ID" ] || { echo "Planner task id missing"; exit 43; }
+          echo "Waiting for plan task: $PLAN_TASK_ID"
+
+          for i in $(seq 1 150); do
+            STATE="$(
+              docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - "$PLAN_TASK_ID" <<'PY'
+          import sys
+          from uuid import UUID
+          from app.db.session import SessionLocal
+          from app.models.domain import Task
+          with SessionLocal() as db:
+              row=db.get(Task, UUID(sys.argv[1]))
+              print(row.status.value if row else 'missing')
+          PY
+            )"
+            STATE="$(echo "$STATE" | tr -d '\r' | tail -n1)"
+            echo "plan_status=$STATE"
+            case "$STATE" in
+              completed) break ;;
+              failed|cancelled|missing) echo "Plan failed: $STATE"; exit 44 ;;
+            esac
+            sleep 8
+          done
+          [ "$STATE" = "completed" ] || { echo "Plan did not complete"; exit 45; }
+
+          CONTENT_TASK_ID="$(
+            docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - "$PLAN_TASK_ID" <<'PY'
+          import json
+          import sys
+          from uuid import UUID
+          from sqlalchemy import select
+
+          from app.content.service import queue_content
+          from app.db.session import SessionLocal
+          from app.models.domain import AgentRun, Artifact, Task
+
+          plan_task_id = UUID(sys.argv[1])
+          with SessionLocal() as db:
+              plan_task = db.get(Task, plan_task_id)
+              viral = db.scalar(
+                  select(Artifact).where(
+                      Artifact.task_id == plan_task_id,
+                      Artifact.kind == "viral_video_research"
+                  ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1)
+              )
+              plan_row = db.scalar(
+                  select(Artifact).where(
+                      Artifact.task_id == plan_task_id,
+                      Artifact.kind == "editorial_plan"
+                  ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1)
+              )
+              if viral is None or plan_row is None:
+                  raise SystemExit("viral research or plan artifact missing")
+              report=json.loads(viral.content)
+              plan=json.loads(plan_row.content)
+              print("VIRAL_RESEARCH_JSON_START", file=sys.stderr)
+              print(json.dumps(report, ensure_ascii=False, indent=2), file=sys.stderr)
+              print("VIRAL_RESEARCH_JSON_END", file=sys.stderr)
+              print("EDITORIAL_PLAN_JSON_START", file=sys.stderr)
+              print(json.dumps(plan, ensure_ascii=False, indent=2), file=sys.stderr)
+              print("EDITORIAL_PLAN_JSON_END", file=sys.stderr)
+
+              viral_ref=str(viral.id)
+              slots=plan.get("slots") or []
+              package_keys=[]
+              for slot in slots:
+                  key=slot.get("package_key")
+                  if key and key not in package_keys:
+                      package_keys.append(key)
+              chosen=None
+              for key in package_keys:
+                  group=[s for s in slots if s.get("package_key")==key]
+                  if any(viral_ref in (s.get("evidence_refs") or []) for s in group):
+                      chosen=group
+                      break
+              if chosen is None and package_keys:
+                  chosen=[s for s in slots if s.get("package_key")==package_keys[0]]
+              if not chosen:
+                  raise SystemExit("new plan has no package slots")
+
+              first=chosen[0]
+              topic=first["topic"]
+              audience=first.get("audience")
+              objective=first.get("objective") or ""
+              rationale=first.get("rationale") or ""
+              refs=first.get("evidence_refs") or []
+              channels=", ".join(sorted({s.get("platform","") for s in chosen if s.get("platform")}))
+              brief=(
+                  "Безопасный production E2E обновлённого редактора ServGo Growth. "
+                  f"Цель: {objective}\nПлощадки: {channels}\n"
+                  f"Основание темы: {rationale}\nEvidence refs: {', '.join(refs)}\n"
+                  "Материал должен быть маркетингово пригодным: узнаваемая боль -> цена текущего процесса -> "
+                  "понятный механизм -> проверенная ценность ServGo -> один конкретный CTA. "
+                  "Не использовать старые цены. Не публиковать и не отправлять наружу."
+              )
+              task=queue_content(
+                  db, plan_task.product_id, topic,
+                  commit=False,
+                  dedupe_key=f"growth-viral-e2e:{plan_row.id}:{first['package_key']}",
+                  audience=audience,
+                  editorial_brief=brief,
+              )
+              request=db.scalar(select(Artifact).where(
+                  Artifact.task_id==task.id, Artifact.kind=="content_request"
+              ).order_by(Artifact.created_at.desc()).limit(1))
+              payload=json.loads(request.content)
+              payload["request_publication"]=False
+              payload["produce_ready_assets"]=True
+              request.content=json.dumps(payload, ensure_ascii=False)
+              db.commit()
+              print(str(task.id))
+          PY
+          )"
+          CONTENT_TASK_ID="$(echo "$CONTENT_TASK_ID" | tr -d '\r' | tail -n1)"
+          [ -n "$CONTENT_TASK_ID" ] || { echo "Content task id missing"; exit 46; }
+          echo "CONTENT_TASK_ID=$CONTENT_TASK_ID"
+
+          for i in $(seq 1 180); do
+            STATE="$(
+              docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - "$CONTENT_TASK_ID" <<'PY'
+          import sys
+          from uuid import UUID
+          from app.db.session import SessionLocal
+          from app.models.domain import Task
+          with SessionLocal() as db:
+              row=db.get(Task, UUID(sys.argv[1]))
+              print(row.status.value if row else 'missing')
+          PY
+            )"
+            STATE="$(echo "$STATE" | tr -d '\r' | tail -n1)"
+            echo "content_status=$STATE"
+            case "$STATE" in
+              completed) break ;;
+              failed|cancelled|missing) break ;;
+            esac
+            sleep 8
+          done
+
+          docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - "$PLAN_TASK_ID" "$CONTENT_TASK_ID" <<'PY'
+          import json
+          import sys
+          from collections import Counter
+          from uuid import UUID
+          from sqlalchemy import select
+
+          from app.company_profile import load_company_profile
+          from app.core.config import get_settings
+          from app.db.session import SessionLocal
+          from app.models.domain import AgentRun, Artifact, Task
+
+          plan_id, content_id = UUID(sys.argv[1]), UUID(sys.argv[2])
+          with SessionLocal() as db:
+              content_task=db.get(Task, content_id)
+              print("FINAL_CONTENT_TASK_STATUS=" + content_task.status.value)
+              profile=load_company_profile(get_settings().products_root, "servgo").profile
+              print("RUNTIME_PROFILE_SUMMARY_START")
+              print(json.dumps({
+                  "positioning": profile.brand.positioning,
+                  "pricing_model": profile.commercial.pricing_model,
+                  "approved_numbers": [x.model_dump() for x in profile.proof.approved_numbers],
+                  "segments": profile.customers.primary_segments,
+              }, ensure_ascii=False, indent=2))
+              print("RUNTIME_PROFILE_SUMMARY_END")
+
+              runs=list(db.scalars(select(AgentRun).where(
+                  AgentRun.task_id.in_([plan_id, content_id])
+              ).order_by(AgentRun.started_at, AgentRun.id)))
+              print("RUNS_JSON_START")
+              print(json.dumps([{
+                  "task_id":str(r.task_id),"agent":r.agent_name,"model":r.model,
+                  "status":r.status,"error":r.error,
+                  "started_at":r.started_at.isoformat() if r.started_at else None,
+                  "finished_at":r.finished_at.isoformat() if r.finished_at else None,
+              } for r in runs], ensure_ascii=False, indent=2))
+              print("RUNS_JSON_END")
+
+              arts=list(db.scalars(select(Artifact).where(
+                  Artifact.task_id==content_id
+              ).order_by(Artifact.created_at, Artifact.id)))
+              print("ARTIFACT_COUNTS=" + json.dumps(Counter(a.kind for a in arts), ensure_ascii=False))
+              keep={"article","channel_text","video_script","short_video_brief","story_brief","content_distribution"}
+              selected=[a for a in arts if a.kind in keep]
+              print("FINAL_MARKETING_ARTIFACTS_START")
+              for a in selected:
+                  print(json.dumps({
+                      "id":str(a.id),"kind":a.kind,"title":a.title,
+                      "status":a.status.value if hasattr(a.status,"value") else str(a.status),
+                      "content":a.content[:14000],
+                  }, ensure_ascii=False))
+              print("FINAL_MARKETING_ARTIFACTS_END")
+          PY
+
+          [ "$STATE" = "completed" ] || { echo "Content pipeline ended as $STATE"; exit 47; }
+          REMOTE
