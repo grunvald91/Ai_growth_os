@@ -19,7 +19,7 @@ jobs:
       SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
       SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
-      EXPECTED_RELEASE: 70597684ba6f3d4fa0e9ea7d852b40a1954a357c
+      EXPECTED_RELEASE: c5979176ecf57936ac0b457afafd3bcb51cd834d
 
     steps:
       - name: Install SSH helper
@@ -73,7 +73,7 @@ jobs:
                   "Подготовить готовые черновики материалов и production-ready брифы Shorts/Reels. "
                   "Ничего не публиковать и не отправлять наружу."
               )
-              dedupe_key = f"e2e-safe:{plan_row.id}:{PACKAGE_KEY}"
+              dedupe_key = f"e2e-safe-v2:{plan_row.id}:{PACKAGE_KEY}"
               task = queue_content(
                   db, product.id, topic,
                   commit=False,
