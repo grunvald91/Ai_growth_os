@@ -56,6 +56,53 @@ async def make_plan(db, settings, data=None):
 
 
 @pytest.mark.asyncio
+async def test_viral_research_runs_before_editorial_planner_and_enters_evidence(db,tmp_path,monkeypatch):
+    p,settings=setup(db,tmp_path)
+    settings.viral_research_mode='youtube_public'
+    events=[]
+
+    async def fake_viral_research(*, db, settings, llm, task, context):
+        events.append('viral')
+        row=Artifact(
+            product_id=task.product_id,
+            task_id=task.id,
+            kind='viral_video_research',
+            title='Viral video research before editorial plan',
+            content=json.dumps({
+                'source_status':'evidence_available',
+                'analysis_status':'completed',
+                'summary':'Повторяется боль долгой переписки до записи.',
+                'hook_patterns':[{'pattern':'Сколько сообщений до записи?', 'source_ids':['yt:demo']}],
+                'seo_topic_seeds':['как сократить переписку при записи'],
+            },ensure_ascii=False),
+        )
+        db.add(row);db.commit();db.refresh(row)
+        return row
+
+    monkeypatch.setattr('app.content.calendar.run_viral_video_research', fake_viral_research)
+
+    class Provider:
+        def __init__(self): self.requests=[]
+        async def generate(self,request):
+            events.append('planner')
+            self.requests.append(request)
+            return LLMResponse(content=json.dumps(draft(),ensure_ascii=False),model='kimi-2.7',
+                               usage=LLMUsage(input_tokens=12,output_tokens=34))
+
+    provider=Provider()
+    llm=LLMService(privacy_gateway=PrivacyGateway(),provider=provider)
+    assert await run_planner_once(lambda:Borrow(db),settings,llm)==1
+
+    assert events[:2]==['viral','planner']
+    payload=json.loads(provider.requests[0].messages[0].content)
+    research=[item for item in payload['research'] if item['kind']=='viral_video_research']
+    assert research and 'долгой переписки' in research[0]['bounded_excerpt']
+    plan=db.scalar(select(Artifact).where(Artifact.kind=='editorial_plan'))
+    stored=json.loads(plan.content)
+    assert any(source.get('kind')=='viral_video_research' for source in stored['sources'])
+
+
+@pytest.mark.asyncio
 async def test_owner_approval_then_due_preparation_once_and_shared_package(db,tmp_path):
     p,settings=setup(db,tmp_path)
     row,provider=await make_plan(db,settings)
