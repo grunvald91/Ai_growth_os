@@ -271,7 +271,12 @@ def _profile_terms(context: dict) -> tuple[str, list[str]]:
         if key not in seen:
             seen.add(key)
             deduped.append(term)
-    niche = deduped[0] if deduped else ((company.get("identity") or {}).get("name") or "business")
+    specific_markers = ("салон", "студи", "барбер", "прокат", "клиник", "мастерск", "школ", "центр")
+    business_markers = ("владел", "управ", "бизнес", "предприним")
+    niche = next((term for term in deduped if any(marker in term.casefold() for marker in specific_markers)), None)
+    if niche is None:
+        niche = next((term for term in deduped if any(marker in term.casefold() for marker in business_markers)), None)
+    niche = niche or (deduped[0] if deduped else ((company.get("identity") or {}).get("name") or "business"))
     return niche[:500], deduped[:4] or [niche]
 
 
