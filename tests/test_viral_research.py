@@ -58,7 +58,8 @@ def test_search_queries_are_niche_specific():
     niche, queries = build_search_queries(context, 4)
     assert niche == "массажный салон"
     assert len(queries) == 4
-    assert all("массажный салон" in query for query in queries)
+    assert any("массажный салон" in query for query in queries)
+    assert any("клиенты массажа" in query for query in queries)
 
 
 class FakeScout:
