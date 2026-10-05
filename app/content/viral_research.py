@@ -10,11 +10,9 @@ from __future__ import annotations
 import asyncio
 import html
 import json
-import math
 import re
 from datetime import datetime, timezone
 from typing import Literal
-from urllib.parse import urlencode
 
 import httpx
 from defusedxml import ElementTree as SafeET
@@ -397,7 +395,7 @@ async def run_viral_video_research(
     try:
         collector = scout or YouTubePublicScout(timeout_seconds=float(settings.viral_research_timeout_seconds))
         candidates = await collector.collect(queries, max_candidates=int(settings.viral_research_max_candidates))
-        candidates = [ViralVideoCandidate.model_validate(privacy.sanitize_text(c.model_dump_json())) for c in candidates]
+        candidates = [ViralVideoCandidate.model_validate_json(privacy.sanitize_text(c.model_dump_json())) for c in candidates]
         with_views = [c for c in candidates if c.view_count is not None]
         if candidates:
             source_status = "evidence_available" if len(with_views) >= 3 else "insufficient_evidence"
