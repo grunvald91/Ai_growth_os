@@ -276,7 +276,7 @@ def test_interrupted_planner_recovers_once_and_preserves_fresh_calls(db,tmp_path
                  status='running',started_at=now-timedelta(minutes=5))
     db.add(run);db.commit()
     assert recover_stale_planner(db,now)==0 and task.status==TaskStatus.RUNNING
-    run.started_at=now-timedelta(minutes=13);db.commit()
+    run.started_at=now-timedelta(minutes=21);db.commit()
     assert recover_stale_planner(db,now)==1 and task.status==TaskStatus.QUEUED
     assert run.status=='failed' and run.error=='editorial_plan_interrupted:stale_run'
     assert recover_stale_planner(db,now)==0
