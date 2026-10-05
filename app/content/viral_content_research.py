@@ -474,9 +474,16 @@ async def run_viral_content_research(
     try:
         yt = video_scout or YouTubePublicScout(timeout_seconds=float(settings.viral_research_timeout_seconds))
         news = article_scout or GoogleNewsPublicScout(timeout_seconds=float(settings.viral_research_timeout_seconds))
+        source_timeout = max(15.0, float(settings.viral_research_timeout_seconds) * 2.5)
         collected = await asyncio.gather(
-            yt.collect(queries, max_candidates=int(settings.viral_research_max_candidates)),
-            news.collect(queries, max_candidates=int(settings.viral_research_max_candidates)),
+            asyncio.wait_for(
+                yt.collect(queries, max_candidates=int(settings.viral_research_max_candidates)),
+                timeout=source_timeout,
+            ),
+            asyncio.wait_for(
+                news.collect(queries, max_candidates=int(settings.viral_research_max_candidates)),
+                timeout=source_timeout,
+            ),
             return_exceptions=True,
         )
         raw_video_result, raw_article_result = collected
@@ -496,15 +503,54 @@ async def run_viral_content_research(
                 ArticleCandidate.model_validate_json(privacy.sanitize_text(item.model_dump_json()))
                 for item in raw_article_result
             ]
-        videos = (
-            await rank_youtube_candidates(
-                video_raw, timeout_seconds=float(settings.viral_research_timeout_seconds)
-            )
-            if video_raw else []
-        )
+        videos = []
+        if video_raw:
+            try:
+                videos = await asyncio.wait_for(
+                    rank_youtube_candidates(
+                        video_raw, timeout_seconds=float(settings.viral_research_timeout_seconds)
+                    ),
+                    timeout=source_timeout,
+                )
+            except Exception:
+                cautions.append(
+                    "Нормализация видео относительно недавних Shorts автора не завершилась; "
+                    "сохранён более слабый слой публичного охвата без outlier-baseline."
+                )
+                for item in video_raw[:10]:
+                    score, confidence = _video_score(
+                        views=item.view_count,
+                        is_short=item.is_short,
+                        outlier_ratio=None,
+                        age_days=None,
+                        transcript=bool(item.transcript_excerpt),
+                    )
+                    videos.append(RankedVideoCandidate(
+                        source_id=item.source_id,
+                        url=item.url,
+                        query=item.query,
+                        title=item.title,
+                        channel=item.channel,
+                        view_count=item.view_count,
+                        published_text=item.published_text,
+                        is_short=item.is_short,
+                        transcript_excerpt=item.transcript_excerpt,
+                        viral_score=score,
+                        evidence_confidence=confidence,
+                    ))
+                videos.sort(key=lambda x: (x.viral_score, x.view_count or 0), reverse=True)
 
-        strong_video = sum(1 for x in videos if x.is_short and x.view_count is not None and x.evidence_confidence != "low")
-        strong_article = sum(1 for x in articles if x.evidence_confidence != "low")
+        strong_video = sum(
+            1 for x in videos
+            if x.is_short and x.view_count is not None and (
+                (x.outlier_ratio is not None and x.outlier_ratio >= 1.5)
+                or x.viral_score >= 70
+            )
+        )
+        strong_article = sum(
+            1 for x in articles
+            if x.cross_source_hits >= 2 and x.evidence_confidence != "low"
+        )
         if strong_video >= 3 and strong_article >= 3:
             quality = "strong_multisource"
         elif strong_video >= 3:
