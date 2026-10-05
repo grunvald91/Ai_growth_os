@@ -35,7 +35,7 @@ def ready_outputs():
         video['production_brief']['duration_seconds']=30
         video['production_brief']['shots'][-1]['end_second']=30
         videos.append(video)
-    return outputs + [texts, {'videos': videos}]
+    return outputs + [texts, videos[0], videos[1]]
 
 @pytest.mark.asyncio
 async def test_complete_factory_outputs_ready_texts_and_two_platform_video_briefs(db, tmp_path):
@@ -44,7 +44,7 @@ async def test_complete_factory_outputs_ready_texts_and_two_platform_video_brief
     result=await build_article_production(db,Settings(products_root=tmp_path),provider).run(
         ArticleProductionInput(product_id=product.id,topic='Онлайн-запись',produce_ready_assets=True,request_publication=True))
     assert result.status == 'completed',result.error
-    assert len(provider.requests)==11
+    assert len(provider.requests)==12
     assert len(list(db.scalars(select(Artifact).where(Artifact.kind=='channel_text'))))==6
     scripts=list(db.scalars(select(Artifact).where(Artifact.kind=='video_script')))
     assert len(scripts)==2
@@ -60,7 +60,10 @@ async def test_factory_duplicate_channel_copy_fails_atomically(db,tmp_path):
     result=await build_article_production(db,Settings(products_root=tmp_path),SequenceProvider(outputs)).run(
         ArticleProductionInput(product_id=p.id,topic='Test',produce_ready_assets=True))
     assert result.status=='failed'
-    assert list(db.scalars(select(Artifact)))==[]
+    checkpoints=list(db.scalars(select(Artifact).where(Artifact.kind=='content_stage_output')))
+    assert len(checkpoints)==9
+    assert result.checkpoint_artifact_ids==[a.id for a in checkpoints]
+    assert not list(db.scalars(select(Artifact).where(Artifact.kind=='article')))
 
 
 def test_queue_content_is_idempotent_and_distinct_from_outreach(db):
@@ -71,7 +74,7 @@ def test_queue_content_is_idempotent_and_distinct_from_outreach(db):
 
 
 def test_actual_renderer_outputs_mp4_cover_and_cyrillic_subtitles(tmp_path):
-    brief=VideoVariants.model_validate(ready_outputs()[-1]).videos[0].production_brief
+    brief=VideoVariants.model_validate({'videos': ready_outputs()[-2:]}).videos[0].production_brief
     metadata=render_video(brief,tmp_path/'assets','ServGo')
     assert metadata['duration_seconds']==30 and metadata['audio']=='none'
     assert (tmp_path/'assets/video.mp4').stat().st_size>10000
@@ -81,6 +84,6 @@ def test_actual_renderer_outputs_mp4_cover_and_cyrillic_subtitles(tmp_path):
 
 
 def test_reject_overlapping_timeline_and_path_injection(tmp_path):
-    video=ready_outputs()[-1];video['videos'][0]['production_brief']['shots'][1]['start_second']=3
-    with pytest.raises(ValueError):VideoVariants.model_validate(video)
+    videos=copy.deepcopy(ready_outputs()[-2:]);videos[0]['production_brief']['shots'][1]['start_second']=3
+    with pytest.raises(ValueError):VideoVariants.model_validate({'videos': videos})
     with pytest.raises(ValueError):asset_path(tmp_path,uuid4(),uuid4(),'../../x')
