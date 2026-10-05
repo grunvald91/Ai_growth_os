@@ -66,12 +66,17 @@ async def test_viral_research_runs_before_editorial_planner_and_enters_evidence(
         row=Artifact(
             product_id=task.product_id,
             task_id=task.id,
-            kind='viral_video_research',
-            title='Viral video research before editorial plan',
+            kind='viral_content_research',
+            title='Viral/trend content research before editorial plan',
             content=json.dumps({
                 'source_status':'evidence_available',
                 'analysis_status':'completed',
+                'research_quality':'strong_multisource',
+                'niche':'салоны красоты',
                 'summary':'Повторяется боль долгой переписки до записи.',
+                'video_candidates':[{'source_id':'yt:demo','title':'Сколько сообщений до записи?','view_count':500000,'outlier_ratio':3.2,'viral_score':88,'age_days':3,'evidence_confidence':'high'}],
+                'article_candidates':[{'source_id':'article:1','title':'Как сократить ручную запись','publisher':'Example','cross_source_hits':3,'trend_score':82,'age_days':2,'evidence_confidence':'high'}],
+                'audience_pains':[{'pain':'Долгая переписка','source_ids':['yt:demo'],'why_it_matters':'Клиент ждёт','product_match':'hypothesis','product_fact_id':None,'product_match_explanation':'Нужно проверить','presentation_angle':'Показать путь','humor_angle':'Чат как CRM'}],
                 'hook_patterns':[{'pattern':'Сколько сообщений до записи?', 'source_ids':['yt:demo']}],
                 'seo_topic_seeds':['как сократить переписку при записи'],
             },ensure_ascii=False),
@@ -79,7 +84,7 @@ async def test_viral_research_runs_before_editorial_planner_and_enters_evidence(
         db.add(row);db.commit();db.refresh(row)
         return row
 
-    monkeypatch.setattr('app.content.calendar.run_viral_video_research', fake_viral_research)
+    monkeypatch.setattr('app.content.calendar.run_viral_content_research', fake_viral_research)
 
     class Provider:
         def __init__(self): self.requests=[]
@@ -95,11 +100,11 @@ async def test_viral_research_runs_before_editorial_planner_and_enters_evidence(
 
     assert events[:2]==['viral','planner']
     payload=json.loads(provider.requests[0].messages[0].content)
-    research=[item for item in payload['research'] if item['kind']=='viral_video_research']
+    research=[item for item in payload['research'] if item['kind']=='viral_content_research']
     assert research and 'долгой переписки' in research[0]['bounded_excerpt']
     plan=db.scalar(select(Artifact).where(Artifact.kind=='editorial_plan'))
     stored=json.loads(plan.content)
-    assert any(source.get('kind')=='viral_video_research' for source in stored['sources'])
+    assert any(source.get('kind')=='viral_content_research' for source in stored['sources'])
 
 
 @pytest.mark.asyncio
@@ -182,6 +187,8 @@ async def test_default_planner_guidance_uses_faster_five_channel_sprint(db,tmp_p
     assert 'five core package topics across 14 days' in prompt
     assert 'own_site, dzen, telegram, youtube_shorts and instagram_reels' in prompt
     assert 'roughly one new package every three days' in prompt
+    assert 'ONE anchor slot per package' in prompt
+    assert 'viral_content_research' in prompt
     assert 'prospect-enrichment/outreach-only gaps' in prompt
 
 
