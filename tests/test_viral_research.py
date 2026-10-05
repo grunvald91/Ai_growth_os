@@ -49,6 +49,27 @@ def test_parse_youtube_search_page_extracts_verifiable_candidate():
     assert "/shorts/" in str(row.url)
 
 
+def test_parse_youtube_shorts_lockup_renderer():
+    initial = {
+        "contents": [{
+            "shortsLockupViewModel": {
+                "onTap": {"innertubeCommand": {"reelWatchEndpoint": {"videoId": "Sh0rt12345A"}}},
+                "overlayMetadata": {
+                    "primaryText": {"simpleText": "Администратор снова ищет свободное окно"},
+                    "secondaryText": {"simpleText": "2,1 млн просмотров"},
+                },
+            }
+        }]
+    }
+    page = "<script>var ytInitialData = " + json.dumps(initial, ensure_ascii=False) + ";</script>"
+    rows = parse_youtube_search_page(page, "салон запись", discovery_mode="shorts_filter")
+    assert len(rows) == 1
+    assert rows[0].source_id == "yt:Sh0rt12345A"
+    assert rows[0].is_short is True
+    assert rows[0].view_count == 2_100_000
+    assert rows[0].discovery_mode == "shorts_filter"
+
+
 def test_search_queries_are_niche_specific():
     context = {"company": {"profile": {
         "identity": {"name": "Demo"},
@@ -121,16 +142,28 @@ async def test_viral_research_persists_grounded_artifact_before_plan(db, tmp_pat
             "why_it_may_work": "Быстро делает операционную боль измеримой и узнаваемой.",
             "source_ids": ["yt:one1234", "yt:three1234"],
         }],
-        "topic_patterns": [{
-            "pattern": "Ошибки администратора, из-за которых клиент ждёт.",
-            "why_it_may_work": "Формат ошибки создаёт ясный конфликт и обещает практическую проверку.",
-            "source_ids": ["yt:two1234"],
-        }],
+        "topic_patterns": [
+            {
+                "pattern": "Ошибки администратора, из-за которых клиент ждёт.",
+                "why_it_may_work": "Формат ошибки создаёт ясный конфликт и обещает практическую проверку.",
+                "source_ids": ["yt:two1234"],
+            },
+            {
+                "pattern": "Считать путь до записи в шагах и сообщениях.",
+                "why_it_may_work": "Конкретное число делает невидимую ручную работу заметной.",
+                "source_ids": ["yt:one1234", "yt:three1234"],
+            },
+        ],
         "seo_topic_seeds": [
             "как сократить переписку при записи клиента",
             "ошибки онлайн-записи в салоне",
+            "как уменьшить ручные уточнения времени записи",
         ],
-        "content_angles": ["Путь клиента как количество ручных уточнений до подтверждения."],
+        "content_angles": [
+            "Путь клиента как количество ручных уточнений до подтверждения.",
+            "Что видит клиент, пока администратор ищет свободное окно.",
+            "Пять сообщений, которые можно заменить понятным выбором слота.",
+        ],
         "cautions": ["Не переносить просмотры ролика в обещание продаж."],
     }
     provider = FakeLLMProvider(LLMResponse(
@@ -158,6 +191,9 @@ async def test_viral_research_persists_grounded_artifact_before_plan(db, tmp_pat
     stored = ViralVideoResearch.model_validate_json(artifact.content)
     assert stored.source_status == "evidence_available"
     assert stored.analysis_status == "completed"
+    assert stored.research_quality == "strong_short_form"
+    assert stored.short_form_candidates == 3
+    assert stored.long_form_candidates == 0
     assert len(stored.candidates) == 3
     assert stored.hook_patterns[0].source_ids == ["yt:one1234", "yt:three1234"]
     run = db.scalar(select(AgentRun).where(AgentRun.agent_name == "viral_video_researcher"))

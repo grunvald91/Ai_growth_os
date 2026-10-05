@@ -29,7 +29,7 @@ def ready_outputs():
         for c,b in zip(['dzen','tenchat','vc_ru','telegram','faq','founder'],bodies)]}
     videos=[]
     for platform,hook in [('youtube_shorts','Проверьте путь записи'),('instagram_reels','Где клиент ждёт ответа')]:
-        video=copy.deepcopy(outputs[6])
+        video=copy.deepcopy(outputs[7])
         video['hook']=hook
         video['production_brief']['target_platform']=platform
         video['production_brief']['duration_seconds']=30
@@ -44,7 +44,7 @@ async def test_complete_factory_outputs_ready_texts_and_two_platform_video_brief
     result=await build_article_production(db,Settings(products_root=tmp_path),provider).run(
         ArticleProductionInput(product_id=product.id,topic='Онлайн-запись',produce_ready_assets=True,request_publication=True))
     assert result.status == 'completed',result.error
-    assert len(provider.requests)==12
+    assert len(provider.requests)==13
     assert len(list(db.scalars(select(Artifact).where(Artifact.kind=='channel_text'))))==6
     scripts=list(db.scalars(select(Artifact).where(Artifact.kind=='video_script')))
     assert len(scripts)==2
@@ -56,12 +56,12 @@ async def test_complete_factory_outputs_ready_texts_and_two_platform_video_brief
 @pytest.mark.asyncio
 async def test_factory_duplicate_channel_copy_fails_atomically(db,tmp_path):
     p=Product(name='P',slug='p');db.add(p);db.commit()
-    outputs=ready_outputs();outputs[9]['texts'][1]['body']=outputs[9]['texts'][0]['body']
+    outputs=ready_outputs();outputs[10]['texts'][1]['body']=outputs[10]['texts'][0]['body']
     result=await build_article_production(db,Settings(products_root=tmp_path),SequenceProvider(outputs)).run(
         ArticleProductionInput(product_id=p.id,topic='Test',produce_ready_assets=True))
     assert result.status=='failed'
     checkpoints=list(db.scalars(select(Artifact).where(Artifact.kind=='content_stage_output')))
-    assert len(checkpoints)==9
+    assert len(checkpoints)==10
     assert result.checkpoint_artifact_ids==[a.id for a in checkpoints]
     assert not list(db.scalars(select(Artifact).where(Artifact.kind=='article')))
 

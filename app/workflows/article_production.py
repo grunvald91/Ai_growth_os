@@ -5,13 +5,13 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
-from app.models.domain import AgentRun, CostRecord, Decision, Experiment, Product, Task, TaskStatus
+from app.models.domain import AgentRun, Artifact, CostRecord, Decision, Experiment, Product, Task, TaskStatus
 from app.policies import PolicyEvaluator
 from app.privacy import PrivacyGateway
 from app.services.approvals import ApprovalService
@@ -45,6 +45,7 @@ STAGES = (
     ('article_writer', ArticleBodyDraft, 'Write the complete long-form article body as advice and hypotheses only. Verified facts are injected deterministically.'),
     ('conversion_editor', ConversionCore, 'Design the CTA, proposed links, funnel measurement and bounded distribution plan. Do not create derivatives.'),
     ('human_editor', HumanEditedArticle, 'Turn the safe draft into a complete, engaging reader-facing article without adding unsupported product facts.'),
+    ('marketing_editor', HumanEditedArticle, 'Sharpen the grounded article into specific pain-led marketing copy with tasteful situational humor and one clear CTA.'),
     ('repurposing_editor', TextDerivativeSet, 'Create six distinct text-channel derivatives only.'),
     ('video_director', ShortVideoDerivativeDraft, 'Write a complete text-only director brief for one vertical short video.'),
     ('story_director', StoryDerivativeDraft, 'Write a complete text-only frame-by-frame brief for one vertical story sequence.'),
@@ -57,6 +58,7 @@ STAGE_TIMEOUT_SECONDS = {
     'article_writer': 240,
     'conversion_editor': 180,
     'human_editor': 240,
+    'marketing_editor': 240,
     'repurposing_editor': 180,
     'video_director': 180,
     'story_director': 180,
@@ -71,6 +73,7 @@ STAGE_MAX_TOKENS = {
     'article_writer': 8000,
     'conversion_editor': 3500,
     'human_editor': 8000,
+    'marketing_editor': 8000,
     'repurposing_editor': 8000,
     'video_director': 5500,
     'story_director': 4500,
@@ -179,10 +182,45 @@ class ArticleProduction:
             # No arbitrary dynamic record contents or unrelated customer data enter this workflow.
             stable = self.privacy.sanitize_text(context['stable_context'])
             facts = product_facts(stable)
-            marketing_research = [
-                row for row in context['records'].get('artifact', [])
-                if row.get('kind') in {'viral_video_research', 'research_report', 'editorial_plan'}
-            ][:4]
+            research_rows = list(self.db.scalars(
+                select(Artifact).where(
+                    Artifact.product_id == product.id,
+                    Artifact.kind.in_(['viral_content_research', 'viral_video_research', 'research_report', 'editorial_plan']),
+                ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(4)
+            ))
+            marketing_research = []
+            for row in research_rows:
+                if row.kind == 'viral_content_research':
+                    try:
+                        raw = json.loads(row.content)
+                        compact = {
+                            'source_status': raw.get('source_status'),
+                            'analysis_status': raw.get('analysis_status'),
+                            'research_quality': raw.get('research_quality'),
+                            'niche': raw.get('niche'),
+                            'summary': raw.get('summary'),
+                            'audience_pains': (raw.get('audience_pains') or [])[:6],
+                            'hook_patterns': (raw.get('hook_patterns') or [])[:5],
+                            'topic_patterns': (raw.get('topic_patterns') or [])[:5],
+                            'article_patterns': (raw.get('article_patterns') or [])[:4],
+                            'seo_topic_seeds': (raw.get('seo_topic_seeds') or [])[:8],
+                            'content_angles': (raw.get('content_angles') or [])[:8],
+                            'white_space_angles': (raw.get('white_space_angles') or [])[:5],
+                            'humor_angles': (raw.get('humor_angles') or [])[:5],
+                            'counterexamples': (raw.get('counterexamples') or [])[:4],
+                            'cautions': (raw.get('cautions') or [])[:5],
+                        }
+                        content = json.dumps(compact, ensure_ascii=False)[:12000]
+                    except (TypeError, json.JSONDecodeError):
+                        content = row.content[:3000]
+                else:
+                    content = row.content[:3000]
+                marketing_research.append({
+                    'id': str(row.id),
+                    'kind': row.kind,
+                    'title': row.title,
+                    'content': self.privacy.sanitize_text(content),
+                })
             inputs = {'request': safe_request.model_dump(mode='json'), 'product_context': stable,
                       'channel_profile': CHANNEL_PROFILES[request.channel],
                       'derivative_profiles': {key: value for key, value in CHANNEL_PROFILES.items() if key != 'own_site'},
@@ -209,14 +247,15 @@ class ArticleProduction:
                 'article_writer': ('content_strategist', 'seo_editor'),
                 'conversion_editor': ('content_strategist', 'seo_editor'),
                 'human_editor': ('content_strategist', 'seo_editor', 'article_writer', 'conversion_editor'),
-                'repurposing_editor': ('content_strategist', 'seo_editor', 'human_editor', 'conversion_editor'),
-                'video_director': ('content_strategist', 'human_editor', 'conversion_editor'),
-                'story_director': ('content_strategist', 'human_editor', 'conversion_editor'),
-                'visual_designer': ('content_strategist', 'human_editor', 'conversion_editor'),
+                'marketing_editor': ('content_strategist', 'seo_editor', 'human_editor', 'conversion_editor'),
+                'repurposing_editor': ('content_strategist', 'seo_editor', 'marketing_editor', 'conversion_editor'),
+                'video_director': ('content_strategist', 'marketing_editor', 'conversion_editor'),
+                'story_director': ('content_strategist', 'marketing_editor', 'conversion_editor'),
+                'visual_designer': ('content_strategist', 'marketing_editor', 'conversion_editor'),
             }
-            stage_dependencies['platform_writer'] = ('content_strategist', 'seo_editor', 'human_editor', 'conversion_editor')
-            stage_dependencies['youtube_shorts_director'] = ('content_strategist', 'human_editor', 'conversion_editor')
-            stage_dependencies['instagram_reels_director'] = ('content_strategist', 'human_editor', 'conversion_editor')
+            stage_dependencies['platform_writer'] = ('content_strategist', 'seo_editor', 'marketing_editor', 'conversion_editor')
+            stage_dependencies['youtube_shorts_director'] = ('content_strategist', 'marketing_editor', 'conversion_editor')
+            stage_dependencies['instagram_reels_director'] = ('content_strategist', 'marketing_editor', 'conversion_editor')
             for run_id, (name, schema, responsibility) in zip(run_ids, stages):
                 run = self.db.get(AgentRun, run_id)
                 run.status, run.started_at = 'running', datetime.now(timezone.utc)
@@ -232,15 +271,19 @@ class ArticleProduction:
                     stage_rule = (
                         ' Build the content hypothesis around a recognizable reader pain, the cost/friction of the '
                         'current workflow, and a concrete useful outcome the reader can pursue. When marketing_research '
-                        'contains viral_video_research, use its grounded topic/hook patterns as creative demand signals '
-                        'without copying wording and without treating views as buyer demand. The brief must create a '
-                        'clear bridge from the reader problem to verified ServGo relevance.'
+                        'contains viral_content_research, start from its grounded audience_pains and strongest video/article '
+                        'patterns, not from a generic product description. Prefer pains with a verified product_match; '
+                        'show the recognizable situation, operational friction and why it matters before proposing the '
+                        'mechanism. Use outlier/trend signals as creative evidence, never as buyer demand. Use white-space '
+                        'and humor angles only as original inspiration, never copy wording. The brief must create a clear '
+                        'bridge from the reader problem to verified ServGo relevance and identify what remains a hypothesis.'
                     )
                 elif name == 'seo_editor':
                     stage_rule = (
                         ' Create a search/content plan that is commercially useful as well as helpful. Use supplied '
-                        'viral-video topic patterns to sharpen angles and hooks when available, but never invent search '
-                        'volume or rankings. Prefer specific problem-led titles over generic educational wording. '
+                        'viral-content pain, article and video patterns to sharpen angles and hooks when available, but '
+                        'never invent search volume or rankings. Combine search usefulness with observed tension and '
+                        'white-space opportunities. Prefer specific problem-led titles over generic educational wording. '
                         'A title may be declarative and strong when it describes a real problem, a process explained '
                         'by the article, or an achievable reader benefit; it does not have to be a question.'
                     )
@@ -257,29 +300,40 @@ class ArticleProduction:
                     )
                 elif name == 'human_editor':
                     stage_rule = (
-                        ' Rewrite the safe article into a polished human-facing article for an actual reader AND '
-                        'make it commercially useful. Open with a recognizable pain or costly friction in the first '
-                        'two sentences; make the stakes concrete; show a before/after contrast in workflow; explain '
-                        'the useful mechanism; connect the reader problem naturally to verified ServGo capabilities; '
-                        'and end with one clear next step. Use confident, concrete Russian, not corporate filler. '
-                        'Do not weaken every paragraph with defensive disclaimers. Mention uncertainty only where it '
-                        'materially changes the reader decision. Make it complete, engaging, clear and useful, with '
-                        'natural transitions, specific examples framed as examples, and a satisfying closing. Do not expose internal '
-                        'research labels, uncertainty bookkeeping, schemas, proof-gap notes or agent language. '
-                        'Do not invent testimonials, metrics, prices, integrations, competitor superiority or '
-                        'product capabilities. Product facts may appear ONLY through fact_renderings, exactly one '
-                        'rendering per supplied verified_product_facts source_id. Each rendering must be a faithful '
-                        'translation or reader-friendly restatement of that one source fact and must not add detail. '
-                        'The ordinary sections must focus on reader explanation, advice, questions and carefully '
-                        'worded hypotheses; they must not introduce new ServGo feature claims. Strong declarative '
-                        'problem statements and benefits-to-pursue are allowed; guaranteed business outcomes are not. '
+                        ' Rewrite the safe article into a polished human-facing article for an actual reader. Open '
+                        'inside a concrete recognizable situation, not with definitions or “businesses often face”. '
+                        'Put the operational pain in the first two sentences, make the friction and stakes tangible, '
+                        'then explain a clearer workflow. Use concrete nouns, verbs, examples and short transitions. '
+                        'Connect the reader problem naturally to verified ServGo capabilities and end with one clear '
+                        'next step. Keep uncertainty only where it materially changes a decision. Do not expose internal '
+                        'research labels, schemas, proof-gap notes or agent language. Do not invent testimonials, metrics, '
+                        'prices, integrations, competitor superiority or product capabilities. Product facts may appear '
+                        'ONLY through fact_renderings, exactly one rendering per supplied verified_product_facts source_id. '
+                        'Each rendering must faithfully restate only that source fact. Ordinary sections may explain '
+                        'problems, advice and hypotheses but cannot introduce new ServGo features. '
+                    )
+                elif name == 'marketing_editor':
+                    stage_rule = (
+                        ' This is the final commercial-quality pass over prior_stage_outputs.human_editor. Keep every '
+                        'verified fact grounded and preserve exactly one fact_rendering per verified_product_facts source. '
+                        'Make the article impossible to confuse with generic SaaS copy: anchor it in the specific niche, '
+                        'specific pain and specific moment where the owner/admin loses time, attention or a client path. '
+                        'Use the sequence SCENE -> PAIN -> COST/FRICTION -> BETTER MECHANISM -> VERIFIED PRODUCT BRIDGE -> CTA. '
+                        'The title must create tension or curiosity without clickbait. The lead must earn the next paragraph. '
+                        'Delete filler, abstract claims, repeated caveats, “digital transformation” language and bland lists. '
+                        'Where marketing_research contains grounded humor_angles, you MAY add one or two light situational '
+                        'jokes, analogies or self-aware lines. Humor should target the absurdity of the process (for example, '
+                        'calendar/message chaos), never mock clients, staff or vulnerable people; no cringe, memes for their '
+                        'own sake, fake quotes or slang overload. Use contrast and rhythm. Make the product feel like the '
+                        'logical answer to the pain without promising guaranteed growth. End with ONE concrete CTA. '
                     )
                 elif name == 'platform_writer':
                     stage_rule = (
-                        ' Make each adaptation publishable and persuasive, not merely safe. Lead with a platform-fit '
-                        'pain/hook, deliver one useful insight quickly, connect it to the verified product mechanism, '
-                        'and use one concrete CTA. Do not repeat internal caveats such as “this is only a hypothesis” '
-                        'unless uncertainty is genuinely necessary for the reader. Do not invent proof or outcomes.'
+                        ' Make each adaptation publishable and persuasive, not merely safe. Start from the platform-fit '
+                        'pain or scene, deliver one useful insight quickly, connect it to the verified product mechanism, '
+                        'and use one concrete CTA. Preserve the sharper voice of marketing_editor. A light situational '
+                        'joke or analogy is welcome when grounded by the research/tone, but never trade clarity for comedy. '
+                        'Do not repeat internal caveats unless genuinely necessary. Do not invent proof or outcomes.'
                     )
                 elif name == 'repurposing_editor':
                     stage_rule = (
@@ -322,8 +376,9 @@ class ArticleProduction:
                         f'{target_platform}. Duration must be exactly 30 seconds. The first shot must start at 0, '
                         'the final shot must end at 30, and every adjacent shot must be contiguous. Every shot must '
                         'contain non-empty on_screen_text and a detailed generation_prompt. Use a platform-specific '
-                        'hook and framing, full spoken script, cover, captions, CTA, camera/movement, transition and '
-                        'edit/mix guidance. Do not render or generate a file.'
+                        'pattern interrupt or pain-led hook, a clear payoff, full spoken script, cover, captions, CTA, '
+                        'camera/movement, transition and edit/mix guidance. Tasteful situational humor is allowed when '
+                        'it sharpens recognition of the pain; never mock the audience. Do not render or generate a file.'
                     )
                 prompt = (
                     f'You are the {name}. {responsibility} Return ONLY JSON matching the schema. '
@@ -331,7 +386,7 @@ class ArticleProduction:
                     'specified by request.language. For ru, use natural Russian suitable for publication; do not '
                     'leak internal labels such as HYPOTHESIS, ADVICE, proof gaps, schema language or agent notes '
                     'into reader-facing copy. Internal uncertainty belongs in proof_needed_notes and metadata. '
-                    'Organic acquisition only: no ads, budgets, publishing, tools, rendering or claims of approval. Never invent metrics, customer '
+                    'Organic acquisition only: no ads, budgets, publishing, tools, rendering or claims of approval. Tasteful situational humor is allowed when it clarifies a real pain; humor never relaxes factual grounding. Never invent metrics, customer '
                     'stories, testimonials, prices, integrations, outcomes or product features. '
                     'Only verified_product_facts can support factual sections: copy the exact quote and source_id; '
                     'claim equals quote; fact section body equals quote and claim_ids contains that source_id. '
@@ -405,12 +460,13 @@ class ArticleProduction:
                 seo,
                 body_draft,
                 conversion_core,
+                safe_reader_article,
                 reader_article,
                 text_derivatives,
                 video_derivative,
                 story_derivative,
                 image_derivative,
-            ) = outputs[:9]
+            ) = outputs[:10]
             error = 'invalid_derivative_assembly'
             derivative_drafts = [
                 *text_derivatives.derivatives,
@@ -419,7 +475,7 @@ class ArticleProduction:
                 image_derivative,
             ]
 
-            error = 'invalid_human_editor_grounding'
+            error = 'invalid_marketing_editor_grounding'
             reader_fact_ids = [item.source_id for item in reader_article.fact_renderings]
             if len(reader_fact_ids) != len(set(reader_fact_ids)):
                 raise ValueError('Human editor duplicated a verified fact source')
@@ -524,13 +580,13 @@ class ArticleProduction:
                     content=json.dumps({'article_id': str(main.id), **brief.model_dump(mode='json')}))
                 artifact_ids.append(derivative.id)
             if request.produce_ready_assets:
-                for text in outputs[9].texts:
+                for text in outputs[10].texts:
                     ready = artifacts.create(product_id=product_id, task_id=task_id,
                         kind='channel_text', title=text.title,
                         content=json.dumps({'article_id': str(main.id), **text.model_dump(mode='json')}, ensure_ascii=False),
                         status='awaiting_approval')
                     artifact_ids.append(ready.id)
-                for index, video in enumerate(outputs[10:12], 1):
+                for index, video in enumerate(outputs[11:13], 1):
                     ready = artifacts.create(product_id=product_id, task_id=task_id,
                         kind='video_script', title=f"{video.production_brief.target_platform}: {video.hook}",
                         content=json.dumps({'article_id': str(main.id), **video.model_dump(mode='json')}, ensure_ascii=False),

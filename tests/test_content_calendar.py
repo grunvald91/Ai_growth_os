@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
-from app.content.calendar import (EditorialPlan, approve_plan, pause_plan, plan_record, planning_context,
+from app.content.calendar import (EditorialPlan, _expand_anchor_slots, approve_plan, pause_plan, plan_record, planning_context,
     queue_plan, record_publication, render_calendar, run_planner_once, save_preferences, tick_calendar)
 from app.core.config import Settings
 from app.llm.fake import FakeLLMProvider
@@ -30,6 +30,26 @@ def draft():
                   'rationale':'Начальный график для проверки, без утверждения оптимального часа.',
                   'success_metric':'leads', 'timing_basis':'test_hypothesis', 'evidence_refs':[]}
                  for i,p in enumerate(['own_site','dzen'])]}
+
+
+def test_compact_anchor_expands_across_tested_channels():
+    value=draft()
+    value['channels']=[
+        {'platform':p,'decision':'test','rationale':'Проверить канал на одном общем пакете без обещания результата.','evidence_refs':[]}
+        for p in ['own_site','dzen','telegram','youtube_shorts','instagram_reels']
+    ]
+    value['slots']=[copy.deepcopy(value['slots'][0])]
+    value['slots'][0]['day_offset']=3
+    plan=_expand_anchor_slots(EditorialPlan.model_validate(value))
+    assert len(plan.slots)==5
+    by_platform={slot.platform:slot for slot in plan.slots}
+    assert set(by_platform)=={'own_site','dzen','telegram','youtube_shorts','instagram_reels'}
+    assert by_platform['own_site'].day_offset==3
+    assert by_platform['dzen'].day_offset==3
+    assert by_platform['telegram'].day_offset==4
+    assert by_platform['youtube_shorts'].format=='short_video'
+    assert by_platform['instagram_reels'].day_offset==5
+    assert by_platform['instagram_reels'].prepare_lead_hours==72
 
 
 class Borrow:
@@ -66,12 +86,17 @@ async def test_viral_research_runs_before_editorial_planner_and_enters_evidence(
         row=Artifact(
             product_id=task.product_id,
             task_id=task.id,
-            kind='viral_video_research',
-            title='Viral video research before editorial plan',
+            kind='viral_content_research',
+            title='Viral/trend content research before editorial plan',
             content=json.dumps({
                 'source_status':'evidence_available',
                 'analysis_status':'completed',
+                'research_quality':'strong_multisource',
+                'niche':'салоны красоты',
                 'summary':'Повторяется боль долгой переписки до записи.',
+                'video_candidates':[{'source_id':'yt:demo','title':'Сколько сообщений до записи?','view_count':500000,'outlier_ratio':3.2,'viral_score':88,'age_days':3,'evidence_confidence':'high'}],
+                'article_candidates':[{'source_id':'article:1','title':'Как сократить ручную запись','publisher':'Example','cross_source_hits':3,'trend_score':82,'age_days':2,'evidence_confidence':'high'}],
+                'audience_pains':[{'pain':'Долгая переписка','source_ids':['yt:demo'],'why_it_matters':'Клиент ждёт','product_match':'hypothesis','product_fact_id':None,'product_match_explanation':'Нужно проверить','presentation_angle':'Показать путь','humor_angle':'Чат как CRM'}],
                 'hook_patterns':[{'pattern':'Сколько сообщений до записи?', 'source_ids':['yt:demo']}],
                 'seo_topic_seeds':['как сократить переписку при записи'],
             },ensure_ascii=False),
@@ -79,7 +104,7 @@ async def test_viral_research_runs_before_editorial_planner_and_enters_evidence(
         db.add(row);db.commit();db.refresh(row)
         return row
 
-    monkeypatch.setattr('app.content.calendar.run_viral_video_research', fake_viral_research)
+    monkeypatch.setattr('app.content.calendar.run_viral_content_research', fake_viral_research)
 
     class Provider:
         def __init__(self): self.requests=[]
@@ -95,11 +120,11 @@ async def test_viral_research_runs_before_editorial_planner_and_enters_evidence(
 
     assert events[:2]==['viral','planner']
     payload=json.loads(provider.requests[0].messages[0].content)
-    research=[item for item in payload['research'] if item['kind']=='viral_video_research']
+    research=[item for item in payload['research'] if item['kind']=='viral_content_research']
     assert research and 'долгой переписки' in research[0]['bounded_excerpt']
     plan=db.scalar(select(Artifact).where(Artifact.kind=='editorial_plan'))
     stored=json.loads(plan.content)
-    assert any(source.get('kind')=='viral_video_research' for source in stored['sources'])
+    assert any(source.get('kind')=='viral_content_research' for source in stored['sources'])
 
 
 @pytest.mark.asyncio
@@ -182,6 +207,8 @@ async def test_default_planner_guidance_uses_faster_five_channel_sprint(db,tmp_p
     assert 'five core package topics across 14 days' in prompt
     assert 'own_site, dzen, telegram, youtube_shorts and instagram_reels' in prompt
     assert 'roughly one new package every three days' in prompt
+    assert 'ONE anchor slot per package' in prompt
+    assert 'viral_content_research' in prompt
     assert 'prospect-enrichment/outreach-only gaps' in prompt
 
 
