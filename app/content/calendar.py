@@ -213,6 +213,73 @@ def _compact_research_artifact(row: Artifact, privacy: PrivacyGateway) -> dict:
         'excerpt_complete': False,
     }
 
+
+def _expand_anchor_slots(plan: EditorialPlan) -> EditorialPlan:
+    """Expand compact one-slot-per-package plans after model validation.
+
+    Legacy/full plans that already contain more than one slot for any package are
+    left unchanged. This keeps older stored/test plans stable while allowing the
+    model to reason over five package anchors instead of roughly 25 channel slots.
+    """
+    counts = Counter(slot.package_key for slot in plan.slots)
+    if not counts or any(count > 1 for count in counts.values()):
+        return plan
+
+    tested = [choice.platform for choice in plan.channels if choice.decision == 'test']
+    if len(tested) <= 1:
+        return plan
+
+    default_hour = {
+        'own_site': 9,
+        'dzen': 12,
+        'telegram': 11,
+        'tenchat': 11,
+        'vc_ru': 10,
+        'youtube_shorts': 18,
+        'vk_clips': 18,
+        'instagram_reels': 19,
+    }
+    day_shift = {
+        'own_site': 0,
+        'dzen': 0,
+        'vc_ru': 0,
+        'telegram': 1,
+        'tenchat': 1,
+        'youtube_shorts': 1,
+        'vk_clips': 1,
+        'instagram_reels': 2,
+    }
+    prep_hours = {'article': 36, 'post': 24, 'short_video': 72}
+
+    expanded: list[Slot] = []
+    for anchor in plan.slots:
+        for platform in tested:
+            target_format = PLATFORMS[platform][1]
+            if platform == anchor.platform:
+                expanded.append(anchor)
+                continue
+            day = anchor.day_offset + day_shift[platform]
+            if day >= plan.horizon_days:
+                day = plan.horizon_days - 1
+            expanded.append(Slot(
+                package_key=anchor.package_key,
+                topic=anchor.topic,
+                platform=platform,
+                format=target_format,
+                asset_index=0,
+                day_offset=day,
+                hour=default_hour[platform],
+                minute=0,
+                prepare_lead_hours=prep_hours[target_format],
+                audience=anchor.audience,
+                objective=anchor.objective,
+                rationale=anchor.rationale,
+                evidence_refs=list(anchor.evidence_refs),
+                success_metric=anchor.success_metric,
+                timing_basis='test_hypothesis',
+            ))
+    return EditorialPlan.model_validate({**plan.model_dump(), 'slots': [slot.model_dump() for slot in expanded]})
+
 def planning_context(db, settings, product_id):
     product = db.get(Product, product_id)
     if product is None:
