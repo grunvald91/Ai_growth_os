@@ -14,7 +14,7 @@ from sqlalchemy import select, update
 
 from app.company_profile import load_company_profile, profile_snapshot
 from app.content.service import queue_content
-from app.content.viral_research import run_viral_video_research
+from app.content.viral_content_research import run_viral_content_research
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, CostRecord, Metric, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
@@ -121,7 +121,7 @@ class EditorialPlan(Contract):
 def _compact_research_artifact(row: Artifact, privacy: PrivacyGateway) -> dict:
     """Keep planning evidence useful without feeding raw research blobs to the planner."""
     artifact_id = 'artifact:' + str(row.id)
-    if row.kind != 'viral_video_research':
+    if row.kind not in {'viral_video_research', 'viral_content_research'}:
         return {
             'id': artifact_id,
             'kind': row.kind,
@@ -137,112 +137,81 @@ def _compact_research_artifact(row: Artifact, privacy: PrivacyGateway) -> dict:
             'bounded_excerpt': privacy.sanitize_text(row.content[:3200]),
             'excerpt_complete': False,
         }
-    compact = {
-        'source_status': raw.get('source_status'),
-        'analysis_status': raw.get('analysis_status'),
-        'research_quality': raw.get('research_quality'),
-        'short_form_candidates': raw.get('short_form_candidates'),
-        'long_form_candidates': raw.get('long_form_candidates'),
-        'niche': raw.get('niche'),
-        'summary': str(raw.get('summary') or '')[:1400],
-        'top_candidates': [
-            {
-                'source_id': item.get('source_id'),
-                'title': item.get('title'),
-                'view_count': item.get('view_count'),
-                'published_text': item.get('published_text'),
-                'is_short': item.get('is_short'),
-                'discovery_mode': item.get('discovery_mode'),
-            }
-            for item in (raw.get('candidates') or [])[:8]
-        ],
-        'hook_patterns': (raw.get('hook_patterns') or [])[:4],
-        'topic_patterns': (raw.get('topic_patterns') or [])[:5],
-        'seo_topic_seeds': (raw.get('seo_topic_seeds') or [])[:8],
-        'content_angles': (raw.get('content_angles') or [])[:8],
-        'cautions': (raw.get('cautions') or [])[:6],
-    }
+    if row.kind == 'viral_content_research':
+        compact_value = {
+            'source_status': raw.get('source_status'),
+            'analysis_status': raw.get('analysis_status'),
+            'research_quality': raw.get('research_quality'),
+            'niche': raw.get('niche'),
+            'summary': str(raw.get('summary') or '')[:1600],
+            'top_videos': [
+                {
+                    'source_id': item.get('source_id'),
+                    'title': item.get('title'),
+                    'view_count': item.get('view_count'),
+                    'outlier_ratio': item.get('outlier_ratio'),
+                    'viral_score': item.get('viral_score'),
+                    'age_days': item.get('age_days'),
+                    'evidence_confidence': item.get('evidence_confidence'),
+                }
+                for item in (raw.get('video_candidates') or [])[:6]
+            ],
+            'top_articles': [
+                {
+                    'source_id': item.get('source_id'),
+                    'title': item.get('title'),
+                    'publisher': item.get('publisher'),
+                    'cross_source_hits': item.get('cross_source_hits'),
+                    'trend_score': item.get('trend_score'),
+                    'age_days': item.get('age_days'),
+                    'evidence_confidence': item.get('evidence_confidence'),
+                }
+                for item in (raw.get('article_candidates') or [])[:6]
+            ],
+            'audience_pains': (raw.get('audience_pains') or [])[:6],
+            'hook_patterns': (raw.get('hook_patterns') or [])[:5],
+            'topic_patterns': (raw.get('topic_patterns') or [])[:6],
+            'article_patterns': (raw.get('article_patterns') or [])[:5],
+            'stepps_mechanisms': (raw.get('stepps_mechanisms') or [])[:6],
+            'seo_topic_seeds': (raw.get('seo_topic_seeds') or [])[:10],
+            'content_angles': (raw.get('content_angles') or [])[:10],
+            'white_space_angles': (raw.get('white_space_angles') or [])[:6],
+            'humor_angles': (raw.get('humor_angles') or [])[:6],
+            'counterexamples': (raw.get('counterexamples') or [])[:5],
+            'cautions': (raw.get('cautions') or [])[:6],
+        }
+    else:
+        compact_value = {
+            'source_status': raw.get('source_status'),
+            'analysis_status': raw.get('analysis_status'),
+            'research_quality': raw.get('research_quality'),
+            'short_form_candidates': raw.get('short_form_candidates'),
+            'long_form_candidates': raw.get('long_form_candidates'),
+            'niche': raw.get('niche'),
+            'summary': str(raw.get('summary') or '')[:1400],
+            'top_candidates': [
+                {
+                    'source_id': item.get('source_id'),
+                    'title': item.get('title'),
+                    'view_count': item.get('view_count'),
+                    'published_text': item.get('published_text'),
+                    'is_short': item.get('is_short'),
+                    'discovery_mode': item.get('discovery_mode'),
+                }
+                for item in (raw.get('candidates') or [])[:8]
+            ],
+            'hook_patterns': (raw.get('hook_patterns') or [])[:4],
+            'topic_patterns': (raw.get('topic_patterns') or [])[:5],
+            'seo_topic_seeds': (raw.get('seo_topic_seeds') or [])[:8],
+            'content_angles': (raw.get('content_angles') or [])[:8],
+            'cautions': (raw.get('cautions') or [])[:6],
+        }
     return {
         'id': artifact_id,
         'kind': row.kind,
-        'bounded_excerpt': privacy.sanitize_text(encode(compact)),
-        'excerpt_complete': True,
+        'bounded_excerpt': privacy.sanitize_text(encode(compact_value)),
+        'excerpt_complete': False,
     }
-
-
-def _expand_anchor_slots(plan: EditorialPlan) -> EditorialPlan:
-    """Expand compact package anchors into the cross-channel calendar deterministically.
-
-    The planner only needs to reason about five package ideas. Repeating the same
-    package data 25 times made cheap structured-output models slow and fragile.
-    Legacy/full plans that already contain multiple slots per package pass through.
-    """
-    counts = Counter(slot.package_key for slot in plan.slots)
-    if any(count > 1 for count in counts.values()):
-        return plan
-
-    tested = [choice.platform for choice in plan.channels if choice.decision == 'test']
-    if not tested:
-        return plan
-
-    platform_hour = {
-        'own_site': 9,
-        'dzen': 12,
-        'telegram': 11,
-        'tenchat': 11,
-        'vc_ru': 10,
-        'youtube_shorts': 18,
-        'vk_clips': 18,
-        'instagram_reels': 19,
-    }
-    day_shift = {
-        'own_site': 0,
-        'dzen': 0,
-        'telegram': 1,
-        'tenchat': 1,
-        'vc_ru': 0,
-        'youtube_shorts': 1,
-        'vk_clips': 1,
-        'instagram_reels': 2,
-    }
-    prep_hours = {'article': 36, 'post': 24, 'short_video': 72}
-    expanded: list[Slot] = []
-    used: set[tuple[str, int, int, int]] = set()
-
-    for anchor in plan.slots:
-        for platform in tested:
-            fmt = PLATFORMS[platform][1]
-            day = min(anchor.day_offset + day_shift[platform], plan.horizon_days - 1)
-            hour = platform_hour[platform]
-            while (platform, day, hour, 0) in used and day + 1 < plan.horizon_days:
-                day += 1
-            if (platform, day, hour, 0) in used:
-                # Extremely dense custom plans are safer left unexpanded than
-                # silently creating duplicate moments.
-                return plan
-            used.add((platform, day, hour, 0))
-            expanded.append(Slot(
-                package_key=anchor.package_key,
-                topic=anchor.topic,
-                platform=platform,
-                format=fmt,
-                asset_index=0,
-                day_offset=day,
-                hour=hour,
-                minute=0,
-                prepare_lead_hours=prep_hours[fmt],
-                audience=anchor.audience,
-                objective=anchor.objective,
-                rationale=anchor.rationale,
-                evidence_refs=anchor.evidence_refs,
-                success_metric=anchor.success_metric,
-                timing_basis=anchor.timing_basis,
-            ))
-    return EditorialPlan.model_validate({
-        **plan.model_dump(),
-        'slots': [slot.model_dump() for slot in expanded],
-    })
-
 
 def planning_context(db, settings, product_id):
     product = db.get(Product, product_id)
@@ -256,7 +225,7 @@ def planning_context(db, settings, product_id):
     preference = db.scalar(select(Artifact).where(Artifact.product_id == product_id,
         Artifact.kind == 'editorial_preferences').order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
     reports = list(db.scalars(select(Artifact).where(Artifact.product_id == product_id,
-        Artifact.kind.in_(['viral_video_research', 'research_report', 'research_source_bundle', 'measurement_spec']))
+        Artifact.kind.in_(['viral_content_research', 'viral_video_research', 'research_report', 'research_source_bundle', 'measurement_spec']))
         .order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(4)))
     observations, keys = [], set()
     for metric in db.scalars(select(Metric).where(Metric.product_id == product_id, Metric.name.like('content_%'))
@@ -380,7 +349,7 @@ async def run_planner_once(session_factory, settings, llm=None):
                     from app.llm.service import LLMService
                     llm = LLMService(privacy_gateway=PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS),
                                      provider=build_llm_provider(settings))
-                await run_viral_video_research(db=db, settings=settings, llm=llm, task=task, context=context)
+                await run_viral_content_research(db=db, settings=settings, llm=llm, task=task, context=context)
                 context, digest = planning_context(db, settings, task.product_id)
             evidence_ids = sorted({r['id'] for r in context['research'] + context['observations'] + GUIDANCE}
                                   | ({context['owner_requirements_ref']} if context['owner_requirements_ref'] else set()))
@@ -410,15 +379,18 @@ async def run_planner_once(session_factory, settings, llm=None):
                 'supported networks may be deferred. Missing accounts, audience, resources and research are unknowns, '
                 'not facts. All numerical cadence and hours are test hypotheses unless supported by relevant owner '
                 'constraints or actual measured audience. Do not invent best hours, platform rules, statistics or ROI. '
-                'Never generalize YouTube guidance to Dzen/other platforms. Before this plan, viral_video_research '
-                'is collected for the specific business niche when the public source is available. Treat its views '
-                'as creative/topic reach signals, NOT proof of buyer demand, keyword volume or conversion. When the '
-                'latest viral_video_research has source_status=evidence_available and completed analysis, use its '
-                'grounded hook/topic patterns to sharpen the plan and make at least three of the five default package '
-                'topics visibly traceable to those patterns through evidence_refs. Do not copy creators or scripts. '
-                'When the source is unavailable or insufficient, say so in unknowns and do not pretend the plan is '
-                'based on viral evidence. SEO prioritizes useful audience problems and search intent, with viral '
-                'signals used to improve framing rather than replace search usefulness. Choose only available_formats. '
+                'Never generalize YouTube guidance to Dzen/other platforms. Before this plan, viral_content_research '
+                'is collected for the specific business niche from public video and article sources when available. '
+                'Treat video reach/outlier scores and article freshness/cross-source recurrence as creative/topic '
+                'signals, NOT proof of buyer demand, keyword volume or conversion. When the latest research has '
+                'source_status=evidence_available and completed analysis, use grounded audience_pains, hook/topic/article '
+                'patterns, SEO seeds and white-space angles to sharpen the plan. Make at least three of the five default '
+                'package topics visibly traceable to that artifact through evidence_refs. Favor pains that have a grounded '
+                'product match, but never turn a hypothesis into a feature claim. Use humor_angles only as optional tone '
+                'inspiration: humor should make an operational situation recognizable, not mock people. Do not copy '
+                'creators, article wording or scripts. When the source is unavailable or insufficient, say so in unknowns '
+                'and do not pretend the plan is based on viral evidence. SEO prioritizes useful audience problems and '
+                'search intent, with trend signals improving framing rather than replacing search usefulness. Choose only available_formats. '
                 'Video slots mean production-ready SCRIPT/STORYBOARD briefs only, never '
                 'video rendering or generation. For YouTube Shorts and Instagram Reels specify a platform-adapted '
                 'director brief; future generation may be delegated to a separate adapter, but this planner never calls '
