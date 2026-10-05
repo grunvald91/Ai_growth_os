@@ -474,19 +474,34 @@ async def run_viral_content_research(
     try:
         yt = video_scout or YouTubePublicScout(timeout_seconds=float(settings.viral_research_timeout_seconds))
         news = article_scout or GoogleNewsPublicScout(timeout_seconds=float(settings.viral_research_timeout_seconds))
-        video_raw, articles = await asyncio.gather(
+        collected = await asyncio.gather(
             yt.collect(queries, max_candidates=int(settings.viral_research_max_candidates)),
             news.collect(queries, max_candidates=int(settings.viral_research_max_candidates)),
+            return_exceptions=True,
         )
-        video_raw = [
-            ViralVideoCandidate.model_validate_json(privacy.sanitize_text(item.model_dump_json()))
-            for item in video_raw
-        ]
-        videos = await rank_youtube_candidates(video_raw, timeout_seconds=float(settings.viral_research_timeout_seconds))
-        articles = [
-            ArticleCandidate.model_validate_json(privacy.sanitize_text(item.model_dump_json()))
-            for item in articles
-        ]
+        raw_video_result, raw_article_result = collected
+        if isinstance(raw_video_result, Exception):
+            video_raw = []
+            cautions.append("YouTube-источник временно недоступен; исследование продолжено по статье/новостному слою.")
+        else:
+            video_raw = [
+                ViralVideoCandidate.model_validate_json(privacy.sanitize_text(item.model_dump_json()))
+                for item in raw_video_result
+            ]
+        if isinstance(raw_article_result, Exception):
+            articles = []
+            cautions.append("Статейный источник временно недоступен; исследование продолжено по видео-слою.")
+        else:
+            articles = [
+                ArticleCandidate.model_validate_json(privacy.sanitize_text(item.model_dump_json()))
+                for item in raw_article_result
+            ]
+        videos = (
+            await rank_youtube_candidates(
+                video_raw, timeout_seconds=float(settings.viral_research_timeout_seconds)
+            )
+            if video_raw else []
+        )
 
         strong_video = sum(1 for x in videos if x.is_short and x.view_count is not None and x.evidence_confidence != "low")
         strong_article = sum(1 for x in articles if x.evidence_confidence != "low")
