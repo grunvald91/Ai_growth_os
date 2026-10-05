@@ -395,7 +395,10 @@ def _approved_facts(context: dict) -> dict[str, str]:
 
 
 def _expanded_queries(context: dict, limit: int) -> tuple[str, list[str]]:
-    niche, base = build_search_queries(context, min(limit, 6))
+    # Reserve part of the query budget for pain-specific discovery instead of
+    # spending every query on generic niche keywords.
+    base_limit = max(1, min(2, limit))
+    niche, base = build_search_queries(context, base_limit)
     profile = ((context.get("company") or {}).get("profile") or {})
     customers = profile.get("customers") or {}
     segments = [x for x in customers.get("primary_segments") or [] if isinstance(x, str) and x.strip()]
