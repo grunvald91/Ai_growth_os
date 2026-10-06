@@ -203,3 +203,88 @@ def test_studio_root_redirects_to_servgo_dashboard(studio_db):
         assert "Выберите проект" in chooser.text
     finally:
         app.dependency_overrides.clear()
+
+
+def test_studio_all_navigation_targets_are_real_pages(studio_db):
+    db=studio_db
+    product=Product(name="ServGo",slug="servgo")
+    db.add(product);db.flush()
+    task=Task(product_id=product.id,title="CONTENT",assigned_agent="content_factory",status=TaskStatus.COMPLETED)
+    db.add(task);db.flush()
+    plan=Artifact(
+        product_id=product.id,kind="editorial_plan",title="План",
+        content=json.dumps(make_plan(task.id),ensure_ascii=False)
+    )
+    article=Artifact(
+        product_id=product.id,task_id=task.id,kind="article",title="Рабочая статья",
+        content=json.dumps({"full_article":"Полный рабочий текст статьи"},ensure_ascii=False)
+    )
+    db.add_all([plan,article]);db.commit()
+    client=client_for(db)
+    try:
+        base=f"/studio/products/{product.id}"
+        overview=client.get(base)
+        assert overview.status_code==200
+        assert f'href="{base}/plan"' in overview.text
+        assert f'href="{base}/calendar"' in overview.text
+        assert f'href="{base}/materials"' in overview.text
+        assert f'href="{base}/analytics"' in overview.text
+        assert f'href="{base}/packages/pkg-1"' in overview.text
+        assert f'href="{base}/calendar"' in overview.text
+        assert 'href="#calendar"' not in overview.text
+
+        plan_page=client.get(base+"/plan")
+        calendar_page=client.get(base+"/calendar")
+        materials_page=client.get(base+"/materials")
+        analytics_page=client.get(base+"/analytics")
+        package_page=client.get(base+"/packages/pkg-1")
+        material_page=client.get(base+f"/materials/{article.id}")
+        for response in (plan_page,calendar_page,materials_page,analytics_page,package_page,material_page):
+            assert response.status_code==200
+
+        assert "Контент-план" in plan_page.text
+        assert "Расписание публикаций" in calendar_page.text
+        assert "Библиотека" in materials_page.text
+        assert "Статусы публикационных слотов" in analytics_page.text
+        assert "Тема один" in package_page.text
+        assert "Полный рабочий текст статьи" in material_page.text
+        assert 'data-copy="material-copy"' in material_page.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_studio_calendar_date_filter_and_material_search_work(studio_db):
+    db=studio_db
+    product=Product(name="ServGo",slug="servgo")
+    db.add(product);db.flush()
+    task=Task(product_id=product.id,title="CONTENT",assigned_agent="content_factory",status=TaskStatus.COMPLETED)
+    db.add(task);db.flush()
+    db.add(Artifact(
+        product_id=product.id,kind="editorial_plan",title="План",
+        content=json.dumps(make_plan(task.id),ensure_ascii=False)
+    ))
+    db.add_all([
+        Artifact(product_id=product.id,task_id=task.id,kind="article",title="Нужная статья",
+                 content=json.dumps({"full_article":"Редкое ключевое слово альбатрос"},ensure_ascii=False)),
+        Artifact(product_id=product.id,task_id=task.id,kind="channel_text",title="Другой пост",
+                 content=json.dumps({"channel":"telegram","body":"Обычный текст"},ensure_ascii=False)),
+    ])
+    db.commit()
+    client=client_for(db)
+    try:
+        base=f"/studio/products/{product.id}"
+        calendar=client.get(base+"/calendar?date=2026-10-06")
+        assert calendar.status_code==200
+        assert "Тема один" in calendar.text
+
+        search=client.get(base+"/materials?q=альбатрос")
+        assert search.status_code==200
+        assert "Нужная статья" in search.text
+        assert "Другой пост" not in search.text
+
+        posts=client.get(base+"/materials?kind=post")
+        assert posts.status_code==200
+        assert "Другой пост" in posts.text
+        assert "Нужная статья" not in posts.text
+    finally:
+        app.dependency_overrides.clear()
