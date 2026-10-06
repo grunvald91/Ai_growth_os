@@ -277,7 +277,11 @@ def _profile_terms(context: dict) -> tuple[str, list[str]]:
     if niche is None:
         niche = next((term for term in deduped if any(marker in term.casefold() for marker in business_markers)), None)
     niche = niche or (deduped[0] if deduped else ((company.get("identity") or {}).get("name") or "business"))
-    return niche[:500], deduped[:4] or [niche]
+    # Search the concrete operating niche first. A generic owner/persona segment
+    # such as "owners of small service businesses" is useful context but produces
+    # noisy YouTube results compared with "massage studios" or "barbershops".
+    ordered = [niche, *[term for term in deduped if term.casefold() != niche.casefold()]]
+    return niche[:500], ordered[:4] or [niche]
 
 
 def build_search_queries(context: dict, limit: int = 4) -> tuple[str, list[str]]:
@@ -324,13 +328,15 @@ class YouTubePublicScout:
                 found[candidate.source_id] = candidate
 
         async with httpx.AsyncClient(timeout=self.timeout_seconds, follow_redirects=True, headers=headers) as client:
-            # YouTube introduced a dedicated Shorts type filter in 2026. Use the
-            # public filter first so a query containing the word "shorts" cannot
-            # silently degrade into a page of old long-form videos.
+            # YouTube introduced a dedicated Shorts type filter in 2026. The value
+            # observed in YouTube's public URL is double-escaped. Passing the
+            # already percent-escaped payload here is intentional: httpx escapes
+            # '%' once more, yielding sp=EgIQCQ%253D%253D on the wire. Using
+            # decoded "EgIQCQ==" silently falls back to ordinary search results.
             for query in queries:
                 try:
                     response = await client.get("https://www.youtube.com/results", params={
-                        "search_query": query, "sp": "EgIQCQ==", "hl": "ru", "gl": "RU",
+                        "search_query": query, "sp": "EgIQCQ%3D%3D", "hl": "ru", "gl": "RU",
                     })
                     response.raise_for_status()
                 except httpx.HTTPError:
