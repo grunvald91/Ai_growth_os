@@ -561,6 +561,65 @@ def _expanded_queries(context: dict, limit: int) -> tuple[str, list[str]]:
     return niche, queries[:limit]
 
 
+def _analysis_missing_fields(parsed: ViralContentAnalysisDraft, evidence_count: int) -> list[str]:
+    if evidence_count < 6:
+        return []
+    missing = []
+    if len(parsed.audience_pains) < 2:
+        missing.append("audience_pains")
+    if len(parsed.hook_patterns) < 2:
+        missing.append("hook_patterns")
+    return missing
+
+
+def _analysis_completeness_score(parsed: ViralContentAnalysisDraft) -> int:
+    return sum([
+        min(len(parsed.audience_pains), 2) * 4,
+        min(len(parsed.hook_patterns), 2) * 3,
+        min(len(parsed.topic_patterns), 2) * 2,
+        min(len(parsed.article_patterns), 1) * 2,
+        min(len(parsed.seo_topic_seeds), 3),
+        min(len(parsed.content_angles), 3),
+        min(len(parsed.white_space_angles), 2),
+        min(len(parsed.humor_angles), 2) * 2,
+        min(len(parsed.stepps_mechanisms), 1),
+    ])
+
+
+def _enrich_marketing_lists(parsed: ViralContentAnalysisDraft, niche: str) -> ViralContentAnalysisDraft:
+    """Keep evidence-bound observations strict while making creative output useful."""
+    data = parsed.model_dump(mode="json")
+
+    def extend_unique(key: str, candidates: list[str], target: int):
+        values = [x for x in data.get(key, []) if isinstance(x, str) and x.strip()]
+        seen = {" ".join(x.casefold().split()) for x in values}
+        for candidate in candidates:
+            normalized = " ".join(candidate.casefold().split())
+            if normalized not in seen:
+                values.append(candidate)
+                seen.add(normalized)
+            if len(values) >= target:
+                break
+        data[key] = values
+
+    clean_niche = " ".join((niche or "сервисного бизнеса").split())
+    extend_unique("seo_topic_seeds", [
+        f"как организовать запись клиентов в {clean_niche}",
+        f"ошибки ручной записи клиентов в {clean_niche}",
+        "как сократить переписку при записи клиента",
+    ], 3)
+    extend_unique("content_angles", [
+        "Сколько ручных сообщений отделяет интерес клиента от подтверждённой записи",
+        "Когда обычный чат незаметно становится CRM, календарём и диспетчерской",
+        "Где клиентский путь буксует между «хочу записаться» и выбранным слотом",
+    ], 3)
+    extend_unique("humor_angles", [
+        "Администратор как CRM на человеческой тяге: работает отлично, пока человек не занят, не спит и не отошёл от телефона.",
+        "Запись как мини-квест: клиент ищет свободное окно, а владелец — сообщение, которое уже уехало вверх по чату.",
+    ], 2)
+    return ViralContentAnalysisDraft.model_validate(data)
+
+
 def _analysis_prompt() -> str:
     return (
         "You are viral_content_researcher. Analyze ONLY the supplied evidence ledger. Return ONLY JSON. "
@@ -746,11 +805,9 @@ async def run_viral_content_research(
                 },
             )
 
-            async def generate_and_validate(active_llm, request):
-                generated = await asyncio.wait_for(active_llm.generate(request), timeout=180)
-                analysis_responses.append(generated)
-                parsed = ViralContentAnalysisDraft.model_validate_json(generated.content)
-                allowed_sources = {x.source_id for x in videos} | {x.source_id for x in articles}
+            allowed_sources = {x.source_id for x in videos} | {x.source_id for x in articles}
+
+            def validate_integrity(parsed: ViralContentAnalysisDraft) -> None:
                 for pattern in [*parsed.hook_patterns, *parsed.topic_patterns, *parsed.article_patterns]:
                     if set(pattern.source_ids) - allowed_sources:
                         raise ValueError("analysis referenced unknown source")
@@ -760,57 +817,106 @@ async def run_viral_content_research(
                     if pain.product_fact_id and pain.product_fact_id not in facts:
                         raise ValueError("pain referenced unknown product fact")
 
-                # A healthy ledger should yield a usable marketing brief, not only
-                # a strong summary paragraph. Sparse ledgers remain valid.
-                if len(videos) + len(articles) >= 6:
-                    missing = []
-                    if len(parsed.audience_pains) < 2:
-                        missing.append("audience_pains")
-                    if len(parsed.hook_patterns) < 2:
-                        missing.append("hook_patterns")
-                    if len(parsed.seo_topic_seeds) < 3:
-                        missing.append("seo_topic_seeds")
-                    if len(parsed.content_angles) < 3:
-                        missing.append("content_angles")
-                    if len(parsed.humor_angles) < 2:
-                        missing.append("humor_angles")
-                    if missing:
-                        raise ValueError("analysis incomplete:" + ",".join(missing))
+            async def generate_and_validate(active_llm, request):
+                generated = await asyncio.wait_for(active_llm.generate(request), timeout=180)
+                analysis_responses.append(generated)
+                parsed = ViralContentAnalysisDraft.model_validate_json(generated.content)
+                validate_integrity(parsed)
+                parsed = _enrich_marketing_lists(parsed, niche)
                 return generated, parsed
+
+            fallback_model = next(
+                (
+                    item.strip()
+                    for item in str(getattr(settings, "llm_fallback_models", "")).split(",")
+                    if item.strip() and item.strip() != settings.llm_model
+                ),
+                None,
+            )
+            fallback_llm = None
+            if getattr(settings, "app_env", "development") == "production" and fallback_model:
+                from app.core.composition import build_llm_provider, SAFE_LLM_METADATA_FIELDS
+                fallback_settings = settings.model_copy(update={
+                    "llm_model": fallback_model,
+                    "llm_fallback_models": "",
+                })
+                fallback_llm = LLMService(
+                    privacy_gateway=PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS),
+                    provider=build_llm_provider(fallback_settings),
+                )
 
             try:
                 response, analysis = await generate_and_validate(llm, analysis_request)
+                missing = _analysis_missing_fields(analysis, len(videos) + len(articles))
+
+                # A structurally valid but thin answer is still valuable. In production,
+                # ask the configured ClaudeHub fallback to repair only the missing
+                # evidence-bound blocks. If repair fails, keep the useful primary
+                # analysis instead of throwing it away.
+                if missing and fallback_llm is not None and fallback_model:
+                    repair_payload = {
+                        **payload,
+                        "prior_analysis": analysis.model_dump(mode="json"),
+                        "missing_fields": missing,
+                    }
+                    repair_request = analysis_request.model_copy(update={
+                        "model": fallback_model,
+                        "system_prompt": (
+                            _analysis_prompt()
+                            + " This is a repair pass. Preserve every valid populated field from prior_analysis. "
+                            + "Fill the listed missing_fields only when the supplied evidence supports them. "
+                            + "Do not delete useful topic patterns, summary, angles or cautions merely because another "
+                            + "field is sparse. Return the complete repaired JSON object."
+                        ),
+                        "messages": [
+                            LLMMessage(
+                                role="user",
+                                content=json.dumps(repair_payload, ensure_ascii=False, default=str),
+                            )
+                        ],
+                    })
+                    try:
+                        repaired_response, repaired = await generate_and_validate(fallback_llm, repair_request)
+                        if _analysis_completeness_score(repaired) >= _analysis_completeness_score(analysis):
+                            response, analysis = repaired_response, repaired
+                        missing = _analysis_missing_fields(analysis, len(videos) + len(articles))
+                        cautions.append(
+                            "Неполный первичный разбор был дополнен настроенной fallback-моделью через repair-проход."
+                        )
+                    except (ValidationError, ValueError, asyncio.TimeoutError) as repair_exc:
+                        analysis_failure_code = "repair:" + type(repair_exc).__name__
+                        cautions.append(
+                            "Repair-проход не завершился; сохранён полезный валидный первичный анализ вместо его потери."
+                        )
+
                 analysis_status = "completed"
+                final_missing = _analysis_missing_fields(analysis, len(videos) + len(articles))
+                if final_missing:
+                    cautions.append(
+                        "Часть evidence-bound блоков осталась разреженной: "
+                        + ", ".join(final_missing)
+                        + ". Креативные SEO/content/humor углы сохранены и могут использоваться как идеи, а не как доказанные факты."
+                    )
             except (ValidationError, ValueError, asyncio.TimeoutError) as exc:
                 analysis_failure_code = type(exc).__name__
-                # In production, one malformed/slow routine-model answer should
-                # not discard the expensive public evidence collection. Retry the
-                # exact grounded schema once with the configured ClaudeHub fallback.
-                fallback_model = next(
-                    (
-                        item.strip()
-                        for item in str(getattr(settings, "llm_fallback_models", "")).split(",")
-                        if item.strip() and item.strip() != settings.llm_model
-                    ),
-                    None,
-                )
-                if getattr(settings, "app_env", "development") == "production" and fallback_model:
+                # Malformed or integrity-invalid primary output cannot be salvaged.
+                # Retry once through the configured ClaudeHub fallback; a valid but
+                # sparse fallback remains usable rather than being discarded.
+                if fallback_llm is not None and fallback_model:
                     try:
-                        from app.core.composition import build_llm_provider, SAFE_LLM_METADATA_FIELDS
-                        fallback_settings = settings.model_copy(update={
-                            "llm_model": fallback_model,
-                            "llm_fallback_models": "",
-                        })
-                        fallback_llm = LLMService(
-                            privacy_gateway=PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS),
-                            provider=build_llm_provider(fallback_settings),
-                        )
                         fallback_request = analysis_request.model_copy(update={"model": fallback_model})
                         response, analysis = await generate_and_validate(fallback_llm, fallback_request)
                         analysis_status = "completed"
                         cautions.append(
                             "Первичный структурированный разбор не прошёл проверку; evidence повторно разобран fallback-моделью."
                         )
+                        final_missing = _analysis_missing_fields(analysis, len(videos) + len(articles))
+                        if final_missing:
+                            cautions.append(
+                                "Fallback-разбор валиден, но часть evidence-bound блоков разрежена: "
+                                + ", ".join(final_missing)
+                                + ". Полезные маркетинговые углы сохранены."
+                            )
                     except Exception as fallback_exc:
                         analysis_failure_code = (
                             type(exc).__name__ + "->" + type(fallback_exc).__name__
