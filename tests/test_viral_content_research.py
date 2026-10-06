@@ -8,6 +8,7 @@ from app.content.viral_content_research import (
     ArticleCandidate,
     RankedVideoCandidate,
     ViralContentResearch,
+    parse_duckduckgo_html,
     run_viral_content_research,
 )
 from app.content.viral_research import ViralVideoCandidate
@@ -17,6 +18,21 @@ from app.llm.schemas import LLMResponse, LLMUsage
 from app.llm.service import LLMService
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
 from app.privacy import PrivacyGateway
+
+
+def test_duckduckgo_html_adds_evergreen_article_evidence():
+    page = """
+    <div class="result results_links">
+      <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fbooking-errors">5 ошибок онлайн-записи в салоне</a>
+      <a class="result__snippet">Как сократить ручные уточнения услуги, мастера и времени.</a>
+    </div>
+    """
+    rows = parse_duckduckgo_html(page, "массажный салон онлайн запись")
+    assert len(rows) == 1
+    assert str(rows[0].url) == "https://example.com/booking-errors"
+    assert rows[0].publisher == "example.com"
+    assert "ручные уточнения" in (rows[0].snippet or "")
+    assert rows[0].source_id.startswith("web:")
 
 
 class FakeVideoScout:
