@@ -1,20 +1,22 @@
-"""Owner-facing visual content workspace.
+"""Owner-facing visual content workspace for AI Growth OS.
 
-The production API is currently loopback-only and has no general web authentication.
-Do not expose these routes publicly until an authenticated HTTPS boundary is added.
+The public production entrypoint is protected by the web edge. This module keeps
+publication manual and preserves existing editorial approval guards.
 """
 from __future__ import annotations
 
 import html
 import json
 from collections import defaultdict
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
 from app.content.calendar import PLATFORMS, approve_plan, pause_plan
 from app.content.service import queue_content
 from app.core.config import get_settings
@@ -23,22 +25,27 @@ from app.models.domain import Artifact, Product, Task
 
 router = APIRouter()
 
+MATERIAL_KINDS = {
+    "article", "channel_text", "video_script", "content_distribution",
+    "dzen_brief", "telegram_brief", "short_video_brief",
+    "story_brief", "static_image_brief",
+}
 
-CSS = """
-:root{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111827;background:#f7f7f8}
-*{box-sizing:border-box}body{margin:0}a{color:inherit}.shell{max-width:1320px;margin:auto;padding:24px}
-.top{display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:24px}
-h1,h2,h3{margin:.2em 0}.muted{color:#6b7280}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-.stat,.card,.panel{background:white;border:1px solid #e5e7eb;border-radius:14px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
-.stat b{display:block;font-size:1.7rem}.chips{display:flex;flex-wrap:wrap;gap:6px}.chip{font-size:.78rem;border-radius:999px;padding:5px 9px;background:#f3f4f6}
-.state{font-weight:700}.planned{color:#4b5563}.queued,.preparing{color:#92400e}.ready_for_review{color:#166534}.failed,.missed{color:#991b1b}
-.calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}.day{min-height:120px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:10px}.slot{margin-top:7px;padding:8px;border-left:3px solid #9ca3af;background:#f9fafb;border-radius:7px;font-size:.84rem}
-.packages{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.package h3{margin-bottom:6px}.asset{border-top:1px solid #eee;padding:12px 0}.asset:first-child{border-top:0}
-pre{white-space:pre-wrap;word-break:break-word;background:#f9fafb;border-radius:10px;padding:12px;overflow:auto}.storyboard{display:grid;gap:8px}.shot{background:#f9fafb;border-radius:10px;padding:10px}.actions{display:flex;gap:8px;flex-wrap:wrap}.btn{border:0;border-radius:10px;padding:9px 12px;background:#111827;color:#fff;cursor:pointer}.btn.secondary{background:#e5e7eb;color:#111827}.danger{background:#7f1d1d}
-details summary{cursor:pointer;font-weight:700}.product-list{display:grid;gap:10px}.product-link{text-decoration:none}
-@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.calendar{grid-template-columns:1fr}.day{min-height:auto}.packages{grid-template-columns:1fr}}
-@media(max-width:520px){.shell{padding:14px}.grid{grid-template-columns:1fr}.stat b{font-size:1.4rem}}
-"""
+STATUS_LABELS = {
+    "draft": "Черновик",
+    "active": "Активен",
+    "paused": "На паузе",
+    "superseded": "Заменён",
+    "planned": "Запланировано",
+    "queued": "В очереди",
+    "preparing": "Готовится",
+    "running": "Готовится",
+    "ready_for_review": "Готово к проверке",
+    "completed": "Готово",
+    "failed": "Ошибка",
+    "missed": "Пропущено",
+    "cancelled": "Отменено",
+}
 
 
 def esc(value) -> str:
@@ -55,212 +62,599 @@ def parse_json(record: Artifact) -> dict:
 
 def latest_plan(db: Session, product_id: UUID):
     rows = list(db.scalars(
-        select(Artifact).where(Artifact.product_id == product_id, Artifact.kind == "editorial_plan")
-        .order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(10)
+        select(Artifact)
+        .where(Artifact.product_id == product_id, Artifact.kind == "editorial_plan")
+        .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        .limit(20)
     ))
-    parsed = []
-    for row in rows:
-        value = parse_json(row)
-        if value:
-            parsed.append((row, value))
+    parsed = [(row, parse_json(row)) for row in rows]
+    parsed = [(row, value) for row, value in parsed if value]
     parsed.sort(key=lambda item: item[1].get("generated_at", ""), reverse=True)
     return parsed[0] if parsed else (None, None)
 
 
 def platform_label(key: str) -> str:
-    return PLATFORMS.get(key, (key, ""))[0]
+    return PLATFORMS.get(key, (key.replace("_", " ").title(), ""))[0]
 
 
-def artifact_html(record: Artifact) -> str:
+def platform_short(key: str) -> str:
+    return {
+        "own_site": "SEO",
+        "dzen": "Дзен",
+        "telegram": "TG",
+        "youtube_shorts": "YT",
+        "instagram_reels": "IG",
+        "vk_clips": "VK",
+        "vc_ru": "VC",
+        "tenchat": "TC",
+    }.get(key, key[:3].upper())
+
+
+def status_label(value: str | None) -> str:
+    return STATUS_LABELS.get(value or "", (value or "—").replace("_", " "))
+
+
+def status_class(value: str | None) -> str:
+    return (value or "planned").replace(" ", "_")
+
+
+def parse_dt(value: str | None):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def fmt_dt(value: str | None, *, date_only: bool = False) -> str:
+    dt = parse_dt(value)
+    if not dt:
+        return esc(value or "—")
+    months = ("янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек")
+    if date_only:
+        return f"{dt.day} {months[dt.month - 1]}"
+    return f"{dt.day} {months[dt.month - 1]}, {dt:%H:%M}"
+
+
+def day_label(value: str | None) -> tuple[str, str]:
+    dt = parse_dt(value)
+    if not dt:
+        return "Дата", "—"
+    weekdays = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
+    months = ("янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек")
+    return weekdays[dt.weekday()], f"{dt.day} {months[dt.month - 1]}"
+
+
+def state_for_group(group: list[dict]) -> str:
+    states = {str(slot.get("state") or "planned") for slot in group}
+    if "failed" in states:
+        return "failed"
+    if "preparing" in states or "running" in states or "queued" in states:
+        return "preparing"
+    if states and states <= {"ready_for_review"}:
+        return "ready_for_review"
+    if "ready_for_review" in states:
+        return "ready_for_review"
+    if "missed" in states:
+        return "missed"
+    return "planned"
+
+
+def artifact_kind(record: Artifact) -> str:
+    if record.kind == "article":
+        return "article"
+    if record.kind in {"channel_text", "dzen_brief", "telegram_brief"}:
+        return "post"
+    if record.kind in {"video_script", "short_video_brief"}:
+        return "video"
+    return "other"
+
+
+def artifact_kind_label(record: Artifact, value: dict | None = None) -> str:
+    value = value or parse_json(record)
+    if record.kind == "article":
+        return "Статья"
+    if record.kind == "channel_text":
+        return platform_label(value.get("channel", "")) or "Пост"
+    if record.kind in {"video_script", "short_video_brief"}:
+        platform = (value.get("production_brief") or value).get("target_platform")
+        return f"Сценарий · {platform_label(platform)}" if platform else "Сценарий"
+    if record.kind == "dzen_brief":
+        return "Дзен"
+    if record.kind == "telegram_brief":
+        return "Telegram"
+    if record.kind == "story_brief":
+        return "Stories"
+    if record.kind == "static_image_brief":
+        return "Визуал"
+    return record.kind.replace("_", " ").title()
+
+
+def artifact_text(record: Artifact, value: dict | None = None) -> str:
+    value = value or parse_json(record)
+    if not value:
+        return record.content
+    if record.kind == "article":
+        return str(value.get("full_article") or value.get("reader_article") or value.get("body") or record.content)
+    if record.kind == "channel_text":
+        return str(value.get("body") or value.get("text") or record.content)
+    if record.kind in {"video_script", "short_video_brief"}:
+        brief = value.get("production_brief") or value
+        return str(brief.get("voiceover_or_dialogue_script") or value.get("script") or record.content)
+    for key in ("body", "text", "copy", "description", "content"):
+        if value.get(key):
+            return str(value[key])
+    return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def excerpt(text: str, limit: int = 120) -> str:
+    compact = " ".join(text.split())
+    return compact if len(compact) <= limit else compact[: limit - 1] + "…"
+
+
+def visual_class(index: int) -> str:
+    return ("", "v2", "v3", "v4")[index % 4]
+
+
+def brand_html() -> str:
+    return (
+        '<a class="brand" href="/studio">'
+        '<span class="brand-mark">S</span>'
+        '<span><span class="brand-name">ServGo</span>'
+        '<span class="brand-sub">Больше порядка в вашем сервисе</span></span>'
+        '</a>'
+    )
+
+
+def sidebar_html() -> str:
+    return f"""
+    <aside class="sidebar">
+      {brand_html()}
+      <nav class="nav">
+        <a class="active" href="#overview"><span class="nav-ico">⌂</span>Обзор</a>
+        <a href="#plan"><span class="nav-ico">▣</span>Контент-план</a>
+        <a href="#materials"><span class="nav-ico">▤</span>Материалы</a>
+        <a href="#calendar"><span class="nav-ico">□</span>Календарь</a>
+        <a href="#analytics"><span class="nav-ico">⌁</span>Аналитика</a>
+      </nav>
+      <div class="nav-label">Инструменты</div>
+      <nav class="nav">
+        <a href="#materials"><span class="nav-ico">▱</span>Библиотека</a>
+        <a href="#plan"><span class="nav-ico">✦</span>Идеи контента</a>
+        <a href="/studio?choose=1"><span class="nav-ico">⇄</span>Проекты</a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-promo">
+        <span>👑</span><b>Growth Studio</b>
+        <p>План, материалы и сценарии в одном рабочем пространстве ServGo.</p>
+      </div>
+      <div class="sidebar-foot">AI Growth OS · owner workspace</div>
+    </aside>
+    """
+
+
+def mobile_nav_html() -> str:
+    return """
+    <nav class="mobile-nav">
+      <a class="active" href="#overview"><span class="m-ico">⌂</span>Обзор</a>
+      <a href="#plan"><span class="m-ico">▣</span>План</a>
+      <a href="#materials"><span class="m-ico">▤</span>Материалы</a>
+      <a href="#calendar"><span class="m-ico">□</span>Календарь</a>
+    </nav>
+    """
+
+
+def asset_dialog(record: Artifact) -> str:
     value = parse_json(record)
     title = esc(record.title)
-    if not value:
-        return f'<div class="asset"><h4>{title}</h4><p class="muted">Не удалось прочитать этот артефакт.</p></div>'
-    if record.kind == "article":
-        body = value.get("full_article") or value.get("reader_article") or record.content
-        return f'<div class="asset"><h4>{title}</h4><pre>{esc(body)}</pre></div>'
-    if record.kind == "channel_text":
-        label = platform_label(value.get("channel", ""))
-        return f'<div class="asset"><h4>{esc(label)} · {title}</h4><pre>{esc(value.get("body",""))}</pre></div>'
-    if record.kind == "video_script":
-        brief = value.get("production_brief") or {}
+    kind_label = esc(artifact_kind_label(record, value))
+    copy_id = f"copy-{record.id}"
+
+    if record.kind in {"video_script", "short_video_brief"}:
+        brief = value.get("production_brief") or value
+        hooks = "".join(f"<li>{esc(x)}</li>" for x in (brief.get("hook_variants") or []))
         shots = []
         for shot in brief.get("shots") or []:
             shots.append(
-                '<div class="shot">'
-                f'<b>{esc(shot.get("start_second"))}–{esc(shot.get("end_second"))} сек.</b>'
-                f'<div>{esc(shot.get("visual_description"))}</div>'
-                f'<div><b>Камера:</b> {esc(shot.get("camera_and_movement"))}</div>'
-                f'<div><b>На экране:</b> {esc(shot.get("on_screen_text"))}</div>'
-                f'<div><b>Переход:</b> {esc(shot.get("transition"))}</div>'
-                f'<div><b>Промпт:</b> {esc(shot.get("generation_prompt"))}</div>'
+                '<div class="story-shot">'
+                '<div class="story-shot-head">'
+                f'<time>{esc(shot.get("start_second"))}–{esc(shot.get("end_second"))} сек.</time>'
+                f'<b>{esc(shot.get("purpose") or shot.get("shot_type") or "Сцена")}</b>'
+                '</div>'
+                f'<p><b>Кадр:</b> {esc(shot.get("visual_description"))}</p>'
+                f'<p><b>Камера:</b> {esc(shot.get("camera_and_movement"))}</p>'
+                f'<p><b>Действие:</b> {esc(shot.get("action"))}</p>'
+                f'<p><b>На экране:</b> {esc(shot.get("on_screen_text"))}</p>'
+                f'<p><b>Переход:</b> {esc(shot.get("transition"))}</p>'
+                f'<div class="story-prompt"><b>Промпт для будущей генерации:</b><br>{esc(shot.get("generation_prompt"))}</div>'
                 '</div>'
             )
-        hooks = "".join(f"<li>{esc(h)}</li>" for h in (brief.get("hook_variants") or []))
-        return (
-            f'<div class="asset"><h4>{esc(brief.get("target_platform","short_video"))} · {title}</h4>'
-            f'<p><b>Цель:</b> {esc(brief.get("objective"))}</p>'
-            f'<p><b>Хуки:</b></p><ul>{hooks}</ul>'
-            f'<p><b>Текст:</b> {esc(brief.get("voiceover_or_dialogue_script"))}</p>'
-            f'<div class="storyboard">{"".join(shots)}</div>'
-            f'<p><b>Монтаж/сведение:</b> {esc(brief.get("editing_mix_notes") or brief.get("editing_rhythm"))}</p>'
-            f'<p><b>Обложка:</b> {esc(brief.get("cover_frame"))}</p></div>'
+        body = (
+            f'<div id="{copy_id}" class="article-text">'
+            f'<b>Площадка:</b> {esc(platform_label(brief.get("target_platform")))}\n'
+            f'<b>Цель:</b> {esc(brief.get("objective"))}\n\n'
+            f'<b>Хуки:</b><ul>{hooks}</ul>'
+            f'<b>Озвучка / диалог:</b>\n{esc(brief.get("voiceover_or_dialogue_script"))}\n\n'
+            f'<b>Монтаж и сведение:</b> {esc(brief.get("editing_mix_notes") or brief.get("editing_rhythm"))}'
+            '</div>'
+            f'<div class="storyboard-grid" style="margin-top:16px">{"".join(shots) or "<div class=\"empty\">Раскадровка ещё не заполнена.</div>"}</div>'
         )
-    if record.kind == "content_distribution":
-        return f'<div class="asset"><h4>{title}</h4><pre>{esc(json.dumps(value,ensure_ascii=False,indent=2))}</pre></div>'
-    return f'<div class="asset"><h4>{title}</h4><pre>{esc(json.dumps(value,ensure_ascii=False,indent=2))}</pre></div>'
+    else:
+        body = f'<div id="{copy_id}" class="article-text">{esc(artifact_text(record, value))}</div>'
+
+    return f"""
+    <dialog class="dialog" id="material-{record.id}">
+      <div class="dialog-head">
+        <div><span class="status draft">{kind_label}</span><h3>{title}</h3></div>
+        <button class="dialog-close" type="button" data-close-dialog aria-label="Закрыть">×</button>
+      </div>
+      <div class="dialog-body">{body}</div>
+      <div class="dialog-actions">
+        <button class="btn ghost" type="button" data-copy="{copy_id}">Копировать</button>
+        <button class="btn primary" type="button" data-close-dialog>Готово</button>
+      </div>
+    </dialog>
+    """
+
+
+def material_card(record: Artifact) -> str:
+    value = parse_json(record)
+    kind = artifact_kind(record)
+    title = esc(record.title)
+    label = esc(artifact_kind_label(record, value))
+    text = artifact_text(record, value)
+    meta = excerpt(text, 90)
+    created = record.created_at.strftime("%d.%m") if record.created_at else ""
+    return (
+        f'<button type="button" class="material-card" data-material data-kind="{kind}" '
+        f'data-search="{esc(record.title + " " + label + " " + meta)}" '
+        f'data-open-dialog="material-{record.id}">'
+        f'<div class="material-cover {esc(record.kind)}"><span class="material-kind">{label}</span></div>'
+        '<div class="material-body">'
+        f'<h4>{title}</h4><p>{esc(meta)}</p>'
+        f'<div class="package-foot"><span>{esc(created)}</span><span>Открыть →</span></div>'
+        '</div></button>'
+    )
+
+
+def package_card(
+    *,
+    product: Product,
+    plan_row: Artifact | None,
+    plan: dict | None,
+    key: str,
+    group: list[dict],
+    package_artifacts: list[Artifact],
+    index: int,
+) -> str:
+    topic = group[0].get("topic") or key
+    state = state_for_group(group)
+    task_ids = {slot.get("task_id") for slot in group if slot.get("task_id")}
+    platforms = []
+    for slot in group:
+        platform = slot.get("platform") or ""
+        if platform and platform not in platforms:
+            platforms.append(platform)
+    chips = "".join(
+        f'<span class="chip blue">{esc(platform_short(p))} · {esc(platform_label(p))}</span>'
+        for p in platforms
+    )
+    first_publish = min((slot.get("publish_at") or "" for slot in group), default="")
+    objective = group[0].get("objective") or group[0].get("audience") or "Контент-пакет для проверки гипотезы"
+    queue_button = ""
+    if plan_row and plan and plan.get("approval_state") == "active" and not task_ids:
+        queue_button = (
+            f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/packages/{esc(key)}/queue">'
+            '<button class="btn secondary small" type="submit">Подготовить сейчас</button></form>'
+        )
+    first_asset = package_artifacts[0] if package_artifacts else None
+    open_button = (
+        f'<button class="btn ghost small" type="button" data-open-dialog="material-{first_asset.id}">Материалы · {len(package_artifacts)}</button>'
+        if first_asset else '<span class="chip">Материалы ещё не готовы</span>'
+    )
+    return f"""
+    <article class="package-card">
+      <div class="package-visual {visual_class(index)}">
+        <span class="package-orb one"></span><span class="package-orb two"></span>
+        <span class="package-symbol">{index + 1}</span>
+        <span class="package-state status {status_class(state)}">{esc(status_label(state))}</span>
+      </div>
+      <div class="package-body">
+        <h3>{esc(topic)}</h3>
+        <div class="package-objective">{esc(objective)}</div>
+        <div class="chips">{chips}</div>
+        <div class="package-foot">
+          <span>□ {fmt_dt(first_publish)}</span>
+          <span>{len(group)} публикац.</span>
+        </div>
+        <div class="preview-actions">{open_button}{queue_button}</div>
+      </div>
+    </article>
+    """
+
+
+def selected_preview(record: Artifact | None) -> str:
+    if record is None:
+        return (
+            '<section class="panel preview"><div class="preview-empty">'
+            '<div class="brand-mark" style="margin:0 auto 14px">S</div>'
+            '<b>Материалы появятся здесь</b><p>После подготовки пакета можно будет быстро открыть статью, пост или раскадровку.</p>'
+            '</div></section>'
+        )
+    value = parse_json(record)
+    text = artifact_text(record, value)
+    return f"""
+    <section class="panel preview">
+      <div class="preview-hero"><span class="brand-mark">S</span></div>
+      <div class="preview-content">
+        <div class="preview-kicker">
+          <span class="chip blue">{esc(artifact_kind_label(record, value))}</span>
+          <span class="status ready_for_review">Предпросмотр</span>
+        </div>
+        <h3>{esc(record.title)}</h3>
+        <div class="preview-copy">{esc(excerpt(text, 900))}</div>
+        <div class="preview-actions">
+          <button class="btn primary" type="button" data-open-dialog="material-{record.id}">Открыть полностью</button>
+        </div>
+      </div>
+    </section>
+    """
 
 
 def product_dashboard(db: Session, product: Product) -> str:
     plan_row, plan = latest_plan(db, product.id)
     tasks = list(db.scalars(
-        select(Task).where(Task.product_id == product.id, Task.assigned_agent.in_(["content_factory","editorial_planner"]))
-        .order_by(Task.created_at.desc()).limit(100)
+        select(Task)
+        .where(Task.product_id == product.id, Task.assigned_agent.in_(["content_factory", "editorial_planner"]))
+        .order_by(Task.created_at.desc())
+        .limit(150)
     ))
     artifacts = list(db.scalars(
-        select(Artifact).where(Artifact.product_id == product.id)
-        .order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(500)
+        select(Artifact)
+        .where(Artifact.product_id == product.id)
+        .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        .limit(700)
     ))
-    by_task = defaultdict(list)
+
+    by_task: dict[str, list[Artifact]] = defaultdict(list)
     for artifact in artifacts:
         if artifact.task_id:
             by_task[str(artifact.task_id)].append(artifact)
 
     slots = (plan or {}).get("slots") or []
-    groups = defaultdict(list)
+    groups: dict[str, list[dict]] = defaultdict(list)
     for slot in slots:
         groups[slot.get("package_key") or "unknown"].append(slot)
 
-    ready = sum(1 for s in slots if s.get("state") == "ready_for_review")
-    failed = sum(1 for s in slots if s.get("state") == "failed")
-    next_slots = sorted(
-        [s for s in slots if s.get("state") in {"planned","queued","preparing"} and s.get("publish_at")],
-        key=lambda s: s.get("publish_at")
-    )
-    next_due = next_slots[0].get("publish_at") if next_slots else "—"
-    channels = sorted({s.get("platform") for s in slots if s.get("platform")})
+    content_tasks = [task for task in tasks if task.assigned_agent == "content_factory"]
+    material_records = [
+        artifact for artifact in artifacts
+        if artifact.kind in MATERIAL_KINDS and artifact.task_id
+    ]
+    # Deduplicate artifacts by id while retaining newest-first order.
+    seen = set()
+    material_records = [a for a in material_records if not (a.id in seen or seen.add(a.id))]
 
-    stats = f"""
-    <div class="grid">
-      <div class="stat"><span class="muted">Следующая публикация</span><b>{esc(next_due)}</b></div>
-      <div class="stat"><span class="muted">Пакетов в спринте</span><b>{len(groups)}</b></div>
-      <div class="stat"><span class="muted">Готово к проверке</span><b>{ready}</b></div>
-      <div class="stat"><span class="muted">Ошибок подготовки</span><b>{failed}</b></div>
-    </div>
-    """
+    ready = sum(1 for slot in slots if slot.get("state") == "ready_for_review")
+    failed = sum(1 for slot in slots if slot.get("state") == "failed")
+    channels = sorted({slot.get("platform") for slot in slots if slot.get("platform")})
+    total_slots = len(slots)
+    done_like = sum(1 for slot in slots if slot.get("state") in {"ready_for_review", "completed"})
+    progress = min(100, round((done_like / total_slots) * 100)) if total_slots else 0
+    horizon = (plan or {}).get("horizon_days") or 14
 
     action_html = ""
     if plan_row and plan:
         if plan.get("approval_state") == "draft":
-            action_html += f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/approve"><button class="btn">Подтвердить план</button></form>'
+            action_html = (
+                f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/approve">'
+                '<button class="btn primary" type="submit">✓ Подтвердить план</button></form>'
+            )
         elif plan.get("approval_state") == "active":
-            action_html += f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/pause"><button class="btn danger">Пауза</button></form>'
+            action_html = (
+                f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/pause">'
+                '<button class="btn ghost" type="submit">Ⅱ Пауза</button></form>'
+            )
 
-    calendar_items = []
-    for slot in sorted(slots, key=lambda s: s.get("publish_at") or ""):
-        state = esc(slot.get("state") or "planned")
-        calendar_items.append(
-            '<div class="slot">'
-            f'<div><b>{esc((slot.get("publish_at") or "")[5:16].replace("T"," "))}</b> · {esc(platform_label(slot.get("platform","")))}</div>'
-            f'<div>{esc(slot.get("topic"))}</div>'
-            f'<div class="state {state}">{state}</div>'
-            f'<div class="muted">готовить: {esc((slot.get("prepare_at") or "")[5:16].replace("T"," "))}</div>'
-            '</div>'
+    kpis = f"""
+    <section class="kpis" id="overview">
+      <div class="kpi blue"><span class="kpi-icon">▱</span><div><strong>{len(groups)}</strong><small>контент-пакетов<br>в текущем цикле</small></div></div>
+      <div class="kpi green"><span class="kpi-icon">□</span><div><strong>{esc(horizon)}</strong><small>дней<br>горизонт плана</small></div></div>
+      <div class="kpi purple"><span class="kpi-icon">⌘</span><div><strong>{len(channels)}</strong><small>площадок<br>в контент-плане</small></div></div>
+      <div class="kpi orange"><span class="kpi-icon">✓</span><div><strong>{ready}</strong><small>материалов<br>готово к проверке</small></div></div>
+    </section>
+    """
+
+    by_day: dict[str, list[dict]] = defaultdict(list)
+    for slot in sorted(slots, key=lambda item: item.get("publish_at") or ""):
+        dt = parse_dt(slot.get("publish_at"))
+        key = dt.date().isoformat() if dt else slot.get("publish_at") or "unknown"
+        by_day[key].append(slot)
+    day_cards = []
+    for _, day_slots in by_day.items():
+        weekday, date_text = day_label(day_slots[0].get("publish_at"))
+        slot_html = []
+        for slot in day_slots:
+            dt = parse_dt(slot.get("publish_at"))
+            time_text = dt.strftime("%H:%M") if dt else "—"
+            slot_html.append(
+                '<div class="slot">'
+                '<div class="slot-top">'
+                f'<span class="slot-time">{esc(time_text)}</span>'
+                f'<span class="platform-mini">{esc(platform_short(slot.get("platform") or ""))}</span>'
+                '</div>'
+                f'<div class="slot-title">{esc(slot.get("topic"))}</div>'
+                f'<div class="slot-meta">{esc(platform_label(slot.get("platform") or ""))} · {esc(status_label(slot.get("state")))}</div>'
+                '</div>'
+            )
+        day_cards.append(
+            '<div class="day-card">'
+            f'<div class="day-head"><strong>{esc(weekday)}, {esc(date_text)}</strong><span class="count">{len(day_slots)}</span></div>'
+            + "".join(slot_html) + "</div>"
         )
-    calendar = '<div class="panel"><h2>Календарь / agenda</h2><div class="calendar">' + "".join(f'<div class="day">{x}</div>' for x in calendar_items) + '</div></div>'
+    calendar = f"""
+    <section class="panel" id="calendar">
+      <div class="panel-head">
+        <div class="panel-title"><span class="ico">□</span><div><h2>Контент-календарь</h2><div class="panel-sub">Публикации и дедлайны текущего цикла</div></div></div>
+        <a class="btn secondary small" href="#plan">К плану →</a>
+      </div>
+      <div class="calendar-scroll"><div class="calendar-grid" style="--days:{max(1, len(day_cards))}">{"".join(day_cards) or '<div class="empty">План пока не содержит публикаций.</div>'}</div></div>
+    </section>
+    """
 
-    packages_html = []
-    for key, group in sorted(groups.items(), key=lambda item: min(s.get("publish_at","") for s in item[1])):
-        topic = group[0].get("topic") or key
-        task_ids = {s.get("task_id") for s in group if s.get("task_id")}
+    package_html = []
+    for index, (key, group) in enumerate(sorted(
+        groups.items(),
+        key=lambda item: min((s.get("publish_at") or "" for s in item[1]), default="")
+    )):
+        task_ids = {slot.get("task_id") for slot in group if slot.get("task_id")}
         package_artifacts = []
         for task_id in task_ids:
-            package_artifacts.extend(by_task.get(task_id, []))
-        chips = "".join(f'<span class="chip">{esc(platform_label(s.get("platform","")))}</span>' for s in group)
-        states = ", ".join(sorted({str(s.get("state") or "planned") for s in group}))
-        queue_button = ""
-        if plan_row and plan.get("approval_state") == "active" and not task_ids:
-            queue_button = (
-                f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/packages/{esc(key)}/queue">'
-                '<button class="btn secondary">Подготовить пакет сейчас</button></form>'
-            )
-        assets_markup = "".join(artifact_html(a) for a in package_artifacts if a.kind in {
-            "article","channel_text","video_script","content_distribution",
-            "dzen_brief","telegram_brief","short_video_brief"
-        })
-        if not assets_markup:
-            assets_markup = '<p class="muted">Материалы ещё не созданы.</p>'
-        packages_html.append(
-            '<div class="card package">'
-            f'<h3>{esc(topic)}</h3><div class="chips">{chips}</div>'
-            f'<p class="muted">package_key: {esc(key)} · {esc(states)}</p>'
-            f'{queue_button}<details><summary>Материалы</summary>{assets_markup}</details></div>'
-        )
-    packages = '<div class="panel"><h2>Контент-пакеты</h2><div class="packages">' + "".join(packages_html) + '</div></div>'
+            package_artifacts.extend([a for a in by_task.get(str(task_id), []) if a.kind in MATERIAL_KINDS])
+        package_html.append(package_card(
+            product=product,
+            plan_row=plan_row,
+            plan=plan,
+            key=key,
+            group=group,
+            package_artifacts=package_artifacts,
+            index=index,
+        ))
+    package_section = f"""
+    <section class="panel" id="plan">
+      <div class="panel-head">
+        <div class="panel-title"><span class="ico">▱</span><div><h2>Контент-пакеты</h2><div class="panel-sub">Одна тема → адаптации для всех нужных площадок</div></div></div>
+        <span class="status {status_class((plan or {}).get("approval_state"))}">{esc(status_label((plan or {}).get("approval_state")))}</span>
+      </div>
+      <div class="package-tools">
+        <div class="tabs"><button class="tab active" type="button">Все · {len(groups)}</button><button class="tab" type="button">Готово · {ready}</button><button class="tab" type="button">Ошибки · {failed}</button></div>
+        {action_html}
+      </div>
+      <div class="package-grid">{"".join(package_html) or '<div class="empty">Контент-пакеты ещё не сформированы.</div>'}</div>
+      <div class="unknowns">
+        <details><summary>Что ещё нужно уточнить · {len((plan or {}).get("unknowns") or [])}</summary>
+        <ul>{"".join(f"<li>{esc(x)}</li>" for x in ((plan or {}).get("unknowns") or [])) or "<li>Критичных неизвестных нет.</li>"}</ul></details>
+      </div>
+    </section>
+    """
 
-    # Library is intentionally independent of the current calendar: owner-created and older
-    # content must remain discoverable even when no plan slot points at its task.
-    content_tasks = [t for t in tasks if t.assigned_agent == "content_factory"]
-    library_cards = []
-    for task in content_tasks[:30]:
-        task_assets = [
-            a for a in by_task.get(str(task.id), [])
-            if a.kind in {"article", "channel_text", "video_script", "content_distribution",
-                          "dzen_brief", "telegram_brief", "short_video_brief",
-                          "story_brief", "static_image_brief"}
-        ]
-        if not task_assets:
-            continue
-        library_cards.append(
-            '<div class="card package">'
-            f'<h3>{esc(task.title)}</h3>'
-            f'<p class="muted">Статус: {esc(task.status.value)} · задача {esc(task.id)}</p>'
-            f'<details><summary>Открыть все материалы ({len(task_assets)})</summary>'
-            + "".join(artifact_html(a) for a in task_assets)
-            + '</details></div>'
-        )
-    library = (
-        '<div class="panel"><h2>Библиотека всех материалов</h2>'
-        '<p class="muted">Здесь остаются и плановые, и вручную созданные пакеты — независимо от текущего календаря.</p>'
-        '<div class="packages">' + ("".join(library_cards) or '<p class="muted">Готовых материалов пока нет.</p>') + '</div></div>'
-    )
+    library_cards = "".join(material_card(record) for record in material_records[:60])
+    library = f"""
+    <section class="panel" id="materials">
+      <div class="panel-head">
+        <div class="panel-title"><span class="ico">▤</span><div><h2>Подготовленные материалы</h2><div class="panel-sub">Статьи, посты и сценарии из всех контент-пакетов</div></div></div>
+        <span class="chip blue">Всего · {len(material_records)}</span>
+      </div>
+      <div class="material-toolbar">
+        <div class="tabs">
+          <button class="tab active" type="button" data-filter="all">Все</button>
+          <button class="tab" type="button" data-filter="article">Статьи</button>
+          <button class="tab" type="button" data-filter="post">Посты</button>
+          <button class="tab" type="button" data-filter="video">Сценарии</button>
+        </div>
+        <label class="search"><input id="material-search" type="search" placeholder="Поиск по материалам…"></label>
+      </div>
+      <div class="material-grid">{library_cards or '<div class="empty">Готовых материалов пока нет.</div>'}</div>
+    </section>
+    """
 
-    plan_meta = ""
-    if plan:
-        plan_meta = (
-            f'<p class="muted">План: {esc(plan.get("approval_state"))} · '
-            f'период {esc(plan.get("horizon_days"))} дней · пересмотр {esc(plan.get("review_at"))}</p>'
-            f'<div class="chips">{"".join(f"<span class=\"chip\">{esc(platform_label(c))}</span>" for c in channels)}</div>'
-        )
-    else:
-        plan_meta = '<p class="muted">Контент-план пока не создан.</p>'
+    first_material = material_records[0] if material_records else None
+    dialogs = "".join(asset_dialog(record) for record in material_records[:60])
+    plan_state = (plan or {}).get("approval_state") or "draft"
+    generated = (plan or {}).get("generated_at")
+    review = (plan or {}).get("review_at")
 
     return f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f4f8fd">
+  <title>Growth Studio · {esc(product.name)}</title>
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=2">
+</head>
+<body>
+<div class="studio-page"><div class="studio-layout">
+  {sidebar_html()}
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">GROWTH STUDIO <span class="beta">BETA</span></div>
+        <h1>Контент, который ведёт к бронированиям</h1>
+        <p class="subtitle">Планируйте, проверяйте и собирайте материалы для {esc(product.name)} в одном месте.</p>
+      </div>
+      <div class="top-actions">
+        <div class="cycle-card">
+          <div class="cycle-head"><span>Текущий цикл</span><b>{esc(horizon)} дней · {esc(status_label(plan_state))}</b></div>
+          <div class="progress"><span style="width:{progress}%"></span></div>
+        </div>
+        <a class="product-pill" href="/studio?choose=1">
+          <span class="product-avatar">S</span><div><b>{esc(product.name)}</b><span>{esc(product.slug)}</span></div>
+        </a>
+      </div>
+    </header>
+    {kpis}
+    <div class="workspace">
+      <div class="stack">
+        {calendar}
+        {package_section}
+        {library}
+        <section class="panel" id="analytics">
+          <div class="panel-head"><div class="panel-title"><span class="ico">⌁</span><div><h2>Цикл и контроль</h2><div class="panel-sub">Измерения начнутся после ручной публикации и регистрации результатов</div></div></div></div>
+          <div class="package-tools">
+            <span class="chip">Сформирован: {fmt_dt(generated)}</span>
+            <span class="chip">Пересмотр: {fmt_dt(review)}</span>
+            <span class="chip">Публикация остаётся ручной</span>
+          </div>
+        </section>
+      </div>
+      {selected_preview(first_material)}
+    </div>
+  </main>
+  {mobile_nav_html()}
+</div></div>
+{dialogs}
+<script src="/studio/assets/studio.js?v=2"></script>
+</body></html>"""
+
+
+def product_selector(products: list[Product]) -> str:
+    cards = "".join(
+        f'<a class="product-link" href="/studio/products/{p.id}"><strong>{esc(p.name)}</strong><small>{esc(p.slug)} · открыть Growth Studio →</small></a>'
+        for p in products
+    )
+    return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Content Studio · {esc(product.name)}</title><style>{CSS}</style></head>
-<body><main class="shell">
-<div class="top"><div><a href="/studio">← компании</a><h1>Content Studio · {esc(product.name)}</h1>{plan_meta}</div>
-<div class="actions">{action_html}</div></div>
-{stats}
-<div style="height:16px"></div>{calendar}
-<div style="height:16px"></div>{packages}
-<div style="height:16px"></div>{library}
-<div style="height:20px"></div><p class="muted">Публикация и видео-генерация здесь не выполняются. Production API должен оставаться за защищённой границей.</p>
+<title>Growth Studio</title><link rel="stylesheet" href="/studio/assets/studio.css?v=2"></head>
+<body><main class="product-home">
+<section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
+<h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
+<div class="product-list">{cards or '<div class="empty">Проекты ещё не добавлены.</div>'}</div>
 </main></body></html>"""
 
 
-@router.get("/studio", response_class=HTMLResponse)
-def studio(db: Session = Depends(get_db)):
+@router.get("/studio/assets/studio.css")
+def studio_css():
+    response = Response(STUDIO_CSS, media_type="text/css")
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return response
+
+
+@router.get("/studio/assets/studio.js")
+def studio_js():
+    response = Response(STUDIO_JS, media_type="application/javascript")
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return response
+
+
+@router.get("/studio")
+def studio(choose: bool = False, db: Session = Depends(get_db)):
     products = list(db.scalars(select(Product).order_by(Product.name).limit(100)))
-    cards = "".join(
-        f'<a class="product-link card" href="/studio/products/{p.id}"><b>{esc(p.name)}</b><div class="muted">{esc(p.slug)}</div></a>'
-        for p in products
-    )
-    response = HTMLResponse(
-        f'<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        f'<title>Content Studio</title><style>{CSS}</style></head><body><main class="shell"><h1>Content Studio</h1>'
-        f'<p class="muted">Визуальная редакционная панель AI Growth OS.</p><div class="product-list">{cards}</div></main></body></html>'
-    )
+    preferred = next((p for p in products if p.slug == "servgo"), None)
+    if preferred is not None and not choose:
+        return RedirectResponse(f"/studio/products/{preferred.id}", status_code=302)
+    response = HTMLResponse(product_selector(products))
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -307,17 +701,23 @@ def studio_queue_package(product_id: UUID, plan_id: UUID, package_key: str, db: 
     plan = parse_json(row)
     if plan.get("approval_state") != "active":
         raise HTTPException(409, "Approve the editorial plan before queueing its packages")
-    slots = [s for s in (plan.get("slots") or []) if s.get("package_key") == package_key]
+    slots = [slot for slot in (plan.get("slots") or []) if slot.get("package_key") == package_key]
     if not slots:
         raise HTTPException(404, "Package not found")
     topic = slots[0].get("topic")
     audience = slots[0].get("audience")
     objective = slots[0].get("objective") or ""
-    channels = ", ".join(sorted({s.get("platform","") for s in slots}))
+    channels = ", ".join(sorted({slot.get("platform", "") for slot in slots}))
     queue_content(
-        db, product_id, topic,
+        db,
+        product_id,
+        topic,
         dedupe_key=f"calendar:{plan_id}:{package_key}",
         audience=audience,
-        editorial_brief=f"Цель пакета: {objective}\nПлощадки: {channels}\nПлан подтверждает только подготовку; публикация вручную."
+        editorial_brief=(
+            f"Цель пакета: {objective}\n"
+            f"Площадки: {channels}\n"
+            "План подтверждает только подготовку; публикация вручную."
+        ),
     )
     return RedirectResponse(f"/studio/products/{product_id}", status_code=303)
