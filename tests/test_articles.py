@@ -449,16 +449,17 @@ def test_platform_writer_accepts_direct_array_payload():
     from app.content.contracts import ReadyTextSet
     from app.workflows.article_production import _parse_stage_payload
 
-    def body(label, size):
-        return (f"{label}: запись клиента должна быть понятным процессом, а не квестом по чатам. " * 80)[:size]
+    def body(seed, size):
+        text = (seed + " ") * 120
+        return text[:size]
 
     rows = [
-        {"channel": "dzen", "title": "Дзен", "body": body("Дзен", 2300), "editorial_checks": ["Проверено"]},
-        {"channel": "tenchat", "title": "TenChat", "body": body("TenChat", 900), "editorial_checks": ["Проверено"]},
-        {"channel": "vc_ru", "title": "vc.ru", "body": body("vc.ru", 2300)[::-1], "editorial_checks": ["Проверено"]},
-        {"channel": "telegram", "title": "Telegram", "body": body("Telegram", 800), "editorial_checks": ["Проверено"]},
-        {"channel": "faq", "title": "FAQ", "body": body("FAQ", 750), "editorial_checks": ["Проверено"]},
-        {"channel": "founder", "title": "Founder", "body": body("Founder", 850), "editorial_checks": ["Проверено"]},
+        {"channel": "dzen", "title": "Дзен", "body": body("История ночной заявки и путь клиента через услугу, мастера и слот.", 2300), "editorial_checks": ["Проверено"]},
+        {"channel": "tenchat", "title": "TenChat", "body": body("Профессиональный чек-лист ручных решений администратора и точек автоматизации.", 900), "editorial_checks": ["Проверено"]},
+        {"channel": "vc_ru", "title": "vc.ru", "body": body("Системный разбор входа, развилок, статусов, контроля и измерения клиентского маршрута.", 2300), "editorial_checks": ["Проверено"]},
+        {"channel": "telegram", "title": "Telegram", "body": body("Короткий мобильный пост про запись без пинг-понга сообщений и одно понятное действие.", 800), "editorial_checks": ["Проверено"]},
+        {"channel": "faq", "title": "FAQ", "body": body("Вопросы и ответы о мессенджерах, свободных окнах, подтверждении и роли администратора.", 750), "editorial_checks": ["Проверено"]},
+        {"channel": "founder", "title": "Founder", "body": body("Продуктовая заметка о том, какую ручную петлю стоит убрать и какой контроль оставить владельцу.", 850), "editorial_checks": ["Проверено"]},
     ]
 
     parsed = _parse_stage_payload(ReadyTextSet, json.dumps(rows, ensure_ascii=False))
