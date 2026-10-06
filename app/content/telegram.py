@@ -1,17 +1,15 @@
-"""Owner-only content queue, review, downloads and manual performance observations."""
-import io
+"""Owner-only content queue, individual material delivery and observations."""
 import json
-import zipfile
 from datetime import datetime, timezone
 from uuid import UUID
 from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict, Field
 from app.content.render import asset_path
+from app.content.presentation import (
+    PLATFORM_LABELS, material_markdown, material_platform, payload, plain_text,
+)
 from app.content.service import queue_content
 from app.models.domain import Artifact, Metric, Product, Task
-
-LABELS = {'own_site':'SEO / сайт', 'dzen':'Дзен', 'tenchat':'TenChat', 'vc_ru':'vc.ru',
-          'telegram':'Telegram', 'faq':'FAQ', 'founder':'Пост автора'}
 
 class Observations(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -113,39 +111,80 @@ class TelegramContent:
         return False
 
     async def article(self, chat, article_id, download=False):
+        # Old download callbacks also open the current menu, never a ZIP archive.
         with self.sessions() as db:
             article = db.get(Artifact, article_id)
             if article is None or article.kind != 'article':
                 raise LookupError('Статья не найдена')
-            data = json.loads(article.content)
-            related = list(db.scalars(select(Artifact).where(Artifact.task_id == article.task_id,
-                Artifact.product_id == article.product_id, Artifact.kind.in_(['channel_text','video_script','content_distribution']))))
-            renders = []
-            for render in db.scalars(select(Artifact).where(Artifact.product_id == article.product_id,
-                Artifact.kind == 'video_render')):
-                if json.loads(render.content).get('article_id') == str(article.id):
-                    renders.append(render)
-            if download:
-                stream = io.BytesIO()
-                with zipfile.ZipFile(stream, 'w', zipfile.ZIP_DEFLATED) as archive:
-                    archive.writestr('seo-article.md', data['full_article'])
-                    archive.writestr('seo-and-measurement.json', json.dumps({'seo':data['seo'], 'measurement':data['conversion']['measurement']}, ensure_ascii=False, indent=2))
-                    for index, item in enumerate(related):
-                        value = json.loads(item.content)
-                        if item.kind == 'channel_text':
-                            archive.writestr(value['channel'] + '.md', '# ' + value['title'] + '\n\n' + value['body'])
-                        else:
-                            archive.writestr(f'{item.kind}-{index}.json', json.dumps(value, ensure_ascii=False, indent=2))
-                await self.bot.api.upload(chat, 'sendDocument', 'document', 'content-package.zip', stream.getvalue())
-                return
-            buttons = [[{'text':'📦 Скачать тексты и сценарии', 'callback_data':f'content:download:{article.id}'}]]
+            related = []
+            if article.task_id is not None:
+                candidates = list(db.scalars(select(Artifact).where(
+                    Artifact.task_id == article.task_id,
+                    Artifact.product_id == article.product_id,
+                    Artifact.kind.in_(['channel_text', 'video_script', 'content_distribution',
+                        'dzen_brief', 'telegram_brief', 'short_video_brief', 'story_brief', 'static_image_brief'])
+                ).order_by(Artifact.created_at, Artifact.id)))
+                for item in candidates:
+                    source = payload(item).get('article_id')
+                    if source is None or source == str(article.id):
+                        related.append(item)
+            buttons = [[{'text': '📄 SEO-статья / сайт', 'callback_data': f'content:asset:{article.id}'}]]
+            ready_channels = {payload(item).get('channel') for item in related if item.kind == 'channel_text'}
+            has_video_scripts = any(item.kind == 'video_script' for item in related)
+            video_index = 0
             for item in related:
-                buttons.append([{'text': (LABELS.get(json.loads(item.content).get('channel')) or item.title)[:60],
-                    'callback_data':f'content:asset:{item.id}'}])
-            for item in renders:
-                buttons.append([{'text':'🎞 ' + item.title[:55], 'callback_data':f'content:video:{item.id}'}])
-            buttons.append([{'text':'📈 Записать результаты публикации', 'callback_data':f'content:metrics:{article.id}'}])
-        await self.bot._send(chat, data['full_article'], reply_markup={'inline_keyboard':buttons})
+                platform = material_platform(item)
+                label = PLATFORM_LABELS.get(platform, '')
+                if item.kind == 'channel_text':
+                    label = '📝 ' + (label or item.title)
+                elif item.kind in {'video_script', 'short_video_brief'}:
+                    if item.kind == 'short_video_brief' and has_video_scripts:
+                        continue
+                    video_index += 1
+                    label = f'🎬 {label or "Видео"} · сценарий {video_index}'
+                elif item.kind == 'content_distribution':
+                    label = '📈 План публикации и измерения'
+                else:
+                    if platform in ready_channels and item.kind in {'dzen_brief', 'telegram_brief'}:
+                        continue
+                    label = {'story_brief': '📱 План Stories', 'static_image_brief': '🖼 План изображения'}.get(
+                        item.kind, '📋 ' + (label or item.title))
+                buttons.append([{'text': label[:60], 'callback_data': f'content:asset:{item.id}'}])
+            for item in db.scalars(select(Artifact).where(
+                    Artifact.product_id == article.product_id, Artifact.kind == 'video_render')):
+                if payload(item).get('article_id') == str(article.id):
+                    buttons.append([{'text': '🎞 ' + item.title[:55], 'callback_data': f'content:video:{item.id}'}])
+            buttons.append([{'text': '📈 Записать результаты публикации', 'callback_data': f'content:metrics:{article.id}'}])
+            buttons.append([{'text': '↩️ К компании', 'callback_data': f'content:product:{article.product_id}'}])
+            title = article.title
+        await self.bot._send(chat, f'📦 {title}\n\nВыберите материал. Бот пришлёт его отдельными сообщениями — текст можно сразу скопировать.',
+                             reply_markup={'inline_keyboard': buttons})
+
+    async def asset(self, chat, record_id):
+        with self.sessions() as db:
+            item = db.get(Artifact, record_id)
+            if item is None or item.kind not in {'article', 'channel_text', 'video_script', 'content_distribution',
+                    'dzen_brief', 'telegram_brief', 'short_video_brief', 'story_brief', 'static_image_brief'}:
+                raise LookupError('Материал не найден')
+            value = payload(item)
+            copy = plain_text(material_markdown(item, value))
+            if not copy:
+                raise LookupError('Текст материала пока не подготовлен')
+            source = value.get('article_id')
+            article_id = item.id if item.kind == 'article' else None
+            if source:
+                try:
+                    source_id = UUID(source)
+                except (ValueError, TypeError, AttributeError):
+                    source_id = None
+                source_article = db.get(Artifact, source_id) if source_id else None
+                if (source_article is not None and source_article.kind == 'article'
+                        and source_article.product_id == item.product_id and source_article.task_id == item.task_id):
+                    article_id = source_article.id
+            buttons = [[{'text': '↩️ Материалы пакета', 'callback_data': f'content:article:{article_id}'}]] if article_id else [
+                [{'text': '↩️ К компании', 'callback_data': f'content:product:{item.product_id}'}]]
+        # _send splits long copy at Telegram's UTF-16 limit without truncating it.
+        await self.bot._send(chat, copy, reply_markup={'inline_keyboard': buttons})
 
     async def calendar(self, chat, product_id):
         from app.content.calendar import render_calendar
@@ -231,36 +270,7 @@ class TelegramContent:
             elif action in {'article','download'}:
                 await self.article(chat, record_id, download=action == 'download')
             elif action == 'asset':
-                with self.sessions() as db:
-                    item = db.get(Artifact, record_id)
-                    if item is None or item.kind not in {'channel_text','video_script','content_distribution'}:
-                        raise LookupError('Материал не найден')
-                    value = json.loads(item.content)
-                    if item.kind == 'channel_text':
-                        text = '# ' + value['title'] + '\n\n' + value['body']
-                    elif item.kind == 'video_script':
-                        brief = value['production_brief']
-                        text = ('🎬 ' + item.title
-                                + '\nПлощадка: ' + brief.get('target_platform', 'short_video')
-                                + '\n\nЗадача: ' + brief['objective']
-                                + '\n\nХуки:\n• ' + '\n• '.join(brief.get('hook_variants', []))
-                                + '\n\nТекст для озвучки/диалога:\n' + brief['voiceover_or_dialogue_script']
-                                + '\n\nСцены:')
-                        for shot in brief['shots']:
-                            text += (f"\n\n{shot['start_second']}–{shot['end_second']} сек."
-                                     + '\nНа экране: ' + (shot.get('on_screen_text') or '')
-                                     + '\nКадр: ' + shot['visual_description']
-                                     + '\nКамера/движение: ' + shot['camera_and_movement']
-                                     + '\nПереход: ' + shot['transition']
-                                     + '\nПромпт для будущей генерации: ' + shot.get('generation_prompt', ''))
-                        text += '\n\nМонтаж/сведение: ' + brief.get('editing_mix_notes', brief.get('editing_rhythm', ''))
-                        text += '\n\nОбложка: ' + brief['cover_frame']
-                        text += '\n\nЭто только production-brief. AI Growth OS не генерирует и не рендерит видео.'
-                    else:
-                        text = ('📈 Публикация и измерение\n\nПлощадки: сайт, Дзен, TenChat, vc.ru, Telegram, Shorts, VK Клипы, Reels.'
-                                + '\nПосле проверки размести материал вручную и сохрани ссылку. Отмечай просмотры, переходы, обращения, демо/регистрации/записи и клиентов.'
-                                + '\nАвтоматические публикации и получение статистики ещё не подключены.')
-                await self.bot._send(chat, text)
+                await self.asset(chat, record_id)
             elif action == 'video':
                 with self.sessions() as db:
                     item = db.get(Artifact, record_id)
