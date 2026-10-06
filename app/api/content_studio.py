@@ -73,11 +73,15 @@ def latest_plan(db: Session, product_id: UUID):
     return parsed[0] if parsed else (None, None)
 
 
-def platform_label(key: str) -> str:
+def platform_label(key: str | None) -> str:
+    if not key:
+        return "Площадка"
     return PLATFORMS.get(key, (key.replace("_", " ").title(), ""))[0]
 
 
-def platform_short(key: str) -> str:
+def platform_short(key: str | None) -> str:
+    if not key:
+        return "—"
     return {
         "own_site": "SEO",
         "dzen": "Дзен",
