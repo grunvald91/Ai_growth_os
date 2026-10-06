@@ -314,7 +314,7 @@ def asset_dialog(record: Artifact) -> str:
     """
 
 
-def material_card(record: Artifact) -> str:
+def material_card(product_id: UUID, record: Artifact) -> str:
     value = parse_json(record)
     kind = artifact_kind(record)
     title = esc(record.title)
@@ -323,14 +323,14 @@ def material_card(record: Artifact) -> str:
     meta = excerpt(text, 90)
     created = record.created_at.strftime("%d.%m") if record.created_at else ""
     return (
-        f'<button type="button" class="material-card" data-material data-kind="{kind}" '
+        f'<a class="material-card" data-material data-kind="{kind}" '
         f'data-search="{esc(record.title + " " + label + " " + meta)}" '
-        f'data-open-dialog="material-{record.id}">'
+        f'href="/studio/products/{product_id}/materials/{record.id}">'
         f'<div class="material-cover {esc(record.kind)}"><span class="material-kind">{label}</span></div>'
         '<div class="material-body">'
         f'<h4>{title}</h4><p>{esc(meta)}</p>'
         f'<div class="package-foot"><span>{esc(created)}</span><span>Открыть →</span></div>'
-        '</div></button>'
+        '</div></a>'
     )
 
 
@@ -384,7 +384,7 @@ def package_card(
           <span>□ {fmt_dt(first_publish)}</span>
           <span>{len(group)} публикац.</span>
         </div>
-        <div class="preview-actions">{open_button}{queue_button}</div>
+        <div class="preview-actions"><a class="btn primary small" href="/studio/products/{product.id}/packages/{quote(str(key), safe='')}">Открыть пакет</a>{open_button}{queue_button}</div>
       </div>
     </article>
     """
@@ -401,7 +401,7 @@ def mobile_logo_html() -> str:
     """
 
 
-def mobile_calendar_html(slots: list[dict]) -> str:
+def mobile_calendar_html(product_id: UUID, slots: list[dict]) -> str:
     ordered = sorted(slots, key=lambda item: item.get("publish_at") or "")
     by_day: dict[str, list[dict]] = defaultdict(list)
     for slot in ordered:
@@ -412,21 +412,21 @@ def mobile_calendar_html(slots: list[dict]) -> str:
     for index, (_, day_slots) in enumerate(list(by_day.items())[:5]):
         weekday, date_text = day_label(day_slots[0].get("publish_at"))
         days.append(
-            f'<button class="m-day{" active" if index == 0 else ""}" type="button">'
-            f'<b>{esc(weekday)}</b><span>{esc(date_text)}</span><i></i></button>'
+            f'<a class="m-day{" active" if index == 0 else ""}" href="/studio/products/{product_id}/calendar?date={esc(_)}">'
+            f'<b>{esc(weekday)}</b><span>{esc(date_text)}</span><i></i></a>'
         )
     timeline = []
     for slot in ordered[:5]:
         dt = parse_dt(slot.get("publish_at"))
         time_text = dt.strftime("%H:%M") if dt else "—"
         timeline.append(
-            '<div class="m-event">'
+            f'<a class="m-event" href="/studio/products/{product_id}/packages/{quote(str(slot.get("package_key") or "unknown"), safe="")}">'
             f'<time>{esc(time_text)}</time>'
             f'<span class="m-platform">{esc(platform_short(slot.get("platform") or ""))}</span>'
             '<div class="m-event-copy">'
             f'<b>{esc(slot.get("topic"))}</b>'
             f'<small>{esc(platform_label(slot.get("platform") or ""))}</small>'
-            '</div><span class="m-more">⋮</span></div>'
+            '</div><span class="m-more">›</span></a>'
         )
     timeline_html = "".join(timeline) or '<div class="empty">Публикаций пока нет.</div>'
     return (
@@ -434,7 +434,7 @@ def mobile_calendar_html(slots: list[dict]) -> str:
         '<div class="m-section-head"><div><span class="m-section-icon">▱</span><b>Контент-календарь</b></div><span>›</span></div>'
         f'<div class="m-days">{"".join(days)}</div>'
         f'<div class="m-timeline">{timeline_html}</div>'
-        '<a class="m-calendar-open" href="#calendar"><span>□</span> Открыть календарь <b>→</b></a>'
+        f'<a class="m-calendar-open" href="/studio/products/{product_id}/calendar"><span>□</span> Открыть календарь <b>→</b></a>'
         '</section>'
     )
 
@@ -458,32 +458,29 @@ def mobile_package_card(
             platforms.append(p)
     chips = "".join(f'<span>{esc(platform_short(p))}</span>' for p in platforms[:5])
     first_publish = min((slot.get("publish_at") or "" for slot in group), default="")
-    first_asset = package_artifacts[0] if package_artifacts else None
-    open_action = (
-        f'data-open-dialog="material-{first_asset.id}"' if first_asset else ""
-    )
+    package_url = f"/studio/products/{product.id}/packages/{quote(str(key), safe='')}"
     return (
-        f'<article class="m-package m-scene-{index % 4}" {open_action}>'
+        f'<a class="m-package m-scene-{index % 4}" href="{package_url}">'
         f'<div class="m-package-cover"><span class="m-package-status {status_class(state)}">{esc(status_label(state))}</span></div>'
         '<div class="m-package-body">'
         f'<h3>{esc(topic)}</h3>'
         f'<p>{esc(group[0].get("objective") or "Материалы пакета для нескольких площадок")}</p>'
         f'<div class="m-channel-row">{chips}<em>{len(package_artifacts)} материала</em></div>'
         f'<div class="m-package-date">□ {fmt_dt(first_publish)}</div>'
-        '</div></article>'
+        '</div></a>'
     )
 
 
-def mobile_material_card(record: Artifact) -> str:
+def mobile_material_card(product_id: UUID, record: Artifact) -> str:
     value = parse_json(record)
     kind = artifact_kind(record)
     return (
-        f'<button class="m-material {kind}" type="button" data-open-dialog="material-{record.id}">'
+        f'<a class="m-material {kind}" href="/studio/products/{product_id}/materials/{record.id}">'
         f'<span class="m-material-type">{esc(artifact_kind_label(record, value))}</span>'
         f'<span class="m-material-thumb">{("▧" if kind == "article" else "▶" if kind == "video" else "✦")}</span>'
         f'<b>{esc(record.title)}</b>'
         f'<small>{esc(excerpt(artifact_text(record, value), 55))}</small>'
-        '</button>'
+        '</a>'
     )
 
 
@@ -518,7 +515,7 @@ def mobile_dashboard_html(
             package_artifacts=package_artifacts,
             index=index,
         ))
-    materials = "".join(mobile_material_card(record) for record in material_records[:6])
+    materials = "".join(mobile_material_card(product.id, record) for record in material_records[:6])
     return f"""
     <div class="mobile-only-dashboard">
       {mobile_logo_html()}
@@ -533,7 +530,7 @@ def mobile_dashboard_html(
         <div class="m-kpi purple"><span class="m-kpi-icon">⌘</span><strong>{len(channels)}<small>площадок</small></strong><div class="m-mini-platforms">{"".join(f"<span>{esc(platform_short(x))}</span>" for x in channels[:4])}</div></div>
       </section>
 
-      {mobile_calendar_html(slots)}
+      {mobile_calendar_html(product.id, slots)}
 
       <section class="m-card m-packages" id="m-packages">
         <div class="m-section-head"><div><span class="m-section-icon">▱</span><b>Контент-пакеты</b></div><span class="m-all-pill">Все</span></div>
@@ -543,7 +540,7 @@ def mobile_dashboard_html(
       </section>
 
       <section class="m-card m-materials" id="m-materials">
-        <div class="m-section-head"><div><span class="m-section-icon">▤</span><b>Подготовленные материалы</b></div><a href="#materials">Все</a></div>
+        <div class="m-section-head"><div><span class="m-section-icon">▤</span><b>Подготовленные материалы</b></div><a href="/studio/products/{product.id}/materials">Все</a></div>
         <div class="m-material-strip">{materials or '<div class="empty">Готовых материалов пока нет.</div>'}</div>
       </section>
     </div>
@@ -673,7 +670,7 @@ def product_dashboard(db: Session, product: Product) -> str:
     <section class="panel" id="calendar">
       <div class="panel-head">
         <div class="panel-title"><span class="ico">□</span><div><h2>Контент-календарь</h2><div class="panel-sub">Публикации и дедлайны текущего цикла</div></div></div>
-        <a class="btn secondary small" href="#plan">К плану →</a>
+        <a class="btn secondary small" href="/studio/products/{product.id}/plan">К плану →</a>
       </div>
       <div class="calendar-scroll"><div class="calendar-grid" style="--days:{max(1, len(day_cards))}">{"".join(day_cards) or '<div class="empty">План пока не содержит публикаций.</div>'}</div></div>
     </section>
@@ -715,7 +712,7 @@ def product_dashboard(db: Session, product: Product) -> str:
     </section>
     """
 
-    library_cards = "".join(material_card(record) for record in material_records[:60])
+    library_cards = "".join(material_card(product.id, record) for record in material_records[:60])
     library = f"""
     <section class="panel" id="materials">
       <div class="panel-head">
