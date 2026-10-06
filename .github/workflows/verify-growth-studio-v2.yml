@@ -36,9 +36,9 @@ jobs:
           current="$(basename "$(readlink /opt/ai_growth_os/current)")"
           test "$current" = "$EXPECTED_RELEASE"
 
-          html="$(curl -fsS http://127.0.0.1:8091/studio -L)"
-          css="$(curl -fsS http://127.0.0.1:8091/studio/assets/studio.css)"
-          js="$(curl -fsS http://127.0.0.1:8091/studio/assets/studio.js)"
+          html="$(curl --retry 12 --retry-all-errors --retry-delay 2 -fsS http://127.0.0.1:8091/studio -L)"
+          css="$(curl --retry 12 --retry-all-errors --retry-delay 2 -fsS http://127.0.0.1:8091/studio/assets/studio.css)"
+          js="$(curl --retry 12 --retry-all-errors --retry-delay 2 -fsS http://127.0.0.1:8091/studio/assets/studio.js)"
 
           printf '%s' "$html" | grep -q 'Growth Studio'
           printf '%s' "$html" | grep -q 'Контент-календарь'
