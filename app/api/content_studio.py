@@ -874,7 +874,7 @@ def studio_page_shell(
 <div class="studio-page"><div class="studio-layout">
   {sidebar_html(product.id, active)}
   <main class="main route-main">
-    <div class="route-mobile-brand">{mobile_logo_html()}</div>
+    <div class="route-mobile-brand">{mobile_logo_html(product.id)}</div>
     <header class="route-page-head">
       <div>
         <a class="back-link" href="/studio/products/{product.id}">← Обзор</a>
