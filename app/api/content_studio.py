@@ -1227,6 +1227,74 @@ def studio_product(product_id: UUID, db: Session = Depends(get_db)):
     return response
 
 
+
+@router.get("/studio/products/{product_id}/plan", response_class=HTMLResponse)
+def studio_plan(product_id: UUID, status: str = "all", db: Session = Depends(get_db)):
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(404, "Product not found")
+    if status not in {"all", "ready", "failed"}:
+        status = "all"
+    response = HTMLResponse(plan_page(db, product, status=status))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.get("/studio/products/{product_id}/calendar", response_class=HTMLResponse)
+def studio_calendar(product_id: UUID, date: str | None = None, db: Session = Depends(get_db)):
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(404, "Product not found")
+    response = HTMLResponse(calendar_page(db, product, selected_date=date))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.get("/studio/products/{product_id}/materials", response_class=HTMLResponse)
+def studio_materials(product_id: UUID, kind: str = "all", q: str = "", db: Session = Depends(get_db)):
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(404, "Product not found")
+    if kind not in {"all", "article", "post", "video"}:
+        kind = "all"
+    response = HTMLResponse(materials_page(db, product, kind=kind, q=q))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.get("/studio/products/{product_id}/materials/{artifact_id}", response_class=HTMLResponse)
+def studio_material_detail(product_id: UUID, artifact_id: UUID, db: Session = Depends(get_db)):
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(404, "Product not found")
+    record = db.get(Artifact, artifact_id)
+    if record is None or record.product_id != product.id or record.kind not in MATERIAL_KINDS:
+        raise HTTPException(404, "Material not found")
+    response = HTMLResponse(material_detail_page(db, product, record))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.get("/studio/products/{product_id}/packages/{package_key}", response_class=HTMLResponse)
+def studio_package_detail(product_id: UUID, package_key: str, db: Session = Depends(get_db)):
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(404, "Product not found")
+    response = HTMLResponse(package_detail_page(db, product, package_key))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.get("/studio/products/{product_id}/analytics", response_class=HTMLResponse)
+def studio_analytics(product_id: UUID, db: Session = Depends(get_db)):
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(404, "Product not found")
+    response = HTMLResponse(analytics_page(db, product))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @router.post("/studio/products/{product_id}/plans/{plan_id}/approve")
 def studio_approve(product_id: UUID, plan_id: UUID, db: Session = Depends(get_db)):
     row = db.get(Artifact, plan_id)
@@ -1236,7 +1304,7 @@ def studio_approve(product_id: UUID, plan_id: UUID, db: Session = Depends(get_db
         approve_plan(db, get_settings(), plan_id)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from None
-    return RedirectResponse(f"/studio/products/{product_id}", status_code=303)
+    return RedirectResponse(f"/studio/products/{product_id}/plan", status_code=303)
 
 
 @router.post("/studio/products/{product_id}/plans/{plan_id}/pause")
@@ -1248,7 +1316,7 @@ def studio_pause(product_id: UUID, plan_id: UUID, db: Session = Depends(get_db))
         pause_plan(db, plan_id)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from None
-    return RedirectResponse(f"/studio/products/{product_id}", status_code=303)
+    return RedirectResponse(f"/studio/products/{product_id}/plan", status_code=303)
 
 
 @router.post("/studio/products/{product_id}/plans/{plan_id}/packages/{package_key}/queue")
@@ -1278,4 +1346,4 @@ def studio_queue_package(product_id: UUID, plan_id: UUID, package_key: str, db: 
             "План подтверждает только подготовку; публикация вручную."
         ),
     )
-    return RedirectResponse(f"/studio/products/{product_id}", status_code=303)
+    return RedirectResponse(f"/studio/products/{product_id}/packages/{quote(package_key, safe='')}", status_code=303)
