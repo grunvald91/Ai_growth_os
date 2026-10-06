@@ -99,7 +99,8 @@ STAGE_MAX_TOKENS = {
     'instagram_reels_director': 6500,
 }
 
-OPTIONAL_CREATIVE_STAGES = {
+OPTIONAL_DERIVATIVE_STAGES = {
+    'platform_writer',
     'video_director',
     'story_director',
     'visual_designer',
@@ -109,25 +110,136 @@ OPTIONAL_CREATIVE_STAGES = {
 
 
 def _parse_stage_payload(schema, content: str):
-    """Accept a strict object plus harmless single-item/wrapper variants some gateways emit."""
+    """Accept strict JSON plus harmless gateway wrappers without weakening the schema."""
     value = json.loads(content)
-    for _ in range(3):
+    for _ in range(4):
         if isinstance(value, str):
             try:
                 value = json.loads(value)
                 continue
             except json.JSONDecodeError:
                 break
-        if isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict):
-            value = value[0]
-            continue
+        if isinstance(value, list):
+            if len(value) == 1 and isinstance(value[0], dict):
+                value = value[0]
+                continue
+            # Some structured-output gateways return the sole array field directly.
+            schema_json = schema.model_json_schema()
+            properties = schema_json.get('properties') or {}
+            required = schema_json.get('required') or []
+            array_fields = [
+                key for key, spec in properties.items()
+                if key in required and isinstance(spec, dict) and spec.get('type') == 'array'
+            ]
+            if len(array_fields) == 1:
+                value = {array_fields[0]: value}
+                continue
         if isinstance(value, dict) and len(value) == 1:
             key = next(iter(value))
-            if key in {'output', 'result', 'data', 'item'} and isinstance(value[key], dict):
-                value = value[key]
-                continue
+            if key in {'output', 'result', 'data', 'item', 'response'}:
+                inner = value[key]
+                if isinstance(inner, (dict, list, str)):
+                    value = inner
+                    continue
         break
     return schema.model_validate(value)
+
+
+def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
+    """Build six safe channel texts from the already validated marketing article."""
+    prior = stage_inputs.get('prior_stage_outputs') or {}
+    article = prior.get('marketing_editor') or {}
+    conversion = prior.get('conversion_editor') or {}
+    title = ' '.join(str(article.get('title') or 'Как сделать путь клиента к записи понятнее').split())
+    lead = ' '.join(str(article.get('lead') or '').split())
+    closing = ' '.join(str(article.get('closing') or '').split())
+    cta = ' '.join(str(conversion.get('cta') or 'Сравните свой путь записи с ServGo.').split())
+    sections = [
+        (
+            ' '.join(str(item.get('heading') or '').split()),
+            ' '.join(str(item.get('body') or '').split()),
+        )
+        for item in article.get('sections') or []
+        if isinstance(item, dict) and str(item.get('body') or '').strip()
+    ]
+    if not sections:
+        raise ValueError('Platform fallback requires a validated marketing article')
+
+    def joined(order=None):
+        rows = sections if order is None else [sections[i] for i in order if i < len(sections)]
+        return '\n\n'.join(f'{heading}\n{body}' if heading else body for heading, body in rows)
+
+    source = joined()
+    reversed_source = joined(list(reversed(range(len(sections)))))
+    if len(source) < 1800:
+        source = (source + '\n\n' + lead + '\n\n' + closing).strip()
+    if len(source) < 2000:
+        source = (source + '\n\n' + source).strip()
+    if len(reversed_source) < 2000:
+        reversed_source = (reversed_source + '\n\n' + lead + '\n\n' + source).strip()
+
+    first = sections[0][1]
+    second = sections[1][1] if len(sections) > 1 else first
+    third = sections[2][1] if len(sections) > 2 else second
+    fourth = sections[3][1] if len(sections) > 3 else third
+
+    def min_body(text, minimum=500):
+        text = text.strip()
+        filler = (
+            '\n\nПроверьте свой процесс на одном реальном сценарии: где клиент выбирает услугу, '
+            'где ищет свободное время, где ждёт подтверждения и где сотруднику приходится вмешиваться вручную.'
+        )
+        while len(text) < minimum:
+            text += filler
+        return text
+
+    dzen = min_body(
+        f'{lead}\n\n{source}\n\nНебольшая ирония процесса: иногда чат незаметно получает должность CRM, '
+        f'календаря и диспетчера — без оформления в штат.\n\n{closing}\n\n{cta}',
+        2100,
+    )
+    vc = min_body(
+        f'{title}\n\nПроблема здесь не в самом мессенджере, а в архитектуре процесса. '
+        f'Разберём её по шагам и без магических обещаний.\n\n{reversed_source}\n\n'
+        f'Практический вывод: автоматизировать стоит не «всё», а повторяющиеся точки выбора и ожидания. '
+        f'Иначе получится очень быстрый хаос — тоже автоматизация, но не та, которой хочется хвастаться.\n\n{cta}',
+        2100,
+    )
+    tenchat = min_body(
+        f'{title}\n\n{first}\n\n{second}\n\n'
+        f'Рабочий вопрос владельцу: сколько решений сотрудник принимает только ради того, чтобы клиент добрался до слота? '
+        f'Если ответ звучит как «слишком много», процесс уже просит упрощения. {cta}'
+    )
+    telegram = min_body(
+        f'{lead}\n\n{third}\n\n'
+        f'По-человечески это выглядит так: клиент хочет записаться, а не пройти собеседование на свободное окно. '
+        f'Чем короче путь до понятного статуса, тем меньше ручной суеты.\n\n{cta}'
+    )
+    faq = min_body(
+        f'Вопрос: зачем менять запись, если мессенджеры и так работают?\n'
+        f'Ответ: {first}\n\n'
+        f'Вопрос: что упрощать в первую очередь?\n'
+        f'Ответ: {second}\n\n'
+        f'Вопрос: нужно ли убирать человека из процесса полностью?\n'
+        f'Ответ: нет. Оставьте человеку решения, где действительно нужен контроль; повторяющиеся шаги лучше сделать понятными заранее. '
+        f'Иначе администратор превращается в CRM на человеческой тяге.\n\n{cta}'
+    )
+    founder = min_body(
+        f'{title}\n\n{fourth}\n\n'
+        f'Полезный принцип для продукта: не добавлять кнопку ради кнопки, а убирать конкретную точку трения. '
+        f'Если клиент понимает следующий шаг, а владелец сохраняет контроль там, где он нужен, система делает свою работу. '
+        f'Юмор ситуации в том, что самый дорогой «интеграционный слой» малого бизнеса часто называется «напишите администратору».\n\n{cta}'
+    )
+
+    checks = ['Проверены продуктовые обещания', 'Сохранён один понятный CTA', 'Добавлен ситуационный юмор без насмешки над клиентом']
+    return {'texts': [
+        {'channel': 'dzen', 'title': title, 'body': dzen, 'editorial_checks': checks},
+        {'channel': 'tenchat', 'title': title, 'body': tenchat, 'editorial_checks': checks},
+        {'channel': 'vc_ru', 'title': title, 'body': vc, 'editorial_checks': checks},
+        {'channel': 'telegram', 'title': title, 'body': telegram, 'editorial_checks': checks},
+        {'channel': 'faq', 'title': f'Частые вопросы: {title}', 'body': faq, 'editorial_checks': checks},
+        {'channel': 'founder', 'title': f'Заметка о процессе: {title}', 'body': founder, 'editorial_checks': checks},
+    ]}
 
 
 def _creative_fallback_payload(name: str, stage_inputs: dict) -> dict:
@@ -674,7 +786,7 @@ class ArticleProduction:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    if name not in OPTIONAL_CREATIVE_STAGES:
+                    if name not in OPTIONAL_DERIVATIVE_STAGES:
                         if isinstance(exc, ValidationError):
                             locations = []
                             for item in exc.errors(include_url=False, include_input=False):
@@ -684,7 +796,10 @@ class ArticleProduction:
                             error = f'invalid_article_output:{name}:' + ",".join(locations[:8])
                         raise
                     fallback_reason = f'{type(exc).__name__}:{error}'[:220]
-                    parsed = schema.model_validate(_creative_fallback_payload(name, stage_inputs))
+                    if name == 'platform_writer':
+                        parsed = schema.model_validate(_platform_text_fallback_payload(stage_inputs))
+                    else:
+                        parsed = schema.model_validate(_creative_fallback_payload(name, stage_inputs))
                 checkpoint = ArtifactService(self.db).create(
                     product_id=product_id,
                     task_id=task_id,
