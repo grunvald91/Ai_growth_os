@@ -1,0 +1,55 @@
+name: Verify Growth Studio mockup parity
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-growth-studio-parity.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      EXPECTED_RELEASE: a5878b21d3eb93d56be53f4ba605a61934c25a15
+    steps:
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Verify exact production UI
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "EXPECTED_RELEASE='$EXPECTED_RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          for n in $(seq 1 36); do
+            current="$(basename "$(readlink /opt/ai_growth_os/current)")"
+            echo "release[$n]=$current"
+            [ "$current" = "$EXPECTED_RELEASE" ] && break
+            sleep 10
+          done
+          current="$(basename "$(readlink /opt/ai_growth_os/current)")"
+          test "$current" = "$EXPECTED_RELEASE"
+
+          html="$(curl --retry 12 --retry-all-errors --retry-delay 2 -fsSL http://127.0.0.1:8091/studio)"
+          css="$(curl --retry 12 --retry-all-errors --retry-delay 2 -fsS http://127.0.0.1:8091/studio/assets/studio.css?v=3)"
+          [[ "$html" == *"mobile-only-dashboard"* ]]
+          [[ "$html" == *"m-brand"* ]]
+          [[ "$html" == *"m-kpis"* ]]
+          [[ "$html" == *"m-timeline"* ]]
+          [[ "$html" == *"m-package-carousel"* ]]
+          [[ "$html" == *"m-material-strip"* ]]
+          [[ "$css" == *".m-day.active"* ]]
+          [[ "$css" == *".m-package-cover"* ]]
+          [[ "$css" == *".mobile-only-dashboard"* ]]
+
+          code="$(curl -ksS -o /dev/null -w '%{http_code}' https://growth.servgo.ru/studio)"
+          echo "public_status=$code"
+          test "$code" = "401"
+          echo "Growth Studio mockup-parity production verification OK"
+          REMOTE
