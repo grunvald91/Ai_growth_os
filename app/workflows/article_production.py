@@ -614,6 +614,8 @@ class ArticleProduction:
                 approval_ids=approval_ids, status='completed')
         except (Exception, asyncio.CancelledError) as exc:
             self.db.rollback()
+            if error == 'context_preparation_failed' and not isinstance(exc, asyncio.CancelledError):
+                error = f'context_preparation_failed:{type(exc).__name__}'
             for run_id in run_ids:
                 run = self.db.get(AgentRun, run_id)
                 if run.status == 'completed':
