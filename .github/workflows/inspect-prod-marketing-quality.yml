@@ -19,7 +19,7 @@ jobs:
       SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
       SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
-      EXPECTED_RELEASE: 22b825b067d56823f563445408d1b13219860079
+      EXPECTED_RELEASE: 6689d57481258b2275f191d1faae02c906fa993b
       QUALITY_RUN_KEY: quality-${{ github.run_id }}
 
     steps:
