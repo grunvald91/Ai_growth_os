@@ -126,9 +126,9 @@ async def test_website_cannot_inject_unknowns_or_business_hypotheses(db, tmp_pat
     ), actor="owner")["sources"][-1]
     extraction(provider, [
         claim(source, "identity.name", "Школа-студия Ирен", "Школа-студия Ирен."),
-        claim(source, "customers.primary_segments", "Massage studios is a candidate segment to test.",
+        claim(source, "identity.positioning", "Massage studios is a candidate segment to test.",
               "Школа-студия Ирен.", "hypothesis"),
-        claim(source, "commercial.pricing_notes", "Approved current pricing for ServGo Growth",
+        claim(source, "identity.positioning", "Approved current pricing for ServGo Growth",
               "Школа-студия Ирен.", "unknown"),
     ])
     review = await service.build(product.id, session, actor="owner")
