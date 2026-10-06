@@ -18,7 +18,7 @@ jobs:
       SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
       SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
-      EXPECTED_RELEASE: f4191e4467cf458656c5796972e60b3b2172e2eb
+      EXPECTED_RELEASE: a5878b21d3eb93d56be53f4ba605a61934c25a15
     steps:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
       - name: Verify exact production UI
