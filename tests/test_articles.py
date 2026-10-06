@@ -598,8 +598,14 @@ async def test_editor_prompts_are_commercially_useful_without_weakening_groundin
     assert 'grounded audience_pains' in by_role['content_strategist'].system_prompt
     assert 'commercially useful' in by_role['seo_editor'].system_prompt
     assert 'concrete recognizable situation' in by_role['human_editor'].system_prompt
+    assert 'Пиши, сокращай' in by_role['human_editor'].system_prompt
     assert 'SCENE -> PAIN -> COST/FRICTION' in by_role['marketing_editor'].system_prompt
-    assert 'situational humor' in by_role['marketing_editor'].system_prompt
+    assert 'MUST include at least one light situational humor beat' in by_role['marketing_editor'].system_prompt
+    assert 'third-party cases' in by_role['marketing_editor'].system_prompt
+    assert 'Write marketing, not an academic paper' in by_role['marketing_editor'].system_prompt
+    assert '30-45 seconds' in by_role['video_director'].system_prompt
+    assert by_role['marketing_editor'].metadata['provider_timeout_seconds'] == 100
+    assert by_role['video_director'].metadata['provider_timeout_seconds'] == 90
     assert 'Titles/hooks/CTAs must be questions or proposals' not in by_role['marketing_editor'].system_prompt
     first_payload = json.loads(by_role['content_strategist'].messages[0].content)
     assert any(item['kind'] == 'viral_video_research' for item in first_payload['marketing_research'])
