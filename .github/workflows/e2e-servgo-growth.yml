@@ -19,7 +19,7 @@ jobs:
       SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
       SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
-      EXPECTED_RELEASE: f65d4ba8d37d7df4f6bb278606520e5a103ee8b1
+      EXPECTED_RELEASE: ca4a25bb9185d8979aedb2aa10ebfc5a883577ba
 
     steps:
       - name: Install SSH helper
@@ -32,8 +32,13 @@ jobs:
           OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15 -o ServerAliveCountMax=20"
           sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "EXPECTED_RELEASE='$EXPECTED_RELEASE' bash -s" <<'REMOTE'
           set -euo pipefail
-          CURRENT="$(basename "$(readlink /opt/ai_growth_os/current)")"
-          echo "Current release: $CURRENT"
+          CURRENT=""
+          for i in $(seq 1 90); do
+            CURRENT="$(basename "$(readlink /opt/ai_growth_os/current 2>/dev/null || true)")"
+            echo "Current release: $CURRENT"
+            [ "$CURRENT" = "$EXPECTED_RELEASE" ] && break
+            sleep 5
+          done
           [ "$CURRENT" = "$EXPECTED_RELEASE" ] || { echo "Expected $EXPECTED_RELEASE, got $CURRENT"; exit 42; }
           cd /opt/ai_growth_os/current
 
@@ -63,7 +68,7 @@ jobs:
                   product_id=product.id,
                   assigned_agent="editorial_planner",
                   title="Редактор: ServGo Growth multisource E2E plan",
-                  description="[growth_viral_e2e_20261006_v2] Live multisource research + marketing-quality validation.",
+                  description="[growth_viral_e2e_20261006_v3] Live multisource research + marketing-quality validation.",
                   priority=125,
                   status=TaskStatus.QUEUED,
               )
@@ -78,7 +83,7 @@ jobs:
           from app.db.session import SessionLocal
           from app.models.domain import Task
           with SessionLocal() as db:
-              row=db.scalar(select(Task).where(Task.description.like('%[growth_viral_e2e_20261006_v2]%')).order_by(Task.created_at.desc()).limit(1))
+              row=db.scalar(select(Task).where(Task.description.like('%[growth_viral_e2e_20261006_v3]%')).order_by(Task.created_at.desc()).limit(1))
               print(row.id if row else '')
           PY
           )"
