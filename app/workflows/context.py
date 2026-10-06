@@ -24,6 +24,44 @@ FIELDS = {
 }
 
 
+def _serialized_size(value: dict) -> int:
+    return len(json.dumps(value, ensure_ascii=False, default=str))
+
+
+def _compact_context_to_bound(context: dict) -> dict:
+    """Deterministically reduce historical records before failing the workflow.
+
+    Dynamic history is useful context but must never prevent a new content task
+    from starting merely because the product accumulated many long artifacts.
+    Canonical company profile and stable context remain present; only bounded
+    history excerpts are progressively shortened.
+    """
+    if _serialized_size(context) <= CONTEXT_LIMIT:
+        return context
+
+    passes = (
+        (12, 900, 40_000),
+        (8, 600, 28_000),
+        (5, 350, 18_000),
+    )
+    for row_limit, text_limit, stable_limit in passes:
+        for kind, rows in list(context.get('records', {}).items()):
+            compact_rows = []
+            for row in rows[:row_limit]:
+                compact_rows.append({
+                    key: (value[:text_limit] if isinstance(value, str) else value)
+                    for key, value in row.items()
+                })
+            context['records'][kind] = compact_rows
+        context['stable_context'] = str(context.get('stable_context') or '')[:stable_limit]
+        context['limits']['history_compacted'] = True
+        context['limits']['effective_rows_per_kind'] = row_limit
+        context['limits']['effective_text_characters'] = text_limit
+        if _serialized_size(context) <= CONTEXT_LIMIT:
+            return context
+    raise ValueError('Context exceeds bound after compaction')
+
+
 def load_context(db: Session, product: Product, products_root: Path) -> dict:
     context = {'product': {'id': str(product.id), 'name': product.name[:200],
                            'description': (product.description or '')[:TEXT_LIMIT]},
@@ -77,9 +115,7 @@ def load_context(db: Session, product: Product, products_root: Path) -> dict:
              'profile_incomplete' if not readiness['strategy']['ready'] else
              'ready' if all(gate['ready'] for gate in readiness.values()) else 'partially_ready')
     context['company_onboarding'] = {'state': state, 'intake_in_progress': active_intake}
-    if len(json.dumps(context)) > CONTEXT_LIMIT:
-        raise ValueError('Context exceeds bound')
-    return context
+    return _compact_context_to_bound(context)
 
 
 def analytics_snapshot(context: dict) -> dict:
