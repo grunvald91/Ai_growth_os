@@ -564,20 +564,25 @@ def _expanded_queries(context: dict, limit: int) -> tuple[str, list[str]]:
 def _analysis_prompt() -> str:
     return (
         "You are viral_content_researcher. Analyze ONLY the supplied evidence ledger. Return ONLY JSON. "
-        "The research combines short-form video and public article/news signals. A view count, trend score, "
-        "cross-source recurrence or creator outlier ratio is a content-discovery signal, NOT proof of buyer demand, "
-        "conversion, causation, revenue or keyword volume. Use creator-baseline outlier_ratio when available; raw views "
-        "alone are weaker. For articles, no fake views exist: use freshness, recurrence and wording/topic structure only. "
+        "The research combines short-form video and public article/news signals. Treat view count, trend score, "
+        "cross-source recurrence and creator outlier ratio as commercially useful attention/topic signals. Several "
+        "independent signals may justify a marketing inference that a theme is visibly recurring or promising; do not "
+        "rename that inference as measured keyword volume, conversion or total market demand unless a supplied source "
+        "actually reports it. Use creator-baseline outlier_ratio when available; raw views alone are weaker. For articles, "
+        "do not fabricate views: use freshness, recurrence and wording/topic structure. "
         "Find repeated audience pains, hooks, POV clusters, counterexamples and white-space angles. Apply STEPPS "
         "(social currency, triggers, emotion, public, practical value, stories) only when supported by title/snippet/"
         "transcript; do not force every category. Every observed pain/pattern must cite exact source_ids. "
         "Map pains to the supplied approved_product_facts. product_match=verified_match ONLY when the exact supplied fact "
         "directly supports the match and then product_fact_id is required. Otherwise use hypothesis or gap. "
-        "Do not invent ServGo capabilities, market statistics, customer results or competitor claims. "
-        "Generate original SEO seeds and content angles rather than copying creators. Aim for 3-8 SEO seeds and content "
-        "angles when evidence supports them; never pad a sparse ledger with invented claims merely to reach a count. "
-        "Identify white-space angles where the evidence supports a fresh combination. Include tasteful humor angles "
-        "where humor helps make an operational pain recognizable; humor must punch at the situation/process, "
+        "Do not invent ServGo capabilities or factual statistics. Third-party numbers and case results already "
+        "present in the evidence MAY be surfaced because marketing needs concrete material: preserve their source scope "
+        "and never turn them into a guaranteed ServGo result. Strong marketing interpretation is welcome when it is a "
+        "reasonable synthesis of several independent signals. Generate original SEO seeds and content angles rather than "
+        "copying creators. Aim for 3-8 SEO seeds and content angles when evidence supports them. "
+        "Identify white-space angles where the evidence supports a fresh combination. Humor is a required marketing "
+        "ingredient: with a normal business ledger, produce at least two tasteful humor angles that make an operational "
+        "pain recognizable; humor must punch at the situation/process, "
         "not at the customer, employee or vulnerable person. Avoid cringe, mockery and fake quotes. "
         "For presentation_angle use tension: recognizable scene -> cost/friction -> clearer mechanism -> grounded next step. "
         "Write natural Russian. Schema: " + json.dumps(ViralContentAnalysisDraft.model_json_schema(), ensure_ascii=False)
@@ -737,6 +742,7 @@ async def run_viral_content_research(
                     "team_role": "viral_content_researcher",
                     "reasoning_effort": "low",
                     "task_type": "viral_content_research",
+                    "provider_timeout_seconds": 90,
                 },
             )
 
@@ -753,6 +759,23 @@ async def run_viral_content_research(
                         raise ValueError("pain referenced unknown source")
                     if pain.product_fact_id and pain.product_fact_id not in facts:
                         raise ValueError("pain referenced unknown product fact")
+
+                # A healthy ledger should yield a usable marketing brief, not only
+                # a strong summary paragraph. Sparse ledgers remain valid.
+                if len(videos) + len(articles) >= 6:
+                    missing = []
+                    if len(parsed.audience_pains) < 2:
+                        missing.append("audience_pains")
+                    if len(parsed.hook_patterns) < 2:
+                        missing.append("hook_patterns")
+                    if len(parsed.seo_topic_seeds) < 3:
+                        missing.append("seo_topic_seeds")
+                    if len(parsed.content_angles) < 3:
+                        missing.append("content_angles")
+                    if len(parsed.humor_angles) < 2:
+                        missing.append("humor_angles")
+                    if missing:
+                        raise ValueError("analysis incomplete:" + ",".join(missing))
                 return generated, parsed
 
             try:
