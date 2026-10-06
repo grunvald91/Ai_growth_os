@@ -19,7 +19,7 @@ jobs:
       SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
       SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
-      EXPECTED_RELEASE: f27a4eb6bd9a900f1ae21f7d950d57289ae8c544
+      EXPECTED_RELEASE: 6e71a56e1c00334c1ea4f7e48e6ffde9c273b770
 
     steps:
       - name: Install SSH helper
