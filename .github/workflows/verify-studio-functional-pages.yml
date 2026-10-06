@@ -1,0 +1,72 @@
+name: Verify Growth Studio functional pages
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-studio-functional-pages.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      EXPECTED_RELEASE: 0ced9753042da3037928b9675eb3d08dd8f7807f
+    steps:
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Verify functional routes in production
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "EXPECTED_RELEASE='$EXPECTED_RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          for n in $(seq 1 42); do
+            current="$(basename "$(readlink /opt/ai_growth_os/current)")"
+            echo "release[$n]=$current"
+            [ "$current" = "$EXPECTED_RELEASE" ] && break
+            sleep 10
+          done
+          current="$(basename "$(readlink /opt/ai_growth_os/current)")"
+          test "$current" = "$EXPECTED_RELEASE"
+
+          root_headers="$(mktemp)"
+          curl --retry 12 --retry-all-errors --retry-delay 2 -sS -D "$root_headers" -o /dev/null http://127.0.0.1:8091/studio
+          base="$(awk 'BEGIN{IGNORECASE=1} /^location:/ {gsub("\r","",$2); print $2}' "$root_headers" | tail -n1)"
+          echo "base=$base"
+          [[ "$base" == /studio/products/* ]]
+
+          for suffix in "" "/plan" "/calendar" "/materials" "/analytics"; do
+            code="$(curl -sS -o /tmp/page.html -w '%{http_code}' "http://127.0.0.1:8091${base}${suffix}")"
+            echo "suffix=$suffix code=$code"
+            test "$code" = "200"
+          done
+
+          overview="$(curl -fsS "http://127.0.0.1:8091${base}")"
+          [[ "$overview" == *"${base}/plan"* ]]
+          [[ "$overview" == *"${base}/calendar"* ]]
+          [[ "$overview" == *"${base}/materials"* ]]
+          [[ "$overview" == *"${base}/analytics"* ]]
+          [[ "$overview" != *'href="#calendar"'* ]]
+
+          package_path="$(printf '%s' "$overview" | grep -oE "${base}/packages/[^\"']+" | head -n1 || true)"
+          test -n "$package_path"
+          test "$(curl -sS -o /tmp/package.html -w '%{http_code}' "http://127.0.0.1:8091${package_path}")" = "200"
+
+          materials="$(curl -fsS "http://127.0.0.1:8091${base}/materials")"
+          material_path="$(printf '%s' "$materials" | grep -oE "${base}/materials/[0-9a-f-]{36}" | head -n1 || true)"
+          if [ -n "$material_path" ]; then
+            test "$(curl -sS -o /tmp/material.html -w '%{http_code}' "http://127.0.0.1:8091${material_path}")" = "200"
+          fi
+
+          public_code="$(curl -ksS -o /dev/null -w '%{http_code}' https://growth.servgo.ru/studio)"
+          echo "public_status=$public_code"
+          test "$public_code" = "401"
+          echo "Growth Studio functional routes verification OK"
+          REMOTE
