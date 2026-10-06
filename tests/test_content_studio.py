@@ -232,6 +232,13 @@ def test_studio_all_navigation_targets_are_real_pages(studio_db):
         assert f'href="{base}/packages/pkg-1"' in overview.text
         assert f'href="{base}/calendar"' in overview.text
         assert 'href="#calendar"' not in overview.text
+        assert 'href="#plan"' not in overview.text
+        assert 'href="#materials"' not in overview.text
+        assert 'href="#analytics"' not in overview.text
+        assert f'href="{base}/plan?status=ready"' in overview.text
+        assert f'href="{base}/plan?status=failed"' in overview.text
+        assert f'href="{base}/analytics" aria-label="Аналитика"' in overview.text
+        assert 'href="/studio?choose=1" aria-label="Выбрать проект"' in overview.text
 
         plan_page=client.get(base+"/plan")
         calendar_page=client.get(base+"/calendar")
