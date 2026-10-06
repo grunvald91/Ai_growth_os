@@ -310,6 +310,36 @@ jobs:
           PY
           REMOTE
 
+      - name: Run requested company content package
+        if: ${{ hashFiles('.github/deploy-request.json') != '' }}
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          RELEASE="$REMOTE_ROOT/releases/$GITHUB_SHA"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "REMOTE_ROOT='$REMOTE_ROOT' RELEASE='$RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$RELEASE"
+          dc() { docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml "$@"; }
+          dc exec -T api python - <<'PY'
+          import json
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Product
+          from app.content.service import queue_content
+          req=json.load(open('/app/.github/deploy-request.json', encoding='utf-8'))
+          with SessionLocal() as db:
+              products=list(db.scalars(select(Product).order_by(Product.name)))
+              needle=req['product_name_contains'].casefold()
+              matches=[p for p in products if needle in p.name.casefold()]
+              if len(matches) != 1:
+                  raise SystemExit(f"Expected one company matching {needle!r}; found {[p.name for p in matches]}")
+              p=matches[0]
+              task=queue_content(db,p.id,req['topic'],dedupe_key=req['dedupe_key'])
+              print("Requested company:",p.name)
+              print("Content task:",task.id,task.status.value)
+          PY
+          REMOTE
+
       - name: Activate release
         run: |
           set -euo pipefail
