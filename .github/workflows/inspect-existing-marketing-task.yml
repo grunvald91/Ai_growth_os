@@ -24,7 +24,7 @@ jobs:
     steps:
       - name: Install SSH helper
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
-      - name: Inspect completed stage outputs only
+      - name: Reconstruct final package from saved checkpoints
         run: |
           set -euo pipefail
           OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
@@ -32,59 +32,131 @@ jobs:
           set -euo pipefail
           cd /opt/ai_growth_os/current
           docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - "$TASK_ID" <<'PY'
-          import json, sys
-          from difflib import SequenceMatcher
+          import json, sys, traceback
           from uuid import UUID
           from sqlalchemy import select
+
+          from app.core.config import get_settings
           from app.db.session import SessionLocal
-          from app.models.domain import Artifact
+          from app.models.domain import Artifact, Product, Task
+          from app.privacy import PrivacyGateway
+          from app.workflows.context import load_context
+          from app.workflows.article_production import (
+              product_facts, validate_grounding, _ensure_fallback_derivative_adaptation,
+          )
+          from app.workflows.article_contracts import (
+              ArticleStrategy, SEOPlan, ArticleBodyDraft, ConversionCore, HumanEditedArticle,
+              TextDerivativeSet, ShortVideoDerivativeDraft, StoryDerivativeDraft, StaticImageDerivativeDraft,
+              GroundedClaim, ArticleSection, ArticleDraft, DerivativeBrief, ConversionPackage, ArticleArtifact,
+          )
 
           tid=UUID(sys.argv[1])
           with SessionLocal() as db:
+              task=db.get(Task, tid)
+              product=db.get(Product, task.product_id)
               rows=list(db.scalars(select(Artifact).where(
                   Artifact.task_id==tid,
                   Artifact.kind=="content_stage_output"
               ).order_by(Artifact.created_at, Artifact.id)))
-              stages={}
-              for row in rows:
-                  payload=json.loads(row.content)
-                  stages[payload["stage"]]=payload["output"]
+              checkpoints={json.loads(r.content)["stage"]:json.loads(r.content) for r in rows}
+              out={k:v["output"] for k,v in checkpoints.items()}
 
-              strategy=stages["content_strategist"]
-              seo=stages["seo_editor"]
-              def norm(v): return " ".join(str(v or "").casefold().split())
-              def ratio(a,b): return round(SequenceMatcher(None,norm(a),norm(b)).ratio(),3)
+              strategy=ArticleStrategy.model_validate(out["content_strategist"])
+              seo=SEOPlan.model_validate(out["seo_editor"])
+              body=ArticleBodyDraft.model_validate(out["article_writer"])
+              core=ConversionCore.model_validate(out["conversion_editor"])
+              human=HumanEditedArticle.model_validate(out["human_editor"])
+              marketing=HumanEditedArticle.model_validate(out["marketing_editor"])
+              texts=TextDerivativeSet.model_validate(out["repurposing_editor"])
+              video=ShortVideoDerivativeDraft.model_validate(out["video_director"])
+              story=StoryDerivativeDraft.model_validate(out["story_director"])
+              visual=StaticImageDerivativeDraft.model_validate(out["visual_designer"])
 
-              derivatives=[]
-              derivatives.extend(stages["repurposing_editor"]["derivatives"])
-              derivatives.extend([
-                  stages["video_director"],
-                  stages["story_director"],
-                  stages["visual_designer"],
-              ])
-              diagnostics=[]
-              for d in derivatives:
-                  diagnostics.append({
-                      "kind": d["kind"],
-                      "hook_ratio": ratio(d["hook"], seo["hook"]),
-                      "framing_ratio": ratio(d["framing"], strategy["angle"]),
-                      "outline_ratio": ratio(" ".join(d["outline"]), " ".join(seo["outline"])),
-                      "hook": d["hook"],
-                      "framing": d["framing"],
-                  })
-              print("DIAGNOSTICS_START")
-              print(json.dumps({
-                  "strategy_angle":strategy["angle"],
-                  "seo_hook":seo["hook"],
-                  "seo_outline":seo["outline"],
-                  "derivatives":diagnostics,
-                  "marketing_fact_ids":[x["source_id"] for x in stages["marketing_editor"].get("fact_renderings",[])],
-              },ensure_ascii=False,indent=2))
-              print("DIAGNOSTICS_END")
+              for stage, brief in list({
+                  "video_director": video,
+                  "story_director": story,
+                  "visual_designer": visual,
+              }.items()):
+                  if checkpoints[stage].get("fallback_used"):
+                      fixed=_ensure_fallback_derivative_adaptation(brief, strategy=strategy, seo=seo, stage=stage)
+                      if stage=="video_director": video=fixed
+                      elif stage=="story_director": story=fixed
+                      else: visual=fixed
 
-              for name in ("marketing_editor","platform_writer","youtube_shorts_director","instagram_reels_director","video_director","visual_designer"):
-                  print("STAGE_OUTPUT_START="+name)
-                  print(json.dumps(stages[name],ensure_ascii=False,indent=2)[:30000])
-                  print("STAGE_OUTPUT_END="+name)
+              phases={}
+              try:
+                  derivatives=[
+                      *texts.derivatives,
+                      video, story, visual,
+                  ]
+                  converted=[
+                      DerivativeBrief(**brief.model_dump(mode="json"), measurement=core.measurement)
+                      for brief in derivatives
+                  ]
+                  conversion=ConversionPackage(**core.model_dump(mode="json"), derivatives=converted)
+                  phases["conversion"]="ok"
+              except Exception as exc:
+                  phases["conversion"]=f"{type(exc).__name__}: {exc}"
+                  conversion=None
+
+              try:
+                  stable=PrivacyGateway().sanitize_text(load_context(db, product, get_settings().products_root)["stable_context"])
+                  facts=product_facts(stable)
+                  claims=[GroundedClaim(claim=q,source_id=s,quote=q) for s,q in facts.items()]
+                  fact_sections=[]
+                  if claims:
+                      fact_sections.append(ArticleSection(
+                          heading="Проверенные факты о ServGo",
+                          body="\n".join(f"- {c.quote}" for c in claims),
+                          kind="fact",
+                          claim_ids=[c.source_id for c in claims],
+                      ))
+                  draft=ArticleDraft(
+                      sections=[
+                          *fact_sections,
+                          *[ArticleSection(heading=x.heading,body=x.body,kind=x.kind,claim_ids=[]) for x in body.sections],
+                      ],
+                      claims=claims,
+                      proof_needed_notes=body.proof_needed_notes,
+                  )
+                  validate_grounding(draft,facts)
+                  fact_ids=[x.source_id for x in marketing.fact_renderings]
+                  phases["grounding"]={
+                      "status":"ok" if set(fact_ids)==set(facts) and len(fact_ids)==len(set(fact_ids)) else "mismatch",
+                      "expected":sorted(facts),
+                      "actual":sorted(fact_ids),
+                  }
+              except Exception as exc:
+                  phases["grounding"]=f"{type(exc).__name__}: {exc}"
+                  draft=None
+
+              try:
+                  rendered=""
+                  if marketing.fact_renderings:
+                      rendered="## Что умеет ServGo\n\n"+"\n".join(f"- {x.text}" for x in marketing.fact_renderings)+"\n\n"
+                  reader_body="\n\n".join(f"## {x.heading}\n\n{x.body}" for x in marketing.sections)
+                  full=f"# {marketing.title}\n\n{marketing.lead}\n\n{rendered}{reader_body}\n\n{marketing.closing}\n\n{core.cta}"
+                  package=ArticleArtifact(
+                      product_id=product.id,
+                      task_id=tid,
+                      decision_id=None,
+                      experiment_id=None,
+                      channel="own_site",
+                      topic=json.loads(db.scalar(select(Artifact.content).where(
+                          Artifact.task_id==tid, Artifact.kind=="content_request"
+                      )))["topic"],
+                      strategy=strategy,
+                      seo=seo,
+                      draft=draft,
+                      reader_article=marketing,
+                      full_article=full,
+                      conversion=conversion,
+                  )
+                  phases["article_artifact"]="ok"
+                  phases["full_article_chars"]=len(full)
+              except Exception as exc:
+                  phases["article_artifact"]=f"{type(exc).__name__}: {exc}"
+
+              print(json.dumps(phases,ensure_ascii=False,indent=2))
           PY
           REMOTE
