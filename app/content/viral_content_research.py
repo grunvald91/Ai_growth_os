@@ -8,6 +8,8 @@ by freshness and cross-source recurrence, never fake view counts.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import html as html_lib
 import json
 import math
 import re
@@ -16,11 +18,11 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from statistics import median
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 from defusedxml import ElementTree as SafeET
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy.orm import Session
 
 from app.content.viral_research import (
@@ -98,16 +100,19 @@ class PainOpportunity(Contract):
 
 
 class ViralContentAnalysisDraft(Contract):
+    # The evidence ledger can legitimately contain only one source family. Requiring
+    # arbitrary list counts made a correct sparse analysis fail validation and threw
+    # away useful evidence. Quality is scored separately from schema validity.
     summary: str = Field(min_length=30, max_length=5000)
-    audience_pains: list[PainOpportunity] = Field(min_length=2, max_length=10)
-    hook_patterns: list[ContentPattern] = Field(min_length=2, max_length=10)
-    topic_patterns: list[ContentPattern] = Field(min_length=2, max_length=10)
-    article_patterns: list[ContentPattern] = Field(min_length=1, max_length=10)
-    stepps_mechanisms: list[str] = Field(min_length=1, max_length=10)
-    seo_topic_seeds: list[str] = Field(min_length=5, max_length=18)
-    content_angles: list[str] = Field(min_length=5, max_length=18)
-    white_space_angles: list[str] = Field(min_length=2, max_length=10)
-    humor_angles: list[str] = Field(min_length=2, max_length=10)
+    audience_pains: list[PainOpportunity] = Field(default_factory=list, max_length=10)
+    hook_patterns: list[ContentPattern] = Field(default_factory=list, max_length=10)
+    topic_patterns: list[ContentPattern] = Field(default_factory=list, max_length=10)
+    article_patterns: list[ContentPattern] = Field(default_factory=list, max_length=10)
+    stepps_mechanisms: list[str] = Field(default_factory=list, max_length=10)
+    seo_topic_seeds: list[str] = Field(default_factory=list, max_length=18)
+    content_angles: list[str] = Field(default_factory=list, max_length=18)
+    white_space_angles: list[str] = Field(default_factory=list, max_length=10)
+    humor_angles: list[str] = Field(default_factory=list, max_length=10)
     counterexamples: list[str] = Field(default_factory=list, max_length=8)
     cautions: list[str] = Field(default_factory=list, max_length=12)
 
@@ -195,6 +200,101 @@ def _similar_title(a: str, b: str) -> bool:
     return len(one & two) / max(1, len(one | two)) >= 0.28
 
 
+def _duckduckgo_target_url(value: str) -> str | None:
+    href = html_lib.unescape(value or "").strip()
+    if href.startswith("//"):
+        href = "https:" + href
+    if not href.startswith(("http://", "https://")):
+        return None
+    parsed = urlparse(href)
+    if (parsed.hostname or "").endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
+        target = (parse_qs(parsed.query).get("uddg") or [None])[0]
+        href = unquote(target) if target else ""
+    if not href.startswith(("http://", "https://")):
+        return None
+    host = (urlparse(href).hostname or "").casefold()
+    if not host or host.endswith("duckduckgo.com"):
+        return None
+    return href
+
+
+def parse_duckduckgo_html(page: str, query: str) -> list[ArticleCandidate]:
+    """Parse the static DuckDuckGo HTML endpoint without executing page JS."""
+    matches = list(re.finditer(
+        r'<a[^>]*class=["\'][^"\']*result__a[^"\']*["\'][^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+        page,
+        re.IGNORECASE | re.DOTALL,
+    ))
+    rows: list[ArticleCandidate] = []
+    seen: set[str] = set()
+    for index, match in enumerate(matches):
+        target = _duckduckgo_target_url(match.group(1))
+        if not target or target in seen:
+            continue
+        seen.add(target)
+        title = re.sub(r'<[^>]+>', ' ', match.group(2))
+        title = re.sub(r'\s+', ' ', html_lib.unescape(title)).strip()
+        if not title:
+            continue
+        block_end = matches[index + 1].start() if index + 1 < len(matches) else min(len(page), match.end() + 5000)
+        block = page[match.end():block_end]
+        snippet_match = re.search(
+            r'<a[^>]*class=["\'][^"\']*result__snippet[^"\']*["\'][^>]*>(.*?)</a>',
+            block,
+            re.IGNORECASE | re.DOTALL,
+        )
+        snippet = None
+        if snippet_match:
+            snippet = re.sub(r'<[^>]+>', ' ', snippet_match.group(1))
+            snippet = re.sub(r'\s+', ' ', html_lib.unescape(snippet)).strip()[:1600] or None
+        host = (urlparse(target).hostname or "").removeprefix("www.")
+        source_id = "web:" + hashlib.sha256(target.encode()).hexdigest()[:12]
+        rows.append(ArticleCandidate(
+            source_id=source_id,
+            url=target,
+            query=query,
+            title=title[:500],
+            publisher=host or None,
+            published_at=None,
+            age_days=None,
+            snippet=snippet,
+            cross_source_hits=1,
+            trend_score=35.0 if snippet else 25.0,
+            evidence_confidence="medium" if snippet else "low",
+        ))
+    return rows
+
+
+class DuckDuckGoPublicArticleScout:
+    def __init__(self, *, timeout_seconds: float = 20.0):
+        self.timeout_seconds = timeout_seconds
+
+    async def collect(self, queries: list[str], max_candidates: int = 16) -> list[ArticleCandidate]:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
+            ),
+            "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.7",
+            "Referer": "https://html.duckduckgo.com/",
+        }
+        rows: list[ArticleCandidate] = []
+        async with httpx.AsyncClient(timeout=self.timeout_seconds, follow_redirects=True, headers=headers) as client:
+            for query in queries:
+                try:
+                    response = await client.post(
+                        "https://html.duckduckgo.com/html/",
+                        data={"q": query, "kl": "ru-ru"},
+                    )
+                    response.raise_for_status()
+                except httpx.HTTPError:
+                    continue
+                if "bots use DuckDuckGo too" in response.text:
+                    continue
+                rows.extend(parse_duckduckgo_html(response.text, query))
+        return rows[:max_candidates]
+
+
 class GoogleNewsPublicScout:
     def __init__(self, *, timeout_seconds: float = 20.0):
         self.timeout_seconds = timeout_seconds
@@ -277,6 +377,51 @@ class GoogleNewsPublicScout:
             ))
         ranked.sort(key=lambda x: (x.trend_score, x.cross_source_hits), reverse=True)
         return ranked[:max_candidates]
+
+
+class PublicArticleScout:
+    """Blend fresh news with evergreen search; either source may fail independently."""
+    def __init__(self, *, timeout_seconds: float = 20.0):
+        self.news = GoogleNewsPublicScout(timeout_seconds=timeout_seconds)
+        self.web = DuckDuckGoPublicArticleScout(timeout_seconds=timeout_seconds)
+
+    async def collect(self, queries: list[str], max_candidates: int = 16) -> list[ArticleCandidate]:
+        results = await asyncio.gather(
+            self.news.collect(queries, max_candidates=max_candidates),
+            self.web.collect(queries, max_candidates=max_candidates),
+            return_exceptions=True,
+        )
+        combined: list[ArticleCandidate] = []
+        for result in results:
+            if not isinstance(result, Exception):
+                combined.extend(result)
+        deduped: dict[str, ArticleCandidate] = {}
+        for item in combined:
+            key = str(item.url)
+            existing = deduped.get(key)
+            if existing is None or item.trend_score > existing.trend_score:
+                deduped[key] = item
+        items = list(deduped.values())
+        # Topic recurrence across independent publishers is useful for both news
+        # and evergreen results. It is a content signal, not a demand metric.
+        for index, item in enumerate(items):
+            publishers = {
+                (other.publisher or (urlparse(str(other.url)).hostname or "unknown")).casefold()
+                for other in items
+                if _similar_title(item.title, other.title)
+            }
+            hits = max(item.cross_source_hits, len(publishers))
+            recurrence_bonus = min(25.0, max(0, hits - 1) * 8.0)
+            items[index] = item.model_copy(update={
+                "cross_source_hits": hits,
+                "trend_score": min(100.0, round(item.trend_score + recurrence_bonus, 1)),
+                "evidence_confidence": (
+                    "high" if hits >= 3 else
+                    "medium" if item.evidence_confidence != "low" or hits >= 2 else "low"
+                ),
+            })
+        items.sort(key=lambda x: (x.trend_score, x.cross_source_hits), reverse=True)
+        return items[:max_candidates]
 
 
 async def _youtube_watch_metadata(client: httpx.AsyncClient, candidate: ViralVideoCandidate) -> tuple[str | None, datetime | None]:
@@ -429,9 +574,10 @@ def _analysis_prompt() -> str:
         "Map pains to the supplied approved_product_facts. product_match=verified_match ONLY when the exact supplied fact "
         "directly supports the match and then product_fact_id is required. Otherwise use hypothesis or gap. "
         "Do not invent ServGo capabilities, market statistics, customer results or competitor claims. "
-        "Generate original SEO seeds and content angles rather than copying creators. Identify at least two white-space "
-        "angles that are less saturated or combine strong patterns in a fresh way. Include at least two tasteful humor "
-        "angles where humor helps make an operational pain recognizable; humor must punch at the situation/process, "
+        "Generate original SEO seeds and content angles rather than copying creators. Aim for 3-8 SEO seeds and content "
+        "angles when evidence supports them; never pad a sparse ledger with invented claims merely to reach a count. "
+        "Identify white-space angles where the evidence supports a fresh combination. Include tasteful humor angles "
+        "where humor helps make an operational pain recognizable; humor must punch at the situation/process, "
         "not at the customer, employee or vulnerable person. Avoid cringe, mockery and fake quotes. "
         "For presentation_angle use tension: recognizable scene -> cost/friction -> clearer mechanism -> grounded next step. "
         "Write natural Russian. Schema: " + json.dumps(ViralContentAnalysisDraft.model_json_schema(), ensure_ascii=False)
@@ -467,13 +613,15 @@ async def run_viral_content_research(
     facts = _approved_facts(context)
     response = None
     analysis = None
+    analysis_responses = []
+    analysis_failure_code = None
     cautions = [
         "Охват и трендовые сигналы не считаются доказательством покупательского спроса или продаж.",
         "Чужие формулировки и сценарии не копируются: используются только абстрактные механики.",
     ]
     try:
         yt = video_scout or YouTubePublicScout(timeout_seconds=float(settings.viral_research_timeout_seconds))
-        news = article_scout or GoogleNewsPublicScout(timeout_seconds=float(settings.viral_research_timeout_seconds))
+        news = article_scout or PublicArticleScout(timeout_seconds=float(settings.viral_research_timeout_seconds))
         source_timeout = max(15.0, float(settings.viral_research_timeout_seconds) * 2.5)
         collected = await asyncio.gather(
             asyncio.wait_for(
@@ -579,36 +727,77 @@ async def run_viral_content_research(
                     "article": "freshness + cross-source recurrence; no fabricated engagement",
                 },
             }
-            try:
-                response = await asyncio.wait_for(
-                    llm.generate(LLMRequest(
-                        system_prompt=_analysis_prompt(),
-                        messages=[LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False, default=str))],
-                        model=settings.llm_model,
-                        max_tokens=6500,
-                        response_schema=ViralContentAnalysisDraft.model_json_schema(),
-                        metadata={
-                            "team_role": "viral_content_researcher",
-                            "reasoning_effort": "low",
-                            "task_type": "viral_content_research",
-                        },
-                    )),
-                    timeout=180,
-                )
-                analysis = ViralContentAnalysisDraft.model_validate_json(response.content)
+            analysis_request = LLMRequest(
+                system_prompt=_analysis_prompt(),
+                messages=[LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False, default=str))],
+                model=settings.llm_model,
+                max_tokens=6500,
+                response_schema=ViralContentAnalysisDraft.model_json_schema(),
+                metadata={
+                    "team_role": "viral_content_researcher",
+                    "reasoning_effort": "low",
+                    "task_type": "viral_content_research",
+                },
+            )
+
+            async def generate_and_validate(active_llm, request):
+                generated = await asyncio.wait_for(active_llm.generate(request), timeout=180)
+                analysis_responses.append(generated)
+                parsed = ViralContentAnalysisDraft.model_validate_json(generated.content)
                 allowed_sources = {x.source_id for x in videos} | {x.source_id for x in articles}
-                for pattern in [*analysis.hook_patterns, *analysis.topic_patterns, *analysis.article_patterns]:
+                for pattern in [*parsed.hook_patterns, *parsed.topic_patterns, *parsed.article_patterns]:
                     if set(pattern.source_ids) - allowed_sources:
                         raise ValueError("analysis referenced unknown source")
-                for pain in analysis.audience_pains:
+                for pain in parsed.audience_pains:
                     if set(pain.source_ids) - allowed_sources:
                         raise ValueError("pain referenced unknown source")
                     if pain.product_fact_id and pain.product_fact_id not in facts:
                         raise ValueError("pain referenced unknown product fact")
+                return generated, parsed
+
+            try:
+                response, analysis = await generate_and_validate(llm, analysis_request)
                 analysis_status = "completed"
-            except Exception:
-                analysis_status = "failed"
-                cautions.append("Содержательный разбор не завершился; в артефакте сохранён только проверяемый evidence ledger.")
+            except (ValidationError, ValueError, asyncio.TimeoutError) as exc:
+                analysis_failure_code = type(exc).__name__
+                # In production, one malformed/slow routine-model answer should
+                # not discard the expensive public evidence collection. Retry the
+                # exact grounded schema once with the configured ClaudeHub fallback.
+                fallback_model = next(
+                    (
+                        item.strip()
+                        for item in str(getattr(settings, "llm_fallback_models", "")).split(",")
+                        if item.strip() and item.strip() != settings.llm_model
+                    ),
+                    None,
+                )
+                if getattr(settings, "app_env", "development") == "production" and fallback_model:
+                    try:
+                        from app.core.composition import build_llm_provider, SAFE_LLM_METADATA_FIELDS
+                        fallback_settings = settings.model_copy(update={
+                            "llm_model": fallback_model,
+                            "llm_fallback_models": "",
+                        })
+                        fallback_llm = LLMService(
+                            privacy_gateway=PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS),
+                            provider=build_llm_provider(fallback_settings),
+                        )
+                        fallback_request = analysis_request.model_copy(update={"model": fallback_model})
+                        response, analysis = await generate_and_validate(fallback_llm, fallback_request)
+                        analysis_status = "completed"
+                        cautions.append(
+                            "Первичный структурированный разбор не прошёл проверку; evidence повторно разобран fallback-моделью."
+                        )
+                    except Exception as fallback_exc:
+                        analysis_failure_code = (
+                            type(exc).__name__ + "->" + type(fallback_exc).__name__
+                        )[:120]
+                if analysis is None:
+                    analysis_status = "failed"
+                    cautions.append(
+                        "Содержательный разбор не завершился (" + analysis_failure_code
+                        + "); в артефакте сохранён проверяемый evidence ledger."
+                    )
         report = ViralContentResearch(
             observed_at=datetime.now(timezone.utc),
             source_status=source_status,
@@ -655,7 +844,8 @@ async def run_viral_content_research(
         run.output_references = [{"kind": "artifact", "id": str(artifact.id)}]
         if response is not None:
             run.model = response.model
-            if response.usage is not None:
+        for generated in analysis_responses:
+            if generated.usage is not None:
                 db.add(CostRecord(
                     product_id=task.product_id,
                     agent_run_id=run_id,
@@ -663,10 +853,14 @@ async def run_viral_content_research(
                     provider=settings.llm_provider,
                     amount=0,
                     currency="USD",
-                    input_tokens=max(0, response.usage.input_tokens),
-                    output_tokens=max(0, response.usage.output_tokens),
+                    input_tokens=max(0, generated.usage.input_tokens),
+                    output_tokens=max(0, generated.usage.output_tokens),
                     incurred_at=datetime.now(timezone.utc),
-                    details={"cost_known": False, "task_type": "viral_content_research"},
+                    details={
+                        "cost_known": False,
+                        "task_type": "viral_content_research",
+                        "model": generated.model,
+                    },
                 ))
         db.commit()
         return artifact
