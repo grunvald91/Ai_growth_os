@@ -212,6 +212,21 @@ def valid_outputs():
         editorial_notes=['Не добавлялись неподтверждённые обещания и сравнения с конкурентами.'],
     )
 
+    marketing_article = dict(human_article)
+    marketing_article['title'] = '20 сообщений ради одной записи: где клиент застревает в переписке'
+    marketing_article['lead'] = (
+        'Клиент хотел просто выбрать время, а через пять минут уже участвует в мини-квесте: услуга, мастер, '
+        '«а на 18:30 свободно?», контакты и ещё одно уточнение. Когда запись живёт в переписке, менеджер '
+        'становится одновременно календарём, диспетчером и поиском по свободным окнам — и именно этот путь стоит разобрать первым.'
+    )
+    marketing_article['closing'] = (
+        'Посчитайте сегодня не заявки, а ручные уточнения до одной записи. Если путь похож на квест, '
+        'сравните его с последовательным выбором услуги, специалиста и времени — и запросите демонстрацию ServGo для своего сценария.'
+    )
+    marketing_article['editorial_notes'] = [
+        'Финальный marketing pass: конкретная сцена, боль, трение, продуктовый мост и один CTA; юмор только ситуационный.'
+    ]
+
     text_derivatives = []
     for item in derivatives[:6]:
         text_derivatives.append({
@@ -245,6 +260,7 @@ def valid_outputs():
              distribution=[dict(channel='own_site', action='prepare_draft',
                                 rationale='Начать с собственного черновика', downstream_goal='lead')]),
         human_article,
+        marketing_article,
         dict(derivatives=text_derivatives),
         video_item,
         story_item,
@@ -270,7 +286,7 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
     workflow, provider, request = setup(db, product, tmp_path)
     result = await workflow.run(request)
     assert result.status == 'completed', result.error
-    assert len(result.artifact_ids) == 10 and len(result.run_ids) == len(provider.requests) == 9
+    assert len(result.artifact_ids) == 10 and len(result.run_ids) == len(provider.requests) == 10
     assert all(request.metadata["reasoning_effort"] == "low" for request in provider.requests)
     assert {request.metadata["team_role"] for request in provider.requests} == {
         "content_strategist", "seo_editor", "article_writer", "conversion_editor", "human_editor",
@@ -308,7 +324,7 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
         assert all(getattr(plan, k).event for k in ['content', 'traffic', 'lead', 'activation', 'customer'])
     assert all(db.get(Artifact, aid).task_id == result.task_id for aid in result.artifact_ids)
     assert all(db.get(AgentRun, rid).status == 'completed' for rid in result.run_ids)
-    assert len(list(db.scalars(select(CostRecord)))) == 9
+    assert len(list(db.scalars(select(CostRecord)))) == 10
     assert all(c.details['cost_known'] is False for c in db.scalars(select(CostRecord)))
     assert list(db.scalars(select(ToolCall))) == list(db.scalars(select(Publication))) == []
     assert result.approval_ids == []
@@ -323,11 +339,11 @@ async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, 
     elif mutation == 'missing_cta': del outputs[3]['cta']
     elif mutation == 'missing_measurement': del outputs[3]['measurement']['customer']
     elif mutation == 'fake_claim': outputs[2]['claims'] = [dict(claim='Guaranteed growth', quote='Guaranteed growth', source_id='invented')]
-    elif mutation == 'video': outputs[6]['video_mode'] = 'render_mp4'
+    elif mutation == 'video': outputs[7]['video_mode'] = 'render_mp4'
     elif mutation == 'external_link': outputs[3]['landing_page']['destination'] = 'https://unverified.example/demo'
     elif mutation == 'extra': outputs[0]['verified_revenue'] = 1000000
-    elif mutation == 'source_copy': outputs[5]['derivatives'][0]['hook'] = outputs[1]['hook']
-    elif mutation == 'wrong_kind': outputs[5]['derivatives'][0]['kind'] = 'telegram'
+    elif mutation == 'source_copy': outputs[6]['derivatives'][0]['hook'] = outputs[1]['hook']
+    elif mutation == 'wrong_kind': outputs[6]['derivatives'][0]['kind'] = 'telegram'
     workflow, _, request = setup(db, product, tmp_path, outputs)
     result = await workflow.run(request)
     assert result.status == 'failed' and result.error
@@ -364,10 +380,12 @@ async def test_verified_product_facts_are_injected_deterministically(db, product
     context_text = path.joinpath('product-marketing-context.md').read_text()
     facts_map = product_facts(context_text)
     outputs = valid_outputs()
-    outputs[4]['fact_renderings'] = [
+    fact_renderings = [
         {'source_id': source_id, 'text': f'Проверенный факт ServGo: {index + 1}.'}
         for index, source_id in enumerate(facts_map)
     ]
+    outputs[4]['fact_renderings'] = fact_renderings
+    outputs[5]['fact_renderings'] = fact_renderings
     workflow, provider, request = setup(db, product, tmp_path, outputs)
 
     result = await workflow.run(request)
@@ -438,7 +456,7 @@ async def test_creative_specialists_are_separate_calls(db, product, tmp_path):
     assert schemas['video_director']['properties']['kind']['const'] == 'short_video'
     assert schemas['story_director']['properties']['kind']['const'] == 'story'
     assert schemas['visual_designer']['properties']['kind']['const'] == 'static_image'
-    assert len(list(db.scalars(select(CostRecord)))) == 9
+    assert len(list(db.scalars(select(CostRecord)))) == 10
 
 
 @pytest.mark.asyncio
@@ -485,10 +503,12 @@ async def test_privacy_on_all_requests_and_output(db, product, tmp_path):
     outputs = valid_outputs()
     outputs[0]['hypothesis'] += ' api_key=private-response-secret'
     sanitized_facts = product_facts(PrivacyGateway().sanitize_text(raw_context))
-    outputs[4]['fact_renderings'] = [
+    fact_renderings = [
         {'source_id': source_id, 'text': 'ServGo — сервис для онлайн-записи.'}
         for source_id in sanitized_facts
     ]
+    outputs[4]['fact_renderings'] = fact_renderings
+    outputs[5]['fact_renderings'] = fact_renderings
     workflow, provider, request = setup(db, product, tmp_path, outputs)
     request.problem += ' password=private-input-secret'
     result = await workflow.run(request)
@@ -530,12 +550,12 @@ def test_api_ids_inspection_and_bad_references(tmp_path):
                 result = response.json()
                 assert result['status'] == 'completed', result
                 assert result['main_artifact_id'] == result['artifact_ids'][0]
-                assert len(result['derivative_artifact_ids']) == 9 and len(result['run_ids']) == 9
+                assert len(result['derivative_artifact_ids']) == 9 and len(result['run_ids']) == 10
                 aid = result['main_artifact_id']
                 assert client.get(f'/products/{pid}/artifacts/{aid}').status_code == 200
                 artifacts = client.get(f'/products/{pid}/artifacts').json()
-                assert len(artifacts) == 19
-                assert sum(a['kind'] == 'content_stage_output' for a in artifacts) == 9
+                assert len(artifacts) == 20
+                assert sum(a['kind'] == 'content_stage_output' for a in artifacts) == 10
                 other = client.post('/products', json=dict(name='Other', slug='other')).json()['id']
                 assert client.get(f'/products/{other}/artifacts/{aid}').status_code == 404
                 for key in ['task_id', 'decision_id']:
@@ -595,7 +615,7 @@ async def test_editor_prompts_are_commercially_useful_without_weakening_groundin
     assert 'defensive disclaimers' in by_role['human_editor'].system_prompt
     assert 'Titles/hooks/CTAs must be questions or proposals' not in by_role['human_editor'].system_prompt
     first_payload = json.loads(by_role['content_strategist'].messages[0].content)
-    assert any(item['kind'] == 'viral_video_research' for item in first_payload['marketing_research'])
+    assert any(item['kind'] == 'viral_content_research' for item in first_payload['marketing_research'])
 
 
 @pytest.mark.asyncio
@@ -611,7 +631,7 @@ async def test_human_editor_requires_all_verified_fact_sources(db, product, tmp_
     result = await workflow.run(request)
 
     assert result.status == 'failed'
-    assert result.error == 'invalid_human_editor_grounding'
+    assert result.error == 'invalid_marketing_editor_grounding'
 
 
 @pytest.mark.asyncio
@@ -635,11 +655,11 @@ async def test_visual_assets_are_text_briefs_not_render_requests(db, product, tm
 @pytest.mark.asyncio
 async def test_truncated_stage_retries_once_and_accounts_both_calls(db, product, tmp_path):
     outputs = valid_outputs()
-    workflow, provider, request = setup(db, product, tmp_path, [*outputs[:5], {}, *outputs[5:]])
+    workflow, provider, request = setup(db, product, tmp_path, [*outputs[:6], {}, *outputs[6:]])
     original = provider.generate
     async def generate(req):
         result = await original(req)
-        if len(provider.requests) == 6:
+        if len(provider.requests) == 7:
             return result.model_copy(update={'stop_reason': 'length'})
         return result
     provider.generate = generate
