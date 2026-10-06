@@ -19,13 +19,13 @@ jobs:
       SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
       SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
-      EXPECTED_RELEASE: f27a4eb6bd9a900f1ae21f7d950d57289ae8c544
+      EXPECTED_RELEASE: 6e71a56e1c00334c1ea4f7e48e6ffde9c273b770
 
     steps:
       - name: Install SSH helper
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
 
-      - name: Apply approved positioning, run fresh plan and safe content E2E
+      - name: Inspect current positioning, run fresh multisource plan and safe content E2E
         run: |
           set -euo pipefail
           [ -n "$SSHPASS" ]
@@ -38,92 +38,32 @@ jobs:
           cd /opt/ai_growth_os/current
 
           docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
-          import hashlib
           import json
-          import os
-          import tempfile
-          from pathlib import Path
           from sqlalchemy import select
 
-          from app.company_profile import parse_company_profile
-          from app.content.calendar import queue_plan
+          from app.company_profile import load_company_profile
           from app.core.config import get_settings
           from app.db.session import SessionLocal
-          from app.models.domain import Artifact, Product, Task, TaskStatus
+          from app.models.domain import Product, Task, TaskStatus
 
           settings = get_settings()
-          packaged = Path("/app/products/servgo/company-profile.json")
-          runtime = settings.products_root / "servgo" / "company-profile.json"
-          desired_raw = packaged.read_bytes()
-          desired = parse_company_profile(json.loads(desired_raw))
-          assert desired.proof.approved_numbers == []
-          assert desired.commercial.pricing_model and "under review" in desired.commercial.pricing_model.lower()
-          assert "ServGo Growth" in (desired.brand.positioning or "")
+          profile = load_company_profile(settings.products_root, "servgo").profile
+          if profile is None:
+              raise SystemExit("ServGo runtime profile missing")
+          assert profile.proof.approved_numbers == []
+          assert profile.commercial.pricing_model and "under review" in profile.commercial.pricing_model.lower()
+          assert "ServGo Growth" in (profile.brand.positioning or "")
+          print("PROFILE_OK=1")
 
           with SessionLocal() as db:
               product = db.scalar(select(Product).where(Product.slug == "servgo"))
               if product is None:
                   raise SystemExit("ServGo not found")
-              old_raw = runtime.read_bytes() if runtime.exists() else b""
-              old_sha = hashlib.sha256(old_raw).hexdigest()
-              new_sha = hashlib.sha256(desired_raw).hexdigest()
-              if old_raw != desired_raw:
-                  if old_raw:
-                      parse_company_profile(json.loads(old_raw))
-                  db.add(Artifact(
-                      product_id=product.id,
-                      kind="company_profile_previous",
-                      title="ServGo profile before owner-approved Growth positioning update",
-                      content=json.dumps({
-                          "reason": "Owner explicitly requested positioning update on 2026-10-05",
-                          "sha256": old_sha,
-                          "profile": json.loads(old_raw) if old_raw else None,
-                      }, ensure_ascii=False),
-                  ))
-                  db.add(Artifact(
-                      product_id=product.id,
-                      kind="company_profile_apply_intent",
-                      title="Apply ServGo Growth positioning",
-                      content=json.dumps({
-                          "reason": "Owner explicitly requested positioning update on 2026-10-05",
-                          "old_sha256": old_sha,
-                          "new_sha256": new_sha,
-                          "profile": json.loads(desired_raw),
-                      }, ensure_ascii=False),
-                  ))
-                  db.commit()
-                  runtime.parent.mkdir(parents=True, exist_ok=True)
-                  fd, name = tempfile.mkstemp(dir=runtime.parent, prefix=".growth-profile-")
-                  try:
-                      with os.fdopen(fd, "wb") as out:
-                          out.write(desired_raw)
-                          out.flush()
-                          os.fsync(out.fileno())
-                      os.replace(name, runtime)
-                      dfd = os.open(runtime.parent, os.O_RDONLY | os.O_DIRECTORY)
-                      try:
-                          os.fsync(dfd)
-                      finally:
-                          os.close(dfd)
-                  finally:
-                      if os.path.exists(name):
-                          os.unlink(name)
-                  db.add(Artifact(
-                      product_id=product.id,
-                      kind="company_profile_applied",
-                      title="ServGo Growth positioning applied",
-                      content=json.dumps({"old_sha256": old_sha, "new_sha256": new_sha}, ensure_ascii=False),
-                  ))
-                  db.commit()
-                  print("PROFILE_APPLIED=1")
-              else:
-                  print("PROFILE_APPLIED=0_ALREADY_CURRENT")
-
               task = Task(
                   product_id=product.id,
                   assigned_agent="editorial_planner",
-                  title="Редактор: ServGo Growth viral E2E plan",
-                  description="[growth_viral_e2e_20261005] Fresh owner-approved positioning + live viral research.",
+                  title="Редактор: ServGo Growth multisource E2E plan",
+                  description="[growth_viral_e2e_20261006] Live multisource research + marketing-quality validation.",
                   priority=125,
                   status=TaskStatus.QUEUED,
               )
@@ -138,7 +78,7 @@ jobs:
           from app.db.session import SessionLocal
           from app.models.domain import Task
           with SessionLocal() as db:
-              row=db.scalar(select(Task).where(Task.description.like('%[growth_viral_e2e_20261005]%')).order_by(Task.created_at.desc()).limit(1))
+              row=db.scalar(select(Task).where(Task.description.like('%[growth_viral_e2e_20261006]%')).order_by(Task.created_at.desc()).limit(1))
               print(row.id if row else '')
           PY
           )"
@@ -185,7 +125,7 @@ jobs:
               viral = db.scalar(
                   select(Artifact).where(
                       Artifact.task_id == plan_task_id,
-                      Artifact.kind == "viral_video_research"
+                      Artifact.kind == "viral_content_research"
                   ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1)
               )
               plan_row = db.scalar(
@@ -195,17 +135,17 @@ jobs:
                   ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1)
               )
               if viral is None or plan_row is None:
-                  raise SystemExit("viral research or plan artifact missing")
+                  raise SystemExit("multisource research or plan artifact missing")
               report=json.loads(viral.content)
               plan=json.loads(plan_row.content)
-              print("VIRAL_RESEARCH_JSON_START", file=sys.stderr)
+              print("VIRAL_CONTENT_RESEARCH_JSON_START", file=sys.stderr)
               print(json.dumps(report, ensure_ascii=False, indent=2), file=sys.stderr)
-              print("VIRAL_RESEARCH_JSON_END", file=sys.stderr)
+              print("VIRAL_CONTENT_RESEARCH_JSON_END", file=sys.stderr)
               print("EDITORIAL_PLAN_JSON_START", file=sys.stderr)
               print(json.dumps(plan, ensure_ascii=False, indent=2), file=sys.stderr)
               print("EDITORIAL_PLAN_JSON_END", file=sys.stderr)
 
-              viral_ref=str(viral.id)
+              viral_ref="artifact:" + str(viral.id)
               slots=plan.get("slots") or []
               package_keys=[]
               for slot in slots:
@@ -231,7 +171,7 @@ jobs:
               refs=first.get("evidence_refs") or []
               channels=", ".join(sorted({s.get("platform","") for s in chosen if s.get("platform")}))
               brief=(
-                  "Безопасный production E2E обновлённого редактора ServGo Growth. "
+                  "Безопасный production E2E multisource Researcher + Marketing Editor для ServGo Growth. "
                   f"Цель: {objective}\nПлощадки: {channels}\n"
                   f"Основание темы: {rationale}\nEvidence refs: {', '.join(refs)}\n"
                   "Материал должен быть маркетингово пригодным: узнаваемая боль -> цена текущего процесса -> "
