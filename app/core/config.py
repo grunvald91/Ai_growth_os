@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     team_worker_idle_poll_seconds: int = 20
     team_worker_busy_poll_seconds: int = 2
     telegram_proxy_url: str | None = None
+    comment_platform_proxy_url: str | None = None
     viral_research_mode: Literal["public_multisource", "youtube_public", "disabled"] = "public_multisource"
     viral_research_max_queries: int = 4
     viral_research_max_candidates: int = 16

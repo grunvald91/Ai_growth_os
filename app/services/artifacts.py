@@ -28,6 +28,10 @@ class ArtifactService(CRUDService[Artifact]):
         unknown = set(values) - self.update_fields
         if unknown:
             raise ValueError(f"Unsupported fields: {', '.join(sorted(unknown))}")
+        if artifact.kind in {"comment_reply_approved", "comment_agent_settings"} and any(
+                key in values and values[key] != getattr(artifact, key)
+                for key in ("kind", "title", "content")):
+            raise ValueError("Comment approval/settings content is immutable; create a new version")
         if artifact.kind in {"outreach_package", "outreach_message", "video_script", "channel_text"} and any(
                 key in values and values[key] != getattr(artifact, key)
                 for key in ("kind", "title", "content")):
