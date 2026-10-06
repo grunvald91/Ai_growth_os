@@ -278,3 +278,118 @@ async def test_multisource_research_maps_pain_to_verified_product_fact(db, tmp_p
     assert run.output_references == [{"kind": "artifact", "id": str(artifact.id)}]
     assert db.scalar(select(CostRecord).where(CostRecord.agent_run_id == run.id)) is not None
     assert db.scalar(select(Artifact).where(Artifact.kind == "viral_content_research")) is not None
+
+
+
+@pytest.mark.asyncio
+async def test_sparse_but_grounded_analysis_is_valid(db, tmp_path, monkeypatch):
+    product = Product(name="ServGo", slug="servgo-sparse")
+    db.add(product)
+    db.flush()
+    task = Task(
+        product_id=product.id,
+        title="Редактор: контент-план",
+        assigned_agent="editorial_planner",
+        status=TaskStatus.RUNNING,
+    )
+    db.add(task)
+    db.commit()
+
+    async def fake_rank(raw, timeout_seconds=20.0):
+        return ranked_videos(raw)
+
+    monkeypatch.setattr("app.content.viral_content_research.rank_youtube_candidates", fake_rank)
+    provider = FakeLLMProvider(LLMResponse(
+        content=json.dumps({
+            "summary": "Источники дают полезный тематический сигнал, но данных недостаточно, чтобы честно заполнить каждый аналитический блок."
+        }, ensure_ascii=False),
+        model="kimi-2.7",
+        usage=LLMUsage(input_tokens=100, output_tokens=50),
+    ))
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=provider)
+    settings = Settings(
+        products_root=tmp_path,
+        llm_provider="xai",
+        llm_model="kimi-2.7",
+        viral_research_mode="public_multisource",
+    )
+    context = {"company": {"profile": {
+        "identity": {"name": "ServGo"},
+        "offer": {"category": "онлайн-запись", "products_services": []},
+        "customers": {"primary_segments": ["Массажные студии"], "pains": []},
+        "proof": {"approved_facts": []},
+    }}}
+
+    artifact = await run_viral_content_research(
+        db=db, settings=settings, llm=llm, task=task, context=context,
+        video_scout=FakeVideoScout(), article_scout=FakeArticleScout(),
+    )
+    stored = ViralContentResearch.model_validate_json(artifact.content)
+    assert stored.analysis_status == "completed"
+    assert stored.hook_patterns == []
+    assert stored.audience_pains == []
+
+
+@pytest.mark.asyncio
+async def test_production_analysis_uses_configured_fallback_after_invalid_primary(db, tmp_path, monkeypatch):
+    product = Product(name="ServGo", slug="servgo-fallback")
+    db.add(product)
+    db.flush()
+    task = Task(
+        product_id=product.id,
+        title="Редактор: контент-план",
+        assigned_agent="editorial_planner",
+        status=TaskStatus.RUNNING,
+    )
+    db.add(task)
+    db.commit()
+
+    async def fake_rank(raw, timeout_seconds=20.0):
+        return ranked_videos(raw)
+
+    monkeypatch.setattr("app.content.viral_content_research.rank_youtube_candidates", fake_rank)
+
+    primary = FakeLLMProvider(LLMResponse(
+        content="{}",
+        model="kimi-2.7",
+        usage=LLMUsage(input_tokens=50, output_tokens=5),
+    ))
+    fallback = FakeLLMProvider(LLMResponse(
+        content=json.dumps({
+            "summary": "Fallback-модель сохранила проверяемые источники и вернула компактный структурированный разбор без выдуманных утверждений."
+        }, ensure_ascii=False),
+        model="grok-4.7",
+        usage=LLMUsage(input_tokens=90, output_tokens=40),
+    ))
+    monkeypatch.setattr("app.core.composition.build_llm_provider", lambda settings: fallback)
+
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=primary)
+    settings = Settings(
+        app_env="production",
+        products_root=tmp_path,
+        llm_provider="xai",
+        llm_model="kimi-2.7",
+        llm_fallback_models="grok-4.7",
+        viral_research_mode="public_multisource",
+    )
+    context = {"company": {"profile": {
+        "identity": {"name": "ServGo"},
+        "offer": {"category": "онлайн-запись", "products_services": []},
+        "customers": {"primary_segments": ["Массажные студии"], "pains": []},
+        "proof": {"approved_facts": []},
+    }}}
+
+    artifact = await run_viral_content_research(
+        db=db, settings=settings, llm=llm, task=task, context=context,
+        video_scout=FakeVideoScout(), article_scout=FakeArticleScout(),
+    )
+    stored = ViralContentResearch.model_validate_json(artifact.content)
+    assert stored.analysis_status == "completed"
+    assert any("fallback-моделью" in caution for caution in stored.cautions)
+    run = db.scalar(select(AgentRun).where(
+        AgentRun.task_id == task.id,
+        AgentRun.agent_name == "viral_content_researcher",
+    ))
+    assert run.model == "grok-4.7"
+    costs = list(db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)))
+    assert len(costs) == 2
