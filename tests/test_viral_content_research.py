@@ -118,6 +118,17 @@ class FakeArticleScout:
         ]
 
 
+class SparseVideoScout(FakeVideoScout):
+    async def collect(self, queries, max_candidates=16):
+        return (await super().collect(queries, max_candidates=max_candidates))[:1]
+
+
+class SparseArticleScout(FakeArticleScout):
+    async def collect(self, queries, max_candidates=16):
+        return (await super().collect(queries, max_candidates=max_candidates))[:1]
+
+
+
 def ranked_videos(raw):
     return [
         RankedVideoCandidate(
@@ -140,6 +151,66 @@ def ranked_videos(raw):
         )
         for index, item in enumerate(raw, 1)
     ]
+
+
+def minimum_complete_analysis():
+    return {
+        "summary": "Повторяется заметная операционная боль ручной записи; тема подходит для сильного маркетингового теста без обещания гарантированного результата.",
+        "audience_pains": [
+            {
+                "pain": "Клиент ждёт ответа о свободном времени.",
+                "source_ids": ["yt:one1234", "article:1"],
+                "why_it_matters": "Ожидание растягивает путь до записи и создаёт лишнюю переписку.",
+                "product_match": "gap",
+                "product_fact_id": None,
+                "product_match_explanation": "Боль подтверждена источниками; продуктовый мост должен опираться только на доступные факты.",
+                "presentation_angle": "Показать путь клиента от первого вопроса до выбора окна.",
+                "humor_angle": "Календарь, который живёт сразу в трёх чатах и одной голове.",
+            },
+            {
+                "pain": "Администратор вручную собирает услугу, мастера и время.",
+                "source_ids": ["yt:three1234", "article:3"],
+                "why_it_matters": "Один простой запрос превращается в цепочку повторяющихся уточнений.",
+                "product_match": "gap",
+                "product_fact_id": None,
+                "product_match_explanation": "Источники подтверждают процессную боль, но не обещают бизнес-результат.",
+                "presentation_angle": "Сравнить ручной квест и понятный пошаговый маршрут.",
+                "humor_angle": "Администратор как CRM, календарь и диспетчер в одном человеке.",
+            },
+        ],
+        "hook_patterns": [
+            {
+                "pattern": "Посчитать сообщения до записи.",
+                "why_it_may_work": "Число быстро делает скрытую ручную работу заметной.",
+                "source_ids": ["yt:three1234"],
+            },
+            {
+                "pattern": "Начать с узнаваемой ошибки процесса.",
+                "why_it_may_work": "Владелец сразу узнаёт рабочую ситуацию.",
+                "source_ids": ["yt:one1234"],
+            },
+        ],
+        "topic_patterns": [],
+        "article_patterns": [],
+        "stepps_mechanisms": ["Practical Value", "Stories"],
+        "seo_topic_seeds": [
+            "как сократить переписку при записи",
+            "как организовать запись клиентов",
+            "ошибки ручной записи в салоне",
+        ],
+        "content_angles": [
+            "Сколько сообщений стоит одна запись",
+            "Когда чат незаметно становится CRM",
+            "Где клиент застревает до выбора времени",
+        ],
+        "white_space_angles": ["Показать запись как UX-маршрут, а не список функций."],
+        "humor_angles": [
+            "Чат, который незаметно устроился работать CRM.",
+            "Свободное окно как финальный босс маленького квеста.",
+        ],
+        "counterexamples": [],
+        "cautions": [],
+    }
 
 
 @pytest.mark.asyncio
@@ -338,7 +409,7 @@ async def test_sparse_but_grounded_analysis_is_valid(db, tmp_path, monkeypatch):
 
     artifact = await run_viral_content_research(
         db=db, settings=settings, llm=llm, task=task, context=context,
-        video_scout=FakeVideoScout(), article_scout=FakeArticleScout(),
+        video_scout=SparseVideoScout(), article_scout=SparseArticleScout(),
     )
     stored = ViralContentResearch.model_validate_json(artifact.content)
     assert stored.analysis_status == "completed"
@@ -366,14 +437,14 @@ async def test_production_analysis_uses_configured_fallback_after_invalid_primar
     monkeypatch.setattr("app.content.viral_content_research.rank_youtube_candidates", fake_rank)
 
     primary = FakeLLMProvider(LLMResponse(
-        content="{}",
+        content=json.dumps({
+            "summary": "Первичная модель дала хороший абзац, но не заполнила обязательные маркетинговые блоки для богатого evidence ledger."
+        }, ensure_ascii=False),
         model="kimi-2.7",
-        usage=LLMUsage(input_tokens=50, output_tokens=5),
+        usage=LLMUsage(input_tokens=50, output_tokens=20),
     ))
     fallback = FakeLLMProvider(LLMResponse(
-        content=json.dumps({
-            "summary": "Fallback-модель сохранила проверяемые источники и вернула компактный структурированный разбор без выдуманных утверждений."
-        }, ensure_ascii=False),
+        content=json.dumps(minimum_complete_analysis(), ensure_ascii=False),
         model="grok-4.7",
         usage=LLMUsage(input_tokens=90, output_tokens=40),
     ))
