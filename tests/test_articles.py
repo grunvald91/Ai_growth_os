@@ -319,7 +319,7 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'fake_claim', 'video', 'external_link', 'extra', 'wrong_kind', 'source_copy'])
+@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'fake_claim', 'external_link', 'extra', 'wrong_kind', 'source_copy'])
 async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, tmp_path, mutation):
     outputs = valid_outputs()
     if mutation == 'malformed': outputs[0] = 'not json'
@@ -327,7 +327,6 @@ async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, 
     elif mutation == 'missing_cta': del outputs[3]['cta']
     elif mutation == 'missing_measurement': del outputs[3]['measurement']['customer']
     elif mutation == 'fake_claim': outputs[2]['claims'] = [dict(claim='Guaranteed growth', quote='Guaranteed growth', source_id='invented')]
-    elif mutation == 'video': outputs[7]['video_mode'] = 'render_mp4'
     elif mutation == 'external_link': outputs[3]['landing_page']['destination'] = 'https://unverified.example/demo'
     elif mutation == 'extra': outputs[0]['verified_revenue'] = 1000000
     elif mutation == 'source_copy': outputs[6]['derivatives'][0]['hook'] = outputs[1]['hook']
@@ -444,6 +443,54 @@ async def test_creative_specialists_are_separate_calls(db, product, tmp_path):
     assert schemas['story_director']['properties']['kind']['const'] == 'story'
     assert schemas['visual_designer']['properties']['kind']['const'] == 'static_image'
     assert len(list(db.scalars(select(CostRecord)))) == 10
+
+
+@pytest.mark.asyncio
+async def test_creative_stage_accepts_singleton_object_wrapper(db, product, tmp_path):
+    outputs = valid_outputs()
+    outputs[7] = [outputs[7]]
+    workflow, _, request = setup(db, product, tmp_path, outputs)
+
+    result = await workflow.run(request)
+
+    assert result.status == 'completed', result.error
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    video = next(d for d in article.conversion.derivatives if d.kind == 'short_video')
+    assert video.production_brief.duration_seconds == 35
+    checkpoint = next(
+        a for a in db.scalars(select(Artifact).where(Artifact.kind == 'content_stage_output'))
+        if json.loads(a.content)['stage'] == 'video_director'
+    )
+    assert json.loads(checkpoint.content)['fallback_used'] is False
+
+
+@pytest.mark.asyncio
+async def test_creative_stage_invalid_payload_uses_safe_fallback_without_cascade(db, product, tmp_path):
+    outputs = valid_outputs()
+    outputs[7] = []
+    workflow, _, request = setup(db, product, tmp_path, outputs)
+
+    result = await workflow.run(request)
+
+    assert result.status == 'completed', result.error
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    kinds = {d.kind for d in article.conversion.derivatives}
+    assert {'short_video', 'story', 'static_image'} <= kinds
+    video = next(d for d in article.conversion.derivatives if d.kind == 'short_video')
+    assert video.production_brief.duration_seconds == 30
+    assert 'CRM на человеческой тяге' in video.production_brief.voiceover_or_dialogue_script
+
+    checkpoints = {
+        json.loads(a.content)['stage']: json.loads(a.content)
+        for a in db.scalars(select(Artifact).where(Artifact.kind == 'content_stage_output'))
+    }
+    assert checkpoints['video_director']['fallback_used'] is True
+    assert checkpoints['story_director']['fallback_used'] is False
+    assert checkpoints['visual_designer']['fallback_used'] is False
+    runs = {r.agent_name: r for r in db.scalars(select(AgentRun))}
+    assert runs['video_director'].status == 'completed'
+    assert runs['story_director'].status == 'completed'
+    assert runs['visual_designer'].status == 'completed'
 
 
 @pytest.mark.asyncio

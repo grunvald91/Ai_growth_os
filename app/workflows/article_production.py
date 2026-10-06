@@ -99,6 +99,210 @@ STAGE_MAX_TOKENS = {
     'instagram_reels_director': 6500,
 }
 
+OPTIONAL_CREATIVE_STAGES = {
+    'video_director',
+    'story_director',
+    'visual_designer',
+    'youtube_shorts_director',
+    'instagram_reels_director',
+}
+
+
+def _parse_stage_payload(schema, content: str):
+    """Accept a strict object plus harmless single-item/wrapper variants some gateways emit."""
+    value = json.loads(content)
+    for _ in range(3):
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+                continue
+            except json.JSONDecodeError:
+                break
+        if isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict):
+            value = value[0]
+            continue
+        if isinstance(value, dict) and len(value) == 1:
+            key = next(iter(value))
+            if key in {'output', 'result', 'data', 'item'} and isinstance(value[key], dict):
+                value = value[key]
+                continue
+        break
+    return schema.model_validate(value)
+
+
+def _creative_fallback_payload(name: str, stage_inputs: dict) -> dict:
+    """Build a safe, production-usable creative brief if an optional LLM creative stage fails."""
+    prior = stage_inputs.get('prior_stage_outputs') or {}
+    strategy = prior.get('content_strategist') or {}
+    article = prior.get('marketing_editor') or {}
+    conversion = prior.get('conversion_editor') or {}
+    request = stage_inputs.get('request') or {}
+
+    def short(value, fallback, limit=180):
+        text = ' '.join(str(value or fallback).split())
+        return text[:limit].rstrip() or fallback
+
+    audience = short(strategy.get('audience') or request.get('audience'), 'Владелец сервисного бизнеса')
+    title = short(article.get('title') or request.get('topic'), 'Как сделать путь клиента к записи понятнее')
+    lead = short(article.get('lead'), 'Покажите знакомый хаос ручной записи и сразу предложите более понятный путь.', 260)
+    cta = short(conversion.get('cta'), 'Посмотрите демо ServGo и сравните путь клиента со своей текущей записью.', 260)
+    landing_page = conversion.get('landing_page')
+    if not isinstance(landing_page, dict):
+        raise ValueError('Creative fallback requires a validated landing_page from conversion_editor')
+
+    core = {
+        'audience': audience,
+        'framing': short(f'Узнаваемая операционная сцена вокруг темы: {title}', 'Узнаваемая операционная сцена'),
+        'hook': title,
+        'outline': [
+            'Показать знакомую боль и лёгкий ситуационный юмор.',
+            'Разложить более понятный механизм по шагам.',
+            'Связать механизм с проверенными возможностями ServGo и дать один CTA.',
+        ],
+        'cta': cta,
+        'landing_page': landing_page,
+        'adaptation_notes': (
+            'Детерминированный резервный бриф: без новых фактов и обещаний; '
+            'юмор направлен на хаос процесса, а не на клиента или сотрудника.'
+        ),
+    }
+
+    if name in {'video_director', 'youtube_shorts_director', 'instagram_reels_director'}:
+        platform = 'instagram_reels' if name == 'instagram_reels_director' else 'youtube_shorts'
+        spoken = (
+            f'{lead} Когда запись живёт сразу в сообщениях, календаре и памяти администратора, '
+            'получается CRM на человеческой тяге — работает, пока человек не лёг спать. '
+            'Покажите клиенту последовательный путь: услуга, специалист при необходимости, '
+            f'свободный слот, контакты и подтверждение. {cta}'
+        )
+        return {
+            **core,
+            'kind': 'short_video',
+            'video_mode': 'brief_only',
+            'production_brief': {
+                'asset_type': 'short_video',
+                'target_platform': platform,
+                'aspect_ratio': '9:16',
+                'duration_seconds': 30,
+                'objective': 'За 30 секунд показать боль ручной записи, понятный механизм и следующий шаг.',
+                'hook_variants': [title, 'Сколько сообщений нужно клиенту, чтобы просто записаться?'],
+                'creative_concept': 'Контраст хаоса переписки и последовательного клиентского пути.',
+                'visual_style': 'Живой деловой вертикальный ролик, реальные бытовые детали, крупные титры.',
+                'setting_and_props': 'Рабочее место владельца, телефон и календарь без чужих логотипов и персональных данных.',
+                'talent_direction': 'Говорить коротко, естественно и с лёгкой самоиронией; без дикторского пафоса.',
+                'voiceover_or_dialogue_script': spoken,
+                'shots': [
+                    {
+                        'number': 1, 'start_second': 0, 'end_second': 6, 'purpose': 'Хук',
+                        'shot_type': 'Средний план', 'visual_description': 'Владелец смотрит на поток сообщений и календарь.',
+                        'camera_and_movement': 'Статичная вертикальная камера, лёгкий push-in.',
+                        'action': 'Телефон вибрирует, герой переводит взгляд на календарь.',
+                        'spoken_text': 'Сколько сообщений нужно клиенту, чтобы просто записаться?',
+                        'on_screen_text': 'Запись или квест?', 'transition': 'Жёсткая склейка',
+                        'sound_or_music_note': 'Короткий сигнал сообщения, затем спокойный ритм.',
+                        'generation_prompt': 'Vertical 9:16 realistic small service business owner at desk, phone notifications and paper calendar, natural daylight, subtle comedic frustration, no logos, no readable personal data.',
+                        'avoid_in_generation': 'Чужие бренды, персональные данные, фальшивые интерфейсы, карикатурные эмоции.',
+                    },
+                    {
+                        'number': 2, 'start_second': 6, 'end_second': 21, 'purpose': 'Механизм',
+                        'shot_type': 'Крупные планы и графические перебивки',
+                        'visual_description': 'Последовательно появляются шаги записи: услуга, специалист, слот, контакты, подтверждение.',
+                        'camera_and_movement': 'Быстрые чистые склейки по ключевым словам.',
+                        'action': 'Хаотичные сообщения сменяются одной понятной последовательностью.',
+                        'spoken_text': 'Если путь можно разложить на понятные шаги, клиенту не нужно собирать свободное время по кусочкам переписки.',
+                        'on_screen_text': 'Услуга → специалист → слот → контакты',
+                        'transition': 'Склейка по движению',
+                        'sound_or_music_note': 'Небольшие акценты на каждом шаге.',
+                        'generation_prompt': 'Vertical 9:16 clean sequence of booking steps represented by simple neutral cards and calendar blocks, realistic service-business setting, smooth motion, no third-party UI or logos.',
+                        'avoid_in_generation': 'Нереальные функции, обещания результата, чужие логотипы.',
+                    },
+                    {
+                        'number': 3, 'start_second': 21, 'end_second': 30, 'purpose': 'CTA',
+                        'shot_type': 'Крупный план', 'visual_description': 'Герой закрывает лишние чаты и обращается в камеру.',
+                        'camera_and_movement': 'Спокойный статичный крупный план.',
+                        'action': 'На экране остаётся один CTA.',
+                        'spoken_text': cta,
+                        'on_screen_text': 'Сравните путь записи с ServGo',
+                        'transition': 'Плавное затемнение',
+                        'sound_or_music_note': 'Музыка чуть поднимается к финалу.',
+                        'generation_prompt': 'Vertical 9:16 close-up of small-business owner calmly addressing camera in a bright minimal workspace, clean negative space for CTA text, realistic lighting.',
+                        'avoid_in_generation': 'Агрессивная реклама, гарантия роста, сторонние бренды.',
+                    },
+                ],
+                'subtitle_style': 'Крупные короткие субтитры по 3–6 слов, безопасная нижняя зона.',
+                'music_direction': 'Лёгкий современный инструментал без вокала, голос всегда впереди.',
+                'editing_rhythm': 'Хук без паузы; затем смена визуального акцента каждые 2–4 секунды.',
+                'editing_mix_notes': 'Ducking музыки под речь; без агрессивных переходов.',
+                'cover_frame': short(title, 'Запись или квест?'),
+                'cta_frame': cta,
+                'caption_variants': [title, 'Ручная запись не обязана превращаться в бесконечную переписку.'],
+                'export_spec': '1080×1920, H.264, 30 fps, 30 секунд.',
+                'production_notes': ['Не показывать несуществующие функции.', 'Не обещать гарантированный рост выручки.'],
+            },
+        }
+
+    if name == 'story_director':
+        return {
+            **core,
+            'kind': 'story',
+            'production_brief': {
+                'asset_type': 'story', 'aspect_ratio': '9:16',
+                'objective': 'Быстро показать проблему ручной записи и следующий шаг.',
+                'narrative_arc': 'Хаос → понятный путь → CTA.',
+                'visual_style': 'Минималистично, крупный текст, один смысл на экран.',
+                'typography_direction': 'Крупный гротеск, высокий контраст, короткие строки.',
+                'frames': [
+                    {'number': 1, 'duration_seconds': 5, 'purpose': 'Хук',
+                     'visual_description': 'Телефон с множеством нейтральных уведомлений рядом с календарём.',
+                     'composition': 'Объект снизу, текст в центральной безопасной зоне.',
+                     'on_screen_text': 'Запись клиента или мини-квест?',
+                     'animation_or_transition': 'Быстрое появление уведомлений.', 'interaction': None,
+                     'safe_area_note': 'Не ставить важный текст у верхнего и нижнего краёв.'},
+                    {'number': 2, 'duration_seconds': 6, 'purpose': 'Механизм',
+                     'visual_description': 'Чистая последовательность шагов записи.',
+                     'composition': 'Вертикальная цепочка по центру.',
+                     'on_screen_text': 'Услуга → специалист → слот → контакты',
+                     'animation_or_transition': 'Шаги появляются по одному.', 'interaction': None,
+                     'safe_area_note': 'Сохранить поля интерфейса Stories свободными.'},
+                    {'number': 3, 'duration_seconds': 5, 'purpose': 'CTA',
+                     'visual_description': 'Спокойный финальный экран с одним действием.',
+                     'composition': 'CTA по центру, много воздуха.',
+                     'on_screen_text': short(cta, 'Сравните свой путь записи с ServGo', 140),
+                     'animation_or_transition': 'Плавное появление.', 'interaction': None,
+                     'safe_area_note': 'CTA выше нижней зоны интерфейса.'},
+                ],
+                'final_cta': cta,
+                'export_spec': '1080×1920, 9:16, три последовательных кадра.',
+                'production_notes': ['Юмор только про процесс.', 'Не добавлять новые продуктовые обещания.'],
+            },
+        }
+
+    if name == 'visual_designer':
+        return {
+            **core,
+            'kind': 'static_image',
+            'production_brief': {
+                'asset_type': 'static_image',
+                'target_formats': ['1:1', '4:5', '9:16'],
+                'objective': 'Остановить внимание на боли ручной записи и подвести к статье/демо.',
+                'visual_style': 'Современный реалистичный business-lifestyle с лёгкой ситуационной иронией.',
+                'subject': 'Владелец небольшого сервисного бизнеса между телефоном, сообщениями и календарём.',
+                'composition': 'Герой в одной трети, свободное место под крупный заголовок.',
+                'background_and_environment': 'Реальное рабочее место без чужих брендов.',
+                'lighting_and_mood': 'Естественный свет, узнаваемая усталость без драматизации.',
+                'typography_direction': 'Крупный лаконичный заголовок, минимум вторичного текста.',
+                'overlay_text': short(title, 'Запись или квест?', 140),
+                'brand_elements': 'Нейтральная подача ServGo; логотип добавлять только из подтверждённого бренд-пакета.',
+                'image_generation_prompt': 'Realistic small service business owner at desk between phone notifications and calendar, subtle situational humor, clean modern composition, natural light, negative space for Russian headline, no logos, no personal data.',
+                'avoid_in_visual': 'Чужие логотипы, мелкий интерфейс, фальшивые цифры, чрезмерно постановочные эмоции.',
+                'cta_treatment': short(cta, 'Посмотрите демо ServGo', 180),
+                'export_spec': 'Подготовить 1:1, 4:5 и 9:16 с безопасными полями под текст.',
+                'production_notes': ['Проверить читаемость заголовка на мобильном.', 'Не изображать непроверенные функции.'],
+            },
+        }
+
+    raise ValueError(f'No deterministic creative fallback for {name}')
+
 
 def product_facts(text: str) -> dict[str, str]:
     """Fail closed: only Product/Verified facts sections, never hypotheses/positioning."""
@@ -441,39 +645,46 @@ class ArticleProduction:
                     + stage_rule
                     + '\nSchema: ' + json.dumps(schema.model_json_schema())
                 )
-                for attempt in range(2):
-                    error = f'provider_request_failed:{name}'
-                    response = await asyncio.wait_for(self.llm.generate(LLMRequest(system_prompt=prompt,
-                        messages=[LLMMessage(role='user', content=json.dumps(stage_inputs, ensure_ascii=False))], model=self.model,
-                        max_tokens=min(20000, STAGE_MAX_TOKENS.get(name, 10000) * (2 ** attempt)),
-                        response_schema=schema.model_json_schema(),
-                        metadata={
-                            'reasoning_effort': 'low',
-                            'team_role': name,
-                            'task_type': 'article_production',
-                            'provider_timeout_seconds': STAGE_PROVIDER_TIMEOUT_SECONDS.get(name, 90),
-                        })),
-                        timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
-                    responses.setdefault(run_id, []).append(response)
-                    self._record_usage(product_id, {run_id: [response]})
-                    self.db.commit()
-                    error = f'invalid_article_output:{name}'
-                    if response.stop_reason in {'length', 'max_tokens'} and attempt == 0:
-                        continue
-                    if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
-                        raise ValueError('Incomplete or oversized response')
-                    break
+                fallback_reason = None
                 try:
-                    parsed = schema.model_validate_json(response.content)
+                    for attempt in range(2):
+                        error = f'provider_request_failed:{name}'
+                        response = await asyncio.wait_for(self.llm.generate(LLMRequest(system_prompt=prompt,
+                            messages=[LLMMessage(role='user', content=json.dumps(stage_inputs, ensure_ascii=False))], model=self.model,
+                            max_tokens=min(20000, STAGE_MAX_TOKENS.get(name, 10000) * (2 ** attempt)),
+                            response_schema=schema.model_json_schema(),
+                            metadata={
+                                'reasoning_effort': 'low',
+                                'team_role': name,
+                                'task_type': 'article_production',
+                                'provider_timeout_seconds': STAGE_PROVIDER_TIMEOUT_SECONDS.get(name, 90),
+                            })),
+                            timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
+                        responses.setdefault(run_id, []).append(response)
+                        self._record_usage(product_id, {run_id: [response]})
+                        self.db.commit()
+                        error = f'invalid_article_output:{name}'
+                        if response.stop_reason in {'length', 'max_tokens'} and attempt == 0:
+                            continue
+                        if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
+                            raise ValueError('Incomplete or oversized response')
+                        break
+                    parsed = _parse_stage_payload(schema, response.content)
                     parsed = schema.model_validate(self._sanitize(parsed.model_dump(mode='json')))
-                except ValidationError as exc:
-                    locations = []
-                    for item in exc.errors(include_url=False, include_input=False):
-                        loc = ".".join(str(part) for part in item.get("loc", ()))
-                        err_type = item.get("type", "validation")
-                        locations.append(f"{loc}:{err_type}" if loc else err_type)
-                    error = f'invalid_article_output:{name}:' + ",".join(locations[:8])
+                except asyncio.CancelledError:
                     raise
+                except Exception as exc:
+                    if name not in OPTIONAL_CREATIVE_STAGES:
+                        if isinstance(exc, ValidationError):
+                            locations = []
+                            for item in exc.errors(include_url=False, include_input=False):
+                                loc = ".".join(str(part) for part in item.get("loc", ()))
+                                err_type = item.get("type", "validation")
+                                locations.append(f"{loc}:{err_type}" if loc else err_type)
+                            error = f'invalid_article_output:{name}:' + ",".join(locations[:8])
+                        raise
+                    fallback_reason = f'{type(exc).__name__}:{error}'[:220]
+                    parsed = schema.model_validate(_creative_fallback_payload(name, stage_inputs))
                 checkpoint = ArtifactService(self.db).create(
                     product_id=product_id,
                     task_id=task_id,
@@ -483,6 +694,8 @@ class ArticleProduction:
                     content=json.dumps({
                         'stage': name,
                         'schema': schema.__name__,
+                        'fallback_used': bool(fallback_reason),
+                        'fallback_reason': fallback_reason,
                         'output': parsed.model_dump(mode='json'),
                     }, ensure_ascii=False),
                     status='draft',
