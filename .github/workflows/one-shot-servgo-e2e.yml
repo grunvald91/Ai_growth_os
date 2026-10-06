@@ -1,0 +1,215 @@
+name: One-shot ServGo Growth E2E
+
+on:
+  push:
+    branches:
+      - ops/one-shot-e2e-20261006
+    paths:
+      - '.e2e-trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      EXPECTED_RELEASE: 0fa1ce48234716a9297fa23fc5e7ea34daab22c3
+
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Run one safe viral-to-content production E2E
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ]
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15 -o ServerAliveCountMax=20"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "EXPECTED_RELEASE='$EXPECTED_RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          CURRENT="$(basename "$(readlink /opt/ai_growth_os/current 2>/dev/null || true)")"
+          echo "CURRENT_RELEASE=$CURRENT"
+          [ "$CURRENT" = "$EXPECTED_RELEASE" ] || { echo "Expected $EXPECTED_RELEASE, got $CURRENT"; exit 42; }
+          cd /opt/ai_growth_os/current
+
+          PLAN_TASK_ID="$(
+            docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Product, Task, TaskStatus
+
+          with SessionLocal() as db:
+              product=db.scalar(select(Product).where(Product.slug=="servgo"))
+              if product is None:
+                  raise SystemExit("ServGo not found")
+              task=Task(
+                  product_id=product.id,
+                  assigned_agent="editorial_planner",
+                  title="Редактор: one-shot final Growth E2E",
+                  description="[one_shot_final_20261006] final viral research -> content validation",
+                  priority=130,
+                  status=TaskStatus.QUEUED,
+              )
+              db.add(task)
+              db.commit()
+              print(task.id)
+          PY
+          )"
+          PLAN_TASK_ID="$(echo "$PLAN_TASK_ID" | tr -d '\r' | tail -n1)"
+          echo "PLAN_TASK_ID=$PLAN_TASK_ID"
+
+          for i in $(seq 1 150); do
+            STATE="$(
+              docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - "$PLAN_TASK_ID" <<'PY'
+          import sys
+          from uuid import UUID
+          from app.db.session import SessionLocal
+          from app.models.domain import Task
+          with SessionLocal() as db:
+              row=db.get(Task, UUID(sys.argv[1]))
+              print(row.status.value if row else "missing")
+          PY
+            )"
+            STATE="$(echo "$STATE" | tr -d '\r' | tail -n1)"
+            echo "plan_status=$STATE"
+            case "$STATE" in
+              completed) break ;;
+              failed|cancelled|missing) exit 44 ;;
+            esac
+            sleep 8
+          done
+          [ "$STATE" = "completed" ] || exit 45
+
+          CONTENT_TASK_ID="$(
+            docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - "$PLAN_TASK_ID" <<'PY'
+          import json, sys
+          from uuid import UUID
+          from sqlalchemy import select
+          from app.content.service import queue_content
+          from app.db.session import SessionLocal
+          from app.models.domain import Artifact, Task
+
+          plan_id=UUID(sys.argv[1])
+          with SessionLocal() as db:
+              plan_row=db.scalar(select(Artifact).where(
+                  Artifact.task_id==plan_id, Artifact.kind=="editorial_plan"
+              ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+              viral=db.scalar(select(Artifact).where(
+                  Artifact.task_id==plan_id, Artifact.kind=="viral_content_research"
+              ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+              if plan_row is None or viral is None:
+                  raise SystemExit("plan or viral artifact missing")
+              plan=json.loads(plan_row.content)
+              report=json.loads(viral.content)
+              print("RESEARCH_STATUS=" + str(report.get("analysis_status")), file=sys.stderr)
+              print("RESEARCH_PAIN_COUNT=" + str(len(report.get("audience_pains") or [])), file=sys.stderr)
+              print("RESEARCH_HOOK_COUNT=" + str(len(report.get("hook_patterns") or [])), file=sys.stderr)
+              print("RESEARCH_HUMOR_COUNT=" + str(len(report.get("humor_angles") or [])), file=sys.stderr)
+              print("RESEARCH_SUMMARY=" + str(report.get("summary",""))[:1200], file=sys.stderr)
+
+              slots=plan.get("slots") or []
+              if not slots:
+                  raise SystemExit("plan has no slots")
+              first=slots[0]
+              task=queue_content(
+                  db,
+                  plan_row.product_id,
+                  first["topic"],
+                  commit=False,
+                  dedupe_key=f"one-shot-final:{plan_row.id}:{first.get('package_key','pkg')}",
+                  audience=first.get("audience"),
+                  editorial_brief=(
+                      "Финальный безопасный E2E. Маркетингово сильный материал: конкретная сцена -> боль -> "
+                      "трение/цена процесса -> более понятный механизм -> проверенные возможности ServGo -> один CTA. "
+                      "Применять принципы «Пиши, сокращай» и обязательный ситуационный юмор. "
+                      "Не использовать старые цены. Не публиковать и не отправлять наружу."
+                  ),
+              )
+              req=db.scalar(select(Artifact).where(
+                  Artifact.task_id==task.id, Artifact.kind=="content_request"
+              ).order_by(Artifact.created_at.desc()).limit(1))
+              payload=json.loads(req.content)
+              payload["request_publication"]=False
+              payload["produce_ready_assets"]=True
+              req.content=json.dumps(payload, ensure_ascii=False)
+              db.commit()
+              print(task.id)
+          PY
+          )"
+          CONTENT_TASK_ID="$(echo "$CONTENT_TASK_ID" | tr -d '\r' | tail -n1)"
+          echo "CONTENT_TASK_ID=$CONTENT_TASK_ID"
+
+          for i in $(seq 1 210); do
+            STATE="$(
+              docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - "$CONTENT_TASK_ID" <<'PY'
+          import sys
+          from uuid import UUID
+          from app.db.session import SessionLocal
+          from app.models.domain import Task
+          with SessionLocal() as db:
+              row=db.get(Task, UUID(sys.argv[1]))
+              print(row.status.value if row else "missing")
+          PY
+            )"
+            STATE="$(echo "$STATE" | tr -d '\r' | tail -n1)"
+            echo "content_status=$STATE"
+            case "$STATE" in
+              completed|failed|cancelled|missing) break ;;
+            esac
+            sleep 8
+          done
+
+          docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - "$CONTENT_TASK_ID" <<'PY'
+          import json, sys
+          from collections import Counter
+          from uuid import UUID
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import AgentRun, Artifact, Task
+
+          content_id=UUID(sys.argv[1])
+          with SessionLocal() as db:
+              task=db.get(Task, content_id)
+              print("FINAL_STATUS=" + task.status.value)
+              runs=list(db.scalars(select(AgentRun).where(AgentRun.task_id==content_id).order_by(AgentRun.started_at, AgentRun.id)))
+              print("RUNS=" + json.dumps([
+                  {"agent":r.agent_name,"model":r.model,"status":r.status,"error":r.error}
+                  for r in runs
+              ], ensure_ascii=False))
+              arts=list(db.scalars(select(Artifact).where(Artifact.task_id==content_id).order_by(Artifact.created_at, Artifact.id)))
+              print("ARTIFACT_COUNTS=" + json.dumps(Counter(a.kind for a in arts), ensure_ascii=False))
+              checkpoints=[]
+              for a in arts:
+                  if a.kind!="content_stage_output":
+                      continue
+                  try:
+                      p=json.loads(a.content)
+                  except Exception:
+                      continue
+                  if p.get("stage") in {
+                      "platform_writer","video_director","story_director","visual_designer",
+                      "youtube_shorts_director","instagram_reels_director"
+                  }:
+                      checkpoints.append({
+                          "stage":p.get("stage"),
+                          "fallback_used":p.get("fallback_used",False),
+                          "fallback_reason":p.get("fallback_reason"),
+                      })
+              print("DERIVATIVE_CHECKPOINTS=" + json.dumps(checkpoints, ensure_ascii=False))
+              final=[a for a in arts if a.kind in {"article","channel_text","video_script","content_distribution"}]
+              print("FINAL_ARTIFACTS_START")
+              for a in final:
+                  print(json.dumps({
+                      "kind":a.kind,"title":a.title,"status":str(a.status),
+                      "content":a.content[:18000],
+                  }, ensure_ascii=False))
+              print("FINAL_ARTIFACTS_END")
+          PY
+
+          [ "$STATE" = "completed" ] || exit 47
+          REMOTE
