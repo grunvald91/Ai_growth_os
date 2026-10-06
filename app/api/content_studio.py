@@ -417,6 +417,7 @@ def mobile_calendar_html(slots: list[dict]) -> str:
             f'<small>{esc(platform_label(slot.get("platform") or ""))}</small>'
             '</div><span class="m-more">⋮</span></div>'
         )
+    timeline_html = "".join(timeline) or '<div class="empty">Публикаций пока нет.</div>'
     return (
         '<section class="m-card m-calendar" id="m-calendar">'
         '<div class="m-section-head"><div><span class="m-section-icon">▱</span><b>Контент-календарь</b></div><span>›</span></div>'
