@@ -63,6 +63,7 @@ STAGE_TIMEOUT_SECONDS = {
     'video_director': 300,
     'story_director': 240,
     'visual_designer': 240,
+    'platform_writer': 300,
     'youtube_shorts_director': 300,
     'instagram_reels_director': 300,
 }
@@ -80,6 +81,7 @@ STAGE_PROVIDER_TIMEOUT_SECONDS = {
     'video_director': 90,
     'story_director': 75,
     'visual_designer': 75,
+    'platform_writer': 90,
     'youtube_shorts_director': 90,
     'instagram_reels_director': 90,
 }
@@ -95,6 +97,7 @@ STAGE_MAX_TOKENS = {
     'video_director': 5500,
     'story_director': 4500,
     'visual_designer': 4000,
+    'platform_writer': 10000,
     'youtube_shorts_director': 6500,
     'instagram_reels_director': 6500,
 }
@@ -247,8 +250,8 @@ def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
     ]}
 
 
-def _creative_fallback_payload(name: str, stage_inputs: dict) -> dict:
-    """Build a safe, production-usable creative brief if an optional LLM creative stage fails."""
+def _optional_stage_fallback_payload(name: str, stage_inputs: dict) -> dict:
+    """Build a safe, production-usable payload if a non-core LLM stage fails."""
     prior = stage_inputs.get('prior_stage_outputs') or {}
     strategy = prior.get('content_strategist') or {}
     article = prior.get('marketing_editor') or {}
@@ -266,6 +269,54 @@ def _creative_fallback_payload(name: str, stage_inputs: dict) -> dict:
     landing_page = conversion.get('landing_page')
     if not isinstance(landing_page, dict):
         raise ValueError('Creative fallback requires a validated landing_page from conversion_editor')
+
+    if name == 'platform_writer':
+        sections = article.get('sections') or []
+        section_text = '\n\n'.join(
+            f"## {short(item.get('heading'), 'Практический шаг', 140)}\n{str(item.get('body') or '').strip()}"
+            for item in sections if isinstance(item, dict) and item.get('body')
+        )
+        source_body = '\n\n'.join(part for part in [
+            str(article.get('lead') or '').strip(),
+            section_text,
+            str(article.get('closing') or '').strip(),
+        ] if part).strip()
+        if len(source_body) < 500:
+            source_body = (
+                f"{lead}\n\n"
+                "Ручная запись часто распадается между сообщениями, календарём и памятью сотрудников. "
+                "Полезно разложить путь клиента на последовательные шаги: выбор услуги, специалиста при необходимости, "
+                "свободного времени, контактов и подтверждения. Так проще увидеть, где клиент ждёт ответа и где процесс "
+                "можно сделать понятнее.\n\n"
+                "Лёгкая проверка для владельца: посчитайте, сколько сообщений требуется человеку до понятного статуса записи. "
+                "Если переписка превращается в мини-квест, проблема уже видна без сложной аналитики.\n\n"
+                f"{cta}"
+            )
+        def adapted(channel, heading, intro):
+            body = f"{intro}\n\n{source_body}\n\n{cta}"
+            if channel in {'dzen', 'vc_ru'}:
+                while len(body) < 2100:
+                    body += (
+                        "\n\nПрактический ориентир: пройдите сценарий записи глазами нового клиента и отметьте каждый "
+                        "момент, где ему приходится ждать, уточнять или повторять данные. Менять стоит не всё сразу, а тот "
+                        "участок, который создаёт больше всего ручной координации. Это позволяет обсуждать автоматизацию "
+                        "через конкретный процесс, а не через абстрактный список функций."
+                    )
+            return {
+                'channel': channel, 'title': short(heading, title, 180), 'body': body,
+                'editorial_checks': [
+                    'Без новых продуктовых фактов и гарантий результата.',
+                    'Юмор направлен на хаос процесса, а не на людей.',
+                ],
+            }
+        return {'texts': [
+            adapted('dzen', title, 'Клиент хочет записаться, а вместо одного понятного пути получает переписку-квест. Разберём, где обычно ломается процесс.'),
+            adapted('tenchat', f'{title}: взгляд на процесс', 'Когда администратор одновременно календарь, маршрутизатор и CRM на человеческой тяге, пора смотреть не на героизм сотрудника, а на сам процесс.'),
+            adapted('vc_ru', f'{title}: разбор клиентского пути', 'Онлайн-запись полезно оценивать не по количеству функций, а по числу ручных решений между намерением клиента и понятным подтверждением.'),
+            adapted('telegram', title, 'Знакомая сцена: клиент пишет вечером, а свободный слот живёт где-то между чатом, календарём и памятью администратора.'),
+            adapted('faq', f'Вопросы о записи: {title}', 'Коротко отвечаем на вопросы, которые стоит задать своему процессу записи до автоматизации.'),
+            adapted('founder', f'Что я бы проверил в записи клиентов: {title}', 'Предлагаю смотреть на запись как на маршрут клиента, а не как на отдельную кнопку. Так быстрее видно лишнюю ручную работу.'),
+        ]}
 
     core = {
         'audience': audience,
@@ -804,7 +855,7 @@ class ArticleProduction:
                     if name == 'platform_writer':
                         parsed = schema.model_validate(_platform_text_fallback_payload(stage_inputs))
                     else:
-                        parsed = schema.model_validate(_creative_fallback_payload(name, stage_inputs))
+                        parsed = schema.model_validate(_optional_stage_fallback_payload(name, stage_inputs))
                 checkpoint = ArtifactService(self.db).create(
                     product_id=product_id,
                     task_id=task_id,
