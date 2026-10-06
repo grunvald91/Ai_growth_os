@@ -418,6 +418,83 @@ async def test_sparse_but_grounded_analysis_is_valid(db, tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_rich_partial_analysis_survives_failed_repair_and_keeps_marketing_angles(db, tmp_path, monkeypatch):
+    product = Product(name="ServGo", slug="servgo-partial-repair")
+    db.add(product)
+    db.flush()
+    task = Task(
+        product_id=product.id,
+        title="Редактор: контент-план",
+        assigned_agent="editorial_planner",
+        status=TaskStatus.RUNNING,
+    )
+    db.add(task)
+    db.commit()
+
+    async def fake_rank(raw, timeout_seconds=20.0):
+        return ranked_videos(raw)
+
+    monkeypatch.setattr("app.content.viral_content_research.rank_youtube_candidates", fake_rank)
+
+    primary = FakeLLMProvider(LLMResponse(
+        content=json.dumps({
+            "summary": "Источники показывают узнаваемую операционную тему ручной записи; полезные наблюдения нужно сохранить, даже если часть структурированных блоков модель не заполнила.",
+            "topic_patterns": [{
+                "pattern": "Ручная запись превращает простой запрос клиента в длинную цепочку уточнений.",
+                "why_it_may_work": "Сцена быстро узнаётся владельцами сервисного бизнеса и даёт основу для сильного контента.",
+                "source_ids": ["yt:three1234", "article:3"],
+            }],
+        }, ensure_ascii=False),
+        model="kimi-2.7",
+        usage=LLMUsage(input_tokens=80, output_tokens=60),
+    ))
+    broken_repair = FakeLLMProvider(LLMResponse(
+        content="not-json",
+        model="grok-4.7",
+        usage=LLMUsage(input_tokens=90, output_tokens=10),
+    ))
+    monkeypatch.setattr("app.core.composition.build_llm_provider", lambda settings: broken_repair)
+
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=primary)
+    settings = Settings(
+        app_env="production",
+        products_root=tmp_path,
+        llm_provider="xai",
+        llm_model="kimi-2.7",
+        llm_fallback_models="grok-4.7",
+        viral_research_mode="public_multisource",
+    )
+    context = {"company": {"profile": {
+        "identity": {"name": "ServGo"},
+        "offer": {"category": "онлайн-запись", "products_services": []},
+        "customers": {"primary_segments": ["Массажные студии"], "pains": []},
+        "proof": {"approved_facts": []},
+    }}}
+
+    artifact = await run_viral_content_research(
+        db=db, settings=settings, llm=llm, task=task, context=context,
+        video_scout=FakeVideoScout(), article_scout=FakeArticleScout(),
+    )
+
+    stored = ViralContentResearch.model_validate_json(artifact.content)
+    assert stored.analysis_status == "completed"
+    assert stored.topic_patterns[0].source_ids == ["yt:three1234", "article:3"]
+    assert len(stored.seo_topic_seeds) >= 3
+    assert len(stored.content_angles) >= 3
+    assert len(stored.humor_angles) >= 2
+    assert any("сохранён полезный валидный первичный анализ" in item for item in stored.cautions)
+    assert any("audience_pains" in item for item in stored.cautions)
+
+    run = db.scalar(select(AgentRun).where(
+        AgentRun.task_id == task.id,
+        AgentRun.agent_name == "viral_content_researcher",
+    ))
+    assert run.status == "completed"
+    costs = list(db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)))
+    assert len(costs) == 2
+
+
+@pytest.mark.asyncio
 async def test_production_analysis_uses_configured_fallback_after_invalid_primary(db, tmp_path, monkeypatch):
     product = Product(name="ServGo", slug="servgo-fallback")
     db.add(product)
