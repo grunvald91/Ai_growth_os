@@ -1,0 +1,36 @@
+name: Inspect deploy state
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-deploy-state.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Inspect release state
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "CURRENT=$(readlink /opt/ai_growth_os/current)"
+          echo "TARGET_DIR:"
+          ls -ld /opt/ai_growth_os/releases/7ff917ee5e54c30104615be5cb675c095d805e13 2>/dev/null || true
+          echo "LATEST_RELEASES:"
+          ls -1dt /opt/ai_growth_os/releases/* 2>/dev/null | head -n 8 || true
+          echo "CONTAINERS:"
+          docker ps --filter label=com.docker.compose.project=ai-growth-os --format '{{.Names}} {{.Status}}'
+          REMOTE
