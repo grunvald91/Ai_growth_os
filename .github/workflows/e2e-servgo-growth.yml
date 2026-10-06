@@ -19,7 +19,7 @@ jobs:
       SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
       SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
-      EXPECTED_RELEASE: 6e71a56e1c00334c1ea4f7e48e6ffde9c273b770
+      EXPECTED_RELEASE: d8ff1ea962b46225e4fab198adc271705cad7f50
 
     steps:
       - name: Install SSH helper
@@ -63,7 +63,7 @@ jobs:
                   product_id=product.id,
                   assigned_agent="editorial_planner",
                   title="Редактор: ServGo Growth multisource E2E plan",
-                  description="[growth_viral_e2e_20261006] Live multisource research + marketing-quality validation.",
+                  description="[growth_viral_e2e_20261006_v2] Live multisource research + marketing-quality validation.",
                   priority=125,
                   status=TaskStatus.QUEUED,
               )
@@ -78,7 +78,7 @@ jobs:
           from app.db.session import SessionLocal
           from app.models.domain import Task
           with SessionLocal() as db:
-              row=db.scalar(select(Task).where(Task.description.like('%[growth_viral_e2e_20261006]%')).order_by(Task.created_at.desc()).limit(1))
+              row=db.scalar(select(Task).where(Task.description.like('%[growth_viral_e2e_20261006_v2]%')).order_by(Task.created_at.desc()).limit(1))
               print(row.id if row else '')
           PY
           )"
