@@ -241,10 +241,10 @@ def sidebar_html() -> str:
 def mobile_nav_html() -> str:
     return """
     <nav class="mobile-nav">
-      <a class="active" href="#overview"><span class="m-ico">⌂</span>Обзор</a>
-      <a href="#plan"><span class="m-ico">▣</span>План</a>
-      <a href="#materials"><span class="m-ico">▤</span>Материалы</a>
-      <a href="#calendar"><span class="m-ico">□</span>Календарь</a>
+      <a class="active" href="#m-calendar"><span class="m-ico">⌂</span>Обзор</a>
+      <a href="#m-packages"><span class="m-ico">▣</span>План</a>
+      <a href="#m-materials"><span class="m-ico">▤</span>Материалы</a>
+      <a href="#m-calendar"><span class="m-ico">□</span>Календарь</a>
     </nav>
     """
 
