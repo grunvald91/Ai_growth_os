@@ -14,7 +14,7 @@ import sys
 import zipfile
 from html.parser import HTMLParser
 from pathlib import PurePosixPath
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree
 
 from app.intake.contracts import IntakeError, IntakeSource
@@ -193,33 +193,54 @@ class PublicWebsiteFetcher:
         return await asyncio.to_thread(self._fetch, url)
 
     def _fetch(self, url: str) -> IntakeSource:
-        connection = None
+        original_url = url
+        current_url = url
         try:
-            parsed, port, address = public_target(url)
-            connection = (_PinnedTLS(parsed.hostname, port, address) if parsed.scheme == "https"
-                          else http.client.HTTPConnection(address, port, timeout=15))
-            path = (parsed.path or "/") + ("?" + parsed.query if parsed.query else "")
-            connection.request("GET", path, headers={"Host": parsed.hostname,
-                               "User-Agent": "AI-Growth-OS-Company-Intake/1.0",
-                               "Accept-Encoding": "identity"})
-            response = connection.getresponse()
-            if response.status != 200:
-                raise IntakeError("Страница недоступна; перенаправления не выполняются.")
-            content_type = response.getheader("Content-Type", "").casefold()
-            if not any(item in content_type for item in ("text/html", "text/plain")):
-                raise IntakeError("Тип страницы не поддерживается.")
-            raw = response.read(MAX_WEB_BYTES + 1)
-            if len(raw) > MAX_WEB_BYTES:
-                raise IntakeError("Страница слишком большая.")
-            text = raw.decode("utf-8", errors="replace")
-            if "text/html" in content_type:
-                parser = _VisibleHTML()
-                parser.feed(text)
-                text = " ".join(parser.parts)
-            return make_source("owned_website", url, text)
+            for _ in range(6):
+                connection = None
+                try:
+                    parsed, port, address = public_target(current_url)
+                    connection = (_PinnedTLS(parsed.hostname, port, address) if parsed.scheme == "https"
+                                  else http.client.HTTPConnection(address, port, timeout=15))
+                    path = (parsed.path or "/") + ("?" + parsed.query if parsed.query else "")
+                    connection.request("GET", path, headers={"Host": parsed.hostname,
+                                       "User-Agent": "Mozilla/5.0 (compatible; AI-Growth-OS-Company-Intake/1.0)",
+                                       "Accept": "text/html,text/plain;q=0.9,*/*;q=0.1",
+                                       "Accept-Encoding": "identity"})
+                    response = connection.getresponse()
+                    if response.status in {301, 302, 303, 307, 308}:
+                        location = response.getheader("Location")
+                        if not location:
+                            raise IntakeError("Страница вернула перенаправление без адреса.")
+                        current_url = urljoin(current_url, location)
+                        # The next loop calls public_target again, so every redirect target
+                        # is independently DNS-resolved and rejected if it is private/local.
+                        continue
+                    if response.status != 200:
+                        raise IntakeError(f"Страница недоступна (HTTP {response.status}).")
+                    content_type = response.getheader("Content-Type", "").casefold()
+                    if not any(item in content_type for item in ("text/html", "text/plain")):
+                        raise IntakeError("Тип страницы не поддерживается.")
+                    raw = response.read(MAX_WEB_BYTES + 1)
+                    if len(raw) > MAX_WEB_BYTES:
+                        raise IntakeError("Страница слишком большая.")
+                    charset_match = re.search(r"charset=([^;\\s]+)", content_type)
+                    charset = charset_match.group(1).strip('"\\'') if charset_match else "utf-8"
+                    try:
+                        text = raw.decode(charset, errors="replace")
+                    except LookupError:
+                        text = raw.decode("utf-8", errors="replace")
+                    if "text/html" in content_type:
+                        parser = _VisibleHTML()
+                        parser.feed(text)
+                        text = " ".join(parser.parts)
+                    if not text.strip():
+                        raise IntakeError("На странице не найден читаемый текст.")
+                    return make_source("owned_website", original_url, text)
+                finally:
+                    if connection is not None:
+                        connection.close()
+            raise IntakeError("Слишком много перенаправлений.")
         except (OSError, ValueError, http.client.HTTPException):
-            return make_source("owned_website", url, status="unavailable",
+            return make_source("owned_website", original_url, status="unavailable",
                                note="Не удалось безопасно прочитать страницу. Можно прислать её текст.")
-        finally:
-            if connection is not None:
-                connection.close()
