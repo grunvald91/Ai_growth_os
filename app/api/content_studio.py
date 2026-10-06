@@ -422,7 +422,7 @@ def mobile_calendar_html(slots: list[dict]) -> str:
         '<section class="m-card m-calendar" id="m-calendar">'
         '<div class="m-section-head"><div><span class="m-section-icon">▱</span><b>Контент-календарь</b></div><span>›</span></div>'
         f'<div class="m-days">{"".join(days)}</div>'
-        f'<div class="m-timeline">{"".join(timeline) or "<div class=\\"empty\\">Публикаций пока нет.</div>"}</div>'
+        f'<div class="m-timeline">{timeline_html}</div>'
         '<a class="m-calendar-open" href="#calendar"><span>□</span> Открыть календарь <b>→</b></a>'
         '</section>'
     )
