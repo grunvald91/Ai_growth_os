@@ -18,7 +18,7 @@ jobs:
       SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
       SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
-      EXPECTED_RELEASE: 7ff917ee5e54c30104615be5cb675c095d805e13
+      EXPECTED_RELEASE: a93bab1b17cd2f33fd2194f7c0f6fc076d2da8bf
     steps:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
       - name: Wait for exact release and verify Studio
