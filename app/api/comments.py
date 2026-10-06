@@ -86,7 +86,10 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
     channels = list(svc.db.scalars(select(CommentChannel).where(CommentChannel.product_id == product_id)))
     live = {row.platform: row for row in channels if row.status == "connected"}
     options = ''.join(f'<option value="{key}" {"selected" if platform == key else ""}>{esc(value["name"])}</option>' for key, value in PLATFORMS.items())
-    route = "Доступ к площадкам настроен через зарубежный сервер. Проверка выполняется при подключении." if svc.settings.comment_platform_proxy_url or svc.settings.telegram_proxy_url else "Для подключения площадок нужно настроить доступ через зарубежный сервер. Прямые подключения отключены."
+    route = "VK и VK Видео подключаются напрямую. " + (
+        "Для YouTube, Telegram, Instagram и Threads настроен доступ через зарубежный сервер. Проверка выполняется при подключении."
+        if svc.settings.comment_platform_proxy_url else
+        "Для YouTube, Telegram, Instagram и Threads укажите адрес прокси на зарубежном сервере в настройках сервиса.")
     notice = '<div class="c-notice">Ответы публикуются после вашей проверки. Жалобы, неизвестные условия и спорные вопросы передаются человеку.<br>' + route + '</div>'
     if tab == "platforms":
         cards = []
@@ -103,7 +106,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
                     controls += f'<div class="c-actions"><button class="btn ghost" data-sync="{key}">Загрузить комментарии</button><button class="btn ghost" data-disconnect="{key}">Отключить</button></div>'
             else:
                 controls = f'<a class="btn ghost" href="{base}?tab=test&platform={key}">Подготовить ответ</a>'
-            cards.append(f'<section class="panel c-platform"><div class="c-card-head"><h2>{esc(item["name"])}</h2><span class="chip {"blue" if channel else ""}">{esc(badge)}</span></div><ol>{steps}</ol><p>{esc(item["limits"])}</p>{docs}{controls}</section>')
+            cards.append(f'<section class="panel c-platform"><div class="c-card-head"><h2>{esc(item["name"])}</h2><span class="chip {"blue" if channel else ""}">{esc(badge)}</span></div><p class="c-meta">{"Доступ напрямую" if key in {"vk", "vk_video"} else "Через зарубежный сервер" if item["live"] else "Ручной режим"}</p><ol>{steps}</ol><p>{esc(item["limits"])}</p>{docs}{controls}</section>')
         content = '<div class="c-platform-grid">' + ''.join(cards) + '</div>'
     elif tab == "agent":
         try:

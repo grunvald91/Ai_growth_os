@@ -33,16 +33,46 @@ copying, skipping and handoff to a human. No background auto-publishing is enabl
 
 ## Foreign server egress
 
-Every real adapter request (authorization checks, reading and sending) goes
-through `COMMENT_PLATFORM_PROXY_URL`, an HTTP(S) forward proxy on the owner's
-foreign server. If unset in development, `TELEGRAM_PROXY_URL` is reused. Production
-Compose defaults to the foreign proxy already used by this project's Telegram
-service. An unavailable proxy fails the operation; **there is no direct fallback**.
+**VK and VK Video use direct HTTPS requests to api.vk.com**, including connection
+checks, reads and publishing. Their HTTP client disables environment proxy lookup
+(`trust_env=false`) and uses no proxy even if the foreign proxy is configured or
+unavailable.
+
+YouTube, Telegram, Instagram and Threads use only `COMMENT_PLATFORM_PROXY_URL`, an
+HTTP(S) forward proxy. The owner confirmed the existing route: entrypoint
+`188.120.254.223:8891`, onward via their foreign server beginning with `89…`.
+Production Compose defaults to this confirmed entrypoint; the exact downstream IP
+is not needed by the application. There is no implicit reuse of
+`TELEGRAM_PROXY_URL`: that setting belongs to the existing controller. An unset or
+unavailable comment proxy fails these platform operations with **no direct fallback**.
 Redirects are disabled and HTTPS certificate verification remains enabled.
-The proxy is supplied server-side and is never part of the LLM context or web UI.
-If proxy authentication is needed, configure the URL as a protected runtime value;
-do not commit credentials. The UI reports configured routing separately from a
-successful real platform check. Platform account access must still be authorized.
+The proxy is configured server-side, outside the LLM context and web UI. Configure
+credentials as protected runtime values, never committed files.
+
+### What runs on the foreign server
+
+The comment agent, business knowledge, encrypted platform credentials and adapters
+run inside AI Growth OS. The foreign server only needs a working forward proxy
+with HTTPS CONNECT support; no separate agent service or platform adapter code
+is required there. The owner confirmed an existing proxy chain through 188 → 89.
+Check the existing proxy's CONNECT access before making any server changes; the
+full downstream IP is still needed to administer that server. Its running state
+and platform connectivity have not been verified from this development workspace.
+
+On that server, configure proxy access from the AI Growth OS server only (IP ACL
+and/or authenticated access), and allow HTTPS CONNECT to port 443 for
+`www.googleapis.com`, `api.telegram.org`, `graph.instagram.com` and
+`graph.threads.net`. Configure firewall access to the proxy port accordingly.
+A Squid, Tinyproxy or equivalent forward proxy can provide this; a normal reverse
+proxy alone cannot replace it. No inbound platform webhooks are required in the
+current refresh-on-demand implementation.
+
+On the AI Growth OS server, set `COMMENT_PLATFORM_PROXY_URL` in the protected
+runtime environment to the confirmed endpoint (for example,
+`http://CONFIRMED_FOREIGN_HOST:PROXY_PORT`), apply migration 0005, then recreate
+API and worker containers. Verify each account through its connection card and
+perform an owner-approved trial reply. Actual connectivity has to be tested from
+the application server; a saved URL alone does not prove the server is reachable.
 
 ## Platform-specific setup
 
@@ -112,7 +142,8 @@ password, scraping session or browser-cookie integration is used.
 Only comments imported through a verified adapter can be published. Manually
 entered and trial comments can only be copied. The explicit **Одобрить и отправить**
 action records the exact edited text in a separate approved Artifact, a YELLOW
-Approval, ToolCall and Publication. Publication uses the configured foreign proxy.
+Approval, ToolCall and Publication. VK publication uses a direct connection;
+other live platforms use the configured foreign proxy.
 Changing business knowledge, rules or the connection invalidates older drafts.
 The gateway binds replies to the source account before sending.
 

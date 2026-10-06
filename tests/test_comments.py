@@ -250,7 +250,7 @@ async def test_gateway_requires_proxy_and_sanitizes_http_errors():
 
 
 @pytest.mark.asyncio
-async def test_gateway_uses_foreign_proxy_for_every_request(monkeypatch):
+async def test_gateway_uses_foreign_proxy_for_required_platforms(monkeypatch):
     captured = []
     class Client:
         def __init__(self, **kwargs):
@@ -266,7 +266,8 @@ async def test_gateway_uses_foreign_proxy_for_every_request(monkeypatch):
     await gateway.request("GET", "https://www.googleapis.com/youtube/v3/channels", "token")
     await gateway.request("GET", "https://graph.instagram.com/v22.0/me", "token")
     await gateway.request("GET", "https://api.telegram.org/bot123:abc/getMe", "token", telegram=True)
-    assert len(captured) == 3
+    await gateway.request("GET", "https://graph.threads.net/v1.0/me", "token")
+    assert len(captured) == 4
     assert all(c["proxy"] == "http://foreign-proxy:8891" and not c["follow_redirects"] for c in captured)
 
 
@@ -413,9 +414,7 @@ async def test_threads_wrong_root_owner_never_creates_container():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("platform", ["vk", "vk_video"])
-async def test_vk_connections_require_manager_and_foreign_proxy(platform):
-    with pytest.raises(PlatformError, match="зарубежный сервер"):
-        await CommentGateway().check(platform, "42", "secret")
+async def test_vk_connections_require_manager(platform):
     client, gateway, _, _ = mock_gateway([("groups.getById", {"response": {"groups": [{"id": 42, "is_admin": 0}]}})])
     async with client:
         with pytest.raises(PlatformError, match="пользовательский токен"):
@@ -508,3 +507,49 @@ async def test_vk_wrong_native_object_never_publishes(platform, namespace, objec
                                SimpleNamespace(id=uuid4(), external_id="-42_10_100",
                                                target={"owner_id": -42, object_key: 10, "comment_id": 100}), "Ответ")
     assert len(seen) == 2 and all("createComment" not in r.url.path for r in seen)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform", ["vk", "vk_video"])
+@pytest.mark.parametrize("proxy", [None, "http://foreign-proxy:8891", "invalid-proxy"])
+async def test_vk_checks_read_and_publish_direct_without_environment_proxy(monkeypatch, platform, proxy):
+    from types import SimpleNamespace
+    captured, methods = [], []
+    namespace = "video" if platform == "vk_video" else "wall"
+    object_key = "video_id" if platform == "vk_video" else "post_id"
+    class DirectClient:
+        def __init__(self, **kwargs):
+            captured.append(kwargs)
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def request(self, method, url, **kwargs):
+            native = url.rsplit("/", 1)[-1]; methods.append(native)
+            assert url.startswith("https://api.vk.com/method/")
+            if native == "groups.getById":
+                data = {"groups": [{"id": 42, "is_admin": 1, "admin_level": 3}]}
+            elif native.endswith("createComment"):
+                data = 101 if platform == "vk_video" else {"comment_id": 101}
+            elif native in {"wall.getComment", "wall.getComments", "video.getComments"}:
+                data = {"count": 1, "items": [{"id": 100, "from_id": 5, "text": "Вопрос", object_key: 10}]}
+            else:
+                data = {"count": 1, "items": [{"id": 10, "owner_id": -42}]}
+            return httpx.Response(200, json={"response": data})
+    monkeypatch.setenv("HTTPS_PROXY", "http://environment-proxy.invalid")
+    monkeypatch.setattr(httpx, "AsyncClient", DirectClient)
+    gateway = CommentGateway(proxy_url=proxy)
+    channel = SimpleNamespace(platform=platform, account_id="42", cursor={})
+    await gateway.check(platform, "42", "secret")
+    rows, _ = await gateway.fetch(channel, "secret")
+    assert rows[0]["external_id"] == "-42_10_100"
+    comment = SimpleNamespace(id=uuid4(), external_id=rows[0]["external_id"], target=rows[0]["target"])
+    assert await gateway.send(channel, "secret", comment, "Ответ") == "101"
+    assert namespace + ".createComment" in methods
+    assert captured and all(c["proxy"] is None and c["trust_env"] is False and c["follow_redirects"] is False for c in captured)
+
+
+def test_controller_proxy_is_not_implicitly_reused_for_comment_service(ctx):
+    db, _, svc, _, _ = ctx
+    settings = svc.settings.model_copy(update={"comment_platform_proxy_url": None, "telegram_proxy_url": "http://another-server:8891"})
+    assert CommentService(db, settings).gateway.proxy_url is None

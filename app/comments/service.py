@@ -56,7 +56,7 @@ def now():
 class CommentService:
     def __init__(self, db: Session, settings, *, llm=None, gateway=None):
         self.db, self.settings, self.llm = db, settings, llm
-        self.gateway = gateway or CommentGateway(proxy_url=settings.comment_platform_proxy_url or settings.telegram_proxy_url)
+        self.gateway = gateway or CommentGateway(proxy_url=settings.comment_platform_proxy_url)
         self.secrets = CommentSecrets(settings.products_root)
 
     def product(self, product_id, *, lock=False):

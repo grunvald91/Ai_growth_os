@@ -16,15 +16,17 @@ class CommentGateway:
 
     async def request(self, method, url, token, *, telegram=False, **kwargs):
         headers = {} if telegram else {"Authorization": f"Bearer {token}"}
-        if self.client is None and not self.proxy_url:
+        direct = urlsplit(url).hostname == "api.vk.com"
+        if self.client is None and not direct and not self.proxy_url:
             raise PlatformError("Настройте доступ через зарубежный сервер. Прямое подключение отключено.")
-        if self.proxy_url and urlsplit(self.proxy_url).scheme not in {"http", "https"}:
+        if not direct and self.proxy_url and urlsplit(self.proxy_url).scheme not in {"http", "https"}:
             raise PlatformError("Для зарубежного сервера нужен HTTP или HTTPS proxy")
         try:
             if self.client is not None:
                 response = await self.client.request(method, url, headers=headers, **kwargs)
             else:
-                async with httpx.AsyncClient(timeout=25, follow_redirects=False, proxy=self.proxy_url) as client:
+                async with httpx.AsyncClient(timeout=25, follow_redirects=False,
+                                            proxy=None if direct else self.proxy_url, trust_env=False) as client:
                     response = await client.request(method, url, headers=headers, **kwargs)
             if response.status_code == 429:
                 raise PlatformError("Лимит площадки исчерпан. Повторите позже.")
