@@ -447,6 +447,54 @@ async def test_creative_specialists_are_separate_calls(db, product, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_creative_stage_accepts_singleton_object_wrapper(db, product, tmp_path):
+    outputs = valid_outputs()
+    outputs[7] = [outputs[7]]
+    workflow, _, request = setup(db, product, tmp_path, outputs)
+
+    result = await workflow.run(request)
+
+    assert result.status == 'completed', result.error
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    video = next(d for d in article.conversion.derivatives if d.kind == 'short_video')
+    assert video.production_brief.duration_seconds == 35
+    checkpoint = next(
+        a for a in db.scalars(select(Artifact).where(Artifact.kind == 'content_stage_output'))
+        if json.loads(a.content)['stage'] == 'video_director'
+    )
+    assert json.loads(checkpoint.content)['fallback_used'] is False
+
+
+@pytest.mark.asyncio
+async def test_creative_stage_invalid_payload_uses_safe_fallback_without_cascade(db, product, tmp_path):
+    outputs = valid_outputs()
+    outputs[7] = []
+    workflow, _, request = setup(db, product, tmp_path, outputs)
+
+    result = await workflow.run(request)
+
+    assert result.status == 'completed', result.error
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    kinds = {d.kind for d in article.conversion.derivatives}
+    assert {'short_video', 'story', 'static_image'} <= kinds
+    video = next(d for d in article.conversion.derivatives if d.kind == 'short_video')
+    assert video.production_brief.duration_seconds == 30
+    assert 'CRM на человеческой тяге' in video.production_brief.voiceover_or_dialogue_script
+
+    checkpoints = {
+        json.loads(a.content)['stage']: json.loads(a.content)
+        for a in db.scalars(select(Artifact).where(Artifact.kind == 'content_stage_output'))
+    }
+    assert checkpoints['video_director']['fallback_used'] is True
+    assert checkpoints['story_director']['fallback_used'] is False
+    assert checkpoints['visual_designer']['fallback_used'] is False
+    runs = {r.agent_name: r for r in db.scalars(select(AgentRun))}
+    assert runs['video_director'].status == 'completed'
+    assert runs['story_director'].status == 'completed'
+    assert runs['visual_designer'].status == 'completed'
+
+
+@pytest.mark.asyncio
 async def test_measurement_window_may_remain_unset(db, product, tmp_path):
     outputs = valid_outputs()
     outputs[3]['measurement']['review_window_days'] = None
