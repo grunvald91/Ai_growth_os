@@ -1,0 +1,50 @@
+name: Inspect ServGo visual tokens
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-servgo-style.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Inspect ServGo HTML and CSS
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          curl -sS http://127.0.0.1:8000/ -o "$tmp/index.html"
+          echo "== TITLE / HEAD =="
+          sed -n '1,120p' "$tmp/index.html"
+          echo "== ASSET URLS =="
+          grep -oE '(href|src)="[^"]+\.(css|js)(\?[^"]*)?"' "$tmp/index.html" | head -n 40 || true
+          css="$(grep -oE 'href="[^"]+\.css(\?[^"]*)?"' "$tmp/index.html" | head -n1 | sed -E 's/^href="//;s/"$//')"
+          if [ -n "$css" ]; then
+            case "$css" in
+              http*) url="$css" ;;
+              /*) url="http://127.0.0.1:8000$css" ;;
+              *) url="http://127.0.0.1:8000/$css" ;;
+            esac
+            curl -sS "$url" -o "$tmp/app.css"
+            echo "== CSS VARIABLES =="
+            grep -oE -- '--[A-Za-z0-9_-]+:[^;}]{1,100}' "$tmp/app.css" | head -n 120 || true
+            echo "== HEX COLORS =="
+            grep -oE '#[0-9A-Fa-f]{6}' "$tmp/app.css" | sort | uniq -c | sort -nr | head -n 40 || true
+            echo "== RADIUS / SHADOW / FONT HINTS =="
+            grep -oE '(border-radius|box-shadow|font-family):[^;}]{1,120}' "$tmp/app.css" | head -n 100 || true
+          fi
+          REMOTE
