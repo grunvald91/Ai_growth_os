@@ -270,6 +270,7 @@ def asset_dialog(record: Artifact) -> str:
                 f'<div class="story-prompt"><b>Промпт для будущей генерации:</b><br>{esc(shot.get("generation_prompt"))}</div>'
                 '</div>'
             )
+        shots_html = "".join(shots) or '<div class="empty">Раскадровка ещё не заполнена.</div>'
         body = (
             f'<div id="{copy_id}" class="article-text">'
             f'<b>Площадка:</b> {esc(platform_label(brief.get("target_platform")))}\n'
@@ -278,7 +279,7 @@ def asset_dialog(record: Artifact) -> str:
             f'<b>Озвучка / диалог:</b>\n{esc(brief.get("voiceover_or_dialogue_script"))}\n\n'
             f'<b>Монтаж и сведение:</b> {esc(brief.get("editing_mix_notes") or brief.get("editing_rhythm"))}'
             '</div>'
-            f'<div class="storyboard-grid" style="margin-top:16px">{"".join(shots) or "<div class=\"empty\">Раскадровка ещё не заполнена.</div>"}</div>'
+            f'<div class="storyboard-grid" style="margin-top:16px">{shots_html}</div>'
         )
     else:
         body = f'<div id="{copy_id}" class="article-text">{esc(artifact_text(record, value))}</div>'
