@@ -152,6 +152,9 @@ def _walk_renderers(value):
             yield from _walk_renderers(child)
 
 
+YOUTUBE_SHORTS_FILTER_PARAM = "EgIQCQ%3D%3D"
+
+
 _VIEW_MULTIPLIERS = {
     "k": 1_000,
     "тыс": 1_000,
@@ -336,7 +339,7 @@ class YouTubePublicScout:
             for query in queries:
                 try:
                     response = await client.get("https://www.youtube.com/results", params={
-                        "search_query": query, "sp": "EgIQCQ%3D%3D", "hl": "ru", "gl": "RU",
+                        "search_query": query, "sp": YOUTUBE_SHORTS_FILTER_PARAM, "hl": "ru", "gl": "RU",
                     })
                     response.raise_for_status()
                 except httpx.HTTPError:
