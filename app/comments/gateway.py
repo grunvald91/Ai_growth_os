@@ -47,7 +47,18 @@ class CommentGateway:
             raise PlatformError("Некорректный токен Telegram")
         return f"https://api.telegram.org/bot{token}/{method}"
 
+    def adapter(self, platform):
+        if platform == "threads":
+            from app.comments.threads import ThreadsAdapter
+            return ThreadsAdapter(self)
+        if platform in {"vk", "vk_video"}:
+            from app.comments.vk import VKAdapter
+            return VKAdapter(self, platform)
+        return None
+
     async def check(self, platform, account_id, token):
+        if adapter := self.adapter(platform):
+            return await adapter.check(account_id, token)
         if platform == "youtube":
             data = await self.request("GET", "https://www.googleapis.com/youtube/v3/channels", token,
                 params={"part": "snippet", "mine": "true", "maxResults": 50})
@@ -87,6 +98,8 @@ class CommentGateway:
 
     async def fetch(self, channel, token):
         """Bounded, cursor-aware batches; caller persists cursor with imported rows."""
+        if adapter := self.adapter(channel.platform):
+            return await adapter.fetch(channel, token)
         if channel.platform == "youtube":
             params = {"part": "snippet", "allThreadsRelatedToChannelId": channel.account_id,
                       "order": "time", "maxResults": 100, "textFormat": "plainText"}
@@ -141,6 +154,8 @@ class CommentGateway:
         raise PlatformError("Ручной режим: добавьте комментарий самостоятельно")
 
     async def send(self, channel, token, comment, text):
+        if adapter := self.adapter(channel.platform):
+            return await adapter.send(channel, token, comment, text)
         if channel.platform == "youtube":
             # Fetch native parent again and bind it to the owned channel.
             check = await self.request("GET", "https://www.googleapis.com/youtube/v3/comments", token,

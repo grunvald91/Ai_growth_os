@@ -9,6 +9,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.comments.platforms import reply_limit
 from app.comments.contracts import AgentSettings, CommentInput, ConnectInput, ReplyDraft
 from app.comments.gateway import CommentGateway
 from app.comments.models import BusinessComment, CommentChannel
@@ -214,7 +215,8 @@ class CommentService:
             response = await self.llm.generate(LLMRequest(system_prompt=SYSTEM_PROMPT, model=self.settings.llm_model,
                 max_tokens=1800, response_schema=ReplyDraft.model_json_schema(),
                 messages=[LLMMessage(role="user", content=json.dumps({"facts": facts,
-                    "settings": config.model_dump(exclude={"facts"}), "untrusted_comment": comment.text,
+                    "settings": {**config.model_dump(exclude={"facts"}), "max_length": reply_limit(comment.platform, config.max_length)},
+                    "platform": comment.platform, "untrusted_comment": comment.text,
                     "untrusted_post_context": comment.post_text}, ensure_ascii=False))]))
             if response.usage:
                 self.db.add(CostRecord(product_id=product_id, agent_run_id=run.id, category="llm",
@@ -225,7 +227,7 @@ class CommentService:
             known_ids = {f["id"] for f in facts}
             if set(result.used_fact_ids) - known_ids:
                 raise ValueError("AI указал неизвестные источники фактов")
-            if len(result.reply) > config.max_length:
+            if len(result.reply) > reply_limit(comment.platform, config.max_length):
                 raise ValueError("Ответ превышает выбранную длину. Повторите генерацию.")
             sensitive = re.search(r"(?i)возврат|верните|жалоб|суд|обман|мошенн|refund|lawsuit|complaint", comment.text)
             if sensitive or result.intent == "complaint" or result.missing_information or not result.used_fact_ids:
@@ -282,7 +284,7 @@ class CommentService:
         data = json.loads(original.content)
         if data["profile_digest"] != profile_digest or data["settings_digest"] != digest(config.model_dump()) or data.get("channel_revision") != channel.revision:
             raise ValueError("Данные бизнеса или подключение изменились. Подготовьте новый ответ.")
-        if not text.strip() or len(text) > config.max_length:
+        if not text.strip() or len(text) > reply_limit(comment.platform, config.max_length):
             raise ValueError("Проверьте длину и текст ответа")
         if data["action"] == "skip":
             raise ValueError("Для пропуска отправка недоступна")

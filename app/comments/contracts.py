@@ -1,7 +1,7 @@
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-Platform = Literal["youtube", "telegram", "instagram", "facebook", "vk", "tiktok", "dzen", "vc_ru", "tenchat", "own_site"]
+Platform = Literal["youtube", "telegram", "instagram", "threads", "facebook", "vk", "vk_video", "tiktok", "dzen", "vc_ru", "tenchat", "own_site"]
 
 
 class Strict(BaseModel):
@@ -32,7 +32,7 @@ class CommentInput(Strict):
 
 
 class ConnectInput(Strict):
-    platform: Literal["youtube", "telegram", "instagram"]
+    platform: Literal["youtube", "telegram", "instagram", "threads", "vk", "vk_video"]
     account_id: str = Field(min_length=1, max_length=200)
     token: SecretStr
 

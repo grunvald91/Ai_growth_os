@@ -66,8 +66,35 @@ successful real platform check. Platform account access must still be authorized
   Third-party accounts require the relevant Meta access/App Review. DMs are a
   separate API capability and are not sent.
   [Meta's official collection](https://www.postman.com/meta/instagram/folder/6raa77c/instagram-api-with-instagram-login).
-- **Facebook / VK:** show their own setup guidance and documentation; live adapters
-  are not enabled. Manually paste comments and copy the approved reply.
+- **Threads:** a separate Meta Threads application and owner access token with
+  `threads_basic`, `threads_content_publish`, `threads_read_replies` and
+  `threads_manage_replies`. Instagram credentials cannot replace this connection.
+  Imports the flat conversation of owned posts, including nested replies, with
+  persistent pagination and excludes the owner's responses. Replies are limited
+  to 500 characters in generation, editing and sending. The adapter rechecks the
+  token owner, native reply's root and root post owner, creates a TEXT reply
+  container, then publishes it after explicit owner approval. Third-party access
+  may require Meta App Review. Reconnect when the token expires.
+  [Meta's official collection](https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api).
+- **VK:** community wall comments, using the positive numeric community ID and a
+  **user** OAuth token with `wall` and `groups` permissions. The user must be a
+  community editor or administrator. Community tokens cannot replace the user
+  token for the read methods used here. Imports own wall posts and all comment
+  threads in bounded batches; replies use `wall.createComment`, numeric community
+  `from_group` and the approved comment's stable `guid`.
+- **VK Видео:** a separate connection for community-owned videos with a user token
+  with `video` and `groups` permissions. Saved videos owned by other accounts are
+  excluded. Imports video comment threads; replies use `video.createComment`,
+  boolean `from_group=1` and a stable `guid`. Personal videos and VK Clips are not
+  covered. Both VK adapters verify manager role, object ownership and native
+  comment before publishing, and namespace inbound IDs by owner/object/comment.
+  API version 5.199; OAuth availability and publishing depend on the app's granted
+  access and the community's comment settings.
+  [Wall reply](https://dev.vk.com/ru/method/wall.createComment),
+  [video reply](https://dev.vk.com/ru/method/video.createComment),
+  [official method schemas](https://github.com/VKCOM/vk-api-schema).
+- **Facebook:** shows setup guidance and documentation; the live adapter is not
+  enabled. Manually paste comments and copy the approved reply.
 - **TikTok:** Display API and Login Kit do not provide comment-reply publishing.
   Do not claim an automatic connection through them. Separate approved Business
   API access would need an additional adapter. Current mode is manual drafts.

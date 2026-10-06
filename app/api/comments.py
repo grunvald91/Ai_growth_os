@@ -13,7 +13,7 @@ from app.api.content_studio import esc, studio_page_shell
 from app.api.comments_design import COMMENTS_CSS, COMMENTS_JS
 from app.comments.contracts import AgentSettings, CommentInput, ConnectInput, ReplyEdit
 from app.comments.models import BusinessComment, CommentChannel
-from app.comments.platforms import PLATFORMS
+from app.comments.platforms import PLATFORMS, reply_limit
 from app.comments.service import CommentService
 from app.core.config import get_settings
 from app.core.composition import build_llm_provider
@@ -155,7 +155,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
             reply_html = ''
             if record:
                 copy_id = f'c-reply-{comment.id}'
-                reply_html = f'<label>Ответ агента<textarea id="{copy_id}" rows="4" maxlength="{config.max_length}" {"readonly" if terminal else ""}>{esc(reply.get("reply", ""))}</textarea></label><p class="c-reason">{esc(reply.get("reason", ""))}</p>'
+                reply_html = f'<label>Ответ агента<textarea id="{copy_id}" rows="4" maxlength="{reply_limit(comment.platform, config.max_length)}" {"readonly" if terminal else ""}>{esc(reply.get("reply", ""))}</textarea></label><p class="c-reason">{esc(reply.get("reason", ""))}</p>'
                 missing = reply.get("missing_information", [])
                 if missing:
                     reply_html += f'<p class="c-warning">Нужно уточнить: {esc("; ".join(missing))}</p>'

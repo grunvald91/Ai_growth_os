@@ -327,3 +327,184 @@ async def test_youtube_native_parent_ownership_checked_before_write():
         with pytest.raises(PlatformError, match="другому каналу"):
             await gateway.send(channel, "token", comment, "Answer")
     assert len(requests) == 1 and requests[0].method == "GET"
+
+
+def mock_gateway(responses):
+    """Check exact native method order, bodies and cursor inputs without network."""
+    from collections import deque
+    pending = deque(responses)
+    seen = []
+    def handler(request):
+        assert pending, f"Unexpected call: {request.url.path}"
+        path, payload = pending.popleft()
+        assert request.url.path.endswith(path)
+        seen.append(request)
+        return httpx.Response(200, json=payload)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return client, CommentGateway(client=client), seen, pending
+
+
+@pytest.mark.asyncio
+async def test_threads_connect_binds_token_to_account_and_requires_proxy():
+    with pytest.raises(PlatformError, match="зарубежный сервер"):
+        await CommentGateway().check("threads", "42", "secret")
+    client, gateway, seen, pending = mock_gateway([("/me", {"id": "99"})])
+    async with client:
+        with pytest.raises(PlatformError, match="другому"):
+            await gateway.check("threads", "42", "secret")
+    assert not pending and len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_threads_conversation_nested_replies_and_pagination():
+    from types import SimpleNamespace
+    client, gateway, seen, pending = mock_gateway([
+        ("/42/threads", {"data": [{"id": "10", "text": "Наш сервис"}]}),
+        ("/10/conversation", {"data": [
+            {"id": "11", "text": "Цена?", "root_post": {"id": "10"}},
+            {"id": "12", "text": "Наш ответ", "root_post": {"id": "10"}, "is_reply_owned_by_me": True}],
+            "paging": {"next": "https://untrusted.invalid/secret", "cursors": {"after": "page2"}}}),
+        ("/10/conversation", {"data": [{"id": "13", "text": "Уточнение", "root_post": {"id": "10"}}]}),
+    ])
+    channel = SimpleNamespace(platform="threads", account_id="42", cursor={})
+    async with client:
+        rows, channel.cursor = await gateway.fetch(channel, "secret")
+        assert [c["external_id"] for c in rows] == ["11"]
+        rows, channel.cursor = await gateway.fetch(channel, "secret")
+    assert rows[0]["external_id"] == "13" and channel.cursor == {}
+    assert seen[-1].url.params["after"] == "page2" and not pending
+    assert all(r.url.host == "graph.threads.net" for r in seen)
+
+
+@pytest.mark.asyncio
+async def test_threads_send_rechecks_root_and_publishes_exact_approved_text():
+    from types import SimpleNamespace
+    from urllib.parse import parse_qs
+    channel = SimpleNamespace(platform="threads", account_id="42")
+    comment = SimpleNamespace(external_id="11", target={"root_post_id": "10"})
+    client, gateway, seen, pending = mock_gateway([
+        ("/me", {"id": "42"}), ("/11", {"id": "11", "root_post": {"id": "10"}}),
+        ("/10", {"id": "10", "owner": {"id": "42"}}), ("/me/threads", {"id": "container"}),
+        ("/me/threads_publish", {"id": "published"}),
+    ])
+    async with client:
+        with pytest.raises(PlatformError, match="500"):
+            await gateway.send(channel, "secret", comment, "x" * 501)
+        assert not seen
+        assert await gateway.send(channel, "secret", comment, "Спасибо! Какой тариф ищете?") == "published"
+    assert parse_qs(seen[-2].content.decode())["reply_to_id"] == ["11"]
+    assert parse_qs(seen[-1].content.decode()) == {"creation_id": ["container"]}
+    assert not pending
+
+
+@pytest.mark.asyncio
+async def test_threads_wrong_root_owner_never_creates_container():
+    from types import SimpleNamespace
+    client, gateway, seen, _ = mock_gateway([
+        ("/me", {"id": "42"}), ("/11", {"id": "11", "root_post": {"id": "10"}}),
+        ("/10", {"id": "10", "owner": {"id": "99"}}),
+    ])
+    async with client:
+        with pytest.raises(PlatformError, match="другому"):
+            await gateway.send(SimpleNamespace(platform="threads", account_id="42"), "secret",
+                               SimpleNamespace(external_id="11", target={"root_post_id": "10"}), "Ответ")
+    assert all(r.method == "GET" for r in seen)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform", ["vk", "vk_video"])
+async def test_vk_connections_require_manager_and_foreign_proxy(platform):
+    with pytest.raises(PlatformError, match="зарубежный сервер"):
+        await CommentGateway().check(platform, "42", "secret")
+    client, gateway, _, _ = mock_gateway([("groups.getById", {"response": {"groups": [{"id": 42, "is_admin": 0}]}})])
+    async with client:
+        with pytest.raises(PlatformError, match="пользовательский токен"):
+            await gateway.check(platform, "42", "secret")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform,namespace,object_key", [("vk", "wall", "post_id"), ("vk_video", "video", "video_id")])
+async def test_vk_import_owns_objects_and_reads_threads_beyond_previews(platform, namespace, object_key):
+    from types import SimpleNamespace
+    from urllib.parse import parse_qs
+    client, gateway, seen, pending = mock_gateway([
+        (namespace + ".get", {"response": {"count": 2, "items": [
+            {"id": 10, "owner_id": -42, "text": "Пост", "description": "Видео"}, {"id": 20, "owner_id": -99}]}}),
+        (namespace + ".getComments", {"response": {"count": 13, "current_level_count": 1, "items": [
+            {"id": 100, "from_id": -42, "text": "Ответ бизнеса", "thread": {"count": 12}}]}}),
+        (namespace + ".getComments", {"response": {"count": 12, "current_level_count": 12,
+            "items": [{"id": i, "from_id": 5, "text": "Вопрос"} for i in range(101, 113)]}}),
+    ])
+    channel = SimpleNamespace(platform=platform, account_id="42", cursor={})
+    async with client:
+        rows, channel.cursor = await gateway.fetch(channel, "secret")
+        assert rows == []  # An owner's root still has customer replies to import.
+        rows, channel.cursor = await gateway.fetch(channel, "secret")
+    assert len(rows) == 12 and channel.cursor == {} and not pending
+    assert rows[-1]["external_id"] == "-42_10_112" and rows[-1]["target"][object_key] == 10
+    assert parse_qs(seen[-1].content.decode())["comment_id"] == ["100"]
+    assert all(r.url.host == "api.vk.com" and "access_token" not in r.url.params for r in seen)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform,namespace,object_key,from_group", [
+    ("vk", "wall", "post_id", "42"), ("vk_video", "video", "video_id", "1")])
+async def test_vk_reply_community_identity_and_stable_guid(platform, namespace, object_key, from_group):
+    from types import SimpleNamespace
+    from urllib.parse import parse_qs
+    client, gateway, seen, pending = mock_gateway([
+        ("groups.getById", {"response": {"groups": [{"id": 42, "is_admin": 1, "admin_level": 2}]}}),
+        ("video.get" if platform == "vk_video" else "wall.getById", {"response": {"items": [{"id": 10, "owner_id": -42}]}}),
+        ("video.getComments" if platform == "vk_video" else "wall.getComment", {"response": {"items": [{"id": 100, object_key: 10}]}}),
+        (namespace + ".createComment", {"response": 101 if platform == "vk_video" else {"comment_id": 101}}),
+    ])
+    comment = SimpleNamespace(id=uuid4(), external_id="-42_10_100", target={"owner_id": -42, object_key: 10, "comment_id": 100})
+    async with client:
+        assert await gateway.send(SimpleNamespace(platform=platform, account_id="42"), "secret", comment, "Одобренный ответ") == "101"
+    body = parse_qs(seen[-1].content.decode())
+    assert body["from_group"] == [from_group] and body["guid"] == [str(comment.id)]
+    assert body["reply_to_comment"] == ["100"] and body["message"] == ["Одобренный ответ"] and not pending
+
+
+@pytest.mark.asyncio
+async def test_threads_effective_limit_is_used_by_agent_and_before_delivery(ctx):
+    db, product, svc, provider, gateway = ctx
+    svc.configure(product.id, AgentSettings(max_length=1500))
+    channel = await svc.connect(product.id, ConnectInput(platform="threads", account_id="42", token="secret"))
+    comment = BusinessComment(product_id=product.id, platform="threads", external_id="11", text="Цена?",
+                              source="platform", target={"channel_id": str(channel.id), "root_post_id": "10"})
+    db.add(comment); db.commit()
+    await svc.draft(product.id, comment.id)
+    assert json.loads(provider.last_request.messages[0].content)["settings"]["max_length"] == 500
+    with pytest.raises(ValueError, match="длину"):
+        await svc.send(product.id, comment.id, "x" * 501)
+    assert not gateway.sent and comment.status == "draft"
+    payload = json.loads(provider.response.content); payload["reply"] = "x" * 501
+    provider.response.content = json.dumps(payload)
+    with pytest.raises(ValueError, match="корректный ответ"):
+        await svc.draft(product.id, comment.id)
+
+
+def test_new_platforms_have_separate_live_cards_and_accept_connections(ctx):
+    _, product, _, _, _ = ctx
+    html = client_for(ctx).get(f"/studio/products/{product.id}/comments?tab=platforms").text
+    for platform in ("threads", "vk", "vk_video"):
+        assert ConnectInput(platform=platform, account_id="42", token="secret").platform == platform
+        assert f'data-platform="{platform}"' in html
+    assert "threads_manage_replies" in html and "VK Видео" in html and "video.createComment" in html
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform,namespace,object_key", [("vk", "wall", "post_id"), ("vk_video", "video", "video_id")])
+async def test_vk_wrong_native_object_never_publishes(platform, namespace, object_key):
+    from types import SimpleNamespace
+    client, gateway, seen, _ = mock_gateway([
+        ("groups.getById", {"response": {"groups": [{"id": 42, "is_admin": 1, "admin_level": 3}]}}),
+        ("video.get" if platform == "vk_video" else "wall.getById", {"response": {"items": [{"id": 10, "owner_id": -99}]}}),
+    ])
+    async with client:
+        with pytest.raises(PlatformError, match="другому"):
+            await gateway.send(SimpleNamespace(platform=platform, account_id="42"), "secret",
+                               SimpleNamespace(id=uuid4(), external_id="-42_10_100",
+                                               target={"owner_id": -42, object_key: 10, "comment_id": 100}), "Ответ")
+    assert len(seen) == 2 and all("createComment" not in r.url.path for r in seen)
