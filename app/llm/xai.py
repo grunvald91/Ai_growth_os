@@ -74,7 +74,14 @@ class XAIProvider:
         ):
             headers["x-grok-conv-id"] = conversation_id[:200]
 
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
+        timeout = self._timeout
+        provider_timeout = request.metadata.get("provider_timeout_seconds")
+        if isinstance(provider_timeout, (int, float)):
+            seconds = float(provider_timeout)
+            if 5.0 <= seconds <= 600.0:
+                timeout = httpx.Timeout(seconds)
+
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=timeout) as client:
             response = None
             for attempt in range(len(_RETRY_DELAYS_SECONDS) + 1):
                 try:
@@ -87,6 +94,10 @@ class XAIProvider:
                         or attempt >= len(_RETRY_DELAYS_SECONDS)
                     ):
                         raise
+                except httpx.TimeoutException:
+                    # A slow model should fail over to the next configured ClaudeHub model
+                    # instead of spending the whole stage budget retrying the same model.
+                    raise
                 except httpx.TransportError:
                     if attempt >= len(_RETRY_DELAYS_SECONDS):
                         raise
