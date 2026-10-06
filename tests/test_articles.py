@@ -466,6 +466,81 @@ def test_platform_writer_accepts_direct_array_payload():
     assert {item.channel for item in parsed.texts} == {"dzen", "tenchat", "vc_ru", "telegram", "faq", "founder"}
 
 
+def test_platform_writer_accepts_alias_wrapper():
+    from app.content.contracts import ReadyTextSet
+    from app.workflows.article_production import _parse_stage_payload
+
+    def body(seed, size):
+        text = (seed + " ") * 140
+        return text[:size]
+
+    rows = [
+        {"channel": "dzen", "title": "Дзен", "body": body("Ночная заявка и путь клиента без лишней переписки.", 2300), "editorial_checks": ["Проверено"]},
+        {"channel": "tenchat", "title": "TenChat", "body": body("Рабочий процесс записи и ручные решения администратора.", 900), "editorial_checks": ["Проверено"]},
+        {"channel": "vc_ru", "title": "vc.ru", "body": body("Системный разбор клиентского пути, статусов и контроля.", 2300), "editorial_checks": ["Проверено"]},
+        {"channel": "telegram", "title": "Telegram", "body": body("Короткий пост про запись без пинг-понга сообщений.", 800), "editorial_checks": ["Проверено"]},
+        {"channel": "faq", "title": "FAQ", "body": body("Вопросы и ответы про свободный слот и подтверждение.", 750), "editorial_checks": ["Проверено"]},
+        {"channel": "founder", "title": "Founder", "body": body("Продуктовая заметка про одну ручную петлю в записи.", 850), "editorial_checks": ["Проверено"]},
+    ]
+    parsed = _parse_stage_payload(
+        ReadyTextSet,
+        json.dumps({"adaptations": rows}, ensure_ascii=False),
+    )
+    assert len(parsed.texts) == 6
+
+
+@pytest.mark.asyncio
+async def test_ready_assets_complete_when_video_visual_and_platform_use_fallbacks(db, product, tmp_path):
+    outputs = valid_outputs()
+    outputs[7] = []          # video_director -> deterministic fallback
+    outputs[9] = {}          # visual_designer -> deterministic fallback
+
+    youtube = json.loads(json.dumps(valid_outputs()[7], ensure_ascii=False))
+    youtube["production_brief"]["target_platform"] = "youtube_shorts"
+    youtube["production_brief"]["duration_seconds"] = 30
+    youtube["production_brief"]["shots"][2]["end_second"] = 30
+
+    reels = json.loads(json.dumps(youtube, ensure_ascii=False))
+    reels["production_brief"]["target_platform"] = "instagram_reels"
+    reels["hook"] = "Запись в директе: сколько ручных шагов осталось?"
+    reels["production_brief"]["hook_variants"] = [
+        "Запись в директе: сколько ручных шагов?",
+        "Клиент хочет слот, а не переписку",
+    ]
+
+    outputs.extend([
+        {},       # platform_writer -> deterministic fallback
+        youtube,
+        reels,
+    ])
+    workflow, _, request = setup(
+        db, product, tmp_path, outputs,
+        produce_ready_assets=True,
+    )
+
+    result = await workflow.run(request)
+
+    assert result.status == "completed", result.error
+    kinds = [db.get(Artifact, aid).kind for aid in result.artifact_ids]
+    assert kinds.count("article") == 1
+    assert kinds.count("channel_text") == 6
+    assert kinds.count("video_script") == 2
+    assert kinds.count("content_distribution") == 1
+
+    checkpoints = {
+        json.loads(a.content)["stage"]: json.loads(a.content)
+        for a in db.scalars(select(Artifact).where(
+            Artifact.task_id == result.task_id,
+            Artifact.kind == "content_stage_output",
+        ))
+    }
+    assert checkpoints["video_director"]["fallback_used"] is True
+    assert checkpoints["visual_designer"]["fallback_used"] is True
+    assert checkpoints["platform_writer"]["fallback_used"] is True
+    assert checkpoints["youtube_shorts_director"]["fallback_used"] is False
+    assert checkpoints["instagram_reels_director"]["fallback_used"] is False
+
+
 def test_platform_writer_safe_fallback_builds_six_publishable_texts():
     from app.content.contracts import ReadyTextSet
     from app.workflows.article_production import _platform_text_fallback_payload
