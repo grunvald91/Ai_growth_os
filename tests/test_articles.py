@@ -445,6 +445,57 @@ async def test_creative_specialists_are_separate_calls(db, product, tmp_path):
     assert len(list(db.scalars(select(CostRecord)))) == 10
 
 
+def test_platform_writer_accepts_direct_array_payload():
+    from app.content.contracts import ReadyTextSet
+    from app.workflows.article_production import _parse_stage_payload
+
+    def body(seed, size):
+        text = (seed + " ") * 120
+        return text[:size]
+
+    rows = [
+        {"channel": "dzen", "title": "Дзен", "body": body("История ночной заявки и путь клиента через услугу, мастера и слот.", 2300), "editorial_checks": ["Проверено"]},
+        {"channel": "tenchat", "title": "TenChat", "body": body("Профессиональный чек-лист ручных решений администратора и точек автоматизации.", 900), "editorial_checks": ["Проверено"]},
+        {"channel": "vc_ru", "title": "vc.ru", "body": body("Системный разбор входа, развилок, статусов, контроля и измерения клиентского маршрута.", 2300), "editorial_checks": ["Проверено"]},
+        {"channel": "telegram", "title": "Telegram", "body": body("Короткий мобильный пост про запись без пинг-понга сообщений и одно понятное действие.", 800), "editorial_checks": ["Проверено"]},
+        {"channel": "faq", "title": "FAQ", "body": body("Вопросы и ответы о мессенджерах, свободных окнах, подтверждении и роли администратора.", 750), "editorial_checks": ["Проверено"]},
+        {"channel": "founder", "title": "Founder", "body": body("Продуктовая заметка о том, какую ручную петлю стоит убрать и какой контроль оставить владельцу.", 850), "editorial_checks": ["Проверено"]},
+    ]
+
+    parsed = _parse_stage_payload(ReadyTextSet, json.dumps(rows, ensure_ascii=False))
+    assert {item.channel for item in parsed.texts} == {"dzen", "tenchat", "vc_ru", "telegram", "faq", "founder"}
+
+
+def test_platform_writer_safe_fallback_builds_six_publishable_texts():
+    from app.content.contracts import ReadyTextSet
+    from app.workflows.article_production import _platform_text_fallback_payload
+
+    stage_inputs = {
+        "prior_stage_outputs": {
+            "marketing_editor": {
+                "title": "Почему ручная запись превращается в ночную смену",
+                "lead": "Клиент пишет поздно вечером, а ответ получает только утром.",
+                "sections": [
+                    {"heading": "Ночной запрос", "body": "Клиент хочет выбрать услугу и время сразу. " * 30},
+                    {"heading": "Ручной пинг-понг", "body": "Администратор уточняет услугу, специалиста и слот сообщениями. " * 30},
+                    {"heading": "Понятный маршрут", "body": "Последовательный путь уменьшает число ручных уточнений и делает следующий шаг ясным. " * 30},
+                    {"heading": "Контроль", "body": "Человеку остаются решения, где действительно нужен контроль, а повторяемые шаги стандартизируются. " * 30},
+                ],
+                "closing": "Начните с одного сценария и сравните путь клиента до и после.",
+            },
+            "conversion_editor": {
+                "cta": "Посмотрите демо ServGo и сравните со своей записью."
+            },
+        }
+    }
+
+    parsed = ReadyTextSet.model_validate(_platform_text_fallback_payload(stage_inputs))
+    assert len(parsed.texts) == 6
+    assert all(len(item.body) >= 500 for item in parsed.texts)
+    assert all(len(item.body) >= 2000 for item in parsed.texts if item.channel in {"dzen", "vc_ru"})
+    assert any("CRM" in item.body or "квест" in item.body for item in parsed.texts)
+
+
 @pytest.mark.asyncio
 async def test_creative_stage_accepts_singleton_object_wrapper(db, product, tmp_path):
     outputs = valid_outputs()
