@@ -70,7 +70,7 @@ def test_studio_lists_products_and_renders_calendar(studio_db):
         assert client.get("/studio").status_code==200
         response=client.get(f"/studio/products/{product.id}")
         assert response.status_code==200
-        assert "Content Studio" in response.text
+        assert "Growth Studio" in response.text\n        assert "Контент-календарь" in response.text\n        assert "Подготовленные материалы" in response.text\n        assert "mobile-nav" in response.text
         assert "Instagram Reels" in response.text
         assert "Тема один" in response.text
         assert response.headers["cache-control"]=="no-store"
@@ -154,8 +154,39 @@ def test_studio_library_includes_content_outside_current_plan(studio_db):
     try:
         response=client.get(f"/studio/products/{product.id}")
         assert response.status_code==200
-        assert "Библиотека всех материалов" in response.text
+        assert "Подготовленные материалы" in response.text
         assert "Внеплановая статья" in response.text
         assert "Полный внеплановый материал" in response.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_studio_assets_expose_servgo_design_system(studio_db):
+    client=client_for(studio_db)
+    try:
+        css=client.get("/studio/assets/studio.css")
+        js=client.get("/studio/assets/studio.js")
+        assert css.status_code==200
+        assert js.status_code==200
+        assert "--sg-blue:#0b7cff" in css.text
+        assert ".mobile-nav" in css.text
+        assert ".material-grid" in css.text
+        assert "data-open-dialog" in js.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_studio_root_redirects_to_servgo_dashboard(studio_db):
+    db=studio_db
+    product=Product(name="ServGo",slug="servgo")
+    db.add(product);db.commit()
+    client=client_for(db)
+    try:
+        response=client.get("/studio",follow_redirects=False)
+        assert response.status_code==302
+        assert response.headers["location"]==f"/studio/products/{product.id}"
+        chooser=client.get("/studio?choose=true")
+        assert chooser.status_code==200
+        assert "Выберите проект" in chooser.text
     finally:
         app.dependency_overrides.clear()
