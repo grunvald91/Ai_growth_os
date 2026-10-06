@@ -326,7 +326,7 @@ jobs:
           from app.db.session import SessionLocal
           from app.models.domain import Product
           from app.content.service import queue_content
-          req=json.load(open('/app/.github/deploy-request.json', encoding='utf-8'))
+          req=json.load(open('.github/deploy-request.json', encoding='utf-8'))
           with SessionLocal() as db:
               products=list(db.scalars(select(Product).order_by(Product.name)))
               needle=req['product_name_contains'].casefold()
