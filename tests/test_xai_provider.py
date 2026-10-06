@@ -91,6 +91,21 @@ async def test_xai_provider_maps_request_and_usage(monkeypatch):
     assert response.usage.output_tokens == 7
     assert response.stop_reason == "end_turn"
 
+@pytest.mark.asyncio
+async def test_xai_provider_allows_bounded_request_timeout(monkeypatch):
+    monkeypatch.setattr("app.llm.xai.httpx.AsyncClient", FakeAsyncClient)
+    provider = XAIProvider(api_key="xai-test-secret", timeout_seconds=300)
+
+    await provider.generate(
+        LLMRequest(
+            messages=[LLMMessage(role="user", content="hello")],
+            metadata={"provider_timeout_seconds": 42},
+        )
+    )
+
+    assert FakeAsyncClient.last.timeout.read == 42
+
+
 
 def test_composition_selects_xai_and_requires_key():
     settings = Settings(
@@ -185,6 +200,32 @@ async def test_xai_provider_retries_transient_gateway_failures(monkeypatch):
     assert response.content == '{"ok":true}'
     assert SequenceAsyncClient.calls == 3
     assert sleeps == [1.0, 3.0]
+
+
+@pytest.mark.asyncio
+async def test_xai_provider_does_not_retry_model_timeout(monkeypatch):
+    SequenceAsyncClient.calls = 0
+    request = httpx.Request("POST", "https://api.example/v1/chat/completions")
+    SequenceAsyncClient.responses = [httpx.ReadTimeout("model too slow", request=request)]
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("app.llm.xai.httpx.AsyncClient", SequenceAsyncClient)
+    monkeypatch.setattr("app.llm.xai.asyncio.sleep", fake_sleep)
+
+    provider = XAIProvider(api_key="secret")
+    with pytest.raises(httpx.ReadTimeout):
+        await provider.generate(
+            LLMRequest(
+                messages=[LLMMessage(role="user", content="hello")],
+                metadata={"provider_timeout_seconds": 30},
+            )
+        )
+
+    assert SequenceAsyncClient.calls == 1
+    assert sleeps == []
 
 
 @pytest.mark.asyncio
