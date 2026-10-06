@@ -1,0 +1,90 @@
+name: Inspect existing marketing task
+
+on:
+  push:
+    branches:
+      - inspect/prod-marketing-quality-20261006
+    paths:
+      - '.github/workflows/inspect-existing-marketing-task.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      TASK_ID: c500ae8d-48fe-4ffa-a491-fc27b894eed5
+
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Inspect completed stage outputs only
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "TASK_ID='$TASK_ID' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/ai_growth_os/current
+          docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - "$TASK_ID" <<'PY'
+          import json, sys
+          from difflib import SequenceMatcher
+          from uuid import UUID
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Artifact
+
+          tid=UUID(sys.argv[1])
+          with SessionLocal() as db:
+              rows=list(db.scalars(select(Artifact).where(
+                  Artifact.task_id==tid,
+                  Artifact.kind=="content_stage_output"
+              ).order_by(Artifact.created_at, Artifact.id)))
+              stages={}
+              for row in rows:
+                  payload=json.loads(row.content)
+                  stages[payload["stage"]]=payload["output"]
+
+              strategy=stages["content_strategist"]
+              seo=stages["seo_editor"]
+              def norm(v): return " ".join(str(v or "").casefold().split())
+              def ratio(a,b): return round(SequenceMatcher(None,norm(a),norm(b)).ratio(),3)
+
+              derivatives=[]
+              derivatives.extend(stages["repurposing_editor"]["derivatives"])
+              derivatives.extend([
+                  stages["video_director"],
+                  stages["story_director"],
+                  stages["visual_designer"],
+              ])
+              diagnostics=[]
+              for d in derivatives:
+                  diagnostics.append({
+                      "kind": d["kind"],
+                      "hook_ratio": ratio(d["hook"], seo["hook"]),
+                      "framing_ratio": ratio(d["framing"], strategy["angle"]),
+                      "outline_ratio": ratio(" ".join(d["outline"]), " ".join(seo["outline"])),
+                      "hook": d["hook"],
+                      "framing": d["framing"],
+                  })
+              print("DIAGNOSTICS_START")
+              print(json.dumps({
+                  "strategy_angle":strategy["angle"],
+                  "seo_hook":seo["hook"],
+                  "seo_outline":seo["outline"],
+                  "derivatives":diagnostics,
+                  "marketing_fact_ids":[x["source_id"] for x in stages["marketing_editor"].get("fact_renderings",[])],
+              },ensure_ascii=False,indent=2))
+              print("DIAGNOSTICS_END")
+
+              for name in ("marketing_editor","platform_writer","youtube_shorts_director","instagram_reels_director","video_director","visual_designer"):
+                  print("STAGE_OUTPUT_START="+name)
+                  print(json.dumps(stages[name],ensure_ascii=False,indent=2)[:30000])
+                  print("STAGE_OUTPUT_END="+name)
+          PY
+          REMOTE
