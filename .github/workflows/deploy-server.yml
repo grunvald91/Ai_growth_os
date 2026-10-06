@@ -320,13 +320,14 @@ jobs:
           set -euo pipefail
           cd "$RELEASE"
           dc() { docker compose --env-file "$REMOTE_ROOT/.env" -p ai-growth-os -f docker-compose.prod.yml "$@"; }
-          dc exec -T api python - <<'PY'
+          dc exec -T -e "AI_GROWTH_CONTENT_REQUEST=$(cat .github/deploy-request.json)" api python - <<'PY'
           import json
+          import os
           from sqlalchemy import select
           from app.db.session import SessionLocal
           from app.models.domain import Product
           from app.content.service import queue_content
-          req=json.load(open('.github/deploy-request.json', encoding='utf-8'))
+          req=json.loads(os.environ['AI_GROWTH_CONTENT_REQUEST'])
           with SessionLocal() as db:
               products=list(db.scalars(select(Product).order_by(Product.name)))
               needle=req['product_name_contains'].casefold()

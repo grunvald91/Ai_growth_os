@@ -288,9 +288,9 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
         "human_editor": 8000,
         "marketing_editor": 8000,
         "repurposing_editor": 8000,
-        "video_director": 5500,
-        "story_director": 4500,
-        "visual_designer": 4000,
+        "video_director": 4200,
+        "story_director": 4000,
+        "visual_designer": 3200,
     }
     writer_request = next(r for r in provider.requests if r.metadata["team_role"] == "article_writer")
     assert "claims" not in writer_request.response_schema["properties"]
@@ -319,7 +319,7 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'fake_claim', 'external_link', 'extra', 'wrong_kind', 'source_copy'])
+@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'fake_claim', 'external_link', 'extra', 'wrong_kind'])
 async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, tmp_path, mutation):
     outputs = valid_outputs()
     if mutation == 'malformed': outputs[0] = 'not json'
@@ -329,7 +329,6 @@ async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, 
     elif mutation == 'fake_claim': outputs[2]['claims'] = [dict(claim='Guaranteed growth', quote='Guaranteed growth', source_id='invented')]
     elif mutation == 'external_link': outputs[3]['landing_page']['destination'] = 'https://unverified.example/demo'
     elif mutation == 'extra': outputs[0]['verified_revenue'] = 1000000
-    elif mutation == 'source_copy': outputs[6]['derivatives'][0]['hook'] = outputs[1]['hook']
     elif mutation == 'wrong_kind': outputs[6]['derivatives'][0]['kind'] = 'telegram'
     workflow, _, request = setup(db, product, tmp_path, outputs)
     result = await workflow.run(request)
@@ -346,6 +345,19 @@ async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, 
         assert any(r.status == 'failed' for r in runs)
     else:
         assert all(r.status == 'completed' for r in runs)
+
+
+@pytest.mark.asyncio
+async def test_copied_source_hook_is_adapted_before_final_assembly(db, product, tmp_path):
+    outputs = valid_outputs()
+    source_hook = outputs[1]['hook']
+    outputs[6]['derivatives'][0]['hook'] = source_hook
+    workflow, _, request = setup(db, product, tmp_path, outputs)
+    result = await workflow.run(request)
+    assert result.status == 'completed', result.error
+    package = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    assert package.conversion.derivatives[0].hook != source_hook
+    assert list(db.scalars(select(ToolCall))) == list(db.scalars(select(Publication))) == []
 
 
 

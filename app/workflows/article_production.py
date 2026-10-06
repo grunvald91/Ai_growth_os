@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import re
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from pathlib import Path
@@ -262,6 +263,28 @@ def _ensure_derivative_source_adaptation(brief, *, strategy, seo):
     return type(brief).model_validate(data)
 
 
+def _normalize_ready_video_timeline(video: ShortVideoDerivativeDraft) -> ShortVideoDerivativeDraft:
+    """Fit validated scenes into a contiguous 30-second production timeline."""
+    data = video.model_dump(mode='json')
+    brief = data['production_brief']
+    shots = brief['shots']
+    durations = [shot['end_second'] - shot['start_second'] for shot in shots]
+    total = sum(durations)
+    elapsed = 0.0
+    for index, (shot, duration) in enumerate(zip(shots, durations)):
+        shot['start_second'] = elapsed
+        elapsed = 30.0 if index == len(shots) - 1 else round(elapsed + duration * 30 / total, 6)
+        shot['end_second'] = elapsed
+        for field in ('spoken_text', 'on_screen_text'):
+            if shot.get(field):
+                shot[field] = re.split(r'\bAvoid\s*:', shot[field], maxsplit=1, flags=re.IGNORECASE)[0].strip() or None
+    brief['duration_seconds'] = 30
+    brief['voiceover_or_dialogue_script'] = re.split(
+        r'\bAvoid\s*:', brief['voiceover_or_dialogue_script'], maxsplit=1, flags=re.IGNORECASE
+    )[0].strip()
+    return ShortVideoDerivativeDraft.model_validate(data)
+
+
 def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
     """Build six safe channel texts from the already validated marketing article."""
     prior = stage_inputs.get('prior_stage_outputs') or {}
@@ -322,7 +345,7 @@ def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
     vc = min_body(
         append_cta_once(
             f'{title}\n\nПроблема здесь не в самом мессенджере, а в архитектуре процесса. '
-            f'Разберём её по шагам и без магических обещаний.\n\n{source}\n\n'
+            f'Разберём её по шагам и без магических обещаний.\n\n{joined(list(reversed(range(len(sections)))))}\n\n'
             f'Практический вывод: автоматизировать стоит не «всё», а повторяющиеся точки выбора и ожидания. '
             f'Иначе получится очень быстрый хаос — тоже автоматизация, но не та, которой хочется хвастаться.'
         ),

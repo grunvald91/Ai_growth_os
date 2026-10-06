@@ -54,16 +54,23 @@ async def test_complete_factory_outputs_ready_texts_and_two_platform_video_brief
     assert not list(db.scalars(select(Artifact).where(Artifact.kind=='render_request')))
 
 @pytest.mark.asyncio
-async def test_factory_duplicate_channel_copy_fails_atomically(db,tmp_path):
+async def test_factory_duplicate_channel_copy_uses_distinct_fallback_texts(db,tmp_path):
     p=Product(name='P',slug='p');db.add(p);db.commit()
     outputs=ready_outputs();outputs[10]['texts'][1]['body']=outputs[10]['texts'][0]['body']
     result=await build_article_production(db,Settings(products_root=tmp_path),SequenceProvider(outputs)).run(
         ArticleProductionInput(product_id=p.id,topic='Test',produce_ready_assets=True))
-    assert result.status=='failed'
+    assert result.status=='completed', result.error
     checkpoints=list(db.scalars(select(Artifact).where(Artifact.kind=='content_stage_output')))
-    assert len(checkpoints)==10
+    assert len(checkpoints)==13
     assert result.checkpoint_artifact_ids==[a.id for a in checkpoints]
-    assert not list(db.scalars(select(Artifact).where(Artifact.kind=='article')))
+    platform = next(a for a in checkpoints if json.loads(a.content)['stage'] == 'platform_writer')
+    assert json.loads(platform.content)['fallback_used']
+    texts = list(db.scalars(select(Artifact).where(Artifact.kind=='channel_text')))
+    ReadyTextSet.model_validate({'texts': [
+        {key: value for key, value in json.loads(a.content).items() if key != 'article_id'}
+        for a in texts
+    ]})
+    assert list(db.scalars(select(ToolCall))) == list(db.scalars(select(Publication))) == []
 
 
 def test_queue_content_is_idempotent_and_distinct_from_outreach(db):
