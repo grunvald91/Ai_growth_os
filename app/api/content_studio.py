@@ -10,6 +10,7 @@ import json
 from collections import defaultdict
 from datetime import datetime
 from uuid import UUID
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -211,21 +212,29 @@ def brand_html() -> str:
     )
 
 
-def sidebar_html() -> str:
+def sidebar_html(product_id: UUID, active: str = "overview") -> str:
+    base = f"/studio/products/{product_id}"
+    def item(name: str, href: str, icon: str, label: str) -> str:
+        current = ' class="active"' if active == name else ""
+        return f'<a{current} href="{href}"><span class="nav-ico">{icon}</span>{label}</a>'
     return f"""
     <aside class="sidebar">
-      {brand_html()}
+      <a class="brand" href="{base}">
+        <span class="brand-mark">S</span>
+        <span><span class="brand-name">ServGo</span>
+        <span class="brand-sub">Больше порядка в вашем сервисе</span></span>
+      </a>
       <nav class="nav">
-        <a class="active" href="#overview"><span class="nav-ico">⌂</span>Обзор</a>
-        <a href="#plan"><span class="nav-ico">▣</span>Контент-план</a>
-        <a href="#materials"><span class="nav-ico">▤</span>Материалы</a>
-        <a href="#calendar"><span class="nav-ico">□</span>Календарь</a>
-        <a href="#analytics"><span class="nav-ico">⌁</span>Аналитика</a>
+        {item("overview", base, "⌂", "Обзор")}
+        {item("plan", base + "/plan", "▣", "Контент-план")}
+        {item("materials", base + "/materials", "▤", "Материалы")}
+        {item("calendar", base + "/calendar", "□", "Календарь")}
+        {item("analytics", base + "/analytics", "⌁", "Аналитика")}
       </nav>
       <div class="nav-label">Инструменты</div>
       <nav class="nav">
-        <a href="#materials"><span class="nav-ico">▱</span>Библиотека</a>
-        <a href="#plan"><span class="nav-ico">✦</span>Идеи контента</a>
+        {item("materials", base + "/materials", "▱", "Библиотека")}
+        <a href="{base}/plan#unknowns"><span class="nav-ico">✦</span>Идеи и неизвестные</a>
         <a href="/studio?choose=1"><span class="nav-ico">⇄</span>Проекты</a>
       </nav>
       <div class="sidebar-spacer"></div>
@@ -237,17 +246,19 @@ def sidebar_html() -> str:
     </aside>
     """
 
-
-def mobile_nav_html() -> str:
-    return """
+def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
+    base = f"/studio/products/{product_id}"
+    def item(name: str, href: str, icon: str, label: str) -> str:
+        current = ' class="active"' if active == name else ""
+        return f'<a{current} href="{href}"><span class="m-ico">{icon}</span>{label}</a>'
+    return f"""
     <nav class="mobile-nav">
-      <a class="active" href="#m-calendar"><span class="m-ico">⌂</span>Обзор</a>
-      <a href="#m-packages"><span class="m-ico">▣</span>План</a>
-      <a href="#m-materials"><span class="m-ico">▤</span>Материалы</a>
-      <a href="#m-calendar"><span class="m-ico">□</span>Календарь</a>
+      {item("overview", base, "⌂", "Обзор")}
+      {item("plan", base + "/plan", "▣", "План")}
+      {item("materials", base + "/materials", "▤", "Материалы")}
+      {item("calendar", base + "/calendar", "□", "Календарь")}
     </nav>
     """
-
 
 def asset_dialog(record: Artifact) -> str:
     value = parse_json(record)
@@ -741,7 +752,7 @@ def product_dashboard(db: Session, product: Product) -> str:
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
-  {sidebar_html()}
+  {sidebar_html(product.id)}
   <main class="main">
     <header class="topbar">
       <div>
@@ -791,7 +802,7 @@ def product_dashboard(db: Session, product: Product) -> str:
     </div>
     </div>
   </main>
-  {mobile_nav_html()}
+  {mobile_nav_html(product.id)}
 </div></div>
 {dialogs}
 <script src="/studio/assets/studio.js?v=3"></script>
