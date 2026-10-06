@@ -70,7 +70,10 @@ def test_studio_lists_products_and_renders_calendar(studio_db):
         assert client.get("/studio").status_code==200
         response=client.get(f"/studio/products/{product.id}")
         assert response.status_code==200
-        assert "Growth Studio" in response.text\n        assert "Контент-календарь" in response.text\n        assert "Подготовленные материалы" in response.text\n        assert "mobile-nav" in response.text
+        assert "Growth Studio" in response.text
+        assert "Контент-календарь" in response.text
+        assert "Подготовленные материалы" in response.text
+        assert "mobile-nav" in response.text
         assert "Instagram Reels" in response.text
         assert "Тема один" in response.text
         assert response.headers["cache-control"]=="no-store"
