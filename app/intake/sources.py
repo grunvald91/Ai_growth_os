@@ -224,8 +224,8 @@ class PublicWebsiteFetcher:
                     raw = response.read(MAX_WEB_BYTES + 1)
                     if len(raw) > MAX_WEB_BYTES:
                         raise IntakeError("Страница слишком большая.")
-                    charset_match = re.search(r"charset=([^;\\s]+)", content_type)
-                    charset = charset_match.group(1).strip('"\\'') if charset_match else "utf-8"
+                    charset_match = re.search("charset=([A-Za-z0-9._-]+)", content_type)
+                    charset = charset_match.group(1) if charset_match else "utf-8"
                     try:
                         text = raw.decode(charset, errors="replace")
                     except LookupError:
