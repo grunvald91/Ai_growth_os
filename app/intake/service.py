@@ -275,11 +275,20 @@ class CompanyIntakeService:
                 if self._state(task.id)["revision"] != state["revision"] or task.status not in {
                     TaskStatus.QUEUED, TaskStatus.WAITING_APPROVAL}:
                     raise IntakeError("Sources changed during extraction")
+                filtered_claims = []
                 for claim in extraction.claims:
                     source = sources.get(claim.source_id)
                     if source is None or source.source_type == "existing_profile" or (
                         claim.evidence_excerpt not in source.text or claim.field_path not in LEAF_PATHS):
                         raise IntakeError("Unsupported provenance")
+                    # Missing fields are derived deterministically from readiness, never invented by the LLM.
+                    # Website/registry/file evidence may support facts, but must not inject speculative
+                    # business strategy into a newly-created company profile.
+                    if claim.kind == "unknown":
+                        continue
+                    if claim.kind == "hypothesis" and source.source_type != "owner_message":
+                        continue
+                    filtered_claims.append(claim)
                     if claim.kind == "candidate":
                         if claim.field_path in {"proof.approved_facts", "proof.approved_numbers"} and isinstance(claim.proposed_value, list):
                             for fact in claim.proposed_value:
@@ -305,6 +314,7 @@ class CompanyIntakeService:
                 if isinstance(exc, asyncio.CancelledError):
                     raise
                 raise IntakeError("Не удалось проверить извлечённые данные. Материалы сохранены; попробуйте ещё раз.") from None
+        extraction = IntakeExtraction(claims=filtered_claims) if eligible else extraction
         review, draft = self._review(state, sources, extraction)
         draft_row = self._save(task, "company_profile_draft", draft, version=state["revision"] + 1)
         review["draft_id"] = str(draft_row.id)
