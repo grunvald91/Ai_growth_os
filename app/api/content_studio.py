@@ -379,6 +379,165 @@ def package_card(
     """
 
 
+
+def mobile_logo_html() -> str:
+    return """
+    <div class="m-brand">
+      <span class="m-logo-mark">S</span>
+      <span class="m-logo-word">ServGo</span>
+      <span class="m-logo-actions"><span class="m-bell">○</span><span class="m-avatar">S</span></span>
+    </div>
+    """
+
+
+def mobile_calendar_html(slots: list[dict]) -> str:
+    ordered = sorted(slots, key=lambda item: item.get("publish_at") or "")
+    by_day: dict[str, list[dict]] = defaultdict(list)
+    for slot in ordered:
+        dt = parse_dt(slot.get("publish_at"))
+        key = dt.date().isoformat() if dt else slot.get("publish_at") or "unknown"
+        by_day[key].append(slot)
+    days = []
+    for index, (_, day_slots) in enumerate(list(by_day.items())[:5]):
+        weekday, date_text = day_label(day_slots[0].get("publish_at"))
+        days.append(
+            f'<button class="m-day{" active" if index == 0 else ""}" type="button">'
+            f'<b>{esc(weekday)}</b><span>{esc(date_text)}</span><i></i></button>'
+        )
+    timeline = []
+    for slot in ordered[:5]:
+        dt = parse_dt(slot.get("publish_at"))
+        time_text = dt.strftime("%H:%M") if dt else "—"
+        timeline.append(
+            '<div class="m-event">'
+            f'<time>{esc(time_text)}</time>'
+            f'<span class="m-platform">{esc(platform_short(slot.get("platform") or ""))}</span>'
+            '<div class="m-event-copy">'
+            f'<b>{esc(slot.get("topic"))}</b>'
+            f'<small>{esc(platform_label(slot.get("platform") or ""))}</small>'
+            '</div><span class="m-more">⋮</span></div>'
+        )
+    return (
+        '<section class="m-card m-calendar" id="m-calendar">'
+        '<div class="m-section-head"><div><span class="m-section-icon">▱</span><b>Контент-календарь</b></div><span>›</span></div>'
+        f'<div class="m-days">{"".join(days)}</div>'
+        f'<div class="m-timeline">{"".join(timeline) or "<div class=\\"empty\\">Публикаций пока нет.</div>"}</div>'
+        '<a class="m-calendar-open" href="#calendar"><span>□</span> Открыть календарь <b>→</b></a>'
+        '</section>'
+    )
+
+
+def mobile_package_card(
+    *,
+    product: Product,
+    plan_row: Artifact | None,
+    plan: dict | None,
+    key: str,
+    group: list[dict],
+    package_artifacts: list[Artifact],
+    index: int,
+) -> str:
+    topic = group[0].get("topic") or key
+    state = state_for_group(group)
+    platforms = []
+    for slot in group:
+        p = slot.get("platform") or ""
+        if p and p not in platforms:
+            platforms.append(p)
+    chips = "".join(f'<span>{esc(platform_short(p))}</span>' for p in platforms[:5])
+    first_publish = min((slot.get("publish_at") or "" for slot in group), default="")
+    first_asset = package_artifacts[0] if package_artifacts else None
+    open_action = (
+        f'data-open-dialog="material-{first_asset.id}"' if first_asset else ""
+    )
+    return (
+        f'<article class="m-package m-scene-{index % 4}" {open_action}>'
+        f'<div class="m-package-cover"><span class="m-package-status {status_class(state)}">{esc(status_label(state))}</span></div>'
+        '<div class="m-package-body">'
+        f'<h3>{esc(topic)}</h3>'
+        f'<p>{esc(group[0].get("objective") or "Материалы пакета для нескольких площадок")}</p>'
+        f'<div class="m-channel-row">{chips}<em>{len(package_artifacts)} материала</em></div>'
+        f'<div class="m-package-date">□ {fmt_dt(first_publish)}</div>'
+        '</div></article>'
+    )
+
+
+def mobile_material_card(record: Artifact) -> str:
+    value = parse_json(record)
+    kind = artifact_kind(record)
+    return (
+        f'<button class="m-material {kind}" type="button" data-open-dialog="material-{record.id}">'
+        f'<span class="m-material-type">{esc(artifact_kind_label(record, value))}</span>'
+        f'<span class="m-material-thumb">{("▧" if kind == "article" else "▶" if kind == "video" else "✦")}</span>'
+        f'<b>{esc(record.title)}</b>'
+        f'<small>{esc(excerpt(artifact_text(record, value), 55))}</small>'
+        '</button>'
+    )
+
+
+def mobile_dashboard_html(
+    *,
+    product: Product,
+    plan_row: Artifact | None,
+    plan: dict | None,
+    slots: list[dict],
+    groups: dict[str, list[dict]],
+    by_task: dict[str, list[Artifact]],
+    material_records: list[Artifact],
+    action_html: str,
+    horizon: int,
+    channels: list[str],
+) -> str:
+    package_cards = []
+    for index, (key, group) in enumerate(sorted(
+        groups.items(),
+        key=lambda item: min((s.get("publish_at") or "" for s in item[1]), default="")
+    )):
+        task_ids = {slot.get("task_id") for slot in group if slot.get("task_id")}
+        package_artifacts: list[Artifact] = []
+        for task_id in task_ids:
+            package_artifacts.extend([a for a in by_task.get(str(task_id), []) if a.kind in MATERIAL_KINDS])
+        package_cards.append(mobile_package_card(
+            product=product,
+            plan_row=plan_row,
+            plan=plan,
+            key=key,
+            group=group,
+            package_artifacts=package_artifacts,
+            index=index,
+        ))
+    materials = "".join(mobile_material_card(record) for record in material_records[:6])
+    return f"""
+    <div class="mobile-only-dashboard">
+      {mobile_logo_html()}
+      <header class="m-hero">
+        <div class="m-title-row"><h1>Growth Studio</h1><span class="beta">BETA</span></div>
+        <p>Готовые идеи, тексты и медиаконтент для роста ваших бронирований</p>
+      </header>
+
+      <section class="m-kpis">
+        <div class="m-kpi blue"><span class="m-kpi-icon">▱</span><strong>{len(groups)}<small>пакетов</small></strong><p>запланировано<br>на период</p></div>
+        <div class="m-kpi green"><span class="m-kpi-icon">□</span><strong>{esc(horizon)}<small>дней</small></strong><p>активный<br>контент-план</p></div>
+        <div class="m-kpi purple"><span class="m-kpi-icon">⌘</span><strong>{len(channels)}<small>площадок</small></strong><div class="m-mini-platforms">{"".join(f"<span>{esc(platform_short(x))}</span>" for x in channels[:4])}</div></div>
+      </section>
+
+      {mobile_calendar_html(slots)}
+
+      <section class="m-card m-packages" id="m-packages">
+        <div class="m-section-head"><div><span class="m-section-icon">▱</span><b>Контент-пакеты</b></div><span class="m-all-pill">Все</span></div>
+        <div class="m-package-actions">{action_html}</div>
+        <div class="m-package-carousel">{"".join(package_cards) or '<div class="empty">Контент-пакеты ещё не сформированы.</div>'}</div>
+        <div class="m-dots"><i class="active"></i><i></i><i></i></div>
+      </section>
+
+      <section class="m-card m-materials" id="m-materials">
+        <div class="m-section-head"><div><span class="m-section-icon">▤</span><b>Подготовленные материалы</b></div><a href="#materials">Все</a></div>
+        <div class="m-material-strip">{materials or '<div class="empty">Готовых материалов пока нет.</div>'}</div>
+      </section>
+    </div>
+    """;
+
+
 def selected_preview(record: Artifact | None) -> str:
     if record is None:
         return (
@@ -577,7 +736,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f4f8fd">
   <title>Growth Studio · {esc(product.name)}</title>
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=2">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=3">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
@@ -586,8 +745,8 @@ def product_dashboard(db: Session, product: Product) -> str:
     <header class="topbar">
       <div>
         <div class="eyebrow">GROWTH STUDIO <span class="beta">BETA</span></div>
-        <h1>Контент, который ведёт к бронированиям</h1>
-        <p class="subtitle">Планируйте, проверяйте и собирайте материалы для {esc(product.name)} в одном месте.</p>
+        <h1>Growth Studio</h1>
+        <p class="subtitle">Готовые идеи, тексты и медиаконтент для роста ваших бронирований.</p>
       </div>
       <div class="top-actions">
         <div class="cycle-card">
@@ -599,6 +758,19 @@ def product_dashboard(db: Session, product: Product) -> str:
         </a>
       </div>
     </header>
+    {mobile_dashboard_html(
+        product=product,
+        plan_row=plan_row,
+        plan=plan,
+        slots=slots,
+        groups=groups,
+        by_task=by_task,
+        material_records=material_records,
+        action_html=action_html,
+        horizon=horizon,
+        channels=channels,
+    )}
+    <div class="desktop-only-dashboard">
     {kpis}
     <div class="workspace">
       <div class="stack">
@@ -616,11 +788,12 @@ def product_dashboard(db: Session, product: Product) -> str:
       </div>
       {selected_preview(first_material)}
     </div>
+    </div>
   </main>
   {mobile_nav_html()}
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=2"></script>
+<script src="/studio/assets/studio.js?v=3"></script>
 </body></html>"""
 
 
