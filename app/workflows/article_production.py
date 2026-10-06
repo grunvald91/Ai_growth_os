@@ -243,6 +243,32 @@ def _ensure_fallback_derivative_adaptation(brief, *, strategy, seo, stage: str):
     return type(brief).model_validate(data)
 
 
+def _normalize_ready_video_timeline(brief):
+    """Make platform-ready Shorts/Reels exactly 30 seconds and strip model-only notes from speech."""
+    data = brief.model_dump(mode='json')
+    production = data['production_brief']
+    shots = production.get('shots') or []
+    if shots:
+        durations = [max(0.001, float(shot['end_second']) - float(shot['start_second'])) for shot in shots]
+        total = sum(durations)
+        cursor = 0.0
+        for index, (shot, duration) in enumerate(zip(shots, durations)):
+            shot['start_second'] = round(cursor, 3)
+            if index == len(shots) - 1:
+                end = 30.0
+            else:
+                end = round(cursor + 30.0 * duration / total, 3)
+            if end <= cursor:
+                end = round(cursor + 0.001, 3)
+            shot['end_second'] = end
+            cursor = end
+            spoken = shot.get('spoken_text')
+            if isinstance(spoken, str) and 'Avoid:' in spoken:
+                shot['spoken_text'] = spoken.split('Avoid:', 1)[0].rstrip(' .;') + '.'
+        production['duration_seconds'] = 30
+    return type(brief).model_validate(data)
+
+
 def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
     """Build six safe channel texts from the already validated marketing article."""
     prior = stage_inputs.get('prior_stage_outputs') or {}
@@ -268,13 +294,18 @@ def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
         return '\n\n'.join(f'{heading}\n{body}' if heading else body for heading, body in rows)
 
     source = joined()
-    reversed_source = joined(list(reversed(range(len(sections)))))
     if len(source) < 1800:
-        source = (source + '\n\n' + lead + '\n\n' + closing).strip()
+        source = (source + '\n\n' + lead).strip()
     if len(source) < 2000:
         source = (source + '\n\n' + source).strip()
-    if len(reversed_source) < 2000:
-        reversed_source = (reversed_source + '\n\n' + lead + '\n\n' + source).strip()
+
+    def append_cta_once(text):
+        text = text.strip()
+        normalized = ' '.join(text.casefold().split())
+        normalized_cta = ' '.join(cta.casefold().split())
+        if normalized_cta and normalized_cta not in normalized:
+            text += '\n\n' + cta
+        return text
 
     first = sections[0][1]
     second = sections[1][1] if len(sections) > 1 else first
@@ -288,16 +319,20 @@ def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
         return text
 
     dzen = min_body(
-        f'{lead}\n\n{source}\n\nНебольшая ирония процесса: иногда чат незаметно получает должность CRM, '
-        f'календаря и диспетчера — без оформления в штат.\n\n{closing}\n\n{cta}',
+        append_cta_once(
+            f'{lead}\n\n{source}\n\nНебольшая ирония процесса: иногда чат незаметно получает должность CRM, '
+            f'календаря и диспетчера — без оформления в штат.\n\n{closing}'
+        ),
         'Для Дзена полезно закончить практикой: выпишите путь клиента от первого сообщения до подтверждения и отметьте каждое ожидание.',
         2100,
     )
     vc = min_body(
-        f'{title}\n\nПроблема здесь не в самом мессенджере, а в архитектуре процесса. '
-        f'Разберём её по шагам и без магических обещаний.\n\n{reversed_source}\n\n'
-        f'Практический вывод: автоматизировать стоит не «всё», а повторяющиеся точки выбора и ожидания. '
-        f'Иначе получится очень быстрый хаос — тоже автоматизация, но не та, которой хочется хвастаться.\n\n{cta}',
+        append_cta_once(
+            f'{title}\n\nПроблема здесь не в самом мессенджере, а в архитектуре процесса. '
+            f'Разберём её по шагам и без магических обещаний.\n\n{source}\n\n'
+            f'Практический вывод: автоматизировать стоит не «всё», а повторяющиеся точки выбора и ожидания. '
+            f'Иначе получится очень быстрый хаос — тоже автоматизация, но не та, которой хочется хвастаться.'
+        ),
         'Для vc.ru смотрим на процесс как на систему: вход, развилки, ручные решения, статус и измеряемый следующий шаг.',
         2100,
     )
@@ -520,17 +555,30 @@ def _creative_fallback_payload(name: str, stage_inputs: dict) -> dict:
 
 
 def product_facts(text: str) -> dict[str, str]:
-    """Fail closed: only Product/Verified facts sections, never hypotheses/positioning."""
+    """Fail closed: prefer the canonical Verified facts section; support legacy Product markdown."""
+    lines = text.splitlines()
+    headings = {
+        raw.lstrip('#').strip().casefold()
+        for raw in lines
+        if raw.strip().startswith('#')
+    }
+    target = 'verified facts' if 'verified facts' in headings else 'product'
     facts = {}
     enabled = False
     digest = hashlib.sha256(text.encode()).hexdigest()[:12]
-    for line_number, raw in enumerate(text.splitlines(), 1):
+    for line_number, raw in enumerate(lines, 1):
         line = raw.strip()
         if line.startswith('#'):
-            enabled = line.lstrip('#').strip().casefold() in {'product', 'verified facts'}
+            enabled = line.lstrip('#').strip().casefold() == target
             continue
-        if enabled and line and not line.endswith(':'):
-            quote = line.removeprefix('- ').strip()
+        if not enabled or not line or line.endswith(':'):
+            continue
+        # Canonical profile rendering places only approved proof as bullets under
+        # "Verified facts". Legacy Product markdown may also have a one-line summary.
+        if target == 'verified facts' and not line.startswith('- '):
+            continue
+        quote = line.removeprefix('- ').strip()
+        if quote and quote not in facts.values():
             facts[f'product:{digest}:L{line_number}'] = quote
     return facts
 
@@ -917,6 +965,8 @@ class ArticleProduction:
                         parsed = schema.model_validate(_platform_text_fallback_payload(stage_inputs))
                     else:
                         parsed = schema.model_validate(_creative_fallback_payload(name, stage_inputs))
+                if name in {'youtube_shorts_director', 'instagram_reels_director'}:
+                    parsed = _normalize_ready_video_timeline(parsed)
                 checkpoint = ArtifactService(self.db).create(
                     product_id=product_id,
                     task_id=task_id,
@@ -1081,13 +1131,15 @@ class ArticleProduction:
                     content=json.dumps({'article_id': str(main.id), **brief.model_dump(mode='json')}))
                 artifact_ids.append(derivative.id)
             if request.produce_ready_assets:
+                from app.content.contracts import VideoVariants
+                ready_videos = VideoVariants(videos=list(outputs[11:13]))
                 for text in outputs[10].texts:
                     ready = artifacts.create(product_id=product_id, task_id=task_id,
                         kind='channel_text', title=text.title,
                         content=json.dumps({'article_id': str(main.id), **text.model_dump(mode='json')}, ensure_ascii=False),
                         status='awaiting_approval')
                     artifact_ids.append(ready.id)
-                for index, video in enumerate(outputs[11:13], 1):
+                for index, video in enumerate(ready_videos.videos, 1):
                     ready = artifacts.create(product_id=product_id, task_id=task_id,
                         kind='video_script', title=f"{video.production_brief.target_platform}: {video.hook}",
                         content=json.dumps({'article_id': str(main.id), **video.model_dump(mode='json')}, ensure_ascii=False),
