@@ -233,14 +233,17 @@ def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
         'В продуктовой заметке важнее решение: какую ручную петлю мы убрали, что стало понятнее клиенту и какой контроль сохранили владельцу.'
     )
 
+    def bounded(text):
+        return text[:11800].rstrip()
+
     checks = ['Проверены продуктовые обещания', 'Сохранён один понятный CTA', 'Добавлен ситуационный юмор без насмешки над клиентом']
     return {'texts': [
-        {'channel': 'dzen', 'title': title, 'body': dzen, 'editorial_checks': checks},
-        {'channel': 'tenchat', 'title': title, 'body': tenchat, 'editorial_checks': checks},
-        {'channel': 'vc_ru', 'title': title, 'body': vc, 'editorial_checks': checks},
-        {'channel': 'telegram', 'title': title, 'body': telegram, 'editorial_checks': checks},
-        {'channel': 'faq', 'title': f'Частые вопросы: {title}', 'body': faq, 'editorial_checks': checks},
-        {'channel': 'founder', 'title': f'Заметка о процессе: {title}', 'body': founder, 'editorial_checks': checks},
+        {'channel': 'dzen', 'title': title, 'body': bounded(dzen), 'editorial_checks': checks},
+        {'channel': 'tenchat', 'title': title, 'body': bounded(tenchat), 'editorial_checks': checks},
+        {'channel': 'vc_ru', 'title': title, 'body': bounded(vc), 'editorial_checks': checks},
+        {'channel': 'telegram', 'title': title, 'body': bounded(telegram), 'editorial_checks': checks},
+        {'channel': 'faq', 'title': f'Частые вопросы: {title}'[:300], 'body': bounded(faq), 'editorial_checks': checks},
+        {'channel': 'founder', 'title': f'Заметка о процессе: {title}'[:300], 'body': bounded(founder), 'editorial_checks': checks},
     ]}
 
 
