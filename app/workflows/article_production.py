@@ -53,18 +53,35 @@ STAGES = (
 )
 
 STAGE_TIMEOUT_SECONDS = {
-    'content_strategist': 120,
-    'seo_editor': 240,
-    'article_writer': 240,
-    'conversion_editor': 180,
-    'human_editor': 240,
-    'marketing_editor': 240,
-    'repurposing_editor': 180,
-    'video_director': 180,
-    'story_director': 180,
-    'visual_designer': 180,
-    'youtube_shorts_director': 180,
-    'instagram_reels_director': 180,
+    'content_strategist': 180,
+    'seo_editor': 300,
+    'article_writer': 300,
+    'conversion_editor': 240,
+    'human_editor': 300,
+    'marketing_editor': 300,
+    'repurposing_editor': 300,
+    'video_director': 300,
+    'story_director': 240,
+    'visual_designer': 240,
+    'youtube_shorts_director': 300,
+    'instagram_reels_director': 300,
+}
+
+# Keep a single slow routine model from consuming the entire stage budget.
+# The production provider chain can then move from Kimi to the configured ClaudeHub fallback.
+STAGE_PROVIDER_TIMEOUT_SECONDS = {
+    'content_strategist': 60,
+    'seo_editor': 90,
+    'article_writer': 120,
+    'conversion_editor': 75,
+    'human_editor': 100,
+    'marketing_editor': 100,
+    'repurposing_editor': 110,
+    'video_director': 90,
+    'story_director': 75,
+    'visual_designer': 75,
+    'youtube_shorts_director': 90,
+    'instagram_reels_director': 90,
 }
 
 STAGE_MAX_TOKENS = {
@@ -274,8 +291,11 @@ class ArticleProduction:
                         'contains viral_content_research, start from its grounded audience_pains and strongest video/article '
                         'patterns, not from a generic product description. Prefer pains with a verified product_match; '
                         'show the recognizable situation, operational friction and why it matters before proposing the '
-                        'mechanism. Use outlier/trend signals as creative evidence, never as buyer demand. Use white-space '
-                        'and humor angles only as original inspiration, never copy wording. The brief must create a clear '
+                        'mechanism. Treat repeated trend/outlier signals as commercially useful attention evidence: '
+                        'you may infer that a theme is promising or visibly recurring when several independent sources align, '
+                        'but do not rename that signal as measured market demand. Third-party case numbers may be used as '
+                        'source-specific context, never as a guaranteed ServGo outcome. Use white-space and humor angles as '
+                        'original inspiration, never copy wording. The brief must create a clear '
                         'bridge from the reader problem to verified ServGo relevance and identify what remains a hypothesis.'
                     )
                 elif name == 'seo_editor':
@@ -303,7 +323,10 @@ class ArticleProduction:
                         ' Rewrite the safe article into a polished human-facing article for an actual reader. Open '
                         'inside a concrete recognizable situation, not with definitions or “businesses often face”. '
                         'Put the operational pain in the first two sentences, make the friction and stakes tangible, '
-                        'then explain a clearer workflow. Use concrete nouns, verbs, examples and short transitions. '
+                        'then explain a clearer workflow. Edit in a concise Russian information style inspired by '
+                        'the practical principles of «Пиши, сокращай»: lead with value, use concrete nouns and active verbs, '
+                        'one main thought per sentence/paragraph, cut throat-clearing, bureaucratic nouns, filler adjectives, '
+                        'repetition and abstract introductions. Prefer a concrete example or number to a vague intensifier. '
                         'Connect the reader problem naturally to verified ServGo capabilities and end with one clear '
                         'next step. Keep uncertainty only where it materially changes a decision. Do not expose internal '
                         'research labels, schemas, proof-gap notes or agent language. Do not invent testimonials, metrics, '
@@ -321,19 +344,27 @@ class ArticleProduction:
                         'Use the sequence SCENE -> PAIN -> COST/FRICTION -> BETTER MECHANISM -> VERIFIED PRODUCT BRIDGE -> CTA. '
                         'The title must create tension or curiosity without clickbait. The lead must earn the next paragraph. '
                         'Delete filler, abstract claims, repeated caveats, “digital transformation” language and bland lists. '
-                        'Where marketing_research contains grounded humor_angles, you MAY add one or two light situational '
-                        'jokes, analogies or self-aware lines. Humor should target the absurdity of the process (for example, '
-                        'calendar/message chaos), never mock clients, staff or vulnerable people; no cringe, memes for their '
-                        'own sake, fake quotes or slang overload. Use contrast and rhythm. Make the product feel like the '
-                        'logical answer to the pain without promising guaranteed growth. End with ONE concrete CTA. '
+                        'Apply a hard information-style edit: short useful paragraphs, active verbs, concrete nouns, meaningful '
+                        'headings, no throat-clearing, no duplicated thought, no sentence kept merely to sound expert. '
+                        'The reader should feel a real operational scene, not read a scientific disclaimer. '
+                        'You MUST include at least one light situational humor beat, and normally one or two are enough. '
+                        'Use research humor_angles when available; otherwise invent an original observational joke about the '
+                        'process itself (calendar/message chaos, endless slot negotiation, admin-as-human-CRM). Humor targets '
+                        'the absurdity of the process, never clients, staff or vulnerable people; no cringe, fake quotes or '
+                        'slang overload. Use contrast and rhythm. Source-specific third-party numbers/case results MAY be used '
+                        'when they are present in marketing_research; keep their scope clear and never turn them into a ServGo '
+                        'guarantee. Clearly illustrative scenario counts MAY be used as examples, not as measured results. '
+                        'Make the product feel like the logical answer to the pain without promising guaranteed growth. '
+                        'End with ONE concrete CTA. '
                     )
                 elif name == 'platform_writer':
                     stage_rule = (
                         ' Make each adaptation publishable and persuasive, not merely safe. Start from the platform-fit '
                         'pain or scene, deliver one useful insight quickly, connect it to the verified product mechanism, '
-                        'and use one concrete CTA. Preserve the sharper voice of marketing_editor. A light situational '
-                        'joke or analogy is welcome when grounded by the research/tone, but never trade clarity for comedy. '
-                        'Do not repeat internal caveats unless genuinely necessary. Do not invent proof or outcomes.'
+                        'and use one concrete CTA. Preserve the sharper voice of marketing_editor and its concise '
+                        'information-style edit. Every reader-facing adaptation MUST contain at least one light situational '
+                        'humor beat or analogy tied to the operational pain; never trade clarity for comedy. '
+                        'Do not repeat internal caveats unless genuinely necessary. Do not invent product guarantees or outcomes.'
                     )
                 elif name == 'repurposing_editor':
                     stage_rule = (
@@ -345,13 +376,13 @@ class ArticleProduction:
                 elif name == 'video_director':
                     stage_rule = (
                         ' Return ONE short_video text brief only. No rendering or file generation. Build a complete '
-                        '9:16 director-ready plan with target_platform, 15-90 second total duration, 2-3 hook variants, '
-                        'full voiceover/dialogue, numbered timed shots, purpose, shot type, visual description, camera '
-                        'movement, action, on-screen text, transition, sound/music note and a detailed generation_prompt '
-                        'for every shot. Include avoid_in_generation where useful, subtitle style, cover frame, edit '
-                        'rhythm, editing/mix notes, CTA frame, caption variants, export spec and production notes. The '
-                        'brief must be detailed enough for a human editor or future video-generation adapter without '
-                        'asking what happens in each shot.'
+                        '9:16 director-ready plan for 30-45 seconds with 2-3 hook variants and normally 4-6 timed shots. '
+                        'Give the full voiceover/dialogue, purpose, shot type, visual description, camera movement, action, '
+                        'on-screen text, transition, sound/music note and a concise but usable generation_prompt for every '
+                        'shot. Include avoid_in_generation where useful, subtitle style, cover frame, edit rhythm, '
+                        'editing/mix notes, CTA frame, caption variants, export spec and production notes. Include at least '
+                        'one situational humor beat in the spoken script or visual action. Be production-ready without '
+                        'overexplaining repeated visual details.'
                     )
                 elif name == 'story_director':
                     stage_rule = (
@@ -377,8 +408,9 @@ class ArticleProduction:
                         'the final shot must end at 30, and every adjacent shot must be contiguous. Every shot must '
                         'contain non-empty on_screen_text and a detailed generation_prompt. Use a platform-specific '
                         'pattern interrupt or pain-led hook, a clear payoff, full spoken script, cover, captions, CTA, '
-                        'camera/movement, transition and edit/mix guidance. Tasteful situational humor is allowed when '
-                        'it sharpens recognition of the pain; never mock the audience. Do not render or generate a file.'
+                        'camera/movement, transition and edit/mix guidance. Include at least one tasteful situational '
+                        'humor beat that sharpens recognition of the pain; never mock the audience. Keep every line concise '
+                        'and useful in the spirit of Russian information-style editing. Do not render or generate a file.'
                     )
                 prompt = (
                     f'You are the {name}. {responsibility} Return ONLY JSON matching the schema. '
@@ -386,8 +418,14 @@ class ArticleProduction:
                     'specified by request.language. For ru, use natural Russian suitable for publication; do not '
                     'leak internal labels such as HYPOTHESIS, ADVICE, proof gaps, schema language or agent notes '
                     'into reader-facing copy. Internal uncertainty belongs in proof_needed_notes and metadata. '
-                    'Organic acquisition only: no ads, budgets, publishing, tools, rendering or claims of approval. Tasteful situational humor is allowed when it clarifies a real pain; humor never relaxes factual grounding. Never invent metrics, customer '
-                    'stories, testimonials, prices, integrations, outcomes or product features. '
+                    'Organic acquisition only: no ads, budgets, publishing, tools, rendering or claims of approval. '
+                    'Write marketing, not an academic paper: prioritize attention, clarity, specificity and a useful next '
+                    'action over defensive caveats. Do not fabricate factual metrics, testimonials, prices, integrations, '
+                    'product features or achieved customer outcomes. Numbers already present in supplied research MAY be '
+                    'used as attributed/contextual evidence, including third-party cases; do not silently generalize them '
+                    'into a guaranteed result for ServGo. Clearly signposted illustrative numbers are allowed as examples. '
+                    'For Russian advertising compliance, never state a knowingly false product characteristic, guarantee, '
+                    'research result, factual demand level or unverifiable superiority as fact. '
                     'Only verified_product_facts can support factual sections: copy the exact quote and source_id; '
                     'claim equals quote; fact section body equals quote and claim_ids contains that source_id. '
                     'All other article sections must not assert unverified product capabilities or achieved results. '
@@ -409,7 +447,12 @@ class ArticleProduction:
                         messages=[LLMMessage(role='user', content=json.dumps(stage_inputs, ensure_ascii=False))], model=self.model,
                         max_tokens=min(20000, STAGE_MAX_TOKENS.get(name, 10000) * (2 ** attempt)),
                         response_schema=schema.model_json_schema(),
-                        metadata={'reasoning_effort': 'low', 'team_role': name, 'task_type': 'article_production'})),
+                        metadata={
+                            'reasoning_effort': 'low',
+                            'team_role': name,
+                            'task_type': 'article_production',
+                            'provider_timeout_seconds': STAGE_PROVIDER_TIMEOUT_SECONDS.get(name, 90),
+                        })),
                         timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
                     responses.setdefault(run_id, []).append(response)
                     self._record_usage(product_id, {run_id: [response]})
