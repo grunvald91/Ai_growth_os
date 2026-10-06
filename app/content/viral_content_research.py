@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 import httpx
 from defusedxml import ElementTree as SafeET
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy.orm import Session
 
 from app.content.viral_research import (
@@ -98,16 +98,19 @@ class PainOpportunity(Contract):
 
 
 class ViralContentAnalysisDraft(Contract):
+    # The evidence ledger can legitimately contain only one source family. Requiring
+    # arbitrary list counts made a correct sparse analysis fail validation and threw
+    # away useful evidence. Quality is scored separately from schema validity.
     summary: str = Field(min_length=30, max_length=5000)
-    audience_pains: list[PainOpportunity] = Field(min_length=2, max_length=10)
-    hook_patterns: list[ContentPattern] = Field(min_length=2, max_length=10)
-    topic_patterns: list[ContentPattern] = Field(min_length=2, max_length=10)
-    article_patterns: list[ContentPattern] = Field(min_length=1, max_length=10)
-    stepps_mechanisms: list[str] = Field(min_length=1, max_length=10)
-    seo_topic_seeds: list[str] = Field(min_length=5, max_length=18)
-    content_angles: list[str] = Field(min_length=5, max_length=18)
-    white_space_angles: list[str] = Field(min_length=2, max_length=10)
-    humor_angles: list[str] = Field(min_length=2, max_length=10)
+    audience_pains: list[PainOpportunity] = Field(default_factory=list, max_length=10)
+    hook_patterns: list[ContentPattern] = Field(default_factory=list, max_length=10)
+    topic_patterns: list[ContentPattern] = Field(default_factory=list, max_length=10)
+    article_patterns: list[ContentPattern] = Field(default_factory=list, max_length=10)
+    stepps_mechanisms: list[str] = Field(default_factory=list, max_length=10)
+    seo_topic_seeds: list[str] = Field(default_factory=list, max_length=18)
+    content_angles: list[str] = Field(default_factory=list, max_length=18)
+    white_space_angles: list[str] = Field(default_factory=list, max_length=10)
+    humor_angles: list[str] = Field(default_factory=list, max_length=10)
     counterexamples: list[str] = Field(default_factory=list, max_length=8)
     cautions: list[str] = Field(default_factory=list, max_length=12)
 
@@ -429,9 +432,10 @@ def _analysis_prompt() -> str:
         "Map pains to the supplied approved_product_facts. product_match=verified_match ONLY when the exact supplied fact "
         "directly supports the match and then product_fact_id is required. Otherwise use hypothesis or gap. "
         "Do not invent ServGo capabilities, market statistics, customer results or competitor claims. "
-        "Generate original SEO seeds and content angles rather than copying creators. Identify at least two white-space "
-        "angles that are less saturated or combine strong patterns in a fresh way. Include at least two tasteful humor "
-        "angles where humor helps make an operational pain recognizable; humor must punch at the situation/process, "
+        "Generate original SEO seeds and content angles rather than copying creators. Aim for 3-8 SEO seeds and content "
+        "angles when evidence supports them; never pad a sparse ledger with invented claims merely to reach a count. "
+        "Identify white-space angles where the evidence supports a fresh combination. Include tasteful humor angles "
+        "where humor helps make an operational pain recognizable; humor must punch at the situation/process, "
         "not at the customer, employee or vulnerable person. Avoid cringe, mockery and fake quotes. "
         "For presentation_angle use tension: recognizable scene -> cost/friction -> clearer mechanism -> grounded next step. "
         "Write natural Russian. Schema: " + json.dumps(ViralContentAnalysisDraft.model_json_schema(), ensure_ascii=False)
@@ -467,6 +471,8 @@ async def run_viral_content_research(
     facts = _approved_facts(context)
     response = None
     analysis = None
+    analysis_responses = []
+    analysis_failure_code = None
     cautions = [
         "Охват и трендовые сигналы не считаются доказательством покупательского спроса или продаж.",
         "Чужие формулировки и сценарии не копируются: используются только абстрактные механики.",
@@ -579,36 +585,77 @@ async def run_viral_content_research(
                     "article": "freshness + cross-source recurrence; no fabricated engagement",
                 },
             }
-            try:
-                response = await asyncio.wait_for(
-                    llm.generate(LLMRequest(
-                        system_prompt=_analysis_prompt(),
-                        messages=[LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False, default=str))],
-                        model=settings.llm_model,
-                        max_tokens=6500,
-                        response_schema=ViralContentAnalysisDraft.model_json_schema(),
-                        metadata={
-                            "team_role": "viral_content_researcher",
-                            "reasoning_effort": "low",
-                            "task_type": "viral_content_research",
-                        },
-                    )),
-                    timeout=180,
-                )
-                analysis = ViralContentAnalysisDraft.model_validate_json(response.content)
+            analysis_request = LLMRequest(
+                system_prompt=_analysis_prompt(),
+                messages=[LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False, default=str))],
+                model=settings.llm_model,
+                max_tokens=6500,
+                response_schema=ViralContentAnalysisDraft.model_json_schema(),
+                metadata={
+                    "team_role": "viral_content_researcher",
+                    "reasoning_effort": "low",
+                    "task_type": "viral_content_research",
+                },
+            )
+
+            async def generate_and_validate(active_llm, request):
+                generated = await asyncio.wait_for(active_llm.generate(request), timeout=180)
+                analysis_responses.append(generated)
+                parsed = ViralContentAnalysisDraft.model_validate_json(generated.content)
                 allowed_sources = {x.source_id for x in videos} | {x.source_id for x in articles}
-                for pattern in [*analysis.hook_patterns, *analysis.topic_patterns, *analysis.article_patterns]:
+                for pattern in [*parsed.hook_patterns, *parsed.topic_patterns, *parsed.article_patterns]:
                     if set(pattern.source_ids) - allowed_sources:
                         raise ValueError("analysis referenced unknown source")
-                for pain in analysis.audience_pains:
+                for pain in parsed.audience_pains:
                     if set(pain.source_ids) - allowed_sources:
                         raise ValueError("pain referenced unknown source")
                     if pain.product_fact_id and pain.product_fact_id not in facts:
                         raise ValueError("pain referenced unknown product fact")
+                return generated, parsed
+
+            try:
+                response, analysis = await generate_and_validate(llm, analysis_request)
                 analysis_status = "completed"
-            except Exception:
-                analysis_status = "failed"
-                cautions.append("Содержательный разбор не завершился; в артефакте сохранён только проверяемый evidence ledger.")
+            except (ValidationError, ValueError, asyncio.TimeoutError) as exc:
+                analysis_failure_code = type(exc).__name__
+                # In production, one malformed/slow routine-model answer should
+                # not discard the expensive public evidence collection. Retry the
+                # exact grounded schema once with the configured ClaudeHub fallback.
+                fallback_model = next(
+                    (
+                        item.strip()
+                        for item in str(getattr(settings, "llm_fallback_models", "")).split(",")
+                        if item.strip() and item.strip() != settings.llm_model
+                    ),
+                    None,
+                )
+                if getattr(settings, "app_env", "development") == "production" and fallback_model:
+                    try:
+                        from app.core.composition import build_llm_provider, SAFE_LLM_METADATA_FIELDS
+                        fallback_settings = settings.model_copy(update={
+                            "llm_model": fallback_model,
+                            "llm_fallback_models": "",
+                        })
+                        fallback_llm = LLMService(
+                            privacy_gateway=PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS),
+                            provider=build_llm_provider(fallback_settings),
+                        )
+                        fallback_request = analysis_request.model_copy(update={"model": fallback_model})
+                        response, analysis = await generate_and_validate(fallback_llm, fallback_request)
+                        analysis_status = "completed"
+                        cautions.append(
+                            "Первичный структурированный разбор не прошёл проверку; evidence повторно разобран fallback-моделью."
+                        )
+                    except Exception as fallback_exc:
+                        analysis_failure_code = (
+                            type(exc).__name__ + "->" + type(fallback_exc).__name__
+                        )[:120]
+                if analysis is None:
+                    analysis_status = "failed"
+                    cautions.append(
+                        "Содержательный разбор не завершился (" + analysis_failure_code
+                        + "); в артефакте сохранён проверяемый evidence ledger."
+                    )
         report = ViralContentResearch(
             observed_at=datetime.now(timezone.utc),
             source_status=source_status,
@@ -655,7 +702,8 @@ async def run_viral_content_research(
         run.output_references = [{"kind": "artifact", "id": str(artifact.id)}]
         if response is not None:
             run.model = response.model
-            if response.usage is not None:
+        for generated in analysis_responses:
+            if generated.usage is not None:
                 db.add(CostRecord(
                     product_id=task.product_id,
                     agent_run_id=run_id,
@@ -663,10 +711,14 @@ async def run_viral_content_research(
                     provider=settings.llm_provider,
                     amount=0,
                     currency="USD",
-                    input_tokens=max(0, response.usage.input_tokens),
-                    output_tokens=max(0, response.usage.output_tokens),
+                    input_tokens=max(0, generated.usage.input_tokens),
+                    output_tokens=max(0, generated.usage.output_tokens),
                     incurred_at=datetime.now(timezone.utc),
-                    details={"cost_known": False, "task_type": "viral_content_research"},
+                    details={
+                        "cost_known": False,
+                        "task_type": "viral_content_research",
+                        "model": generated.model,
+                    },
                 ))
         db.commit()
         return artifact
