@@ -1,11 +1,13 @@
 import json
 
+import httpx
 import pytest
 from sqlalchemy import select
 
 from app.content.viral_research import (
     ViralVideoCandidate,
     ViralVideoResearch,
+    YOUTUBE_SHORTS_FILTER_PARAM,
     build_search_queries,
     parse_view_count,
     parse_youtube_search_page,
@@ -17,6 +19,29 @@ from app.llm.schemas import LLMResponse, LLMUsage
 from app.llm.service import LLMService
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
 from app.privacy import PrivacyGateway
+
+
+
+
+def test_shorts_filter_param_is_double_escaped_on_wire():
+    query = str(httpx.QueryParams({"sp": YOUTUBE_SHORTS_FILTER_PARAM}))
+    assert query == "sp=EgIQCQ%253D%253D"
+
+
+def test_search_queries_prioritize_concrete_operating_niche():
+    context = {"company": {"profile": {
+        "identity": {"name": "ServGo"},
+        "offer": {"category": "B2B SaaS", "products_services": []},
+        "customers": {"primary_segments": [
+            "Владельцы и управляющие небольших сервисных бизнесов с записью по времени",
+            "Массажные и beauty-студии",
+            "Барбершопы и салоны",
+        ]},
+    }}}
+    niche, queries = build_search_queries(context, 4)
+    assert niche == "Массажные и beauty-студии"
+    assert queries[0].startswith("Массажные и beauty-студии")
+    assert not queries[0].startswith("Владельцы и управляющие")
 
 
 def test_parse_view_count_russian_and_compact():
