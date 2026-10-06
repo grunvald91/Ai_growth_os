@@ -466,6 +466,59 @@ def test_platform_writer_accepts_direct_array_payload():
     assert {item.channel for item in parsed.texts} == {"dzen", "tenchat", "vc_ru", "telegram", "faq", "founder"}
 
 
+def test_product_facts_prefers_canonical_verified_facts_over_product_identity():
+    from app.workflows.article_production import product_facts
+
+    rendered = (
+        "# Company Profile v1\n"
+        "## Product\n"
+        "ServGo\n"
+        "ServGo is an online booking system.\n"
+        "## Verified facts\n"
+        "- ServGo is an online booking system.\n"
+        "- Client chooses a service and a time slot.\n"
+        "## Stable business truth and constraints\n"
+        "{}\n"
+    )
+    facts = product_facts(rendered)
+    assert list(facts.values()) == [
+        "ServGo is an online booking system.",
+        "Client chooses a service and a time slot.",
+    ]
+    assert "ServGo" not in facts.values()
+
+
+def test_ready_video_timeline_is_normalized_to_30_seconds_and_strips_internal_notes():
+    from app.content.contracts import VideoVariants
+    from app.workflows.article_contracts import ShortVideoDerivativeDraft
+    from app.workflows.article_production import _normalize_ready_video_timeline
+
+    raw = json.loads(json.dumps(valid_outputs()[7], ensure_ascii=False))
+    raw["production_brief"]["duration_seconds"] = 38
+    raw["production_brief"]["shots"][0]["start_second"] = 0
+    raw["production_brief"]["shots"][0]["end_second"] = 7
+    raw["production_brief"]["shots"][1]["start_second"] = 7
+    raw["production_brief"]["shots"][1]["end_second"] = 20
+    raw["production_brief"]["shots"][2]["start_second"] = 20
+    raw["production_brief"]["shots"][2]["end_second"] = 38
+    raw["production_brief"]["shots"][0]["spoken_text"] = "Основной текст. Avoid: служебная инструкция."
+    parsed = _normalize_ready_video_timeline(ShortVideoDerivativeDraft.model_validate(raw))
+
+    assert parsed.production_brief.duration_seconds == 30
+    assert parsed.production_brief.shots[0].start_second == 0
+    assert parsed.production_brief.shots[-1].end_second == 30
+    assert all(
+        a.end_second == b.start_second
+        for a, b in zip(parsed.production_brief.shots, parsed.production_brief.shots[1:])
+    )
+    assert "Avoid:" not in parsed.production_brief.shots[0].spoken_text
+
+    other = parsed.model_copy(deep=True)
+    other.production_brief.target_platform = "instagram_reels"
+    other.hook = "Другой Reels-хук"
+    VideoVariants(videos=[parsed, other])
+
+
 def test_platform_writer_accepts_alias_wrapper():
     from app.content.contracts import ReadyTextSet
     from app.workflows.article_production import _parse_stage_payload
