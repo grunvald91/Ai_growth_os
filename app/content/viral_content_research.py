@@ -8,6 +8,8 @@ by freshness and cross-source recurrence, never fake view counts.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import html as html_lib
 import json
 import math
 import re
@@ -16,7 +18,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from statistics import median
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 from defusedxml import ElementTree as SafeET
@@ -198,6 +200,101 @@ def _similar_title(a: str, b: str) -> bool:
     return len(one & two) / max(1, len(one | two)) >= 0.28
 
 
+def _duckduckgo_target_url(value: str) -> str | None:
+    href = html_lib.unescape(value or "").strip()
+    if href.startswith("//"):
+        href = "https:" + href
+    if not href.startswith(("http://", "https://")):
+        return None
+    parsed = urlparse(href)
+    if (parsed.hostname or "").endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
+        target = (parse_qs(parsed.query).get("uddg") or [None])[0]
+        href = unquote(target) if target else ""
+    if not href.startswith(("http://", "https://")):
+        return None
+    host = (urlparse(href).hostname or "").casefold()
+    if not host or host.endswith("duckduckgo.com"):
+        return None
+    return href
+
+
+def parse_duckduckgo_html(page: str, query: str) -> list[ArticleCandidate]:
+    """Parse the static DuckDuckGo HTML endpoint without executing page JS."""
+    matches = list(re.finditer(
+        r'<a[^>]*class=["\'][^"\']*result__a[^"\']*["\'][^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+        page,
+        re.IGNORECASE | re.DOTALL,
+    ))
+    rows: list[ArticleCandidate] = []
+    seen: set[str] = set()
+    for index, match in enumerate(matches):
+        target = _duckduckgo_target_url(match.group(1))
+        if not target or target in seen:
+            continue
+        seen.add(target)
+        title = re.sub(r'<[^>]+>', ' ', match.group(2))
+        title = re.sub(r'\s+', ' ', html_lib.unescape(title)).strip()
+        if not title:
+            continue
+        block_end = matches[index + 1].start() if index + 1 < len(matches) else min(len(page), match.end() + 5000)
+        block = page[match.end():block_end]
+        snippet_match = re.search(
+            r'<a[^>]*class=["\'][^"\']*result__snippet[^"\']*["\'][^>]*>(.*?)</a>',
+            block,
+            re.IGNORECASE | re.DOTALL,
+        )
+        snippet = None
+        if snippet_match:
+            snippet = re.sub(r'<[^>]+>', ' ', snippet_match.group(1))
+            snippet = re.sub(r'\s+', ' ', html_lib.unescape(snippet)).strip()[:1600] or None
+        host = (urlparse(target).hostname or "").removeprefix("www.")
+        source_id = "web:" + hashlib.sha256(target.encode()).hexdigest()[:12]
+        rows.append(ArticleCandidate(
+            source_id=source_id,
+            url=target,
+            query=query,
+            title=title[:500],
+            publisher=host or None,
+            published_at=None,
+            age_days=None,
+            snippet=snippet,
+            cross_source_hits=1,
+            trend_score=35.0 if snippet else 25.0,
+            evidence_confidence="medium" if snippet else "low",
+        ))
+    return rows
+
+
+class DuckDuckGoPublicArticleScout:
+    def __init__(self, *, timeout_seconds: float = 20.0):
+        self.timeout_seconds = timeout_seconds
+
+    async def collect(self, queries: list[str], max_candidates: int = 16) -> list[ArticleCandidate]:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
+            ),
+            "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.7",
+            "Referer": "https://html.duckduckgo.com/",
+        }
+        rows: list[ArticleCandidate] = []
+        async with httpx.AsyncClient(timeout=self.timeout_seconds, follow_redirects=True, headers=headers) as client:
+            for query in queries:
+                try:
+                    response = await client.post(
+                        "https://html.duckduckgo.com/html/",
+                        data={"q": query, "kl": "ru-ru"},
+                    )
+                    response.raise_for_status()
+                except httpx.HTTPError:
+                    continue
+                if "bots use DuckDuckGo too" in response.text:
+                    continue
+                rows.extend(parse_duckduckgo_html(response.text, query))
+        return rows[:max_candidates]
+
+
 class GoogleNewsPublicScout:
     def __init__(self, *, timeout_seconds: float = 20.0):
         self.timeout_seconds = timeout_seconds
@@ -280,6 +377,51 @@ class GoogleNewsPublicScout:
             ))
         ranked.sort(key=lambda x: (x.trend_score, x.cross_source_hits), reverse=True)
         return ranked[:max_candidates]
+
+
+class PublicArticleScout:
+    """Blend fresh news with evergreen search; either source may fail independently."""
+    def __init__(self, *, timeout_seconds: float = 20.0):
+        self.news = GoogleNewsPublicScout(timeout_seconds=timeout_seconds)
+        self.web = DuckDuckGoPublicArticleScout(timeout_seconds=timeout_seconds)
+
+    async def collect(self, queries: list[str], max_candidates: int = 16) -> list[ArticleCandidate]:
+        results = await asyncio.gather(
+            self.news.collect(queries, max_candidates=max_candidates),
+            self.web.collect(queries, max_candidates=max_candidates),
+            return_exceptions=True,
+        )
+        combined: list[ArticleCandidate] = []
+        for result in results:
+            if not isinstance(result, Exception):
+                combined.extend(result)
+        deduped: dict[str, ArticleCandidate] = {}
+        for item in combined:
+            key = str(item.url)
+            existing = deduped.get(key)
+            if existing is None or item.trend_score > existing.trend_score:
+                deduped[key] = item
+        items = list(deduped.values())
+        # Topic recurrence across independent publishers is useful for both news
+        # and evergreen results. It is a content signal, not a demand metric.
+        for index, item in enumerate(items):
+            publishers = {
+                (other.publisher or (urlparse(str(other.url)).hostname or "unknown")).casefold()
+                for other in items
+                if _similar_title(item.title, other.title)
+            }
+            hits = max(item.cross_source_hits, len(publishers))
+            recurrence_bonus = min(25.0, max(0, hits - 1) * 8.0)
+            items[index] = item.model_copy(update={
+                "cross_source_hits": hits,
+                "trend_score": min(100.0, round(item.trend_score + recurrence_bonus, 1)),
+                "evidence_confidence": (
+                    "high" if hits >= 3 else
+                    "medium" if item.evidence_confidence != "low" or hits >= 2 else "low"
+                ),
+            })
+        items.sort(key=lambda x: (x.trend_score, x.cross_source_hits), reverse=True)
+        return items[:max_candidates]
 
 
 async def _youtube_watch_metadata(client: httpx.AsyncClient, candidate: ViralVideoCandidate) -> tuple[str | None, datetime | None]:
@@ -479,7 +621,7 @@ async def run_viral_content_research(
     ]
     try:
         yt = video_scout or YouTubePublicScout(timeout_seconds=float(settings.viral_research_timeout_seconds))
-        news = article_scout or GoogleNewsPublicScout(timeout_seconds=float(settings.viral_research_timeout_seconds))
+        news = article_scout or PublicArticleScout(timeout_seconds=float(settings.viral_research_timeout_seconds))
         source_timeout = max(15.0, float(settings.viral_research_timeout_seconds) * 2.5)
         collected = await asyncio.gather(
             asyncio.wait_for(
