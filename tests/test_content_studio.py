@@ -74,6 +74,12 @@ def test_studio_lists_products_and_renders_calendar(studio_db):
         assert "Контент-календарь" in response.text
         assert "Подготовленные материалы" in response.text
         assert "mobile-nav" in response.text
+        assert "mobile-only-dashboard" in response.text
+        assert "m-brand" in response.text
+        assert "m-kpis" in response.text
+        assert "m-timeline" in response.text
+        assert "m-package-carousel" in response.text
+        assert "m-material-strip" in response.text
         assert "Instagram Reels" in response.text
         assert "Тема один" in response.text
         assert response.headers["cache-control"]=="no-store"
@@ -174,6 +180,10 @@ def test_studio_assets_expose_servgo_design_system(studio_db):
         assert "--sg-blue:#0b7cff" in css.text
         assert ".mobile-nav" in css.text
         assert ".material-grid" in css.text
+        assert ".m-kpis" in css.text
+        assert ".m-day.active" in css.text
+        assert ".m-package-carousel" in css.text
+        assert ".m-material-strip" in css.text
         assert "data-open-dialog" in js.text
     finally:
         app.dependency_overrides.clear()
