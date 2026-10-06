@@ -391,12 +391,15 @@ def package_card(
 
 
 
-def mobile_logo_html() -> str:
-    return """
+def mobile_logo_html(product_id: UUID) -> str:
+    return f"""
     <div class="m-brand">
-      <span class="m-logo-mark">S</span>
-      <span class="m-logo-word">ServGo</span>
-      <span class="m-logo-actions"><span class="m-bell">○</span><span class="m-avatar">S</span></span>
+      <a class="m-logo-mark" href="/studio/products/{product_id}">S</a>
+      <a class="m-logo-word" href="/studio/products/{product_id}">ServGo</a>
+      <span class="m-logo-actions">
+        <a class="m-bell" href="/studio/products/{product_id}/analytics" aria-label="Аналитика">⌁</a>
+        <a class="m-avatar" href="/studio?choose=1" aria-label="Выбрать проект">S</a>
+      </span>
     </div>
     """
 
@@ -431,7 +434,7 @@ def mobile_calendar_html(product_id: UUID, slots: list[dict]) -> str:
     timeline_html = "".join(timeline) or '<div class="empty">Публикаций пока нет.</div>'
     return (
         '<section class="m-card m-calendar" id="m-calendar">'
-        '<div class="m-section-head"><div><span class="m-section-icon">▱</span><b>Контент-календарь</b></div><span>›</span></div>'
+        f'<div class="m-section-head"><div><span class="m-section-icon">▱</span><b>Контент-календарь</b></div><a href="/studio/products/{product_id}/calendar" aria-label="Открыть календарь">›</a></div>'
         f'<div class="m-days">{"".join(days)}</div>'
         f'<div class="m-timeline">{timeline_html}</div>'
         f'<a class="m-calendar-open" href="/studio/products/{product_id}/calendar"><span>□</span> Открыть календарь <b>→</b></a>'
@@ -518,7 +521,7 @@ def mobile_dashboard_html(
     materials = "".join(mobile_material_card(product.id, record) for record in material_records[:6])
     return f"""
     <div class="mobile-only-dashboard">
-      {mobile_logo_html()}
+      {mobile_logo_html(product.id)}
       <header class="m-hero">
         <div class="m-title-row"><h1>Growth Studio</h1><span class="beta">BETA</span></div>
         <p>Готовые идеи, тексты и медиаконтент для роста ваших бронирований</p>
@@ -533,7 +536,7 @@ def mobile_dashboard_html(
       {mobile_calendar_html(product.id, slots)}
 
       <section class="m-card m-packages" id="m-packages">
-        <div class="m-section-head"><div><span class="m-section-icon">▱</span><b>Контент-пакеты</b></div><span class="m-all-pill">Все</span></div>
+        <div class="m-section-head"><div><span class="m-section-icon">▱</span><b>Контент-пакеты</b></div><a class="m-all-pill" href="/studio/products/{product.id}/plan">Все</a></div>
         <div class="m-package-actions">{action_html}</div>
         <div class="m-package-carousel">{"".join(package_cards) or '<div class="empty">Контент-пакеты ещё не сформированы.</div>'}</div>
         <div class="m-dots"><i class="active"></i><i></i><i></i></div>
@@ -701,7 +704,7 @@ def product_dashboard(db: Session, product: Product) -> str:
         <span class="status {status_class((plan or {}).get("approval_state"))}">{esc(status_label((plan or {}).get("approval_state")))}</span>
       </div>
       <div class="package-tools">
-        <div class="tabs"><button class="tab active" type="button">Все · {len(groups)}</button><button class="tab" type="button">Готово · {ready}</button><button class="tab" type="button">Ошибки · {failed}</button></div>
+        <div class="tabs"><a class="tab active" href="/studio/products/{product.id}/plan">Все · {len(groups)}</a><a class="tab" href="/studio/products/{product.id}/plan?status=ready">Готово · {ready}</a><a class="tab" href="/studio/products/{product.id}/plan?status=failed">Ошибки · {failed}</a></div>
         {action_html}
       </div>
       <div class="package-grid">{"".join(package_html) or '<div class="empty">Контент-пакеты ещё не сформированы.</div>'}</div>
@@ -871,7 +874,7 @@ def studio_page_shell(
 <div class="studio-page"><div class="studio-layout">
   {sidebar_html(product.id, active)}
   <main class="main route-main">
-    <div class="route-mobile-brand">{mobile_logo_html()}</div>
+    <div class="route-mobile-brand">{mobile_logo_html(product.id)}</div>
     <header class="route-page-head">
       <div>
         <a class="back-link" href="/studio/products/{product.id}">← Обзор</a>
