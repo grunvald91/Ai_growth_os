@@ -80,7 +80,7 @@ STAGE_PROVIDER_TIMEOUT_SECONDS = {
     'marketing_editor': 100,
     'repurposing_editor': 110,
     'video_director': 90,
-    'story_director': 75,
+    'story_director': 100,
     'visual_designer': 85,
     'platform_writer': 100,
     'youtube_shorts_director': 90,
@@ -159,11 +159,14 @@ def _parse_stage_payload(schema, content: str):
                             value = {'texts': rows}
             if isinstance(value, dict) and len(value) == 1:
                 key = next(iter(value))
-                if key in {'output', 'result', 'data', 'item', 'response'}:
-                    inner = value[key]
-                    if isinstance(inner, (dict, list, str)):
-                        value = inner
-                        continue
+                inner = value[key]
+                schema_fields = set((schema.model_json_schema().get('properties') or {}))
+                if (
+                    key in {'output', 'result', 'data', 'item', 'response'}
+                    or key not in schema_fields
+                ) and isinstance(inner, (dict, list, str)):
+                    value = inner
+                    continue
         break
     return schema.model_validate(value)
 
@@ -208,64 +211,54 @@ def _validation_failure(name: str, exc: Exception, fallback: str) -> str:
     return f'ValidationError:invalid_article_output:{name}:{detail}'[:300]
 
 
-def _ensure_fallback_derivative_adaptation(brief, *, strategy, seo, stage: str):
-    """Fallbacks are trusted app output, but still must be visibly adapted from source copy."""
+def _ensure_derivative_source_adaptation(brief, *, strategy, seo):
+    """Keep every derivative distinct from the source without discarding valid generated work."""
     normalize = lambda value: ' '.join(str(value).casefold().split())
     hook_candidates = {
-        'video_director': ['Сколько сообщений отделяет клиента от свободного слота?', 'Запись или переписка: где теряется следующий шаг?'],
-        'story_director': ['Где обычная запись превращается в цепочку уточнений?', 'Четыре экрана, чтобы проверить путь записи'],
-        'visual_designer': ['Когда чат, календарь и память сотрудника работают как одна система', 'Путь клиента к слоту — на одной картинке'],
+        'dzen': 'Ночная заявка: что происходит, пока администратор офлайн',
+        'tenchat': 'Где ручная запись съедает рабочее время команды',
+        'vc_ru': 'Чат вместо системы записи: как устроена ручная координация',
+        'telegram': 'Клиент хочет записаться. Почему ему приходится переписываться?',
+        'faq': 'Что в ручной записи действительно стоит автоматизировать',
+        'founder': 'Как мы смотрим на путь клиента до записи',
+        'short_video': 'Сколько сообщений отделяет клиента от свободного слота?',
+        'story': 'Где обычная запись превращается в цепочку уточнений?',
+        'static_image': 'Когда чат, календарь и память сотрудника работают как одна система',
     }
     framing_candidates = {
-        'video_director': ['Короткая сценка о ручной переписке с переходом к последовательному пути записи.'],
-        'story_director': ['Покадровый чек-лист: где клиент ждёт человека и какой шаг можно сделать понятнее.'],
-        'visual_designer': ['Визуальный контраст между хаотичной ручной координацией и понятной последовательностью записи.'],
+        'dzen': 'История одного клиентского запроса от сообщения до подтверждённого слота.',
+        'tenchat': 'Операционный разбор ручных решений администратора и повторяемых точек процесса.',
+        'vc_ru': 'Системный разбор архитектуры записи: вход, развилки, ожидание и контроль.',
+        'telegram': 'Короткая узнаваемая сцена о переписке, которая стала системой записи.',
+        'faq': 'Ответы на практические возражения владельца перед изменением процесса записи.',
+        'founder': 'Продуктовый взгляд на то, какую ручную петлю стоит убрать, а какой контроль оставить.',
+        'short_video': 'Короткая сценка о ручной переписке с переходом к последовательному пути записи.',
+        'story': 'Покадровый чек-лист: где клиент ждёт человека и какой шаг можно сделать понятнее.',
+        'static_image': 'Визуальный контраст между хаотичной ручной координацией и понятной последовательностью записи.',
     }
     outline_candidates = {
-        'video_director': ['Показать сообщение клиента и задержку ответа.', 'Собрать путь записи в несколько ясных шагов.', 'Закончить одним действием для владельца.'],
-        'story_director': ['Задать узнаваемый вопрос.', 'Показать цепочку выбора и ожиданий.', 'Дать короткий чек-лист и CTA.'],
-        'visual_designer': ['Показать три источника хаоса.', 'Свести их в один последовательный маршрут.', 'Оставить короткий CTA без обещаний результата.'],
+        'dzen': ['Начать с ночной заявки.', 'Показать цепочку ручных уточнений.', 'Разобрать более понятный маршрут.', 'Закончить одним следующим шагом.'],
+        'tenchat': ['Посчитать повторяемые решения.', 'Отделить контроль от рутины.', 'Дать владельцу короткий чек-лист.'],
+        'vc_ru': ['Разложить процесс на вход и развилки.', 'Показать цену ручной координации.', 'Сравнить с последовательным маршрутом.', 'Зафиксировать критерий проверки.'],
+        'telegram': ['Показать знакомую сцену.', 'Назвать одну причину лишней переписки.', 'Дать один практический следующий шаг.'],
+        'faq': ['Собрать ключевые возражения.', 'Ответить без обещаний результата.', 'Дать критерий, что менять первым.'],
+        'founder': ['Сформулировать продуктовый принцип.', 'Показать одну ручную петлю.', 'Объяснить, какой контроль остаётся человеку.'],
+        'short_video': ['Показать сообщение клиента и задержку ответа.', 'Собрать путь записи в несколько ясных шагов.', 'Закончить одним действием для владельца.'],
+        'story': ['Задать узнаваемый вопрос.', 'Показать цепочку выбора и ожиданий.', 'Дать короткий чек-лист и CTA.'],
+        'static_image': ['Показать три источника хаоса.', 'Свести их в один последовательный маршрут.', 'Оставить короткий CTA без обещаний результата.'],
     }
     data = brief.model_dump(mode='json')
+    kind = data.get('kind')
     source_hook = normalize(seo.hook)
     source_frame = normalize(strategy.angle)
     source_outline = normalize(' '.join(seo.outline))
 
     if SequenceMatcher(None, normalize(data['hook']), source_hook).ratio() >= .85:
-        for candidate in hook_candidates.get(stage, []):
-            if SequenceMatcher(None, normalize(candidate), source_hook).ratio() < .75:
-                data['hook'] = candidate
-                break
+        data['hook'] = hook_candidates.get(kind, f'{data["hook"]} — адаптация под формат')
     if SequenceMatcher(None, normalize(data['framing']), source_frame).ratio() >= .85:
-        data['framing'] = framing_candidates.get(stage, ['Отдельная адаптация исходной темы под формат.'])[0]
+        data['framing'] = framing_candidates.get(kind, 'Отдельная адаптация исходной темы под формат.')
     if SequenceMatcher(None, normalize(' '.join(data['outline'])), source_outline).ratio() >= .85:
-        data['outline'] = outline_candidates.get(stage, ['Новый хук.', 'Новая подача.', 'Один CTA.'])
-    return type(brief).model_validate(data)
-
-
-def _normalize_ready_video_timeline(brief):
-    """Make platform-ready Shorts/Reels exactly 30 seconds and strip model-only notes from speech."""
-    data = brief.model_dump(mode='json')
-    production = data['production_brief']
-    shots = production.get('shots') or []
-    if shots:
-        durations = [max(0.001, float(shot['end_second']) - float(shot['start_second'])) for shot in shots]
-        total = sum(durations)
-        cursor = 0.0
-        for index, (shot, duration) in enumerate(zip(shots, durations)):
-            shot['start_second'] = round(cursor, 3)
-            if index == len(shots) - 1:
-                end = 30.0
-            else:
-                end = round(cursor + 30.0 * duration / total, 3)
-            if end <= cursor:
-                end = round(cursor + 0.001, 3)
-            shot['end_second'] = end
-            cursor = end
-            spoken = shot.get('spoken_text')
-            if isinstance(spoken, str) and 'Avoid:' in spoken:
-                shot['spoken_text'] = spoken.split('Avoid:', 1)[0].rstrip(' .;') + '.'
-        production['duration_seconds'] = 30
+        data['outline'] = outline_candidates.get(kind, ['Новый хук.', 'Новая подача.', 'Один CTA.'])
     return type(brief).model_validate(data)
 
 
@@ -1006,24 +999,15 @@ class ArticleProduction:
                 image_derivative,
             ) = outputs[:10]
             error = 'invalid_derivative_assembly'
-            creative_by_stage = {
-                'video_director': video_derivative,
-                'story_director': story_derivative,
-                'visual_designer': image_derivative,
-            }
-            for stage, brief in list(creative_by_stage.items()):
-                if stage in fallback_stages:
-                    creative_by_stage[stage] = _ensure_fallback_derivative_adaptation(
-                        brief, strategy=strategy, seo=seo, stage=stage
-                    )
-            video_derivative = creative_by_stage['video_director']
-            story_derivative = creative_by_stage['story_director']
-            image_derivative = creative_by_stage['visual_designer']
             derivative_drafts = [
                 *text_derivatives.derivatives,
                 video_derivative,
                 story_derivative,
                 image_derivative,
+            ]
+            derivative_drafts = [
+                _ensure_derivative_source_adaptation(brief, strategy=strategy, seo=seo)
+                for brief in derivative_drafts
             ]
 
             error = 'invalid_marketing_editor_grounding'
