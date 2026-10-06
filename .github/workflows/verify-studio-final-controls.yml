@@ -1,0 +1,55 @@
+name: Verify Growth Studio final controls
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-studio-final-controls.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      EXPECTED_RELEASE: ffc7873dd40029c15eaec0101cd7d877368c2662
+    steps:
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Verify final clickable controls
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "EXPECTED_RELEASE='$EXPECTED_RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          for n in $(seq 1 42); do
+            current="$(basename "$(readlink /opt/ai_growth_os/current)")"
+            echo "release[$n]=$current"
+            [ "$current" = "$EXPECTED_RELEASE" ] && break
+            sleep 10
+          done
+          current="$(basename "$(readlink /opt/ai_growth_os/current)")"
+          test "$current" = "$EXPECTED_RELEASE"
+
+          headers="$(mktemp)"
+          curl -sS -D "$headers" -o /dev/null http://127.0.0.1:8091/studio
+          base="$(awk 'BEGIN{IGNORECASE=1} /^location:/ {gsub("\r","",$2); print $2}' "$headers" | tail -n1)"
+          html="$(curl --retry 12 --retry-all-errors --retry-delay 2 -fsS "http://127.0.0.1:8091${base}")"
+          [[ "$html" == *"${base}/plan?status=ready"* ]]
+          [[ "$html" == *"${base}/plan?status=failed"* ]]
+          [[ "$html" == *"${base}/analytics\" aria-label=\"Аналитика"* ]]
+          [[ "$html" == *'href="/studio?choose=1" aria-label="Выбрать проект"'* ]]
+          [[ "$html" != *'href="#calendar"'* ]]
+          [[ "$html" != *'href="#plan"'* ]]
+          [[ "$html" != *'href="#materials"'* ]]
+          [[ "$html" != *'href="#analytics"'* ]]
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8091${base}/plan?status=ready")" = "200"
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8091${base}/analytics")" = "200"
+          test "$(curl -ksS -o /dev/null -w '%{http_code}' https://growth.servgo.ru/studio)" = "401"
+          echo "Growth Studio final controls verification OK"
+          REMOTE
