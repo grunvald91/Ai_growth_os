@@ -118,6 +118,28 @@ async def test_hypothesis_unknown_and_no_more_than_three_questions(db, tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_website_cannot_inject_unknowns_or_business_hypotheses(db, tmp_path):
+    product, session, service, provider = setup(db, tmp_path)
+    source = service.add_source(product.id, session, make_source(
+        "owned_website", "https://example.com",
+        "Школа-студия Ирен. Обучение парикмахеров в Сочи."
+    ), actor="owner")["sources"][-1]
+    extraction(provider, [
+        claim(source, "identity.name", "Школа-студия Ирен", "Школа-студия Ирен."),
+        claim(source, "customers.primary_segments", "Massage studios is a candidate segment to test.",
+              "Школа-студия Ирен.", "hypothesis"),
+        claim(source, "commercial.pricing_notes", "Approved current pricing for ServGo Growth",
+              "Школа-студия Ирен.", "unknown"),
+    ])
+    review = await service.build(product.id, session, actor="owner")
+    assert any(row["field_path"] == "identity.name" for row in review["supported"])
+    assert not review["hypothesis_claims"]
+    assert all("ServGo" not in item["question"] for item in review["unknowns"])
+    assert all("Massage studios" not in item.get("statement", "")
+               for item in review["profile_preview"].get("hypotheses", []))
+
+
+@pytest.mark.asyncio
 async def test_unchanged_review_is_cached_and_new_sources_invalidate_approval(db, tmp_path):
     product, session, service, provider = setup(db, tmp_path)
     service.add_text(product.id, session, "Описание компании", actor="owner")
