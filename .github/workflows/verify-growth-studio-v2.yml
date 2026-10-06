@@ -40,14 +40,14 @@ jobs:
           css="$(curl --retry 12 --retry-all-errors --retry-delay 2 -fsS http://127.0.0.1:8091/studio/assets/studio.css)"
           js="$(curl --retry 12 --retry-all-errors --retry-delay 2 -fsS http://127.0.0.1:8091/studio/assets/studio.js)"
 
-          printf '%s' "$html" | grep -q 'Growth Studio'
-          printf '%s' "$html" | grep -q 'Контент-календарь'
-          printf '%s' "$html" | grep -q 'Подготовленные материалы'
-          printf '%s' "$html" | grep -q 'mobile-nav'
-          printf '%s' "$css" | grep -q -- '--sg-blue:#0b7cff'
-          printf '%s' "$css" | grep -q '.package-card'
-          printf '%s' "$css" | grep -q '.mobile-nav'
-          printf '%s' "$js" | grep -q 'data-open-dialog'
+          [[ "$html" == *"Growth Studio"* ]]
+          [[ "$html" == *"Контент-календарь"* ]]
+          [[ "$html" == *"Подготовленные материалы"* ]]
+          [[ "$html" == *"mobile-nav"* ]]
+          [[ "$css" == *"--sg-blue:#0b7cff"* ]]
+          [[ "$css" == *".package-card"* ]]
+          [[ "$css" == *".mobile-nav"* ]]
+          [[ "$js" == *"data-open-dialog"* ]]
 
           echo "== public edge without credentials =="
           code="$(curl -ksS -o /dev/null -w '%{http_code}' https://growth.servgo.ru/studio)"
