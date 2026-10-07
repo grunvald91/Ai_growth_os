@@ -230,6 +230,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         {item("materials", base + "/materials", "▤", "Материалы")}
         {item("calendar", base + "/calendar", "□", "Календарь")}
         {item("analytics", base + "/analytics", "⌁", "Аналитика")}
+        {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
       </nav>
       <div class="nav-label">Инструменты</div>
       <nav class="nav">
@@ -257,6 +258,7 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
       {item("plan", base + "/plan", "▣", "План")}
       {item("materials", base + "/materials", "▤", "Материалы")}
       {item("calendar", base + "/calendar", "□", "Календарь")}
+      {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Разведка")}
     </nav>
     """
 

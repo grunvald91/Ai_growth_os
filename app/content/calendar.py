@@ -292,7 +292,7 @@ def planning_context(db, settings, product_id):
     preference = db.scalar(select(Artifact).where(Artifact.product_id == product_id,
         Artifact.kind == 'editorial_preferences').order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
     reports = list(db.scalars(select(Artifact).where(Artifact.product_id == product_id,
-        Artifact.kind.in_(['viral_content_research', 'viral_video_research', 'research_report', 'research_source_bundle', 'measurement_spec']))
+        Artifact.kind.in_(['viral_content_research', 'viral_video_research', 'research_report', 'research_source_bundle', 'measurement_spec', 'competitive_intelligence_report', 'market_opportunity_report']))
         .order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(4)))
     observations, keys = [], set()
     for metric in db.scalars(select(Metric).where(Metric.product_id == product_id, Metric.name.like('content_%'))

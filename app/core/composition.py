@@ -116,4 +116,20 @@ def build_team_cycle(
         provider_name=settings.llm_provider,
         model=settings.llm_model,
         followup_review=build_review(db, settings, provider),
+        intelligence=build_intelligence(db, settings, provider) if settings.intelligence_campaign_enabled else None,
     )
+
+
+def build_intelligence(db: Session, settings: Settings, provider: LLMProvider | None = None,
+                       jeff_provider: LLMProvider | None = None):
+    from app.competitive_intelligence.service import IntelligenceService
+    privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
+    if jeff_provider is None and settings.jeff_api_key and settings.jeff_base_url:
+        # Reuse the existing OpenAI-compatible adapter behind the provider boundary.
+        jeff_provider = XAIProvider(api_key=settings.jeff_api_key, base_url=settings.jeff_base_url,
+            model=settings.jeff_model, timeout_seconds=30, reasoning_effort="low")
+    return IntelligenceService(db,
+        llm=LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings)),
+        jeff=LLMService(privacy_gateway=privacy, provider=jeff_provider) if jeff_provider else None,
+        model=settings.llm_model, jeff_model=settings.jeff_model, provider_name=settings.llm_provider,
+        products_root=settings.products_root, threshold=settings.intelligence_confidence_threshold)

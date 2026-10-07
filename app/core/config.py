@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +18,12 @@ class Settings(BaseSettings):
     xai_reasoning_effort: Literal["low", "medium", "high", "xhigh"] = "low"
     xai_timeout_seconds: float = 300.0
     llm_fallback_models: str = "grok-4.7"
+    # Jeff is an optional OpenAI-compatible decision endpoint, never a search adapter.
+    jeff_api_key: str | None = None
+    jeff_base_url: str | None = None
+    jeff_model: str = "jeff"
+    intelligence_confidence_threshold: float = Field(default=.8, ge=0, le=1)
+    intelligence_campaign_enabled: bool = True
     skills_root: Path = Path("skills")
     products_root: Path = Path("products")
     review_skill: str | None = None

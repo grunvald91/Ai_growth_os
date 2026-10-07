@@ -27,6 +27,7 @@ from app.workflows.research_contracts import (
     SegmentResearchReport,
 )
 from app.workflows.team_contracts import TeamTaskResult
+from app.workflows.research_sources import load_source_bundles
 
 
 WORKERS = (
@@ -50,6 +51,7 @@ class ResearchDepartment:
         products_root: Path,
         provider_name: str,
         model: str,
+        intelligence=None,
     ):
         self.db = db
         self.llm = llm
@@ -57,6 +59,7 @@ class ResearchDepartment:
         self.products_root = products_root
         self.provider_name = provider_name
         self.model = model
+        self.intelligence = intelligence
 
     async def run(self, product: Product, parent: Task, brief: Artifact, brief_data: dict) -> TeamTaskResult:
         claimed = self.db.execute(
@@ -102,6 +105,15 @@ class ResearchDepartment:
 
         context = load_context(self.db, product, self.products_root)
         source_bundles = self._load_source_bundles(product.id)
+        intelligence_report = None
+        intelligence_report_id = None
+        if self.intelligence is not None and source_bundles:
+            try:
+                intelligence_report, intelligence_report_id, source_bundles = await self._competitive_context(
+                    product, parent, source_bundles)
+            except Exception:
+                # An optional extension must not strand the existing department task.
+                self.db.rollback()
         base_payload = self._sanitize_tree({
             "parent_task": {
                 "id": str(parent.id),
@@ -118,6 +130,8 @@ class ResearchDepartment:
                 row for row in context["records"].get("artifact", [])
                 if row.get("kind") in {"research_report", "measurement_spec", "article_brief"}
             ][:6],
+            "competitive_intelligence_report": intelligence_report,
+            "competitive_intelligence_report_id": intelligence_report_id,
         })
 
         worker_outputs: list[tuple[AgentRole, BaseModel, UUID, UUID]] = []
@@ -298,6 +312,8 @@ class ResearchDepartment:
                                         "description": parent.description,
                                     },
                                     "worker_results": synthesis_payload,
+                                    "competitive_intelligence_report": intelligence_report,
+                                    "competitive_intelligence_report_id": intelligence_report_id,
                                 })),
                             )
                         ],
@@ -375,6 +391,7 @@ class ResearchDepartment:
                 worker_task_ids=worker_task_ids,
                 worker_artifact_ids=worker_artifact_ids,
                 lead_run_id=lead_run_id,
+                competitive_intelligence_artifact_id=intelligence_report_id,
             )
             artifact = ArtifactService(self.db).create(
                 product_id=product.id,
@@ -452,33 +469,30 @@ class ResearchDepartment:
         return None
 
     def _load_source_bundles(self, product_id: UUID) -> list[ResearchSourceBundle]:
-        rows = list(self.db.scalars(
-            select(Artifact)
-            .where(
-                Artifact.product_id == product_id,
-                Artifact.kind == "research_source_bundle",
-            )
-            .order_by(Artifact.created_at.desc(), Artifact.id.desc())
-            .limit(10)
-        ))
-        bundles: list[ResearchSourceBundle] = []
-        source_count = 0
-        for row in rows:
-            try:
-                bundle = ResearchSourceBundle.model_validate_json(row.content)
-            except Exception:
-                continue
-            remaining = 50 - source_count
-            if remaining <= 0:
-                break
-            if len(bundle.sources) > remaining:
-                bundle = ResearchSourceBundle(
-                    label=bundle.label,
-                    sources=bundle.sources[:remaining],
-                )
-            bundles.append(bundle)
-            source_count += len(bundle.sources)
-        return bundles
+        return load_source_bundles(self.db, product_id)
+
+    async def _competitive_context(self, product, parent, source_bundles):
+        from app.competitive_intelligence.contracts import RunInput
+        research = self.intelligence.start(RunInput(product_id=product.id,
+            brief=("Исследование: " + (parent.description or parent.title))[:3000], mode="weaknesses"),
+            parent_id=parent.id, frozen_bundles=source_bundles)
+        run_id = UUID(research["id"])
+        await self.intelligence.execute(run_id)
+        state = self.intelligence.get(run_id)
+        if not state["report_artifact_id"]:
+            return None, None, source_bundles
+        report = self.intelligence.report(run_id)
+        retained = [row for row in self.intelligence.evidence(run_id)
+                    if row["disposition"] == "retained" and row["source_type"] == "review"]
+        filtered = [ResearchSourceBundle.model_validate({
+            "label": "Отобранные отзывы бизнес-разведки", "sources": [{
+                "url": row["source_url"], "title": row["competitor"], "platform": row["platform"],
+                "competitor": row["competitor"], "excerpt": row["excerpt"], "rating": row["rating"],
+                "observed_at": row["observed_at"], "published_at": row["published_at"],
+                "source_type": row["source_type"],
+            } for row in retained],
+        })] if retained else []
+        return report, state["report_artifact_id"], filtered
 
     def _persist_worker_result(
         self,
