@@ -1,0 +1,87 @@
+name: Inspect ServGo Growth production
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/inspect-servgo-growth.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      EXPECTED_RELEASE: f27a4eb6bd9a900f1ae21f7d950d57289ae8c544
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Inspect latest ServGo Growth runs
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ]
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15 -o ServerAliveCountMax=20"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "EXPECTED_RELEASE='$EXPECTED_RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          CURRENT="$(basename "$(readlink /opt/ai_growth_os/current)")"
+          echo "Current release: $CURRENT"
+          [ "$CURRENT" = "$EXPECTED_RELEASE" ] || exit 42
+          cd /opt/ai_growth_os/current
+          docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import json
+          from sqlalchemy import select
+          from app.company_profile import load_company_profile
+          from app.core.config import get_settings
+          from app.db.session import SessionLocal
+          from app.models.domain import AgentRun, Artifact, Product, Task
+
+          with SessionLocal() as db:
+              product=db.scalar(select(Product).where(Product.slug=="servgo"))
+              profile=load_company_profile(get_settings().products_root,"servgo").profile
+              print("PROFILE")
+              print(json.dumps({
+                  "positioning": profile.brand.positioning if profile else None,
+                  "pricing_model": profile.commercial.pricing_model if profile else None,
+                  "approved_numbers": [x.model_dump() for x in (profile.proof.approved_numbers if profile else [])],
+                  "segments": profile.customers.primary_segments if profile else [],
+              },ensure_ascii=False,indent=2))
+
+              tasks=list(db.scalars(
+                  select(Task).where(Task.product_id==product.id)
+                  .order_by(Task.created_at.desc(),Task.id.desc()).limit(12)
+              ))
+              for task in tasks:
+                  print("TASK",json.dumps({
+                      "id":str(task.id),"title":task.title,"agent":task.assigned_agent,
+                      "status":task.status.value,"description":task.description,
+                      "created_at":task.created_at.isoformat() if task.created_at else None,
+                  },ensure_ascii=False))
+                  runs=list(db.scalars(select(AgentRun).where(
+                      AgentRun.task_id==task.id
+                  ).order_by(AgentRun.started_at,AgentRun.id)))
+                  for run in runs:
+                      print("RUN",json.dumps({
+                          "id":str(run.id),"agent":run.agent_name,"model":run.model,
+                          "status":run.status,"error":run.error,
+                          "started_at":run.started_at.isoformat() if run.started_at else None,
+                          "finished_at":run.finished_at.isoformat() if run.finished_at else None,
+                      },ensure_ascii=False))
+                  arts=list(db.scalars(select(Artifact).where(
+                      Artifact.task_id==task.id
+                  ).order_by(Artifact.created_at,Artifact.id)))
+                  for art in arts:
+                      if art.kind in {"viral_video_research","editorial_plan","content_request","article","channel_text","video_script","content_stage_output"}:
+                          print("ART",json.dumps({
+                              "id":str(art.id),"kind":art.kind,"title":art.title,
+                              "status":art.status.value if hasattr(art.status,"value") else str(art.status),
+                              "content":art.content[:12000],
+                          },ensure_ascii=False))
+          PY
+          REMOTE
