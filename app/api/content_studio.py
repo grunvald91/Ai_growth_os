@@ -231,6 +231,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         {item("calendar", base + "/calendar", "□", "Календарь")}
         {item("analytics", base + "/analytics", "⌁", "Аналитика")}
         {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
+        {item("market_research", f"/market-research?product_id={product_id}", "⌕", "Анализ спроса")}
       </nav>
       <div class="nav-label">Инструменты</div>
       <nav class="nav">
