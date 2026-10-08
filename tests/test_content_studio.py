@@ -296,3 +296,37 @@ def test_studio_calendar_date_filter_and_material_search_work(studio_db):
     finally:
         app.dependency_overrides.clear()
 
+def test_mobile_navigation_keeps_three_controls_and_all_sections():
+    from html.parser import HTMLParser
+    from uuid import uuid4
+    from app.api.content_studio import mobile_nav_html
+
+    class Navigation(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.in_bottom = False
+            self.controls = []
+            self.links = []
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == 'nav' and attrs.get('class') == 'mobile-nav':
+                self.in_bottom = True
+            if self.in_bottom and tag in ('a', 'button'):
+                self.controls.append(attrs)
+            if tag == 'a':
+                self.links.append(attrs.get('href'))
+        def handle_endtag(self, tag):
+            if tag == 'nav':
+                self.in_bottom = False
+
+    product_id = uuid4()
+    html = mobile_nav_html(product_id, 'intelligence')
+    nav = Navigation(); nav.feed(html)
+    assert len(nav.controls) == 3
+    assert nav.controls[-1]['data-open-dialog'] == 'mobile-sections'
+    assert 'active' in nav.controls[-1]['class']
+    for route in ['plan', 'materials', 'calendar', 'analytics', 'comments']:
+        assert f'/studio/products/{product_id}/{route}' in nav.links
+    assert f'/intelligence?product_id={product_id}' in nav.links
+    assert 'aria-labelledby="mobile-sections-title"' in html
+

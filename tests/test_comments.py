@@ -554,3 +554,17 @@ def test_controller_proxy_is_not_implicitly_reused_for_comment_service(ctx):
     settings = svc.settings.model_copy(update={"comment_platform_proxy_url": None, "telegram_proxy_url": "http://another-server:8891"})
     assert CommentService(db, settings).gateway.proxy_url is None
 
+def test_live_connection_guides_have_action_links_and_manual_token_explanation(ctx):
+    from app.comments.platforms import PLATFORMS
+    _, product, _, _, _ = ctx
+    html = client_for(ctx).get(f'/studio/products/{product.id}/comments?tab=platforms').text
+    assert 'В этой версии токены вводятся вручную' in html
+    assert 'https://t.me/BotFather' in html
+    assert 'https://developers.google.com/oauthplayground/' in html
+    for platform in PLATFORMS.values():
+        if platform['live']:
+            assert platform['help']
+            for links in platform['links'].values():
+                for _, url in links:
+                    assert f'href="{url}"' in html
+
