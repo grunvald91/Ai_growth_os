@@ -130,3 +130,7 @@ Implement `daily_growth_review`:
 6. No automatic publishing or advertising writes in Phase 1.
 
 Read `ARCHITECTURE.md` and `IMPLEMENTATION_PLAN.md` before coding.
+
+## GitHub Actions budget policy (mandatory)
+
+Before planning or executing any CI, deployment or GitHub Actions operation, read and follow [AGENTS.md](AGENTS.md). Its cost, safety, diagnostics, limits and reporting rules apply equally to Claude Code and any delegated agent. Do not bypass them through issue comments or other automation triggers.
