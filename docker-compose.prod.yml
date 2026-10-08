@@ -25,6 +25,8 @@ services:
       context: .
     restart: unless-stopped
     environment:
+      COMMENT_PLATFORM_PROXY_URL: ${COMMENT_PLATFORM_PROXY_URL:-http://188.120.254.223:8891}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       APP_ENV: production
       DATABASE_URL: postgresql+psycopg://ai_growth:${POSTGRES_PASSWORD}@postgres:5432/ai_growth
       LLM_PROVIDER: xai
@@ -89,6 +91,7 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "app.team_worker"]
     environment:
+      COMMENT_PLATFORM_PROXY_URL: ${COMMENT_PLATFORM_PROXY_URL:-http://188.120.254.223:8891}
       APP_ENV: production
       DATABASE_URL: postgresql+psycopg://ai_growth:${POSTGRES_PASSWORD}@postgres:5432/ai_growth
       LLM_PROVIDER: xai

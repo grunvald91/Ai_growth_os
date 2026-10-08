@@ -1,5 +1,11 @@
 # AI Growth OS
 
+Comment replies are available from **Growth Studio → Комментарии**. The page uses
+the selected business profile, configurable response rules, trial replies and
+owner approval of the final answer. Live adapters cover YouTube, Telegram,
+Instagram, Threads, VK wall and VK Video. VK uses direct requests; other live
+adapters use the owner's explicitly configured foreign proxy. See [comment service setup and platform instructions](docs/comment-service.md).
+
 AI Growth OS is a modular monolith foundation for a safe, auditable growth operating system. Phase 1A provides the FastAPI health endpoint, PostgreSQL persistence models, and migration/container scaffolding. Phase 1B adds core services and the provider-neutral LLM/privacy boundary. Phase 1C adds in-process agent contracts, single-skill loading, fake tools, and deterministic approval policy. Phase 1D adds a bounded organic-first daily growth review and typed product APIs. Production integrations remain out of scope.
 
 ## Local setup
