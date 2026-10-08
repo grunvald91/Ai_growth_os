@@ -279,7 +279,7 @@ class CompanyIntakeService:
                 for claim in extraction.claims:
                     source = sources.get(claim.source_id)
                     if source is None or source.source_type == "existing_profile" or (
-                        claim.evidence_excerpt not in source.text or claim.field_path not in LEAF_PATHS):
+                        claim.evidence_excerpt not in source.text):
                         raise IntakeError("Unsupported provenance")
                     # Missing fields are derived deterministically from readiness, never invented by the LLM.
                     # Website/registry/file evidence may support facts, but must not inject speculative
@@ -288,6 +288,8 @@ class CompanyIntakeService:
                         continue
                     if claim.kind == "hypothesis" and source.source_type != "owner_message":
                         continue
+                    if claim.field_path not in LEAF_PATHS:
+                        raise IntakeError("Unsupported field path")
                     filtered_claims.append(claim)
                     if claim.kind == "candidate":
                         if claim.field_path in {"proof.approved_facts", "proof.approved_numbers"} and isinstance(claim.proposed_value, list):

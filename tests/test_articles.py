@@ -288,9 +288,9 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
         "human_editor": 8000,
         "marketing_editor": 8000,
         "repurposing_editor": 8000,
-        "video_director": 5500,
-        "story_director": 4500,
-        "visual_designer": 4000,
+        "video_director": 4200,
+        "story_director": 4000,
+        "visual_designer": 3200,
     }
     writer_request = next(r for r in provider.requests if r.metadata["team_role"] == "article_writer")
     assert "claims" not in writer_request.response_schema["properties"]
@@ -319,7 +319,7 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'fake_claim', 'external_link', 'extra', 'wrong_kind', 'source_copy'])
+@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'fake_claim', 'external_link', 'extra', 'wrong_kind'])
 async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, tmp_path, mutation):
     outputs = valid_outputs()
     if mutation == 'malformed': outputs[0] = 'not json'
@@ -329,7 +329,6 @@ async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, 
     elif mutation == 'fake_claim': outputs[2]['claims'] = [dict(claim='Guaranteed growth', quote='Guaranteed growth', source_id='invented')]
     elif mutation == 'external_link': outputs[3]['landing_page']['destination'] = 'https://unverified.example/demo'
     elif mutation == 'extra': outputs[0]['verified_revenue'] = 1000000
-    elif mutation == 'source_copy': outputs[6]['derivatives'][0]['hook'] = outputs[1]['hook']
     elif mutation == 'wrong_kind': outputs[6]['derivatives'][0]['kind'] = 'telegram'
     workflow, _, request = setup(db, product, tmp_path, outputs)
     result = await workflow.run(request)
@@ -488,6 +487,31 @@ def test_product_facts_prefers_canonical_verified_facts_over_product_identity():
     assert "ServGo" not in facts.values()
 
 
+@pytest.mark.asyncio
+async def test_copied_derivative_hook_is_adapted_without_discarding_the_brief(db, product, tmp_path):
+    outputs = valid_outputs()
+    outputs[6]['derivatives'][0]['hook'] = outputs[1]['hook']
+    original = json.loads(json.dumps(outputs[6]['derivatives'][0]))
+    workflow, _, request = setup(db, product, tmp_path, outputs)
+    result = await workflow.run(request)
+    assert result.status == 'completed', result.error
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    brief = next(d for d in article.conversion.derivatives if d.kind == original['kind'])
+    assert brief.hook != article.seo.hook
+    for field in ('audience', 'cta', 'outline', 'adaptation_notes'):
+        assert getattr(brief, field) == original[field]
+
+
+@pytest.mark.parametrize('boundary', [3, 5])
+def test_ready_video_normalizer_rejects_overlaps_and_gaps(boundary):
+    from app.workflows.article_contracts import ShortVideoDerivativeDraft
+    from app.workflows.article_production import _normalize_ready_video_timeline
+    raw = valid_outputs()[7]
+    raw['production_brief']['shots'][1]['start_second'] = boundary
+    with pytest.raises(ValueError, match='overlapping or incomplete'):
+        _normalize_ready_video_timeline(ShortVideoDerivativeDraft.model_validate(raw))
+
+
 def test_ready_video_timeline_is_normalized_to_30_seconds_and_strips_internal_notes():
     from app.content.contracts import VideoVariants
     from app.workflows.article_contracts import ShortVideoDerivativeDraft
@@ -512,6 +536,8 @@ def test_ready_video_timeline_is_normalized_to_30_seconds_and_strips_internal_no
         for a, b in zip(parsed.production_brief.shots, parsed.production_brief.shots[1:])
     )
     assert "Avoid:" not in parsed.production_brief.shots[0].spoken_text
+    assert "служебная инструкция" in parsed.production_brief.shots[0].avoid_in_generation
+    assert raw['production_brief']['duration_seconds'] == 38
 
     other = parsed.model_copy(deep=True)
     other.production_brief.target_platform = "instagram_reels"

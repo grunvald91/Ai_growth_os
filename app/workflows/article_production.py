@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import re
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from pathlib import Path
@@ -262,6 +263,32 @@ def _ensure_derivative_source_adaptation(brief, *, strategy, seo):
     return type(brief).model_validate(data)
 
 
+def _normalize_ready_video_timeline(brief: ShortVideoDerivativeDraft) -> ShortVideoDerivativeDraft:
+    """Scale a valid contiguous brief to 30 seconds without changing scene content."""
+    data = brief.model_dump(mode='json')
+    production = data['production_brief']
+    shots = production['shots']
+    duration = production['duration_seconds']
+    if (shots[0]['start_second'] != 0 or shots[-1]['end_second'] != duration
+            or any(a['end_second'] != b['start_second'] for a, b in zip(shots, shots[1:]))):
+        raise ValueError('Cannot normalize an overlapping or incomplete video timeline')
+    scale = 30 / duration
+    for shot in shots:
+        shot['start_second'] = round(shot['start_second'] * scale, 6)
+        shot['end_second'] = round(shot['end_second'] * scale, 6)
+        spoken = shot.get('spoken_text')
+        if spoken:
+            note = re.search(r'\b(?:avoid(?:_in_generation)?|generation_prompt|production_notes)\s*:', spoken, re.I)
+            if note:
+                shot['spoken_text'] = spoken[:note.start()].strip() or None
+                existing = shot.get('avoid_in_generation') or ''
+                shot['avoid_in_generation'] = (existing + '\n' + spoken[note.start():]).strip()[:4000]
+    shots[0]['start_second'] = 0
+    shots[-1]['end_second'] = 30
+    production['duration_seconds'] = 30
+    return ShortVideoDerivativeDraft.model_validate(data)
+
+
 def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
     """Build six safe channel texts from the already validated marketing article."""
     prior = stage_inputs.get('prior_stage_outputs') or {}
@@ -322,7 +349,8 @@ def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
     vc = min_body(
         append_cta_once(
             f'{title}\n\nПроблема здесь не в самом мессенджере, а в архитектуре процесса. '
-            f'Разберём её по шагам и без магических обещаний.\n\n{source}\n\n'
+            f'Начнём с выводов и критериев контроля, затем разберём механизм и исходную ситуацию.\n\n'
+            f'{joined(range(len(sections) - 1, -1, -1))}\n\n'
             f'Практический вывод: автоматизировать стоит не «всё», а повторяющиеся точки выбора и ожидания. '
             f'Иначе получится очень быстрый хаос — тоже автоматизация, но не та, которой хочется хвастаться.'
         ),
