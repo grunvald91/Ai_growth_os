@@ -34,10 +34,8 @@ def _month_window():
     """Last 12 fully completed months as RFC3339 range."""
     month_start = datetime.now(timezone.utc).date().replace(day=1)
     end = month_start - timedelta(days=1)
-    start_year = month_start.year - (month_start.month == 1)
-    start_month = 12 if month_start.month == 1 else month_start.month - 1
     return (
-        date(start_year - (start_month == 12), start_month % 12 + 1, 1).isoformat() + "T00:00:00Z",
+        date(month_start.year - 1, month_start.month, 1).isoformat() + "T00:00:00Z",
         end.isoformat() + "T23:59:59Z",
     )
 
