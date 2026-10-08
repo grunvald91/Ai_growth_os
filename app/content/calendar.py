@@ -309,7 +309,7 @@ def planning_context(db, settings, product_id):
              'research': [_compact_research_artifact(r, privacy) for r in reports],
              'observations': observations[:30], 'platform_guidance': GUIDANCE,
              'available_formats': PLATFORMS,
-             'production': 'One shared package produces an SEO article, six text adaptations, three 30s video scripts. MP4 is typography-only, silent, and requires separate owner approval. Publishing and statistics collection are manual.'}
+             'production': 'One shared package produces an SEO article, text adaptations, and platform-specific 30s production briefs for YouTube Shorts and Instagram Reels. Video files are not generated or rendered. Each brief includes a timed storyboard and future-generation prompts. Publishing and statistics collection are manual.'}
     safe = json.loads(privacy.sanitize_text(encode(value)))
     digest = hashlib.sha256(encode(safe).encode()).hexdigest()
     return safe, digest
@@ -712,7 +712,7 @@ def render_calendar(plan):
     lines += ['', 'Неизвестное:', *['• ' + x for x in plan['unknowns']],
               '', 'Пересмотр: ' + datetime.fromisoformat(plan['review_at']).strftime('%d.%m %H:%M'),
               'Частота и время — стартовые гипотезы, если нет измерений. Подтверждение запускает подготовку, не публикацию.',
-              'Каждая тема готовится одним пакетом адаптаций; ролики: сценарии, MP4 — после отдельного одобрения.',
+              'Каждая тема готовится одним пакетом адаптаций; для Shorts/Reels создаются только сценарий и раскадровка. Видео здесь не генерируется и не рендерится.',
               '', 'Источники:']
     for source in plan['sources']:
         lines.append('• ' + source.get('url', source['id']))
