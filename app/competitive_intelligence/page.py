@@ -28,6 +28,16 @@ def render_page(products, selected: UUID | None):
 .intel-card [hidden]{{display:none!important}}
 #intel-error{{color:#a32424}}#intel-stages .current{{font-weight:bold;color:#1759a5}}
 details{{margin:12px 0}}summary{{cursor:pointer}}
+
+.intel-card{{box-shadow:var(--sg-shadow);border-color:var(--sg-line);margin:0 0 24px;line-height:1.65}}
+.intel-card h2{{font-size:21px;margin:0 0 20px}}
+.intel-card label{{display:grid;gap:8px;margin:0 0 20px;font-size:14px;font-weight:600}}
+.intel-card input,.intel-card select,.intel-card textarea{{padding:12px 14px;border-radius:12px;font-size:16px;background:#f9fbfe}}
+.intel-card button{{display:inline-flex;align-items:center;justify-content:center;text-align:center;min-height:44px;padding:11px 18px;line-height:1.45;font-size:14px;font-weight:650;border-radius:12px}}
+.intel-actions{{gap:12px;margin:20px 0 24px}}
+#intel-submit{{background:var(--sg-blue-600);color:white;border-color:transparent}}
+.intel-card p{{margin:12px 0 20px}}
+@media(max-width:600px){{.intel-card{{padding:18px}}.intel-actions button{{flex:1 1 100%}}.intel-grid{{grid-template-columns:1fr}}}}
 </style>
 <section class="intel-card">
 <form id="intel-form">
@@ -208,3 +218,4 @@ SCRIPT = r"""
   const saved=new URLSearchParams(location.search).get('run_id'); if(saved) watch(saved).catch(e=>error(e.message));
 })();
 """
+

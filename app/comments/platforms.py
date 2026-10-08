@@ -57,5 +57,72 @@ PLATFORMS = {
 }
 
 
+
+# Links belong to individual steps so the owner can act without searching the docs.
+CONNECTION_GUIDES = {
+    "youtube": {
+        "steps": [
+            "Войдите в аккаунт владельца нужного канала. Откройте расширенные настройки YouTube и скопируйте «Идентификатор канала»: он начинается с UC. Имя @канала сюда не подходит.",
+            "В Google Cloud выберите или создайте проект, включите YouTube Data API v3. В Google Auth Platform настройте экран согласия и OAuth-клиент типа Web application. Для тестового приложения добавьте свой Google-аккаунт в тестировщики. В разрешённые redirect URI добавьте https://developers.google.com/oauthplayground (без слеша в конце).",
+            "Откройте OAuth Playground: в шестерёнке включите Use your own OAuth credentials и укажите Client ID и Client secret из своего проекта. На шаге 1 введите scope https://www.googleapis.com/auth/youtube.force-ssl, нажмите Authorize APIs и выберите владельца нужного канала. На шаге 2 нажмите Exchange authorization code for tokens и скопируйте Access token.",
+            "Вернитесь сюда: вставьте ID канала и Access token, затем нажмите «Проверить и подключить». После статуса «Подключено» нажмите «Загрузить комментарии»."
+        ],
+        "links": {0: [("Настройки YouTube", "https://www.youtube.com/account_advanced")], 1: [("Включить YouTube API", "https://console.cloud.google.com/apis/library/youtube.googleapis.com"), ("Настроить OAuth", "https://console.cloud.google.com/auth/overview")], 2: [("Открыть OAuth Playground", "https://developers.google.com/oauthplayground/")]},
+        "help": "ID начинается с UC; токен — значение Access token, без слова Bearer. API key, Client secret и Refresh token в это поле не подходят."
+    },
+    "telegram": {
+        "steps": [
+            "Откройте BotFather, отправьте /newbot, задайте имя и username нового бота. Скопируйте выданный токен. Создайте отдельного бота для комментариев, чтобы он не конфликтовал с другими сервисами.",
+            "В настройках своего канала откройте «Обсуждение» и привяжите группу. В группе добавьте нового бота администратором и разрешите отправлять сообщения. Подключается группа обсуждения, а не сам канал.",
+            "Найдите ID группы. Для приватной группы: в Telegram Desktop скопируйте ссылку на сообщение вида t.me/c/1234567890/42. Возьмите число после /c/ и добавьте перед ним -100: в примере ID будет -1001234567890. Для группы с публичным username ID можно получить методом getChat Bot API; если такого инструмента нет, этот шаг выполняет администратор интеграции.",
+            "Вставьте ID группы и токен BotFather ниже, нажмите «Проверить и подключить». Напишите новый комментарий в обсуждении, затем нажмите «Загрузить комментарии». Ответ будет отправлен от имени бота."
+        ],
+        "links": {0: [("Открыть BotFather", "https://t.me/BotFather")], 1: [("Права бота в группе", "https://core.telegram.org/bots/faq#what-messages-will-my-bot-get")], 2: [("Получить ID через getChat", "https://core.telegram.org/bots/api#getchat")]},
+        "help": "ID группы начинается с -100. Токен берётся из BotFather. Старые сообщения группы не загружаются; бот не должен использовать чужой webhook."
+    },
+    "instagram": {
+        "steps": [
+            "В Instagram переключите свой аккаунт на профессиональный: Business или Creator. Обычный личный аккаунт не подходит. Этот способ подключения использует Instagram Login и не требует Facebook Page.",
+            "В Meta for Developers создайте или откройте своё приложение и настройте Instagram API with Instagram Login. Для проверки собственного аккаунта добавьте его в тестировщики приложения и примите приглашение в Instagram.",
+            "В настройке Instagram Login авторизуйте нужный аккаунт и получите Instagram User access token с разрешениями instagram_business_basic и instagram_business_manage_comments. Получение токена описано в официальной инструкции ниже; для чужих аккаунтов может понадобиться App Review.",
+            "Получите числовой ID этого аккаунта из ответа GET /me?fields=user_id,username на graph.instagram.com — нужен user_id. Вставьте его и Instagram User access token в форму, проверьте подключение и загрузите комментарии. @username и токен Facebook Page не подходят."
+        ],
+        "links": {1: [("Мои приложения Meta", "https://developers.facebook.com/apps/")], 2: [("Настроить Instagram Login", "https://www.postman.com/meta/instagram/folder/6raa77c/instagram-api-with-instagram-login")], 3: [("Официальная коллекция запросов Meta", "https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api")]},
+        "help": "Нужны числовой user_id и Instagram User access token одного аккаунта. Получение токена требует настройки приложения Meta."
+    },
+    "threads": {
+        "steps": [
+            "Откройте Meta for Developers и создайте или выберите приложение с Threads API. Добавьте владельца своего Threads-аккаунта в тестировщики и примите приглашение в Threads.",
+            "В настройке Threads API авторизуйте этот аккаунт и получите Threads access token. Нужны threads_basic, threads_content_publish, threads_read_replies и threads_manage_replies. Используйте инструкцию Authorization в официальной коллекции Meta; токен Instagram не подходит.",
+            "Выполните запрос профиля /me?fields=id,username на graph.threads.net с этим токеном. Скопируйте числовое поле id. Ниже вставьте ID и токен, проверьте подключение, затем загрузите комментарии своих публикаций."
+        ],
+        "links": {0: [("Мои приложения Meta", "https://developers.facebook.com/apps/")], 1: [("Авторизация Threads API", "https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api")], 2: [("Запрос ID Threads", "https://www.postman.com/meta/threads/request/q9os31a/get-threads-user-s-profile-information")]},
+        "help": "Нужны числовой ID Threads и отдельный Threads access token. Для сторонних аккаунтов может потребоваться проверка приложения Meta."
+    },
+    "vk": {
+        "steps": [
+            "Войдите в VK как редактор или администратор нужного сообщества и включите комментарии к его записям.",
+            "Узнайте числовой ID сообщества. Если адрес содержит club12345 или public12345, ID — 12345. Для короткого имени получите ID через groups.getById в документации VK.",
+            "Получите пользовательский access token через приложение VK с доступом к wall и groups по официальной инструкции. Нужен токен пользователя с ролью редактора или администратора; токен сообщества не подходит. Если приложения с такими правами нет, потребуется настройка интеграции разработчиком.",
+            "Вставьте положительный ID без club/public и токен ниже. Нажмите «Проверить и подключить», затем «Загрузить комментарии». Ответы публикуются от имени сообщества."
+        ],
+        "links": {1: [("Найти ID: groups.getById", "https://dev.vk.com/ru/method/groups.getById")], 2: [("Токены доступа VK", "https://dev.vk.com/ru/api/access-token/getting-started"), ("Метод чтения комментариев", "https://dev.vk.com/ru/method/wall.getComments")]},
+        "help": "Например, для club12345 укажите 12345. Нужен пользовательский токен с wall и groups, не ключ сообщества."
+    },
+    "vk_video": {
+        "steps": [
+            "Выберите сообщество, где вы редактор или администратор, и проверьте, что оно владеет нужными видео. Включите комментарии к видео.",
+            "Найдите числовой ID сообщества-владельца: число после club/public в адресе или id из groups.getById. Укажите его без минуса и букв.",
+            "По инструкции VK получите пользовательский access token с video и groups. Токен сообщества не поддерживает используемые video.getComments / video.createComment. Если подходящего приложения нет, понадобится разработчик интеграции.",
+            "Заполните эту карточку отдельно от VK: ID сообщества и токен, затем «Проверить и подключить» и «Загрузить комментарии». Обрабатываются собственные видео сообщества, а не сохранённые чужие видео."
+        ],
+        "links": {1: [("Найти ID сообщества", "https://dev.vk.com/ru/method/groups.getById")], 2: [("Токены доступа VK", "https://dev.vk.com/ru/api/access-token/getting-started"), ("Комментарии к видео", "https://dev.vk.com/ru/method/video.getComments")]},
+        "help": "Положительный ID сообщества и пользовательский токен с video и groups. VK и VK Видео подключаются отдельно."
+    }
+}
+for _platform, _guide in CONNECTION_GUIDES.items():
+    PLATFORMS[_platform].update(_guide)
+
 def reply_limit(platform, configured):
     return min(configured, PLATFORMS[platform].get("max_length", configured))
+

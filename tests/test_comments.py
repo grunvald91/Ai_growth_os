@@ -553,3 +553,4 @@ def test_controller_proxy_is_not_implicitly_reused_for_comment_service(ctx):
     db, _, svc, _, _ = ctx
     settings = svc.settings.model_copy(update={"comment_platform_proxy_url": None, "telegram_proxy_url": "http://another-server:8891"})
     assert CommentService(db, settings).gateway.proxy_url is None
+

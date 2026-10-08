@@ -40,6 +40,30 @@ COMMENTS_CSS = """
 
 @media(max-width:1000px){.c-inbox-grid,.c-agent-grid{grid-template-columns:1fr}.c-platform-grid{grid-template-columns:1fr}}
 @media(max-width:600px){.c-card,.c-platform{padding:18px}.c-tabs{gap:8px}.c-tabs .btn{flex:1 1 42%;text-align:center}.c-fields{grid-template-columns:1fr;gap:0}.c-filters label{flex:1 1 42%}.c-card .btn{margin:4px 0}.c-inbox-grid{gap:16px}}
+#comments-app p{line-height:1.7;margin:12px 0 20px}
+#comments-app .btn{display:inline-flex;align-items:center;justify-content:center;text-align:center;padding:12px 18px;line-height:1.4;min-height:46px}
+#comments-app .c-tabs{gap:6px;padding:6px;background:#eaf0f7;border:0;border-radius:14px;margin-bottom:24px}
+#comments-app .c-tabs .btn{box-shadow:none;border:0;background:transparent;color:var(--sg-muted);flex:1}
+#comments-app .c-tabs .btn.primary{background:#fff;color:var(--sg-blue-600);box-shadow:0 2px 6px rgba(20,40,70,.06)}
+.c-connect{padding-top:20px;margin-top:24px;border-top:1px solid var(--sg-line)}
+#comments-app .c-connect label{margin:0 0 18px}
+.c-connect .btn{width:100%;margin-top:6px}
+.c-platform .c-actions{margin:16px 0 0;gap:12px}
+.c-platform ol{margin:16px 0 24px;padding-left:24px}
+.c-platform li{padding-left:6px;margin-bottom:18px;line-height:1.7}
+.c-step-links{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.c-step-links a{display:inline-flex;align-items:center;min-height:36px;text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}
+.c-platform .c-docs{display:inline-flex;min-height:40px;align-items:center;text-decoration:underline;text-underline-offset:4px}
+.c-platform .c-meta{margin-bottom:16px!important}
+.c-guide{border:1px solid var(--sg-line);border-radius:12px;padding:14px 16px;margin:18px 0}
+#comments-app .c-guide summary{font-weight:650;line-height:1.6;min-height:28px}
+.c-platform-intro{padding:24px;margin-bottom:24px}
+.c-platform-intro h2{margin-bottom:8px!important}
+.c-platform-intro p:last-child{margin-bottom:0!important}
+.c-help{display:block;font-size:12px;font-weight:450;color:var(--sg-muted);line-height:1.6}
+#comments-app .c-fields{gap:18px}
+@media(max-width:600px){#comments-app .c-tabs .btn{flex:1 1 42%;font-size:13px}.c-platform-intro{padding:18px}.c-connect .btn{width:100%}.c-platform .chip{font-size:11px}}
+
 """
 
 COMMENTS_JS = r"""
@@ -96,3 +120,4 @@ COMMENTS_JS = r"""
   });
 })();
 """
+

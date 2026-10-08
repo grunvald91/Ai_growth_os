@@ -295,3 +295,4 @@ def test_studio_calendar_date_filter_and_material_search_work(studio_db):
         assert "Нужная статья" not in posts.text
     finally:
         app.dependency_overrides.clear()
+

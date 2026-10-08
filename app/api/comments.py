@@ -82,7 +82,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
         raise error(exc)
     base = f"/studio/products/{product_id}/comments"
     tabs = ''.join(f'<a class="btn {"primary" if tab == key else "ghost"}" href="{base}?tab={key}" aria-current="{str(tab == key).lower()}">{name}</a>'
-        for key, name in [("inbox", "Входящие"), ("agent", "Бизнес и агент"), ("platforms", "Площадки"), ("test", "Проверка ответов")])
+        for key, name in [("inbox", "Входящие"), ("agent", "Бизнес и агент"), ("platforms", "Подключения"), ("test", "Проверка ответов")])
     channels = list(svc.db.scalars(select(CommentChannel).where(CommentChannel.product_id == product_id)))
     live = {row.platform: row for row in channels if row.status == "connected"}
     options = ''.join(f'<option value="{key}" {"selected" if platform == key else ""}>{esc(value["name"])}</option>' for key, value in PLATFORMS.items())
@@ -96,18 +96,27 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
         for key, item in PLATFORMS.items():
             channel = live.get(key)
             badge = "Подключено · " + channel.account_name if channel else ("Можно подключить" if item["live"] else "Ручные черновики")
-            steps = ''.join(f'<li>{esc(step)}</li>' for step in item["steps"])
-            docs = f'<a href="{esc(item["docs"])}" target="_blank" rel="noopener noreferrer">Инструкция площадки</a>' if item["docs"] else ''
+            steps = ''
+            for index, step in enumerate(item["steps"]):
+                links = ''.join(f'<a href="{esc(url)}" target="_blank" rel="noopener noreferrer">{esc(label)} ↗</a>'
+                    for label, url in item.get("links", {}).get(index, []))
+                steps += f'<li>{esc(step)}<div class="c-step-links">{links}</div></li>' if links else f'<li>{esc(step)}</li>' 
+            docs = f'<a class="c-docs" href="{esc(item["docs"])}" target="_blank" rel="noopener noreferrer">Официальная документация ↗</a>' if item["docs"] else ''
+            help_text = esc(item.get("help", ""))
             if item["live"]:
                 controls = (f'<form class="c-connect" data-platform="{key}"><label>{esc(item["account_label"])}<input name="account_id" required value="{esc(channel.account_id if channel else "")}" autocomplete="off"></label>'
                     '<label>Токен доступа<input name="token" type="password" required autocomplete="new-password" placeholder="Хранится зашифрованным на сервере"></label>'
-                    '<button class="btn primary" type="submit">Проверить и подключить</button></form>')
+                    f'<span class="c-help">{help_text}</span><button class="btn primary" type="submit">Проверить и подключить</button></form>')
                 if channel:
                     controls += f'<div class="c-actions"><button class="btn ghost" data-sync="{key}">Загрузить комментарии</button><button class="btn ghost" data-disconnect="{key}">Отключить</button></div>'
             else:
                 controls = f'<a class="btn ghost" href="{base}?tab=test&platform={key}">Подготовить ответ</a>'
-            cards.append(f'<section class="panel c-platform"><div class="c-card-head"><h2>{esc(item["name"])}</h2><span class="chip {"blue" if channel else ""}">{esc(badge)}</span></div><p class="c-meta">{"Доступ напрямую" if key in {"vk", "vk_video"} else "Через зарубежный сервер" if item["live"] else "Ручной режим"}</p><ol>{steps}</ol><p>{esc(item["limits"])}</p>{docs}{controls}</section>')
-        content = '<div class="c-platform-grid">' + ''.join(cards) + '</div>'
+            cards.append(f'<section class="panel c-platform"><div class="c-card-head"><h2>{esc(item["name"])}</h2><span class="chip {"blue" if channel else ""}">{esc(badge)}</span></div><p class="c-meta">{"Доступ напрямую" if key in {"vk", "vk_video"} else "Через зарубежный сервер" if item["live"] else "Ручной режим"}</p><details class="c-guide"><summary>Как получить ID и токен · {len(item["steps"])} шага</summary><ol>{steps}</ol>{docs}</details><p>{esc(item["limits"])}</p>{controls}</section>')
+        content = ('<section class="panel c-platform-intro"><h2>Подключите аккаунты бизнеса</h2>'
+            '<p>Для каждой площадки нужны два значения: ID аккаунта и токен доступа — ключ, который площадка выдаёт для работы с комментариями. Это не пароль от аккаунта.</p>'
+            '<p>Откройте инструкцию ниже, получите данные по ссылкам, заполните форму и нажмите «Проверить и подключить». Затем загрузите комментарии. В этой версии токены вводятся вручную; при истечении срока действия их нужно заменить.</p>'
+            '<p>Для Google и Meta потребуется приложение в кабинете разработчика. Если его ещё нет, подготовку доступа выполняет владелец аккаунта или разработчик интеграции. Для ручной работы подключение не требуется: откройте «Проверка ответов».</p></section>'
+            '<div class="c-platform-grid">' + ''.join(cards) + '</div>')
     elif tab == "agent":
         try:
             facts, _, _, _ = svc.knowledge(product_id)
@@ -175,7 +184,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
         empty = '<section class="panel c-empty"><h2>Комментариев пока нет</h2><p>Подключите площадку и загрузите комментарии или добавьте один вручную.</p><a class="btn primary" href="?tab=platforms">Подключить площадку</a></section>'
         content = f'''<form method="get" class="c-filters"><input type="hidden" name="tab" value="inbox"><label>Площадка<select name="platform"><option value="all">Все площадки</option>{options}</select></label><label>Статус<select name="status"><option value="all">Все статусы</option>{statuses}</select></label><button class="btn ghost" type="submit">Показать</button></form><div class="c-actions">{sync}</div>
         <div class="c-inbox-grid"><div class="c-list">{''.join(cards) or empty}</div><aside class="panel c-card"><h2>Добавить комментарий</h2><p>Для ручного ответа и площадок без подключения.</p><form id="c-manual"><label>Площадка<select name="platform">{options}</select></label><label>Контекст поста<textarea name="post_text" rows="3" maxlength="8000"></textarea></label><label>Комментарий<textarea name="text" rows="4" maxlength="8000" required></textarea></label><button class="btn primary" type="submit">Добавить</button></form><p>Ручные ответы размещаются копированием.</p></aside></div>'''
-    body_html = f'<link rel="stylesheet" href="/studio/assets/comments.css"><div id="comments-app" data-api="/products/{product_id}/comments"><nav class="c-tabs">{tabs}</nav><p id="c-feedback" role="status" aria-live="polite"></p>{notice}{content}</div><script src="/studio/assets/comments.js" defer></script>'
+    body_html = f'<link rel="stylesheet" href="/studio/assets/comments.css?v=2"><div id="comments-app" data-api="/products/{product_id}/comments"><nav class="c-tabs">{tabs}</nav><p id="c-feedback" role="status" aria-live="polite"></p>{notice}{content}</div><script src="/studio/assets/comments.js" defer></script>'
     return HTMLResponse(studio_page_shell(product, active="comments", title="Комментарии", subtitle="AI-консультант вашего бизнеса", body=body_html), headers={"Cache-Control": "no-store"})
 
 
@@ -256,3 +265,4 @@ async def comment_action(product_id: UUID, comment_id: UUID, action: str, reques
         raise LookupError("Действие не найдено")
     except (ValueError, LookupError) as exc:
         raise error(exc)
+

@@ -9,6 +9,7 @@ import html
 import json
 from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 from uuid import UUID
 from urllib.parse import quote
 
@@ -251,17 +252,28 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
 def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
     base = f"/studio/products/{product_id}"
     def item(name: str, href: str, icon: str, label: str) -> str:
-        current = ' class="active"' if active == name else ""
+        current = ' class="active" aria-current="page"' if active == name else ""
         return f'<a{current} href="{href}"><span class="m-ico">{icon}</span>{label}</a>'
+    more_active = ' active' if active not in {"overview", "comments"} else ''
     return f"""
-    <nav class="mobile-nav">
+    <nav class="mobile-nav" aria-label="Основные разделы">
       {item("overview", base, "⌂", "Обзор")}
-      {item("plan", base + "/plan", "▣", "План")}
-      {item("materials", base + "/materials", "▤", "Материалы")}
-      {item("calendar", base + "/calendar", "□", "Календарь")}
       {item("comments", base + "/comments", "☷", "Комментарии")}
-      {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Разведка")}
+      <button class="mobile-more{more_active}" type="button" data-open-dialog="mobile-sections" aria-haspopup="dialog" aria-controls="mobile-sections"><span class="m-ico">☰</span>Ещё</button>
     </nav>
+    <dialog id="mobile-sections" class="mobile-sections" aria-labelledby="mobile-sections-title">
+      <div class="mobile-sections-head"><h2 id="mobile-sections-title">Все разделы</h2><button type="button" data-close-dialog aria-label="Закрыть меню">×</button></div>
+      <nav class="mobile-sections-links" aria-label="Все разделы">
+        {item("overview", base, "⌂", "Обзор")}
+        {item("plan", base + "/plan", "▣", "Контент-план")}
+        {item("materials", base + "/materials", "▤", "Материалы")}
+        {item("calendar", base + "/calendar", "□", "Календарь")}
+        {item("analytics", base + "/analytics", "⌁", "Аналитика")}
+        {item("comments", base + "/comments", "☷", "Комментарии")}
+        {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
+        <a href="/studio?choose=1"><span class="m-ico">⇄</span>Выбрать проект</a>
+      </nav>
+    </dialog>
     """
 
 def asset_dialog(record: Artifact) -> str:
@@ -752,7 +764,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f4f8fd">
   <title>Growth Studio · {esc(product.name)}</title>
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=3">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=7">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
@@ -809,7 +821,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   {mobile_nav_html(product.id)}
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=3"></script>
+<script src="/studio/assets/studio.js?v=5"></script>
 </body></html>"""
 
 
@@ -872,7 +884,7 @@ def studio_page_shell(
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f4f8fd">
   <title>{esc(title)} · Growth Studio</title>
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=6">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=7">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
@@ -893,7 +905,7 @@ def studio_page_shell(
   {mobile_nav_html(product.id, active)}
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=4"></script>
+<script src="/studio/assets/studio.js?v=5"></script>
 </body></html>"""
 
 
@@ -1191,12 +1203,18 @@ def product_selector(products: list[Product]) -> str:
     )
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Growth Studio</title><link rel="stylesheet" href="/studio/assets/studio.css?v=6"></head>
+<title>Growth Studio</title><link rel="stylesheet" href="/studio/assets/studio.css?v=7"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
 <div class="product-list">{cards or '<div class="empty">Проекты ещё не добавлены.</div>'}</div>
 </main></body></html>"""
+
+
+@router.get("/studio/assets/manrope.woff2")
+def studio_font():
+    return Response((Path(__file__).parent / "assets" / "manrope.woff2").read_bytes(),
+                    media_type="font/woff2", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @router.get("/studio/assets/studio.css")
@@ -1354,3 +1372,4 @@ def studio_queue_package(product_id: UUID, plan_id: UUID, package_key: str, db: 
         ),
     )
     return RedirectResponse(f"/studio/products/{product_id}/packages/{quote(package_key, safe='')}", status_code=303)
+
