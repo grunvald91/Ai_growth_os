@@ -30,6 +30,7 @@ def render_page(products, selected: UUID | None):
 details{{margin:12px 0}}summary{{cursor:pointer}}
 </style>
 <section class="intel-card">
+<p><a href="/market-research?product_id={product.id}">⌕ Анализ поискового спроса — Wordstat →</a></p>
 <form id="intel-form">
 <label>Компания <select id="intel-product">{options}</select></label>
 <label>Что хотите узнать? <textarea id="intel-brief" required minlength="3" maxlength="3000" placeholder="Например: какие жалобы на конкурентов повторяются и какой оффер стоит проверить?"></textarea></label>
