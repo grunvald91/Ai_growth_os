@@ -262,6 +262,37 @@ def _ensure_derivative_source_adaptation(brief, *, strategy, seo):
     return type(brief).model_validate(data)
 
 
+
+def _normalize_ready_video_timeline(brief):
+    """Make platform-ready Shorts/Reels exactly 30 seconds and strip model-only notes from speech."""
+    data = brief.model_dump(mode='json')
+    production = data['production_brief']
+    shots = production.get('shots') or []
+    if shots:
+        durations = [
+            max(0.001, float(shot['end_second']) - float(shot['start_second']))
+            for shot in shots
+        ]
+        total = sum(durations)
+        cursor = 0.0
+        for index, (shot, duration) in enumerate(zip(shots, durations)):
+            shot['start_second'] = round(cursor, 3)
+            if index == len(shots) - 1:
+                end = 30.0
+            else:
+                end = round(cursor + 30.0 * duration / total, 3)
+            if end <= cursor:
+                end = round(cursor + 0.001, 3)
+            shot['end_second'] = end
+            cursor = end
+            spoken = shot.get('spoken_text')
+            if isinstance(spoken, str) and 'Avoid:' in spoken:
+                shot['spoken_text'] = spoken.split('Avoid:', 1)[0].rstrip(' .;') + '.'
+        production['duration_seconds'] = 30
+    return type(brief).model_validate(data)
+
+
+
 def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
     """Build six safe channel texts from the already validated marketing article."""
     prior = stage_inputs.get('prior_stage_outputs') or {}
