@@ -368,3 +368,33 @@ PDF со сканами и изображения распознаются ло�
 Worker запускает подготовку заранее к срокам календаря. Одна тема на нескольких площадках использует общий пакет: SEO-статья, шесть текстовых адаптаций и три сценария роликов по 30 секунд. Это существующая единица производства; календарь явно показывает число таких пакетов. Запланированные публикации используют нужные материалы из пакета; вне календаря могут оставаться дополнительные адаптации. Видео — сценарии и отдельно одобренный рендер тихих текстовых карточек, без съёмки/озвучки/музыки. Повтор одного и того же материала на одной площадке не разрешается. Пропущенная дата без подготовленного задания обозначается как пропущенная, а не превращается в позднюю публикацию.
 
 Календарь показывает состояния подготовки и ссылки на готовые пакеты. Публикация и сбор статистики остаются ручными. URL, введённый владельцем через «Записать результаты публикации», фиксируется как сообщение владельца, а не как проверенный внешней системой факт размещения. При нескольких вариантах видео общий URL статьи не приписывается одному из них автоматически. В дату пересмотра редактор получает задачу на новый черновик с актуальными наблюдениями; он снова требует подтверждения. Автоматического поиска новых внешних маркетинговых исследований в этой роли пока нет: используются сохранённые исследования и явно обозначенные пробелы.
+
+## ServGo sales-agent settings
+
+The ServGo product has an **ИИ-продавец** link in Growth Studio:
+`/studio/products/{servgo_product_uuid}/sales-agent`. This page edits the live
+ServGo business policy: enable/disable AI, tool capabilities, instructions, topic
+exclusions, and booking after client confirmation versus operator-only booking.
+It also shows current schedule/prepayment/legal settings and the scenarios that
+still require the existing booking form or operator. Operator conversations stay
+in the ServGo admin inbox at `/admin/sales`; owner settings are also available
+there at `/admin/sales/settings`.
+
+Configure server-side `SERVGO_API_BASE_URL` (HTTPS URL, typically ending `/api`),
+`SERVGO_PLATFORM_API_TOKEN` (>=32 characters), and a separate
+`SERVGO_SALES_OWNER_PASSWORD` (>=16 characters). The page requires HTTP Basic
+login with username `owner`; serve it over HTTPS or local loopback. In ServGo,
+configure the same integration token and an explicit `SERVGO_PLATFORM_BUSINESS_IDS`
+allowlist, and apply `add_sales_conversations.sql` and
+`add_sales_agent_settings.sql` from the matching ServGo PR before rollout.
+Missing integration/login configuration fails closed; no pretend settings form
+is shown. Credentials are not sent to the LLM or embedded in HTML/JS.
+
+Each save is an explicit owner approval of that policy/revision. The platform
+records a versioned Artifact, RED `change_access` Approval and ToolCall before
+calling ServGo, including rejected external writes. CSRF checks and revision
+conflicts prevent blind replacement of another owner's edit. ServGo remains the
+authority and enforces permissions again during tool execution and booking
+confirmation. No duplicate local policy, auto-publishing or production deployment
+is introduced. The rest of this application's existing APIs still require the
+loopback/authenticated proxy setup described above.

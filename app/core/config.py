@@ -7,6 +7,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_env: str = "development"
+    servgo_api_base_url: str | None = None
+    servgo_platform_api_token: str | None = None
+    servgo_sales_owner_password: str | None = None
     database_url: str = "postgresql+psycopg://ai_growth:ai_growth@localhost:5432/ai_growth"
     llm_provider: str = "xai"
     llm_model: str = "kimi-2.7"

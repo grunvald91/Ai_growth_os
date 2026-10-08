@@ -23,3 +23,6 @@ app.include_router(company_intake_router)
 
 from app.api.content_studio import router as content_studio_router
 app.include_router(content_studio_router)
+
+from app.api.sales_agent import router as sales_agent_router
+app.include_router(sales_agent_router)
