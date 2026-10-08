@@ -18,7 +18,17 @@ class RoleProvider:
     async def generate(self, request):
         self.requests.append(request.model_copy(deep=True))
         role = request.metadata.get("team_role")
-        if role == "segment_researcher":
+        if role == "competitive_intelligence":
+            stage = request.metadata["task_type"]
+            payload = json.loads(request.messages[0].content)
+            if stage == "planning":
+                data = {"mode": payload["request"]["mode"], "questions": ["What weaknesses repeat?"], "source_requests": []}
+            elif stage == "strong_triage":
+                data = {"labels": [{"evidence_id": item["evidence_id"], "relevance": "relevant",
+                    "topic": "quality", "sentiment": "negative", "confidence": .95} for item in payload["items"]]}
+            else:
+                data = {"insights": [], "evidence_gaps": ["Small supplied review sample."]}
+        elif role == "segment_researcher":
             data = {
                 "summary": "Test a small set of service-business segments.",
                 "hypotheses": [{
@@ -214,10 +224,15 @@ async def test_research_department_uses_supplied_review_sources(db, product, tmp
     result = await cycle.run(product.id, max_tasks=1, followup_cmo=False)
 
     assert result.completed_task_ids == [parent.id]
-    assert len(provider.requests) == 5
+    assert len(provider.requests) == 8
+    intel = db.scalar(select(Artifact).where(Artifact.kind == "competitive_intelligence_report"))
+    assert intel is not None
+    lead_request = next(r for r in provider.requests if r.metadata.get("team_role") == "research_lead")
+    assert str(intel.id) in lead_request.messages[0].content
     research = db.get(Artifact, result.artifact_ids[0])
     report = ResearchDepartmentReport.model_validate_json(research.content)
     assert report.department_status == "complete"
+    assert report.competitive_intelligence_artifact_id == intel.id
     assert report.competitor_voc_status == "evidence_available"
     voc_request = next(
         r for r in provider.requests

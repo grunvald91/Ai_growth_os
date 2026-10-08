@@ -231,6 +231,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         {item("calendar", base + "/calendar", "□", "Календарь")}
         {item("analytics", base + "/analytics", "⌁", "Аналитика")}
         {item("comments", base + "/comments", "☷", "Комментарии")}
+        {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
       </nav>
       <div class="nav-label">Инструменты</div>
       <nav class="nav">
@@ -259,6 +260,7 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
       {item("materials", base + "/materials", "▤", "Материалы")}
       {item("calendar", base + "/calendar", "□", "Календарь")}
       {item("comments", base + "/comments", "☷", "Комментарии")}
+      {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Разведка")}
     </nav>
     """
 
@@ -870,7 +872,7 @@ def studio_page_shell(
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f4f8fd">
   <title>{esc(title)} · Growth Studio</title>
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=4">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=6">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
@@ -1189,7 +1191,7 @@ def product_selector(products: list[Product]) -> str:
     )
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Growth Studio</title><link rel="stylesheet" href="/studio/assets/studio.css?v=2"></head>
+<title>Growth Studio</title><link rel="stylesheet" href="/studio/assets/studio.css?v=6"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>

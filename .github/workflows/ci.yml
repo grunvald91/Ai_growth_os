@@ -2,11 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main, "feature/**", "deploy/**"]
+    branches: [main, "deploy/**"]
   pull_request:
 
 permissions:
   contents: read
+
+# A feature branch with an open PR is validated by pull_request only.
+# This avoids spending Actions minutes twice for the same commit.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:

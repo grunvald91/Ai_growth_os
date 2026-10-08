@@ -220,7 +220,7 @@ h1{font-size:31px;line-height:1.06;margin:5px 0 4px;letter-spacing:-1.1px;color:
   .package-grid{display:flex;overflow-x:auto;scroll-snap-type:x proximity;padding-bottom:18px}
   .package-card{min-width:235px;scroll-snap-align:start}
   .material-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .mobile-nav{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border-top:1px solid var(--sg-line);padding:7px 8px max(7px,env(safe-area-inset-bottom));z-index:40;box-shadow:0 -8px 24px rgba(31,75,128,.08)}
+  .mobile-nav{display:grid;grid-template-columns:repeat(6,minmax(65px,1fr));overflow-x:auto;position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border-top:1px solid var(--sg-line);padding:7px 8px max(7px,env(safe-area-inset-bottom));z-index:40;box-shadow:0 -8px 24px rgba(31,75,128,.08)}
   .mobile-nav a{display:grid;place-items:center;gap:2px;color:#7585a0;font-size:9px;font-weight:800;padding:5px;border-radius:10px}
   .mobile-nav a.active{color:var(--sg-blue);background:#edf6ff}
   .mobile-nav .m-ico{font-size:16px}

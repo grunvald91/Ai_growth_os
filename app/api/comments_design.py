@@ -37,7 +37,7 @@ COMMENTS_CSS = """
 #c-feedback{padding:12px 16px;border-radius:12px;background:#e9f4ff;color:var(--sg-text)!important}
 #c-feedback.error{background:#fff1ef;color:#a53227!important}
 #c-test-result:not(:empty){border-top:1px solid var(--sg-line);margin-top:24px;padding-top:20px}
-.mobile-nav:has(a[href$='/comments']){grid-template-columns:repeat(5,minmax(0,1fr))}
+
 @media(max-width:1000px){.c-inbox-grid,.c-agent-grid{grid-template-columns:1fr}.c-platform-grid{grid-template-columns:1fr}}
 @media(max-width:600px){.c-card,.c-platform{padding:18px}.c-tabs{gap:8px}.c-tabs .btn{flex:1 1 42%;text-align:center}.c-fields{grid-template-columns:1fr;gap:0}.c-filters label{flex:1 1 42%}.c-card .btn{margin:4px 0}.c-inbox-grid{gap:16px}}
 """

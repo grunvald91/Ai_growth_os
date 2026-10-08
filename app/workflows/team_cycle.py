@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from app.agents import AGENT_CONFIGS, AgentRole
@@ -87,6 +87,7 @@ class TeamCycle:
         provider_name: str,
         model: str,
         followup_review: DailyGrowthReview | None = None,
+        intelligence=None,
     ):
         self.db = db
         self.llm = llm
@@ -102,6 +103,7 @@ class TeamCycle:
             products_root=products_root,
             provider_name=provider_name,
             model=model,
+            intelligence=intelligence,
         )
 
     async def run(
@@ -119,6 +121,7 @@ class TeamCycle:
             self.db.scalars(
                 select(Task)
                 .where(Task.product_id == product_id, Task.status == TaskStatus.QUEUED)
+                .where(or_(Task.assigned_agent.is_(None), Task.assigned_agent != "competitive_intelligence"))
                 .order_by(Task.priority.desc(), Task.created_at.asc(), Task.id)
                 .limit(max_tasks)
             )
