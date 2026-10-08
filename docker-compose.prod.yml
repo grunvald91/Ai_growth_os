@@ -26,6 +26,9 @@ services:
     restart: unless-stopped
     environment:
       APP_ENV: production
+      WORDSTAT_API_KEY: ${WORDSTAT_API_KEY:-}
+      WORDSTAT_FOLDER_ID: ${WORDSTAT_FOLDER_ID:-}
+      WORDSTAT_DAILY_LIMIT: ${WORDSTAT_DAILY_LIMIT:-40}
       DATABASE_URL: postgresql+psycopg://ai_growth:${POSTGRES_PASSWORD}@postgres:5432/ai_growth
       LLM_PROVIDER: xai
       LLM_MODEL: ${LLM_MODEL:-grok-4.7}
