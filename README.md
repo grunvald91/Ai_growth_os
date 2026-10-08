@@ -306,9 +306,22 @@ independently of outreach experiments. The existing article workflow is extended
 `produce_ready_assets=true`: SEO article + six complete channel adaptations
 (Dzen, TenChat, vc.ru, Telegram, FAQ, proposed founder post) + three distinct 30-second
 video scripts + a distribution/measurement plan. Packages are drafts requiring human review;
-no automatic publishing or claim of SEO performance. ZIP download contains actual texts,
-scripts and measurement metadata. The first ServGo package is queued idempotently by
+no automatic publishing or claim of SEO performance. Opening a package in Telegram
+shows separate buttons for the SEO article, each channel adaptation, each video
+script, and the publication/measurement plan. Selecting a button delivers that
+material as readable messages, with long copy split without truncation. Legacy ZIP
+download buttons open this menu too; the bot no longer sends package archives.
+The first ServGo package is queued idempotently by
 `python -m app.content.bootstrap` during deployment.
+
+Growth Studio renders articles and posts with headings, paragraphs, lists and links
+inside publication preview cards. JSON wrappers, IDs and workflow fields are never
+used as fallback display text. Production briefs are shown as readable instructions;
+visual-generation prompts sit in a collapsed section. **Копировать** copies the
+material alone, including the full storyboard for scripts, without UI labels or
+generation prompts. The clipboard includes plain text and formatted HTML where
+the browser supports it, with plain-text and legacy browser fallbacks. Preview
+cards show text layout; platform publication adapters remain separate work.
 
 After reviewing scripts, **Одобрить рендер трёх MP4** queues local ffmpeg production.
 The first renderer produces 720×1280 H.264 typography videos, 25 fps, exactly 30 seconds,

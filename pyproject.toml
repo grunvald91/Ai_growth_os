@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Safe, auditable AI growth operating system"
 requires-python = ">=3.12"
 dependencies = [
+  "markdown-it-py>=3,<5",
   "defusedxml>=0.7,<1",
   "pypdf>=6,<7",
   "openpyxl>=3.1,<4",

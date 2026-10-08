@@ -19,6 +19,9 @@ from sqlalchemy.orm import Session
 
 from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
 from app.content.calendar import PLATFORMS, approve_plan, pause_plan
+from app.content.presentation import (
+    PLATFORM_LABELS, formatted_html, material_markdown, material_platform, plain_text,
+)
 from app.content.service import queue_content
 from app.core.config import get_settings
 from app.db.session import get_db
@@ -173,24 +176,13 @@ def artifact_kind_label(record: Artifact, value: dict | None = None) -> str:
         return "Stories"
     if record.kind == "static_image_brief":
         return "Визуал"
+    if record.kind == "content_distribution":
+        return "План публикации и измерения"
     return record.kind.replace("_", " ").title()
 
 
 def artifact_text(record: Artifact, value: dict | None = None) -> str:
-    value = value or parse_json(record)
-    if not value:
-        return record.content
-    if record.kind == "article":
-        return str(value.get("full_article") or value.get("reader_article") or value.get("body") or record.content)
-    if record.kind == "channel_text":
-        return str(value.get("body") or value.get("text") or record.content)
-    if record.kind in {"video_script", "short_video_brief"}:
-        brief = value.get("production_brief") or value
-        return str(brief.get("voiceover_or_dialogue_script") or value.get("script") or record.content)
-    for key in ("body", "text", "copy", "description", "content"):
-        if value.get(key):
-            return str(value[key])
-    return json.dumps(value, ensure_ascii=False, indent=2)
+    return plain_text(material_markdown(record, value))
 
 
 def excerpt(text: str, limit: int = 120) -> str:
@@ -260,54 +252,59 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
     </nav>
     """
 
-def asset_dialog(record: Artifact) -> str:
+def material_preview(record: Artifact, copy_id: str, author: str = "") -> str:
     value = parse_json(record)
-    title = esc(record.title)
-    kind_label = esc(artifact_kind_label(record, value))
-    copy_id = f"copy-{record.id}"
-
-    if record.kind in {"video_script", "short_video_brief"}:
-        brief = value.get("production_brief") or value
-        hooks = "".join(f"<li>{esc(x)}</li>" for x in (brief.get("hook_variants") or []))
-        shots = []
-        for shot in brief.get("shots") or []:
-            shots.append(
-                '<div class="story-shot">'
-                '<div class="story-shot-head">'
-                f'<time>{esc(shot.get("start_second"))}–{esc(shot.get("end_second"))} сек.</time>'
-                f'<b>{esc(shot.get("purpose") or shot.get("shot_type") or "Сцена")}</b>'
-                '</div>'
-                f'<p><b>Кадр:</b> {esc(shot.get("visual_description"))}</p>'
-                f'<p><b>Камера:</b> {esc(shot.get("camera_and_movement"))}</p>'
-                f'<p><b>Действие:</b> {esc(shot.get("action"))}</p>'
-                f'<p><b>На экране:</b> {esc(shot.get("on_screen_text"))}</p>'
-                f'<p><b>Переход:</b> {esc(shot.get("transition"))}</p>'
-                f'<div class="story-prompt"><b>Промпт для будущей генерации:</b><br>{esc(shot.get("generation_prompt"))}</div>'
-                '</div>'
+    markdown = material_markdown(record, value)
+    copy = plain_text(markdown)
+    platform = material_platform(record, value)
+    label = PLATFORM_LABELS.get(platform, artifact_kind_label(record, value))
+    layout = "article" if record.kind == "article" or platform in {"own_site", "dzen", "vc_ru"} else "post"
+    is_brief = record.kind.endswith("_brief") or record.kind in {"video_script", "content_distribution"}
+    body = formatted_html(markdown) if copy else '<p class="empty">Текст материала пока не подготовлен.</p>'
+    author_html = (
+        '<div class="social-author">'
+        f'<span class="social-avatar">{esc(author[:1].upper())}</span>'
+        f'<div><b>{esc(author)}</b><small>{esc(label)}</small></div></div>'
+        if author and not is_brief else ""
+    )
+    # Clipboard sources contain only reader copy; UI labels and private metadata
+    # never enter a publication. Textareas are hidden and escaped, not raw HTML.
+    clipboard = f'<textarea id="{copy_id}" hidden>{esc(copy)}</textarea>'
+    rich_id = copy_id + "-html"
+    rich_clipboard = f'<template id="{rich_id}">{body}</template>'
+    preview = (
+        f'<div class="publication-preview {layout}" data-platform="{esc(platform)}">'
+        f'{author_html}<div class="formatted-copy">{body}</div></div>'
+    )
+    production_details = ""
+    brief = value.get("production_brief") or value
+    if isinstance(brief, dict):
+        prompts = [
+            f'<h4>Сцена {index}</h4><p>{esc(shot.get("generation_prompt"))}</p>'
+            for index, shot in enumerate(brief.get("shots") or [], 1)
+            if isinstance(shot, dict) and shot.get("generation_prompt")
+        ]
+        if brief.get("image_generation_prompt"):
+            prompts.append(f'<p>{esc(brief["image_generation_prompt"])}</p>')
+        if prompts:
+            production_details = (
+                '<details class="production-details"><summary>Инструкции для создания визуала</summary>'
+                + "".join(prompts) + '</details>'
             )
-        shots_html = "".join(shots) or '<div class="empty">Раскадровка ещё не заполнена.</div>'
-        body = (
-            f'<div id="{copy_id}" class="article-text">'
-            f'<b>Площадка:</b> {esc(platform_label(brief.get("target_platform")))}\n'
-            f'<b>Цель:</b> {esc(brief.get("objective"))}\n\n'
-            f'<b>Хуки:</b><ul>{hooks}</ul>'
-            f'<b>Озвучка / диалог:</b>\n{esc(brief.get("voiceover_or_dialogue_script"))}\n\n'
-            f'<b>Монтаж и сведение:</b> {esc(brief.get("editing_mix_notes") or brief.get("editing_rhythm"))}'
-            '</div>'
-            f'<div class="storyboard-grid" style="margin-top:16px">{shots_html}</div>'
-        )
-    else:
-        body = f'<div id="{copy_id}" class="article-text">{esc(artifact_text(record, value))}</div>'
+    return clipboard + rich_clipboard + preview + production_details
 
+
+def asset_dialog(record: Artifact, author: str = "") -> str:
+    copy_id = f"copy-{record.id}"
     return f"""
     <dialog class="dialog" id="material-{record.id}">
       <div class="dialog-head">
-        <div><span class="status draft">{kind_label}</span><h3>{title}</h3></div>
+        <div><span class="status draft">{esc(artifact_kind_label(record))}</span><h3>{esc(record.title)}</h3></div>
         <button class="dialog-close" type="button" data-close-dialog aria-label="Закрыть">×</button>
       </div>
-      <div class="dialog-body">{body}</div>
+      <div class="dialog-body">{material_preview(record, copy_id, author)}</div>
       <div class="dialog-actions">
-        <button class="btn ghost" type="button" data-copy="{copy_id}">Копировать</button>
+        <button class="btn ghost" type="button" data-copy="{copy_id}" data-copy-html="{copy_id}-html">Копировать</button>
         <button class="btn primary" type="button" data-close-dialog>Готово</button>
       </div>
     </dialog>
@@ -550,7 +547,7 @@ def mobile_dashboard_html(
     """;
 
 
-def selected_preview(record: Artifact | None) -> str:
+def selected_preview(record: Artifact | None, author: str = "") -> str:
     if record is None:
         return (
             '<section class="panel preview"><div class="preview-empty">'
@@ -559,7 +556,6 @@ def selected_preview(record: Artifact | None) -> str:
             '</div></section>'
         )
     value = parse_json(record)
-    text = artifact_text(record, value)
     return f"""
     <section class="panel preview">
       <div class="preview-hero"><span class="brand-mark">S</span></div>
@@ -569,8 +565,9 @@ def selected_preview(record: Artifact | None) -> str:
           <span class="status ready_for_review">Предпросмотр</span>
         </div>
         <h3>{esc(record.title)}</h3>
-        <div class="preview-copy">{esc(excerpt(text, 900))}</div>
+        <div class="preview-copy">{material_preview(record, "preview-copy", author)}</div>
         <div class="preview-actions">
+          <button class="btn ghost" type="button" data-copy="preview-copy" data-copy-html="preview-copy-html">Копировать</button>
           <button class="btn primary" type="button" data-open-dialog="material-{record.id}">Открыть полностью</button>
         </div>
       </div>
@@ -736,7 +733,7 @@ def product_dashboard(db: Session, product: Product) -> str:
     """
 
     first_material = material_records[0] if material_records else None
-    dialogs = "".join(asset_dialog(record) for record in material_records[:60])
+    dialogs = "".join(asset_dialog(record, product.name) for record in material_records[:60])
     plan_state = (plan or {}).get("approval_state") or "draft"
     generated = (plan or {}).get("generated_at")
     review = (plan or {}).get("review_at")
@@ -748,7 +745,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f4f8fd">
   <title>Growth Studio · {esc(product.name)}</title>
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=3">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=4">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
@@ -798,14 +795,14 @@ def product_dashboard(db: Session, product: Product) -> str:
           </div>
         </section>
       </div>
-      {selected_preview(first_material)}
+      {selected_preview(first_material, product.name)}
     </div>
     </div>
   </main>
   {mobile_nav_html(product.id)}
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=3"></script>
+<script src="/studio/assets/studio.js?v=4"></script>
 </body></html>"""
 
 
@@ -1046,50 +1043,22 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
 
 
 def material_detail_page(db: Session, product: Product, record: Artifact) -> str:
-    value = parse_json(record)
-    kind_label = artifact_kind_label(record, value)
-    if record.kind in {"video_script", "short_video_brief"}:
-        brief = value.get("production_brief") or value
-        shots = "".join(
-            '<div class="story-shot">'
-            f'<div class="story-shot-head"><time>{esc(shot.get("start_second"))}–{esc(shot.get("end_second"))} сек.</time><b>{esc(shot.get("purpose") or shot.get("shot_type") or "Сцена")}</b></div>'
-            f'<p><b>Кадр:</b> {esc(shot.get("visual_description"))}</p>'
-            f'<p><b>Камера:</b> {esc(shot.get("camera_and_movement"))}</p>'
-            f'<p><b>Действие:</b> {esc(shot.get("action"))}</p>'
-            f'<p><b>Текст на экране:</b> {esc(shot.get("on_screen_text"))}</p>'
-            f'<p><b>Переход:</b> {esc(shot.get("transition"))}</p>'
-            f'<div class="story-prompt"><b>Промпт:</b><br>{esc(shot.get("generation_prompt"))}</div>'
-            '</div>'
-            for shot in (brief.get("shots") or [])
-        )
-        content = f"""
-        <section class="panel material-detail-card">
-          <div class="panel-head"><div class="panel-title"><span class="ico">▶</span><div><h2>Сценарий и раскадровка</h2>
-          <div class="panel-sub">{esc(platform_label(brief.get("target_platform")))}</div></div></div></div>
-          <div class="material-detail-body">
-            <div class="detail-meta"><span class="chip blue">{esc(kind_label)}</span><span class="chip">{esc(record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "")}</span></div>
-            <h2>{esc(record.title)}</h2>
-            <div id="material-copy" class="article-text"><b>Цель:</b> {esc(brief.get("objective"))}\n\n<b>Озвучка / диалог:</b>\n{esc(brief.get("voiceover_or_dialogue_script"))}\n\n<b>Монтаж и сведение:</b> {esc(brief.get("editing_mix_notes") or brief.get("editing_rhythm"))}</div>
-            <div class="storyboard-grid">{shots or '<div class="empty">Раскадровка пока отсутствует.</div>'}</div>
-          </div>
-        </section>
-        """
-    else:
-        text = artifact_text(record, value)
-        content = f"""
-        <section class="panel material-detail-card">
-          <div class="panel-head"><div class="panel-title"><span class="ico">▤</span><div><h2>{esc(kind_label)}</h2>
-          <div class="panel-sub">Готовый материал</div></div></div></div>
-          <div class="material-detail-body">
-            <div class="detail-meta"><span class="chip blue">{esc(kind_label)}</span><span class="chip">{esc(record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "")}</span></div>
-            <h2>{esc(record.title)}</h2>
-            <div id="material-copy" class="article-text">{esc(text)}</div>
-          </div>
-        </section>
-        """
+    kind_label = artifact_kind_label(record)
+    is_brief = record.kind.endswith("_brief") or record.kind in {"video_script", "content_distribution"}
+    heading = "Сценарий и раскадровка" if record.kind in {"video_script", "short_video_brief"} else kind_label
+    content = f"""
+    <section class="panel material-detail-card">
+      <div class="panel-head"><div class="panel-title"><span class="ico">▤</span><div><h2>{esc(heading)}</h2>
+      <div class="panel-sub">{"План подготовки материала" if is_brief else "Предпросмотр публикации"}</div></div></div></div>
+      <div class="material-detail-body">
+        <div class="detail-meta"><span class="chip blue">{esc(kind_label)}</span><span class="chip">{esc(record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "")}</span></div>
+        {material_preview(record, "material-copy", product.name)}
+      </div>
+    </section>
+    """
     actions = (
         f'<a class="btn ghost" href="/studio/products/{product.id}/materials">← К материалам</a>'
-        '<button class="btn primary" type="button" data-copy="material-copy">Копировать текст</button>'
+        '<button class="btn primary" type="button" data-copy="material-copy" data-copy-html="material-copy-html">Копировать</button>'
     )
     return studio_page_shell(
         product, active="materials", title=record.title,

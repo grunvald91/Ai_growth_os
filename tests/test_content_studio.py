@@ -110,9 +110,63 @@ def test_studio_renders_storyboard_only_video_brief(studio_db):
     try:
         response=client.get(f"/studio/products/{product.id}")
         assert response.status_code==200
-        assert "Промпт" in response.text
+        assert '<details class="production-details"><summary>Инструкции для создания визуала</summary>' in response.text
+        assert '<details class="production-details" open' not in response.text
         assert "Vertical realistic presenter shot" in response.text
         assert "Instagram Reels" in response.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_studio_formats_publication_and_excludes_payload_metadata(studio_db):
+    db = studio_db
+    product = Product(name="Компания клиента", slug="customer")
+    db.add(product); db.flush()
+    post = Artifact(product_id=product.id, kind="channel_text", title="Тема",
+        content=json.dumps({"channel": "telegram", "title": "Как записаться",
+            "body": "Первый **важный** абзац.\n\n## Что сделать\n\n- Выберите время\n- [Откройте сайт](https://example.com)",
+            "article_id": str(uuid4()), "editorial_checks": ["INTERNAL_ONLY"]}, ensure_ascii=False))
+    empty = Artifact(product_id=product.id, kind="channel_text", title="Нет текста",
+        content=json.dumps({"channel": "telegram", "editorial_checks": ["INTERNAL_ONLY"]}))
+    db.add_all([post, empty]); db.commit()
+    client = client_for(db)
+    try:
+        response = client.get(f"/studio/products/{product.id}/materials/{post.id}")
+        assert response.status_code == 200
+        assert "<h1>Как записаться</h1>" in response.text
+        assert "<strong>важный</strong>" in response.text
+        assert "<h2>Что сделать</h2>" in response.text
+        assert "Компания клиента" in response.text
+        assert "INTERNAL_ONLY" not in response.text
+        assert "editorial_checks" not in response.text
+        assert 'data-copy-html="material-copy-html"' in response.text
+        from html import unescape
+        import re
+        copy = unescape(re.search(r'<textarea id="material-copy" hidden>(.*?)</textarea>', response.text, re.S)[1])
+        assert "Как записаться" in copy and "важный" in copy
+        assert "https://example.com" in copy
+        assert "##" not in copy and "**" not in copy and "article_id" not in copy
+        missing = client.get(f"/studio/products/{product.id}/materials/{empty.id}")
+        assert "Текст материала пока не подготовлен" in missing.text
+        assert "INTERNAL_ONLY" not in missing.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_studio_escapes_untrusted_copy_and_clipboard_source(studio_db):
+    db = studio_db
+    product = Product(name="Компания", slug="safe-preview")
+    db.add(product); db.flush()
+    article = Artifact(product_id=product.id, kind="article", title="Безопасный материал",
+        content=json.dumps({"full_article": '</textarea><script>alert(1)</script>\n\n[Ссылка](javascript:alert(1))'}))
+    db.add(article); db.commit()
+    client = client_for(db)
+    try:
+        response = client.get(f"/studio/products/{product.id}/materials/{article.id}")
+        assert response.status_code == 200
+        assert '<script>alert(1)</script>' not in response.text
+        assert 'href="javascript:' not in response.text
+        assert '&lt;script&gt;' in response.text
     finally:
         app.dependency_overrides.clear()
 

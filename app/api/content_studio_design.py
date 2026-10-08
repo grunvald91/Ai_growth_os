@@ -451,6 +451,28 @@ h1{font-size:31px;line-height:1.06;margin:5px 0 4px;letter-spacing:-1.1px;color:
 
 """
 
+STUDIO_CSS += r"""
+.publication-preview{margin-top:16px;border:1px solid var(--sg-line);border-radius:16px;background:#fff;overflow:hidden;max-width:780px}
+.publication-preview.post{max-width:580px}
+.social-author{display:flex;align-items:center;gap:11px;padding:18px 20px;border-bottom:1px solid #edf2f7}
+.social-avatar{display:grid;place-items:center;width:42px;height:42px;flex-shrink:0;border-radius:50%;background:var(--sg-sky);color:var(--sg-blue);font-weight:850}
+.social-author b,.social-author small{display:block}.social-author small{margin-top:3px;color:var(--sg-muted);font-size:11px}
+.formatted-copy{padding:22px;font-size:15px;line-height:1.75;white-space:normal;overflow-wrap:anywhere}
+.formatted-copy h1{font-size:27px;line-height:1.25;margin:0 0 18px;letter-spacing:-.4px}
+.formatted-copy h2{font-size:21px;line-height:1.35;margin:24px 0 12px}
+.formatted-copy h3{font-size:18px;margin:20px 0 10px}.formatted-copy p{margin:0 0 16px}
+.publication-preview.post .formatted-copy h1{font-size:18px;letter-spacing:normal;line-height:1.5}
+.publication-preview.post .formatted-copy h2{font-size:17px;line-height:1.5}
+.formatted-copy p:last-child{margin-bottom:0}.formatted-copy ul,.formatted-copy ol{padding-left:24px;margin:12px 0 20px}
+.formatted-copy li{margin:6px 0}.formatted-copy a{color:var(--sg-blue);text-decoration:underline}
+.formatted-copy blockquote{border-left:3px solid var(--sg-blue);margin:18px 0;padding-left:16px;color:#52627e}
+.formatted-copy img{max-width:100%;height:auto}.formatted-copy pre{overflow:auto}
+.production-details{margin-top:16px;padding:14px;border:1px solid var(--sg-line);border-radius:12px;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.production-details summary{cursor:pointer;font-weight:700}.preview-copy{white-space:normal;max-height:440px;overflow:auto}
+.preview-copy .formatted-copy{padding:15px;font-size:13px}.preview-copy .formatted-copy h1{font-size:20px}
+@media(max-width:560px){.formatted-copy{padding:16px;font-size:14px}.formatted-copy h1{font-size:23px}.formatted-copy h2{font-size:19px}.social-author{padding:14px 16px}}
+"""
+
 STUDIO_JS = r"""
 (function(){
   const q=(s,r=document)=>r.querySelector(s), qa=(s,r=document)=>Array.from(r.querySelectorAll(s));
@@ -482,7 +504,31 @@ STUDIO_JS = r"""
   qa('[data-copy]').forEach(btn=>btn.addEventListener('click',async()=>{
     const el=document.getElementById(btn.dataset.copy);
     if(!el)return;
-    try{await navigator.clipboard.writeText(el.innerText||el.textContent||'');const old=btn.textContent;btn.textContent='Скопировано';setTimeout(()=>btn.textContent=old,1400)}catch(_){}
+    const text=el.value??el.innerText??el.textContent??'';
+    const rich=document.getElementById(btn.dataset.copyHtml);
+    const old=btn.textContent;
+    let copied=false;
+    if(navigator.clipboard){
+      if(rich&&window.ClipboardItem&&navigator.clipboard.write){
+        try{
+          await navigator.clipboard.write([new ClipboardItem({
+            'text/plain':new Blob([text],{type:'text/plain'}),
+            'text/html':new Blob([rich.innerHTML],{type:'text/html'})
+          })]);copied=true;
+        }catch(_){}
+      }
+      if(!copied){try{await navigator.clipboard.writeText(text);copied=true}catch(_){}}
+    }
+    if(!copied){
+      const active=document.activeElement;
+      const fallback=document.createElement('textarea');fallback.value=text;
+      fallback.style.cssText='position:fixed;top:0;left:0;opacity:0';
+      (btn.closest('dialog')||document.body).appendChild(fallback);fallback.focus();fallback.select();
+      try{copied=document.execCommand('copy')}catch(_){}finally{fallback.remove();active?.focus()}
+    }
+    btn.textContent=copied?'Скопировано':'Не удалось скопировать';
+    btn.setAttribute('aria-live','polite');
+    setTimeout(()=>btn.textContent=old,2000);
   }));
 })();
 """
