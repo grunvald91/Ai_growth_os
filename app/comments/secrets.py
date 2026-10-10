@@ -1,5 +1,6 @@
 """Reuse the persistent encrypted integration store; never expose tokens to LLMs."""
 import os
+import json
 from pathlib import Path
 from uuid import UUID
 from cryptography.fernet import InvalidToken
@@ -30,3 +31,36 @@ class CommentSecrets(MailStore):
                 return self.cipher().decrypt(self.path(channel_id).read_bytes()).decode()
             except (InvalidToken, FileNotFoundError):
                 raise ValueError("Подключите аккаунт заново") from None
+
+    def oauth_path(self, channel_id):
+        return self.root / (str(UUID(str(channel_id))) + ".oauth")
+
+    def save_oauth_info(self, channel_id, info):
+        if not isinstance(info, dict) or info.get("platform") not in {"youtube", "instagram"}:
+            raise ValueError("Неверные параметры OAuth")
+        with self.locked():
+            payload = self.cipher().encrypt(json.dumps(info).encode("utf-8"))
+            path = self.oauth_path(channel_id)
+            temp = Path(str(path) + ".tmp")
+            fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp, path)
+
+    def load_oauth_info(self, channel_id):
+        with self.locked():
+            try:
+                return json.loads(self.cipher().decrypt(self.oauth_path(channel_id).read_bytes()).decode("utf-8"))
+            except (InvalidToken, FileNotFoundError, ValueError):
+                return None
+
+    def clear_oauth_info(self, channel_id):
+        with self.locked():
+            self.oauth_path(channel_id).unlink(missing_ok=True)
+
+    def delete(self, channel_id):
+        with self.locked():
+            self.path(channel_id).unlink(missing_ok=True)
+            self.oauth_path(channel_id).unlink(missing_ok=True)
