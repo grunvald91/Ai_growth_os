@@ -1,5 +1,6 @@
 """Official OAuth authorization-code login for YouTube and Instagram comments."""
 import hashlib
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urlsplit
@@ -86,7 +87,7 @@ async def oauth_http(settings, method, url, **kwargs):
 
 async def complete(db, settings, platform: str, state: str, code: str):
     credentials(settings, platform)
-    if not state or len(state) > 200 or not code or len(code) > 4000:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,200}", state) or not code or len(code) > 4000:
         raise ValueError("Некорректный ответ авторизации")
     row = db.scalar(select(SocialOAuthAttempt).where(
         SocialOAuthAttempt.state_digest == state_hash(state),
