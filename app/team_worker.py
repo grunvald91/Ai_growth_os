@@ -219,7 +219,10 @@ async def _calendar_loop(settings):
             with SessionLocal() as db:
                 tick_calendar(db, settings)
                 auto_plan_queue(db, settings)
-            await deliver_once(SessionLocal, settings)
+            # Bounded batch keeps multichannel posts from waiting one whole polling cycle each.
+            for _ in range(30):
+                if not await deliver_once(SessionLocal, settings):
+                    break
         except Exception:
             import logging
             logging.getLogger(__name__).warning('calendar_tick_failed')
