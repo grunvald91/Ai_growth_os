@@ -26,6 +26,8 @@ def configured(settings):
     token = getattr(settings, "social_telegram_bot_token", None)
     if not token or not re.fullmatch(r"\d+:[A-Za-z0-9_-]+", token):
         raise ValueError("Администратор ServGo ещё не настроил бота автопубликации")
+    if token == settings.telegram_bot_token:
+        raise ValueError("Нужен отдельный бот автопубликаций; бот управления используется отдельно")
     if not settings.comment_platform_proxy_url:
         raise ValueError("Не настроен защищённый Telegram-прокси")
     return token
