@@ -1,4 +1,5 @@
 """Per-business Telegram destinations and durable, per-destination delivery records."""
+from datetime import datetime
 from uuid import UUID
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,7 +28,7 @@ class TelegramPost(UUIDMixin, TimestampMixin, Base):
     plan_slot_key: Mapped[str | None] = mapped_column(String(120))
     text: Mapped[str] = mapped_column(Text, nullable=False)
     media: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    scheduled_at: Mapped[object] = mapped_column(DateTime(timezone=True), index=True, nullable=False)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="scheduled", nullable=False)
     external_message_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(100))
