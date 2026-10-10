@@ -1,7 +1,6 @@
 """Telegram Bot API publishing with no browser tokens and no duplicate blind retries."""
 import json
 import re
-import secrets
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from uuid import UUID
@@ -76,7 +75,6 @@ async def start_connect(db, settings, product_id, chat_reference):
     row.title = chat.get("title", canonical)[:200]
     row.username = chat.get("username")
     row.status = "pending"
-    row.proof_code = "SERVGO-" + secrets.token_hex(6).upper()
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -121,7 +119,7 @@ async def confirm_connect(db, settings, product_id, channel_id, auth_data):
     member = await api(settings, "getChatMember", {"chat_id": row.chat_id, "user_id": bot["id"]})
     if member.get("status") not in {"administrator", "creator"} or not member.get("can_post_messages"):
         raise ValueError("Боту необходимо право публикации")
-    row.status, row.proof_code = "active", None
+    row.status = "active"
     row.title = chat.get("title", row.title)[:200]
     db.commit()
     return row
