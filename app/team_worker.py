@@ -213,10 +213,13 @@ async def run_once() -> int:
 
 async def _calendar_loop(settings):
     from app.content.calendar import tick_calendar
+    from app.social.telegram import auto_plan_queue, deliver_once
     while True:
         try:
             with SessionLocal() as db:
                 tick_calendar(db, settings)
+                auto_plan_queue(db, settings)
+            await deliver_once(SessionLocal, settings)
         except Exception:
             import logging
             logging.getLogger(__name__).warning('calendar_tick_failed')
