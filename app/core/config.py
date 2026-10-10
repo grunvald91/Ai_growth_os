@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     telegram_proxy_url: str | None = None
     comment_platform_proxy_url: str | None = None
     social_telegram_bot_token: str | None = None
+    social_telegram_bot_username: str | None = None
     social_google_client_id: str | None = None
     social_google_client_secret: str | None = None
     social_instagram_client_id: str | None = None
