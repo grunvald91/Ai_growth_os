@@ -54,12 +54,20 @@
     });
   });
   root.addEventListener("click", event => {
-    const button = event.target.closest("button[data-verify],button[data-remove]");
+    const button = event.target.closest("button[data-remove],button[data-post-action]");
     if (!button) return;
-    if (button.dataset.verify) run(button, async () => {
-      await send("/channels/" + button.dataset.verify + "/verify");
-      location.reload();
-    });
+    if (button.dataset.postAction) {
+      const messages = {
+        cancel: "Закрыть эту публикацию без автоматического повтора? Если Telegram уже получил сообщение, оно останется в канале.",
+        confirm_delivered: "Вы лично проверили канал и действительно видите сообщение? Подтверждение будет отмечено как ручное, без Telegram API ID."
+      };
+      if (!confirm(messages[button.dataset.postAction])) return;
+      run(button, async () => {
+        await send("/posts/" + button.dataset.postId + "/resolve", {action: button.dataset.postAction});
+        location.reload();
+      });
+      return;
+    }
     if (button.dataset.remove) {
       if (!confirm("Отключить этот канал и отменить все его будущие публикации?")) return;
       run(button, async () => {
