@@ -52,3 +52,15 @@ class SocialOAuthAttempt(UUIDMixin, TimestampMixin, Base):
     state_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+
+
+class TelegramPlanMedia(UUIDMixin, TimestampMixin, Base):
+    """Uploaded photo/video assignment for a specific editorial plan slot."""
+    __tablename__ = "social_telegram_plan_media"
+    __table_args__ = (UniqueConstraint("plan_id", "slot_id", "position", name="uq_telegram_plan_media_position"),)
+
+    product_id: Mapped[UUID] = mapped_column(ForeignKey("products.id"), index=True, nullable=False)
+    plan_id: Mapped[UUID] = mapped_column(ForeignKey("artifacts.id"), index=True, nullable=False)
+    slot_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    media_id: Mapped[UUID] = mapped_column(ForeignKey("social_telegram_media.id"), nullable=False)
