@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     team_worker_busy_poll_seconds: int = 2
     telegram_proxy_url: str | None = None
     comment_platform_proxy_url: str | None = None
+    social_telegram_bot_token: str | None = None
+    social_google_client_id: str | None = None
+    social_google_client_secret: str | None = None
+    social_instagram_client_id: str | None = None
+    social_instagram_client_secret: str | None = None
+    social_oauth_redirect_base: str | None = None
     viral_research_mode: Literal["public_multisource", "youtube_public", "disabled"] = "public_multisource"
     viral_research_max_queries: int = 4
     viral_research_max_candidates: int = 16
