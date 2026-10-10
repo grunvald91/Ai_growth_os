@@ -60,7 +60,7 @@ def get_channel(db, product_id, channel_id):
 def serialize(row):
     return {"id": str(row.id), "title": row.title, "chat_id": row.chat_id,
             "username": row.username, "status": row.status, "auto_plan": row.auto_plan,
-            "proof_code": row.proof_code if row.status == "pending" else None}
+            "proof_code": None}
 
 
 @router.get("/studio/products/{product_id}/social", response_class=HTMLResponse)
@@ -73,17 +73,26 @@ async def page(product_id: UUID, db: Session = Depends(get_db), settings=Depends
     posts = list(db.scalars(select(TelegramPost).where(
         TelegramPost.product_id == product_id).order_by(TelegramPost.created_at.desc()).limit(30)))
     bot_url = None
+    bot_name = None
     try:
         me = await api(settings, "getMe")
         if me.get("username"):
-            bot_url = "https://t.me/" + me["username"] + "?startchannel&admin=post_messages"
+            bot_name = me["username"]
+            bot_url = "https://t.me/" + bot_name + "?startchannel&admin=post_messages"
     except ValueError:
         pass
     cards = []
     for row in channels:
-        proof = (f'<p class="c-warning">Для подтверждения временно добавьте <b>{esc(row.proof_code)}</b> '
-                 'в описание канала. Затем нажмите «Проверить». Код можно удалить после подключения.</p>'
-                 f'<button type="button" data-verify="{row.id}">Проверить владение</button>') if row.status == "pending" else ""
+        login_host = (settings.social_oauth_redirect_base or "").rstrip("/")
+        login_url = (login_host + f"/products/{product_id}/social/channels/{row.id}/telegram-login")
+        proof = (f'<p>Бот уже добавлен? Подтвердите через Telegram аккаунт '
+                 'администратора этого канала:</p>'
+                 f'<script async src="https://telegram.org/js/telegram-widget.js?22" '
+                 f'data-telegram-login="{esc(bot_name)}" data-size="large" '
+                 f'data-auth-url="{esc(login_url)}"></script>'
+                 if row.status == "pending" and bot_name and login_host.startswith("https://") else
+                 '<p>Для входа через Telegram администратор должен настроить HTTPS-домен в BotFather.</p>'
+                 if row.status == "pending" else "")
         controls = (f'<label class="c-check"><input type="checkbox" data-auto="{row.id}" '
                     f'{"checked" if row.auto_plan else ""} {"disabled" if row.status != "active" else ""}> '
                     'Автопубликация по утверждённому контент-плану</label>')
@@ -144,13 +153,22 @@ async def connect(product_id: UUID, value: Begin, db: Session = Depends(get_db),
         raise error(exc)
 
 
-@router.post("/products/{product_id}/social/channels/{channel_id}/verify", dependencies=[Depends(same_origin)])
-async def verify(product_id: UUID, channel_id: UUID, db: Session = Depends(get_db), settings=Depends(get_settings)):
+@router.get("/products/{product_id}/social/channels/{channel_id}/telegram-login")
+async def telegram_login(product_id: UUID, channel_id: UUID, request: Request,
+                         db: Session = Depends(get_db), settings=Depends(get_settings)):
+    """Signed Telegram identity plus channel-admin verification, on the owner's authenticated website."""
+    destination = f"/studio/products/{product_id}/social"
     try:
-        return serialize(await confirm_connect(db, settings, product_id, channel_id))
+        data = dict(request.query_params)
+        if len(data) != len(request.query_params):
+            raise ValueError("Некорректные параметры входа")
+        await confirm_connect(db, settings, product_id, channel_id, data)
     except (ValueError, LookupError) as exc:
         db.rollback()
-        raise error(exc)
+        return HTMLResponse("<h2>Подключение не завершено</h2><p>" + esc(str(exc)) +
+                            "</p><a href='" + destination +
+                            "'>Вернуться к Telegram-каналам</a>", status_code=409)
+    return RedirectResponse(destination, status_code=303)
 
 
 @router.post("/products/{product_id}/social/channels/{channel_id}/options", dependencies=[Depends(same_origin)])
