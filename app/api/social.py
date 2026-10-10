@@ -60,7 +60,7 @@ def get_channel(db, product_id, channel_id):
 def serialize(row):
     return {"id": str(row.id), "title": row.title, "chat_id": row.chat_id,
             "username": row.username, "status": row.status, "auto_plan": row.auto_plan,
-            "proof_code": None}
+            "verification": "telegram_login" if row.status == "pending" else None}
 
 
 @router.get("/studio/products/{product_id}/social", response_class=HTMLResponse)
