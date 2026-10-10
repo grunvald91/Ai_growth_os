@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import json
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -136,7 +136,7 @@ async def test_publishes_once_without_retry_after_timeout(state, monkeypatch):
     (channel, _) = channels(state)
     ids = telegram.create_posts(db, product.id, [channel.id], "Public test", [],
         datetime.now(timezone.utc) + timedelta(minutes=5))
-    record = db.get(TelegramPost, ids[0])
+    record = db.get(TelegramPost, UUID(ids[0]))
     record.scheduled_at = datetime.now(timezone.utc) - timedelta(seconds=2)
     db.commit()
     def factory():
