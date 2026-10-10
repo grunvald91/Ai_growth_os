@@ -29,3 +29,6 @@ app.include_router(content_studio_router)
 
 from app.api.comments import router as comments_router
 app.include_router(comments_router)
+
+from app.api.social import router as social_router
+app.include_router(social_router)
