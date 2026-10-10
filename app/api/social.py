@@ -272,8 +272,10 @@ def resolve_post(product_id: UUID, post_id: UUID, decision: PostDecision, db: Se
         TelegramPost.id == post_id, TelegramPost.product_id == product_id).with_for_update())
     if not post:
         raise HTTPException(404, "Публикация не найдена")
-    if decision.action == "cancel" and post.status in {"scheduled", "delivery_unknown"}:
-        post.status, post.error_code = "cancelled", "owner_reconciled"
+    if decision.action == "cancel" and post.status == "scheduled":
+        post.status, post.error_code = "cancelled", "owner_cancelled_before_send"
+    elif decision.action == "cancel" and post.status == "delivery_unknown":
+        post.status, post.error_code = "closed_unverified", "owner_closed_without_resend"
     elif decision.action == "confirm_delivered" and post.status in {"sending", "delivery_unknown"}:
         post.status, post.error_code = "owner_confirmed", "owner_confirmed_not_api_verified"
     else:
