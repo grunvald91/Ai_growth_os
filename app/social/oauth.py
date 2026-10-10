@@ -20,7 +20,7 @@ def origin_and_redirect(settings, product_id, platform):
     if (parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password
             or parsed.path or parsed.query or parsed.fragment):
         raise ValueError("Настройте SOCIAL_OAUTH_REDIRECT_BASE как публичный HTTPS-адрес без пути")
-    return origin + f"/products/{product_id}/comments/oauth/{platform}/callback"
+    return origin + f"/social/oauth/{platform}/callback"
 
 
 def credentials(settings, platform):
@@ -84,13 +84,12 @@ async def oauth_http(settings, method, url, **kwargs):
         raise ValueError("Не удалось завершить авторизацию через платформу") from None
 
 
-async def complete(db, settings, product_id: UUID, platform: str, state: str, code: str):
+async def complete(db, settings, platform: str, state: str, code: str):
     credentials(settings, platform)
     if not state or len(state) > 200 or not code or len(code) > 4000:
         raise ValueError("Некорректный ответ авторизации")
     row = db.scalar(select(SocialOAuthAttempt).where(
         SocialOAuthAttempt.state_digest == state_hash(state),
-        SocialOAuthAttempt.product_id == product_id,
         SocialOAuthAttempt.platform == platform).with_for_update())
     if not row or row.status != "pending":
         raise ValueError("Авторизация уже использована или не начиналась")
@@ -99,6 +98,7 @@ async def complete(db, settings, product_id: UUID, platform: str, state: str, co
         raise ValueError("Срок авторизации истёк. Подключите заново")
     # Irrevocably consume state before any network request to prevent callback replay.
     row.status = "used"
+    product_id = row.product_id
     db.commit()
     app_id, secret = credentials(settings, platform)
     redirect_uri = origin_and_redirect(settings, product_id, platform)
