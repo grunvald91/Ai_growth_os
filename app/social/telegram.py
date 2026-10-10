@@ -7,7 +7,7 @@ from uuid import UUID
 import httpx
 from sqlalchemy import select
 from app.models.domain import Artifact, Product, Task, TaskStatus
-from app.social.models import TelegramChannel, TelegramPost, TelegramMedia
+from app.social.models import TelegramChannel, TelegramPost, TelegramMedia, TelegramPlanMedia
 
 
 def now_utc():
@@ -164,6 +164,45 @@ def create_posts(db, product_id, channel_ids, text, media_ids, scheduled_at, *, 
     return ids
 
 
+
+def assign_plan_media(db, product_id, plan_id, slot_id, media_ids):
+    """Bind uploaded images/videos to a future Telegram slot before jobs are queued."""
+    if not 1 <= len(media_ids) <= 10 or len(set(media_ids)) != len(media_ids):
+        raise ValueError("Выберите от 1 до 10 разных изображений или видео")
+    row = db.scalar(select(Artifact).where(
+        Artifact.id == plan_id, Artifact.product_id == product_id,
+        Artifact.kind == "editorial_plan").with_for_update())
+    if not row:
+        raise LookupError("Контент-план не найден")
+    plan = json.loads(row.content)
+    if plan.get("approval_state") != "active":
+        raise ValueError("Сначала утвердите контент-план")
+    slots = [item for item in plan["slots"]
+             if str(item["slot_id"]) == slot_id and item["platform"] == "telegram"]
+    if len(slots) != 1 or datetime.fromisoformat(slots[0]["publish_at"]) <= now_utc():
+        raise ValueError("Telegram-публикация не найдена или дата уже прошла")
+    key = str(plan_id) + ":" + slot_id
+    already = db.scalar(select(TelegramPost.id).where(
+        TelegramPost.product_id == product_id, TelegramPost.plan_slot_key == key).limit(1))
+    if already:
+        raise ValueError("Публикации уже поставлены в очередь. Отмените их перед изменением материалов")
+    stored = list(db.scalars(select(TelegramMedia).where(
+        TelegramMedia.product_id == product_id, TelegramMedia.id.in_(media_ids))))
+    if len(stored) != len(media_ids):
+        raise ValueError("Медиафайлы принадлежат другому бизнесу или удалены")
+    for earlier in db.scalars(select(TelegramPlanMedia).where(
+        TelegramPlanMedia.product_id == product_id, TelegramPlanMedia.plan_id == plan_id,
+        TelegramPlanMedia.slot_id == slot_id)):
+        db.delete(earlier)
+    db.flush()
+    for position, media_id in enumerate(media_ids):
+        db.add(TelegramPlanMedia(product_id=product_id, plan_id=plan_id, slot_id=slot_id,
+                                 media_id=media_id, position=position))
+    db.commit()
+    return len(media_ids)
+
+
+
 def auto_plan_queue(db, settings):
     """Only owner-approved plans AND explicitly enabled destinations; never publish raw scripts."""
     plans = list(db.scalars(select(Artifact).where(Artifact.kind == "editorial_plan")))
@@ -203,8 +242,17 @@ def auto_plan_queue(db, settings):
                 if not text:
                     continue
                 try:
+                    attachments = list(db.scalars(select(TelegramPlanMedia).where(
+                        TelegramPlanMedia.product_id == artifact.product_id,
+                        TelegramPlanMedia.plan_id == artifact.id,
+                        TelegramPlanMedia.slot_id == str(slot["slot_id"]))
+                        .order_by(TelegramPlanMedia.position)))
+                    media_ids = [item.media_id for item in attachments]
+                    if media_ids and len(text) > 1024:
+                        text = text[:1021].rstrip() + "…"
                     ids = create_posts(db, artifact.product_id, [ch.id for ch in channels],
-                        text[:4096], [], scheduled, plan_slot_key=str(artifact.id) + ":" + str(slot["slot_id"]))
+                        text[:4096], media_ids, scheduled,
+                        plan_slot_key=str(artifact.id) + ":" + str(slot["slot_id"]))
                     count += len(ids)
                 except ValueError:
                     db.rollback()
