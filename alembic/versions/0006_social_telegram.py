@@ -46,8 +46,17 @@ def upgrade():
     op.create_index("ix_social_telegram_posts_channel_id", "social_telegram_posts", ["channel_id"])
     op.create_index("ix_social_telegram_posts_scheduled_at", "social_telegram_posts", ["scheduled_at"])
 
+    op.create_table("social_oauth_attempts", *base(),
+        sa.Column("platform", sa.String(30), nullable=False),
+        sa.Column("state_digest", sa.String(64), nullable=False),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("status", sa.String(20), nullable=False),
+        sa.UniqueConstraint("state_digest", name="uq_social_oauth_state"))
+    op.create_index("ix_social_oauth_attempts_product_id", "social_oauth_attempts", ["product_id"])
+
 
 def downgrade():
+    op.drop_table("social_oauth_attempts")
     op.drop_table("social_telegram_posts")
     op.drop_table("social_telegram_media")
     op.drop_table("social_telegram_channels")
