@@ -135,6 +135,7 @@ class CommentService:
             self.db.flush()
         else:
             channel.revision += 1
+        self.secrets.clear_oauth_info(channel.id)
         self.secrets.save_token(channel.id, token)
         channel.account_name, channel.status = name, "connected"
         self.db.add(ToolCall(product_id=product_id, tool_name="comment_gateway", operation="verify_connection",
@@ -161,7 +162,8 @@ class CommentService:
         channel = self.channel(product_id, platform, lock=True)
         if not channel or channel.status != "connected":
             raise ValueError("Сначала подключите площадку")
-        rows, cursor = await self.gateway.fetch(channel, self.secrets.load_token(channel.id))
+        from app.social.oauth import valid_token
+        rows, cursor = await self.gateway.fetch(channel, await valid_token(self.secrets, self.settings, channel))
         count = 0
         for item in rows:
             if not item.get("text"):
@@ -305,7 +307,8 @@ class CommentService:
             tool_call_id=call.id, channel=comment.platform, status="sending")
         self.db.add(publication)
         comment.status = "sending"
-        token = self.secrets.load_token(channel.id)
+        from app.social.oauth import valid_token
+        token = await valid_token(self.secrets, self.settings, channel)
         # Durable claim before HTTP: retries/restarts cannot send twice.
         self.db.commit()
         try:
