@@ -23,7 +23,6 @@ def upgrade():
         sa.Column("title", sa.String(200), nullable=False),
         sa.Column("username", sa.String(100)),
         sa.Column("status", sa.String(20), nullable=False),
-        sa.Column("proof_code", sa.String(50)),
         sa.Column("auto_plan", sa.Boolean(), nullable=False),
         sa.UniqueConstraint("chat_id", name="uq_social_telegram_chat"))
     op.create_index("ix_social_telegram_channels_product_id", "social_telegram_channels", ["product_id"])
