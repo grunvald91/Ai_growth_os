@@ -258,21 +258,19 @@ def oauth_start(product_id: UUID, platform: str, db: Session = Depends(get_db),
         raise error(exc)
 
 
-@router.get("/products/{product_id}/comments/oauth/{platform}/callback")
-async def oauth_callback(product_id: UUID, platform: str, state: str = "", code: str = "",
+@router.get("/social/oauth/{platform}/callback")
+async def oauth_callback(platform: str, state: str = "", code: str = "",
                          error_message: str = "", db: Session = Depends(get_db),
                          settings=Depends(get_settings)):
-    """OAuth provider returns user to the original protected website; no tokens in browser."""
+    """Fixed callback shared across all companies; product scope is bound to one-time state."""
     from app.social.oauth import complete
-    destination = f"/studio/products/{product_id}/comments?tab=platforms"
     if error_message:
-        return HTMLResponse("<h1>Подключение отменено</h1><p><a href='" + destination
-                            + "'>Вернуться к подключениям</a></p>", status_code=409)
+        return HTMLResponse("<h1>Подключение отменено</h1><p><a href='/studio'>Вернуться в Growth Studio</a></p>",
+                            status_code=409)
     try:
-        await complete(db, settings, product_id, platform, state, code)
+        channel = await complete(db, settings, platform, state, code)
     except (ValueError, LookupError) as exc:
         db.rollback()
         return HTMLResponse("<h1>Не удалось подключить аккаунт</h1><p>" + esc(str(exc)) +
-                            "</p><p><a href='" + destination +
-                            "'>Вернуться к подключениям</a></p>", status_code=409)
-    return RedirectResponse(destination, status_code=303)
+                            "</p><p><a href='/studio'>Вернуться в Growth Studio</a></p>", status_code=409)
+    return RedirectResponse(f"/studio/products/{channel.product_id}/comments?tab=platforms", status_code=303)
