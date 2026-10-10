@@ -2,6 +2,7 @@
 import os
 import re
 from datetime import datetime
+from typing import Literal
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -44,6 +45,10 @@ class Schedule(Strict):
 
 class ChannelOptions(Strict):
     auto_plan: bool
+
+
+class PostDecision(Strict):
+    action: Literal["cancel", "confirm_delivered"]
 
 
 def error(exc):
@@ -100,8 +105,21 @@ async def page(product_id: UUID, db: Session = Depends(get_db), settings=Depends
             f'<button type="button" class="btn ghost" data-remove="{row.id}">Отключить</button></section>')
     options = ''.join(f'<label class="c-check"><input type="checkbox" name="channels" value="{ch.id}"> '
                       f'{esc(ch.title)}</label>' for ch in channels if ch.status == "active")
-    history = ''.join('<tr><td>' + esc(post.scheduled_at.isoformat()) + '</td><td>' +
-                      esc(post.text[:70]) + '</td><td>' + esc(post.status) + '</td></tr>' for post in posts)
+    channel_titles = {channel.id: channel.title for channel in channels}
+    def history_action(post):
+        if post.status == "scheduled":
+            return f'<button type="button" class="btn ghost" data-post-id="{post.id}" data-post-action="cancel">Отменить</button>'
+        if post.status in {"sending", "delivery_unknown"}:
+            return (f'<button type="button" class="btn ghost" data-post-id="{post.id}" data-post-action="confirm_delivered">'
+                    'Подтвердить после проверки в Telegram</button>'
+                    f'<button type="button" class="btn ghost" data-post-id="{post.id}" data-post-action="cancel">'
+                    'Отметить как неотправленное</button>')
+        return ""
+    history = ''.join('<tr><td>' + esc(channel_titles.get(post.channel_id, "Канал отключён")) +
+                      '</td><td>' + esc(post.scheduled_at.isoformat()) +
+                      '</td><td>' + esc(post.text[:70]) + '</td><td>' +
+                      esc(post.status) + '</td><td>' + history_action(post) +
+                      '</td></tr>' for post in posts)
     link = (f'<a class="btn primary" href="{esc(bot_url)}" target="_blank" rel="noopener noreferrer">'
             'Добавить бота в канал ↗</a>') if bot_url else '<p>Бот публикаций ещё не настроен администратором.</p>'
     base = f"/studio/products/{product_id}"
@@ -132,8 +150,8 @@ async def page(product_id: UUID, db: Session = Depends(get_db), settings=Depends
 <button class="btn primary" type="submit">Поставить в расписание</button>
 </form></section>
 <section class="panel c-card"><h2>Последние публикации</h2>
-<div style="overflow-x:auto"><table><thead><tr><th>Время</th><th>Материал</th><th>Статус</th></tr></thead>
-<tbody>{history or '<tr><td colspan="3">Публикаций пока нет</td></tr>'}</tbody></table></div>
+<div style="overflow-x:auto"><table><thead><tr><th>Канал</th><th>Время</th><th>Материал</th><th>Статус</th><th>Действия</th></tr></thead>
+<tbody>{history or '<tr><td colspan="5">Публикаций пока нет</td></tr>'}</tbody></table></div>
 <p>Статус «delivery_unknown» требует ручной проверки в Telegram: повторная отправка заблокирована, чтобы избежать дублей.</p></section>
 </div><script src="/studio/assets/social.js" defer></script>
 """
@@ -243,6 +261,25 @@ def schedule(product_id: UUID, value: Schedule, db: Session = Depends(get_db)):
     except (ValueError, LookupError) as exc:
         db.rollback()
         raise error(exc)
+
+
+@router.post("/products/{product_id}/social/posts/{post_id}/resolve", dependencies=[Depends(same_origin)])
+def resolve_post(product_id: UUID, post_id: UUID, decision: PostDecision, db: Session = Depends(get_db)):
+    """Owner may cancel a queued post or manually reconcile ambiguous delivery.
+    Manual confirmation is not Telegram API proof and does not fabricate message IDs.
+    """
+    post = db.scalar(select(TelegramPost).where(
+        TelegramPost.id == post_id, TelegramPost.product_id == product_id).with_for_update())
+    if not post:
+        raise HTTPException(404, "Публикация не найдена")
+    if decision.action == "cancel" and post.status in {"scheduled", "sending", "delivery_unknown"}:
+        post.status, post.error_code = "cancelled", "owner_reconciled"
+    elif decision.action == "confirm_delivered" and post.status in {"sending", "delivery_unknown"}:
+        post.status, post.error_code = "owner_confirmed", "owner_confirmed_not_api_verified"
+    else:
+        raise HTTPException(409, "Статус публикации уже изменился. Обновите страницу.")
+    db.commit()
+    return {"id": str(post.id), "status": post.status}
 
 
 @router.get("/products/{product_id}/comments/oauth/{platform}/start")
