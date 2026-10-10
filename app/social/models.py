@@ -41,3 +41,15 @@ class TelegramMedia(UUIDMixin, TimestampMixin, Base):
     kind: Mapped[str] = mapped_column(String(10), nullable=False)
     file_name: Mapped[str] = mapped_column(String(100), nullable=False)
     file_size: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class SocialOAuthAttempt(UUIDMixin, TimestampMixin, Base):
+    """Short lived one-time browser OAuth state; no provider tokens in the database."""
+    __tablename__ = "social_oauth_attempts"
+    __table_args__ = (UniqueConstraint("state_digest", name="uq_social_oauth_state"),)
+
+    product_id: Mapped[UUID] = mapped_column(ForeignKey("products.id"), index=True, nullable=False)
+    platform: Mapped[str] = mapped_column(String(30), nullable=False)
+    state_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
