@@ -231,7 +231,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         {item("materials", base + "/materials", "▤", "Материалы")}
         {item("calendar", base + "/calendar", "□", "Календарь")}
         {item("analytics", base + "/analytics", "⌁", "Аналитика")}
-        {item("comments", base + "/comments", "☷", "Комментарии")}
+        {item("comments", base + "/social", "☷", "Соцсети")}
         {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
       </nav>
       <div class="nav-label">Инструменты</div>
@@ -258,7 +258,7 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
     return f"""
     <nav class="mobile-nav" aria-label="Основные разделы">
       {item("overview", base, "⌂", "Обзор")}
-      {item("comments", base + "/comments", "☷", "Комментарии")}
+      {item("comments", base + "/social", "☷", "Соцсети")}
       <button class="mobile-more{more_active}" type="button" data-open-dialog="mobile-sections" aria-haspopup="dialog" aria-controls="mobile-sections"><span class="m-ico">☰</span>Ещё</button>
     </nav>
     <dialog id="mobile-sections" class="mobile-sections" aria-labelledby="mobile-sections-title">
@@ -269,7 +269,7 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
         {item("materials", base + "/materials", "▤", "Материалы")}
         {item("calendar", base + "/calendar", "□", "Календарь")}
         {item("analytics", base + "/analytics", "⌁", "Аналитика")}
-        {item("comments", base + "/comments", "☷", "Комментарии")}
+        {item("comments", base + "/social", "☷", "Соцсети")}
         {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
         <a href="/studio?choose=1"><span class="m-ico">⇄</span>Выбрать проект</a>
       </nav>
