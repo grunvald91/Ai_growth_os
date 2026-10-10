@@ -83,18 +83,40 @@ async def start_connect(db, settings, product_id, chat_reference):
     return row
 
 
-async def confirm_connect(db, settings, product_id, channel_id):
+def verify_telegram_login(token, data):
+    """Verify signed Telegram Login Widget identity; the logged-in person must be channel admin."""
+    import hashlib
+    import hmac
+    if not isinstance(data, dict) or len(data) > 12:
+        raise ValueError("Некорректные данные входа Telegram")
+    provided_hash = data.get("hash", "")
+    if not re.fullmatch(r"[0-9a-f]{64}", provided_hash):
+        raise ValueError("Не удалось проверить подпись Telegram")
+    if not str(data.get("id", "")).isdigit() or not str(data.get("auth_date", "")).isdigit():
+        raise ValueError("Некорректный аккаунт Telegram")
+    signed = "\n".join(f"{key}={value}" for key, value in sorted(data.items()) if key != "hash")
+    secret = hashlib.sha256(token.encode("utf-8")).digest()
+    expected = hmac.new(secret, signed.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, provided_hash):
+        raise ValueError("Подпись Telegram не совпадает")
+    age = int(datetime.now(timezone.utc).timestamp()) - int(data["auth_date"])
+    if not 0 <= age <= 300:
+        raise ValueError("Вход устарел. Авторизуйтесь через Telegram повторно")
+    return int(data["id"])
+
+
+async def confirm_connect(db, settings, product_id, channel_id, auth_data):
     row = db.scalar(select(TelegramChannel).where(
         TelegramChannel.id == channel_id, TelegramChannel.product_id == product_id).with_for_update())
     if not row:
         raise LookupError("Подключение не найдено")
-    if row.status == "active":
-        return row
-    if row.status != "pending" or not row.proof_code:
-        raise ValueError("Начните подключение заново")
+    if row.status != "pending":
+        raise ValueError("Подключение уже выполнено или отменено")
+    operator_id = verify_telegram_login(configured(settings), auth_data)
     chat = await api(settings, "getChat", {"chat_id": row.chat_id})
-    if row.proof_code not in (chat.get("description") or ""):
-        raise ValueError("Временно добавьте показанный код в описание вашего Telegram-канала")
+    admin = await api(settings, "getChatMember", {"chat_id": row.chat_id, "user_id": operator_id})
+    if admin.get("status") not in {"administrator", "creator"}:
+        raise ValueError("Этот Telegram-аккаунт не является администратором выбранного канала")
     bot = await api(settings, "getMe")
     member = await api(settings, "getChatMember", {"chat_id": row.chat_id, "user_id": bot["id"]})
     if member.get("status") not in {"administrator", "creator"} or not member.get("can_post_messages"):
@@ -103,7 +125,6 @@ async def confirm_connect(db, settings, product_id, channel_id):
     row.title = chat.get("title", row.title)[:200]
     db.commit()
     return row
-
 
 def create_posts(db, product_id, channel_ids, text, media_ids, scheduled_at, *, plan_slot_key=None):
     if not db.get(Product, product_id):
