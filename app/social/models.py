@@ -15,7 +15,6 @@ class TelegramChannel(UUIDMixin, TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     username: Mapped[str | None] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
-    proof_code: Mapped[str | None] = mapped_column(String(50))
     auto_plan: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
