@@ -83,6 +83,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
     base = f"/studio/products/{product_id}/comments"
     tabs = ''.join(f'<a class="btn {"primary" if tab == key else "ghost"}" href="{base}?tab={key}" aria-current="{str(tab == key).lower()}">{name}</a>'
         for key, name in [("inbox", "Входящие"), ("agent", "Бизнес и агент"), ("platforms", "Подключения"), ("test", "Проверка ответов")])
+    tabs += f'<a class="btn ghost" href="/studio/products/{product_id}/social">Каналы и публикации</a>'
     channels = list(svc.db.scalars(select(CommentChannel).where(CommentChannel.product_id == product_id)))
     live = {row.platform: row for row in channels if row.status == "connected"}
     options = ''.join(f'<option value="{key}" {"selected" if platform == key else ""}>{esc(value["name"])}</option>' for key, value in PLATFORMS.items())
@@ -185,7 +186,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
         content = f'''<form method="get" class="c-filters"><input type="hidden" name="tab" value="inbox"><label>Площадка<select name="platform"><option value="all">Все площадки</option>{options}</select></label><label>Статус<select name="status"><option value="all">Все статусы</option>{statuses}</select></label><button class="btn ghost" type="submit">Показать</button></form><div class="c-actions">{sync}</div>
         <div class="c-inbox-grid"><div class="c-list">{''.join(cards) or empty}</div><aside class="panel c-card"><h2>Добавить комментарий</h2><p>Для ручного ответа и площадок без подключения.</p><form id="c-manual"><label>Площадка<select name="platform">{options}</select></label><label>Контекст поста<textarea name="post_text" rows="3" maxlength="8000"></textarea></label><label>Комментарий<textarea name="text" rows="4" maxlength="8000" required></textarea></label><button class="btn primary" type="submit">Добавить</button></form><p>Ручные ответы размещаются копированием.</p></aside></div>'''
     body_html = f'<link rel="stylesheet" href="/studio/assets/comments.css?v=2"><div id="comments-app" data-api="/products/{product_id}/comments"><nav class="c-tabs">{tabs}</nav><p id="c-feedback" role="status" aria-live="polite"></p>{notice}{content}</div><script src="/studio/assets/comments.js" defer></script>'
-    return HTMLResponse(studio_page_shell(product, active="comments", title="Комментарии", subtitle="AI-консультант вашего бизнеса", body=body_html), headers={"Cache-Control": "no-store"})
+    return HTMLResponse(studio_page_shell(product, active="comments", title="Социальные сети", subtitle="Ответы на комментарии и управление аккаунтами", body=body_html), headers={"Cache-Control": "no-store"})
 
 
 @router.post("/products/{product_id}/comments/settings", dependencies=[Depends(same_origin)])
