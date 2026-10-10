@@ -113,7 +113,7 @@ async def page(product_id: UUID, db: Session = Depends(get_db), settings=Depends
             return (f'<button type="button" class="btn ghost" data-post-id="{post.id}" data-post-action="confirm_delivered">'
                     'Подтвердить после проверки в Telegram</button>'
                     f'<button type="button" class="btn ghost" data-post-id="{post.id}" data-post-action="cancel">'
-                    'Отметить как неотправленное</button>')
+                    'Закрыть без повтора</button>')
         return ""
     history = ''.join('<tr><td>' + esc(channel_titles.get(post.channel_id, "Канал отключён")) +
                       '</td><td>' + esc(post.scheduled_at.isoformat()) +
@@ -272,7 +272,7 @@ def resolve_post(product_id: UUID, post_id: UUID, decision: PostDecision, db: Se
         TelegramPost.id == post_id, TelegramPost.product_id == product_id).with_for_update())
     if not post:
         raise HTTPException(404, "Публикация не найдена")
-    if decision.action == "cancel" and post.status in {"scheduled", "sending", "delivery_unknown"}:
+    if decision.action == "cancel" and post.status in {"scheduled", "delivery_unknown"}:
         post.status, post.error_code = "cancelled", "owner_reconciled"
     elif decision.action == "confirm_delivered" and post.status in {"sending", "delivery_unknown"}:
         post.status, post.error_code = "owner_confirmed", "owner_confirmed_not_api_verified"
