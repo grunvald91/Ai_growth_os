@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.config import Settings
 from app.db.models import Base
 from app.models.domain import Artifact, ArtifactStatus, Product, Task, TaskStatus
-from app.social.models import TelegramChannel, TelegramPost
+from app.social.models import TelegramChannel, TelegramPost, TelegramMedia, TelegramPlanMedia
 from app.social import telegram
 
 
@@ -169,3 +169,36 @@ async def test_success_records_message_id(state, monkeypatch):
     db.expire_all()
     assert db.get(TelegramPost, ids[0]).external_message_ids == [7001]
     assert db.get(TelegramPost, ids[0]).status == "sent"
+
+
+
+def test_plan_media_is_attached_to_each_channel_and_is_company_scoped(state):
+    db, _, product, other, settings = state
+    channels(state)
+    task = Task(product_id=product.id, title="CONTENT", status=TaskStatus.COMPLETED,
+                assigned_agent="content_factory")
+    db.add(task)
+    db.flush()
+    db.add(Artifact(product_id=product.id, task_id=task.id,
+        kind="channel_text", title="Post",
+        content=json.dumps({"channel": "telegram", "title": "Title", "body": "Short content"})))
+    plan = {"approval_state": "active", "slots": [
+        {"platform": "telegram", "task_id": str(task.id), "slot_id": "1",
+         "publish_at": (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()}]}
+    artifact = Artifact(product_id=product.id, kind="editorial_plan", title="Plan",
+        status=ArtifactStatus.APPROVED, content=json.dumps(plan))
+    media = TelegramMedia(product_id=product.id, kind="photo", file_name=str(uuid4()) + ".jpg",
+                          file_size=1200)
+    unrelated = TelegramMedia(product_id=other.id, kind="photo", file_name=str(uuid4()) + ".jpg",
+                              file_size=1300)
+    db.add_all([artifact, media, unrelated])
+    db.commit()
+    with pytest.raises(ValueError):
+        telegram.assign_plan_media(db, product.id, artifact.id, "1", [unrelated.id])
+    assert telegram.assign_plan_media(db, product.id, artifact.id, "1", [media.id]) == 1
+    assert telegram.auto_plan_queue(db, settings) == 2
+    rows = list(db.scalars(select(TelegramPost)))
+    assert len(rows) == 2
+    assert all(row.media == [str(media.id)] for row in rows)
+    with pytest.raises(ValueError, match="уже поставлены"):
+        telegram.assign_plan_media(db, product.id, artifact.id, "1", [media.id])
