@@ -1,5 +1,6 @@
 """Owner-facing Social Networks workspace and its Telegram publishing API."""
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -73,14 +74,11 @@ async def page(product_id: UUID, db: Session = Depends(get_db), settings=Depends
     posts = list(db.scalars(select(TelegramPost).where(
         TelegramPost.product_id == product_id).order_by(TelegramPost.created_at.desc()).limit(30)))
     bot_url = None
-    bot_name = None
-    try:
-        me = await api(settings, "getMe")
-        if me.get("username"):
-            bot_name = me["username"]
-            bot_url = "https://t.me/" + bot_name + "?startchannel&admin=post_messages"
-    except ValueError:
-        pass
+    bot_name = (settings.social_telegram_bot_username or "").lstrip("@")
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{4,31}", bot_name):
+        bot_url = "https://t.me/" + bot_name + "?startchannel&admin=post_messages"
+    else:
+        bot_name = None
     cards = []
     for row in channels:
         login_host = (settings.social_oauth_redirect_base or "").rstrip("/")
