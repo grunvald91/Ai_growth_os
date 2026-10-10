@@ -21,6 +21,11 @@ from app.social.telegram import start_connect, confirm_connect, create_posts, st
 router = APIRouter()
 
 
+@router.get("/studio/assets/social.js")
+def social_javascript():
+    return Response(Path(__file__).with_name("social_design.js").read_text(encoding="utf-8"), media_type="application/javascript")
+
+
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
