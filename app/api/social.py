@@ -1,7 +1,8 @@
 """Owner-facing Social Networks workspace and its Telegram publishing API."""
+import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -16,9 +17,9 @@ from app.api.content_studio import esc, studio_page_shell
 from app.api.comments import same_origin
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.domain import Product
-from app.social.models import TelegramChannel, TelegramPost, TelegramMedia
-from app.social.telegram import start_connect, confirm_connect, create_posts, storage_path, api, configured
+from app.models.domain import Product, Artifact
+from app.social.models import TelegramChannel, TelegramPost, TelegramMedia, TelegramPlanMedia
+from app.social.telegram import start_connect, confirm_connect, create_posts, assign_plan_media, storage_path, api, configured
 
 router = APIRouter()
 
@@ -49,6 +50,12 @@ class ChannelOptions(Strict):
 
 class PostDecision(Strict):
     action: Literal["cancel", "confirm_delivered"]
+
+
+class PlanAssets(Strict):
+    plan_id: UUID
+    slot_id: str = Field(min_length=1, max_length=80)
+    media: list[UUID] = Field(min_length=1, max_length=10)
 
 
 def error(exc):
@@ -105,6 +112,27 @@ async def page(product_id: UUID, db: Session = Depends(get_db), settings=Depends
             f'<button type="button" class="btn ghost" data-remove="{row.id}">Отключить</button></section>')
     options = ''.join(f'<label class="c-check"><input type="checkbox" name="channels" value="{ch.id}"> '
                       f'{esc(ch.title)}</label>' for ch in channels if ch.status == "active")
+    plan_slots = []
+    for plan_artifact in db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id, Artifact.kind == "editorial_plan")
+        .order_by(Artifact.created_at.desc()).limit(10)):
+        try:
+            plan_data = json.loads(plan_artifact.content)
+        except (ValueError, TypeError):
+            continue
+        if plan_data.get("approval_state") != "active":
+            continue
+        for slot in plan_data.get("slots", []):
+            if slot.get("platform") != "telegram" or datetime.fromisoformat(slot["publish_at"]) <= datetime.now(timezone.utc):
+                continue
+            existing = list(db.scalars(select(TelegramPlanMedia).where(
+                TelegramPlanMedia.product_id == product_id,
+                TelegramPlanMedia.plan_id == plan_artifact.id,
+                TelegramPlanMedia.slot_id == str(slot["slot_id"]))))
+            plan_slots.append((f'{plan_artifact.id}:{slot["slot_id"]}',
+                f'{slot["publish_at"][:16]} — {slot.get("topic", "Публикация")[:70]} — медиа: {len(existing)}'))
+    slot_options = ''.join(
+        f'<option value="{esc(key)}">{esc(title)}</option>' for key, title in plan_slots)
     channel_titles = {channel.id: channel.title for channel in channels}
     def history_action(post):
         if post.status == "scheduled":
@@ -148,6 +176,14 @@ async def page(product_id: UUID, db: Session = Depends(get_db), settings=Depends
 <label>Фото или MP4 (до 10 файлов, каждый до 20 МБ)<input name="files" type="file" multiple accept="image/jpeg,image/png,video/mp4"></label>
 <label>Дата и время по вашему устройству<input name="when" type="datetime-local" required></label>
 <button class="btn primary" type="submit">Поставить в расписание</button>
+</form></section>
+<section class="panel c-card">
+<h2>Фото и видео по контент-плану</h2>
+<p>Выберите будущую Telegram-публикацию из утверждённого плана и загрузите медиа. Когда контент будет готов, ServGo отправит его вместе с текстом в каждый канал, где включён автопостинг.</p>
+<form id="social-plan-media">
+<label>Пункт контент-плана<select name="plan_slot" required>{slot_options or '<option value="">Нет будущих пунктов Telegram в утверждённом плане</option>'}</select></label>
+<label>Фото или MP4 (1–10 файлов, до 20 МБ каждый)<input name="files" type="file" required multiple accept="image/jpeg,image/png,video/mp4"></label>
+<button class="btn primary" type="submit">Привязать к контент-плану</button>
 </form></section>
 <section class="panel c-card"><h2>Последние публикации</h2>
 <div style="overflow-x:auto"><table><thead><tr><th>Канал</th><th>Время</th><th>Материал</th><th>Статус</th><th>Действия</th></tr></thead>
@@ -258,6 +294,18 @@ def schedule(product_id: UUID, value: Schedule, db: Session = Depends(get_db)):
     try:
         ids = create_posts(db, product_id, value.channels, value.text, value.media, value.scheduled_at)
         return {"scheduled": len(ids), "ids": ids}
+    except (ValueError, LookupError) as exc:
+        db.rollback()
+        raise error(exc)
+
+
+
+
+@router.post("/products/{product_id}/social/plan-media", dependencies=[Depends(same_origin)])
+def attach_plan_media(product_id: UUID, value: PlanAssets, db: Session = Depends(get_db)):
+    try:
+        count = assign_plan_media(db, product_id, value.plan_id, value.slot_id, value.media)
+        return {"assigned": count}
     except (ValueError, LookupError) as exc:
         db.rollback()
         raise error(exc)
