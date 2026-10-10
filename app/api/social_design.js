@@ -53,6 +53,29 @@
       form.reset();
     });
   });
+  document.getElementById("social-plan-media")?.addEventListener("submit", event => {
+    event.preventDefault();
+    const form = event.target;
+    run(form.querySelector("button[type=submit]"), async () => {
+      const selector = form.elements.plan_slot.value;
+      const delimiter = selector.indexOf(":");
+      if (delimiter < 0) throw new Error("Выберите публикацию из утверждённого контент-плана");
+      const plan_id = selector.slice(0, delimiter);
+      const slot_id = selector.slice(delimiter + 1);
+      const selected = Array.from(form.elements.files.files);
+      if (!selected.length || selected.length > 10) throw new Error("Выберите от 1 до 10 файлов");
+      say("Загружаем файлы к контент-плану…");
+      const media = [];
+      for (const file of selected) {
+        const data = new FormData();
+        data.append("file", file, file.name);
+        media.push((await send("/upload", data, true)).id);
+      }
+      await send("/plan-media", {plan_id, slot_id, media});
+      say("Медиа привязаны к публикации контент-плана.");
+      location.reload();
+    });
+  });
   root.addEventListener("click", event => {
     const button = event.target.closest("button[data-remove],button[data-post-action]");
     if (!button) return;
