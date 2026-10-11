@@ -18,7 +18,7 @@
 
 ## Проверки перед слиянием
 
-- [ ] Запустить `python -m pytest tests/test_content_studio.py tests/test_content_factory.py tests/test_content_calendar.py tests/test_articles.py tests/test_quick_post.py tests/test_content_fallbacks.py tests/test_content_quick_post_owner.py tests/test_post_revisions.py tests/test_content_studio_auth.py -q` в GitHub Codespaces или локально (не Actions).
+- [ ] Запустить `python -m pytest tests/test_content_studio.py tests/test_content_factory.py tests/test_content_calendar.py tests/test_articles.py tests/test_quick_post.py tests/test_content_fallbacks.py tests/test_content_quick_post_owner.py tests/test_post_revisions.py tests/test_content_studio_auth.py tests/test_content_quality.py -q` в GitHub Codespaces или локально (не Actions).
 - [ ] Запустить полный `python -m pytest -q`.
 - [ ] Проверить конфигурацию reverse proxy для `growth.servgo.ru`: кто аутентифицирует владельцев? Сам FastAPI явно не обеспечивает авторизацию.
 - [ ] Проверить право доступа к `product_id` для чтения и любых POST; разграничить владельца и сотрудников перед добавлением редактора.
@@ -63,6 +63,25 @@
 Для продуктивного деплоя сначала безопасно создать длинный секрет владельца
 в непубликуемой `.env` на сервере, затем отдельно проверить HTTPS и ответ 401/503.
 Не выкладывать без выполненного `pytest` и проверки edge-прокси.
+
+## Дополнительная функциональная доработка — 11.10.2026
+
+- [x] `app/content/revisions.py`: редактор создаёт новую версию поста по замечанию владельца, старый текст остаётся в базе; проверяется версия и SHA-256 исходника. Веб-маршруты редактирования не открывались.
+- [x] Telegram-команда «Попросить доработку» и последующее отдельное подтверждение новой версии.
+- [x] Запрет согласования старого черновика, если уже поставлена задача его переписать.
+- [x] `app/content/quality.py`: понятные эвристические замечания по заголовкам, повтору, удобству чтения и обещаниям; никаких придуманных рейтингов/метрик.
+- [x] Картотека предупреждений встроена в новый пост, его редакции и Telegram-просмотр.
+- [x] `app/api/content_studio_auth.py`: защищены все пути Studio (включая POST и файлы статики) временной owner-only HTTP Basic авторизацией; в production без секретов — закрытый доступ.
+- [x] Дополнительная CSRF-проверка Origin/Referer для Studio POST. Для production нужен `STUDIO_PUBLIC_ORIGIN` (по умолчанию при compose: `https://growth.servgo.ru`).
+- [x] Добавлены `tests/test_post_revisions.py`, `tests/test_content_studio_auth.py`, `tests/test_content_quality.py`.
+- [x] Подготовлен локальный скрипт без Actions: `bash scripts/validate_content_studio.sh`; полный набор — `FULL_TESTS=1 bash scripts/validate_content_studio.sh`.
+- [ ] Скрипт и тесты пока **не запускались**: через GitHub connector нет терминала Codespaces; сервер также не использовался.
+
+Контроль перед деплоем: `STUDIO_ADMIN_USERNAME`, `STUDIO_ADMIN_PASSWORD` и
+`STUDIO_PUBLIC_ORIGIN` должны быть заданы на сервере безопасно, без секретов в
+репозитории. Проверить reverse proxy, HTTPS, авторизацию и CSRF. Действующие
+публичные REST-маршруты приложения всё ещё требуют отдельного контура защиты.
+Временная owner-only защита Studio не означает реализованную мультитенантность.
 
 ## Следующие функциональные этапы
 
