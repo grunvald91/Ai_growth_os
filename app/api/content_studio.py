@@ -1035,6 +1035,12 @@ def studio_page_shell(
       </div>
       <div class="route-actions">{actions}</div>
     </header>
+    <nav class="sg-route-utility" aria-label="Перейти к другим действиям">
+      <a href="/studio/products/{product.id}/create">＋ Создать</a>
+      <a href="/studio/products/{product.id}/review">✓ На проверке</a>
+      <a href="/studio/products/{product.id}/materials">▤ Материалы</a>
+      <a href="/studio/products/{product.id}/channels">↗ Публикации</a>
+    </nav>
     <div class="route-content">{body}</div>
   </main>
   {mobile_nav_html(product.id, active)}
@@ -1299,7 +1305,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
         f'<a class="btn ghost" href="/studio/products/{product.id}/materials">← К материалам</a>'
         '<button class="btn primary" type="button" data-copy="material-copy">Копировать текст</button>'
     )
-    if record.kind in {"channel_text", "creative_brief"}:
+    if record.kind in {"channel_text", "creative_brief", "article", "video_script"}:
         status = record.status
         form_actions = ""
         if status == ArtifactStatus.AWAITING_APPROVAL:
