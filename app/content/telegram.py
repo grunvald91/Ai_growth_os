@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.content.render import asset_path
 from app.content.service import queue_content
 from app.content.revisions import queue_post_edit
-from app.models.domain import Artifact, ArtifactStatus, Metric, Product, Task
+from app.models.domain import Artifact, ArtifactStatus, Metric, Product, Task, TaskStatus
 
 LABELS = {'own_site':'SEO / сайт', 'dzen':'Дзен', 'tenchat':'TenChat', 'vc_ru':'vc.ru',
           'telegram':'Telegram', 'vk':'ВКонтакте', 'faq':'FAQ', 'founder':'Пост автора'}
@@ -326,10 +326,19 @@ class TelegramContent:
                     if item is None or json.loads(item.content).get('origin') not in {'quick_post', 'owner_revision'}:
                         raise LookupError('Пост недоступен')
                     if item.status == ArtifactStatus.AWAITING_APPROVAL:
-                        item.status = ArtifactStatus.APPROVED
-                        item.version += 1
-                        db.commit()
-                        response = '✅ Текст утверждён. Публикация пока только вручную.'
+                        pending = db.scalar(select(Task).where(
+                            Task.product_id == item.product_id,
+                            Task.assigned_agent == 'content_editor',
+                            Task.title == 'EDIT: ' + str(item.id),
+                            Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING]),
+                        ))
+                        if pending is not None:
+                            response = 'Пост сейчас дорабатывается. Проверь новую версию перед утверждением.'
+                        else:
+                            item.status = ArtifactStatus.APPROVED
+                            item.version += 1
+                            db.commit()
+                            response = '✅ Текст утверждён. Публикация пока только вручную.'
                     elif item.status == ArtifactStatus.APPROVED:
                         response = 'Этот текст уже утверждён. Публикация не запускалась.'
                     else:
