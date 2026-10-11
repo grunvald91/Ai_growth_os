@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 from app.content.contracts import ReadyTextSet, VideoVariants
-from app.content.service import queue_content
+from app.content.service import queue_content, queue_render
 from app.content.render import render_video, asset_path
 from app.core.config import Settings
 from app.core.composition import build_article_production
@@ -87,3 +87,34 @@ def test_reject_overlapping_timeline_and_path_injection(tmp_path):
     videos=copy.deepcopy(ready_outputs()[-2:]);videos[0]['production_brief']['shots'][1]['start_second']=3
     with pytest.raises(ValueError):VideoVariants.model_validate({'videos': videos})
     with pytest.raises(ValueError):asset_path(tmp_path,uuid4(),uuid4(),'../../x')
+
+
+def test_render_accepts_exactly_the_two_produced_video_scripts(db):
+    from app.models.domain import Task
+    p = Product(name="P", slug="two-script-render")
+    db.add(p)
+    db.flush()
+    task = Task(product_id=p.id, title="CONTENT: test",
+                assigned_agent="content_factory", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    article = Artifact(product_id=p.id, task_id=task.id, kind="article",
+                       title="Article", content="{}")
+    db.add(article)
+    db.flush()
+    with pytest.raises(ValueError, match="два готовых сценария"):
+        queue_render(db, article.id)
+
+    for platform in ("youtube_shorts", "instagram_reels"):
+        db.add(Artifact(product_id=p.id, task_id=task.id, kind="video_script",
+                        title=platform, content=json.dumps({"platform": platform})))
+    db.commit()
+
+    render_task = queue_render(db, article.id)
+    assert render_task.assigned_agent == "content_renderer"
+    request = db.scalar(select(Artifact).where(
+        Artifact.task_id == render_task.id, Artifact.kind == "render_request"
+    ))
+    assert len(json.loads(request.content)["script_ids"]) == 2
+    assert "двух роликов" in request.title
+    assert queue_render(db, article.id).id == render_task.id
