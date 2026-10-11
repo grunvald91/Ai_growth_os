@@ -243,3 +243,30 @@ def test_storyboard_page_is_clearly_an_unrendered_brief(studio_v5):
     assert "не создавались" in response.text
     assert "Утвердить материал" in response.text
     assert "sg-storyboard-screen" in response.text
+
+
+def test_library_pagination_limits_page_size_and_preserves_filters(studio_v5):
+    client, db, company, _ = studio_v5
+    for i in range(28):
+        db.add(Artifact(
+            product_id=company.id, kind="channel_text",
+            title=f"Материал {i:02d}",
+            content=json.dumps({"channel":"telegram",
+                                "body": f"Текст публикации с номером {i:02d}"}, ensure_ascii=False),
+        ))
+    db.commit()
+    base = f"/studio/products/{company.id}/materials"
+    first = client.get(base + "?kind=post")
+    assert first.status_code == 200
+    assert "Страница 1" in first.text
+    assert "Следующая" in first.text
+    assert first.text.count('class="material-card') <= 24
+    second = client.get(base + "?kind=post&page=2")
+    assert second.status_code == 200
+    assert "Страница 2" in second.text
+    assert "Материал 00" in second.text
+    assert "Материал 27" not in second.text
+    searched = client.get(base + "?kind=post&q=Материал%2007")
+    assert searched.status_code == 200
+    assert "Материал 07" in searched.text
+    assert "Материал 06" not in searched.text
