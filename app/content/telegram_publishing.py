@@ -237,6 +237,32 @@ def cancel_scheduled_post(db, publication_id: UUID) -> Publication:
     return pub
 
 
+
+def update_plan_delivery(db, data: dict, state: str, message_id: int | None = None):
+    """Reconcile the editorial slot from an actual publisher outcome."""
+    if not data.get("plan_id"):
+        return
+    product_id = UUID(data["post_id"])
+    source = db.get(Artifact, product_id)
+    if source is None:
+        return
+    db.scalar(select(Product).where(Product.id == source.product_id).with_for_update())
+    plan = db.scalar(select(Artifact).where(
+        Artifact.id == UUID(data["plan_id"]), Artifact.product_id == source.product_id,
+        Artifact.kind == "editorial_plan",
+    ).with_for_update().execution_options(populate_existing=True))
+    if plan is None:
+        return
+    plan_data = json.loads(plan.content)
+    for slot in plan_data.get("slots", []):
+        if slot.get("telegram_publication_id") == data.get("publication_id"):
+            slot["state"] = state
+            if message_id is not None:
+                slot["telegram_message_id"] = message_id
+    plan.content = json.dumps(plan_data, ensure_ascii=False)
+
+
+
 def _utf16_units(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
@@ -305,6 +331,7 @@ async def run_due_telegram_post_once(session_factory, settings, *, api=None, now
             db.execute(update(Publication).where(
                 Publication.id == pub_id, Publication.status == "scheduled"
             ).values(status="failed_before_send"))
+            update_plan_delivery(db, data, "failed")
             db.commit()
             return 1
         claimed = db.execute(update(Publication).where(
@@ -324,22 +351,15 @@ async def run_due_telegram_post_once(session_factory, settings, *, api=None, now
             pub.status = "published"
             pub.external_reference = "telegram:" + data["chat_id"] + ":" + str(result["message_id"])
             pub.published_at = datetime.now(timezone.utc)
-            if data.get("plan_id"):
-                db.scalar(select(Product).where(Product.id == pub.product_id).with_for_update())
-                plan_row = db.scalar(select(Artifact).where(
-                    Artifact.id == UUID(data["plan_id"]), Artifact.product_id == pub.product_id,
-                    Artifact.kind == "editorial_plan",
-                ).with_for_update().execution_options(populate_existing=True))
-                if plan_row is not None:
-                    plan = json.loads(plan_row.content)
-                    for slot in plan.get("slots", []):
-                        if slot.get("telegram_publication_id") == str(pub.id):
-                            slot["state"] = "published"
-                            slot["telegram_message_id"] = result["message_id"]
-                    plan_row.content = json.dumps(plan, ensure_ascii=False)
+            update_plan_delivery(db, data, "published", result["message_id"])
         except Exception:
             # The Bot API may have delivered despite a network timeout.
             # Never replay automatically: an owner must reconcile this result.
             pub.status = "delivery_unknown"
+            try:
+                update_plan_delivery(db, data, "delivery_unknown")
+            except (ValueError, LookupError, KeyError, TypeError):
+                db.rollback()
+                db.get(Publication, pub_id).status = "delivery_unknown"
         db.commit()
         return 1
