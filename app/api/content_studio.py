@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 
 from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
@@ -840,24 +840,19 @@ def product_dashboard(db: Session, product: Product) -> str:
     generated = (plan or {}).get("generated_at")
     review = (plan or {}).get("review_at")
 
-    review_count = sum(
-        1 for art in artifacts
-        if art.kind in {"channel_text", "creative_brief", "article", "video_script"}
-        and art.status == ArtifactStatus.AWAITING_APPROVAL
-    )
-    pending_count = db.scalar(select(Publication.id).where(
-        Publication.product_id == product.id,
-        Publication.channel == "telegram",
-        Publication.status == "scheduled",
-    ).limit(1))
-    publishing = list(db.scalars(select(Publication).where(
-        Publication.product_id == product.id,
-        Publication.channel == "telegram",
-    ).order_by(Publication.created_at.desc()).limit(150)))
-    scheduled_count = sum(1 for p in publishing if p.status == "scheduled")
-    published_count = sum(1 for p in publishing if p.status == "published")
-    unsafe_count = sum(1 for p in publishing
-                       if p.status in {"delivery_unknown", "sending", "failed_before_send"})
+    review_count = db.scalar(select(func.count(Artifact.id)).where(
+        Artifact.product_id == product.id,
+        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script"]),
+        Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
+    )) or 0
+    publishing_counts = dict(db.execute(
+        select(Publication.status, func.count(Publication.id))
+        .where(Publication.product_id == product.id, Publication.channel == "telegram")
+        .group_by(Publication.status)
+    ).all())
+    scheduled_count = publishing_counts.get("scheduled", 0)
+    unsafe_count = sum(publishing_counts.get(status, 0)
+                       for status in ("delivery_unknown", "sending", "failed_before_send"))
     attention_html = f"""
     <section class="sg-workflow-banner" aria-labelledby="start-working">
       <div><span class="sg-overline">ВАШ СЛЕДУЮЩИЙ ШАГ</span>
