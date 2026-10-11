@@ -1304,6 +1304,30 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
           </div>
         </section>
         """
+    elif record.kind == "creative_brief":
+        frames = value.get("frames") or []
+        scenes = "".join(
+            '<article class="sg-storyboard-card">'
+            f'<div class="sg-storyboard-counter">Кадр {esc(frame.get("number") or index)}'
+            + (f' · {esc(frame.get("start_second"))}–{esc(frame.get("end_second"))} с'
+               if value.get("format") != "static_image" else '')
+            + '</div>'
+            f'<div class="sg-storyboard-screen"><span>{esc(frame.get("on_screen_text"))}</span></div>'
+            f'<h3>{esc(frame.get("purpose"))}</h3>'
+            f'<p>{esc(frame.get("action_or_animation"))}</p>'
+            f'<details><summary>Промпт и озвучка</summary><p>{esc(frame.get("visual_prompt"))}</p>'
+            f'<p>{esc(frame.get("spoken_text"))}</p></details>'
+            '</article>'
+            for index, frame in enumerate(frames, 1)
+        )
+        content = f"""
+        <section class="sg-surface">
+          <div class="sg-section-head"><div><span class="sg-overline">РАСКАДРОВКА · {esc(value.get('platform'))}</span>
+          <h2>{esc(record.title)}</h2><p>Предпросмотр структуры будущего материала. Медиафайлы не создавались.</p></div></div>
+          <div class="sg-storyboard-grid">{scenes or '<p>Кадры ещё не подготовлены.</p>'}</div>
+          <h3>Текст и рекомендации</h3>
+          <div id="material-copy" class="article-text">{esc(artifact_text(record, value))}</div>
+        </section>"""
     else:
         text = artifact_text(record, value)
         review_html = ""
@@ -1335,7 +1359,10 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
           <div class="material-detail-body">
             <div class="detail-meta"><span class="chip blue">{esc(kind_label)}</span><span class="chip">{esc(record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "")}</span></div>
             <h2>{esc(record.title)}</h2>
-            <div id="material-copy" class="article-text">{esc(text)}</div>
+            <div id="material-copy" class="article-text {'sg-post-preview' if record.kind == 'channel_text' else ''}">
+              {f'<div class="sg-native-post-label">Предпросмотр текста · {esc(platform_label(value.get("channel")))}</div>' if record.kind == 'channel_text' else ''}
+              {esc(text)}
+            </div>
           </div>
         </section>
         {review_html}
