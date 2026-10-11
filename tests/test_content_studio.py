@@ -327,7 +327,7 @@ def test_active_plan_is_stable_when_new_draft_is_generated(studio_db):
         dashboard = client.get(base)
         assert dashboard.status_code == 200
         assert "Действующий календарь" in dashboard.text
-        assert "Новый контент-план ожидает согласования" in dashboard.text
+        assert "Новый контент-план готов" in dashboard.text
         assert f'href="{base}/plan?view=draft"' in dashboard.text
 
         current_page = client.get(base + "/plan")
