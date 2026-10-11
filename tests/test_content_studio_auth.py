@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from app.api.content_studio_auth import require_studio_auth
 from app.core.config import Settings, get_settings
 from app.main import app
+from app.db.session import get_db
 
 
 def set_settings(settings):
@@ -77,5 +78,59 @@ def test_partially_configured_owner_auth_is_not_silently_ignored():
     try:
         with TestClient(app) as client:
             assert client.get("/studio/assets/studio.css").status_code == 503
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_owner_commands_reject_cross_site_posts_even_with_valid_password():
+    set_settings(Settings(
+        app_env="production", studio_admin_username="owner",
+        studio_admin_password="correct-secret",
+        studio_public_origin="https://growth.servgo.ru",
+        _env_file=None,
+    ))
+    class EmptyDb:
+        def get(self, *args, **kwargs):
+            return None
+
+    def db_override():
+        yield EmptyDb()
+
+    app.dependency_overrides[get_db] = db_override
+    try:
+        url = ("/studio/products/00000000-0000-0000-0000-000000000000/"
+               "plans/00000000-0000-0000-0000-000000000000/approve")
+        with TestClient(app) as client:
+            untrusted = client.post(
+                url, auth=("owner", "correct-secret"),
+                headers={"Origin": "https://evil.example"},
+            )
+            assert untrusted.status_code == 403
+            no_origin = client.post(url, auth=("owner", "correct-secret"))
+            assert no_origin.status_code == 403
+            trusted = client.post(
+                url, auth=("owner", "correct-secret"),
+                headers={"Origin": "https://growth.servgo.ru"},
+            )
+            assert trusted.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_owner_commands_refuse_missing_public_origin_in_production():
+    set_settings(Settings(
+        app_env="production", studio_admin_username="owner",
+        studio_admin_password="correct-secret", studio_public_origin=None,
+        _env_file=None,
+    ))
+    try:
+        url = ("/studio/products/00000000-0000-0000-0000-000000000000/"
+               "plans/00000000-0000-0000-0000-000000000000/approve")
+        with TestClient(app) as client:
+            blocked = client.post(
+                url, auth=("owner", "correct-secret"),
+                headers={"Origin": "https://growth.servgo.ru"},
+            )
+            assert blocked.status_code == 503
     finally:
         app.dependency_overrides.clear()
