@@ -112,15 +112,21 @@ async def complete(db, settings, platform: str, state: str, code: str, *, device
     expires = row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
     if expires < datetime.now(timezone.utc):
         raise ValueError("Срок авторизации истёк. Подключите заново")
-    # Irrevocably consume state before any network request to prevent callback replay.
+    # Irrevocably consume state and erase the short-lived PKCE verifier before
+    # making any external request; keep only a process-local copy for the exchange.
+    from types import SimpleNamespace
+    attempt = SimpleNamespace(product_id=row.product_id, pkce_verifier=row.pkce_verifier,
+                              target_account_id=row.target_account_id)
     row.status = "used"
+    row.pkce_verifier = None
+    row.target_account_id = None
     product_id = row.product_id
     db.commit()
     app_id, secret = credentials(settings, platform)
     redirect_uri = origin_and_redirect(settings, product_id, platform)
     if platform in {"vk", "vk_video", "threads"}:
         from app.social.extended_oauth import complete_extended
-        return await complete_extended(db, settings, platform, row, code, state=state, device_id=device_id)
+        return await complete_extended(db, settings, platform, attempt, code, state=state, device_id=device_id)
     if platform == "youtube":
         result = await oauth_http(settings, "POST", "https://oauth2.googleapis.com/token",
             data={"client_id": app_id, "client_secret": secret, "code": code,
