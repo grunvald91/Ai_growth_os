@@ -1275,9 +1275,50 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
         f'<a class="btn ghost" href="/studio/products/{product.id}/materials">← К материалам</a>'
         '<button class="btn primary" type="button" data-copy="material-copy">Копировать текст</button>'
     )
+    if record.kind in {"channel_text", "creative_brief"}:
+        status = record.status
+        form_actions = ""
+        if status == ArtifactStatus.AWAITING_APPROVAL:
+            form_actions += (
+                f'<form method="post" action="/studio/products/{product.id}/review/{record.id}/approve">'
+                '<button class="btn primary" type="submit">✓ Утвердить материал</button></form>'
+            )
+        if record.kind == "channel_text" and status in {
+            ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED
+        } and value.get("body") and value.get("channel") in {
+            "telegram", "vk", "dzen", "vc_ru", "tenchat"
+        }:
+            form_actions += (
+                f'<form class="sg-inline-form" method="post" action="/studio/products/{product.id}/review/{record.id}/revise">'
+                '<label class="sg-field"><span>Что исправить в этом посте?</span>'
+                '<textarea name="feedback" required minlength="8" maxlength="1800" rows="3" '
+                'placeholder="Например: сократи начало, приведи понятный пример, убери штампы"></textarea>'
+                '<small>ИИ создаст новую версию. Предыдущий текст сохранится.</small></label>'
+                '<button type="submit" class="btn secondary">✦ Попросить ИИ доработать</button></form>'
+            )
+        if status == ArtifactStatus.APPROVED and value.get("channel") == "telegram":
+            form_actions += (
+                f'<div class="sg-inline-form"><a class="btn secondary" '
+                f'href="/studio/products/{product.id}/channels?post_id={record.id}">'
+                '↗ Запланировать публикацию в Telegram</a></div>'
+            )
+        status_text = {
+            ArtifactStatus.APPROVED: "Согласован",
+            ArtifactStatus.AWAITING_APPROVAL: "Ожидает вашего решения",
+            ArtifactStatus.REJECTED: "Сохранён в истории",
+        }.get(status, status.value)
+        content += (
+            '<section class="sg-surface">'
+            '<div class="sg-detail-steps"><span class="done">Создан</span>'
+            f'<span class="{"current" if status == ArtifactStatus.AWAITING_APPROVAL else "done"}">Проверка</span>'
+            '<span>Публикация отдельно</span></div>'
+            f'<h2>{esc(status_text)}</h2>'
+            '<p>Проверяйте конкретную версию. Утверждение ещё не означает публикацию.</p>'
+            + form_actions + '</section>'
+        )
     return studio_page_shell(
         product, active="materials", title=record.title,
-        subtitle=f"{kind_label} · отдельный просмотр материала",
+        subtitle=f"{kind_label} · просмотр, проверка и версии.",
         body=content, actions=actions,
     )
 
