@@ -21,6 +21,7 @@ from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.content.calendar import PLATFORMS, approve_plan, pause_plan
 from app.content.service import queue_content
+from app.content.revisions import post_history
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import Artifact, Product, Task, TaskStatus
@@ -1170,6 +1171,28 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
         """
     else:
         text = artifact_text(record, value)
+        review_html = ""
+        if record.kind == "channel_text":
+            warnings = value.get("quality_warnings") or []
+            warning_list = "".join(f"<li>{esc(note)}</li>" for note in warnings[:6])
+            if warning_list:
+                review_html += (
+                    '<section class="panel"><h3>Проверить перед публикацией</h3>'
+                    '<ul>' + warning_list + '</ul>'
+                    '<p>Замечания автоматические; окончательное решение за владельцем.</p>'
+                    '</section>'
+                )
+            if value.get("origin") in {"quick_post", "owner_revision"}:
+                versions = post_history(db, record.id)
+                history_links = "".join(
+                    f'<a class="btn ghost small" href="/studio/products/{product.id}/materials/{item.id}">'
+                    f'Версия {index} · {esc(item.status.value)}</a>'
+                    for index, item in enumerate(versions, 1)
+                )
+                review_html += (
+                    '<section class="panel"><h3>История текста</h3>'
+                    '<div class="preview-actions">' + history_links + '</div></section>'
+                )
         content = f"""
         <section class="panel material-detail-card">
           <div class="panel-head"><div class="panel-title"><span class="ico">▤</span><div><h2>{esc(kind_label)}</h2>
@@ -1180,6 +1203,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
             <div id="material-copy" class="article-text">{esc(text)}</div>
           </div>
         </section>
+        {review_html}
         """
     actions = (
         f'<a class="btn ghost" href="/studio/products/{product.id}/materials">← К материалам</a>'
