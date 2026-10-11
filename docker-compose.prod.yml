@@ -26,6 +26,8 @@ services:
     restart: unless-stopped
     environment:
       APP_ENV: production
+      STUDIO_ADMIN_USERNAME: ${STUDIO_ADMIN_USERNAME:-}
+      STUDIO_ADMIN_PASSWORD: ${STUDIO_ADMIN_PASSWORD:-}
       DATABASE_URL: postgresql+psycopg://ai_growth:${POSTGRES_PASSWORD}@postgres:5432/ai_growth
       LLM_PROVIDER: xai
       LLM_MODEL: ${LLM_MODEL:-grok-4.7}
