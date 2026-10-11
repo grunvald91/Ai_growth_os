@@ -757,7 +757,7 @@ def render_calendar(plan):
             lines.append('  Наличие аккаунта нужно подтвердить владельцу; публикация вручную.')
     lines += ['', 'Ресурсы и ограничения:', *['• ' + x for x in plan['capacity_assumptions']], '', 'Календарь:']
     states = {'planned': 'запланировано', 'queued': 'в очереди', 'preparing': 'готовится',
-        'ready_for_review': 'готово к проверке', 'failed': 'ошибка подготовки', 'missed': 'дата пропущена', 'cancelled': 'отменено', 'scheduled': 'ожидает отправки', 'published': 'опубликовано'}
+        'ready_for_review': 'готово к проверке', 'failed': 'ошибка подготовки', 'missed': 'дата пропущена', 'cancelled': 'отменено', 'scheduled': 'ожидает отправки', 'published': 'опубликовано', 'delivery_unknown': 'проверить отправку вручную'}
     for s in sorted(plan['slots'], key=lambda s: s['publish_at']):
         publication = datetime.fromisoformat(s['publish_at']).strftime('%d.%m %H:%M')
         preparation = datetime.fromisoformat(s['prepare_at']).strftime('%d.%m %H:%M')
