@@ -57,6 +57,8 @@ def upgrade():
     op.create_table("social_oauth_attempts", *base(),
         sa.Column("platform", sa.String(30), nullable=False),
         sa.Column("state_digest", sa.String(64), nullable=False),
+        sa.Column("target_account_id", sa.String(100)),
+        sa.Column("pkce_verifier", sa.String(150)),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("status", sa.String(20), nullable=False),
         sa.UniqueConstraint("state_digest", name="uq_social_oauth_state"))
