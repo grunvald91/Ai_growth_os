@@ -507,3 +507,7 @@ STUDIO_JS += "\n" + STUDIO_REFRESH_JS
 from app.api.content_studio_brand_fix import CSS as STUDIO_BRAND_FIX_CSS
 STUDIO_CSS += "\n" + STUDIO_BRAND_FIX_CSS
 
+# Last cascade: consistent product typography for every Studio view.
+from app.api.content_studio_typography import CSS as STUDIO_TYPOGRAPHY_CSS
+STUDIO_CSS += "\n" + STUDIO_TYPOGRAPHY_CSS
+
