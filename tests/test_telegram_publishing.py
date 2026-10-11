@@ -270,3 +270,10 @@ async def test_stale_scheduled_post_is_marked_missed_instead_of_sent(db):
     db.refresh(pub)
     assert pub.status == "missed"
     assert not any(name == "sendMessage" for name, _ in fake.calls)
+    # Explicit owner clearing is safe because no send attempt occurred.
+    cancel_scheduled_post(db, pub.id)
+    db.refresh(pub)
+    assert pub.status == "cancelled"
+    second = schedule_post(db, post.id, conn.id,
+                           now+timedelta(days=1), now=now)
+    assert second.status == "scheduled"
