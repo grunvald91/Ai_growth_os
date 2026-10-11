@@ -245,7 +245,7 @@ async def page(product_id: UUID, db: Session = Depends(get_db), settings=Depends
 Для подходящего личного или профессионального канала отправьте редакции адрес Telegram-канала
 и ссылку на блог vc.ru.</p>
 <div class="c-actions">
-<a class="btn ghost" href="https://vc.ru/about-tg-bot" target="_blank" rel="noopener noreferrer">Условия vc.ru ↗</a>
+<a class="btn ghost" href="https://vc.ru/team/2066907-avtomaticheskaya-publikatsiya-postov-iz-telegram-v-blog-na-vc-ru" target="_blank" rel="noopener noreferrer">Условия vc.ru ↗</a>
 <a class="btn ghost" href="https://t.me/vcrepost_bot" target="_blank" rel="noopener noreferrer">Бот vc.ru ↗</a>
 <a class="btn primary" href="mailto:telegram@vc.ru?subject=Подключение%20Telegram-канала%20к%20vc.ru">Запросить подключение ↗</a>
 </div>
