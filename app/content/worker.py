@@ -6,6 +6,7 @@ from sqlalchemy import select, update
 from app.content.render import asset_path, render_video
 from app.content.quick_post import QuickPostRequest, run_quick_post
 from app.content.revisions import EditRequest, run_post_edit
+from app.content.creative import CreativeRequest, run_creative_once
 from app.core.composition import build_article_production
 from app.models.domain import AgentRun, Artifact, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
@@ -13,7 +14,7 @@ from app.workflows.article_contracts import ArticleProductionInput, ShortVideoDe
 
 async def run_content_once(session_factory, settings):
     with session_factory() as db:
-        task = db.scalar(select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer', 'content_editor']),
+        task = db.scalar(select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer', 'content_editor', 'content_creative']),
             Task.status == TaskStatus.QUEUED).order_by(Task.priority.desc(), Task.created_at, Task.id).limit(1))
         if task is None:
             return 0
@@ -40,6 +41,28 @@ async def run_content_once(session_factory, settings):
             except (Exception, asyncio.CancelledError) as exc:
                 db.rollback()
                 db.execute(update(Task).where(Task.id == task_id, Task.status == TaskStatus.QUEUED).values(status=TaskStatus.FAILED))
+                db.commit()
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
+                return 1
+        if agent == 'content_creative':
+            try:
+                record = db.scalar(select(Artifact).where(
+                    Artifact.task_id == task_id, Artifact.product_id == product_id,
+                    Artifact.kind == 'creative_request'
+                ))
+                if record is None:
+                    raise ValueError('Missing creative request')
+                data = CreativeRequest.model_validate_json(record.content)
+                if data.product_id != product_id:
+                    raise ValueError('Wrong creative company')
+                await run_creative_once(db, settings, data, task_id=task_id)
+                return 1
+            except (Exception, asyncio.CancelledError) as exc:
+                db.rollback()
+                db.execute(update(Task).where(
+                    Task.id == task_id, Task.status == TaskStatus.QUEUED
+                ).values(status=TaskStatus.FAILED))
                 db.commit()
                 if isinstance(exc, asyncio.CancelledError):
                     raise
