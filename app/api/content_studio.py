@@ -1138,9 +1138,11 @@ def calendar_page(db: Session, product: Product, selected_date: str | None = Non
         for day in dates
     )
     rows = []
+    plan_row = state.get("plan_row")
+    plan_state = state["plan"].get("approval_state")
     for slot in filtered:
         package_key = quote(str(slot.get("package_key") or "unknown"), safe="")
-        rows.append(
+        row_content = (
             '<a class="calendar-row" href="/studio/products/{pid}/packages/{key}">'.format(pid=product.id, key=package_key)
             + f'<div class="calendar-time">{fmt_dt(slot.get("publish_at"))}</div>'
             + f'<div class="calendar-platform"><span class="platform-mini">{esc(platform_short(slot.get("platform")))}</span><b>{esc(platform_label(slot.get("platform")))}</b></div>'
@@ -1149,6 +1151,27 @@ def calendar_page(db: Session, product: Product, selected_date: str | None = Non
             + f'<span class="status {status_class(slot.get("state"))}">{esc(status_label(slot.get("state")))}</span>'
             + '<span class="calendar-arrow">›</span></a>'
         )
+        can_move = bool(
+            plan_row and plan_state in {"active", "draft"} and slot.get("slot_id")
+            and slot.get("state") not in {"scheduled", "published", "delivery_unknown"}
+            and not slot.get("telegram_publication_id") and not slot.get("publication_url")
+        )
+        if can_move:
+            dt = parse_dt(slot.get("publish_at"))
+            slot_value = esc(dt.strftime("%Y-%m-%dT%H:%M")) if dt else ""
+            move_url = (
+                f"/studio/products/{product.id}/plans/{plan_row.id}/slots/"
+                f"{quote(str(slot['slot_id']), safe='')}/move"
+            )
+            row_content += (
+                '<details class="sg-calendar-move"><summary>🕒 Перенести публикацию</summary>'
+                f'<form class="sg-calendar-form" method="post" action="{move_url}">'
+                '<label class="sg-field"><span>Новое время · часовой пояс плана</span>'
+                f'<input type="datetime-local" name="when" value="{slot_value}" required></label>'
+                '<button class="btn secondary" type="submit">Сохранить дату</button>'
+                '</form></details>'
+            )
+        rows.append(f'<div class="sg-calendar-entry">{row_content}</div>')
     body = f"""
     <section class="panel">
       <div class="panel-head">
