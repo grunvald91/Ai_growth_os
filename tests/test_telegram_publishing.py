@@ -251,3 +251,22 @@ async def test_cancelling_calendar_link_restores_ready_state(db):
     db.refresh(plan)
     assert json.loads(plan.content)["slots"][0]["state"] == "ready_for_review"
     assert json.loads(plan.content)["slots"][0]["telegram_publication_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_stale_scheduled_post_is_marked_missed_instead_of_sent(db):
+    product, post = company_and_post(db)
+    conn = save_verified_channel(db, await verify_channel(FakeTelegram(), "@craft_studio"))
+    now = datetime.now(timezone.utc)
+    pub = schedule_post(db, post.id, conn.id, now+timedelta(minutes=1), now=now)
+    fake = FakeTelegram()
+    enabled = Settings(
+        telegram_bot_token="unit-test-only", content_telegram_autopost_enabled=True,
+        content_telegram_max_lateness_minutes=30, _env_file=None,
+    )
+    assert await run_due_telegram_post_once(
+        sessions(db), enabled, api=fake, now=now+timedelta(hours=6),
+    ) == 1
+    db.refresh(pub)
+    assert pub.status == "missed"
+    assert not any(name == "sendMessage" for name, _ in fake.calls)
