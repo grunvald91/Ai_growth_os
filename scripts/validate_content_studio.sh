@@ -18,7 +18,8 @@ python -m pytest -q \
   tests/test_post_revisions.py \
   tests/test_content_creative.py \
   tests/test_telegram_publishing.py \
-  tests/test_telegram_content_owner_publishing.py
+  tests/test_telegram_content_owner_publishing.py \
+  tests/test_content_studio_v5.py
 
 if [[ "${FULL_TESTS:-0}" == "1" ]]; then
   python -m pytest -q
