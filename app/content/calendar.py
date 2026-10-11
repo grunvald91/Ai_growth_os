@@ -690,7 +690,7 @@ def tick_calendar(db, settings, now=None):
                     state = {'queued': 'queued', 'running': 'preparing', 'completed': 'ready_for_review',
                              'failed': 'failed', 'cancelled': 'cancelled'}.get(task.status.value, 'preparing')
                     for slot in group:
-                        if slot['state'] not in {'missed', 'scheduled', 'published'}:
+                        if slot['state'] not in {'missed', 'scheduled', 'published', 'delivery_unknown'}:
                             slot['task_id'], slot['state'] = str(task.id), state
                             changed = True
             if datetime.fromisoformat(plan['review_at']) <= now and not plan['review_requested']:
@@ -727,7 +727,7 @@ def reschedule_slot(db, plan_id: UUID, slot_id: str, publish_at: datetime, *, no
     if len(matches) != 1:
         raise LookupError('Публикационный слот не найден')
     slot = matches[0]
-    if slot.get('telegram_publication_id') or slot.get('publication_url') or slot.get('state') in {'scheduled', 'published'}:
+    if slot.get('telegram_publication_id') or slot.get('publication_url') or slot.get('state') in {'scheduled', 'published', 'delivery_unknown'}:
         raise ValueError('Сначала отмени назначенную Telegram-публикацию; отправленный материал переносить нельзя')
     destination = publish_at.astimezone(ZoneInfo(plan['timezone']))
     if destination <= now.astimezone(destination.tzinfo):
