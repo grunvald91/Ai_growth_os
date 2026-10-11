@@ -969,24 +969,26 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
 
     unknowns = plan.get("unknowns") or []
     draft_row, _ = latest_draft(db, product.id)
-    active_row, active_plan = latest_plan(db, product.id)
+    _, active_plan = latest_plan(db, product.id)
     switcher = ""
     if view == "draft" and active_plan and active_plan.get("approval_state") == "active":
         switcher = f'<a class="btn secondary small" href="/studio/products/{product.id}/plan">← Действующий план</a>'
     elif draft_row and draft_row != plan_row:
         switcher = f'<a class="btn secondary small" href="/studio/products/{product.id}/plan?view=draft">Новый черновик →</a>'
+    view_q = "&view=draft" if view == "draft" else ""
+    plan_q = "?view=draft" if view == "draft" else ""
     body = f"""
     <section class="panel route-summary">
       <div class="panel-head">
-        <div class="panel-title"><span class="ico">▣</span><div><h2>Текущий план</h2>
+        <div class="panel-title"><span class="ico">▣</span><div><h2>{"Черновик плана" if view == "draft" else "Действующий план"}</h2>
         <div class="panel-sub">{esc(plan.get("horizon_days") or 14)} дней · пересмотр {fmt_dt(plan.get("review_at"))}</div></div></div>
         <span class="status {status_class(plan.get("approval_state"))}">{esc(status_label(plan.get("approval_state")))}</span>
       </div>
       {switcher}
       <div class="package-tools">
-        <a class="tab {'active' if status == 'all' else ''}" href="/studio/products/{product.id}/plan">Все · {len(groups)}</a>
-        <a class="tab {'active' if status == 'ready' else ''}" href="/studio/products/{product.id}/plan?status=ready">Готово</a>
-        <a class="tab {'active' if status == 'failed' else ''}" href="/studio/products/{product.id}/plan?status=failed">Ошибки</a>
+        <a class="tab {'active' if status == 'all' else ''}" href="/studio/products/{product.id}/plan{plan_q}">Все · {len(groups)}</a>
+        <a class="tab {'active' if status == 'ready' else ''}" href="/studio/products/{product.id}/plan?status=ready{view_q}">Готово</a>
+        <a class="tab {'active' if status == 'failed' else ''}" href="/studio/products/{product.id}/plan?status=failed{view_q}">Ошибки</a>
       </div>
     </section>
     <section class="package-grid route-package-grid">{"".join(cards) or '<div class="panel empty">По выбранному фильтру пакетов нет.</div>'}</section>
