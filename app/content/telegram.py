@@ -11,7 +11,7 @@ from app.content.service import queue_content
 from app.models.domain import Artifact, ArtifactStatus, Metric, Product, Task
 
 LABELS = {'own_site':'SEO / сайт', 'dzen':'Дзен', 'tenchat':'TenChat', 'vc_ru':'vc.ru',
-          'telegram':'Telegram', 'faq':'FAQ', 'founder':'Пост автора'}
+          'telegram':'Telegram', 'vk':'ВКонтакте', 'faq':'FAQ', 'founder':'Пост автора'}
 
 class Observations(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -50,7 +50,11 @@ class TelegramContent:
             articles = list(db.scalars(select(Artifact).where(Artifact.product_id == product.id,
                 Artifact.kind == 'article').order_by(Artifact.created_at.desc()).limit(8)))
             statuses = {'queued':'в очереди','running':'готовится','completed':'готово', 'failed':'ошибка'}
-            text = f'📝 {product.name}\n\nПакет: SEO-статья и адаптации, включая Дзен и Telegram, плюс отдельные production-ready сценарии/раскадровки для YouTube Shorts и Instagram Reels.\nВидео здесь не генерируется и не рендерится. Публикация — после проверки, вручную до подключения площадок.'
+            text = (f'📝 {product.name}\n\n'
+                    'Один пост — быстрая подготовка текста для выбранной площадки. '
+                    'Полный пакет — SEO-статья, адаптации и видеосценарии. '
+                    'Проверка и утверждение обязательны. '
+                    'Видео автоматически не создаётся; публикация отдельно, вручную до подключения площадок.')
             if tasks:
                 text += '\n\nПоследние задачи:\n' + '\n'.join(f'• {t.title[:65]} — {statuses.get(t.status.value, t.status.value)}' for t in tasks)
             buttons = [[{'text':'✍️ Один пост', 'callback_data':f'content:postchannels:{product.id}'},
