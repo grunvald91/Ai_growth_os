@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 
-python -m compileall -q app tests
+python -m compileall -q app tests scripts
 
 python -m pytest -q \
   tests/test_content_studio.py \
