@@ -697,7 +697,7 @@ def selected_preview(record: Artifact | None) -> str:
     if record is None:
         return (
             '<section class="panel preview"><div class="preview-empty">'
-            '<div class="brand-mark" style="margin:0 auto 14px">S</div>'
+            '<img class="sg-preview-logo" src="/studio/assets/servgo.svg" alt="" width="44" height="44" style="margin:0 auto 14px">'
             '<b>Материалы появятся здесь</b><p>После подготовки пакета можно будет быстро открыть статью, пост или раскадровку.</p>'
             '</div></section>'
         )
@@ -705,7 +705,7 @@ def selected_preview(record: Artifact | None) -> str:
     text = artifact_text(record, value)
     return f"""
     <section class="panel preview">
-      <div class="preview-hero"><span class="brand-mark">S</span></div>
+      <div class="preview-hero"><img class="sg-preview-logo" src="/studio/assets/servgo.svg" alt="" width="44" height="44"></div>
       <div class="preview-content">
         <div class="preview-kicker">
           <span class="chip blue">{esc(artifact_kind_label(record, value))}</span>
