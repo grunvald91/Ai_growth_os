@@ -38,7 +38,7 @@ def extended_authorization(platform, app_id, redirect_uri, state, *, challenge=N
     raise LookupError("Эта соцсеть не поддерживает выбранный OAuth-процесс")
 
 
-async def complete_extended(db, settings, platform, row, code, *, device_id=None):
+async def complete_extended(db, settings, platform, row, code, *, state, device_id=None):
     """Consume VK/Threads OAuth response after state validation in oauth.complete."""
     from app.social.oauth import credentials, oauth_http, origin_and_redirect
     client_id, secret = credentials(settings, platform)
@@ -67,9 +67,9 @@ async def complete_extended(db, settings, platform, row, code, *, device_id=None
         data = await oauth_http(settings, "POST", "https://id.vk.com/oauth2/auth",
             params={"grant_type": "authorization_code", "redirect_uri": redirect_uri,
                     "client_id": client_id, "code_verifier": row.pkce_verifier,
-                    "state": row.oauth_state, "device_id": device_id},
+                    "state": state, "device_id": device_id},
             data={"code": code})
-        if data.get("state") != row.oauth_state:
+        if data.get("state") != state:
             raise ValueError("VK ID вернул неподтверждённый state")
         access = data.get("access_token")
         if not access or not re.fullmatch(r"[1-9]\d*", row.target_account_id):
