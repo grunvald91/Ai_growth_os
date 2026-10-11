@@ -36,7 +36,7 @@ class CommentSecrets(MailStore):
         return self.root / (str(UUID(str(channel_id))) + ".oauth")
 
     def save_oauth_info(self, channel_id, info):
-        if not isinstance(info, dict) or info.get("platform") not in {"youtube", "instagram"}:
+        if not isinstance(info, dict) or info.get("platform") not in {"youtube", "instagram", "threads", "vk", "vk_video"}:
             raise ValueError("Неверные параметры OAuth")
         with self.locked():
             payload = self.cipher().encrypt(json.dumps(info).encode("utf-8"))
