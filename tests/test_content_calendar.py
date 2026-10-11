@@ -388,3 +388,25 @@ def test_reschedule_one_slot_preserves_package_and_rejects_collisions(db):
         reschedule_slot(
             db, row.id, '1', original-timedelta(days=5), now=fixed_now,
         )
+
+
+def test_planning_context_knows_verified_telegram_channels_without_credentials(db, tmp_path):
+    company = Product(name='Пекарня', slug='bakery-channels')
+    db.add(company)
+    db.flush()
+    db.add(Artifact(
+        product_id=company.id, kind='telegram_channel_connection',
+        title='Новости пекарни', status='approved',
+        content=json.dumps({
+            'chat_id': '-1001234567890', 'title': 'Новости пекарни',
+            'verified_at': '2026-10-11T00:00:00+00:00',
+        }, ensure_ascii=False),
+    ))
+    db.commit()
+    context, digest = planning_context(
+        db, Settings(products_root=tmp_path), company.id,
+    )
+    assert context['verified_telegram_channels'][0]['name'] == 'Новости пекарни'
+    assert context['verified_telegram_channels'][0]['scheduled_publication_requires_owner_approval'] is True
+    assert 'chat_id' not in context['verified_telegram_channels'][0]
+    assert isinstance(digest, str) and len(digest) == 64
