@@ -8,7 +8,7 @@ from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict, Field
 from app.content.render import asset_path
 from app.content.service import queue_content
-from app.content.revisions import queue_post_edit
+from app.content.revisions import queue_post_edit, post_history
 from app.models.domain import Artifact, ArtifactStatus, Metric, Product, Task, TaskStatus
 
 LABELS = {'own_site':'SEO / сайт', 'dzen':'Дзен', 'tenchat':'TenChat', 'vc_ru':'vc.ru',
@@ -318,6 +318,22 @@ class TelegramContent:
                     '«Убери общие фразы, добавь конкретный пример и сократи вступление». '
                     'ИИ сохранит старую версию, а новую отправит на проверку.'
                 )
+            elif action == 'history':
+                with self.sessions() as db:
+                    versions = post_history(db, record_id)
+                    buttons = []
+                    for pos, version in enumerate(versions, 1):
+                        label = f'Версия {pos} · {version.title[:36]} · {version.status.value}'
+                        buttons.append([{
+                            'text': label,
+                            'callback_data': f'content:asset:{version.id}',
+                        }])
+                await self.bot._send(
+                    chat,
+                    f'📚 История текста — {len(versions)} верс.\n'
+                    'Старые варианты доступны для просмотра, но не редактируются поверх оригинала.',
+                    reply_markup={'inline_keyboard': buttons},
+                )
             elif action == 'approvepost':
                 with self.sessions() as db:
                     item = db.scalar(select(Artifact).where(
@@ -373,6 +389,13 @@ class TelegramContent:
                                 'callback_data':f'content:editpost:{item.id}',
                             }])
                             reply_markup = {'inline_keyboard': buttons}
+                        if value.get('origin') in {'quick_post', 'owner_revision'}:
+                            if reply_markup is None:
+                                reply_markup = {'inline_keyboard': []}
+                            reply_markup['inline_keyboard'].append([{
+                                'text': '📚 История версий',
+                                'callback_data': f'content:history:{item.id}',
+                            }])
                     elif item.kind == 'video_script':
                         brief = value['production_brief']
                         text = ('🎬 ' + item.title
