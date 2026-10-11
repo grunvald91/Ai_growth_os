@@ -96,6 +96,50 @@ def latest_draft(db: Session, product_id: UUID):
     return drafts[0] if drafts else (None, None)
 
 
+def reconcile_plan_states(db: Session, product_id: UUID, plan: dict | None):
+    """Display actual job state even before the periodic calendar tick runs.
+
+    Read-only reconciliation: never claim a package was published, and never
+    mutate stored plan JSON while preparing an HTML response.
+    """
+    if not plan:
+        return plan
+    slots = plan.get("slots") or []
+    raw_ids = {slot.get("task_id") for slot in slots if slot.get("task_id")}
+    task_ids = set()
+    for raw in raw_ids:
+        try:
+            task_ids.add(UUID(str(raw)))
+        except (ValueError, TypeError, AttributeError):
+            continue
+    if not task_ids:
+        return plan
+    tasks = {
+        str(task.id): task
+        for task in db.scalars(
+            select(Task).where(Task.product_id == product_id, Task.id.in_(task_ids))
+        )
+    }
+    mapping = {
+        TaskStatus.QUEUED: "queued",
+        TaskStatus.RUNNING: "preparing",
+        TaskStatus.WAITING_APPROVAL: "ready_for_review",
+        TaskStatus.COMPLETED: "ready_for_review",
+        TaskStatus.FAILED: "failed",
+        TaskStatus.CANCELLED: "cancelled",
+    }
+    # A display-only copy protects persistence semantics (including 'missed').
+    updated = dict(plan)
+    updated["slots"] = []
+    for slot in slots:
+        current = dict(slot)
+        task = tasks.get(str(slot.get("task_id")))
+        if task is not None and current.get("state") != "missed":
+            current["state"] = mapping.get(task.status, current.get("state", "planned"))
+        updated["slots"].append(current)
+    return updated
+
+
 def platform_label(key: str | None) -> str:
     if not key:
         return "Площадка"
@@ -606,6 +650,7 @@ def selected_preview(record: Artifact | None) -> str:
 
 def product_dashboard(db: Session, product: Product) -> str:
     plan_row, plan = latest_plan(db, product.id)
+    plan = reconcile_plan_states(db, product.id, plan)
     tasks = list(db.scalars(
         select(Task)
         .where(Task.product_id == product.id, Task.assigned_agent.in_(["content_factory", "editorial_planner"]))
@@ -849,6 +894,7 @@ def studio_state(db: Session, product: Product, *, view: str = "current") -> dic
         draft_row, draft = latest_draft(db, product.id)
         if draft_row:
             plan_row, plan = draft_row, draft
+    plan = reconcile_plan_states(db, product.id, plan)
     tasks = list(db.scalars(
         select(Task)
         .where(Task.product_id == product.id, Task.assigned_agent.in_(["content_factory", "editorial_planner"]))
