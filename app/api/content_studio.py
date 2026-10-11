@@ -31,7 +31,7 @@ router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_s
 MATERIAL_KINDS = {
     "article", "channel_text", "video_script", "content_distribution",
     "dzen_brief", "telegram_brief", "short_video_brief",
-    "story_brief", "static_image_brief",
+    "story_brief", "static_image_brief", "creative_brief",
 }
 
 STATUS_LABELS = {
@@ -225,6 +225,8 @@ def artifact_kind(record: Artifact) -> str:
         return "post"
     if record.kind in {"video_script", "short_video_brief"}:
         return "video"
+    if record.kind == "creative_brief":
+        return "video" if parse_json(record).get("format") == "short_video" else "other"
     return "other"
 
 
@@ -237,6 +239,9 @@ def artifact_kind_label(record: Artifact, value: dict | None = None) -> str:
     if record.kind in {"video_script", "short_video_brief"}:
         platform = (value.get("production_brief") or value).get("target_platform")
         return f"Сценарий · {platform_label(platform)}" if platform else "Сценарий"
+    if record.kind == "creative_brief":
+        format_name = {"short_video":"Сценарий ролика", "story":"Stories", "static_image":"Визуальный бриф"}.get(value.get("format"), "Креативный бриф")
+        return format_name + " · " + platform_label(value.get("platform"))
     if record.kind == "dzen_brief":
         return "Дзен"
     if record.kind == "telegram_brief":
@@ -256,6 +261,8 @@ def artifact_text(record: Artifact, value: dict | None = None) -> str:
         return str(value.get("full_article") or value.get("reader_article") or value.get("body") or record.content)
     if record.kind == "channel_text":
         return str(value.get("body") or value.get("text") or record.content)
+    if record.kind == "creative_brief":
+        return str(value.get("preview_text") or record.content)
     if record.kind in {"video_script", "short_video_brief"}:
         brief = value.get("production_brief") or value
         return str(brief.get("voiceover_or_dialogue_script") or value.get("script") or record.content)
