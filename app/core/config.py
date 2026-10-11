@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     social_google_client_secret: str | None = None
     social_instagram_client_id: str | None = None
     social_instagram_client_secret: str | None = None
+    social_threads_client_id: str | None = None
+    social_threads_client_secret: str | None = None
+    social_vk_client_id: str | None = None
     social_oauth_redirect_base: str | None = None
     viral_research_mode: Literal["public_multisource", "youtube_public", "disabled"] = "public_multisource"
     viral_research_max_queries: int = 4
