@@ -3,12 +3,14 @@ import io
 import json
 import zipfile
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from uuid import UUID
 from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict, Field
 from app.content.render import asset_path
 from app.content.service import queue_content
 from app.content.revisions import queue_post_edit, post_history
+from app.content.calendar import PLATFORMS
 from app.models.domain import Artifact, ArtifactStatus, Metric, Product, Task, TaskStatus
 
 LABELS = {'own_site':'SEO / сайт', 'dzen':'Дзен', 'tenchat':'TenChat', 'vc_ru':'vc.ru',
@@ -32,9 +34,10 @@ class TelegramContent:
         self.plan_product = None
         self.post_target = None  # (product_id, channel) for a single post
         self.post_edit_target = None  # immutable Artifact ID under revision
+        self.calendar_target = None  # (plan_id, slot_id)
 
     async def menu(self, chat_id):
-        self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = None
+        self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = self.calendar_target = None
         with self.sessions() as db:
             products = list(db.scalars(select(Product).order_by(Product.name).limit(20)))
             buttons = [[{'text':p.name, 'callback_data':f'content:product:{p.id}'}] for p in products]
@@ -84,8 +87,26 @@ class TelegramContent:
             await self.menu(chat)
             return True
         if text.startswith('/') or text in {'📊 Главное','✅ На согласование','🧪 Тесты','🔄 Обновить','🏢 Компания','📇 Контакты','📧 Почта'}:
-            self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = None
+            self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = self.calendar_target = None
             return False
+        if self.calendar_target:
+            plan_id, slot_id = self.calendar_target
+            try:
+                when = datetime.strptime(text, '%d.%m.%Y %H:%M')
+                from app.content.calendar import plan_record, reschedule_slot
+                with self.sessions() as db:
+                    _, plan = plan_record(db, plan_id)
+                    when = when.replace(tzinfo=ZoneInfo(plan['timezone']))
+                    result = reschedule_slot(db, plan_id, slot_id, when)
+                self.calendar_target = None
+                await self.bot._send(
+                    chat, '✅ Время изменено: ' +
+                    datetime.fromisoformat(result['publish_at']).strftime('%d.%m.%Y %H:%M') +
+                    '. Тема и материалы сохранены; новая публикация не отправлялась.'
+                )
+            except (ValueError, LookupError) as exc:
+                await self.bot._send(chat, str(exc))
+            return True
         if self.post_edit_target:
             try:
                 with self.sessions() as db:
@@ -224,14 +245,40 @@ class TelegramContent:
     async def callback(self, chat, data):
         try:
             _, action, raw = data.split(':',2)
-            record_id = UUID(raw)
+            if action == 'slotmove':
+                raw_plan_id, slot_id = raw.split(':', 1)
+                record_id = UUID(raw_plan_id)
+            else:
+                record_id = UUID(raw)
             # Leaving the quick-post wizard must not steal a later unrelated
             # message (company profile, research parameters, statistics, etc.).
             if action not in {'postchannels', 'posttg', 'postvk', 'postdzen', 'postvc', 'postten'}:
                 self.post_target = None
             if action != 'editpost':
                 self.post_edit_target = None
-            if action == 'postchannels':
+            if action != 'slotmove':
+                self.calendar_target = None
+            if action == 'slotmove':
+                from app.content.calendar import plan_record
+                with self.sessions() as db:
+                    row, plan = plan_record(db, record_id)
+                    slot = next((x for x in plan['slots']
+                                 if str(x.get('slot_id')) == str(slot_id)), None)
+                    if not slot:
+                        raise LookupError('Слот не найден')
+                    if plan.get('approval_state') not in {'active', 'draft'}:
+                        raise ValueError('План недоступен для переноса')
+                    if slot.get('publication_url'):
+                        raise ValueError('Опубликованный материал нельзя переносить')
+                self.topic_product = self.metrics_article = self.plan_product = None
+                self.post_target = self.post_edit_target = None
+                self.calendar_target = (record_id, slot_id)
+                await self.bot._send(chat,
+                    'Пришли новое время в формате ДД.ММ.ГГГГ ЧЧ:ММ.\n'
+                    f'Площадка: {PLATFORMS[slot["platform"]][0]}. '
+                    'Дата должна оставаться в пределах текущего плана. '
+                    'Перенос не публикует материал автоматически.')
+            elif action == 'postchannels':
                 self.topic_product = self.metrics_article = self.plan_product = self.post_target = None
                 with self.sessions() as db:
                     if db.get(Product, record_id) is None:
@@ -275,6 +322,13 @@ class TelegramContent:
                         buttons.insert(0, [{'text':'✅ Подтвердить и готовить', 'callback_data':f'content:planapprove:{record_id}'}])
                     if value['approval_state'] == 'active':
                         buttons.insert(0, [{'text':'⏸ Пауза', 'callback_data':f'content:planpause:{record_id}'}])
+                    if value['approval_state'] in {'active', 'draft'}:
+                        for slot in sorted(value['slots'], key=lambda x: x['publish_at'])[:15]:
+                            buttons.append([{
+                                'text': '🕒 ' + slot['publish_at'][5:16].replace('T', ' ') + ' · ' +
+                                        PLATFORMS[slot['platform']][0][:16],
+                                'callback_data': f'content:slotmove:{record_id}:{slot["slot_id"]}',
+                            }])
                     body = render_calendar(value)
                 await self.bot._send(chat, body, reply_markup={'inline_keyboard':buttons})
             elif action == 'planapprove':
