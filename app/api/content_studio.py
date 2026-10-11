@@ -136,7 +136,7 @@ def reconcile_plan_states(db: Session, product_id: UUID, plan: dict | None):
     for slot in slots:
         current = dict(slot)
         task = tasks.get(str(slot.get("task_id")))
-        if task is not None and current.get("state") != "missed":
+        if task is not None and current.get("state") not in {"missed", "scheduled", "published"}:
             current["state"] = mapping.get(task.status, current.get("state", "planned"))
         updated["slots"].append(current)
     return updated
