@@ -365,6 +365,18 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
     """
 
 
+def mobile_header_html(product: Product) -> str:
+    """One brand bar on mobile, not a second bottom navigation overlay."""
+    base = f"/studio/products/{product.id}"
+    return f"""
+    <header class="sg-mobile-shell-head">
+      {servgo_brand_html(compact=True, href=base)}
+      <a class="sg-mobile-project" href="/studio?choose=1"
+         aria-label="Сменить компанию: {esc(product.name)}">{esc(product.name)} <span aria-hidden="true">⌄</span></a>
+    </header>
+    """
+
+
 def asset_dialog(record: Artifact) -> str:
     value = parse_json(record)
     title = esc(record.title)
@@ -911,9 +923,9 @@ def product_dashboard(db: Session, product: Product) -> str:
         meta = parse_json(material)
         recent_cards.append(
             f'<a class="sg-mini-row" href="/studio/products/{product.id}/materials/{material.id}">'
-            f'<span class="sg-mini-kind">▤</span><div><b>{esc(material.title[:65])}</b>'
+            f'<span class="sg-mini-kind">▤</span><div><b>{esc(display_material_title(material, meta)[:75])}</b>'
             f'<small>{esc(artifact_kind_label(material, meta))} · '
-            f'{esc(material.status.value)}</small></div>'
+            f'{esc(status_label(material.status.value))}</small></div>'
             '<span aria-hidden="true">↗</span></a>'
         )
     quick_feed = f"""
@@ -944,6 +956,8 @@ def product_dashboard(db: Session, product: Product) -> str:
 <body>
 <div class="studio-page"><div class="studio-layout">
   {sidebar_html(product.id)}
+  {mobile_header_html(product)}
+  {mobile_nav_html(product.id)}
   <main class="main">
     <header class="topbar">
       <div>
@@ -998,7 +1012,6 @@ def product_dashboard(db: Session, product: Product) -> str:
     </div>
     </details>
   </main>
-  {mobile_nav_html(product.id)}
 </div></div>
 {dialogs}
 <script src="/studio/assets/studio.js?v=6"></script>
@@ -1075,6 +1088,8 @@ def studio_page_shell(
 <body>
 <div class="studio-page"><div class="studio-layout">
   {sidebar_html(product.id, active)}
+  {mobile_header_html(product)}
+  {mobile_nav_html(product.id, active)}
   <main class="main route-main">
     <div class="route-mobile-brand">{mobile_logo_html(product.id)}</div>
     <header class="route-page-head">
@@ -1094,7 +1109,6 @@ def studio_page_shell(
     </nav>
     <div class="route-content">{body}</div>
   </main>
-  {mobile_nav_html(product.id, active)}
 </div></div>
 {dialogs}
 <script src="/studio/assets/studio.js?v=6"></script>
