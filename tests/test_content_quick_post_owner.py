@@ -60,6 +60,11 @@ async def test_owner_can_choose_channel_and_queue_one_post(db, tmp_path):
     assert request.mode == "post" and request.channel == "telegram"
     assert content.post_target is None
 
+    await content.callback(7, f"content:postvk:{product.id}")
+    assert content.post_target is not None
+    await content.callback(7, f"content:product:{product.id}")
+    assert content.post_target is None
+
 
 @pytest.mark.asyncio
 async def test_owner_post_approval_is_idempotent_and_does_not_publish(db, tmp_path):
