@@ -22,7 +22,8 @@ from sqlalchemy.orm import Session
 from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
 from app.api.content_studio_ui import create_content_html, review_html, channels_html
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
-from app.content.calendar import PLATFORMS, approve_plan, pause_plan, reschedule_slot
+from app.content.calendar import (PLATFORMS, approve_plan, pause_plan,
+    reschedule_slot, queue_plan, save_preferences)
 from app.content.service import queue_content
 from app.content.revisions import post_history, queue_post_edit
 from app.content.creative import CreativeRequest, queue_creative
@@ -1136,7 +1137,16 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
         switcher = f'<a class="btn secondary small" href="/studio/products/{product.id}/plan?view=draft">Новый черновик →</a>'
     view_q = "&view=draft" if view == "draft" else ""
     plan_q = "?view=draft" if view == "draft" else ""
+    pending_planner = next((task for task in state["tasks"]
+                            if task.assigned_agent == "editorial_planner"
+                            and task.status in {TaskStatus.QUEUED, TaskStatus.RUNNING}), None)
+    planner_notice = (
+        '<p class="sg-notice" role="status">Редактор готовит новый вариант контент-плана. '
+        'Обновите эту страницу позже. Действующий план продолжит работать.</p>'
+        if pending_planner else ""
+    )
     body = f"""
+    {planner_notice}
     <section class="panel route-summary">
       <div class="panel-head">
         <div class="panel-title"><span class="ico">▣</span><div><h2>{"Черновик плана" if view == "draft" else "Действующий план"}</h2>
@@ -1151,6 +1161,16 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
       </div>
     </section>
     <section class="package-grid route-package-grid">{"".join(cards) or '<div class="panel empty">По выбранному фильтру пакетов нет.</div>'}</section>
+    <section class="sg-surface">
+      <div class="sg-section-head"><div><span class="sg-overline">ПЕРЕСМОТР СТРАТЕГИИ</span>
+      <h2>Нужен новый план?</h2>
+      <p>Напишите свободно, что важно компании. ИИ предложит новый черновик; действующий план не изменится до утверждения.</p></div></div>
+      <form class="sg-inline-form" method="post" action="/studio/products/{product.id}/plan/generate">
+        <label class="sg-field"><span>Пожелания к следующему плану <em>· необязательно</em></span>
+          <textarea name="requirements" maxlength="6000" rows="3" placeholder="Например: 4 поста в Telegram в неделю, короткие ролики для тёплой аудитории, акцент на преимуществах"></textarea>
+        </label><button class="btn secondary" type="submit">✦ Подготовить новый контент-план</button>
+      </form>
+    </section>
     <section class="panel" id="unknowns">
       <div class="panel-head"><div class="panel-title"><span class="ico">✦</span><div><h2>Идеи и неизвестные</h2>
       <div class="panel-sub">То, что редактор пока считает непроверенным</div></div></div><span class="chip blue">{len(unknowns)}</span></div>
@@ -1924,3 +1944,17 @@ async def studio_slot_move(product_id: UUID, plan_id: UUID, slot_id: str,
     except (ValueError, LookupError) as exc:
         raise HTTPException(409, str(exc)) from None
     return RedirectResponse(f"/studio/products/{product_id}/calendar", status_code=303)
+
+
+@router.post("/studio/products/{product_id}/plan/generate")
+async def studio_generate_plan(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    values = await _studio_form(request)
+    text = values.get("requirements", "").strip()
+    try:
+        if text:
+            save_preferences(db, product_id, text)
+        queue_plan(db, product_id)
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f"/studio/products/{product_id}/plan", status_code=303)
