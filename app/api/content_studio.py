@@ -235,8 +235,8 @@ def artifact_kind(record: Artifact) -> str:
         return "post"
     if record.kind in {"video_script", "short_video_brief"}:
         return "video"
-    if record.kind == "creative_brief":
-        return "video" if parse_json(record).get("format") == "short_video" else "creative"
+    if record.kind in {"creative_brief", "story_brief", "static_image_brief"}:
+        return "creative"
     return "other"
 
 
