@@ -8,7 +8,7 @@ from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict, Field
 from app.content.render import asset_path
 from app.content.service import queue_content
-from app.models.domain import Artifact, Metric, Product, Task
+from app.models.domain import Artifact, ArtifactStatus, Metric, Product, Task
 
 LABELS = {'own_site':'SEO / сайт', 'dzen':'Дзен', 'tenchat':'TenChat', 'vc_ru':'vc.ru',
           'telegram':'Telegram', 'faq':'FAQ', 'founder':'Пост автора'}
@@ -277,14 +277,40 @@ class TelegramContent:
                     await self.product(chat, record_id)
             elif action in {'article','download'}:
                 await self.article(chat, record_id, download=action == 'download')
+            elif action == 'approvepost':
+                with self.sessions() as db:
+                    item = db.scalar(select(Artifact).where(
+                        Artifact.id == record_id, Artifact.kind == 'channel_text'
+                    ).with_for_update())
+                    if item is None or json.loads(item.content).get('origin') != 'quick_post':
+                        raise LookupError('Пост недоступен')
+                    if item.status == ArtifactStatus.AWAITING_APPROVAL:
+                        item.status = ArtifactStatus.APPROVED
+                        item.version += 1
+                        db.commit()
+                        response = '✅ Текст утверждён. Публикация пока только вручную.'
+                    elif item.status == ArtifactStatus.APPROVED:
+                        response = 'Этот текст уже утверждён. Публикация не запускалась.'
+                    else:
+                        response = 'Пост нельзя утвердить из текущего состояния.'
+                await self.bot._send(chat, response)
             elif action == 'asset':
+                reply_markup = None
                 with self.sessions() as db:
                     item = db.get(Artifact, record_id)
                     if item is None or item.kind not in {'channel_text','video_script','content_distribution'}:
                         raise LookupError('Материал не найден')
                     value = json.loads(item.content)
                     if item.kind == 'channel_text':
-                        text = '# ' + value['title'] + '\n\n' + value['body']
+                        status_label = {
+                            ArtifactStatus.AWAITING_APPROVAL: 'Ожидает проверки',
+                            ArtifactStatus.APPROVED: 'Утверждено',
+                        }.get(item.status, item.status.value)
+                        text = '# ' + value['title'] + '\n\n' + value['body'] + '\n\nСтатус: ' + status_label
+                        if value.get('origin') == 'quick_post' and item.status == ArtifactStatus.AWAITING_APPROVAL:
+                            reply_markup = {'inline_keyboard': [[
+                                {'text':'✅ Утвердить текст', 'callback_data':f'content:approvepost:{item.id}'},
+                            ]]}
                     elif item.kind == 'video_script':
                         brief = value['production_brief']
                         text = ('🎬 ' + item.title
@@ -307,7 +333,7 @@ class TelegramContent:
                         text = ('📈 Публикация и измерение\n\nПлощадки: сайт, Дзен, TenChat, vc.ru, Telegram, Shorts, VK Клипы, Reels.'
                                 + '\nПосле проверки размести материал вручную и сохрани ссылку. Отмечай просмотры, переходы, обращения, демо/регистрации/записи и клиентов.'
                                 + '\nАвтоматические публикации и получение статистики ещё не подключены.')
-                await self.bot._send(chat, text)
+                await self.bot._send(chat, text, reply_markup=reply_markup)
             elif action == 'video':
                 with self.sessions() as db:
                     item = db.get(Artifact, record_id)
