@@ -3,10 +3,12 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 
 
 class Settings(BaseSettings):
     app_env: str = "development"
+    release_sha: str = ""
     database_url: str = "postgresql+psycopg://ai_growth:ai_growth@localhost:5432/ai_growth"
     llm_provider: str = "xai"
     llm_model: str = "kimi-2.7"
@@ -23,6 +25,7 @@ class Settings(BaseSettings):
     studio_admin_username: str | None = None
     studio_admin_password: str | None = None
     studio_public_origin: str | None = None
+    studio_users_file: Path | None = None
     telegram_bot_token: str | None = None
     telegram_owner_chat_id: int | None = None
     telegram_poll_timeout_seconds: int = 25
@@ -39,7 +42,13 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    @field_validator("studio_users_file", mode="before")
+    @classmethod
+    def optional_account_file(cls, value):
+        return None if value == "" else value
+
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+

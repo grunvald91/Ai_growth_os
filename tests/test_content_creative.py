@@ -83,7 +83,7 @@ class FakeCreativeProvider:
 ])
 @pytest.mark.asyncio
 async def test_creative_job_runs_only_two_specialists_and_keeps_approval(db, tmp_path, fmt, platform):
-    product = Product(name="Цветочная мастерская", slug="floral-" + fmt + platform)
+    product = Product(name="Цветочная мастерская", slug=("floral-" + fmt + platform).replace("_", "-"))
     db.add(product)
     db.commit()
     request = CreativeRequest(
@@ -153,3 +153,4 @@ async def test_worker_dispatches_creative_job(monkeypatch, db, tmp_path):
     monkeypatch.setattr("app.content.worker.run_creative_once", fake_runner)
     assert await run_content_once(session, Settings(products_root=tmp_path)) == 1
     assert calls == [("story", "telegram", task.id)]
+

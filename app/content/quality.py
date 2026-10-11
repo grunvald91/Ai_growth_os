@@ -45,3 +45,14 @@ def post_quality_warnings(title: str, body: str, channel: str) -> list[str]:
     if re.search(r"(?:\b100\s*%|\bгарантируем\s+(?:рост|продажи|результат)\b)", text, flags=re.IGNORECASE):
         warnings.append("Проверьте категоричное обещание результата и его доказательства")
     return warnings[:6]
+
+
+def factual_claim_warnings(text: str, facts: dict | None = None) -> list[str]:
+    """Flag unsupported quantitative business promises; this is not truth verification."""
+    facts_text = " ".join(str(value) for value in (facts or {}).values()).casefold()
+    risks = re.findall(r"\b\d[\d\s.,]*\s*(?:(?:довольных|активных|постоянных|новых|успешных)\s+)?(?:%|₽|руб(?:лей|ля|ль)?\b|клиент\w*|покупател\w*|заказ\w*|отзыв\w*|лет\b)", text, flags=re.I)
+    unsupported = [claim.strip() for claim in risks if " ".join(claim.casefold().split()) not in " ".join(facts_text.split())]
+    if unsupported:
+        return ["Нет подтверждения в профиле: " + "; ".join(dict.fromkeys(unsupported))[:350] + ". Проверьте числа, цены и результаты перед утверждением."]
+    return []
+

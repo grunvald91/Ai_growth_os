@@ -111,7 +111,7 @@ async def test_owner_scheduled_post_sent_once_and_acknowledged(db):
 @pytest.mark.asyncio
 async def test_ambiguous_send_failure_never_autoretries(db):
     product, post = company_and_post(db)
-    conn = save_verified_channel(db, await verify_channel(FakeTelegram(), "@craft_studio"))
+    conn = save_verified_channel(db, product.id, await verify_channel(FakeTelegram(), "@craft_studio"))
     now = datetime.now(timezone.utc)
     pub = schedule_post(db, post.id, conn.id, now + timedelta(minutes=2), now=now)
     fake = FakeTelegram(fail=True)
@@ -131,7 +131,7 @@ async def test_ambiguous_send_failure_never_autoretries(db):
 @pytest.mark.asyncio
 async def test_disabled_flag_and_cancelled_publication_do_not_send(db):
     product, post = company_and_post(db)
-    conn = save_verified_channel(db, await verify_channel(FakeTelegram(), "@craft_studio"))
+    conn = save_verified_channel(db, product.id, await verify_channel(FakeTelegram(), "@craft_studio"))
     now = datetime.now(timezone.utc)
     pub = schedule_post(db, post.id, conn.id, now + timedelta(minutes=2), now=now)
     fake = FakeTelegram()
@@ -152,7 +152,7 @@ async def test_disabled_flag_and_cancelled_publication_do_not_send(db):
 @pytest.mark.asyncio
 async def test_changed_source_is_rejected_before_send(db):
     product, post = company_and_post(db)
-    conn = save_verified_channel(db, await verify_channel(FakeTelegram(), "@craft_studio"))
+    conn = save_verified_channel(db, product.id, await verify_channel(FakeTelegram(), "@craft_studio"))
     now = datetime.now(timezone.utc)
     pub = schedule_post(db, post.id, conn.id, now+timedelta(minutes=1), now=now)
     post.version += 1
@@ -200,7 +200,7 @@ async def test_publish_calendar_slot_updates_states_and_survives_scheduler(db):
                     }))
     db.add(plan)
     db.commit()
-    conn = save_verified_channel(db, await verify_channel(FakeTelegram(), "@craft_studio"))
+    conn = save_verified_channel(db, company.id, await verify_channel(FakeTelegram(), "@craft_studio"))
     with pytest.raises(ValueError, match="совпадать"):
         schedule_post(db, post.id, conn.id, when+timedelta(minutes=2),
                       plan_id=plan.id, slot_id="3")
@@ -245,7 +245,7 @@ async def test_cancelling_calendar_link_restores_ready_state(db):
                     }]}))
     db.add(plan)
     db.commit()
-    conn = save_verified_channel(db, await verify_channel(FakeTelegram(), "@craft_studio"))
+    conn = save_verified_channel(db, company.id, await verify_channel(FakeTelegram(), "@craft_studio"))
     pub = schedule_post(db, post.id, conn.id, when, plan_id=plan.id, slot_id="1")
     cancel_scheduled_post(db, pub.id)
     db.refresh(plan)
@@ -256,7 +256,7 @@ async def test_cancelling_calendar_link_restores_ready_state(db):
 @pytest.mark.asyncio
 async def test_stale_scheduled_post_is_marked_missed_instead_of_sent(db):
     product, post = company_and_post(db)
-    conn = save_verified_channel(db, await verify_channel(FakeTelegram(), "@craft_studio"))
+    conn = save_verified_channel(db, product.id, await verify_channel(FakeTelegram(), "@craft_studio"))
     now = datetime.now(timezone.utc)
     pub = schedule_post(db, post.id, conn.id, now+timedelta(minutes=1), now=now)
     fake = FakeTelegram()
@@ -277,3 +277,4 @@ async def test_stale_scheduled_post_is_marked_missed_instead_of_sent(db):
     second = schedule_post(db, post.id, conn.id,
                            now+timedelta(days=1), now=now)
     assert second.status == "scheduled"
+

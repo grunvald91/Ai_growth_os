@@ -482,7 +482,11 @@ STUDIO_JS = r"""
   qa('[data-copy]').forEach(btn=>btn.addEventListener('click',async()=>{
     const el=document.getElementById(btn.dataset.copy);
     if(!el)return;
-    try{await navigator.clipboard.writeText(el.innerText||el.textContent||'');const old=btn.textContent;btn.textContent='Скопировано';setTimeout(()=>btn.textContent=old,1400)}catch(_){}
+    const text=el.tagName==='TEXTAREA'?el.value:(el.innerText||el.textContent||'');
+    try{await navigator.clipboard.writeText(text);const old=btn.textContent;btn.textContent='Скопировано';setTimeout(()=>btn.textContent=old,1400)}catch(_){
+      const range=document.createRange();range.selectNodeContents(el);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
+      btn.textContent='Текст выделен: нажмите Ctrl+C / ⌘C';btn.setAttribute('role','status');
+    }
   }));
 })();
 """
@@ -490,4 +494,12 @@ STUDIO_JS = r"""
 # Task-first redesign layered over the existing dashboard and its legacy selectors.
 from app.api.content_studio_refresh import CSS as STUDIO_REFRESH_CSS, JS as STUDIO_REFRESH_JS
 STUDIO_CSS += "\n" + STUDIO_REFRESH_CSS
+STUDIO_CSS += """
+/* Keep publication state visible on compact screens. */
+@media(max-width:920px){.calendar-row>.status{display:inline-flex;grid-column:3;white-space:normal}.calendar-row{grid-template-columns:60px 32px minmax(0,1fr) 16px}.calendar-arrow{grid-column:4;grid-row:1}}
+.sg-muted,.sg-footnote,.panel-sub,.sg-field small,.sg-overline,.sg-form-hint,.sg-channel-line small{color:#526176}
+.sg-publication-row{flex-wrap:wrap;gap:12px}.sg-publication-row>div{display:flex;flex-direction:column;gap:6px}
+.sg-manual-editor textarea{width:100%;min-height:160px}.sg-manual-editor{margin-top:16px}
+"""
 STUDIO_JS += "\n" + STUDIO_REFRESH_JS
+

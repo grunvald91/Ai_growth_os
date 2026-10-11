@@ -112,7 +112,7 @@ async def run_content_once(session_factory, settings):
                 script = db.get(Artifact, UUID(raw_id))
                 if script is None or script.product_id != product_id or script.task_id != article.task_id or script.kind != 'video_script':
                     raise ValueError('Wrong source script')
-                brief = ShortVideoDerivativeDraft.model_validate({k:v for k,v in json.loads(script.content).items() if k != 'article_id'})
+                brief = ShortVideoDerivativeDraft.model_validate({k:v for k,v in json.loads(script.content).items() if k in ShortVideoDerivativeDraft.model_fields})
                 target = asset_path(settings.products_root, product_id, script.id, 'video.mp4').parent
                 metadata = await asyncio.to_thread(render_video, brief.production_brief, target, product.name)
                 ArtifactService(db).create(product_id=product_id, task_id=task_id, agent_run_id=run_id,
@@ -133,3 +133,4 @@ async def run_content_once(session_factory, settings):
             if isinstance(exc, asyncio.CancelledError):
                 raise
     return 1
+

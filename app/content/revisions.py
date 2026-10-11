@@ -16,9 +16,9 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.content.quick_post import CHANNEL_GUIDANCE
-from app.content.quality import post_quality_warnings
+from app.content.quality import post_quality_warnings, factual_claim_warnings
 from app.llm.schemas import LLMMessage, LLMRequest
-from app.models.domain import AgentRun, Artifact, ArtifactStatus, CostRecord, Product, Task, TaskStatus
+from app.models.domain import AgentRun, Artifact, ArtifactStatus, CostRecord, Product, Publication, Task, TaskStatus
 from app.services.artifacts import ArtifactService
 from app.services.tasks import TaskService
 from app.workflows.article_production import product_facts
@@ -62,7 +62,7 @@ def post_history(db: Session, post_id: UUID) -> list[Artifact]:
     is introduced. The root post remains queryable even when superseded.
     """
     source = db.get(Artifact, post_id)
-    if source is None or source.kind != "channel_text":
+    if source is None or source.kind not in {"channel_text", "article", "creative_brief", "video_script"}:
         raise LookupError("Пост не найден")
     try:
         value = json.loads(source.content)
@@ -70,13 +70,13 @@ def post_history(db: Session, post_id: UUID) -> list[Artifact]:
     except (ValueError, TypeError, AttributeError):
         raise LookupError("Связи версий повреждены") from None
     root = db.get(Artifact, root_id)
-    if root is None or root.kind != "channel_text" or root.product_id != source.product_id:
+    if root is None or root.kind != source.kind or root.product_id != source.product_id:
         raise LookupError("Первая версия поста не найдена")
     pattern = '%"revision_root_id": "' + str(root.id) + '"%'
     revisions = list(db.scalars(
         select(Artifact).where(
             Artifact.product_id == root.product_id,
-            Artifact.kind == "channel_text",
+            Artifact.kind == source.kind,
             Artifact.content.like(pattern),
         ).order_by(Artifact.created_at, Artifact.id).limit(250)
     ))
@@ -104,6 +104,10 @@ def queue_post_edit(db: Session, post_id: UUID, feedback: str):
     )
     if source.status not in {ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED}:
         raise ValueError("Эта версия поста уже закрыта для редактирования")
+    pending_publication = db.scalar(select(Publication.id).where(
+        Publication.artifact_id == post_id, Publication.status.in_(["scheduled", "sending", "delivery_unknown"])))
+    if pending_publication:
+        raise ValueError("Сначала отмените отправку или проверьте её результат, затем доработайте пост")
     try:
         value = json.loads(source.content)
     except (ValueError, TypeError):
@@ -221,6 +225,9 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
         if reply.stop_reason not in (None, "end_turn", "stop_sequence") or len(reply.content) > 50000:
             raise ValueError("Incomplete revision output")
         draft = RevisedPost.model_validate(json.loads(reply.content))
+        if channel == "telegram":
+            from app.content.telegram_publishing import validate_telegram_text
+            validate_telegram_text(draft.body)
         if any(source_id not in facts for source_id in draft.evidence_ids):
             raise ValueError("Unverified company fact in revision")
         if (product.slug != "servgo"
@@ -245,6 +252,8 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
         old = json.loads(source.content)
         root_id = old.get("revision_root_id") or str(source.id)
         warnings = post_quality_warnings(draft.title, draft.body, channel)
+        facts_warnings = factual_claim_warnings(draft.title + " " + draft.body, facts)
+        warnings += facts_warnings
         new_value = {
             "channel": old["channel"],
             "title": draft.title,
@@ -252,6 +261,7 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
             "cta": draft.cta,
             "editorial_checks": draft.editor_notes,
             "quality_warnings": warnings,
+            "fact_check_required": bool(facts_warnings),
             "quality_review": "heuristic_only_requires_owner_review",
             "evidence_ids": draft.evidence_ids,
             "origin": "owner_revision",
@@ -299,3 +309,4 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
         if isinstance(exc, asyncio.CancelledError):
             raise
         return False
+

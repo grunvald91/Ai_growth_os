@@ -8,6 +8,7 @@ python -m compileall -q app tests
 python -m pytest -q \
   tests/test_content_studio.py \
   tests/test_content_studio_auth.py \
+  tests/test_content_studio_audit_fixes.py \
   tests/test_content_calendar.py \
   tests/test_content_factory.py \
   tests/test_articles.py \
@@ -24,3 +25,4 @@ python -m pytest -q \
 if [[ "${FULL_TESTS:-0}" == "1" ]]; then
   python -m pytest -q
 fi
+

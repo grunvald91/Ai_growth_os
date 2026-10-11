@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import re
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from pathlib import Path
@@ -264,118 +265,30 @@ def _ensure_derivative_source_adaptation(brief, *, strategy, seo):
     return type(brief).model_validate(data)
 
 
+def _normalize_ready_video_timeline(value):
+    """Keep shot durations proportional while producing one contiguous 30s brief."""
+    data = value.model_dump(mode='json')
+    brief = data['production_brief']
+    shots = brief['shots']
+    durations = [shot['end_second'] - shot['start_second'] for shot in shots]
+    total = sum(durations)
+    if total <= 0:
+        raise ValueError('Invalid video timeline')
+    current = 0.0
+    for index, (shot, duration) in enumerate(zip(shots, durations)):
+        shot['start_second'] = current
+        current = 30.0 if index == len(shots) - 1 else round(current + 30 * duration / total, 3)
+        shot['end_second'] = current
+        if isinstance(shot.get('spoken_text'), str):
+            shot['spoken_text'] = re.split(r'\s+Avoid:\s*', shot['spoken_text'], maxsplit=1, flags=re.I)[0].strip()
+    brief['duration_seconds'] = 30
+    return type(value).model_validate(data)
+
+
 def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
-    """Build six safe channel texts from the already validated marketing article."""
-    if stage_inputs.get('company_slug') not in (None, 'servgo'):
-        from app.content.fallbacks import generic_text_fallback
-        return generic_text_fallback(stage_inputs)
-    prior = stage_inputs.get('prior_stage_outputs') or {}
-    article = prior.get('marketing_editor') or {}
-    conversion = prior.get('conversion_editor') or {}
-    title = ' '.join(str(article.get('title') or 'Как сделать путь клиента к записи понятнее').split())
-    lead = ' '.join(str(article.get('lead') or '').split())
-    closing = ' '.join(str(article.get('closing') or '').split())
-    cta = ' '.join(str(conversion.get('cta') or 'Сравните свой путь записи с ServGo.').split())
-    sections = [
-        (
-            ' '.join(str(item.get('heading') or '').split()),
-            ' '.join(str(item.get('body') or '').split()),
-        )
-        for item in article.get('sections') or []
-        if isinstance(item, dict) and str(item.get('body') or '').strip()
-    ]
-    if not sections:
-        raise ValueError('Platform fallback requires a validated marketing article')
-
-    def joined(order=None):
-        rows = sections if order is None else [sections[i] for i in order if i < len(sections)]
-        return '\n\n'.join(f'{heading}\n{body}' if heading else body for heading, body in rows)
-
-    source = joined()
-    if len(source) < 1800:
-        source = (source + '\n\n' + lead).strip()
-    if len(source) < 2000:
-        source = (source + '\n\n' + source).strip()
-
-    def append_cta_once(text):
-        text = text.strip()
-        normalized = ' '.join(text.casefold().split())
-        normalized_cta = ' '.join(cta.casefold().split())
-        if normalized_cta and normalized_cta not in normalized:
-            text += '\n\n' + cta
-        return text
-
-    first = sections[0][1]
-    second = sections[1][1] if len(sections) > 1 else first
-    third = sections[2][1] if len(sections) > 2 else second
-    fourth = sections[3][1] if len(sections) > 3 else third
-
-    def min_body(text, filler, minimum=500):
-        text = text.strip()
-        while len(text) < minimum:
-            text += '\n\n' + filler
-        return text
-
-    dzen = min_body(
-        append_cta_once(
-            f'{lead}\n\n{source}\n\nНебольшая ирония процесса: иногда чат незаметно получает должность CRM, '
-            f'календаря и диспетчера — без оформления в штат.\n\n{closing}'
-        ),
-        'Для Дзена полезно закончить практикой: выпишите путь клиента от первого сообщения до подтверждения и отметьте каждое ожидание.',
-        2100,
-    )
-    vc = min_body(
-        append_cta_once(
-            f'{title}\n\nПроблема здесь не в самом мессенджере, а в архитектуре процесса. '
-            f'Разберём её по шагам и без магических обещаний.\n\n{source}\n\n'
-            f'Практический вывод: автоматизировать стоит не «всё», а повторяющиеся точки выбора и ожидания. '
-            f'Иначе получится очень быстрый хаос — тоже автоматизация, но не та, которой хочется хвастаться.'
-        ),
-        'Для vc.ru смотрим на процесс как на систему: вход, развилки, ручные решения, статус и измеряемый следующий шаг.',
-        2100,
-    )
-    tenchat = min_body(
-        f'{title}\n\n{first}\n\n'
-        f'Рабочий вопрос владельцу: сколько решений сотрудник принимает только ради того, чтобы клиент добрался до слота? '
-        f'Если ответ звучит как «слишком много», процесс уже просит упрощения.\n\n{cta}',
-        'Профессиональный чек-лист: отделите повторяемые операции от решений, где действительно нужен опыт сотрудника.'
-    )
-    telegram = min_body(
-        f'{lead}\n\n{third}\n\n'
-        f'По-человечески это выглядит так: клиент хочет записаться, а не пройти собеседование на свободное окно. '
-        f'Чем короче путь до понятного статуса, тем меньше ручной суеты.\n\n{cta}',
-        'Для Telegram правило простое: один экран — одна мысль. Покажите проблему, следующий шаг и оставьте человеку одно действие.'
-    )
-    faq = min_body(
-        f'Вопрос: зачем менять запись, если мессенджеры и так работают?\n'
-        f'Ответ: {second}\n\n'
-        f'Вопрос: что упрощать в первую очередь?\n'
-        f'Ответ: начните с повторяющихся уточнений услуги, специалиста и свободного времени.\n\n'
-        f'Вопрос: нужно ли убирать человека из процесса полностью?\n'
-        f'Ответ: нет. Оставьте человеку решения, где действительно нужен контроль; повторяющиеся шаги лучше сделать понятными заранее. '
-        f'Иначе администратор превращается в CRM на человеческой тяге.\n\n{cta}',
-        'Ещё один вопрос для проверки: может ли клиент понять статус записи без нового сообщения администратору?'
-    )
-    founder = min_body(
-        f'{title}\n\n{fourth}\n\n'
-        f'Полезный принцип для продукта: не добавлять кнопку ради кнопки, а убирать конкретную точку трения. '
-        f'Если клиент понимает следующий шаг, а владелец сохраняет контроль там, где он нужен, система делает свою работу. '
-        f'Юмор ситуации в том, что самый дорогой «интеграционный слой» малого бизнеса часто называется «напишите администратору».\n\n{cta}',
-        'В продуктовой заметке важнее решение: какую ручную петлю мы убрали, что стало понятнее клиенту и какой контроль сохранили владельцу.'
-    )
-
-    def bounded(text):
-        return text[:11800].rstrip()
-
-    checks = ['Проверены продуктовые обещания', 'Сохранён один понятный CTA', 'Добавлен ситуационный юмор без насмешки над клиентом']
-    return {'texts': [
-        {'channel': 'dzen', 'title': title, 'body': bounded(dzen), 'editorial_checks': checks},
-        {'channel': 'tenchat', 'title': title, 'body': bounded(tenchat), 'editorial_checks': checks},
-        {'channel': 'vc_ru', 'title': title, 'body': bounded(vc), 'editorial_checks': checks},
-        {'channel': 'telegram', 'title': title, 'body': bounded(telegram), 'editorial_checks': checks},
-        {'channel': 'faq', 'title': f'Частые вопросы: {title}'[:300], 'body': bounded(faq), 'editorial_checks': checks},
-        {'channel': 'founder', 'title': f'Заметка о процессе: {title}'[:300], 'body': bounded(founder), 'editorial_checks': checks},
-    ]}
+    """Adapt only validated source content; no hard-coded brand promises."""
+    from app.content.fallbacks import generic_text_fallback
+    return generic_text_fallback(stage_inputs)
 
 
 def _creative_fallback_payload(name: str, stage_inputs: dict) -> dict:
@@ -1129,9 +1042,13 @@ class ArticleProduction:
                 from app.content.contracts import VideoVariants
                 ready_videos = VideoVariants(videos=list(outputs[11:13]))
                 for text in outputs[10].texts:
+                    from app.content.quality import post_quality_warnings, factual_claim_warnings
+                    facts_warnings = factual_claim_warnings(text.title + " " + text.body, facts)
                     ready = artifacts.create(product_id=product_id, task_id=task_id,
                         kind='channel_text', title=text.title,
-                        content=json.dumps({'article_id': str(main.id), **text.model_dump(mode='json')}, ensure_ascii=False),
+                        content=json.dumps({'article_id': str(main.id), **text.model_dump(mode='json'),
+                            'quality_warnings': post_quality_warnings(text.title, text.body, text.channel) + facts_warnings,
+                            'fact_check_required': bool(facts_warnings)}, ensure_ascii=False),
                         status='awaiting_approval')
                     artifact_ids.append(ready.id)
                 for index, video in enumerate(ready_videos.videos, 1):
@@ -1204,3 +1121,4 @@ class ArticleProduction:
                         input_tokens=max(0, response.usage.input_tokens),
                         output_tokens=max(0, response.usage.output_tokens), incurred_at=datetime.now(timezone.utc),
                         details={'cost_known': False, 'note': 'Usage recorded; monetary price unavailable.'}))
+

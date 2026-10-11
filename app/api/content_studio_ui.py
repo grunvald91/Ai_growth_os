@@ -14,9 +14,9 @@ def esc(value) -> str:
 
 FORMAT_CHOICES = [
     ("post", "Пост", "Готовый текст для одной площадки"),
-    ("short_video", "Короткое видео", "Сценарий, кадры и озвучка — не MP4"),
+    ("short_video", "Короткое видео · сценарий", "Сценарий, кадры и озвучка — не MP4"),
     ("story", "Stories", "Последовательность экранов — не готовые изображения"),
-    ("static_image", "Изображение", "Визуальный бриф — не готовая картинка"),
+    ("static_image", "Изображение · бриф", "Визуальный бриф — не готовая картинка"),
     ("package", "Полный пакет", "Статья, адаптации и видеосценарии"),
 ]
 
@@ -31,11 +31,12 @@ CHANNELS = {
                      ("dzen", "Дзен"), ("instagram_reels", "Instagram")],
 }
 
-def create_content_html(product_id, *, created=False) -> str:
+def create_content_html(product_id, *, created=False, fields=None, error=None) -> str:
+    fields = fields or {}
     base = f"/studio/products/{product_id}"
     choices = "".join(
         f'<label class="sg-choice"><input type="radio" name="format" value="{esc(key)}" '
-        f'{"checked" if i == 0 else ""} required><span class="sg-choice-copy">'
+        f'{"checked" if key == fields.get("format", "post") else ""} required><span class="sg-choice-copy">'
         f'<b>{esc(name)}</b><small>{esc(description)}</small></span></label>'
         for i, (key,name,description) in enumerate(FORMAT_CHOICES)
     )
@@ -43,13 +44,15 @@ def create_content_html(product_id, *, created=False) -> str:
     # explicitly labeled groups. JS narrows these to the chosen format.
     option_groups = "".join(
         '<optgroup label="' + esc(next(name for key,name,_ in FORMAT_CHOICES if key == fmt)) + '">'
-        + "".join(f'<option value="{esc(key)}">{esc(label)}</option>'
+        + "".join(f'<option value="{esc(key)}" {"selected" if key == fields.get("channel") else ""}>{esc(label)}</option>'
                   for key,label in platforms) + '</optgroup>'
         for fmt,platforms in CHANNELS.items()
     )
     feedback = ('<div class="sg-notice" role="status">✓ Задание добавлено в очередь. '
                 f'<a href="{base}/review">Посмотреть результаты и согласование</a></div>'
                 if created else "")
+    if error:
+        feedback = f'<div class="sg-warning" role="alert">{esc(error)}</div>'
     return f"""
     <div class="sg-layout-two">
       <section class="sg-surface sg-create-form">
@@ -65,15 +68,15 @@ def create_content_html(product_id, *, created=False) -> str:
             </label>
             <label class="sg-field sg-wide"><span>Тема или задача</span>
               <textarea name="topic" minlength="3" maxlength="300" rows="3"
-                placeholder="Например: три ошибки при выборе массажной процедуры" required></textarea>
+                placeholder="Например: три ошибки при выборе массажной процедуры" required>{esc(fields.get("topic", ""))}</textarea>
               <small>Одно предложение обычными словами. Подробности ИИ возьмёт из профиля компании.</small>
             </label>
             <label class="sg-field sg-wide"><span>Для кого пишем <em>· необязательно</em></span>
-              <input name="audience" maxlength="300" placeholder="Например: занятые родители с детьми">
+              <input name="audience" maxlength="300" value="{esc(fields.get('audience', ''))}" placeholder="Например: занятые родители с детьми">
             </label>
             <label class="sg-field sg-wide"><span>Дополнительные требования <em>· необязательно</em></span>
               <textarea name="editorial_brief" maxlength="3500" rows="3"
-                placeholder="Тон, особенности услуги, что нельзя обещать, нужный призыв"></textarea>
+                placeholder="Тон, особенности услуги, что нельзя обещать, нужный призыв">{esc(fields.get('editorial_brief', ''))}</textarea>
             </label>
           </div>
           <div class="sg-form-bottom">
@@ -88,7 +91,7 @@ def create_content_html(product_id, *, created=False) -> str:
           <h2>Как работает ИИ-команда</h2>
           <ol class="sg-steps"><li><b>Создаёт</b><span>Под конкретную компанию, формат и аудиторию.</span></li>
           <li><b>Даёт на проверку</b><span>Вы видите готовый текст или производственный бриф.</span></li>
-          <li><b>Дорабатывает</b><span>Оставьте замечание — предыдущая версия сохранится.</span></li>
+          <li><b>Дорабатывает</b><span>Пост можно доработать с ИИ. Все форматы можно исправить вручную; предыдущая версия сохранится.</span></li>
           <li><b>Публикует отдельно</b><span>Telegram: только утверждённые посты и подключённые каналы.</span></li></ol>
         </section>
         <section class="sg-surface sg-guide"><h3>Нужен план на неделю или месяц?</h3>
@@ -134,12 +137,14 @@ def review_html(product_id, records, *, filter_name="all") -> str:
               <div class="sg-inline-actions">
                 <a class="btn secondary" href="{action}">Открыть и исправить</a>
                 <form method="post" action="{approve}">
-                  <button class="btn primary" type="submit">Утвердить ✓</button>
+                  {'<a class="btn primary" href="' + action + '">Проверить факты</a>' if data.get('fact_check_required') else '<button class="btn primary" type="submit">Утвердить ✓</button>'}
                 </form>
               </div>
             </div>
           </article>""")
-    empty=f'<div class="sg-empty"><div>✓</div><h3>Материалы проверены</h3><p>Сейчас ничего не требует согласования.</p><a class="btn primary" href="{base}/create">Создать материал →</a></div>'
+    empty_title = "В этом разделе нет материалов" if filter_name != "all" else "Материалы проверены"
+    empty_note = "Попробуйте фильтр «Всё»." if filter_name != "all" else "Сейчас ничего не требует согласования."
+    empty=f'<div class="sg-empty"><div>✓</div><h3>{empty_title}</h3><p>{empty_note}</p><a class="btn primary" href="{base}/create">Создать материал →</a></div>'
     return (f'<section class="sg-surface"><div class="sg-section-head"><div>'
             f'<span class="sg-overline">ВАШЕ ВНИМАНИЕ</span><h2>Очередь согласования</h2>'
             f'<p>Сначала проверяйте материал, затем разрешайте публикацию.</p></div>'
@@ -148,8 +153,18 @@ def review_html(product_id, records, *, filter_name="all") -> str:
             f'<div class="sg-review-list">{"".join(cards) or empty}</div></section>')
 
 def channels_html(product_id, connections, publications, approved_posts, *, added=False, scheduled=False,
-                  selected_post=None, autopost_enabled=False) -> str:
+                  selected_post=None, autopost_enabled=False, publication_details=None,
+                  publication_page=1, publication_total=0) -> str:
+    publication_details = publication_details or {}
     base=f"/studio/products/{product_id}"
+    pages = max(1, (publication_total + 29) // 30)
+    pagination = '<nav class="preview-actions" aria-label="История отправок">'
+    if publication_page > 1:
+        pagination += f'<a class="btn ghost" href="{base}/channels?page={publication_page - 1}">← Новее</a>'
+    pagination += f'<span>Страница {publication_page} из {pages} · Всего {publication_total}</span>'
+    if publication_page < pages:
+        pagination += f'<a class="btn ghost" href="{base}/channels?page={publication_page + 1}">Ранее →</a>'
+    pagination += '</nav>'
     feedback = ("<p class='sg-notice' role='status'>✓ Настройки обновлены.</p>"
                 if added or scheduled else "")
     linked=[]
@@ -164,6 +179,7 @@ def channels_html(product_id, connections, publications, approved_posts, *, adde
     post_opts="".join(f'<option value="{esc(p.id)}" {"selected" if str(p.id)==str(selected_post) else ""}>{esc(p.title[:105])}</option>' for p in approved_posts)
     pub_items=[]
     for p in publications:
+        detail = publication_details.get(str(p.id), {})
         status={"scheduled":"Запланировано","sending":"Отправляется",
                 "published":"Опубликовано","delivery_unknown":"Проверить вручную",
                 "missed":"Время пропущено","cancelled":"Отменено",
@@ -172,7 +188,16 @@ def channels_html(product_id, connections, publications, approved_posts, *, adde
                 f'<button class="btn secondary small" type="submit">Отменить</button></form>'
                 if p.status in {"scheduled","missed","failed_before_send"} else "")
         pub_items.append(f'<li class="sg-publication-row"><div><b>{esc(status)}</b>'
-                         f'<small>{esc(str(p.artifact_id)[:8])} · Telegram</small></div>{cancel}</li>')
+                         f'<a href="{base}/materials/{p.artifact_id}">{esc(detail.get("title") or "Открыть материал")}</a>'
+                         f'<small>{esc(detail.get("channel") or "Telegram")} · {esc(detail.get("when") or "Дата не указана")}</small></div>{cancel}'
+                         + (f'<form method="post" action="{base}/publishing/{p.id}/reconcile">'
+                            '<label class="sg-field"><span>После ручной проверки канала</span><select name="outcome">'
+                            '<option value="published">Сообщение есть в канале</option>'
+                            '<option value="not_sent">Сообщения нет в канале</option></select></label>'
+                            '<label class="sg-field"><span>ID сообщения (если опубликовано)</span><input name="message_id" type="number" min="1"></label>'
+                            '<label><input type="checkbox" name="confirmed" value="yes" required> Я проверил канал вручную</label>'
+                            '<button class="btn secondary" type="submit">Сохранить результат проверки</button></form>'
+                            if p.status == "delivery_unknown" else "") + '</li>')
     dispatch_status = ("Автоотправка включена" if autopost_enabled else
                        "Автоотправка выключена — запланированные посты пока не отправляются")
     return f"""
@@ -193,6 +218,7 @@ def channels_html(product_id, connections, publications, approved_posts, *, adde
         <section class="sg-surface"><div class="sg-section-head"><div><span class="sg-overline">ИСТОРИЯ И ОЧЕРЕДЬ</span>
           <h2>Отправки</h2><p>Реальный статус Telegram отдельно от готовности текста.</p></div></div>
           <ul class="sg-publication-list">{"".join(pub_items) or '<li class="sg-muted">Отправок ещё нет.</li>'}</ul>
+          {pagination}
         </section>
       </div>
       <aside class="sg-aside-stack">
@@ -212,3 +238,4 @@ def channels_html(product_id, connections, publications, approved_posts, *, adde
         </section>
       </aside>
     </div>"""
+

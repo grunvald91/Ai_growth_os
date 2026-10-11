@@ -719,7 +719,7 @@ class TelegramContent:
                         status_label = {
                             ArtifactStatus.AWAITING_APPROVAL: 'Ожидает проверки',
                             ArtifactStatus.APPROVED: 'Утверждено',
-                        }.get(item.status, item.status.value)
+                        }.get(item.status, getattr(item.status, "value", str(item.status)))
                         text = '# ' + value['title'] + '\n\n' + value['body'] + '\n\nСтатус: ' + status_label
                         warnings = value.get('quality_warnings') or []
                         if warnings:
@@ -757,7 +757,7 @@ class TelegramContent:
                             }])
                     elif item.kind == 'creative_brief':
                         text = value.get('preview_text') or 'Сценарий ещё не подготовлен'
-                        text += '\n\nСтатус: ' + item.status.value
+                        text += '\n\nСтатус: ' + getattr(item.status, "value", str(item.status))
                         if item.status == ArtifactStatus.AWAITING_APPROVAL:
                             reply_markup = {'inline_keyboard': [[{
                                 'text':'✅ Утвердить бриф',
@@ -802,3 +802,4 @@ class TelegramContent:
         except (ValueError, LookupError, OSError) as exc:
             await self.bot._send(chat, str(exc) if action in {'planapprove','planpause','preferences'} and isinstance(exc, (ValueError, LookupError)) else 'Материал недоступен. Открой «Контент» заново.')
             return True
+

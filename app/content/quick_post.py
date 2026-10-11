@@ -15,7 +15,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.llm.schemas import LLMMessage, LLMRequest
-from app.content.quality import post_quality_warnings
+from app.content.quality import post_quality_warnings, factual_claim_warnings
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
 from app.services.tasks import TaskService
@@ -218,6 +218,9 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
             if reply.stop_reason not in (None, "end_turn", "stop_sequence"):
                 raise ValueError("AI answer was interrupted")
             output = _decode(schema, reply.content)
+            if name == "post_writer_editor" and request.channel == "telegram":
+                from app.content.telegram_publishing import validate_telegram_text
+                validate_telegram_text(output.body)
             if any(source_id not in facts for source_id in output.evidence_ids):
                 raise ValueError("AI referenced unverified company facts")
             if name == "post_strategist":
@@ -252,6 +255,8 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
             db.commit()
 
         warnings = post_quality_warnings(output.title, output.body, request.channel)
+        facts_warnings = factual_claim_warnings(output.title + " " + output.body, facts)
+        warnings += facts_warnings
         content = {
             "channel": request.channel,
             "title": output.title,
@@ -259,6 +264,7 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
             "cta": output.cta,
             "editorial_checks": output.editor_notes,
             "quality_warnings": warnings,
+            "fact_check_required": bool(facts_warnings),
             "quality_review": "heuristic_only_requires_owner_review",
             "evidence_ids": output.evidence_ids,
             "origin": "quick_post",
@@ -290,3 +296,4 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
         if cancelled:
             raise
         return False
+

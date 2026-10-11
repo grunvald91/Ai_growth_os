@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import parse_qs
 from zoneinfo import ZoneInfo
 from uuid import UUID
@@ -26,12 +27,15 @@ from app.content.calendar import (PLATFORMS, approve_plan, pause_plan,
     reschedule_slot, queue_plan, save_preferences)
 from app.content.service import queue_content
 from app.content.revisions import post_history, queue_post_edit
+from app.content.revisions import source_fingerprint
+from app.content.manual_edits import editable_fields, save_manual_edit
 from app.content.creative import CreativeRequest, queue_creative
 from app.content.telegram_publishing import (verify_channel, save_verified_channel,
-    connected_channels, schedule_post, cancel_scheduled_post)
+    connected_channels, schedule_post, cancel_scheduled_post, validate_telegram_text,
+    reconcile_publication)
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.domain import Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
+from app.models.domain import AgentRun, Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 
@@ -92,6 +96,23 @@ def latest_plan(db: Session, product_id: UUID, *, prefer_active: bool = True):
         if active:
             return active
     return parsed[0] if parsed else (None, None)
+
+
+def article_preview_html(text: str) -> str:
+    """A safe Markdown subset: escape all input before adding any markup."""
+    lines = []
+    for raw in text.splitlines():
+        safe = esc(raw)
+        safe = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", safe)
+        heading = re.match(r"^(#{1,3})\s+(.+)$", safe)
+        if heading:
+            level = len(heading[1]) + 1
+            lines.append(f"<h{level}>{heading[2]}</h{level}>")
+        elif safe.startswith("- "):
+            lines.append(f'<p class="sg-article-bullet">• {safe[2:]}</p>')
+        elif safe:
+            lines.append(f"<p>{safe}</p>")
+    return "".join(lines)
 
 
 def latest_draft(db: Session, product_id: UUID):
@@ -675,7 +696,7 @@ def product_dashboard(db: Session, product: Product) -> str:
     plan = reconcile_plan_states(db, product.id, plan)
     tasks = list(db.scalars(
         select(Task)
-        .where(Task.product_id == product.id, Task.assigned_agent.in_(["content_factory", "editorial_planner"]))
+        .where(Task.product_id == product.id, Task.assigned_agent.in_(["content_factory", "editorial_planner", "content_creative", "content_editor"]))
         .order_by(Task.created_at.desc())
         .limit(150)
     ))
@@ -696,7 +717,7 @@ def product_dashboard(db: Session, product: Product) -> str:
     for slot in slots:
         groups[slot.get("package_key") or "unknown"].append(slot)
 
-    content_tasks = [task for task in tasks if task.assigned_agent == "content_factory"]
+    content_tasks = [task for task in tasks if task.assigned_agent in {"content_factory", "content_creative", "content_editor"}]
     material_records = [
         artifact for artifact in artifacts
         if artifact.kind in MATERIAL_KINDS and artifact.task_id
@@ -882,7 +903,8 @@ def product_dashboard(db: Session, product: Product) -> str:
     """
 
     upcoming_cards = []
-    for slot in sorted(slots, key=lambda x: x.get("publish_at") or "")[:4]:
+    future_slots = [slot for slot in slots if parse_dt(slot.get("publish_at")) and parse_dt(slot.get("publish_at")) >= datetime.now(timezone.utc)]
+    for slot in sorted(future_slots, key=lambda x: x.get("publish_at") or "")[:4]:
         package_key = quote(str(slot.get("package_key") or "unknown"), safe="")
         upcoming_cards.append(
             f'<a class="sg-mini-row" href="/studio/products/{product.id}/packages/{package_key}">'
@@ -1000,7 +1022,7 @@ def studio_state(db: Session, product: Product, *, view: str = "current") -> dic
     plan = reconcile_plan_states(db, product.id, plan)
     tasks = list(db.scalars(
         select(Task)
-        .where(Task.product_id == product.id, Task.assigned_agent.in_(["content_factory", "editorial_planner"]))
+        .where(Task.product_id == product.id, Task.assigned_agent.in_(["content_factory", "editorial_planner", "content_creative", "content_editor"]))
         .order_by(Task.created_at.desc())
         .limit(250)
     ))
@@ -1182,6 +1204,25 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
 def calendar_page(db: Session, product: Product, selected_date: str | None = None) -> str:
     state = studio_state(db, product)
     slots = sorted(state["slots"], key=lambda slot: slot.get("publish_at") or "")
+    linked = {str(slot.get("telegram_publication_id")) for slot in slots}
+    pubs = list(db.scalars(select(Publication).where(
+        Publication.product_id == product.id, Publication.channel == "telegram",
+    ).order_by(Publication.created_at.desc())))
+    intents = list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product.id, Artifact.kind == "telegram_publish_intent",
+    )))
+    by_publication = {str(parse_json(row).get("publication_id")): parse_json(row) for row in intents}
+    for pub in pubs:
+        if str(pub.id) in linked:
+            continue
+        meta = by_publication.get(str(pub.id), {})
+        source = db.get(Artifact, pub.artifact_id)
+        scheduled = parse_dt(meta.get("scheduled_at"))
+        display_when = scheduled.astimezone(ZoneInfo("Europe/Moscow")).isoformat() if scheduled and scheduled.tzinfo else meta.get("scheduled_at")
+        slots.append({"publish_at": display_when, "topic": source.title if source else "Telegram-пост",
+                      "platform": "telegram", "state": pub.status, "artifact_id": str(pub.artifact_id),
+                      "objective": "Отдельно назначенная публикация"})
+    slots.sort(key=lambda slot: parse_dt(slot.get("publish_at")).timestamp() if parse_dt(slot.get("publish_at")) else 0)
     dates = []
     for slot in slots:
         dt = parse_dt(slot.get("publish_at"))
@@ -1203,7 +1244,8 @@ def calendar_page(db: Session, product: Product, selected_date: str | None = Non
     for slot in filtered:
         package_key = quote(str(slot.get("package_key") or "unknown"), safe="")
         row_content = (
-            '<a class="calendar-row" href="/studio/products/{pid}/packages/{key}">'.format(pid=product.id, key=package_key)
+            ('<a class="calendar-row" href="/studio/products/{pid}/materials/{aid}">'.format(pid=product.id, aid=slot["artifact_id"])
+             if slot.get("artifact_id") else '<a class="calendar-row" href="/studio/products/{pid}/packages/{key}">'.format(pid=product.id, key=package_key))
             + f'<div class="calendar-time">{fmt_dt(slot.get("publish_at"))}</div>'
             + f'<div class="calendar-platform"><span class="platform-mini">{esc(platform_short(slot.get("platform")))}</span><b>{esc(platform_label(slot.get("platform")))}</b></div>'
             + f'<div class="calendar-topic"><b>{esc(slot.get("topic"))}</b><small>{esc(slot.get("objective") or "")}</small></div>'
@@ -1330,6 +1372,7 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
 def material_detail_page(db: Session, product: Product, record: Artifact) -> str:
     value = parse_json(record)
     kind_label = artifact_kind_label(record, value)
+    generic_warnings = value.get("quality_warnings") or []
     if record.kind in {"video_script", "short_video_brief"}:
         brief = value.get("production_brief") or value
         shots = "".join(
@@ -1393,11 +1436,11 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
                     '<p>Замечания автоматические; окончательное решение за владельцем.</p>'
                     '</section>'
                 )
-            if value.get("origin") in {"quick_post", "owner_revision"}:
+            if value.get("origin") in {"quick_post", "owner_revision", "owner_manual_revision"}:
                 versions = post_history(db, record.id)
                 history_links = "".join(
                     f'<a class="btn ghost small" href="/studio/products/{product.id}/materials/{item.id}">'
-                    f'Версия {index} · {esc(item.status.value)}</a>'
+                    f'Версия {index} · {esc(getattr(item.status, "value", item.status))}</a>'
                     for index, item in enumerate(versions, 1)
                 )
                 review_html += (
@@ -1411,24 +1454,49 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
           <div class="material-detail-body">
             <div class="detail-meta"><span class="chip blue">{esc(kind_label)}</span><span class="chip">{esc(record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "")}</span></div>
             <h2>{esc(record.title)}</h2>
-            <div id="material-copy" class="article-text {'sg-post-preview' if record.kind == 'channel_text' else ''}">
+            <div class="article-text {'sg-post-preview' if record.kind == 'channel_text' else ''}">
               {f'<div class="sg-native-post-label">Предпросмотр текста · {esc(platform_label(value.get("channel")))}</div>' if record.kind == 'channel_text' else ''}
-              {esc(text)}
+              <div id="material-copy">{esc(text)}</div>
             </div>
           </div>
         </section>
         {review_html}
         """
+        if record.kind == "article":
+            start = content.index('<div class="article-text ')
+            end = content.index('\n            </div>', start) + len('\n            </div>')
+            content = content[:start] + '<div class="sg-rendered-article">' + article_preview_html(text) + '</div><textarea id="material-copy" hidden>' + esc(text) + '</textarea>' + content[end:]
     actions = (
         f'<a class="btn ghost" href="/studio/products/{product.id}/materials">← К материалам</a>'
         '<button class="btn primary" type="button" data-copy="material-copy">Копировать текст</button>'
     )
+    if generic_warnings and record.kind != "channel_text":
+        content += '<section class="sg-surface" role="alert"><h3>Проверить перед публикацией</h3><ul>' + ''.join(f'<li>{esc(note)}</li>' for note in generic_warnings) + '</ul></section>'
+    if record.kind != "channel_text" and value.get("revision_root_id"):
+        versions = post_history(db, record.id)
+        content += '<section class="sg-surface"><h3>История материала</h3><div class="preview-actions">' + ''.join(
+            f'<a class="btn ghost small" href="/studio/products/{product.id}/materials/{item.id}">Версия {index}</a>'
+            for index, item in enumerate(versions, 1)) + '</div></section>'
     if record.kind in {"channel_text", "creative_brief", "article", "video_script"}:
         status = record.status
         form_actions = ""
+        if status in {ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED}:
+            edits = editable_fields(record)
+            if edits:
+                controls = ''.join(f'<label class="sg-field"><span>{esc(label)}</span><textarea name="edit_{index}" rows="6" maxlength="60000">{esc(text)}</textarea></label>' for index, (_, label, text) in enumerate(edits))
+                form_actions += (
+                    '<details class="sg-manual-editor"><summary>✎ Исправить текст вручную</summary>'
+                    f'<form method="post" action="/studio/products/{product.id}/materials/{record.id}/edit">'
+                    f'<input type="hidden" name="source_version" value="{record.version}">'
+                    f'<input type="hidden" name="source_digest" value="{source_fingerprint(record)}">'
+                    f'<label class="sg-field"><span>Заголовок</span><input name="title" value="{esc(record.title)}" maxlength="240" required></label>'
+                    + controls + '<p>Сохраняется новая версия. Она потребует отдельного утверждения.</p>'
+                    '<button class="btn primary" type="submit">Сохранить новую версию</button></form></details>'
+                )
         if status == ArtifactStatus.AWAITING_APPROVAL:
             form_actions += (
                 f'<form method="post" action="/studio/products/{product.id}/review/{record.id}/approve">'
+                + ('<label><input type="checkbox" name="facts_confirmed" value="yes" required> Я проверил указанные числа, цены и результаты по источникам</label>' if value.get("fact_check_required") else '') +
                 '<button class="btn primary" type="submit">✓ Утвердить материал</button></form>'
             )
         if record.kind == "channel_text" and status in {
@@ -1454,7 +1522,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
             ArtifactStatus.APPROVED: "Согласован",
             ArtifactStatus.AWAITING_APPROVAL: "Ожидает вашего решения",
             ArtifactStatus.REJECTED: "Сохранён в истории",
-        }.get(status, status.value)
+        }.get(status, getattr(status, "value", str(status)))
         content += (
             '<section class="sg-surface">'
             '<div class="sg-detail-steps"><span class="done">Создан</span>'
@@ -1585,8 +1653,12 @@ def studio_js():
 
 
 @router.get("/studio")
-def studio(choose: bool = False, db: Session = Depends(get_db)):
-    products = list(db.scalars(select(Product).order_by(Product.name).limit(100)))
+def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)):
+    query = select(Product)
+    allowed = getattr(request.state, "studio_product_ids", None)
+    if allowed is not None:
+        query = query.where(Product.id.in_([UUID(value) for value in allowed]))
+    products = list(db.scalars(query.order_by(Product.name).limit(100)))
     preferred = next((p for p in products if p.slug == "servgo"), None)
     if preferred is not None and not choose:
         return RedirectResponse(f"/studio/products/{preferred.id}", status_code=302)
@@ -1756,14 +1828,18 @@ def studio_queue_package(product_id: UUID, plan_id: UUID, package_key: str, db: 
 # require_studio_auth and require_studio_csrf on the entire router.
 
 async def _studio_form(request: Request) -> dict[str, str]:
-    raw = await request.body()
-    if len(raw) > 12000:
-        raise HTTPException(413, "Слишком большой запрос")
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > 1000000:
+            raise HTTPException(413, "Слишком большой запрос")
+        chunks.append(chunk)
+    raw = b"".join(chunks)
     if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/x-www-form-urlencoded":
         raise HTTPException(415, "Ожидается форма")
     try:
         parsed = parse_qs(raw.decode("utf-8"), keep_blank_values=True,
-                          max_num_fields=14, strict_parsing=False)
+                          max_num_fields=80, strict_parsing=False)
     except (UnicodeError, ValueError):
         raise HTTPException(400, "Некорректная форма") from None
     return {k: v[-1].strip() for k, v in parsed.items() if v}
@@ -1776,10 +1852,31 @@ def _owner_product(db: Session, product_id: UUID) -> Product:
     return product
 
 
+@router.post("/studio/products/{product_id}/materials/{artifact_id}/edit")
+async def studio_manual_edit(product_id: UUID, artifact_id: UUID, request: Request, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    try:
+        revised = save_manual_edit(db, product_id, artifact_id, fields)
+    except (LookupError, ValueError) as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f"/studio/products/{product_id}/materials/{revised.id}", status_code=303)
+
+
 @router.get("/studio/products/{product_id}/create", response_class=HTMLResponse)
 def studio_create_page(product_id: UUID, created: bool = False, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
     html_body = create_content_html(product.id, created=created)
+    jobs = list(db.scalars(select(Task).where(
+        Task.product_id == product.id,
+        Task.assigned_agent.in_(["content_factory", "content_creative", "content_editor"]),
+    ).order_by(Task.created_at.desc(), Task.id.desc()).limit(20)))
+    if jobs:
+        html_body += '<section class="sg-surface"><h2>Последние задания</h2>' + ''.join(
+            f'<p><a href="/studio/products/{product.id}/tasks/{job.id}">{esc(job.title)}</a> · '
+            f'{esc(status_label(getattr(job.status, "value", job.status)))}</p>' for job in jobs
+        ) + '</section>'
     response = HTMLResponse(studio_page_shell(
         product, active="create", title="Создать материал",
         subtitle="Одна задача, одна площадка и понятный результат — без лишних настроек.",
@@ -1799,20 +1896,78 @@ async def studio_create_submit(product_id: UUID, request: Request, db: Session =
     brief = fields.get("editorial_brief") or None
     try:
         if chosen == "package":
-            queue_content(db, product.id, topic, audience=audience, editorial_brief=brief)
+            task = queue_content(db, product.id, topic, audience=audience, editorial_brief=brief)
         elif chosen == "post":
-            queue_content(db, product.id, topic, format="post",
+            task = queue_content(db, product.id, topic, format="post",
                           channel=fields.get("channel"), audience=audience, editorial_brief=brief)
         elif chosen in {"short_video", "story", "static_image"}:
             command = CreativeRequest(mode="creative", product_id=product.id, topic=topic,
                                       format=chosen, platform=fields.get("channel") or "",
                                       audience=audience, editorial_brief=brief)
-            queue_creative(db, command)
+            task = queue_creative(db, command)
         else:
             raise ValueError("Неизвестный формат")
     except (ValueError, LookupError) as exc:
-        raise HTTPException(422, str(exc)) from None
-    return RedirectResponse(f"/studio/products/{product.id}/create?created=1", status_code=303)
+        db.rollback()
+        return HTMLResponse(studio_page_shell(
+            product, active="create", title="Создать материал", subtitle="Проверьте поля задания.",
+            body=create_content_html(product.id, fields=fields, error="Проверьте формат, площадку и длину полей: тема 3–300, аудитория до 300, требования до 3500 символов."),
+        ), status_code=422, headers={"Cache-Control": "no-store"})
+    return RedirectResponse(f"/studio/products/{product.id}/tasks/{task.id}", status_code=303)
+
+
+@router.get("/studio/products/{product_id}/tasks/{task_id}", response_class=HTMLResponse)
+def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    task = db.get(Task, task_id)
+    if task is None or task.product_id != product_id:
+        raise HTTPException(404, "Задание не найдено")
+    runs = list(db.scalars(select(AgentRun).where(AgentRun.task_id == task_id).order_by(AgentRun.started_at, AgentRun.id)))
+    materials = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task_id, Artifact.product_id == product_id,
+        Artifact.kind.in_(MATERIAL_KINDS),
+    ).order_by(Artifact.created_at, Artifact.id)))
+    state = getattr(task.status, "value", str(task.status))
+    progress = ''.join(f'<li>{esc(run.agent_name)} · {esc(status_label(run.status))}</li>' for run in runs)
+    links = ''.join(f'<p><a class="btn secondary" href="/studio/products/{product_id}/materials/{row.id}">{esc(row.title)}</a></p>' for row in materials)
+    retry = (f'<p role="alert">Подготовка не завершилась. Проверьте профиль компании и повторите задание.</p>'
+             f'<form method="post" action="/studio/products/{product_id}/tasks/{task_id}/retry"><button class="btn primary">Повторить подготовку</button></form>'
+             if state in {"failed", "cancelled"} else '')
+    body = f'<section class="sg-surface"><h2>{esc(task.title)}</h2><p role="status">{esc(status_label(state))}</p><ul>{progress}</ul>{links}{retry}'
+    if state in {"queued", "running"}:
+        body += '<p>Задание сохранено. Эту страницу можно закрыть; обработка продолжится. Статус обновляется автоматически.</p>'
+    if state == "completed" and not materials:
+        body += '<p>Задание завершено. Откройте контент-план или список материалов.</p>'
+    body += f'<a href="/studio/products/{product_id}/create">К заданиям</a></section>'
+    response = HTMLResponse(studio_page_shell(product, active="create", title="Подготовка материала", subtitle="Прогресс, результат и повтор при ошибке.", body=body))
+    response.headers["Cache-Control"] = "no-store"
+    if state in {"queued", "running"}:
+        response.headers["Refresh"] = "8"
+    return response
+
+
+@router.post("/studio/products/{product_id}/tasks/{task_id}/retry")
+def studio_retry_task(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    db.scalar(select(Product).where(Product.id == product_id).with_for_update())
+    task = db.scalar(select(Task).where(Task.id == task_id, Task.product_id == product_id).with_for_update().execution_options(populate_existing=True))
+    if task is None:
+        raise HTTPException(404, "Задание не найдено")
+    if task.assigned_agent not in {"content_factory", "content_creative", "content_editor"}:
+        raise HTTPException(409, "Это задание нельзя повторить из страницы создания")
+    if task.status not in {TaskStatus.FAILED, TaskStatus.CANCELLED}:
+        raise HTTPException(409, "Повторить можно только остановленное задание")
+    duplicate = db.scalar(select(Task.id).where(Task.product_id == product_id,
+        Task.title == task.title, Task.assigned_agent == task.assigned_agent,
+        Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING])))
+    if duplicate:
+        raise HTTPException(409, "Такое задание уже выполняется")
+    partial = db.scalar(select(Artifact.id).where(Artifact.task_id == task_id, Artifact.kind.in_(MATERIAL_KINDS)))
+    if partial:
+        raise HTTPException(409, "У задания уже есть материалы. Проверьте их перед новым запуском.")
+    task.status = TaskStatus.QUEUED
+    db.commit()
+    return RedirectResponse(f"/studio/products/{product_id}/tasks/{task_id}", status_code=303)
 
 
 @router.get("/studio/products/{product_id}/review", response_class=HTMLResponse)
@@ -1835,7 +1990,7 @@ def studio_review_page(product_id: UUID, kind: str = "all", db: Session = Depend
 
 
 @router.post("/studio/products/{product_id}/review/{artifact_id}/approve")
-def studio_material_approve(product_id: UUID, artifact_id: UUID, db: Session = Depends(get_db)):
+async def studio_material_approve(product_id: UUID, artifact_id: UUID, request: Request, db: Session = Depends(get_db)):
     _owner_product(db, product_id)
     db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     row = db.scalar(select(Artifact).where(
@@ -1848,10 +2003,19 @@ def studio_material_approve(product_id: UUID, artifact_id: UUID, db: Session = D
         return RedirectResponse(f"/studio/products/{product_id}/materials/{artifact_id}", status_code=303)
     if row.status != ArtifactStatus.AWAITING_APPROVAL:
         raise HTTPException(409, "Согласовать эту версию уже нельзя")
+    if parse_json(row).get("fact_check_required"):
+        fields = await _studio_form(request)
+        if fields.get("facts_confirmed") != "yes":
+            raise HTTPException(422, "Сначала проверьте числа, цены и результаты в полном просмотре материала")
     if row.kind == "channel_text":
         source = parse_json(row)
         if not source.get("body"):
             raise HTTPException(409, "Текст материала отсутствует")
+        if source.get("channel") == "telegram":
+            try:
+                validate_telegram_text(source["body"])
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from None
         pending = db.scalar(select(Task.id).where(
             Task.product_id == product_id,
             Task.assigned_agent == "content_editor",
@@ -1875,33 +2039,48 @@ async def studio_material_revise(product_id: UUID, artifact_id: UUID,
         raise HTTPException(404, "Пост не найден")
     fields = await _studio_form(request)
     try:
-        queue_post_edit(db, artifact_id, fields.get("feedback", ""))
+        task = queue_post_edit(db, artifact_id, fields.get("feedback", ""))
     except (ValueError, LookupError) as exc:
         raise HTTPException(409, str(exc)) from None
-    return RedirectResponse(f"/studio/products/{product_id}/review", status_code=303)
+    return RedirectResponse(f"/studio/products/{product_id}/tasks/{task.id}", status_code=303)
 
 
 @router.get("/studio/products/{product_id}/channels", response_class=HTMLResponse)
 def studio_channels(product_id: UUID, added: bool = False, scheduled: bool = False,
-                    post_id: UUID | None = None, db: Session = Depends(get_db)):
+                    post_id: UUID | None = None, page: int = 1, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
     connections = connected_channels(db, product.id)
+    page = max(1, page)
+    total = db.scalar(select(func.count()).select_from(Publication).where(
+        Publication.product_id == product.id, Publication.channel == "telegram")) or 0
+    page = min(page, max(1, (total + 29) // 30))
     publications = list(db.scalars(select(Publication).where(
         Publication.product_id == product.id,
         Publication.channel == "telegram",
-    ).order_by(Publication.created_at.desc(), Publication.id.desc()).limit(30)))
+    ).order_by(Publication.created_at.desc(), Publication.id.desc()).offset((page - 1) * 30).limit(30)))
     candidate_posts = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product.id,
         Artifact.kind == "channel_text",
         Artifact.status == ArtifactStatus.APPROVED,
-    ).order_by(Artifact.created_at.desc()).limit(200)))
+    ).order_by(Artifact.created_at.desc(), Artifact.id.desc())))
     approved_posts = [row for row in candidate_posts if parse_json(row).get("channel") == "telegram"]
+    intents = list(db.scalars(select(Artifact).where(Artifact.product_id == product.id,
+        Artifact.kind == "telegram_publish_intent")))
+    metas = {str(parse_json(row).get("publication_id")): parse_json(row) for row in intents}
+    details = {}
+    for pub in publications:
+        meta = metas.get(str(pub.id), {})
+        source = db.get(Artifact, pub.artifact_id)
+        connection = next((row for row in connections if str(row.id) == str(meta.get("connection_id"))), None)
+        details[str(pub.id)] = {"title": source.title if source else "Материал", "channel": connection.title if connection else "Telegram",
+                                "when": fmt_dt(parse_dt(meta.get("scheduled_at")).astimezone(ZoneInfo("Europe/Moscow")).isoformat()) + " · Москва" if parse_dt(meta.get("scheduled_at")) else "Дата не указана"}
     response = HTMLResponse(studio_page_shell(
         product, active="channels", title="Каналы и публикации",
         subtitle="Подключения, назначенные отправки и реальные результаты Telegram.",
         body=channels_html(product.id, connections, publications, approved_posts,
                            added=added, scheduled=scheduled, selected_post=post_id,
-                           autopost_enabled=get_settings().content_telegram_autopost_enabled),
+                           autopost_enabled=get_settings().content_telegram_autopost_enabled,
+                           publication_details=details, publication_page=page, publication_total=total),
     ))
     response.headers["Cache-Control"] = "no-store"
     return response
@@ -1940,10 +2119,34 @@ async def studio_schedule_post(product_id: UUID, request: Request, db: Session =
         post = db.get(Artifact, post_id)
         if post is None or post.product_id != product_id:
             raise LookupError("Пост другой компании")
-        schedule_post(db, post_id, connection_id, when)
+        plan_id, slot_id = None, None
+        plan_row, plan = latest_plan(db, product_id)
+        if plan_row and plan and plan.get("approval_state") == "active":
+            matches = [slot for slot in plan.get("slots", []) if
+                       slot.get("task_id") == str(post.task_id) and slot.get("platform") == "telegram"
+                       and not slot.get("telegram_publication_id") and not slot.get("publication_url")
+                       and parse_dt(slot.get("publish_at")) == when]
+            if len(matches) == 1:
+                plan_id, slot_id = plan_row.id, str(matches[0]["slot_id"])
+        schedule_post(db, post_id, connection_id, when, plan_id=plan_id, slot_id=slot_id)
     except (ValueError, LookupError) as exc:
         raise HTTPException(422, str(exc)) from None
     return RedirectResponse(f"/studio/products/{product_id}/channels?scheduled=1", status_code=303)
+
+
+@router.post("/studio/products/{product_id}/publishing/{publication_id}/reconcile")
+async def studio_reconcile_publication(product_id: UUID, publication_id: UUID, request: Request, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    if fields.get("confirmed") != "yes":
+        raise HTTPException(422, "Подтвердите ручную проверку канала")
+    try:
+        message_id = int(fields["message_id"]) if fields.get("message_id") else None
+        reconcile_publication(db, publication_id, product_id=product_id,
+                              outcome=fields.get("outcome", ""), message_id=message_id)
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f"/studio/products/{product_id}/channels", status_code=303)
 
 
 @router.post("/studio/products/{product_id}/publishing/{publication_id}/cancel")
@@ -1991,3 +2194,4 @@ async def studio_generate_plan(product_id: UUID, request: Request, db: Session =
     except (ValueError, LookupError) as exc:
         raise HTTPException(409, str(exc)) from None
     return RedirectResponse(f"/studio/products/{product_id}/plan", status_code=303)
+

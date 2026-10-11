@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import hashlib
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
@@ -14,7 +15,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select, update
 
-from app.content.quality import post_quality_warnings
+from app.content.quality import post_quality_warnings, factual_claim_warnings
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
@@ -146,6 +147,7 @@ def queue_creative(db, request: CreativeRequest, *, commit=True) -> Task:
     if company is None:
         raise LookupError("Компания не найдена")
     title = f"CREATIVE: {request.format}:{request.platform}:{request.topic}"
+    title = title[:275] + ':' + hashlib.sha256(request.model_dump_json(exclude={"task_id"}).encode()).hexdigest()[:16]
     duplicate = TaskService(db).find_active_duplicate(
         product_id=company.id, title=title, assigned_agent="content_creative",
     )
@@ -292,6 +294,7 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             if idx == 0:
                 strategy = result
         draft = result
+        facts_warnings = factual_claim_warnings(_preview(draft), verified)
         ArtifactService(db).create(
             product_id=product.id, task_id=task.id,
             kind="creative_brief", title=draft.title,
@@ -300,6 +303,8 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                 "origin": "quick_creative",
                 "preview_text": _preview(draft),
                 "review_notes": ["Черновой бриф; видео или изображение не созданы"],
+                "quality_warnings": facts_warnings,
+                "fact_check_required": bool(facts_warnings),
             }, ensure_ascii=False),
             status="awaiting_approval",
         )
@@ -321,3 +326,4 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
         if isinstance(exc, asyncio.CancelledError):
             raise
         return False
+

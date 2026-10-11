@@ -17,7 +17,7 @@ from uuid import UUID
 
 from sqlalchemy import select, update
 
-from app.models.domain import Artifact, ArtifactStatus, Product, Publication
+from app.models.domain import Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
 from app.services.artifacts import ArtifactService
 from app.content.revisions import source_fingerprint
 
@@ -120,6 +120,11 @@ def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now
         raise ValueError("Выбранный Telegram-канал не подключён к этой компании")
     channel = json.loads(connection.content)
     content = json.loads(source.content)
+    pending_edit = db.scalar(select(Task.id).where(Task.product_id == source.product_id,
+        Task.assigned_agent == "content_editor", Task.title == "EDIT: " + str(source.id),
+        Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING])))
+    if pending_edit:
+        raise ValueError("Дождитесь доработки поста и утвердите новую версию")
     plan_row = None
     plan = None
     plan_slot = None
@@ -152,6 +157,7 @@ def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now
         raise ValueError("Сначала утверди готовый пост для Telegram")
     if not content.get("body"):
         raise ValueError("Текст поста пустой")
+    validate_telegram_text(content["body"])
     existing = list(db.scalars(select(Artifact).where(
         Artifact.product_id == source.product_id,
         Artifact.kind == "telegram_publish_intent",
@@ -167,7 +173,7 @@ def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now
                 raise ValueError("Этот пост уже запланирован или отправлен в данный канал")
     publication = Publication(
         product_id=source.product_id, artifact_id=source.id,
-        channel="telegram", status="scheduled",
+        channel="telegram", status="scheduled", scheduled_at=when.astimezone(timezone.utc),
     )
     db.add(publication)
     db.flush()
@@ -267,20 +273,88 @@ def _utf16_units(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
 
+def validate_telegram_text(text: str) -> None:
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Текст поста пустой")
+    if _utf16_units(text) > 4096:
+        raise ValueError("Telegram допускает до 4096 символов (эмодзи могут занимать два). Сократите пост перед утверждением и планированием.")
+
+
+def reconcile_publication(db, publication_id: UUID, *, product_id: UUID,
+                          outcome: str, message_id: int | None = None):
+    """Owner verifies the actual channel. Never infer delivery or replay a send."""
+    db.scalar(select(Product).where(Product.id == product_id).with_for_update())
+    pub = db.scalar(select(Publication).where(
+        Publication.id == publication_id, Publication.product_id == product_id,
+        Publication.channel == "telegram",
+    ).with_for_update().execution_options(populate_existing=True))
+    if pub is None:
+        raise LookupError("Публикация не найдена")
+    if pub.status != "delivery_unknown":
+        raise ValueError("Ручная проверка нужна только для неизвестного результата отправки")
+    intent = db.scalar(select(Artifact).where(
+        Artifact.product_id == product_id, Artifact.kind == "telegram_publish_intent",
+        Artifact.title == "Telegram schedule " + str(pub.id),
+    ))
+    if intent is None:
+        raise ValueError("Не найдено задание публикации")
+    data = json.loads(intent.content)
+    if outcome == "published" and isinstance(message_id, int) and message_id > 0:
+        pub.status = "published"
+        pub.external_reference = "telegram:" + data["chat_id"] + ":" + str(message_id)
+        # Exact send time is unknown; don't invent it from reconciliation time.
+        update_plan_delivery(db, data, "published", message_id)
+    elif outcome == "not_sent":
+        pub.status = "failed_before_send"
+        update_plan_delivery(db, data, "failed")
+    else:
+        raise ValueError("Подтвердите результат; для опубликованного сообщения нужен его ID")
+    data["owner_reconciliation"] = {"outcome": outcome, "message_id": message_id,
+                                     "checked_at": datetime.now(timezone.utc).isoformat()}
+    intent.content = json.dumps(data, ensure_ascii=False)
+    db.commit()
+    return pub
+
+
 async def run_due_telegram_post_once(session_factory, settings, *, api=None, now=None) -> int:
     """Send at most one due approved post. Status 'delivery_unknown' never auto-retries."""
-    if not settings.content_telegram_autopost_enabled or not settings.telegram_bot_token:
-        return 0
+    enabled = settings.content_telegram_autopost_enabled and settings.telegram_bot_token
     now = now or datetime.now(timezone.utc)
     from app.telegram_control_bot import TelegramAPI
-    bot = api or TelegramAPI(settings.telegram_bot_token, settings.telegram_proxy_url)
     with session_factory() as db:
+        # Expire a crashed send lease into ambiguity, never an automatic retry.
+        stale = list(db.scalars(select(Publication).where(
+            Publication.channel == "telegram", Publication.status == "sending",
+            ((Publication.sending_started_at < now - timedelta(minutes=15)) |
+             (Publication.sending_started_at.is_(None))),
+        )))
+        for pub in stale:
+            changed = db.execute(update(Publication).where(Publication.id == pub.id,
+                Publication.status == "sending",
+                ((Publication.sending_started_at < now - timedelta(minutes=15)) |
+                 Publication.sending_started_at.is_(None)),
+            ).values(status="delivery_unknown"))
+            if changed.rowcount != 1:
+                continue
+            intent = db.scalar(select(Artifact).where(Artifact.product_id == pub.product_id,
+                Artifact.kind == "telegram_publish_intent", Artifact.title == "Telegram schedule " + str(pub.id)))
+            if intent:
+                try:
+                    update_plan_delivery(db, json.loads(intent.content), "delivery_unknown")
+                except (ValueError, KeyError, TypeError):
+                    pass  # Keep the publication visible for owner reconciliation.
+        if stale:
+            db.commit()
+        if not enabled:
+            return 0
+        bot = api or TelegramAPI(settings.telegram_bot_token, settings.telegram_proxy_url)
         # Query only pending publications, not the first N historic intents.
         # This prevents starvation when the archive contains thousands of posts.
         queued_publications = list(db.scalars(select(Publication).where(
             Publication.channel == "telegram",
             Publication.status == "scheduled",
-        ).order_by(Publication.created_at, Publication.id).limit(500)))
+            ((Publication.scheduled_at <= now) | Publication.scheduled_at.is_(None)),
+        ).order_by(Publication.scheduled_at, Publication.created_at, Publication.id).limit(500)))
         selected = None
         for pub in queued_publications:
             intent = db.scalar(select(Artifact).where(
@@ -344,7 +418,7 @@ async def run_due_telegram_post_once(session_factory, settings, *, api=None, now
             return 1
         claimed = db.execute(update(Publication).where(
             Publication.id == pub_id, Publication.status == "scheduled"
-        ).values(status="sending"))
+        ).values(status="sending", sending_started_at=now))
         if claimed.rowcount != 1:
             db.rollback()
             return 0
@@ -371,3 +445,4 @@ async def run_due_telegram_post_once(session_factory, settings, *, api=None, now
                 db.get(Publication, pub_id).status = "delivery_unknown"
         db.commit()
         return 1
+

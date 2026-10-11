@@ -78,7 +78,7 @@ def test_create_post_and_story_from_web_without_publishing(studio_v5):
         "audience": "Покупатели",
     }, follow_redirects=False)
     assert post.status_code == 303
-    assert post.headers["location"].endswith("/create?created=1")
+    assert post.headers["location"].split("/")[-2] == "tasks"
     queued = list(db.scalars(select(Task).where(Task.product_id == company.id)))
     assert len(queued) == 1
     assert queued[0].status == TaskStatus.QUEUED
@@ -251,6 +251,7 @@ def test_library_pagination_limits_page_size_and_preserves_filters(studio_v5):
         db.add(Artifact(
             product_id=company.id, kind="channel_text",
             title=f"Материал {i:02d}",
+            created_at=datetime(2026, 10, 1, tzinfo=timezone.utc) + timedelta(minutes=i),
             content=json.dumps({"channel":"telegram",
                                 "body": f"Текст публикации с номером {i:02d}"}, ensure_ascii=False),
         ))
@@ -270,3 +271,4 @@ def test_library_pagination_limits_page_size_and_preserves_filters(studio_v5):
     assert searched.status_code == 200
     assert "Материал 07" in searched.text
     assert "Материал 06" not in searched.text
+

@@ -1,12 +1,14 @@
-"""Temporary owner-only protection for Growth Studio.
+"""Operator login and company-scoped customer accounts shared by Studio and API.
 
-This is not a multi-tenant login system. Production refuses all Studio routes
-unless operator credentials are explicitly configured. Other FastAPI routes
-still require network/edge protection until full user RBAC is implemented.
+Customer passwords use PBKDF2 hashes in a private operator-managed account file.
+Production always fails closed without configured credentials. Browser writes
+also require the explicitly configured HTTPS origin.
 """
 from __future__ import annotations
 
 import secrets
+import hashlib
+import json
 from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request
@@ -18,6 +20,7 @@ _basic = HTTPBasic(auto_error=False)
 
 
 def require_studio_auth(
+    request: Request,
     credentials: HTTPBasicCredentials | None = Depends(_basic),
     settings: Settings = Depends(get_settings),
 ):
@@ -25,10 +28,47 @@ def require_studio_auth(
     password = settings.studio_admin_password
     production = settings.app_env.casefold() in {"production", "prod"}
 
+    users = {}
+    if settings.studio_users_file:
+        try:
+            users = json.loads(settings.studio_users_file.read_text(encoding="utf-8"))
+            if not isinstance(users, dict):
+                raise ValueError("Invalid accounts")
+        except (OSError, ValueError):
+            raise HTTPException(503, "Studio accounts are not configured correctly") from None
+    if credentials and credentials.username in users:
+        account = users[credentials.username]
+        try:
+            scheme, rounds, salt, expected = account["password_hash"].split("$")
+            if scheme != "pbkdf2_sha256" or not 600000 <= int(rounds) <= 2000000:
+                raise ValueError("Invalid password hash")
+            computed = hashlib.pbkdf2_hmac("sha256", credentials.password.encode(), bytes.fromhex(salt), int(rounds)).hex()
+            valid = secrets.compare_digest(computed, expected)
+            allowed = account["product_ids"]
+            if not isinstance(allowed, list) or not all(isinstance(v, str) for v in allowed):
+                raise ValueError("Invalid company membership")
+            from uuid import UUID
+            allowed = [str(UUID(value)) for value in allowed]
+        except (KeyError, ValueError, TypeError):
+            raise HTTPException(503, "Studio account is not configured correctly") from None
+        if not valid:
+            raise HTTPException(401, "Incorrect credentials", headers={"WWW-Authenticate": "Basic"})
+        request.state.studio_product_ids = allowed
+        product_id = request.path_params.get("product_id")
+        if product_id is not None and str(product_id) not in allowed:
+            raise HTTPException(404, "Компания не найдена")
+        if request.url.path == "/control/status" or (request.url.path == "/products" and request.method != "GET"):
+            raise HTTPException(403, "Administrator account required")
+        return credentials.username
     if not username or not password:
+        if users and credentials:
+            raise HTTPException(401, "Incorrect credentials", headers={"WWW-Authenticate": "Basic"})
+        if users:
+            raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": "Basic"})
         if production or username or password:
             # Fail closed on misconfigured production AND partial configuration.
             raise HTTPException(503, "Growth Studio owner login is not configured")
+        request.state.studio_product_ids = None
         return None  # Developer loopback only; never a production exemption.
 
     if not credentials:
@@ -39,6 +79,7 @@ def require_studio_auth(
     if not valid_user or not valid_password:
         raise HTTPException(401, "Incorrect credentials",
                             headers={"WWW-Authenticate": "Basic"})
+    request.state.studio_product_ids = None  # Explicit operator account.
     return username
 
 
@@ -74,3 +115,4 @@ def require_studio_csrf(
             or received.username or received.password):
         raise HTTPException(403, "Cross-origin action rejected")
     return None
+

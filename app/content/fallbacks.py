@@ -61,12 +61,16 @@ def generic_text_fallback(stage_inputs: dict) -> dict:
     telegram = extend_from_source(
         lead,
         [sections[-1], sections[0]],
-    ) + "\n\n" + cta
+    )
+    # Reserve the CTA and trim only source copy, never the owner's next action.
+    available_units = 4096 - len(cta.encode("utf-16-le")) // 2 - 4
+    telegram = telegram.encode("utf-16-le")[:available_units * 2].decode("utf-16-le", errors="ignore").rstrip()
+    telegram += "\n\n" + cta
     faq = (
         "Вопросы по теме: " + title + "\n\n" +
         "\n\n".join(
             "Вопрос: " + heading.rstrip(".?") + "?\nОтвет: " + body
-            for heading, body in sections[:4]
+            for heading, body in sections[:3]
         ) + "\n\n" + cta
     )
     founder = extend_from_source(
@@ -89,3 +93,4 @@ def generic_text_fallback(stage_inputs: dict) -> dict:
     ]}
     # This validates lengths, supported channels and cross-channel similarity.
     return ReadyTextSet.model_validate(payload).model_dump(mode="json")
+

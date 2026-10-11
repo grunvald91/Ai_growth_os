@@ -1,5 +1,6 @@
 """Durable owner-created content jobs, independent of outreach experiment priority."""
 import json
+import hashlib
 from uuid import UUID
 from sqlalchemy import select
 from app.models.domain import Artifact, Product, Task, TaskStatus
@@ -32,6 +33,9 @@ def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC, *, commit=Tr
         raise ValueError("Unknown content format")
     if dedupe_key:
         title = dedupe_key
+    else:
+        fingerprint = hashlib.sha256(request.model_dump_json().encode()).hexdigest()[:16]
+        title = title[:275] + ':' + fingerprint
     task = TaskService(db).find_active_duplicate(product_id=product.id, title=title,
                                                assigned_agent='content_factory')
     if task:
@@ -67,3 +71,4 @@ def queue_render(db, article_id: UUID):
         content=json.dumps({'article_id': str(article.id), 'script_ids': [str(s.id) for s in scripts]}))
     db.commit()
     return task
+
