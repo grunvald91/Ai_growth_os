@@ -885,6 +885,42 @@ def product_dashboard(db: Session, product: Product) -> str:
     </nav>
     """
 
+    upcoming_cards = []
+    for slot in sorted(slots, key=lambda x: x.get("publish_at") or "")[:4]:
+        package_key = quote(str(slot.get("package_key") or "unknown"), safe="")
+        upcoming_cards.append(
+            f'<a class="sg-mini-row" href="/studio/products/{product.id}/packages/{package_key}">'
+            f'<span class="sg-mini-date">{fmt_dt(slot.get("publish_at"))}</span>'
+            f'<div><b>{esc(slot.get("topic") or "Материал")}</b>'
+            f'<small>{esc(platform_label(slot.get("platform")))} · '
+            f'{esc(status_label(slot.get("state")))}</small></div>'
+            '<span aria-hidden="true">↗</span></a>'
+        )
+    recent_cards = []
+    for material in material_records[:4]:
+        meta = parse_json(material)
+        recent_cards.append(
+            f'<a class="sg-mini-row" href="/studio/products/{product.id}/materials/{material.id}">'
+            f'<span class="sg-mini-kind">▤</span><div><b>{esc(material.title[:65])}</b>'
+            f'<small>{esc(artifact_kind_label(material, meta))} · '
+            f'{esc(material.status.value)}</small></div>'
+            '<span aria-hidden="true">↗</span></a>'
+        )
+    quick_feed = f"""
+    <div class="sg-dashboard-feed">
+      <section class="sg-surface"><div class="sg-section-head"><div><h2>Ближайшее по плану</h2>
+        <p>Когда и какой материал готовим к публикации.</p></div>
+        <a class="sg-mini-link" href="/studio/products/{product.id}/calendar">Календарь →</a></div>
+        <div class="sg-mini-list">{"".join(upcoming_cards) or '<div class="sg-muted">Слотов пока нет. Начните с контент-плана.</div>'}</div>
+      </section>
+      <section class="sg-surface"><div class="sg-section-head"><div><h2>Последние материалы</h2>
+        <p>Новые статьи, посты и сценарии вашей команды.</p></div>
+        <a class="sg-mini-link" href="/studio/products/{product.id}/materials">Библиотека →</a></div>
+        <div class="sg-mini-list">{"".join(recent_cards) or '<div class="sg-muted">Начните с создания первого материала.</div>'}</div>
+      </section>
+    </div>
+    """
+
     return f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -915,6 +951,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       </div>
     </header>
     {attention_html}
+    {quick_feed}
     {mobile_dashboard_html(
         product=product,
         plan_row=plan_row,
@@ -928,6 +965,7 @@ def product_dashboard(db: Session, product: Product) -> str:
         channels=channels,
     )}
     {new_draft_notice}
+    <details class="sg-legacy-details"><summary>Развернуть подробный контроль плана, пакетов и материалов</summary>
     <div class="desktop-only-dashboard">
     {kpis}
     <div class="workspace">
@@ -947,6 +985,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       {selected_preview(first_material)}
     </div>
     </div>
+    </details>
   </main>
   {mobile_nav_html(product.id)}
 </div></div>
