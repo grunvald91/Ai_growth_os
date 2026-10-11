@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 from app.content.render import asset_path, render_video
 from app.content.quick_post import QuickPostRequest, run_quick_post
+from app.content.revisions import EditRequest, run_post_edit
 from app.core.composition import build_article_production
 from app.models.domain import AgentRun, Artifact, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
@@ -12,7 +13,7 @@ from app.workflows.article_contracts import ArticleProductionInput, ShortVideoDe
 
 async def run_content_once(session_factory, settings):
     with session_factory() as db:
-        task = db.scalar(select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer']),
+        task = db.scalar(select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer', 'content_editor']),
             Task.status == TaskStatus.QUEUED).order_by(Task.priority.desc(), Task.created_at, Task.id).limit(1))
         if task is None:
             return 0
@@ -39,6 +40,29 @@ async def run_content_once(session_factory, settings):
             except (Exception, asyncio.CancelledError) as exc:
                 db.rollback()
                 db.execute(update(Task).where(Task.id == task_id, Task.status == TaskStatus.QUEUED).values(status=TaskStatus.FAILED))
+                db.commit()
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
+                return 1
+        if agent == 'content_editor':
+            try:
+                edit = db.scalar(select(Artifact).where(
+                    Artifact.task_id == task_id,
+                    Artifact.product_id == product_id,
+                    Artifact.kind == 'content_edit_request'
+                ))
+                if edit is None:
+                    raise ValueError('Missing owner edit request')
+                data = EditRequest.model_validate_json(edit.content)
+                if data.product_id != product_id:
+                    raise ValueError('Wrong edit company')
+                await run_post_edit(db, settings, data, task_id=task_id)
+                return 1
+            except (Exception, asyncio.CancelledError) as exc:
+                db.rollback()
+                db.execute(update(Task).where(
+                    Task.id == task_id, Task.status == TaskStatus.QUEUED
+                ).values(status=TaskStatus.FAILED))
                 db.commit()
                 if isinstance(exc, asyncio.CancelledError):
                     raise
