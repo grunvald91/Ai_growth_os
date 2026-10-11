@@ -39,12 +39,11 @@ def create_content_html(product_id, *, created=False) -> str:
         f'<b>{esc(name)}</b><small>{esc(description)}</small></span></label>'
         for i, (key,name,description) in enumerate(FORMAT_CHOICES)
     )
+    # In no-JS browsers, the default post must remain submit-ready.
+    # The client replaces these options when the format changes.
     option_groups = "".join(
-        f'<optgroup label="{esc(next(n for k,n,_ in FORMAT_CHOICES if k==fmt))}">'
-        + "".join(f'<option value="{esc(fmt)}:{esc(k)}">{esc(label)}</option>'
-                  for k,label in channels)
-        + '</optgroup>'
-        for fmt,channels in CHANNELS.items()
+        f'<option value="{esc(k)}">{esc(label)}</option>'
+        for k,label in CHANNELS["post"]
     )
     feedback = ('<div class="sg-notice" role="status">✓ Задание добавлено в очередь. '
                 f'<a href="{base}/review">Посмотреть результаты и согласование</a></div>'
@@ -140,7 +139,8 @@ def review_html(product_id, records, *, filter_name="all") -> str:
             f'<div class="sg-filters">{"".join(tabs)}</div>'
             f'<div class="sg-review-list">{"".join(cards) or empty}</div></section>')
 
-def channels_html(product_id, connections, publications, approved_posts, *, added=False, scheduled=False) -> str:
+def channels_html(product_id, connections, publications, approved_posts, *, added=False, scheduled=False,
+                  selected_post=None, autopost_enabled=False) -> str:
     base=f"/studio/products/{product_id}"
     feedback = ("<p class='sg-notice' role='status'>✓ Настройки обновлены.</p>"
                 if added or scheduled else "")
@@ -153,7 +153,7 @@ def channels_html(product_id, connections, publications, approved_posts, *, adde
                       f'<small>{esc(data.get("username") or data.get("chat_id") or "Telegram-канал")}</small></div>'
                       '<span class="sg-channel-status">Бот проверен</span></div>')
     channels_opts="".join(f'<option value="{esc(c.id)}">{esc(c.title)}</option>' for c in connections)
-    post_opts="".join(f'<option value="{esc(p.id)}">{esc(p.title[:105])}</option>' for p in approved_posts)
+    post_opts="".join(f'<option value="{esc(p.id)}" {"selected" if str(p.id)==str(selected_post) else ""}>{esc(p.title[:105])}</option>' for p in approved_posts)
     pub_items=[]
     for p in publications:
         status={"scheduled":"Запланировано","sending":"Отправляется",
@@ -165,11 +165,14 @@ def channels_html(product_id, connections, publications, approved_posts, *, adde
                 if p.status in {"scheduled","missed","failed_before_send"} else "")
         pub_items.append(f'<li class="sg-publication-row"><div><b>{esc(status)}</b>'
                          f'<small>{esc(str(p.artifact_id)[:8])} · Telegram</small></div>{cancel}</li>')
+    dispatch_status = ("Автоотправка включена" if autopost_enabled else
+                       "Автоотправка выключена — запланированные посты пока не отправляются")
     return f"""
     <div class="sg-layout-two">
       <div class="sg-aside-stack">
         <section class="sg-surface"><div class="sg-section-head"><div><span class="sg-overline">ПОДКЛЮЧЕНИЯ</span>
-          <h2>Telegram-каналы</h2><p>Без ручной вставки API-токенов: бот проверит право публикации.</p></div>
+          <h2>Telegram-каналы</h2><p>Без ручной вставки API-токенов: бот проверит право публикации.</p>
+          <p class="sg-publish-mode" role="status">{esc(dispatch_status)}</p></div>
           <span class="sg-count">{len(connections)}</span></div>
           {feedback}<div class="sg-channel-list">{"".join(linked) or '<p class="sg-muted">Пока нет подключённых каналов.</p>'}</div>
           <form method="post" action="{base}/channels/connect" class="sg-fields sg-compact-form">
