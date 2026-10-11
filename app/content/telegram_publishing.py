@@ -299,6 +299,14 @@ async def run_due_telegram_post_once(session_factory, settings, *, api=None, now
                     raise ValueError("Invalid publication intent")
                 if when > now:
                     continue
+                # If the operator enables publishing after a long outage,
+                # never flood channels with a backlog of stale announcements.
+                lateness = max(1, min(1440, settings.content_telegram_max_lateness_minutes))
+                if now - when > timedelta(minutes=lateness):
+                    pub.status = "missed"
+                    update_plan_delivery(db, data, "missed")
+                    db.commit()
+                    return 1
             except (ValueError, TypeError, KeyError):
                 pub.status = "failed_before_send"
                 db.commit()
