@@ -11,6 +11,7 @@ from app.content.render import asset_path
 from app.content.service import queue_content
 from app.content.revisions import queue_post_edit, post_history
 from app.content.calendar import PLATFORMS
+from app.content.creative import CreativeRequest, queue_creative
 from app.content.telegram_publishing import (verify_channel, save_verified_channel,
     connected_channels, schedule_post, cancel_scheduled_post)
 from app.models.domain import Artifact, ArtifactStatus, Metric, Product, Publication, Task, TaskStatus
@@ -40,9 +41,10 @@ class TelegramContent:
         self.channel_connect_product = None
         self.schedule_post_id = None
         self.schedule_target = None  # (post_id, connection_id)
+        self.creative_target = None  # (company_id, format, platform)
 
     async def menu(self, chat_id):
-        self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = self.calendar_target = self.channel_connect_product = self.schedule_post_id = self.schedule_target = None
+        self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = self.calendar_target = self.channel_connect_product = self.schedule_post_id = self.schedule_target = self.creative_target = None
         with self.sessions() as db:
             products = list(db.scalars(select(Product).order_by(Product.name).limit(20)))
             buttons = [[{'text':p.name, 'callback_data':f'content:product:{p.id}'}] for p in products]
@@ -70,6 +72,7 @@ class TelegramContent:
             buttons = [[{'text':'✍️ Один пост', 'callback_data':f'content:postchannels:{product.id}'},
                         {'text':'📦 Полный пакет', 'callback_data':f'content:queue:{product.id}'}],
                        [{'text':'✏️ Тема полного пакета', 'callback_data':f'content:topic:{product.id}'}]]
+            buttons.append([{'text':'🎬 Ролики, Stories, изображения', 'callback_data':f'content:creativeformats:{product.id}'}])
             buttons.append([{'text':'📅 Контент-план', 'callback_data':f'content:calendar:{product.id}'}])
             buttons.append([{'text':'📣 Telegram-каналы и публикации', 'callback_data':f'content:channels:{product.id}'}])
             recent_posts = list(db.scalars(select(Artifact).where(
@@ -82,6 +85,12 @@ class TelegramContent:
                     continue
                 if meta.get('origin') in {'quick_post', 'owner_revision'}:
                     buttons.append([{'text':'📝 ' + post.title[:50], 'callback_data':f'content:asset:{post.id}'}])
+            recent_creatives = list(db.scalars(select(Artifact).where(
+                Artifact.product_id == product.id,
+                Artifact.kind == 'creative_brief',
+            ).order_by(Artifact.created_at.desc()).limit(8)))
+            buttons += [[{'text':'🎬 ' + item.title[:47], 'callback_data':f'content:asset:{item.id}'}]
+                        for item in recent_creatives]
             buttons += [[{'text':a.title[:60], 'callback_data':f'content:article:{a.id}'}] for a in articles]
             buttons.append([{'text':'🔄 Обновить', 'callback_data':f'content:product:{product.id}'}])
         await self.bot._send(chat_id, text, reply_markup={'inline_keyboard':buttons})
@@ -93,8 +102,24 @@ class TelegramContent:
             await self.menu(chat)
             return True
         if text.startswith('/') or text in {'📊 Главное','✅ На согласование','🧪 Тесты','🔄 Обновить','🏢 Компания','📇 Контакты','📧 Почта'}:
-            self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = self.calendar_target = self.channel_connect_product = self.schedule_post_id = self.schedule_target = None
+            self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = self.calendar_target = self.channel_connect_product = self.schedule_post_id = self.schedule_target = self.creative_target = None
             return False
+        if self.creative_target:
+            product_id, creative_format, platform = self.creative_target
+            try:
+                request = CreativeRequest(
+                    mode='creative', product_id=product_id,
+                    format=creative_format, platform=platform, topic=text,
+                )
+                with self.sessions() as db:
+                    queue_creative(db, request)
+                self.creative_target = None
+                await self.bot._send(chat,
+                    '✅ Бриф поставлен в очередь. ИИ подготовит сценарий или визуальную '
+                    'раскадровку на проверку. Видео, фотография и публикация пока не создаются.')
+            except ValueError:
+                await self.bot._send(chat, 'Напиши тему от 3 до 300 символов.')
+            return True
         if self.channel_connect_product:
             try:
                 checked = await verify_channel(self.bot.api, text)
@@ -303,7 +328,58 @@ class TelegramContent:
                 self.schedule_post_id = None
             if action != 'schedtg':
                 self.schedule_target = None
-            if action == 'channels':
+            if action not in {'creativeformats', 'creativevideo', 'creativestory', 'creativeimage',
+                              'cvyt', 'cvreels', 'cvvk', 'cstg', 'csreels', 'csvk',
+                              'citg', 'civk', 'cidzen', 'cireels'}:
+                self.creative_target = None
+            if action == 'creativeformats':
+                with self.sessions() as db:
+                    if db.get(Product, record_id) is None:
+                        raise LookupError('Компания не найдена')
+                buttons = [[{
+                    'text':label, 'callback_data':f'content:{key}:{record_id}',
+                }] for label,key in [
+                    ('🎥 Короткое видео (только сценарий)', 'creativevideo'),
+                    ('📱 Stories (раскадровка)', 'creativestory'),
+                    ('🖼 Картинка (дизайн-бриф)', 'creativeimage'),
+                ]]
+                await self.bot._send(chat,
+                    'Какой материал создать? Готовим отдельный бриф для одной площадки '
+                    'без запуска большого пакета и без рендера медиа.',
+                    reply_markup={'inline_keyboard':buttons})
+            elif action in {'creativevideo', 'creativestory', 'creativeimage'}:
+                choices = {
+                    'creativevideo': [('YouTube Shorts','cvyt'), ('Instagram Reels','cvreels'),
+                                      ('VK Клипы','cvvk')],
+                    'creativestory': [('Telegram','cstg'), ('Instagram Stories','csreels'),
+                                      ('VK Истории','csvk')],
+                    'creativeimage': [('Telegram','citg'), ('ВКонтакте','civk'),
+                                      ('Дзен','cidzen'), ('Instagram','cireels')],
+                }[action]
+                await self.bot._send(chat, 'Выбери площадку:',
+                    reply_markup={'inline_keyboard': [[{
+                        'text':label, 'callback_data':f'content:{key}:{record_id}'
+                    }] for label,key in choices]})
+            elif action in {'cvyt','cvreels','cvvk','cstg','csreels','csvk',
+                            'citg','civk','cidzen','cireels'}:
+                mapping = {
+                    'cvyt': ('short_video','youtube_shorts'),
+                    'cvreels': ('short_video','instagram_reels'),
+                    'cvvk': ('short_video','vk_clips'),
+                    'cstg': ('story','telegram'), 'csreels': ('story','instagram_reels'),
+                    'csvk': ('story','vk'),
+                    'citg': ('static_image','telegram'), 'civk': ('static_image','vk'),
+                    'cidzen': ('static_image','dzen'), 'cireels': ('static_image','instagram_reels'),
+                }
+                with self.sessions() as db:
+                    if db.get(Product, record_id) is None:
+                        raise LookupError('Компания не найдена')
+                fmt, platform = mapping[action]
+                self.topic_product = self.post_target = self.post_edit_target = None
+                self.plan_product = self.metrics_article = self.channel_connect_product = None
+                self.creative_target = (record_id, fmt, platform)
+                await self.bot._send(chat, 'Напиши тему для сценария/брифа одним сообщением.')
+            elif action == 'channels':
                 with self.sessions() as db:
                     product = db.get(Product, record_id)
                     if product is None:
@@ -509,6 +585,21 @@ class TelegramContent:
                     'Старые варианты доступны для просмотра, но не редактируются поверх оригинала.',
                     reply_markup={'inline_keyboard': buttons},
                 )
+            elif action == 'approvebrief':
+                with self.sessions() as db:
+                    brief = db.scalar(select(Artifact).where(
+                        Artifact.id == record_id, Artifact.kind == 'creative_brief',
+                    ).with_for_update())
+                    if brief is None:
+                        raise LookupError('Бриф не найден')
+                    if brief.status == ArtifactStatus.AWAITING_APPROVAL:
+                        brief.status = ArtifactStatus.APPROVED
+                        brief.version += 1
+                        db.commit()
+                        result = '✅ Бриф согласован. Медиафайл и публикация не создавались.'
+                    else:
+                        result = 'Бриф уже проверен или недоступен для согласования.'
+                await self.bot._send(chat, result)
             elif action == 'approvepost':
                 with self.sessions() as db:
                     item = db.scalar(select(Artifact).where(
@@ -539,7 +630,7 @@ class TelegramContent:
                 reply_markup = None
                 with self.sessions() as db:
                     item = db.get(Artifact, record_id)
-                    if item is None or item.kind not in {'channel_text','video_script','content_distribution'}:
+                    if item is None or item.kind not in {'channel_text','video_script','content_distribution','creative_brief'}:
                         raise LookupError('Материал не найден')
                     value = json.loads(item.content)
                     if item.kind == 'channel_text':
@@ -579,6 +670,14 @@ class TelegramContent:
                                 'text': '📚 История версий',
                                 'callback_data': f'content:history:{item.id}',
                             }])
+                    elif item.kind == 'creative_brief':
+                        text = value.get('preview_text') or 'Сценарий ещё не подготовлен'
+                        text += '\n\nСтатус: ' + item.status.value
+                        if item.status == ArtifactStatus.AWAITING_APPROVAL:
+                            reply_markup = {'inline_keyboard': [[{
+                                'text':'✅ Утвердить бриф',
+                                'callback_data':f'content:approvebrief:{item.id}',
+                            }]]}
                     elif item.kind == 'video_script':
                         brief = value['production_brief']
                         text = ('🎬 ' + item.title
