@@ -267,7 +267,8 @@ def _ensure_derivative_source_adaptation(brief, *, strategy, seo):
 def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
     """Build six safe channel texts from the already validated marketing article."""
     if stage_inputs.get('company_slug') not in (None, 'servgo'):
-        raise ValueError('ServGo-specific text fallback is not safe for this company')
+        from app.content.fallbacks import generic_text_fallback
+        return generic_text_fallback(stage_inputs)
     prior = stage_inputs.get('prior_stage_outputs') or {}
     article = prior.get('marketing_editor') or {}
     conversion = prior.get('conversion_editor') or {}
