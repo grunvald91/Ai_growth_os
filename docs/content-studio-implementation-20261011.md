@@ -18,7 +18,7 @@
 
 ## Проверки перед слиянием
 
-- [ ] Запустить `python -m pytest tests/test_content_studio.py tests/test_content_factory.py tests/test_content_calendar.py tests/test_articles.py tests/test_quick_post.py tests/test_content_fallbacks.py tests/test_content_quick_post_owner.py -q` в GitHub Codespaces или локально (не Actions).
+- [ ] Запустить `python -m pytest tests/test_content_studio.py tests/test_content_factory.py tests/test_content_calendar.py tests/test_articles.py tests/test_quick_post.py tests/test_content_fallbacks.py tests/test_content_quick_post_owner.py tests/test_post_revisions.py tests/test_content_studio_auth.py -q` в GitHub Codespaces или локально (не Actions).
 - [ ] Запустить полный `python -m pytest -q`.
 - [ ] Проверить конфигурацию reverse proxy для `growth.servgo.ru`: кто аутентифицирует владельцев? Сам FastAPI явно не обеспечивает авторизацию.
 - [ ] Проверить право доступа к `product_id` для чтения и любых POST; разграничить владельца и сотрудников перед добавлением редактора.
@@ -44,6 +44,25 @@
 Записи и согласование поста работают через существующую Telegram-авторизацию
 владельца; НЕ добавлять веб-POST без защиты пользовательской сессии.
 Проверка точности текста и критериев качества LLM всё ещё требует совершенствования.
+
+## Реализовано дополнительно: ИИ-редактор по замечаниям и защита Studio (требует тестов)
+
+- [x] Добавлен `app/content/revisions.py`: владелец передаёт замечание обычным языком, создаётся отдельное задание и новая версия `channel_text`; исходная версия сохраняется для истории.
+- [x] Создание версии проверяет предприятие, исходный материал, статус, версию и SHA-256 исходного текста; при конфликте запрещает публикационно значимое изменение.
+- [x] Telegram: «Попросить доработку» → замечание → новая версия на проверку → «Утвердить текст».
+- [x] Worker обрабатывает `content_editor` отдельно от общего фабричного конвейера.
+- [x] `app/api/content_studio_auth.py`: временная авторизация владельца по HTTP Basic для **всех** путей Studio. В production без `STUDIO_ADMIN_USERNAME` и `STUDIO_ADMIN_PASSWORD` Studio возвращает 503, а не открывается всем.
+- [x] Production compose передаёт переменные авторизации из окружения без хранения секретов в репозитории.
+- [x] Тесты: `tests/test_post_revisions.py` и `tests/test_content_studio_auth.py`.
+
+ВАЖНО: это **временный административный вход**, не многопользовательская авторизация SaaS.
+Один пароль даёт доступ ко всем компаниям в Studio. До привлечения клиентов
+нужны индивидуальные учётные записи, роли и проверка доступа к `product_id`.
+Другие API-роуты FastAPI этой временной защитой не закрыты; reverse proxy
+не должен выставлять их публично без отдельной проверки.
+Для продуктивного деплоя сначала безопасно создать длинный секрет владельца
+в непубликуемой `.env` на сервере, затем отдельно проверить HTTPS и ответ 401/503.
+Не выкладывать без выполненного `pytest` и проверки edge-прокси.
 
 ## Следующие функциональные этапы
 
