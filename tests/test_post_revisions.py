@@ -5,7 +5,7 @@ from contextlib import contextmanager
 import pytest
 from sqlalchemy import select
 
-from app.content.revisions import EditRequest, queue_post_edit, run_post_edit
+from app.content.revisions import EditRequest, queue_post_edit, run_post_edit, post_history
 from app.content.telegram import TelegramContent
 from app.content.worker import run_content_once
 from app.core.config import Settings
@@ -96,6 +96,8 @@ async def test_owner_feedback_creates_new_version_and_preserves_old(db, tmp_path
     assert data["revision_root_id"] == str(post.id)
     assert data["revision_number"] == 2
     assert data["channel"] == "telegram"
+    history = post_history(db, new.id)
+    assert [item.id for item in history] == [post.id, new.id]
     assert post.content == original_text
     assert db.get(Artifact, post.id).status == ArtifactStatus.REJECTED
     assert list(db.scalars(select(Publication))) == []
@@ -173,6 +175,10 @@ async def test_telegram_owner_can_request_edit_and_approve_new_version(db, tmp_p
     ))
     await ui.callback(123, "content:asset:" + str(revised.id))
     assert "Утвердить текст" in str(bot.outgoing[-1][1])
+    assert "История версий" in str(bot.outgoing[-1][1])
+    await ui.callback(123, "content:history:" + str(revised.id))
+    assert "Версия 1" in str(bot.outgoing[-1][1])
+    assert "Версия 2" in str(bot.outgoing[-1][1])
     await ui.callback(123, "content:approvepost:" + str(revised.id))
     db.refresh(revised)
     assert revised.status == ArtifactStatus.APPROVED
