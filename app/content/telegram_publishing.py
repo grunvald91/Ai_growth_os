@@ -206,8 +206,8 @@ def cancel_scheduled_post(db, publication_id: UUID) -> Publication:
         Publication.id == publication_id,
         Publication.product_id == pub.product_id,
     ).with_for_update().execution_options(populate_existing=True))
-    if pub.status != "scheduled":
-        raise ValueError("Отменить можно только публикацию, которая ещё не отправлена")
+    if pub.status not in {"scheduled", "missed", "failed_before_send"}:
+        raise ValueError("Отменить можно только заведомо неотправленную публикацию")
     pub.status = "cancelled"
     intent = db.scalar(select(Artifact).where(
         Artifact.product_id == pub.product_id,
