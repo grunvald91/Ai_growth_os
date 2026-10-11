@@ -45,14 +45,14 @@ small,.sg-field small,.sg-footnote,.sg-field-help{font-size:var(--sg-fs-caption)
 }
 .btn.small,.sg-inline-actions .btn.small{font-size:12px;line-height:1.45;min-height:38px;font-weight:600}
 .studio-page input,.studio-page select,.studio-page textarea{
-  font-size:15px;line-height:1.45;font-weight:400;color:#1D3044;
+  font-size:16px;line-height:1.45;font-weight:400;color:#1D3044;
 }
 .sg-field>span,.sg-field>label,.library-controls label,.material-toolbar label{
   font-size:13px;font-weight:600;line-height:1.48;color:#334B62;
 }
 .sg-field>span em{font-size:12px;font-weight:400}
 .sg-field input,.sg-field select,.sg-field textarea,.search input{
-  font-size:15px;min-height:44px;line-height:1.5;
+  font-size:16px;min-height:44px;line-height:1.5;
 }
 .sg-field input::placeholder,.sg-field textarea::placeholder,.search input::placeholder{color:#687B91;opacity:1;font-weight:400}
 .nav-label{font-size:11px}
