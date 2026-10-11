@@ -21,6 +21,7 @@ from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 
 from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
+from app.api.content_studio_brand import SERVGO_FAVICON_SVG, servgo_brand_html
 from app.api.content_studio_ui import create_content_html, review_html, channels_html
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.content.calendar import (PLATFORMS, approve_plan, pause_plan,
@@ -313,13 +314,7 @@ def visual_class(index: int) -> str:
 
 
 def brand_html() -> str:
-    return (
-        '<a class="brand" href="/studio">'
-        '<span class="brand-mark">S</span>'
-        '<span><span class="brand-name">ServGo</span>'
-        '<span class="brand-sub">Больше порядка в вашем сервисе</span></span>'
-        '</a>'
-    )
+    return servgo_brand_html()
 
 
 def sidebar_html(product_id: UUID, active: str = "overview") -> str:
@@ -329,10 +324,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         return f'<a{current} href="{href}"><span class="nav-ico" aria-hidden="true">{icon}</span>{label}</a>'
     return f"""
     <aside class="sidebar">
-      <a class="brand" href="{base}" aria-label="ServGo · Главная">
-        <span class="brand-mark">S</span>
-        <span><span class="brand-name">ServGo</span><span class="brand-sub">ИИ-команда маркетинга</span></span>
-      </a>
+      {servgo_brand_html(href=base)}
       <div class="nav-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
       <nav class="nav" aria-label="Основная навигация">
         {item("overview", base, "⌂", "Главная")}
@@ -505,14 +497,14 @@ def package_card(
 
 
 def mobile_logo_html(product_id: UUID) -> str:
+    base = f"/studio/products/{product_id}"
     return f"""
-    <div class="m-brand">
-      <a class="m-logo-mark" href="/studio/products/{product_id}">S</a>
-      <a class="m-logo-word" href="/studio/products/{product_id}">ServGo</a>
-      <span class="m-logo-actions">
-        <a class="m-bell" href="/studio/products/{product_id}/analytics" aria-label="Аналитика">⌁</a>
-        <a class="m-avatar" href="/studio?choose=1" aria-label="Выбрать проект">S</a>
-      </span>
+    <div class="m-brand sg-mobile-brand">
+      {servgo_brand_html(compact=True, href=base)}
+      <div class="m-logo-actions">
+        <a class="m-bell" href="{base}/review" aria-label="Материалы на проверке">✓</a>
+        <a class="m-avatar" href="/studio?choose=1" aria-label="Сменить компанию">⇄</a>
+      </div>
     </div>
     """
 
@@ -946,7 +938,8 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f7f9fc">
   <title>Growth Studio · {esc(product.name)}</title>
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=5">
+  <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=6">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
@@ -964,7 +957,7 @@ def product_dashboard(db: Session, product: Product) -> str:
           <div class="progress"><span style="width:{progress}%"></span></div>
         </div>
         <a class="product-pill" href="/studio?choose=1">
-          <span class="product-avatar">S</span><div><b>{esc(product.name)}</b><span>{esc(product.slug)}</span></div>
+          <img class="product-avatar sg-product-avatar" src="/studio/assets/servgo.svg" alt="" width="38" height="38"><div><b>{esc(product.name)}</b><span>{esc(product.slug)}</span></div>
         </a>
       </div>
     </header>
@@ -1008,7 +1001,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   {mobile_nav_html(product.id)}
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=5"></script>
+<script src="/studio/assets/studio.js?v=6"></script>
 </body></html>"""
 
 
@@ -1076,7 +1069,8 @@ def studio_page_shell(
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f7f9fc">
   <title>{esc(title)} · Growth Studio</title>
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=5">
+  <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=6">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
@@ -1103,7 +1097,7 @@ def studio_page_shell(
   {mobile_nav_html(product.id, active)}
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=5"></script>
+<script src="/studio/assets/studio.js?v=6"></script>
 </body></html>"""
 
 
@@ -1630,12 +1624,21 @@ def product_selector(products: list[Product]) -> str:
     )
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Growth Studio</title><link rel="stylesheet" href="/studio/assets/studio.css?v=5"></head>
+<title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=6"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
 <div class="product-list">{cards or '<div class="empty">Проекты ещё не добавлены.</div>'}</div>
 </main></body></html>"""
+
+
+@router.get("/studio/assets/servgo.svg")
+def studio_official_logo():
+    response = Response(SERVGO_FAVICON_SVG, media_type="image/svg+xml")
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @router.get("/studio/assets/studio.css")
