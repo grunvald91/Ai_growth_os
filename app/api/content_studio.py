@@ -885,9 +885,20 @@ def product_dashboard(db: Session, product: Product) -> str:
     dialogs = "".join(asset_dialog(record) for record in material_records[:60])
     plan_state = (plan or {}).get("approval_state") or "draft"
     draft_row, draft = latest_draft(db, product.id)
+    # One prominent, self-contained action card instead of raw text appended
+    # to a generic .panel (which collided with its layout on narrow screens).
     new_draft_notice = (
-        f'<div class="panel" role="status"><b>Новый контент-план ожидает согласования.</b> '
-        f'<a class="btn secondary small" href="/studio/products/{product.id}/plan?view=draft">Открыть черновик →</a></div>'
+        f'<section class="sg-draft-alert" role="region" aria-labelledby="sg-draft-title">'
+        '<div class="sg-draft-alert-icon" aria-hidden="true">✓</div>'
+        '<div class="sg-draft-alert-copy">'
+        '<span class="sg-draft-alert-eyebrow">ГОТОВО К ПРОВЕРКЕ</span>'
+        '<h2 id="sg-draft-title">Новый контент-план готов</h2>'
+        '<p>ИИ подготовил новый вариант. Текущий план продолжит работать, '
+        'пока вы не утвердите новый.</p>'
+        '</div>'
+        f'<a class="btn primary sg-draft-alert-action" href="/studio/products/{product.id}/plan?view=draft">'
+        'Посмотреть план <span aria-hidden="true">→</span></a>'
+        '</section>'
         if draft_row and draft_row != plan_row and plan_state == "active" else ""
     )
     generated = (plan or {}).get("generated_at")
@@ -1004,6 +1015,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       </div>
     </header>
     {attention_html}
+    {new_draft_notice}
     {quick_feed}
     {mobile_dashboard_html(
         product=product,
@@ -1017,7 +1029,6 @@ def product_dashboard(db: Session, product: Product) -> str:
         horizon=horizon,
         channels=channels,
     )}
-    {new_draft_notice}
     <details class="sg-legacy-details"><summary>Развернуть подробный контроль плана, пакетов и материалов</summary>
     <div class="desktop-only-dashboard">
     {kpis}
