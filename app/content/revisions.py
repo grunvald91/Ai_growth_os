@@ -55,6 +55,34 @@ def source_fingerprint(source: Artifact) -> str:
     return hashlib.sha256(source.content.encode("utf-8")).hexdigest()
 
 
+def post_history(db: Session, post_id: UUID) -> list[Artifact]:
+    """Return prior immutable versions without scanning unrelated client companies.
+
+    Revision linkage is kept in artifact JSON until a dedicated version table
+    is introduced. The root post remains queryable even when superseded.
+    """
+    source = db.get(Artifact, post_id)
+    if source is None or source.kind != "channel_text":
+        raise LookupError("Пост не найден")
+    try:
+        value = json.loads(source.content)
+        root_id = UUID(value.get("revision_root_id") or str(source.id))
+    except (ValueError, TypeError, AttributeError):
+        raise LookupError("Связи версий повреждены") from None
+    root = db.get(Artifact, root_id)
+    if root is None or root.kind != "channel_text" or root.product_id != source.product_id:
+        raise LookupError("Первая версия поста не найдена")
+    pattern = '%"revision_root_id": "' + str(root.id) + '"%'
+    revisions = list(db.scalars(
+        select(Artifact).where(
+            Artifact.product_id == root.product_id,
+            Artifact.kind == "channel_text",
+            Artifact.content.like(pattern),
+        ).order_by(Artifact.created_at, Artifact.id).limit(250)
+    ))
+    return [root, *[row for row in revisions if row.id != root.id]]
+
+
 def queue_post_edit(db: Session, post_id: UUID, feedback: str):
     """Lock owner company, then source post. Reject stale and duplicate requests."""
     feedback = (feedback or "").strip()
