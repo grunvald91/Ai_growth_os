@@ -185,6 +185,9 @@ textarea:focus-visible,select:focus-visible{outline:3px solid #83b8d8;outline-of
 .sg-dashboard-feed .sg-section-head h2{font-size:17px}
 .sg-dashboard-feed .sg-section-head p{font-size:11px}
 .sg-mini-link{font-size:11px;color:#246288;font-weight:780;white-space:nowrap}
+.sg-pagination{display:flex;justify-content:center;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 18px;padding:0 14px}
+.sg-pagination span{color:#73889b;font-size:12px;font-weight:700}
+.sg-pagination .btn{min-width:110px}
 .sg-mini-list{display:grid}
 .sg-mini-row{display:flex;align-items:center;gap:11px;border-bottom:1px solid #edf1f5;min-height:63px;padding:10px 2px}
 .sg-mini-row:hover{background:#fafcff}
