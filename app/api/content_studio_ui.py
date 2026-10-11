@@ -99,7 +99,7 @@ def create_content_html(product_id, *, created=False) -> str:
 def review_html(product_id, records, *, filter_name="all") -> str:
     base=f"/studio/products/{product_id}"
     tabs=[]
-    types=[("all","Всё"),("text","Посты"),("creative","Сценарии и визуалы")]
+    types=[("all","Всё"),("text","Тексты и статьи"),("creative","Сценарии и визуалы")]
     for value,label in types:
         tabs.append(f'<a class="sg-filter {"is-active" if value==filter_name else ""}" '
                     f'href="{base}/review?kind={value}">{label}</a>')
@@ -107,12 +107,18 @@ def review_html(product_id, records, *, filter_name="all") -> str:
     for row in records:
         try: data=json.loads(row.content)
         except (ValueError,TypeError): data={}
-        is_creative=row.kind=="creative_brief"
+        is_creative=row.kind in {"creative_brief", "video_script"}
         if filter_name=="text" and is_creative: continue
         if filter_name=="creative" and not is_creative: continue
-        preview=(data.get("body") or data.get("preview_text") or "")[:320]
+        preview=(data.get("body") or data.get("preview_text") or
+                 data.get("full_article") or data.get("reader_article") or
+                 (data.get("production_brief") or {}).get("voiceover_or_dialogue_script") or "")
+        if not isinstance(preview, str):
+            preview=str(preview)
+        preview=preview[:320]
         channel=data.get("platform") or data.get("channel") or "Материал"
-        kind="Сценарий / бриф" if is_creative else "Текст поста"
+        kind={"creative_brief":"Креативный бриф", "video_script":"Сценарий",
+              "article":"Статья", "channel_text":"Пост"}.get(row.kind, "Материал")
         action=f'{base}/materials/{row.id}'
         approve=(f'{base}/review/{row.id}/approve')
         warnings=data.get("quality_warnings") or []
