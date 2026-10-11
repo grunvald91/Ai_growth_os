@@ -346,7 +346,7 @@ class TelegramControlBot:
             return
 
         if data.startswith(('contact:', 'mail:', 'e:')):
-            self.content.topic_product = self.content.metrics_article = None
+            self.content.topic_product = self.content.metrics_article = self.content.post_target = None
             if callback_id:
                 await self._answer_callback(callback_id, 'Открываю')
             await self.communications.callback(chat_id, data)
@@ -360,7 +360,7 @@ class TelegramControlBot:
 
         if data.startswith("company:"):
             self.communications.mail_step, self.communications.mail_draft = None, {}
-            self.content.topic_product = self.content.metrics_article = None
+            self.content.topic_product = self.content.metrics_article = self.content.post_target = None
             if callback_id:
                 await self._answer_callback(callback_id, "Открываю")
             await self.company_intake.callback(chat_id, data)
