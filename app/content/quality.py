@@ -42,6 +42,6 @@ def post_quality_warnings(title: str, body: str, channel: str) -> list[str]:
     ]
     if len(normalized_paragraphs) != len(set(normalized_paragraphs)):
         warnings.append("Повторяются целые абзацы: удалите дубли")
-    if re.search(r"\b(?:100\s*%|гарантируем\s+(?:рост|продажи|результат))\b", text, flags=re.IGNORECASE):
+    if re.search(r"(?:\b100\s*%|\bгарантируем\s+(?:рост|продажи|результат)\b)", text, flags=re.IGNORECASE):
         warnings.append("Проверьте категоричное обещание результата и его доказательства")
     return warnings[:6]
