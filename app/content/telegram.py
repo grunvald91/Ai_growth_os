@@ -403,9 +403,9 @@ class TelegramContent:
                         'callback_data':f'content:connecttg:{record_id}',
                     }]]
                     for pub in publications:
-                        if pub.status == 'scheduled':
+                        if pub.status in {'scheduled', 'missed', 'failed_before_send'}:
                             actions.append([{
-                                'text':'✖ Отменить ' + str(pub.id)[:8],
+                                'text':'✖ Снять с расписания ' + str(pub.id)[:8],
                                 'callback_data':f'content:canceltg:{pub.id}',
                             }])
                     summary = '\n'.join('• ' + ch.title for ch in channels) or 'Каналы ещё не подключены.'
