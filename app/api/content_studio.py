@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
-from app.api.content_studio_auth import require_studio_auth
+from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.content.calendar import PLATFORMS, approve_plan, pause_plan
 from app.content.service import queue_content
 from app.core.config import get_settings
