@@ -118,19 +118,18 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
         )
 
     run_ids = []
-    for name in ("post_strategist", "post_writer_editor"):
-        run = AgentRun(
-            task_id=task.id, agent_name=name,
-            provider=settings.llm_provider, model=settings.llm_model,
-            status="queued",
-            input_references=[{"kind": "product", "id": str(product.id)}],
-        )
-        db.add(run)
-        db.flush()
-        run_ids.append(run.id)
-    db.commit()
-
     try:
+        for name in ("post_strategist", "post_writer_editor"):
+            run = AgentRun(
+                task_id=task.id, agent_name=name,
+                provider=settings.llm_provider, model=settings.llm_model,
+                status="queued",
+                input_references=[{"kind": "product", "id": str(product.id)}],
+            )
+            db.add(run)
+            db.flush()
+            run_ids.append(run.id)
+        db.commit()
         context = load_context(db, product, settings.products_root)
         stable = privacy.sanitize_text(context["stable_context"])
         facts = product_facts(stable)
@@ -222,6 +221,13 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                 raise ValueError("AI referenced unverified company facts")
             if name == "post_strategist":
                 strategy = output
+            elif (
+                product.slug != "servgo" and
+                "servgo" not in request.topic.casefold() and
+                "servgo" not in (request.editorial_brief or "").casefold() and
+                "servgo" in (output.title + " " + output.body).casefold()
+            ):
+                raise ValueError("Unexpected third-party brand in generated post")
             if reply.usage:
                 db.add(CostRecord(
                     product_id=product.id, agent_run_id=run.id, category="llm",
