@@ -303,50 +303,53 @@ def brand_html() -> str:
 def sidebar_html(product_id: UUID, active: str = "overview") -> str:
     base = f"/studio/products/{product_id}"
     def item(name: str, href: str, icon: str, label: str) -> str:
-        current = ' class="active"' if active == name else ""
-        return f'<a{current} href="{href}"><span class="nav-ico">{icon}</span>{label}</a>'
+        current = ' class="active" aria-current="page"' if active == name else ""
+        return f'<a{current} href="{href}"><span class="nav-ico" aria-hidden="true">{icon}</span>{label}</a>'
     return f"""
     <aside class="sidebar">
-      <a class="brand" href="{base}">
+      <a class="brand" href="{base}" aria-label="ServGo · Главная">
         <span class="brand-mark">S</span>
-        <span><span class="brand-name">ServGo</span>
-        <span class="brand-sub">Больше порядка в вашем сервисе</span></span>
+        <span><span class="brand-name">ServGo</span><span class="brand-sub">ИИ-команда маркетинга</span></span>
       </a>
-      <nav class="nav">
-        {item("overview", base, "⌂", "Обзор")}
-        {item("plan", base + "/plan", "▣", "Контент-план")}
+      <div class="nav-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
+      <nav class="nav" aria-label="Основная навигация">
+        {item("overview", base, "⌂", "Главная")}
+        {item("create", base + "/create", "＋", "Создать")}
+        {item("review", base + "/review", "✓", "На проверке")}
+        {item("calendar", base + "/calendar", "▦", "Календарь")}
         {item("materials", base + "/materials", "▤", "Материалы")}
-        {item("calendar", base + "/calendar", "□", "Календарь")}
-        {item("analytics", base + "/analytics", "⌁", "Аналитика")}
       </nav>
-      <div class="nav-label">Инструменты</div>
-      <nav class="nav">
-        {item("materials", base + "/materials", "▱", "Библиотека")}
-        <a href="{base}/plan#unknowns"><span class="nav-ico">✦</span>Идеи и неизвестные</a>
-        <a href="/studio?choose=1"><span class="nav-ico">⇄</span>Проекты</a>
+      <div class="nav-label">УПРАВЛЕНИЕ</div>
+      <nav class="nav" aria-label="Дополнительные инструменты">
+        {item("plan", base + "/plan", "☷", "Контент-план")}
+        {item("channels", base + "/channels", "↗", "Каналы и публикации")}
+        {item("analytics", base + "/analytics", "⌁", "Результаты")}
+        <a href="/studio?choose=1"><span class="nav-ico" aria-hidden="true">⇄</span>Другой проект</a>
       </nav>
       <div class="sidebar-spacer"></div>
       <div class="sidebar-promo">
-        <span>👑</span><b>Growth Studio</b>
-        <p>План, материалы и сценарии в одном рабочем пространстве ServGo.</p>
+        <b>Проще, чем управлять агентами</b>
+        <p>Выберите задачу, проверьте результат и согласуйте публикацию.</p>
       </div>
-      <div class="sidebar-foot">AI Growth OS · owner workspace</div>
+      <div class="sidebar-foot">ServGo · Growth Studio</div>
     </aside>
     """
+
 
 def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
     base = f"/studio/products/{product_id}"
     def item(name: str, href: str, icon: str, label: str) -> str:
-        current = ' class="active"' if active == name else ""
-        return f'<a{current} href="{href}"><span class="m-ico">{icon}</span>{label}</a>'
+        current = ' class="active" aria-current="page"' if active == name else ""
+        return f'<a{current} href="{href}"><span class="m-ico" aria-hidden="true">{icon}</span>{label}</a>'
     return f"""
-    <nav class="mobile-nav">
-      {item("overview", base, "⌂", "Обзор")}
-      {item("plan", base + "/plan", "▣", "План")}
-      {item("materials", base + "/materials", "▤", "Материалы")}
-      {item("calendar", base + "/calendar", "□", "Календарь")}
+    <nav class="mobile-nav" aria-label="Быстрая навигация">
+      {item("overview", base, "⌂", "Главная")}
+      {item("create", base + "/create", "＋", "Создать")}
+      {item("review", base + "/review", "✓", "Проверить")}
+      {item("calendar", base + "/calendar", "▦", "Календарь")}
     </nav>
     """
+
 
 def asset_dialog(record: Artifact) -> str:
     value = parse_json(record)
@@ -841,9 +844,9 @@ def product_dashboard(db: Session, product: Product) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#f4f8fd">
+  <meta name="theme-color" content="#f7f9fc">
   <title>Growth Studio · {esc(product.name)}</title>
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=3">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=5">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
@@ -901,7 +904,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   {mobile_nav_html(product.id)}
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=3"></script>
+<script src="/studio/assets/studio.js?v=5"></script>
 </body></html>"""
 
 
@@ -967,9 +970,9 @@ def studio_page_shell(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#f4f8fd">
+  <meta name="theme-color" content="#f7f9fc">
   <title>{esc(title)} · Growth Studio</title>
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=4">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=5">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
@@ -990,7 +993,7 @@ def studio_page_shell(
   {mobile_nav_html(product.id, active)}
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=4"></script>
+<script src="/studio/assets/studio.js?v=5"></script>
 </body></html>"""
 
 
@@ -1323,7 +1326,7 @@ def product_selector(products: list[Product]) -> str:
     )
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Growth Studio</title><link rel="stylesheet" href="/studio/assets/studio.css?v=2"></head>
+<title>Growth Studio</title><link rel="stylesheet" href="/studio/assets/studio.css?v=5"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
