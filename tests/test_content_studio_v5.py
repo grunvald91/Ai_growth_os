@@ -397,7 +397,7 @@ def test_v8_typography_consistent_across_all_studio_views(studio_v5):
         ".studio-page input",
         ".sg-draft-alert h2",
         "font-weight:600",
-        "font-size:15px;min-height:44px",
+        "font-size:16px;min-height:44px",
     ):
         assert needle in css, needle
     for route in ("", "/create", "/review", "/calendar", "/materials", "/channels", "/plan"):
