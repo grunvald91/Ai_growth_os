@@ -503,3 +503,7 @@ STUDIO_CSS += """
 """
 STUDIO_JS += "\n" + STUDIO_REFRESH_JS
 
+# v6: official ServGo assets, brand colors and non-overlay mobile navigation.
+from app.api.content_studio_brand_fix import CSS as STUDIO_BRAND_FIX_CSS
+STUDIO_CSS += "\n" + STUDIO_BRAND_FIX_CSS
+
