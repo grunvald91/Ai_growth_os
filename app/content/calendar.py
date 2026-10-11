@@ -672,7 +672,7 @@ def tick_calendar(db, settings, now=None):
                     state = {'queued': 'queued', 'running': 'preparing', 'completed': 'ready_for_review',
                              'failed': 'failed', 'cancelled': 'cancelled'}.get(task.status.value, 'preparing')
                     for slot in group:
-                        if slot['state'] != 'missed':
+                        if slot['state'] not in {'missed', 'scheduled', 'published'}:
                             slot['task_id'], slot['state'] = str(task.id), state
                             changed = True
             if datetime.fromisoformat(plan['review_at']) <= now and not plan['review_requested']:
@@ -757,7 +757,7 @@ def render_calendar(plan):
             lines.append('  Наличие аккаунта нужно подтвердить владельцу; публикация вручную.')
     lines += ['', 'Ресурсы и ограничения:', *['• ' + x for x in plan['capacity_assumptions']], '', 'Календарь:']
     states = {'planned': 'запланировано', 'queued': 'в очереди', 'preparing': 'готовится',
-        'ready_for_review': 'готово к проверке', 'failed': 'ошибка подготовки', 'missed': 'дата пропущена', 'cancelled': 'отменено'}
+        'ready_for_review': 'готово к проверке', 'failed': 'ошибка подготовки', 'missed': 'дата пропущена', 'cancelled': 'отменено', 'scheduled': 'ожидает отправки', 'published': 'опубликовано'}
     for s in sorted(plan['slots'], key=lambda s: s['publish_at']):
         publication = datetime.fromisoformat(s['publish_at']).strftime('%d.%m %H:%M')
         preparation = datetime.fromisoformat(s['prepare_at']).strftime('%d.%m %H:%M')
