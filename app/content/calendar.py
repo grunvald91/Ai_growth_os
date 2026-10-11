@@ -709,8 +709,8 @@ def reschedule_slot(db, plan_id: UUID, slot_id: str, publish_at: datetime, *, no
     if len(matches) != 1:
         raise LookupError('Публикационный слот не найден')
     slot = matches[0]
-    if slot.get('publication_url') or slot.get('state') == 'published':
-        raise ValueError('Опубликованный материал нельзя переносить')
+    if slot.get('telegram_publication_id') or slot.get('publication_url') or slot.get('state') in {'scheduled', 'published'}:
+        raise ValueError('Сначала отмени назначенную Telegram-публикацию; отправленный материал переносить нельзя')
     destination = publish_at.astimezone(ZoneInfo(plan['timezone']))
     if destination <= now.astimezone(destination.tzinfo):
         raise ValueError('Новое время публикации должно быть в будущем')
