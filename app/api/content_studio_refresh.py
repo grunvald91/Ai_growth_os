@@ -167,6 +167,18 @@ textarea:focus-visible,select:focus-visible{outline:3px solid #83b8d8;outline-of
 .sg-action-tile{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:15px;border:1px solid var(--sg-line);border-radius:12px}
 .sg-action-tile h3{margin:0;font-size:14px;color:#2a4863}
 .sg-action-tile p{margin:4px 0 0;color:#7c8c9d;font-size:11px}
+.sg-post-preview{white-space:pre-wrap;max-width:740px;margin-inline:auto;border:1px solid #dfe7ee!important;background:#fbfcfd!important;border-radius:16px!important;box-shadow:0 6px 22px rgba(20,45,74,.04);font-size:14px!important;line-height:1.75!important}
+.sg-native-post-label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#71889e;font-weight:780;padding:0 0 14px;border-bottom:1px solid #e3ecf3;margin-bottom:18px}
+.sg-storyboard-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:12px 0 25px}
+.sg-storyboard-card{border:1px solid #dae4ed;border-radius:13px;padding:12px;background:#fcfdff}
+.sg-storyboard-counter{font-size:11px;font-weight:760;color:#688196;margin:0 0 10px}
+.sg-storyboard-screen{height:175px;background:linear-gradient(150deg,#dbe7ec,#f0f4f7);border:1px solid #d1dfe7;border-radius:11px;display:grid;place-items:center;padding:18px;text-align:center}
+.sg-storyboard-screen span{max-width:175px;word-break:break-word;font-size:15px;font-weight:780;color:#35536d}
+.sg-storyboard-card h3{font-size:12px;font-weight:780;margin:12px 0 5px;color:#29455f}
+.sg-storyboard-card p{font-size:11px;line-height:1.5;color:#6a7e91;word-break:break-word}
+.sg-storyboard-card details{margin:11px 0 0;border-top:1px solid #e6edf2;padding-top:8px}
+.sg-storyboard-card summary{font-size:11px;font-weight:750;color:#34658b;cursor:pointer}
+.sg-storyboard-card details p{font-size:11px;line-height:1.5}
 .sg-dashboard-feed{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:16px;margin-bottom:20px}
 .sg-dashboard-feed .sg-surface{padding:20px}
 .sg-dashboard-feed .sg-section-head{align-items:center;margin-bottom:8px}
