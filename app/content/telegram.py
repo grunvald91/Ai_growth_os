@@ -348,6 +348,9 @@ class TelegramContent:
                             ArtifactStatus.APPROVED: 'Утверждено',
                         }.get(item.status, item.status.value)
                         text = '# ' + value['title'] + '\n\n' + value['body'] + '\n\nСтатус: ' + status_label
+                        warnings = value.get('quality_warnings') or []
+                        if warnings:
+                            text += '\n\nПеред публикацией проверь:\n• ' + '\n• '.join(warnings[:6])
                         if item.status in {ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED}:
                             buttons = []
                             if (value.get('origin') in {'quick_post', 'owner_revision'} and
