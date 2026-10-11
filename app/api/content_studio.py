@@ -22,7 +22,7 @@ from app.content.calendar import PLATFORMS, approve_plan, pause_plan
 from app.content.service import queue_content
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.domain import Artifact, Product, Task
+from app.models.domain import Artifact, Product, Task, TaskStatus
 
 router = APIRouter()
 
@@ -61,17 +61,39 @@ def parse_json(record: Artifact) -> dict:
         return {}
 
 
-def latest_plan(db: Session, product_id: UUID):
+def latest_plan(db: Session, product_id: UUID, *, prefer_active: bool = True):
+    """Active production plan must not disappear when a newer draft is created.
+
+    Set prefer_active=False when the owner explicitly asks to review the latest draft.
+    """
     rows = list(db.scalars(
         select(Artifact)
         .where(Artifact.product_id == product_id, Artifact.kind == "editorial_plan")
         .order_by(Artifact.created_at.desc(), Artifact.id.desc())
-        .limit(20)
+        .limit(100)
     ))
     parsed = [(row, parse_json(row)) for row in rows]
     parsed = [(row, value) for row, value in parsed if value]
-    parsed.sort(key=lambda item: item[1].get("generated_at", ""), reverse=True)
+    parsed.sort(key=lambda item: (item[1].get("generated_at") or "", str(item[0].id)), reverse=True)
+    if prefer_active:
+        active = next((item for item in parsed if item[1].get("approval_state") == "active"), None)
+        if active:
+            return active
     return parsed[0] if parsed else (None, None)
+
+
+def latest_draft(db: Session, product_id: UUID):
+    """Find an awaiting-review draft without hiding the active plan."""
+    rows = list(db.scalars(
+        select(Artifact)
+        .where(Artifact.product_id == product_id, Artifact.kind == "editorial_plan")
+        .order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        .limit(100)
+    ))
+    drafts = [(row, parse_json(row)) for row in rows]
+    drafts = [item for item in drafts if item[1].get("approval_state") == "draft"]
+    drafts.sort(key=lambda item: (item[1].get("generated_at") or "", str(item[0].id)), reverse=True)
+    return drafts[0] if drafts else (None, None)
 
 
 def platform_label(key: str | None) -> str:
@@ -143,6 +165,10 @@ def state_for_group(group: list[dict]) -> str:
         return "ready_for_review"
     if "missed" in states:
         return "missed"
+    if "cancelled" in states:
+        return "cancelled"
+    if states and states <= {"completed"}:
+        return "completed"
     return "planned"
 
 
@@ -359,10 +385,10 @@ def package_card(
     first_publish = min((slot.get("publish_at") or "" for slot in group), default="")
     objective = group[0].get("objective") or group[0].get("audience") or "Контент-пакет для проверки гипотезы"
     queue_button = ""
-    if plan_row and plan and plan.get("approval_state") == "active" and not task_ids:
+    if plan_row and plan and plan.get("approval_state") == "active" and (not task_ids or state in {"failed", "cancelled"}):
         queue_button = (
             f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/packages/{esc(key)}/queue">'
-            '<button class="btn secondary small" type="submit">Подготовить сейчас</button></form>'
+            f'<button class="btn secondary small" type="submit">{"Повторить подготовку" if task_ids else "Подготовить сейчас"}</button></form>'
         )
     first_asset = package_artifacts[0] if package_artifacts else None
     open_button = (
@@ -612,7 +638,7 @@ def product_dashboard(db: Session, product: Product) -> str:
     seen = set()
     material_records = [a for a in material_records if not (a.id in seen or seen.add(a.id))]
 
-    ready = sum(1 for slot in slots if slot.get("state") == "ready_for_review")
+    ready = sum(1 for slot in slots if slot.get("state") in {"ready_for_review", "completed"})
     failed = sum(1 for slot in slots if slot.get("state") == "failed")
     channels = sorted({slot.get("platform") for slot in slots if slot.get("platform")})
     total_slots = len(slots)
@@ -638,7 +664,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       <div class="kpi blue"><span class="kpi-icon">▱</span><div><strong>{len(groups)}</strong><small>контент-пакетов<br>в текущем цикле</small></div></div>
       <div class="kpi green"><span class="kpi-icon">□</span><div><strong>{esc(horizon)}</strong><small>дней<br>горизонт плана</small></div></div>
       <div class="kpi purple"><span class="kpi-icon">⌘</span><div><strong>{len(channels)}</strong><small>площадок<br>в контент-плане</small></div></div>
-      <div class="kpi orange"><span class="kpi-icon">✓</span><div><strong>{ready}</strong><small>материалов<br>готово к проверке</small></div></div>
+      <div class="kpi orange"><span class="kpi-icon">✓</span><div><strong>{ready}</strong><small>слотов<br>готово к проверке</small></div></div>
     </section>
     """
 
@@ -738,6 +764,12 @@ def product_dashboard(db: Session, product: Product) -> str:
     first_material = material_records[0] if material_records else None
     dialogs = "".join(asset_dialog(record) for record in material_records[:60])
     plan_state = (plan or {}).get("approval_state") or "draft"
+    draft_row, draft = latest_draft(db, product.id)
+    new_draft_notice = (
+        f'<div class="panel" role="status"><b>Новый контент-план ожидает согласования.</b> '
+        f'<a class="btn secondary small" href="/studio/products/{product.id}/plan?view=draft">Открыть черновик →</a></div>'
+        if draft_row and draft_row != plan_row and plan_state == "active" else ""
+    )
     generated = (plan or {}).get("generated_at")
     review = (plan or {}).get("review_at")
 
@@ -762,7 +794,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       </div>
       <div class="top-actions">
         <div class="cycle-card">
-          <div class="cycle-head"><span>Текущий цикл</span><b>{esc(horizon)} дней · {esc(status_label(plan_state))}</b></div>
+          <div class="cycle-head"><span>Подготовлено {done_like} из {total_slots} слотов</span><b>{esc(horizon)} дней · {esc(status_label(plan_state))}</b></div>
           <div class="progress"><span style="width:{progress}%"></span></div>
         </div>
         <a class="product-pill" href="/studio?choose=1">
@@ -782,6 +814,7 @@ def product_dashboard(db: Session, product: Product) -> str:
         horizon=horizon,
         channels=channels,
     )}
+    {new_draft_notice}
     <div class="desktop-only-dashboard">
     {kpis}
     <div class="workspace">
@@ -810,8 +843,12 @@ def product_dashboard(db: Session, product: Product) -> str:
 
 
 
-def studio_state(db: Session, product: Product) -> dict:
+def studio_state(db: Session, product: Product, *, view: str = "current") -> dict:
     plan_row, plan = latest_plan(db, product.id)
+    if view == "draft":
+        draft_row, draft = latest_draft(db, product.id)
+        if draft_row:
+            plan_row, plan = draft_row, draft
     tasks = list(db.scalars(
         select(Task)
         .where(Task.product_id == product.id, Task.assigned_agent.in_(["content_factory", "editorial_planner"]))
@@ -893,8 +930,8 @@ def studio_page_shell(
 </body></html>"""
 
 
-def plan_page(db: Session, product: Product, status: str = "all") -> str:
-    state = studio_state(db, product)
+def plan_page(db: Session, product: Product, status: str = "all", view: str = "current") -> str:
+    state = studio_state(db, product, view=view)
     plan_row = state["plan_row"]
     plan = state["plan"]
     groups = state["groups"]
@@ -931,6 +968,13 @@ def plan_page(db: Session, product: Product, status: str = "all") -> str:
         ))
 
     unknowns = plan.get("unknowns") or []
+    draft_row, _ = latest_draft(db, product.id)
+    active_row, active_plan = latest_plan(db, product.id)
+    switcher = ""
+    if view == "draft" and active_plan and active_plan.get("approval_state") == "active":
+        switcher = f'<a class="btn secondary small" href="/studio/products/{product.id}/plan">← Действующий план</a>'
+    elif draft_row and draft_row != plan_row:
+        switcher = f'<a class="btn secondary small" href="/studio/products/{product.id}/plan?view=draft">Новый черновик →</a>'
     body = f"""
     <section class="panel route-summary">
       <div class="panel-head">
@@ -938,6 +982,7 @@ def plan_page(db: Session, product: Product, status: str = "all") -> str:
         <div class="panel-sub">{esc(plan.get("horizon_days") or 14)} дней · пересмотр {fmt_dt(plan.get("review_at"))}</div></div></div>
         <span class="status {status_class(plan.get("approval_state"))}">{esc(status_label(plan.get("approval_state")))}</span>
       </div>
+      {switcher}
       <div class="package-tools">
         <a class="tab {'active' if status == 'all' else ''}" href="/studio/products/{product.id}/plan">Все · {len(groups)}</a>
         <a class="tab {'active' if status == 'ready' else ''}" href="/studio/products/{product.id}/plan?status=ready">Готово</a>
@@ -1121,10 +1166,12 @@ def package_detail_page(db: Session, product: Product, package_key: str) -> str:
     )
     material_cards = "".join(material_card(product.id, record) for record in materials)
     queue = ""
-    if plan_row and plan.get("approval_state") == "active" and not task_ids:
+    if plan_row and plan.get("approval_state") == "active" and (
+        not task_ids or state_for_group(group) in {"failed", "cancelled"}
+    ):
         queue = (
             f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/packages/{quote(package_key, safe="")}/queue">'
-            '<button class="btn primary" type="submit">Подготовить пакет сейчас</button></form>'
+            f'<button class="btn primary" type="submit">{"Повторить подготовку" if task_ids else "Подготовить пакет сейчас"}</button></form>'
         )
     body = f"""
     <section class="panel">
@@ -1232,13 +1279,13 @@ def studio_product(product_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/studio/products/{product_id}/plan", response_class=HTMLResponse)
-def studio_plan(product_id: UUID, status: str = "all", db: Session = Depends(get_db)):
+def studio_plan(product_id: UUID, status: str = "all", view: str = "current", db: Session = Depends(get_db)):
     product = db.get(Product, product_id)
     if product is None:
         raise HTTPException(404, "Product not found")
     if status not in {"all", "ready", "failed"}:
         status = "all"
-    response = HTMLResponse(plan_page(db, product, status=status))
+    response = HTMLResponse(plan_page(db, product, status=status, view=view))
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -1324,8 +1371,16 @@ def studio_pause(product_id: UUID, plan_id: UUID, db: Session = Depends(get_db))
 
 @router.post("/studio/products/{product_id}/plans/{plan_id}/packages/{package_key}/queue")
 def studio_queue_package(product_id: UUID, plan_id: UUID, package_key: str, db: Session = Depends(get_db)):
-    row = db.get(Artifact, plan_id)
-    if row is None or row.product_id != product_id or row.kind != "editorial_plan":
+    # Match the lock order of tick_calendar/approve_plan: company, then editorial plan.
+    product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
+    if product is None:
+        raise HTTPException(404, "Product not found")
+    row = db.scalar(
+        select(Artifact).where(
+            Artifact.id == plan_id, Artifact.product_id == product_id, Artifact.kind == "editorial_plan"
+        ).with_for_update().execution_options(populate_existing=True)
+    )
+    if row is None:
         raise HTTPException(404, "Plan not found")
     plan = parse_json(row)
     if plan.get("approval_state") != "active":
@@ -1333,14 +1388,24 @@ def studio_queue_package(product_id: UUID, plan_id: UUID, package_key: str, db: 
     slots = [slot for slot in (plan.get("slots") or []) if slot.get("package_key") == package_key]
     if not slots:
         raise HTTPException(404, "Package not found")
+
+    old_task_ids = {slot.get("task_id") for slot in slots if slot.get("task_id")}
+    old_tasks = [db.get(Task, UUID(task_id)) for task_id in old_task_ids]
+    # Only a failed/cancelled task can be restarted by the owner. Never queue a
+    # second production while another is running, or overwrite completed work.
+    if old_task_ids and any(
+        task is None or task.product_id != product_id or
+        task.status not in {TaskStatus.FAILED, TaskStatus.CANCELLED}
+        for task in old_tasks
+    ):
+        raise HTTPException(409, "Пакет уже запущен или подготовлен; повтор не требуется")
+
     topic = slots[0].get("topic")
     audience = slots[0].get("audience")
     objective = slots[0].get("objective") or ""
     channels = ", ".join(sorted({slot.get("platform", "") for slot in slots}))
-    queue_content(
-        db,
-        product_id,
-        topic,
+    task = queue_content(
+        db, product_id, topic, commit=False,
         dedupe_key=f"calendar:{plan_id}:{package_key}",
         audience=audience,
         editorial_brief=(
@@ -1349,4 +1414,9 @@ def studio_queue_package(product_id: UUID, plan_id: UUID, package_key: str, db: 
             "План подтверждает только подготовку; публикация вручную."
         ),
     )
+    for slot in slots:
+        slot["task_id"] = str(task.id)
+        slot["state"] = "preparing" if task.status == TaskStatus.RUNNING else "queued"
+    row.content = json.dumps(plan, ensure_ascii=False)
+    db.commit()
     return RedirectResponse(f"/studio/products/{product_id}/packages/{quote(package_key, safe='')}", status_code=303)
