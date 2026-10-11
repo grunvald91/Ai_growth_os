@@ -11,7 +11,7 @@ from app.db.models import Base
 from app.db.session import get_db
 from app.main import app
 from app.api.content_studio import latest_plan, latest_draft, state_for_group, reconcile_plan_states
-from app.models.domain import Artifact, Product, Task, TaskStatus
+from app.models.domain import Artifact, Product, Task, TaskStatus, ArtifactStatus
 
 
 @pytest.fixture
@@ -424,5 +424,51 @@ def test_failed_task_is_visible_before_scheduler_tick_without_persisting_derived
         detail = client.get(f"/studio/products/{product.id}/packages/pkg-1")
         assert detail.status_code == 200
         assert "Повторить подготовку" in detail.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_studio_post_detail_shows_version_history_and_editorial_warnings(studio_db):
+    db = studio_db
+    product = Product(name="Студия цветов", slug="flowers-versioned")
+    db.add(product)
+    db.flush()
+    origin = Artifact(
+        product_id=product.id, kind="channel_text",
+        title="Первый вариант",
+        content=json.dumps({
+            "origin": "quick_post", "title": "Первый вариант",
+            "channel": "telegram", "body": "Старая версия",
+            "quality_warnings": ["Уберите общие слова"],
+        }, ensure_ascii=False),
+        status=ArtifactStatus.REJECTED,
+    )
+    db.add(origin)
+    db.flush()
+    revision = Artifact(
+        product_id=product.id, kind="channel_text",
+        title="Второй вариант",
+        content=json.dumps({
+            "origin": "owner_revision", "title": "Второй вариант",
+            "channel": "telegram", "body": "Новая версия",
+            "revision_of": str(origin.id),
+            "revision_root_id": str(origin.id),
+            "revision_number": 2,
+            "quality_warnings": ["Уточните доказательства"],
+        }, ensure_ascii=False),
+        status=ArtifactStatus.AWAITING_APPROVAL,
+    )
+    db.add(revision)
+    db.commit()
+    client = client_for(db)
+    try:
+        response = client.get(f"/studio/products/{product.id}/materials/{revision.id}")
+        assert response.status_code == 200
+        assert "История текста" in response.text
+        assert "Проверить перед публикацией" in response.text
+        assert "Уточните доказательства" in response.text
+        assert f"/materials/{origin.id}" in response.text
+        assert f"/materials/{revision.id}" in response.text
+        assert "Новая версия" in response.text
     finally:
         app.dependency_overrides.clear()
