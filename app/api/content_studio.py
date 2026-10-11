@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
@@ -1255,42 +1255,79 @@ def calendar_page(db: Session, product: Product, selected_date: str | None = Non
     )
 
 
-def materials_page(db: Session, product: Product, kind: str = "all", q: str = "") -> str:
-    state = studio_state(db, product)
-    materials: list[Artifact] = state["materials"]
-    query = q.strip().casefold()
-    filtered = []
-    for record in materials:
-        current_kind = artifact_kind(record)
-        if kind != "all" and current_kind != kind:
-            continue
-        if query:
-            hay = f"{record.title} {artifact_kind_label(record)} {artifact_text(record)}".casefold()
-            if query not in hay:
-                continue
-        filtered.append(record)
-    cards = "".join(material_card(product.id, record) for record in filtered)
+def materials_page(db: Session, product: Product, kind: str = "all", q: str = "", page: int = 1) -> str:
+    """Filter before pagination; do not hydrate the entire content library."""
+    kinds = {
+        "all": MATERIAL_KINDS,
+        "article": {"article"},
+        "post": {"channel_text", "dzen_brief", "telegram_brief"},
+        "video": {"video_script", "short_video_brief"},
+        "creative": {"creative_brief", "story_brief", "static_image_brief"},
+    }
+    kind = kind if kind in kinds else "all"
+    page = min(10000, max(1, page))
+    query_text = q.strip()[:120]
+    stmt = select(Artifact).where(
+        Artifact.product_id == product.id,
+        Artifact.kind.in_(kinds[kind]),
+    )
+    if query_text:
+        literal = (query_text.replace("\\", "\\\\")
+                   .replace("%", "\\%").replace("_", "\\_"))
+        pattern = "%" + literal + "%"
+        stmt = stmt.where(or_(
+            Artifact.title.ilike(pattern, escape="\\"),
+            Artifact.content.ilike(pattern, escape="\\"),
+        ))
+    page_size = 24
+    rows = list(db.scalars(
+        stmt.order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        .limit(page_size + 1).offset((page - 1) * page_size)
+    ))
+    more = len(rows) > page_size
+    records = rows[:page_size]
+    cards = "".join(material_card(product.id, row) for row in records)
+    query_url = "&q=" + quote(query_text) if query_text else ""
+    tabs = "".join(
+        f'<a class="tab {"active" if kind == value else ""}" '
+        f'href="/studio/products/{product.id}/materials?kind={value}{query_url}">{label}</a>'
+        for value, label in (
+            ("all", "Все"), ("article", "Статьи"), ("post", "Посты"),
+            ("video", "Видеосценарии"), ("creative", "Stories и креативы"),
+        )
+    )
+    nav = '<div class="sg-pagination">'
+    if page > 1:
+        nav += (
+            f'<a class="btn secondary" href="/studio/products/{product.id}/materials'
+            f'?kind={kind}&page={page-1}{query_url}">← Назад</a>'
+        )
+    nav += f'<span>Страница {page}</span>'
+    if more:
+        nav += (
+            f'<a class="btn secondary" href="/studio/products/{product.id}/materials'
+            f'?kind={kind}&page={page+1}{query_url}">Следующая →</a>'
+        )
+    nav += '</div>'
     body = f"""
     <section class="panel">
-      <div class="panel-head"><div class="panel-title"><span class="ico">▤</span><div><h2>Библиотека</h2>
-      <div class="panel-sub">Все сгенерированные статьи, посты и сценарии</div></div></div><span class="chip blue">{len(filtered)} из {len(materials)}</span></div>
+      <div class="panel-head"><div class="panel-title"><span class="ico">▤</span><div>
+      <h2>Библиотека</h2><div class="panel-sub">Все статьи, посты, сценарии и визуальные брифы</div>
+      </div></div><span class="chip blue">Страница {page}</span></div>
       <form class="library-controls" method="get">
-        <label class="search"><input name="q" type="search" value="{esc(q)}" placeholder="Поиск по материалам…"></label>
-        <div class="tabs">
-          <a class="tab {'active' if kind == 'all' else ''}" href="/studio/products/{product.id}/materials?q={quote(q)}">Все</a>
-          <a class="tab {'active' if kind == 'article' else ''}" href="/studio/products/{product.id}/materials?kind=article&q={quote(q)}">Статьи</a>
-          <a class="tab {'active' if kind == 'post' else ''}" href="/studio/products/{product.id}/materials?kind=post&q={quote(q)}">Посты</a>
-          <a class="tab {'active' if kind == 'video' else ''}" href="/studio/products/{product.id}/materials?kind=video&q={quote(q)}">Видеосценарии</a>
-        <a class="tab {'active' if kind == 'creative' else ''}" href="/studio/products/{product.id}/materials?kind=creative&q={quote(q)}">Stories и визуалы</a>
-        </div>
+        <input type="hidden" name="kind" value="{esc(kind)}">
+        <label class="search"><input name="q" type="search" value="{esc(query_text)}"
+          maxlength="120" placeholder="Найти тему или текст материала…" aria-label="Поиск материалов"></label>
+        <div class="tabs">{tabs}</div>
         <button class="btn secondary small" type="submit">Найти</button>
       </form>
-      <div class="material-grid route-material-grid">{cards or '<div class="empty">Ничего не найдено.</div>'}</div>
+      <div class="material-grid route-material-grid">{cards or '<div class="empty">По запросу ничего не найдено.</div>'}</div>
+      {nav}
     </section>
     """
     return studio_page_shell(
         product, active="materials", title="Материалы",
-        subtitle="Открывайте и проверяйте каждый готовый материал на отдельной странице.",
+        subtitle="Поиск, фильтры и удобный просмотр — без загрузки всей библиотеки.",
         body=body,
     )
 
@@ -1597,13 +1634,14 @@ def studio_calendar(product_id: UUID, date: str | None = None, db: Session = Dep
 
 
 @router.get("/studio/products/{product_id}/materials", response_class=HTMLResponse)
-def studio_materials(product_id: UUID, kind: str = "all", q: str = "", db: Session = Depends(get_db)):
+def studio_materials(product_id: UUID, kind: str = "all", q: str = "", page: int = 1,
+                     db: Session = Depends(get_db)):
     product = db.get(Product, product_id)
     if product is None:
         raise HTTPException(404, "Product not found")
     if kind not in {"all", "article", "post", "video", "creative"}:
         kind = "all"
-    response = HTMLResponse(materials_page(db, product, kind=kind, q=q))
+    response = HTMLResponse(materials_page(db, product, kind=kind, q=q, page=page))
     response.headers["Cache-Control"] = "no-store"
     return response
 
