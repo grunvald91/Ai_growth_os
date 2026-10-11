@@ -122,3 +122,28 @@ async def test_worker_dispatches_quick_post_and_preserves_full_package(monkeypat
     assert result == 1 and len(calls) == 1
     assert calls[0].mode == "post"
     assert calls[0].product_id == product.id and calls[0].task_id == task.id
+
+
+@pytest.mark.asyncio
+async def test_owner_can_create_one_story_without_full_package(db, tmp_path):
+    company = Product(name="Школа музыки", slug="school-music-creative")
+    db.add(company)
+    db.commit()
+    bot = FakeBot()
+    ui = TelegramContent(bot, make_sessions(db),
+                         lambda: Settings(products_root=tmp_path))
+    await ui.callback(7, f"content:creativeformats:{company.id}")
+    assert "Stories" in str(bot.messages[-1][2])
+    await ui.callback(7, f"content:creativestory:{company.id}")
+    await ui.callback(7, f"content:cstg:{company.id}")
+    assert ui.creative_target == (company.id, "story", "telegram")
+    await ui.message({"chat":{"id":7}, "text":"Как подготовиться к концерту"})
+    record = db.scalar(select(Artifact).where(
+        Artifact.product_id == company.id,
+        Artifact.kind == "creative_request",
+    ))
+    assert record is not None
+    assert json.loads(record.content)["mode"] == "creative"
+    task = db.get(Task, record.task_id)
+    assert task.assigned_agent == "content_creative"
+    assert ui.creative_target is None
