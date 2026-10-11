@@ -28,6 +28,7 @@ services:
       APP_ENV: production
       STUDIO_ADMIN_USERNAME: ${STUDIO_ADMIN_USERNAME:-}
       STUDIO_ADMIN_PASSWORD: ${STUDIO_ADMIN_PASSWORD:-}
+      STUDIO_PUBLIC_ORIGIN: ${STUDIO_PUBLIC_ORIGIN:-https://growth.servgo.ru}
       DATABASE_URL: postgresql+psycopg://ai_growth:${POSTGRES_PASSWORD}@postgres:5432/ai_growth
       LLM_PROVIDER: xai
       LLM_MODEL: ${LLM_MODEL:-grok-4.7}
