@@ -826,7 +826,8 @@ async def test_editor_prompts_are_commercially_useful_without_weakening_groundin
     assert 'concrete recognizable situation' in by_role['human_editor'].system_prompt
     assert 'Пиши, сокращай' in by_role['human_editor'].system_prompt
     assert 'SCENE -> PAIN -> COST/FRICTION' in by_role['marketing_editor'].system_prompt
-    assert 'MUST include at least one light situational humor beat' in by_role['marketing_editor'].system_prompt
+    assert 'Use gentle situational humor only when it fits' in by_role['marketing_editor'].system_prompt
+    assert 'humor may be entirely absent' in by_role['marketing_editor'].system_prompt
     assert 'third-party cases' in by_role['marketing_editor'].system_prompt
     assert 'Write marketing, not an academic paper' in by_role['marketing_editor'].system_prompt
     assert '30-45 seconds' in by_role['video_director'].system_prompt
