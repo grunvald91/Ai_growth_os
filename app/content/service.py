@@ -38,8 +38,8 @@ def queue_render(db, article_id: UUID):
         raise LookupError('Статья не найдена')
     scripts = list(db.scalars(select(Artifact).where(Artifact.task_id == article.task_id,
         Artifact.product_id == article.product_id, Artifact.kind == 'video_script')))
-    if len(scripts) != 3:
-        raise ValueError('Три сценария ещё не готовы')
+    if len(scripts) != 2:
+        raise ValueError('Для рендера нужны два готовых сценария: YouTube Shorts и Instagram Reels')
     title = 'RENDER: ' + str(article.id)
     previous = db.scalar(select(Task).where(Task.product_id == article.product_id, Task.title == title,
         Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.COMPLETED])))
@@ -48,7 +48,7 @@ def queue_render(db, article_id: UUID):
     task = TaskService(db).create(product_id=article.product_id, title=title,
         assigned_agent='content_renderer', status=TaskStatus.QUEUED, priority=100)
     ArtifactService(db).create(product_id=article.product_id, task_id=task.id,
-        kind='render_request', title='Одобрен рендер трёх роликов',
+        kind='render_request', title='Одобрен рендер двух роликов',
         content=json.dumps({'article_id': str(article.id), 'script_ids': [str(s.id) for s in scripts]}))
     db.commit()
     return task
