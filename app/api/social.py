@@ -133,6 +133,45 @@ async def page(product_id: UUID, db: Session = Depends(get_db), settings=Depends
                 f'{slot["publish_at"][:16]} — {slot.get("topic", "Публикация")[:70]} — медиа: {len(existing)}'))
     slot_options = ''.join(
         f'<option value="{esc(key)}">{esc(title)}</option>' for key, title in plan_slots)
+    # No invented publishing API for Dzen/vc.ru: provide approved editorial material
+    # and a verified external editor link, never claim automatic delivery.
+    editorial = []
+    for material in db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id, Artifact.kind.in_(["channel_text", "article"]))
+        .order_by(Artifact.created_at.desc()).limit(80)):
+        try:
+            value = json.loads(material.content)
+        except (ValueError, TypeError):
+            continue
+        target = str(value.get("channel", "")).lower()
+        if target in {"dzen", "zen"}:
+            site = "dzen"
+        elif target in {"vc_ru", "vc.ru", "vc"}:
+            site = "vc_ru"
+        else:
+            continue
+        title = str(value.get("title") or material.title)[:300]
+        full_text = (title + "\n\n" + str(value.get("body") or value.get("full_article") or "")).strip()
+        if full_text:
+            editorial.append((material, site, title, full_text))
+        if len(editorial) >= 20:
+            break
+    editor_cards = []
+    for material, platform, title, plain in editorial:
+        publisher = "Дзен" if platform == "dzen" else "vc.ru"
+        url = "https://dzen.ru/editor" if platform == "dzen" else "https://vc.ru/"
+        editor_cards.append(f'<article class="panel c-card">'
+            f'<h3>{esc(publisher)} · {esc(title)}</h3>'
+            f'<p class="c-help">Материал из контент-плана · {esc(str(material.status.value))}. '
+            'Размещение на площадке не подтверждено.</p>'
+            f'<textarea id="social-copy-{material.id}" readonly rows="5">{esc(plain)}</textarea>'
+            f'<div class="c-actions"><button class="btn ghost" type="button" '
+            f'data-copy-id="social-copy-{material.id}">Скопировать материал</button>'
+            f'<a class="btn primary" href="{esc(url)}" target="_blank" rel="noopener noreferrer">'
+            f'Открыть {esc(publisher)} ↗</a></div></article>')
+    editorial_cards = ''.join(editor_cards) or (
+        '<p>Пока нет материалов для Дзена и vc.ru. Создайте контент-план '
+        'или подготовьте соответствующие адаптации в разделе «Материалы».</p>')
     channel_titles = {channel.id: channel.title for channel in channels}
     def history_action(post):
         if post.status == "scheduled":
@@ -185,6 +224,20 @@ async def page(product_id: UUID, db: Session = Depends(get_db), settings=Depends
 <label>Фото или MP4 (1–10 файлов, до 20 МБ каждый)<input name="files" type="file" required multiple accept="image/jpeg,image/png,video/mp4"></label>
 <button class="btn primary" type="submit">Привязать к контент-плану</button>
 </form></section>
+<section class="panel c-card">
+<h2>Дзен и vc.ru · Публикация статей</h2>
+<p>Материалы готовятся в ServGo. У vc.ru нет подтверждённого открытого API для публикации
+из нашего приложения, поэтому используется ручная передача в редактор.
+У Дзена возможно настроить независимую синхронизацию публичного Telegram-канала;
+ServGo не может подтвердить публикацию в Дзене только по факту отправки в Telegram.</p>
+<p><a class="btn ghost" href="https://t.me/zen_sync_bot" target="_blank" rel="noopener noreferrer">
+Подключить Синхробот Дзена ↗</a></p>
+<p class="c-help">Откройте @zen_sync_bot, следуйте официальным инструкциям по привязке
+публичного Telegram-канала к каналу Дзена. Тогда посты из этого канала могут
+переноситься ботом Дзена независимо от ServGo. Проверяйте публикации в самом Дзене.
+Не передавайте логины и пароли сторонним сервисам.</p>
+</section>
+<div class="c-platform-grid">{editorial_cards}</div>
 <section class="panel c-card"><h2>Последние публикации</h2>
 <div style="overflow-x:auto"><table><thead><tr><th>Канал</th><th>Время</th><th>Материал</th><th>Статус</th><th>Действия</th></tr></thead>
 <tbody>{history or '<tr><td colspan="5">Публикаций пока нет</td></tr>'}</tbody></table></div>
