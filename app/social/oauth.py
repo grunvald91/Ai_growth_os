@@ -1,4 +1,4 @@
-"""Official OAuth authorization-code login for YouTube and Instagram comments."""
+"""Official OAuth authorization-code login for supported social integrations."""
 import hashlib
 import re
 import secrets
@@ -55,7 +55,7 @@ def authorize(db, settings, product_id, platform, account_id=None):
     state = secrets.token_urlsafe(32)
     verifier, challenge = None, None
     if platform in {"vk", "vk_video"}:
-        if not re.fullmatch(r"[1-9]\\d{0,14}", account_id or ""):
+        if not re.fullmatch(r"[1-9]\d{0,14}", account_id or ""):
             raise ValueError("Перед подключением укажите положительный ID сообщества VK")
         from app.social.extended_oauth import vk_verifier_and_challenge
         verifier, challenge = vk_verifier_and_challenge()
