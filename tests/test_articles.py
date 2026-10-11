@@ -903,3 +903,19 @@ async def test_repeated_truncation_fails_atomically_without_third_attempt(db, pr
     assert result.status == 'failed' and len(provider.requests) == 2
     assert not result.artifact_ids and not list(db.scalars(select(Artifact)))
     assert len(list(db.scalars(select(CostRecord)))) == 2
+
+
+def test_servgo_specific_fallbacks_cannot_leak_into_another_business():
+    from app.workflows.article_production import (
+        _creative_fallback_payload, _platform_text_fallback_payload,
+    )
+    other_company = {
+        'company_slug': 'flower-shop',
+        'company_name': 'Цветочная мастерская',
+        'request': {'topic': 'Уход за букетом'},
+        'prior_stage_outputs': {},
+    }
+    with pytest.raises(ValueError, match='not safe for this company'):
+        _platform_text_fallback_payload(other_company)
+    with pytest.raises(ValueError, match='not safe for this company'):
+        _creative_fallback_payload('visual_designer', other_company)
