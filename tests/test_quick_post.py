@@ -13,9 +13,10 @@ from app.models.domain import Artifact, Product, Task, TaskStatus, Publication
 
 
 class FakePostProvider:
-    def __init__(self, *, bad_evidence=False):
+    def __init__(self, *, bad_evidence=False, brand_leak=False):
         self.requests = []
         self.bad_evidence = bad_evidence
+        self.brand_leak = brand_leak
 
     async def generate(self, request):
         self.requests.append(request.model_copy(deep=True))
@@ -41,6 +42,8 @@ class FakePostProvider:
                 "evidence_ids": [],
                 "editor_notes": ["Не обещать конкретный срок жизни букета без данных"],
             }
+            if self.brand_leak:
+                result["body"] += " Также советуем приобрести подписку ServGo."
         return LLMResponse(content=json.dumps(result, ensure_ascii=False), model="fake",
                            usage=LLMUsage(input_tokens=90, output_tokens=140))
 
@@ -122,3 +125,27 @@ def test_single_post_rejects_unsupported_channels_and_dedupes_queue(db):
                           format="post", channel="vk")
     assert first.id == again.id
     assert other.id != first.id
+
+
+@pytest.mark.asyncio
+async def test_single_post_rejects_unrequested_servgo_brand_for_other_company(db, tmp_path):
+    company = Product(name="Кафе", slug="local-cafe")
+    db.add(company)
+    db.commit()
+    task = queue_content(db, company.id, "Выбираем сезонное меню",
+                         format="post", channel="telegram")
+    request_artifact = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "content_request"
+    ))
+    success = await run_quick_post(
+        db, Settings(products_root=tmp_path),
+        QuickPostRequest.model_validate_json(request_artifact.content).model_copy(
+            update={"task_id": task.id}
+        ),
+        provider=FakePostProvider(brand_leak=True),
+    )
+    assert success is False
+    assert db.get(Task, task.id).status == TaskStatus.FAILED
+    assert not list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "channel_text"
+    )))
