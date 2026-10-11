@@ -405,7 +405,7 @@ def mobile_header_html(product: Product) -> str:
 
 def asset_dialog(record: Artifact) -> str:
     value = parse_json(record)
-    title = esc(record.title)
+    title = esc(display_material_title(record, value))
     kind_label = esc(artifact_kind_label(record, value))
     copy_id = f"copy-{record.id}"
 
@@ -1429,7 +1429,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
           <div class="panel-sub">{esc(platform_label(brief.get("target_platform")))}</div></div></div></div>
           <div class="material-detail-body">
             <div class="detail-meta"><span class="chip blue">{esc(kind_label)}</span><span class="chip">{esc(record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "")}</span></div>
-            <h2>{esc(record.title)}</h2>
+            <h2>{esc(display_material_title(record, value))}</h2>
             <div id="material-copy" class="article-text"><b>Цель:</b> {esc(brief.get("objective"))}\n\n<b>Озвучка / диалог:</b>\n{esc(brief.get("voiceover_or_dialogue_script"))}\n\n<b>Монтаж и сведение:</b> {esc(brief.get("editing_mix_notes") or brief.get("editing_rhythm"))}</div>
             <div class="storyboard-grid">{shots or '<div class="empty">Раскадровка пока отсутствует.</div>'}</div>
           </div>
@@ -1454,7 +1454,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
         content = f"""
         <section class="sg-surface">
           <div class="sg-section-head"><div><span class="sg-overline">РАСКАДРОВКА · {esc(value.get('platform'))}</span>
-          <h2>{esc(record.title)}</h2><p>Предпросмотр структуры будущего материала. Медиафайлы не создавались.</p></div></div>
+          <h2>{esc(display_material_title(record, value))}</h2><p>Предпросмотр структуры будущего материала. Медиафайлы не создавались.</p></div></div>
           <div class="sg-storyboard-grid">{scenes or '<p>Кадры ещё не подготовлены.</p>'}</div>
           <h3>Текст и рекомендации</h3>
           <div id="material-copy" class="article-text">{esc(artifact_text(record, value))}</div>
@@ -1489,7 +1489,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
           <div class="panel-sub">Готовый материал</div></div></div></div>
           <div class="material-detail-body">
             <div class="detail-meta"><span class="chip blue">{esc(kind_label)}</span><span class="chip">{esc(record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "")}</span></div>
-            <h2>{esc(record.title)}</h2>
+            <h2>{esc(display_material_title(record, value))}</h2>
             <div class="article-text {'sg-post-preview' if record.kind == 'channel_text' else ''}">
               {f'<div class="sg-native-post-label">Предпросмотр текста · {esc(platform_label(value.get("channel")))}</div>' if record.kind == 'channel_text' else ''}
               <div id="material-copy">{esc(text)}</div>
@@ -1569,7 +1569,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
             + form_actions + '</section>'
         )
     return studio_page_shell(
-        product, active="materials", title=record.title,
+        product, active="materials", title=display_material_title(record, value),
         subtitle=f"{kind_label} · просмотр, проверка и версии.",
         body=content, actions=actions,
     )
