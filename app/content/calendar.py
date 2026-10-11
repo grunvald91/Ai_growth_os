@@ -309,7 +309,7 @@ def planning_context(db, settings, product_id):
              'research': [_compact_research_artifact(r, privacy) for r in reports],
              'observations': observations[:30], 'platform_guidance': GUIDANCE,
              'available_formats': PLATFORMS,
-             'production': 'One shared package produces an SEO article, six text adaptations, three 30s video scripts. MP4 is typography-only, silent, and requires separate owner approval. Publishing and statistics collection are manual.'}
+             'production': 'One shared package currently produces an SEO article, six text adaptations and TWO 30-second video scripts (YouTube Shorts and Instagram Reels). MP4 rendering is a separate silent typography-only operation requiring owner approval. Publishing is manual unless an external connector is verified; statistics require explicit observations.'}
     safe = json.loads(privacy.sanitize_text(encode(value)))
     digest = hashlib.sha256(encode(safe).encode()).hexdigest()
     return safe, digest
