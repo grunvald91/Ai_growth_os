@@ -1,5 +1,5 @@
 import json
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.db.models import Base
 from app.db.session import get_db
 from app.main import app
-from app.api.content_studio import latest_plan, latest_draft, state_for_group
+from app.api.content_studio import latest_plan, latest_draft, state_for_group, reconcile_plan_states
 from app.models.domain import Artifact, Product, Task, TaskStatus
 
 
@@ -375,7 +375,7 @@ def test_failed_package_can_retry_without_duplicate_or_replacing_active_job(stud
         assert len(ids) == 1
         assert str(previous_task.id) not in ids
         assert {slot["state"] for slot in refreshed_slots} == {"queued"}
-        new_task = db.get(Task, __import__("uuid").UUID(next(iter(ids))))
+        new_task = db.get(Task, UUID(next(iter(ids))))
         assert new_task is not None
         assert new_task.status == TaskStatus.QUEUED
         assert new_task.product_id == product.id
@@ -397,3 +397,32 @@ def test_studio_group_states_include_completed_and_cancelled():
     assert state_for_group([{"state": "cancelled"}]) == "cancelled"
     assert state_for_group([{"state": "ready_for_review"}, {"state": "planned"}]) == "ready_for_review"
     assert state_for_group([{"state": "failed"}, {"state": "completed"}]) == "failed"
+
+
+def test_failed_task_is_visible_before_scheduler_tick_without_persisting_derived_status(studio_db):
+    db = studio_db
+    product = Product(name="Компания", slug="company-stale-state")
+    db.add(product)
+    db.flush()
+    task = Task(product_id=product.id, title="CONTENT: current",
+                assigned_agent="content_factory", status=TaskStatus.FAILED)
+    db.add(task)
+    db.flush()
+    plan = make_plan(task.id, approval_state="active")
+    for slot in plan["slots"]:
+        slot["state"] = "queued"
+    row = Artifact(product_id=product.id, kind="editorial_plan", title="План",
+                   content=json.dumps(plan, ensure_ascii=False))
+    db.add(row)
+    db.commit()
+
+    reconciled = reconcile_plan_states(db, product.id, json.loads(row.content))
+    assert {slot["state"] for slot in reconciled["slots"]} == {"failed"}
+    assert {slot["state"] for slot in json.loads(row.content)["slots"]} == {"queued"}
+    client = client_for(db)
+    try:
+        detail = client.get(f"/studio/products/{product.id}/packages/pkg-1")
+        assert detail.status_code == 200
+        assert "Повторить подготовку" in detail.text
+    finally:
+        app.dependency_overrides.clear()
