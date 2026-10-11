@@ -289,7 +289,7 @@ def test_official_servgo_brand_matches_booking_component(studio_v5):
     assert "/studio/assets/servgo.svg" in main.text
     assert 'sg-official-brand-name">Serv<span>Go</span>' in main.text
     assert '<span class="brand-mark">S</span>' not in main.text
-    assert 'studio.css?v=6' in main.text
+    assert 'studio.css?v=7' in main.text
 
     css = client.get("/studio/assets/studio.css").text
     assert '--sg-blue:#2F5BEB' in css
