@@ -303,13 +303,31 @@ def planning_context(db, settings, product_id):
         keys.add(key)
         observations.append({'id': 'metric:' + str(metric.id), 'name': metric.name, 'value': str(metric.value),
             'observed_at': str(metric.observed_at), 'source': metric.source, 'dimensions': metric.dimensions})
+    connected_telegram = []
+    for row in db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id,
+        Artifact.kind == 'telegram_channel_connection',
+        Artifact.status == ArtifactStatus.APPROVED,
+    ).order_by(Artifact.created_at.desc()).limit(30)):
+        try:
+            channel = json.loads(row.content)
+        except (TypeError, ValueError):
+            continue
+        if channel.get('chat_id'):
+            connected_telegram.append({
+                'name': privacy.sanitize_text(str(channel.get('title') or row.title))[:160],
+                'connection_id': str(row.id),
+                'bot_admin_verified_at': channel.get('verified_at'),
+                'scheduled_publication_requires_owner_approval': True,
+            })
     value = {'company': snapshot, 'stable_business_context': privacy.sanitize_text(stable),
              'owner_requirements': privacy.sanitize_text(preference.content) if preference else '',
              'owner_requirements_ref': 'artifact:' + str(preference.id) if preference else None,
              'research': [_compact_research_artifact(r, privacy) for r in reports],
              'observations': observations[:30], 'platform_guidance': GUIDANCE,
+             'verified_telegram_channels': connected_telegram,
              'available_formats': PLATFORMS,
-             'production': 'One shared package currently produces an SEO article, six text adaptations and TWO 30-second video scripts (YouTube Shorts and Instagram Reels). MP4 rendering is a separate silent typography-only operation requiring owner approval. Publishing is manual unless an external connector is verified; statistics require explicit observations.'}
+             'production': 'One shared package currently produces an SEO article, six text adaptations and TWO 30-second video scripts (YouTube Shorts and Instagram Reels). MP4 rendering is a separate silent typography-only operation requiring owner approval. Telegram text posting can be scheduled only for an approved post and an owner-selected verified channel; actual dispatch requires CONTENT_TELEGRAM_AUTOPOST_ENABLED, which defaults to false. Other platforms still require manual publication; statistics require explicit observations.'}
     safe = json.loads(privacy.sanitize_text(encode(value)))
     digest = hashlib.sha256(encode(safe).encode()).hexdigest()
     return safe, digest
