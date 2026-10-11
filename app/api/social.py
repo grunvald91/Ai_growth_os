@@ -333,18 +333,18 @@ def resolve_post(product_id: UUID, post_id: UUID, decision: PostDecision, db: Se
 
 
 @router.get("/products/{product_id}/comments/oauth/{platform}/start")
-def oauth_start(product_id: UUID, platform: str, db: Session = Depends(get_db),
+def oauth_start(product_id: UUID, platform: str, account_id: str | None = None, db: Session = Depends(get_db),
                 settings=Depends(get_settings)):
     from app.social.oauth import authorize
     try:
-        return RedirectResponse(authorize(db, settings, product_id, platform), status_code=303)
+        return RedirectResponse(authorize(db, settings, product_id, platform, account_id), status_code=303)
     except (ValueError, LookupError) as exc:
         db.rollback()
         raise error(exc)
 
 
 @router.get("/social/oauth/{platform}/callback")
-async def oauth_callback(platform: str, state: str = "", code: str = "",
+async def oauth_callback(platform: str, state: str = "", code: str = "", device_id: str = "",
                          error_message: str = "", db: Session = Depends(get_db),
                          settings=Depends(get_settings)):
     """Fixed callback shared across all companies; product scope is bound to one-time state."""
@@ -353,7 +353,7 @@ async def oauth_callback(platform: str, state: str = "", code: str = "",
         return HTMLResponse("<h1>Подключение отменено</h1><p><a href='/studio'>Вернуться в Growth Studio</a></p>",
                             status_code=409)
     try:
-        channel = await complete(db, settings, platform, state, code)
+        channel = await complete(db, settings, platform, state, code, device_id=device_id)
     except (ValueError, LookupError) as exc:
         db.rollback()
         return HTMLResponse("<h1>Не удалось подключить аккаунт</h1><p>" + esc(str(exc)) +
