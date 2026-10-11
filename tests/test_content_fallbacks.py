@@ -44,7 +44,7 @@ def test_brand_neutral_fallback_produces_six_distinct_adaptations():
     for copy in result.texts:
         assert "ServGo" not in copy.body
         assert "онлайн-запис" not in copy.body
-        assert "для проверки" in " ".join(copy.editorial_checks)
+        assert "Требуется проверка" in " ".join(copy.editorial_checks)
     assert len(result.texts[0].body) >= 2000
     assert len(result.texts[2].body) >= 2000
     assert SequenceMatcher(None, result.texts[0].body, result.texts[2].body).ratio() < .85
