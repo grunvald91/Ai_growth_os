@@ -12,6 +12,9 @@ app.include_router(products_router, dependencies=[Depends(require_studio_auth), 
 from app.api.research_sources import router as research_sources_router
 app.include_router(research_sources_router, dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 
+from app.api.competitive_intelligence import router as intelligence_router
+app.include_router(intelligence_router, dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
+
 
 from app.api.control import router as control_router
 app.include_router(control_router, dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -25,3 +28,5 @@ app.include_router(company_intake_router, dependencies=[Depends(require_studio_a
 from app.api.content_studio import router as content_studio_router
 app.include_router(content_studio_router)
 
+from app.api.comments import router as comments_router
+app.include_router(comments_router, dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])

@@ -265,24 +265,30 @@ def _ensure_derivative_source_adaptation(brief, *, strategy, seo):
     return type(brief).model_validate(data)
 
 
-def _normalize_ready_video_timeline(value):
-    """Keep shot durations proportional while producing one contiguous 30s brief."""
-    data = value.model_dump(mode='json')
-    brief = data['production_brief']
-    shots = brief['shots']
-    durations = [shot['end_second'] - shot['start_second'] for shot in shots]
-    total = sum(durations)
-    if total <= 0:
-        raise ValueError('Invalid video timeline')
-    current = 0.0
-    for index, (shot, duration) in enumerate(zip(shots, durations)):
-        shot['start_second'] = current
-        current = 30.0 if index == len(shots) - 1 else round(current + 30 * duration / total, 3)
-        shot['end_second'] = current
-        if isinstance(shot.get('spoken_text'), str):
-            shot['spoken_text'] = re.split(r'\s+Avoid:\s*', shot['spoken_text'], maxsplit=1, flags=re.I)[0].strip()
-    brief['duration_seconds'] = 30
-    return type(value).model_validate(data)
+def _normalize_ready_video_timeline(brief: ShortVideoDerivativeDraft) -> ShortVideoDerivativeDraft:
+    """Scale a valid contiguous brief to 30 seconds without changing scene content."""
+    data = brief.model_dump(mode='json')
+    production = data['production_brief']
+    shots = production['shots']
+    duration = production['duration_seconds']
+    if (shots[0]['start_second'] != 0 or shots[-1]['end_second'] != duration
+            or any(a['end_second'] != b['start_second'] for a, b in zip(shots, shots[1:]))):
+        raise ValueError('Cannot normalize an overlapping or incomplete video timeline')
+    scale = 30 / duration
+    for shot in shots:
+        shot['start_second'] = round(shot['start_second'] * scale, 6)
+        shot['end_second'] = round(shot['end_second'] * scale, 6)
+        spoken = shot.get('spoken_text')
+        if spoken:
+            note = re.search(r'\b(?:avoid(?:_in_generation)?|generation_prompt|production_notes)\s*:', spoken, re.I)
+            if note:
+                shot['spoken_text'] = spoken[:note.start()].strip() or None
+                existing = shot.get('avoid_in_generation') or ''
+                shot['avoid_in_generation'] = (existing + '\n' + spoken[note.start():]).strip()[:4000]
+    shots[0]['start_second'] = 0
+    shots[-1]['end_second'] = 30
+    production['duration_seconds'] = 30
+    return ShortVideoDerivativeDraft.model_validate(data)
 
 
 def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
@@ -1121,4 +1127,3 @@ class ArticleProduction:
                         input_tokens=max(0, response.usage.input_tokens),
                         output_tokens=max(0, response.usage.output_tokens), incurred_at=datetime.now(timezone.utc),
                         details={'cost_known': False, 'note': 'Usage recorded; monetary price unavailable.'}))
-

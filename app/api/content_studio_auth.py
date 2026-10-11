@@ -57,8 +57,30 @@ def require_studio_auth(
         product_id = request.path_params.get("product_id")
         if product_id is not None and str(product_id) not in allowed:
             raise HTTPException(404, "Компания не найдена")
+        if request.url.path.startswith(("/intelligence", "/competitive-intelligence")):
+            raise HTTPException(403, "Administrator account required")
         if request.url.path == "/control/status" or (request.url.path == "/products" and request.method != "GET"):
             raise HTTPException(403, "Administrator account required")
+        return credentials.username
+    if settings.studio_htpasswd_file:
+        # Reuse the current Nginx operator hashes; never replace credentials.
+        from passlib.hash import apr_md5_crypt
+        try:
+            hashes = dict(line.split(":", 1) for line in settings.studio_htpasswd_file.read_text().splitlines() if line and not line.startswith("#"))
+            if not hashes or any(not value.startswith("$apr1$") for value in hashes.values()):
+                raise ValueError("Unsupported operator hash")
+        except (OSError, ValueError):
+            raise HTTPException(503, "Studio operator hashes are not configured correctly") from None
+        if not credentials:
+            raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": "Basic"})
+        encoded = hashes.get(credentials.username)
+        try:
+            valid = bool(encoded) and apr_md5_crypt.verify(credentials.password, encoded)
+        except ValueError:
+            raise HTTPException(503, "Invalid operator password hash") from None
+        if not valid:
+            raise HTTPException(401, "Incorrect credentials", headers={"WWW-Authenticate": "Basic"})
+        request.state.studio_product_ids = None
         return credentials.username
     if not username or not password:
         if users and credentials:

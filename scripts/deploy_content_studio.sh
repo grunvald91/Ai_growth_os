@@ -5,7 +5,7 @@ set -Eeuo pipefail
 ROOT=/opt/ai_growth_os
 RELEASE_SHA=${RELEASE_SHA:?Set the exact tested commit SHA}
 EXPECTED_CURRENT_RELEASE=${EXPECTED_CURRENT_RELEASE:?Set the freshly inspected active release name}
-export RELEASE_SHA
+export RELEASE_SHA STALE_TASK_IDS
 [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 2
 RELEASE="$ROOT/releases/$RELEASE_SHA"
 [[ -d "$RELEASE" && -f "$RELEASE/docker-compose.prod.yml" && -f "$ROOT/.env" ]] || exit 3
@@ -18,15 +18,7 @@ dc_old(){ docker compose --env-file "$ROOT/.env" -p ai-growth-os -f "$PREVIOUS/d
 dc(){ docker compose --env-file "$ROOT/.env" -p ai-growth-os -f "$RELEASE/docker-compose.prod.yml" "$@"; }
 
 # Fail before stopping anything if an active job would be interrupted.
-dc_old exec -T api python - <<'PY'
-from sqlalchemy import select
-from app.db.session import SessionLocal
-from app.models.domain import Task, TaskStatus
-with SessionLocal() as db:
-    if db.scalar(select(Task.id).where(Task.status == TaskStatus.RUNNING).limit(1)):
-        raise SystemExit('An active task is running; deploy after it finishes')
-print('No active tasks; deployment preflight OK')
-PY
+dc_old exec -T -e STALE_TASK_IDS api python - < "$RELEASE/scripts/content_studio_deploy_tasks.py"
 
 BACKUP="$ROOT/backups/content-studio-$(date -u +%Y%m%dT%H%M%SZ)-$RELEASE_SHA"
 umask 077
@@ -35,6 +27,11 @@ cp -p "$ROOT/.env" "$BACKUP/runtime.env"
 printf '%s\n' "$PREVIOUS" > "$BACKUP/previous-release"
 dc_old exec -T postgres pg_dump -U ai_growth -d ai_growth -Fc > "$BACKUP/database.dump"
 [[ -s "$BACKUP/database.dump" ]] || exit 7
+PROFILE_VOLUME=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/company_products"}}{{.Name}}{{end}}{{end}}' "$(dc_old ps -q api)")
+[[ -n "$PROFILE_VOLUME" ]] || exit 8
+docker run --rm -v "$PROFILE_VOLUME:/data:ro" postgres:16-alpine tar -C /data -czf - . > "$BACKUP/company-products.tar.gz"
+printf '%s
+' "${STALE_TASK_IDS:-}" > "$BACKUP/recovered-task-ids"
 
 # Keep the exact images currently running so rebuilding cannot spoil rollback.
 printf 'services:\n' > "$BACKUP/rollback-images.yml"
@@ -54,7 +51,7 @@ from urllib.parse import urlsplit
 from app.core.config import get_settings
 s = get_settings()
 assert s.app_env == 'production'
-assert s.studio_admin_username and s.studio_admin_password, 'Configure operator login privately before deployment'
+assert (s.studio_admin_username and s.studio_admin_password) or (s.studio_htpasswd_file and s.studio_htpasswd_file.is_file()), 'Existing operator login must be configured'
 assert s.studio_public_origin and urlsplit(s.studio_public_origin).scheme == 'https'
 assert s.llm_provider == 'xai' and urlsplit(s.xai_base_url).hostname == 'api.claudehub.fun'
 print('Production auth, ClaudeHub and runtime configuration OK')
@@ -75,15 +72,10 @@ rollback(){
 trap rollback ERR
 
 # Check again after build; the old worker must not be stopped mid-generation.
-dc_old exec -T api python - <<'PY'
-from sqlalchemy import select
-from app.db.session import SessionLocal
-from app.models.domain import Task, TaskStatus
-with SessionLocal() as db:
-    assert db.scalar(select(Task.id).where(Task.status == TaskStatus.RUNNING).limit(1)) is None, 'A task started during build; wait for it'
-PY
+dc_old exec -T -e STALE_TASK_IDS api python - < "$RELEASE/scripts/content_studio_deploy_tasks.py"
 RESTART_NEEDED=1
 dc_old --profile telegram stop worker telegram
+dc_old exec -T -e STALE_TASK_IDS api python - --recover < "$RELEASE/scripts/content_studio_deploy_tasks.py"
 dc run -T --rm --no-deps api python -m alembic upgrade head
 dc up --no-deps --abort-on-container-exit --exit-code-from profile-init profile-init
 dc --profile telegram up -d --no-build api worker
@@ -103,14 +95,21 @@ with TestClient(app) as client:
     assert client.get('/health').status_code == 200
     assert client.get('/health/version').json()['release'] == s.release_sha
     assert client.get('/products').status_code == 401
-    auth = (s.studio_admin_username, s.studio_admin_password)
-    products = client.get('/products', auth=auth)
+    from fastapi import Request
+    from app.api.content_studio_auth import require_studio_auth
+    def verified_operator(request: Request):
+        request.state.studio_product_ids = None
+        return 'deployment-render-check'
+    app.dependency_overrides[require_studio_auth] = verified_operator
+    products = client.get('/products')
     assert products.status_code == 200
     for product in products.json():
         base = '/studio/products/' + product['id']
         for suffix in ('/create', '/review', '/calendar', '/channels', '/materials'):
-            assert client.get(base + suffix, auth=auth).status_code == 200, suffix
-    print('Authenticated Studio pages and API protection OK')
+            assert client.get(base + suffix).status_code == 200, suffix
+    app.dependency_overrides.pop(require_studio_auth, None)
+    assert client.get('/products').status_code == 401
+    print('Studio rendering and API protection OK')
 PY
 curl -fsS --max-time 5 http://127.0.0.1:8091/health/version
 ln -sfn "$RELEASE" "$ROOT/current"

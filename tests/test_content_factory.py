@@ -61,12 +61,17 @@ async def test_factory_duplicate_channel_copy_uses_validated_source_fallback(db,
         ArticleProductionInput(product_id=p.id,topic='Test',produce_ready_assets=True))
     assert result.status=='completed', result.error
     checkpoints=list(db.scalars(select(Artifact).where(Artifact.kind=='content_stage_output')))
-    fallback = next(json.loads(a.content) for a in checkpoints if json.loads(a.content)['stage'] == 'platform_writer')
-    assert fallback['fallback_used'] is True
-    assert list(db.scalars(select(Artifact).where(Artifact.kind=='article')))
-    texts = [json.loads(a.content) for a in db.scalars(select(Artifact).where(Artifact.kind == 'channel_text'))]
-    assert len(texts) == 6
-    assert len({row['body'] for row in texts}) == 6
+    assert len(checkpoints)==13
+    assert result.checkpoint_artifact_ids==[a.id for a in checkpoints]
+    checkpoint = next(json.loads(a.content) for a in checkpoints
+                      if json.loads(a.content)['stage'] == 'platform_writer')
+    assert checkpoint['fallback_used'] is True
+    assert checkpoint['fallback_reason'].startswith('ValidationError:')
+    ReadyTextSet.model_validate(checkpoint['output'])
+    texts=list(db.scalars(select(Artifact).where(Artifact.kind=='channel_text')))
+    assert len(texts)==6
+    assert len({json.loads(a.content)['body'] for a in texts})==6
+    assert list(db.scalars(select(ToolCall)))==list(db.scalars(select(Publication)))==[]
 
 
 def test_queue_content_is_idempotent_and_distinct_from_outreach(db):
@@ -83,7 +88,8 @@ def test_actual_renderer_outputs_mp4_cover_and_cyrillic_subtitles(tmp_path):
     assert (tmp_path/'assets/video.mp4').stat().st_size>10000
     assert 'Сколько' in (tmp_path/'assets/subtitles.srt').read_text()
     from PIL import Image
-    assert Image.open(tmp_path/'assets/cover.png').size==(720,1280)
+    with Image.open(tmp_path/'assets/cover.png') as cover:
+        assert cover.size==(720,1280)
 
 
 def test_reject_overlapping_timeline_and_path_injection(tmp_path):
@@ -121,4 +127,3 @@ def test_render_accepts_exactly_the_two_produced_video_scripts(db):
     assert len(json.loads(request.content)["script_ids"]) == 2
     assert "двух роликов" in request.title
     assert queue_render(db, article.id).id == render_task.id
-

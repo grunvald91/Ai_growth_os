@@ -289,7 +289,7 @@ class CompanyIntakeService:
                     if claim.kind == "hypothesis" and source.source_type != "owner_message":
                         continue
                     if claim.field_path not in LEAF_PATHS:
-                        raise IntakeError("Unsupported provenance")
+                        raise IntakeError("Unsupported field path")
                     filtered_claims.append(claim)
                     if claim.kind == "candidate":
                         if claim.field_path in {"proof.approved_facts", "proof.approved_numbers"} and isinstance(claim.proposed_value, list):
@@ -492,4 +492,3 @@ class CompanyIntakeService:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
         return {"status": "approved", "profile": safe, "readiness": evaluate_readiness(profile)}
-

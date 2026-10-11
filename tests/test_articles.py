@@ -501,6 +501,31 @@ def test_product_facts_prefers_canonical_verified_facts_over_product_identity():
     assert "ServGo" not in facts.values()
 
 
+@pytest.mark.asyncio
+async def test_copied_derivative_hook_is_adapted_without_discarding_the_brief(db, product, tmp_path):
+    outputs = valid_outputs()
+    outputs[6]['derivatives'][0]['hook'] = outputs[1]['hook']
+    original = json.loads(json.dumps(outputs[6]['derivatives'][0]))
+    workflow, _, request = setup(db, product, tmp_path, outputs)
+    result = await workflow.run(request)
+    assert result.status == 'completed', result.error
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    brief = next(d for d in article.conversion.derivatives if d.kind == original['kind'])
+    assert brief.hook != article.seo.hook
+    for field in ('audience', 'cta', 'outline', 'adaptation_notes'):
+        assert getattr(brief, field) == original[field]
+
+
+@pytest.mark.parametrize('boundary', [3, 5])
+def test_ready_video_normalizer_rejects_overlaps_and_gaps(boundary):
+    from app.workflows.article_contracts import ShortVideoDerivativeDraft
+    from app.workflows.article_production import _normalize_ready_video_timeline
+    raw = valid_outputs()[7]
+    raw['production_brief']['shots'][1]['start_second'] = boundary
+    with pytest.raises(ValueError, match='overlapping or incomplete'):
+        _normalize_ready_video_timeline(ShortVideoDerivativeDraft.model_validate(raw))
+
+
 def test_ready_video_timeline_is_normalized_to_30_seconds_and_strips_internal_notes():
     from app.content.contracts import VideoVariants
     from app.workflows.article_contracts import ShortVideoDerivativeDraft
@@ -525,6 +550,8 @@ def test_ready_video_timeline_is_normalized_to_30_seconds_and_strips_internal_no
         for a, b in zip(parsed.production_brief.shots, parsed.production_brief.shots[1:])
     )
     assert "Avoid:" not in parsed.production_brief.shots[0].spoken_text
+    assert "служебная инструкция" in parsed.production_brief.shots[0].avoid_in_generation
+    assert raw['production_brief']['duration_seconds'] == 38
 
     other = parsed.model_copy(deep=True)
     other.production_brief.target_platform = "instagram_reels"
@@ -933,4 +960,3 @@ def test_servgo_specific_fallbacks_cannot_leak_into_another_business():
         _platform_text_fallback_payload(other_company)
     with pytest.raises(ValueError, match='not safe for this company'):
         _creative_fallback_payload('visual_designer', other_company)
-

@@ -268,6 +268,7 @@ def test_client_account_cannot_access_another_company_or_global_api(studio_v5, t
         response = client.get("/products", auth=auth)
         assert response.status_code == 200 and [p["id"] for p in response.json()] == [str(company.id)]
         assert client.get("/control/status", auth=auth).status_code == 403
+        assert client.get("/intelligence", auth=auth).status_code == 403
         assert client.get("/products").status_code == 401
         assert other.name not in client.get("/studio?choose=true", auth=auth).text
         assert client.post(f"/products/{company.id}/goals", auth=auth, json={"name":"Goal"}, headers={"Origin":"https://evil.example"}).status_code == 403
@@ -295,7 +296,7 @@ def test_due_migration_backfills_existing_intents_and_preserves_rows():
     from alembic.operations import Operations
     company, publication = uuid4(), uuid4()
     engine = create_engine("sqlite+pysqlite:///:memory:")
-    path = Path(__file__).resolve().parents[1] / "alembic/versions/0005_publication_due.py"
+    path = Path(__file__).resolve().parents[1] / "alembic/versions/0006_publication_due.py"
     spec = importlib.util.spec_from_file_location("due_migration", path)
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     with engine.begin() as conn:
