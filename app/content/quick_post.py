@@ -134,6 +134,29 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
         context = load_context(db, product, settings.products_root)
         stable = privacy.sanitize_text(context["stable_context"])
         facts = product_facts(stable)
+        # Research is an optional set of observations, NOT verified proof of
+        # the customer's capabilities or achieved results.
+        research = []
+        recent = db.scalars(select(Artifact).where(
+            Artifact.product_id == product.id,
+            Artifact.kind == "viral_content_research",
+        ).order_by(Artifact.created_at.desc()).limit(2))
+        for record in recent:
+            try:
+                observed = json.loads(record.content)
+            except (TypeError, ValueError):
+                continue
+            if (observed.get("source_status") != "evidence_available" or
+                    observed.get("analysis_status") != "completed"):
+                continue
+            research.append({
+                "ref": str(record.id),
+                "audience_pains": (observed.get("audience_pains") or [])[:5],
+                "hook_patterns": (observed.get("hook_patterns") or [])[:5],
+                "article_patterns": (observed.get("article_patterns") or [])[:4],
+                "content_angles": (observed.get("content_angles") or [])[:5],
+                "cautions": (observed.get("cautions") or [])[:5],
+            })
         supplied = {
             "company_name": privacy.sanitize_text(product.name),
             "topic": privacy.sanitize_text(request.topic),
@@ -142,6 +165,9 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
             "channel": request.channel,
             "channel_guidance": CHANNEL_GUIDANCE[request.channel],
             "verified_facts": facts,
+            "research_hypotheses": privacy.sanitize_text(
+                json.dumps(research, ensure_ascii=False)[:6500]
+            ),
             "company_context": stable[:10500],
         }
         strategy = None
@@ -163,6 +189,7 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                 "Do not invent prices, measurable results, reviews, business capabilities, "
                 "competitor comparisons, discounts or customer testimonials. "
                 "Treat only verified_facts as grounds for positive business claims. "
+                "Research hypotheses may guide hooks, but never become measured customer demand or facts. "
                 "evidence_ids must reference only verified_facts keys, and can be empty. "
                 "Do not pretend to have performed web research or publication. "
                 "Use concrete audience pain, useful information, one clear next action, "
