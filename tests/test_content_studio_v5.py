@@ -272,3 +272,69 @@ def test_library_pagination_limits_page_size_and_preserves_filters(studio_v5):
     assert "Материал 07" in searched.text
     assert "Материал 06" not in searched.text
 
+
+
+def test_official_servgo_brand_matches_booking_component(studio_v5):
+    client, db, company, _ = studio_v5
+    logo = client.get("/studio/assets/servgo.svg")
+    assert logo.status_code == 200
+    assert logo.headers["content-type"].startswith("image/svg+xml")
+    assert 'viewBox="0 0 48 48"' in logo.text
+    assert 'fill="#0D1B2A"' in logo.text
+    assert 'fill="#2F5BEB"' in logo.text
+    assert 'L44 23 L31.5 35.5' in logo.text
+    base = f"/studio/products/{company.id}"
+    main = client.get(base)
+    assert main.status_code == 200
+    assert "/studio/assets/servgo.svg" in main.text
+    assert 'sg-official-brand-name">Serv<span>Go</span>' in main.text
+    assert '<span class="brand-mark">S</span>' not in main.text
+    assert 'studio.css?v=6' in main.text
+
+    css = client.get("/studio/assets/studio.css").text
+    assert '--sg-blue:#2F5BEB' in css
+    assert '--sg-navy:#0D1B2A' in css
+    assert '.sg-official-brand-icon' in css
+
+
+def test_mobile_navigation_does_not_overlay_cards_and_sidebar_has_no_duplicate_calendar(studio_v5):
+    client, db, company, _ = studio_v5
+    base = f"/studio/products/{company.id}"
+    for route in ("", "/create", "/review", "/calendar", "/materials", "/channels", "/plan"):
+        page = client.get(base + route)
+        assert page.status_code == 200, route
+        markup = page.text
+        assert markup.count('class="mobile-nav"') == 1
+        assert markup.count('class="sg-mobile-shell-head"') == 1
+        assert markup.index('class="sg-mobile-shell-head"') < markup.index('class="mobile-nav"')
+        assert markup.index('class="mobile-nav"') < markup.index('<main class="main')
+        sidebar = markup.split('<aside class="sidebar">', 1)[1].split('</aside>', 1)[0]
+        assert sidebar.count(f'href="{base}/calendar"') == 1
+        assert "Комментарии" not in sidebar
+    css = client.get("/studio/assets/studio.css").text
+    assert 'position:sticky!important' in css
+    assert 'bottom:auto!important' in css
+    assert '.sg-quick-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))' in css
+
+
+def test_recent_materials_use_russian_status_and_readable_titles(studio_v5):
+    client, db, company, _ = studio_v5
+    item = Artifact(
+        product_id=company.id,
+        title="telegram derivative brief",
+        kind="telegram_brief", status="draft",
+        content=json.dumps({"brief": "Текстовую публикацию нужно подготовить"}),
+    )
+    post = Artifact(
+        product_id=company.id, kind="channel_text",
+        title="Новый пост", status="awaiting_approval",
+        content=json.dumps({"channel":"telegram","body":"Текст сообщения"}, ensure_ascii=False),
+    )
+    db.add_all([item, post])
+    db.commit()
+    page = client.get(f"/studio/products/{company.id}")
+    assert page.status_code == 200
+    assert "Бриф для Telegram" in page.text
+    assert "На проверке" in page.text
+    assert "awaiting_approval</small>" not in page.text
+    assert "telegram derivative brief</b>" not in page.text
