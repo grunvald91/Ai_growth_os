@@ -11,7 +11,7 @@ from app.content.telegram_publishing import (
     cancel_scheduled_post, run_due_telegram_post_once, safe_channel_locator,
 )
 from app.core.config import Settings
-from app.models.domain import Artifact, Product, Publication
+from app.models.domain import Artifact, Product, Publication, Task, TaskStatus
 
 
 class FakeTelegram:
@@ -166,3 +166,88 @@ async def test_changed_source_is_rejected_before_send(db):
     db.refresh(pub)
     assert pub.status == "failed_before_send"
     assert not any(name == "sendMessage" for name, _ in fake.calls)
+
+
+@pytest.mark.asyncio
+async def test_publish_calendar_slot_updates_states_and_survives_scheduler(db):
+    company = Product(name="Кафе", slug="calendar-telegram-post")
+    db.add(company)
+    db.flush()
+    job = Task(product_id=company.id, title="calendar:package",
+               assigned_agent="content_factory", status=TaskStatus.COMPLETED)
+    db.add(job)
+    db.flush()
+    post = Artifact(product_id=company.id, task_id=job.id,
+                    kind="channel_text", title="Вечернее меню",
+                    status="approved",
+                    content=json.dumps({
+                        "channel":"telegram", "title":"Вечернее меню",
+                        "body":"Вечером приятно выбрать лёгкий ужин и узнать детали меню заранее.",
+                    }, ensure_ascii=False))
+    db.add(post)
+    db.flush()
+    when = datetime.now(timezone.utc) + timedelta(minutes=4)
+    plan = Artifact(product_id=company.id, kind="editorial_plan",
+                    title="Календарь", status="approved",
+                    content=json.dumps({
+                        "approval_state":"active",
+                        "timezone":"Europe/Moscow",
+                        "slots":[{
+                            "slot_id":"3", "package_key":"package1", "task_id":str(job.id),
+                            "platform":"telegram", "topic":"Вечернее меню",
+                            "state":"ready_for_review", "publish_at":when.isoformat(),
+                        }],
+                    }))
+    db.add(plan)
+    db.commit()
+    conn = save_verified_channel(db, await verify_channel(FakeTelegram(), "@craft_studio"))
+    with pytest.raises(ValueError, match="совпадать"):
+        schedule_post(db, post.id, conn.id, when+timedelta(minutes=2),
+                      plan_id=plan.id, slot_id="3")
+    pub = schedule_post(db, post.id, conn.id, when,
+                        plan_id=plan.id, slot_id="3")
+    db.refresh(plan)
+    slot = json.loads(plan.content)["slots"][0]
+    assert slot["state"] == "scheduled"
+    assert slot["telegram_publication_id"] == str(pub.id)
+    fake = FakeTelegram()
+    enabled = Settings(telegram_bot_token="unit-test-only",
+                       content_telegram_autopost_enabled=True, _env_file=None)
+    assert await run_due_telegram_post_once(
+        sessions(db), enabled, api=fake,
+        now=when+timedelta(seconds=1),
+    ) == 1
+    db.refresh(plan)
+    assert json.loads(plan.content)["slots"][0]["state"] == "published"
+    assert json.loads(plan.content)["slots"][0]["telegram_message_id"] == 876
+
+
+@pytest.mark.asyncio
+async def test_cancelling_calendar_link_restores_ready_state(db):
+    company = Product(name="Кофейня", slug="calendar-cancel-telegram")
+    db.add(company)
+    db.flush()
+    job = Task(product_id=company.id, title="calendar:package",
+               assigned_agent="content_factory", status=TaskStatus.COMPLETED)
+    db.add(job)
+    db.flush()
+    post = Artifact(product_id=company.id, task_id=job.id,
+                    kind="channel_text", title="Про кофе", status="approved",
+                    content=json.dumps({"channel":"telegram","body":"Кофе с утра"},ensure_ascii=False))
+    db.add(post)
+    db.flush()
+    when = datetime.now(timezone.utc) + timedelta(minutes=3)
+    plan = Artifact(product_id=company.id, kind="editorial_plan", title="Календарь",
+                    status="approved",
+                    content=json.dumps({"approval_state":"active","slots":[{
+                        "slot_id":"1","platform":"telegram","task_id":str(job.id),
+                        "publish_at":when.isoformat(),"state":"ready_for_review",
+                    }]}))
+    db.add(plan)
+    db.commit()
+    conn = save_verified_channel(db, await verify_channel(FakeTelegram(), "@craft_studio"))
+    pub = schedule_post(db, post.id, conn.id, when, plan_id=plan.id, slot_id="1")
+    cancel_scheduled_post(db, pub.id)
+    db.refresh(plan)
+    assert json.loads(plan.content)["slots"][0]["state"] == "ready_for_review"
+    assert json.loads(plan.content)["slots"][0]["telegram_publication_id"] is None
