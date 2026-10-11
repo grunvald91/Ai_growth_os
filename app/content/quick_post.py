@@ -269,19 +269,20 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
         db.get(Task, task.id).status = TaskStatus.COMPLETED
         db.commit()
         return True
-    except asyncio.CancelledError:
+    except (Exception, asyncio.CancelledError) as exc:
         db.rollback()
-        db.get(Task, task.id).status = TaskStatus.FAILED
-        db.commit()
-        raise
-    except Exception as exc:
-        db.rollback()
+        cancelled = isinstance(exc, asyncio.CancelledError)
+        safe_code = "quick_post_cancelled" if cancelled else "quick_post_failed:" + type(exc).__name__
         for run_id in run_ids:
             run = db.get(AgentRun, run_id)
-            if run.status != "completed":
+            if run is not None and run.status != "completed":
                 run.status = "failed"
-                run.error = "quick_post_failed:" + type(exc).__name__
+                run.error = safe_code
                 run.finished_at = datetime.now(timezone.utc)
-        db.get(Task, task.id).status = TaskStatus.FAILED
+        failed_task = db.get(Task, task.id)
+        if failed_task is not None:
+            failed_task.status = TaskStatus.FAILED
         db.commit()
+        if cancelled:
+            raise
         return False
