@@ -11,7 +11,9 @@ from app.content.render import asset_path
 from app.content.service import queue_content
 from app.content.revisions import queue_post_edit, post_history
 from app.content.calendar import PLATFORMS
-from app.models.domain import Artifact, ArtifactStatus, Metric, Product, Task, TaskStatus
+from app.content.telegram_publishing import (verify_channel, save_verified_channel,
+    connected_channels, schedule_post, cancel_scheduled_post)
+from app.models.domain import Artifact, ArtifactStatus, Metric, Product, Publication, Task, TaskStatus
 
 LABELS = {'own_site':'SEO / сайт', 'dzen':'Дзен', 'tenchat':'TenChat', 'vc_ru':'vc.ru',
           'telegram':'Telegram', 'vk':'ВКонтакте', 'faq':'FAQ', 'founder':'Пост автора'}
@@ -35,9 +37,12 @@ class TelegramContent:
         self.post_target = None  # (product_id, channel) for a single post
         self.post_edit_target = None  # immutable Artifact ID under revision
         self.calendar_target = None  # (plan_id, slot_id)
+        self.channel_connect_product = None
+        self.schedule_post_id = None
+        self.schedule_target = None  # (post_id, connection_id)
 
     async def menu(self, chat_id):
-        self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = self.calendar_target = None
+        self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = self.calendar_target = self.channel_connect_product = self.schedule_post_id = self.schedule_target = None
         with self.sessions() as db:
             products = list(db.scalars(select(Product).order_by(Product.name).limit(20)))
             buttons = [[{'text':p.name, 'callback_data':f'content:product:{p.id}'}] for p in products]
@@ -66,6 +71,7 @@ class TelegramContent:
                         {'text':'📦 Полный пакет', 'callback_data':f'content:queue:{product.id}'}],
                        [{'text':'✏️ Тема полного пакета', 'callback_data':f'content:topic:{product.id}'}]]
             buttons.append([{'text':'📅 Контент-план', 'callback_data':f'content:calendar:{product.id}'}])
+            buttons.append([{'text':'📣 Telegram-каналы и публикации', 'callback_data':f'content:channels:{product.id}'}])
             recent_posts = list(db.scalars(select(Artifact).where(
                 Artifact.product_id == product.id, Artifact.kind == 'channel_text'
             ).order_by(Artifact.created_at.desc()).limit(10)))
@@ -87,8 +93,41 @@ class TelegramContent:
             await self.menu(chat)
             return True
         if text.startswith('/') or text in {'📊 Главное','✅ На согласование','🧪 Тесты','🔄 Обновить','🏢 Компания','📇 Контакты','📧 Почта'}:
-            self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = self.calendar_target = None
+            self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = self.calendar_target = self.channel_connect_product = self.schedule_post_id = self.schedule_target = None
             return False
+        if self.channel_connect_product:
+            try:
+                checked = await verify_channel(self.bot.api, text)
+                with self.sessions() as db:
+                    connection = save_verified_channel(db, self.channel_connect_product, checked)
+                self.channel_connect_product = None
+                await self.bot._send(chat,
+                    '✅ Канал подключён: ' + connection.title +
+                    '. Бот проверен как администратор с правом отправки. '
+                    'Публикация возможна только после утверждения текста и назначения даты.')
+            except (ValueError, LookupError) as exc:
+                await self.bot._send(chat, str(exc))
+            except Exception:
+                await self.bot._send(chat,
+                    'Не удалось проверить права бота через Telegram. '
+                    'Добавь бота администратором с правом публикации и попробуй ещё раз.')
+            return True
+        if self.schedule_target:
+            post_id, channel_id = self.schedule_target
+            try:
+                when = datetime.strptime(text, '%d.%m.%Y %H:%M').replace(tzinfo=ZoneInfo('Europe/Moscow'))
+                with self.sessions() as db:
+                    publication = schedule_post(db, post_id, channel_id, when)
+                self.schedule_target = self.schedule_post_id = None
+                enabled = self.settings().content_telegram_autopost_enabled
+                await self.bot._send(chat,
+                    '✅ Публикация запланирована на ' + when.strftime('%d.%m.%Y %H:%M') +
+                    ' (Москва). ' +
+                    ('Автоотправка активна.' if enabled else
+                     'Автоотправка пока выключена на сервере; материал не будет отправлен до включения.'))
+            except (ValueError, LookupError) as exc:
+                await self.bot._send(chat, str(exc))
+            return True
         if self.calendar_target:
             plan_id, slot_id = self.calendar_target
             try:
@@ -258,7 +297,89 @@ class TelegramContent:
                 self.post_edit_target = None
             if action != 'slotmove':
                 self.calendar_target = None
-            if action == 'slotmove':
+            if action != 'connecttg':
+                self.channel_connect_product = None
+            if action not in {'schedulechannels', 'schedtg'}:
+                self.schedule_post_id = None
+            if action != 'schedtg':
+                self.schedule_target = None
+            if action == 'channels':
+                with self.sessions() as db:
+                    product = db.get(Product, record_id)
+                    if product is None:
+                        raise LookupError('Компания не найдена')
+                    channels = connected_channels(db, record_id)
+                    publications = list(db.scalars(select(Publication).where(
+                        Publication.product_id == record_id,
+                        Publication.channel == 'telegram',
+                    ).order_by(Publication.created_at.desc()).limit(12)))
+                    actions = [[{
+                        'text':'➕ Подключить Telegram-канал',
+                        'callback_data':f'content:connecttg:{record_id}',
+                    }]]
+                    for pub in publications:
+                        if pub.status == 'scheduled':
+                            actions.append([{
+                                'text':'✖ Отменить ' + str(pub.id)[:8],
+                                'callback_data':f'content:canceltg:{pub.id}',
+                            }])
+                    summary = '\n'.join('• ' + ch.title for ch in channels) or 'Каналы ещё не подключены.'
+                    summary += '\n\nПоследние публикации:\n'
+                    summary += '\n'.join(
+                        '• ' + pub.status + ' · ' + str(pub.artifact_id)[:8]
+                        for pub in publications
+                    ) or 'Нет запланированных публикаций.'
+                await self.bot._send(chat,
+                    '📣 Telegram-каналы компании: ' + product.name + '\n\n' + summary +
+                    '\n\nДля подключения добавь бота администратором канала с правом публикации. '
+                    'Пароль и токены вручную вводить не нужно.',
+                    reply_markup={'inline_keyboard':actions})
+            elif action == 'connecttg':
+                with self.sessions() as db:
+                    if db.get(Product, record_id) is None:
+                        raise LookupError('Компания не найдена')
+                self.topic_product = self.metrics_article = self.plan_product = None
+                self.channel_connect_product = record_id
+                await self.bot._send(chat,
+                    'Добавь управляющего бота администратором канала с правом публикации. '
+                    'Затем пришли @username канала или его ID (начинается с -100). '
+                    'Я проверю права через официальный Telegram API.')
+            elif action == 'schedulechannels':
+                with self.sessions() as db:
+                    post = db.get(Artifact, record_id)
+                    if post is None or post.kind != 'channel_text' or post.status != ArtifactStatus.APPROVED:
+                        raise LookupError('Сначала утверди пост')
+                    if json.loads(post.content).get('channel') != 'telegram':
+                        raise ValueError('Автопостинг доступен только для Telegram-постов')
+                    connections = connected_channels(db, post.product_id)
+                self.schedule_post_id = record_id
+                actions = [[{
+                    'text':'📣 ' + connection.title[:42],
+                    'callback_data':f'content:schedtg:{connection.id}',
+                }] for connection in connections]
+                await self.bot._send(chat,
+                    'Выбери канал для утверждённого поста. '
+                    'Если каналов нет, сначала открой раздел Telegram-каналов.',
+                    reply_markup={'inline_keyboard':actions})
+            elif action == 'schedtg':
+                if self.schedule_post_id is None:
+                    raise ValueError('Сначала открой утверждённый пост и выбери публикацию')
+                with self.sessions() as db:
+                    post = db.get(Artifact, self.schedule_post_id)
+                    connection = db.get(Artifact, record_id)
+                    if (post is None or connection is None or post.product_id != connection.product_id
+                            or connection.kind != 'telegram_channel_connection'
+                            or connection.status != ArtifactStatus.APPROVED):
+                        raise ValueError('Канал не принадлежит компании этого поста')
+                self.schedule_target = (self.schedule_post_id, record_id)
+                await self.bot._send(chat,
+                    'Пришли дату и время публикации по Москве: ДД.ММ.ГГГГ ЧЧ:ММ. '
+                    'Например: 15.10.2026 12:30. Перед отправкой пост должен оставаться утверждённым.')
+            elif action == 'canceltg':
+                with self.sessions() as db:
+                    cancel_scheduled_post(db, record_id)
+                await self.bot._send(chat, '✅ Публикация отменена до отправки.')
+            elif action == 'slotmove':
                 from app.content.calendar import plan_record
                 with self.sessions() as db:
                     row, plan = plan_record(db, record_id)
@@ -443,6 +564,14 @@ class TelegramContent:
                                 'callback_data':f'content:editpost:{item.id}',
                             }])
                             reply_markup = {'inline_keyboard': buttons}
+                        if (value.get('channel') == 'telegram' and
+                                item.status == ArtifactStatus.APPROVED):
+                            if reply_markup is None:
+                                reply_markup = {'inline_keyboard': []}
+                            reply_markup['inline_keyboard'].append([{
+                                'text':'📣 Запланировать в Telegram',
+                                'callback_data':f'content:schedulechannels:{item.id}',
+                            }])
                         if value.get('origin') in {'quick_post', 'owner_revision'}:
                             if reply_markup is None:
                                 reply_markup = {'inline_keyboard': []}
