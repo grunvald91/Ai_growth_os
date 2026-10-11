@@ -207,6 +207,10 @@ class TelegramContent:
         try:
             _, action, raw = data.split(':',2)
             record_id = UUID(raw)
+            # Leaving the quick-post wizard must not steal a later unrelated
+            # message (company profile, research parameters, statistics, etc.).
+            if action not in {'postchannels', 'posttg', 'postvk', 'postdzen', 'postvc', 'postten'}:
+                self.post_target = None
             if action == 'postchannels':
                 self.topic_product = self.metrics_article = self.plan_product = self.post_target = None
                 with self.sessions() as db:
