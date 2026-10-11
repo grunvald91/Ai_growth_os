@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     skills_root: Path = Path("skills")
     products_root: Path = Path("products")
     review_skill: str | None = None
+    studio_admin_username: str | None = None
+    studio_admin_password: str | None = None
     telegram_bot_token: str | None = None
     telegram_owner_chat_id: int | None = None
     telegram_poll_timeout_seconds: int = 25
