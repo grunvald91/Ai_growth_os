@@ -3,13 +3,14 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.db.models import Base
 from app.db.session import get_db
 from app.main import app
+from app.api.content_studio import latest_plan, latest_draft, state_for_group
 from app.models.domain import Artifact, Product, Task, TaskStatus
 
 
@@ -295,3 +296,104 @@ def test_studio_calendar_date_filter_and_material_search_work(studio_db):
         assert "Нужная статья" not in posts.text
     finally:
         app.dependency_overrides.clear()
+
+
+def test_active_plan_is_stable_when_new_draft_is_generated(studio_db):
+    db = studio_db
+    product = Product(name="Пекарня", slug="bakery-plan")
+    db.add(product)
+    db.flush()
+    active = make_plan(approval_state="active")
+    active["generated_at"] = "2026-10-01T12:00:00+00:00"
+    active["slots"][0]["topic"] = active["slots"][1]["topic"] = "Действующий календарь"
+    draft = make_plan(approval_state="draft")
+    draft["generated_at"] = "2026-10-11T12:00:00+00:00"
+    draft["slots"][0]["topic"] = draft["slots"][1]["topic"] = "Новый план"
+    current_row = Artifact(product_id=product.id, kind="editorial_plan", title="Действует",
+                           content=json.dumps(active, ensure_ascii=False))
+    draft_row = Artifact(product_id=product.id, kind="editorial_plan", title="Черновик",
+                         content=json.dumps(draft, ensure_ascii=False))
+    db.add_all([current_row, draft_row])
+    db.commit()
+
+    selected, _ = latest_plan(db, product.id)
+    newest_draft, _ = latest_draft(db, product.id)
+    assert selected.id == current_row.id
+    assert newest_draft.id == draft_row.id
+
+    client = client_for(db)
+    try:
+        base = f"/studio/products/{product.id}"
+        dashboard = client.get(base)
+        assert dashboard.status_code == 200
+        assert "Действующий календарь" in dashboard.text
+        assert "Новый контент-план ожидает согласования" in dashboard.text
+        assert f'href="{base}/plan?view=draft"' in dashboard.text
+
+        current_page = client.get(base + "/plan")
+        assert "Действующий календарь" in current_page.text
+        assert "Новый план" not in current_page.text
+
+        draft_page = client.get(base + "/plan?view=draft")
+        assert "Новый план" in draft_page.text
+        assert f'/plans/{draft_row.id}/approve' in draft_page.text
+        assert "Действующий план" in draft_page.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_failed_package_can_retry_without_duplicate_or_replacing_active_job(studio_db):
+    db = studio_db
+    product = Product(name="Салон", slug="salon-retry")
+    db.add(product)
+    db.flush()
+    previous_task = Task(product_id=product.id, title="calendar:legacy",
+                         assigned_agent="content_factory", status=TaskStatus.FAILED)
+    db.add(previous_task)
+    db.flush()
+    plan = make_plan(previous_task.id, approval_state="active")
+    for slot in plan["slots"]:
+        slot["state"] = "failed"
+    plan_row = Artifact(product_id=product.id, kind="editorial_plan", title="План",
+                        content=json.dumps(plan, ensure_ascii=False))
+    db.add(plan_row)
+    db.commit()
+
+    client = client_for(db)
+    try:
+        base = f"/studio/products/{product.id}"
+        detail = client.get(base + "/packages/pkg-1")
+        assert detail.status_code == 200
+        assert "Повторить подготовку" in detail.text
+        response = client.post(
+            base + f"/plans/{plan_row.id}/packages/pkg-1/queue", follow_redirects=False
+        )
+        assert response.status_code == 303
+        db.refresh(plan_row)
+        refreshed_slots = json.loads(plan_row.content)["slots"]
+        ids = {slot["task_id"] for slot in refreshed_slots}
+        assert len(ids) == 1
+        assert str(previous_task.id) not in ids
+        assert {slot["state"] for slot in refreshed_slots} == {"queued"}
+        new_task = db.get(Task, __import__("uuid").UUID(next(iter(ids))))
+        assert new_task is not None
+        assert new_task.status == TaskStatus.QUEUED
+        assert new_task.product_id == product.id
+        assert db.get(Task, previous_task.id).status == TaskStatus.FAILED
+
+        duplicate = client.post(
+            base + f"/plans/{plan_row.id}/packages/pkg-1/queue", follow_redirects=False
+        )
+        assert duplicate.status_code == 409
+        assert len(list(db.scalars(select(Task).where(
+            Task.product_id == product.id, Task.assigned_agent == "content_factory"
+        )))) == 2
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_studio_group_states_include_completed_and_cancelled():
+    assert state_for_group([{"state": "completed"}]) == "completed"
+    assert state_for_group([{"state": "cancelled"}]) == "cancelled"
+    assert state_for_group([{"state": "ready_for_review"}, {"state": "planned"}]) == "ready_for_review"
+    assert state_for_group([{"state": "failed"}, {"state": "completed"}]) == "failed"
