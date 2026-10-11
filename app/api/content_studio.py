@@ -748,9 +748,11 @@ def product_dashboard(db: Session, product: Product) -> str:
         groups[slot.get("package_key") or "unknown"].append(slot)
 
     content_tasks = [task for task in tasks if task.assigned_agent in {"content_factory", "content_creative", "content_editor"}]
+    # Manual/standalone assets belong in the owner's library too; they need
+    # not have originated from a content factory task.
     material_records = [
         artifact for artifact in artifacts
-        if artifact.kind in MATERIAL_KINDS and artifact.task_id
+        if artifact.kind in MATERIAL_KINDS
     ]
     # Deduplicate artifacts by id while retaining newest-first order.
     seen = set()
