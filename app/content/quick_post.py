@@ -15,6 +15,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.llm.schemas import LLMMessage, LLMRequest
+from app.content.quality import post_quality_warnings
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
 from app.services.tasks import TaskService
@@ -250,12 +251,15 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
             run.finished_at = datetime.now(timezone.utc)
             db.commit()
 
+        warnings = post_quality_warnings(output.title, output.body, request.channel)
         content = {
             "channel": request.channel,
             "title": output.title,
             "body": output.body,
             "cta": output.cta,
             "editorial_checks": output.editor_notes,
+            "quality_warnings": warnings,
+            "quality_review": "heuristic_only_requires_owner_review",
             "evidence_ids": output.evidence_ids,
             "origin": "quick_post",
             "publication": "manual_until_channel_connected",
