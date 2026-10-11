@@ -9,22 +9,28 @@ import html
 import json
 from collections import defaultdict
 from datetime import datetime
+from urllib.parse import parse_qs
+from zoneinfo import ZoneInfo
 from uuid import UUID
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
+from app.api.content_studio_ui import create_content_html, review_html, channels_html
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
-from app.content.calendar import PLATFORMS, approve_plan, pause_plan
+from app.content.calendar import PLATFORMS, approve_plan, pause_plan, reschedule_slot
 from app.content.service import queue_content
-from app.content.revisions import post_history
+from app.content.revisions import post_history, queue_post_edit
+from app.content.creative import CreativeRequest, queue_creative
+from app.content.telegram_publishing import (verify_channel, save_verified_channel,
+    connected_channels, schedule_post, cancel_scheduled_post)
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.domain import Artifact, Product, Task, TaskStatus
+from app.models.domain import Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 
