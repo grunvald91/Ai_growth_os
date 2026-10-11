@@ -52,3 +52,58 @@ Sources: https://developers.google.com/youtube/v3/guides/auth/server-side-web-ap
 8. If smoke checks fail, restore the prior containers/files/database snapshot. Do not downgrade the production database without a verified backup because dropping revision 0006 loses scheduling records.
 
 Current branch is **code only**, not tested against real Telegram, Meta or Google accounts and not published to production.
+
+## VK ID, Meta Threads, Dzen, vc.ru
+
+**VK/VK Video:** VK ID OAuth PKCE, account owner specifies a numeric community ID
+before redirect; existing VK adapter checks group manager role, permissions to
+read comments and write replies. User login alone does not grant these rights.
+Configure SOCIAL_VK_CLIENT_ID and these redirects:
+- https://growth.servgo.ru/social/oauth/vk/callback
+- https://growth.servgo.ru/social/oauth/vk_video/callback
+
+**Threads:** configure SOCIAL_THREADS_CLIENT_ID and
+SOCIAL_THREADS_CLIENT_SECRET for a dedicated Meta Threads app.
+Redirect: https://growth.servgo.ru/social/oauth/threads/callback
+Scope: threads_basic, threads_content_publish, threads_read_replies,
+threads_manage_replies. The existing comment adapter checks the obtained token
+and account ID after OAuth; long-lived tokens/refresh metadata are encrypted.
+
+**Dzen:** link a public Telegram channel with official @zen_sync_bot:
+https://t.me/zen_sync_bot . ServGo schedules posts in that Telegram channel;
+the Dzen sync is an external feature controlled by Dzen, and ServGo cannot
+assert that publication to Dzen happened based only on a successful Telegram
+post. Comments remain manual drafts. Dzen's own author channel explains the bot:
+https://t.me/s/zenforcreators?after=1289
+
+**vc.ru:** the Social Networks page displays platform-specific content with
+Copy and Open vc.ru actions. Comments and publications remain manually
+performed by the owner. No public writing/comment API for general third-party
+access was confirmed, and no private browser endpoints or cookies are used.
+Official editorial introduction: https://vc.ru/team/28520-how-to-vcru
+
+## Proxy checking
+
+The production Compose config already references the proxy endpoint
+188.120.254.223:8891 for overseas platforms, via COMMENT_PLATFORM_PROXY_URL.
+This is **configuration**, not a successful live connectivity test.
+VK comment methods and VK ID auth are direct. Threads/Instagram/YouTube/Telegram
+use overseas proxy routing.
+
+The Social Networks UI has an authenticated 'Проверить подключение' action,
+which checks a fixed list of HTTPS API destinations through the proxy from
+the **API container** without user tokens, and reports response codes.
+It does NOT verify OAuth scopes, approval for third-party accounts, content
+publishing rights, or connectivity from the separate worker container.
+
+Before production deploy:
+1. Run pytest on test_social_extended_oauth.py and test_social_proxy_check.py
+   together with test_social_oauth.py, test_comments.py and test_social_telegram.py.
+2. Test VK/Threads OAuth redirect URI, consent grants, token refresh and actual
+   comment reads/replies on owner-authorized test accounts.
+3. Test proxy from API and worker containers; verify the overseas proxy chain.
+4. Configure domains, secrets and provider app approval. Then stage migration
+   0006 on a database backup and deploy with health check/rollback.
+
+No GitHub Actions, live proxy test, OAuth-provider test or production
+deployment has been performed during this change.
