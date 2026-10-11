@@ -16,6 +16,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.content.quick_post import CHANNEL_GUIDANCE
+from app.content.quality import post_quality_warnings
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, CostRecord, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
@@ -215,12 +216,15 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
             raise ValueError("Revision source has changed; retry against latest material")
         old = json.loads(source.content)
         root_id = old.get("revision_root_id") or str(source.id)
+        warnings = post_quality_warnings(draft.title, draft.body, channel)
         new_value = {
             "channel": old["channel"],
             "title": draft.title,
             "body": draft.body,
             "cta": draft.cta,
             "editorial_checks": draft.editor_notes,
+            "quality_warnings": warnings,
+            "quality_review": "heuristic_only_requires_owner_review",
             "evidence_ids": draft.evidence_ids,
             "origin": "owner_revision",
             "revision_of": str(source.id),
