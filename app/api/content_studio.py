@@ -25,7 +25,7 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import Artifact, Product, Task, TaskStatus
 
-router = APIRouter(dependencies=[Depends(require_studio_auth)])
+router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 
 MATERIAL_KINDS = {
     "article", "channel_text", "video_script", "content_distribution",
