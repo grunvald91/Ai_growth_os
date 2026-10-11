@@ -107,3 +107,35 @@ Before production deploy:
 
 No GitHub Actions, live proxy test, OAuth-provider test or production
 deployment has been performed during this change.
+
+## 2026-10-11: provider ownership and vc.ru limitations — verified
+
+Dzen was acquired by VK from Yandex on **2022-09-12**. The existence of
+Yandex ID OAuth means that applications may authenticate Yandex users; it does
+**not** supply Dzen content/comment API permissions. Do not show a misleading
+"Connect Dzen via Yandex OAuth" button as though Dzen publishing were unlocked.
+Current supported Dzen publishing bridge: public Telegram channel connected to
+@zen_sync_bot. This bridge is external; ServGo cannot prove Dzen delivery.
+Ownership source: https://www.interfax.ru/business/1046274
+Yandex OAuth API rights: https://yandex.ru/dev/id/doc/ru/
+
+**Important new finding for vc.ru:** the vc.ru editorial team runs an official
+Telegram-to-vc.ru publication service. It can carry media and text; vc.ru may
+generate a headline, sends a notification, and supports edit/delete via its own
+bot. However participation requires **editorial pre-moderation**, and the
+official announcement explicitly says **brand channels are not connected**.
+Advertising-labelled posts are not imported. Thus this is not a general-purpose
+business/brand integration and must **never** be advertised as such.
+
+For an eligible personal/professional channel, the owner sends the Telegram
+channel URL **and** vc.ru blog URL to telegram@vc.ru, then follows the
+acceptance instructions from vc.ru. The bot is @vcrepost_bot.
+Source: https://vc.ru/about-tg-bot
+Bot: https://t.me/vcrepost_bot
+
+The Social Networks UI and comment-platform guide now disclose these
+restrictions and link to the official application route. The existing
+prepared-content copy/editor workflow remains available for brand businesses,
+and replies to vc.ru comments are manual. No private/unofficial publication
+endpoints or browser automation should be introduced. No provider
+connectivity or production deployment has been verified.
