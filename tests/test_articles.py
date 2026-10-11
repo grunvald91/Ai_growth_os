@@ -915,7 +915,7 @@ def test_servgo_specific_fallbacks_cannot_leak_into_another_business():
         'request': {'topic': 'Уход за букетом'},
         'prior_stage_outputs': {},
     }
-    with pytest.raises(ValueError, match='not safe for this company'):
+    with pytest.raises(ValueError, match='validated long-form'):
         _platform_text_fallback_payload(other_company)
     with pytest.raises(ValueError, match='not safe for this company'):
         _creative_fallback_payload('visual_designer', other_company)
