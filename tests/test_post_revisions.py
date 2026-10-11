@@ -195,3 +195,17 @@ async def test_worker_routes_post_edit_requests_without_launching_long_form(monk
     result = await run_content_once(session_factory(db), Settings(products_root=tmp_path))
     assert result == 1
     assert calls == [(post.id, task.id)]
+
+
+@pytest.mark.asyncio
+async def test_old_post_cannot_be_approved_while_owner_revision_is_queued(db, tmp_path):
+    _, post = setup_post(db)
+    pending = queue_post_edit(db, post.id, "Поменяй первый абзац и сделай проще")
+    bot = FakeBot()
+    ui = TelegramContent(bot, session_factory(db),
+                         lambda: Settings(products_root=tmp_path))
+    await ui.callback(123, "content:approvepost:" + str(post.id))
+    db.refresh(post)
+    assert post.status == ArtifactStatus.AWAITING_APPROVAL
+    assert "сейчас дорабатывается" in bot.outgoing[-1][0]
+    assert db.get(Task, pending.id).status == TaskStatus.QUEUED
