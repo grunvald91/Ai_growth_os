@@ -38,6 +38,7 @@ class StrictModel(BaseModel):
 class QuickPostRequest(StrictModel):
     mode: str = Field(pattern="^post$")
     product_id: UUID
+    task_id: UUID | None = None
     topic: str = Field(min_length=3, max_length=300)
     channel: str
     audience: str | None = Field(default=None, max_length=300)
