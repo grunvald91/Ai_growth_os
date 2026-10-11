@@ -23,6 +23,7 @@ from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 
 from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
+from app.api.content_studio_brand import SERVGO_FAVICON_SVG, servgo_brand_html
 from app.api.content_studio_ui import create_content_html, review_html, channels_html
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.content.calendar import (PLATFORMS, approve_plan, pause_plan,
@@ -64,6 +65,11 @@ STATUS_LABELS = {
     "failed": "Ошибка",
     "missed": "Пропущено",
     "cancelled": "Отменено",
+    "awaiting_approval": "На проверке",
+    "approved": "Утверждено",
+    "rejected": "Предыдущая версия",
+    "failed_before_send": "Не отправлено",
+    "sending": "Отправляется",
 }
 
 
@@ -286,6 +292,27 @@ def artifact_kind_label(record: Artifact, value: dict | None = None) -> str:
     return record.kind.replace("_", " ").title()
 
 
+def display_material_title(record: Artifact, value: dict | None = None) -> str:
+    """Show business-facing labels without modifying the original artifact title."""
+    value = value or parse_json(record)
+    raw = (record.title or "").strip()
+    normalized = raw.casefold().replace("_", " ").replace("-", " ")
+    aliases = {
+        "telegram derivative brief": "Бриф для Telegram",
+        "dzen derivative brief": "Бриф для Дзена",
+        "story derivative brief": "Сценарий Stories",
+        "static image derivative brief": "Бриф изображения",
+        "short video derivative brief": "Идея короткого видео",
+        "content distribution": "План публикаций",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    if normalized.endswith(" derivative brief"):
+        channel = normalized.removesuffix(" derivative brief")
+        return f"Бриф для {platform_label(channel)}"
+    return raw or artifact_kind_label(record, value)
+
+
 def artifact_text(record: Artifact, value: dict | None = None) -> str:
     value = value or parse_json(record)
     if not value:
@@ -315,26 +342,17 @@ def visual_class(index: int) -> str:
 
 
 def brand_html() -> str:
-    return (
-        '<a class="brand" href="/studio">'
-        '<span class="brand-mark">S</span>'
-        '<span><span class="brand-name">ServGo</span>'
-        '<span class="brand-sub">Больше порядка в вашем сервисе</span></span>'
-        '</a>'
-    )
+    return servgo_brand_html()
 
 
 def sidebar_html(product_id: UUID, active: str = "overview") -> str:
     base = f"/studio/products/{product_id}"
     def item(name: str, href: str, icon: str, label: str) -> str:
         current = ' class="active" aria-current="page"' if active == name else ""
-        return f'<a{current} href="{href}"><span class="nav-ico" aria-hidden="true">{icon}</span>{label}</a>'
+        return f'<a{current} href="{href}" aria-label="{esc(label)}"><span class="nav-ico" aria-hidden="true">{icon}</span>{label}</a>'
     return f"""
     <aside class="sidebar">
-      <a class="brand" href="{base}" aria-label="ServGo · Главная">
-        <span class="brand-mark">S</span>
-        <span><span class="brand-name">ServGo</span><span class="brand-sub">ИИ-команда маркетинга</span></span>
-      </a>
+      {servgo_brand_html(href=base)}
       <div class="nav-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
       <nav class="nav" aria-label="Основная навигация">
         {item("overview", base, "⌂", "Главная")}
@@ -342,7 +360,6 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         {item("review", base + "/review", "✓", "На проверке")}
         {item("calendar", base + "/calendar", "▦", "Календарь")}
         {item("materials", base + "/materials", "▤", "Материалы")}
-        {item("calendar", base + "/calendar", "□", "Календарь")}
         {item("analytics", base + "/analytics", "⌁", "Аналитика")}
         {item("comments", base + "/comments", "☷", "Комментарии")}
         {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
@@ -379,6 +396,9 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
     <dialog id="mobile-sections" class="mobile-sections" aria-labelledby="mobile-sections-title">
       <div class="mobile-sections-head"><h2 id="mobile-sections-title">Все разделы</h2><button type="button" data-close-dialog aria-label="Закрыть меню">×</button></div>
       <nav class="mobile-sections-links" aria-label="Все разделы">
+        {item("create", base + "/create", "＋", "Создать")}
+        {item("review", base + "/review", "✓", "На проверке")}
+        {item("channels", base + "/channels", "↗", "Каналы и публикации")}
         {item("overview", base, "⌂", "Обзор")}
         {item("plan", base + "/plan", "▣", "Контент-план")}
         {item("materials", base + "/materials", "▤", "Материалы")}
@@ -386,15 +406,27 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
         {item("analytics", base + "/analytics", "⌁", "Аналитика")}
         {item("comments", base + "/comments", "☷", "Комментарии")}
         {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
-        <a href="/studio?choose=1"><span class="m-ico">⇄</span>Выбрать проект</a>
+        <a href="/studio?choose=1" aria-label="Выбрать проект"><span class="m-ico">⇄</span>Выбрать проект</a>
       </nav>
     </dialog>
     """
 
 
+def mobile_header_html(product: Product) -> str:
+    """One brand bar on mobile, not a second bottom navigation overlay."""
+    base = f"/studio/products/{product.id}"
+    return f"""
+    <header class="sg-mobile-shell-head">
+      {servgo_brand_html(compact=True, href=base)}
+      <a class="sg-mobile-project" href="/studio?choose=1"
+         aria-label="Сменить компанию: {esc(product.name)}">{esc(product.name)} <span aria-hidden="true">⌄</span></a>
+    </header>
+    """
+
+
 def asset_dialog(record: Artifact) -> str:
     value = parse_json(record)
-    title = esc(record.title)
+    title = esc(display_material_title(record, value))
     kind_label = esc(artifact_kind_label(record, value))
     copy_id = f"copy-{record.id}"
 
@@ -449,7 +481,7 @@ def asset_dialog(record: Artifact) -> str:
 def material_card(product_id: UUID, record: Artifact) -> str:
     value = parse_json(record)
     kind = artifact_kind(record)
-    title = esc(record.title)
+    title = esc(display_material_title(record, value))
     label = esc(artifact_kind_label(record, value))
     text = artifact_text(record, value)
     meta = excerpt(text, 90)
@@ -524,14 +556,14 @@ def package_card(
 
 
 def mobile_logo_html(product_id: UUID) -> str:
+    base = f"/studio/products/{product_id}"
     return f"""
-    <div class="m-brand">
-      <a class="m-logo-mark" href="/studio/products/{product_id}">S</a>
-      <a class="m-logo-word" href="/studio/products/{product_id}">ServGo</a>
-      <span class="m-logo-actions">
-        <a class="m-bell" href="/studio/products/{product_id}/analytics" aria-label="Аналитика">⌁</a>
-        <a class="m-avatar" href="/studio?choose=1" aria-label="Выбрать проект">S</a>
-      </span>
+    <div class="m-brand sg-mobile-brand">
+      {servgo_brand_html(compact=True, href=base)}
+      <div class="m-logo-actions">
+        <a class="m-bell" href="{base}/review" aria-label="Материалы на проверке">✓</a>
+        <a class="m-avatar" href="/studio?choose=1" aria-label="Сменить компанию">⇄</a>
+      </div>
     </div>
     """
 
@@ -613,7 +645,7 @@ def mobile_material_card(product_id: UUID, record: Artifact) -> str:
         f'<a class="m-material {kind}" href="/studio/products/{product_id}/materials/{record.id}">'
         f'<span class="m-material-type">{esc(artifact_kind_label(record, value))}</span>'
         f'<span class="m-material-thumb">{("▧" if kind == "article" else "▶" if kind == "video" else "✦")}</span>'
-        f'<b>{esc(record.title)}</b>'
+        f'<b>{esc(display_material_title(record, value))}</b>'
         f'<small>{esc(excerpt(artifact_text(record, value), 55))}</small>'
         '</a>'
     )
@@ -686,7 +718,7 @@ def selected_preview(record: Artifact | None) -> str:
     if record is None:
         return (
             '<section class="panel preview"><div class="preview-empty">'
-            '<div class="brand-mark" style="margin:0 auto 14px">S</div>'
+            '<img class="sg-preview-logo" src="/studio/assets/servgo.svg" alt="" width="44" height="44" style="margin:0 auto 14px">'
             '<b>Материалы появятся здесь</b><p>После подготовки пакета можно будет быстро открыть статью, пост или раскадровку.</p>'
             '</div></section>'
         )
@@ -694,7 +726,7 @@ def selected_preview(record: Artifact | None) -> str:
     text = artifact_text(record, value)
     return f"""
     <section class="panel preview">
-      <div class="preview-hero"><span class="brand-mark">S</span></div>
+      <div class="preview-hero"><img class="sg-preview-logo" src="/studio/assets/servgo.svg" alt="" width="44" height="44"></div>
       <div class="preview-content">
         <div class="preview-kicker">
           <span class="chip blue">{esc(artifact_kind_label(record, value))}</span>
@@ -737,9 +769,11 @@ def product_dashboard(db: Session, product: Product) -> str:
         groups[slot.get("package_key") or "unknown"].append(slot)
 
     content_tasks = [task for task in tasks if task.assigned_agent in {"content_factory", "content_creative", "content_editor"}]
+    # Manual/standalone assets belong in the owner's library too; they need
+    # not have originated from a content factory task.
     material_records = [
         artifact for artifact in artifacts
-        if artifact.kind in MATERIAL_KINDS and artifact.task_id
+        if artifact.kind in MATERIAL_KINDS
     ]
     # Deduplicate artifacts by id while retaining newest-first order.
     seen = set()
@@ -896,7 +930,7 @@ def product_dashboard(db: Session, product: Product) -> str:
     attention_html = f"""
     <section class="sg-workflow-banner" aria-labelledby="start-working">
       <div><span class="sg-overline">ВАШ СЛЕДУЮЩИЙ ШАГ</span>
-        <h2 id="start-working">Контент, которым легко управлять</h2>
+        <h2 id="start-working">Маркетинг под контролем</h2>
         <p>Поставьте задачу ИИ-команде. Затем проверьте текст или сценарий,
         внесите правки и отдельно разрешите публикацию.</p>
       </div>
@@ -938,9 +972,9 @@ def product_dashboard(db: Session, product: Product) -> str:
         meta = parse_json(material)
         recent_cards.append(
             f'<a class="sg-mini-row" href="/studio/products/{product.id}/materials/{material.id}">'
-            f'<span class="sg-mini-kind">▤</span><div><b>{esc(material.title[:65])}</b>'
+            f'<span class="sg-mini-kind">▤</span><div><b>{esc(display_material_title(material, meta)[:75])}</b>'
             f'<small>{esc(artifact_kind_label(material, meta))} · '
-            f'{esc(material.status.value)}</small></div>'
+            f'{esc(status_label(material.status))}</small></div>'
             '<span aria-hidden="true">↗</span></a>'
         )
     quick_feed = f"""
@@ -965,11 +999,14 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f7f9fc">
   <title>Growth Studio · {esc(product.name)}</title>
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=7">
+  <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=9">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
   {sidebar_html(product.id)}
+  {mobile_header_html(product)}
+  {mobile_nav_html(product.id)}
   <main class="main">
     <header class="topbar">
       <div>
@@ -983,7 +1020,7 @@ def product_dashboard(db: Session, product: Product) -> str:
           <div class="progress"><span style="width:{progress}%"></span></div>
         </div>
         <a class="product-pill" href="/studio?choose=1">
-          <span class="product-avatar">S</span><div><b>{esc(product.name)}</b><span>{esc(product.slug)}</span></div>
+          <img class="product-avatar sg-product-avatar" src="/studio/assets/servgo.svg" alt="" width="38" height="38"><div><b>{esc(product.name)}</b><span>{esc(product.slug)}</span></div>
         </a>
       </div>
     </header>
@@ -1024,10 +1061,9 @@ def product_dashboard(db: Session, product: Product) -> str:
     </div>
     </details>
   </main>
-  {mobile_nav_html(product.id)}
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=5"></script>
+<script src="/studio/assets/studio.js?v=9"></script>
 </body></html>"""
 
 
@@ -1095,11 +1131,14 @@ def studio_page_shell(
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f7f9fc">
   <title>{esc(title)} · Growth Studio</title>
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=7">
+  <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=9">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
   {sidebar_html(product.id, active)}
+  {mobile_header_html(product)}
+  {mobile_nav_html(product.id, active)}
   <main class="main route-main">
     <div class="route-mobile-brand">{mobile_logo_html(product.id)}</div>
     <header class="route-page-head">
@@ -1119,10 +1158,9 @@ def studio_page_shell(
     </nav>
     <div class="route-content">{body}</div>
   </main>
-  {mobile_nav_html(product.id, active)}
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=5"></script>
+<script src="/studio/assets/studio.js?v=9"></script>
 </body></html>"""
 
 
@@ -1412,7 +1450,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
           <div class="panel-sub">{esc(platform_label(brief.get("target_platform")))}</div></div></div></div>
           <div class="material-detail-body">
             <div class="detail-meta"><span class="chip blue">{esc(kind_label)}</span><span class="chip">{esc(record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "")}</span></div>
-            <h2>{esc(record.title)}</h2>
+            <h2>{esc(display_material_title(record, value))}</h2>
             <div id="material-copy" class="article-text"><b>Цель:</b> {esc(brief.get("objective"))}\n\n<b>Озвучка / диалог:</b>\n{esc(brief.get("voiceover_or_dialogue_script"))}\n\n<b>Монтаж и сведение:</b> {esc(brief.get("editing_mix_notes") or brief.get("editing_rhythm"))}</div>
             <div class="storyboard-grid">{shots or '<div class="empty">Раскадровка пока отсутствует.</div>'}</div>
           </div>
@@ -1437,7 +1475,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
         content = f"""
         <section class="sg-surface">
           <div class="sg-section-head"><div><span class="sg-overline">РАСКАДРОВКА · {esc(value.get('platform'))}</span>
-          <h2>{esc(record.title)}</h2><p>Предпросмотр структуры будущего материала. Медиафайлы не создавались.</p></div></div>
+          <h2>{esc(display_material_title(record, value))}</h2><p>Предпросмотр структуры будущего материала. Медиафайлы не создавались.</p></div></div>
           <div class="sg-storyboard-grid">{scenes or '<p>Кадры ещё не подготовлены.</p>'}</div>
           <h3>Текст и рекомендации</h3>
           <div id="material-copy" class="article-text">{esc(artifact_text(record, value))}</div>
@@ -1472,7 +1510,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
           <div class="panel-sub">Готовый материал</div></div></div></div>
           <div class="material-detail-body">
             <div class="detail-meta"><span class="chip blue">{esc(kind_label)}</span><span class="chip">{esc(record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "")}</span></div>
-            <h2>{esc(record.title)}</h2>
+            <h2>{esc(display_material_title(record, value))}</h2>
             <div class="article-text {'sg-post-preview' if record.kind == 'channel_text' else ''}">
               {f'<div class="sg-native-post-label">Предпросмотр текста · {esc(platform_label(value.get("channel")))}</div>' if record.kind == 'channel_text' else ''}
               <div id="material-copy">{esc(text)}</div>
@@ -1552,7 +1590,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
             + form_actions + '</section>'
         )
     return studio_page_shell(
-        product, active="materials", title=record.title,
+        product, active="materials", title=display_material_title(record, value),
         subtitle=f"{kind_label} · просмотр, проверка и версии.",
         body=content, actions=actions,
     )
@@ -1649,7 +1687,8 @@ def product_selector(products: list[Product]) -> str:
     )
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Growth Studio</title><link rel="stylesheet" href="/studio/assets/studio.css?v=7"></head>
+<title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=9"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
@@ -1661,6 +1700,12 @@ def product_selector(products: list[Product]) -> str:
 def studio_font():
     return Response((Path(__file__).parent / "assets" / "manrope.woff2").read_bytes(),
                     media_type="font/woff2", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+@router.get("/studio/assets/servgo.svg")
+def studio_official_logo():
+    response = Response(SERVGO_FAVICON_SVG, media_type="image/svg+xml")
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @router.get("/studio/assets/studio.css")
