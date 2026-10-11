@@ -8,6 +8,7 @@ from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict, Field
 from app.content.render import asset_path
 from app.content.service import queue_content
+from app.content.revisions import queue_post_edit
 from app.models.domain import Artifact, ArtifactStatus, Metric, Product, Task
 
 LABELS = {'own_site':'SEO / сайт', 'dzen':'Дзен', 'tenchat':'TenChat', 'vc_ru':'vc.ru',
@@ -30,9 +31,10 @@ class TelegramContent:
         self.metrics_article = None
         self.plan_product = None
         self.post_target = None  # (product_id, channel) for a single post
+        self.post_edit_target = None  # immutable Artifact ID under revision
 
     async def menu(self, chat_id):
-        self.topic_product = self.metrics_article = self.plan_product = self.post_target = None
+        self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = None
         with self.sessions() as db:
             products = list(db.scalars(select(Product).order_by(Product.name).limit(20)))
             buttons = [[{'text':p.name, 'callback_data':f'content:product:{p.id}'}] for p in products]
@@ -69,7 +71,7 @@ class TelegramContent:
                     meta = json.loads(post.content)
                 except (ValueError, TypeError):
                     continue
-                if meta.get('origin') == 'quick_post':
+                if meta.get('origin') in {'quick_post', 'owner_revision'}:
                     buttons.append([{'text':'📝 ' + post.title[:50], 'callback_data':f'content:asset:{post.id}'}])
             buttons += [[{'text':a.title[:60], 'callback_data':f'content:article:{a.id}'}] for a in articles]
             buttons.append([{'text':'🔄 Обновить', 'callback_data':f'content:product:{product.id}'}])
@@ -82,8 +84,20 @@ class TelegramContent:
             await self.menu(chat)
             return True
         if text.startswith('/') or text in {'📊 Главное','✅ На согласование','🧪 Тесты','🔄 Обновить','🏢 Компания','📇 Контакты','📧 Почта'}:
-            self.topic_product = self.metrics_article = self.plan_product = self.post_target = None
+            self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = None
             return False
+        if self.post_edit_target:
+            try:
+                with self.sessions() as db:
+                    queue_post_edit(db, self.post_edit_target, text)
+                self.post_edit_target = None
+                await self.bot._send(
+                    chat, '✅ Замечание принято. ИИ-редактор готовит новую версию. '
+                          'Исходный текст сохранён, а новая версия появится на проверку.'
+                )
+            except (ValueError, LookupError) as exc:
+                await self.bot._send(chat, str(exc))
+            return True
         if self.plan_product:
             try:
                 from app.content.calendar import save_preferences, queue_plan
@@ -215,6 +229,8 @@ class TelegramContent:
             # message (company profile, research parameters, statistics, etc.).
             if action not in {'postchannels', 'posttg', 'postvk', 'postdzen', 'postvc', 'postten'}:
                 self.post_target = None
+            if action != 'editpost':
+                self.post_edit_target = None
             if action == 'postchannels':
                 self.topic_product = self.metrics_article = self.plan_product = self.post_target = None
                 with self.sessions() as db:
@@ -285,12 +301,29 @@ class TelegramContent:
                     await self.product(chat, record_id)
             elif action in {'article','download'}:
                 await self.article(chat, record_id, download=action == 'download')
+            elif action == 'editpost':
+                with self.sessions() as db:
+                    item = db.get(Artifact, record_id)
+                    if (item is None or item.kind != 'channel_text' or
+                            item.status not in {ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED}):
+                        raise LookupError('Пост недоступен для доработки')
+                    current = json.loads(item.content)
+                    if not current.get('body'):
+                        raise LookupError('Текст поста отсутствует')
+                self.topic_product = self.metrics_article = self.plan_product = self.post_target = None
+                self.post_edit_target = record_id
+                await self.bot._send(
+                    chat,
+                    'Напиши, что именно изменить в посте. Например: '
+                    '«Убери общие фразы, добавь конкретный пример и сократи вступление». '
+                    'ИИ сохранит старую версию, а новую отправит на проверку.'
+                )
             elif action == 'approvepost':
                 with self.sessions() as db:
                     item = db.scalar(select(Artifact).where(
                         Artifact.id == record_id, Artifact.kind == 'channel_text'
                     ).with_for_update())
-                    if item is None or json.loads(item.content).get('origin') != 'quick_post':
+                    if item is None or json.loads(item.content).get('origin') not in {'quick_post', 'owner_revision'}:
                         raise LookupError('Пост недоступен')
                     if item.status == ArtifactStatus.AWAITING_APPROVAL:
                         item.status = ArtifactStatus.APPROVED
@@ -315,10 +348,19 @@ class TelegramContent:
                             ArtifactStatus.APPROVED: 'Утверждено',
                         }.get(item.status, item.status.value)
                         text = '# ' + value['title'] + '\n\n' + value['body'] + '\n\nСтатус: ' + status_label
-                        if value.get('origin') == 'quick_post' and item.status == ArtifactStatus.AWAITING_APPROVAL:
-                            reply_markup = {'inline_keyboard': [[
-                                {'text':'✅ Утвердить текст', 'callback_data':f'content:approvepost:{item.id}'},
-                            ]]}
+                        if item.status in {ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED}:
+                            buttons = []
+                            if (value.get('origin') in {'quick_post', 'owner_revision'} and
+                                    item.status == ArtifactStatus.AWAITING_APPROVAL):
+                                buttons.append([{
+                                    'text':'✅ Утвердить текст',
+                                    'callback_data':f'content:approvepost:{item.id}',
+                                }])
+                            buttons.append([{
+                                'text':'✏️ Попросить доработку',
+                                'callback_data':f'content:editpost:{item.id}',
+                            }])
+                            reply_markup = {'inline_keyboard': buttons}
                     elif item.kind == 'video_script':
                         brief = value['production_brief']
                         text = ('🎬 ' + item.title
