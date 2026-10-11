@@ -197,6 +197,12 @@ async def page(product_id: UUID, db: Session = Depends(get_db), settings=Depends
 <a class="btn primary" href="{base}/social">Каналы и публикации</a>
 <a class="btn ghost" href="{base}/calendar">Контент-план</a></nav>
 <p id="social-feedback" role="status" aria-live="polite"></p>
+<section class="panel c-card"><h2>Соединение с соцсетями</h2>
+<p>Проверка зарубежного прокси из API-контейнера — без передачи логинов или токенов.</p>
+<button class="btn ghost" type="button" id="social-check-proxy">Проверить подключение</button>
+<pre id="social-proxy-result" aria-live="polite"></pre>
+<p class="c-help">Проверка соединения не подтверждает права OAuth-приложений; рабочий контейнер проверяется отдельно.</p>
+</section>
 <section class="panel c-card">
 <h2>Подключение Telegram-канала</h2>
 <p>Один бот может публиковать в нескольких каналах. Токен бота вводить не нужно.</p>
@@ -247,6 +253,15 @@ ServGo не может подтвердить публикацию в Дзене
     return HTMLResponse(studio_page_shell(product, active="comments", title="Социальные сети",
                                           subtitle="Комментарии, каналы и автопубликации", body=content),
                         headers={"Cache-Control": "no-store"})
+
+
+@router.post("/products/{product_id}/social/connection-check", dependencies=[Depends(same_origin)])
+async def connection_check(product_id: UUID, db: Session = Depends(get_db),
+                           settings=Depends(get_settings)):
+    if not db.get(Product, product_id):
+        raise HTTPException(404, "Бизнес не найден")
+    from app.social.proxy_check import verify_proxy
+    return await verify_proxy(settings)
 
 
 @router.post("/products/{product_id}/social/channels", dependencies=[Depends(same_origin)])
