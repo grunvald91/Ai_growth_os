@@ -130,7 +130,7 @@ business/brand integration and must **never** be advertised as such.
 For an eligible personal/professional channel, the owner sends the Telegram
 channel URL **and** vc.ru blog URL to telegram@vc.ru, then follows the
 acceptance instructions from vc.ru. The bot is @vcrepost_bot.
-Source: https://vc.ru/about-tg-bot
+Source: https://vc.ru/team/2066907-avtomaticheskaya-publikatsiya-postov-iz-telegram-v-blog-na-vc-ru
 Bot: https://t.me/vcrepost_bot
 
 The Social Networks UI and comment-platform guide now disclose these
