@@ -167,6 +167,19 @@ textarea:focus-visible,select:focus-visible{outline:3px solid #83b8d8;outline-of
 .sg-action-tile{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:15px;border:1px solid var(--sg-line);border-radius:12px}
 .sg-action-tile h3{margin:0;font-size:14px;color:#2a4863}
 .sg-action-tile p{margin:4px 0 0;color:#7c8c9d;font-size:11px}
+.sg-calendar-entry{border-bottom:1px solid #e5edf2}
+.sg-calendar-entry:last-child{border-bottom:0}
+.sg-calendar-entry>.calendar-row{border:0}
+.sg-calendar-move{padding:0 18px 13px}
+.sg-calendar-move summary{list-style:none;display:inline-flex;align-items:center;cursor:pointer;color:#366487;font-size:12px;font-weight:720;border-radius:8px;padding:8px 10px}
+.sg-calendar-move summary::-webkit-details-marker{display:none}
+.sg-calendar-move summary:hover{background:#eaf3fa}
+.sg-calendar-form{display:flex;flex-wrap:wrap;gap:11px;align-items:end;padding:12px 0}
+.sg-calendar-form .sg-field{max-width:265px;flex:1;min-width:220px}
+.sg-calendar-form .btn{align-self:end}
+.sg-route-utility{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:8px 0 19px}
+.sg-route-utility a{font-size:11px;color:#426681;padding:8px 12px;border:1px solid #e1eaf1;background:white;border-radius:9px;font-weight:710}
+.sg-route-utility a:hover{background:#f0f5f9}
 .sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @media(max-width:1180px){.sg-layout-two{grid-template-columns:1fr}.sg-aside-stack{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:920px){
