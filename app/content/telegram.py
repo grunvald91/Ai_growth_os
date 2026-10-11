@@ -78,7 +78,7 @@ class TelegramContent:
             await self.menu(chat)
             return True
         if text.startswith('/') or text in {'📊 Главное','✅ На согласование','🧪 Тесты','🔄 Обновить','🏢 Компания','📇 Контакты','📧 Почта'}:
-            self.topic_product = self.metrics_article = self.plan_product = None
+            self.topic_product = self.metrics_article = self.plan_product = self.post_target = None
             return False
         if self.plan_product:
             try:
@@ -239,7 +239,7 @@ class TelegramContent:
                     queue_plan(db, record_id)
                 await self.bot._send(chat, '✅ Редактору поручен план. Он учтёт профиль, доступные исследования и записанные результаты. Открой календарь и нажми «Обновить».')
             elif action == 'preferences':
-                self.topic_product = self.metrics_article = None
+                self.topic_product = self.metrics_article = self.post_target = None
                 self.plan_product = record_id
                 await self.bot._send(chat, 'Напиши своими словами: какие аккаунты уже есть, кого привлекаем, сколько времени есть на проверку, какие форматы доступны, на какой период нужен план. Можно указать желаемую частоту, даты и бюджет. Например: «Есть Telegram и Дзен; Shorts хочу протестировать. На проверку — два часа в неделю. План на 14 дней». Неизвестное можно так и назвать.')
             elif action == 'planview':
@@ -317,6 +317,7 @@ class TelegramContent:
                     path = asset_path(self.settings().products_root, item.product_id, UUID(value['script_id']), 'video.mp4')
                 await self.bot.api.upload(chat, 'sendVideo', 'video', 'video.mp4', path.read_bytes())
             elif action == 'metrics':
+                self.post_target = None
                 self.metrics_article = record_id
                 await self.bot._send(chat, 'Пришли показатели опубликованного материала. Например:\n{"channel":"dzen","url":"https://...","views":120,"clicks":5,"leads":1}\nНеизвестные показатели не указывай. Это снимок на текущую дату, не прибавление к предыдущим числам.')
             return True
