@@ -98,11 +98,14 @@ async def refresh_extended(settings, platform, access, info):
         if not info.get("refresh_token") or not info.get("device_id"):
             raise ValueError("VK не предоставил обновляемый токен — подключите аккаунт заново")
         client_id, _ = credentials(settings, platform)
+        refresh_state = secrets.token_urlsafe(24)
         result = await oauth_http(settings, "POST", "https://id.vk.com/oauth2/auth",
             params={"grant_type": "refresh_token", "redirect_uri": origin_and_redirect(
                 settings, None, platform), "client_id": client_id,
-                "device_id": info["device_id"], "state": secrets.token_urlsafe(24)},
+                "device_id": info["device_id"], "state": refresh_state},
             data={"refresh_token": info["refresh_token"]})
+        if result.get("state") != refresh_state:
+            raise ValueError("VK ID вернул неподтверждённый ответ обновления доступа")
     else:
         raise ValueError("Площадка не поддерживает обновление доступа")
     token = result.get("access_token")
