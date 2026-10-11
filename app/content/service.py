@@ -6,16 +6,30 @@ from app.models.domain import Artifact, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
 from app.services.tasks import TaskService
 from app.workflows.article_contracts import ArticleProductionInput
+from app.content.quick_post import QuickPostRequest
 
 DEFAULT_TOPIC = 'Как организовать онлайн-запись в небольшом сервисном бизнесе: путь клиента и чек-лист владельца'
 
-def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC, *, commit=True, dedupe_key=None, audience=None, editorial_brief=None):
+def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC, *, commit=True, dedupe_key=None,
+                  audience=None, editorial_brief=None, format="package", channel=None):
+    """Submit full package (legacy) or a single platform post (two-agent fast path)."""
     product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     if product is None:
         raise LookupError('Компания не найдена')
-    request = ArticleProductionInput(product_id=product.id, topic=topic, audience=audience, editorial_brief=editorial_brief,
-                                    request_publication=True, produce_ready_assets=True)
-    title = 'CONTENT: ' + request.topic
+    if format == "post":
+        request = QuickPostRequest(mode="post", product_id=product.id, topic=topic, channel=channel,
+                                   audience=audience, editorial_brief=editorial_brief)
+        title = f"CONTENT: post:{request.channel}:{request.topic}"
+        description = "Один пост для проверки владельцем. Без автоматической публикации."
+    elif format == "package":
+        request = ArticleProductionInput(product_id=product.id, topic=topic, audience=audience,
+                                         editorial_brief=editorial_brief,
+                                         request_publication=True, produce_ready_assets=True)
+        title = "CONTENT: " + request.topic
+        description = ("SEO article, channel adaptations, two video scripts. "
+                       "No automatic publication or video rendering.")
+    else:
+        raise ValueError("Unknown content format")
     if dedupe_key:
         title = dedupe_key
     task = TaskService(db).find_active_duplicate(product_id=product.id, title=title,
@@ -24,9 +38,10 @@ def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC, *, commit=Tr
         return task
     task = TaskService(db).create(product_id=product.id, title=title, assigned_agent='content_factory',
                                  status=TaskStatus.QUEUED, priority=100,
-                                 description='Issue #8: SEO article, channel adaptations, YouTube Shorts and Instagram Reels production briefs. No video rendering; owner review before publication.')
+                                 description=description)
     ArtifactService(db).create(product_id=product.id, task_id=task.id, kind='content_request',
-                              title='Пакет контента', content=request.model_dump_json())
+                              title="Один пост" if format == "post" else "Пакет контента",
+                              content=request.model_dump_json())
     if commit:
         db.commit()
     return task
