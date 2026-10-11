@@ -77,6 +77,16 @@
     });
   });
   root.addEventListener("click", event => {
+    const copyButton = event.target.closest("button[data-copy-id]");
+    if (!copyButton) return;
+    run(copyButton, async () => {
+      const textarea = document.getElementById(copyButton.dataset.copyId);
+      if (!textarea) throw new Error("Материал недоступен");
+      await navigator.clipboard.writeText(textarea.value);
+      say("Материал скопирован. Опубликуйте его через редактор площадки.");
+    });
+  });
+  root.addEventListener("click", event => {
     const button = event.target.closest("button[data-remove],button[data-post-action]");
     if (!button) return;
     if (button.dataset.postAction) {
