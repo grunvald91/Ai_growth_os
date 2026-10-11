@@ -289,7 +289,7 @@ def test_official_servgo_brand_matches_booking_component(studio_v5):
     assert "/studio/assets/servgo.svg" in main.text
     assert 'sg-official-brand-name">Serv<span>Go</span>' in main.text
     assert '<span class="brand-mark">S</span>' not in main.text
-    assert 'studio.css?v=7' in main.text
+    assert 'studio.css?v=8' in main.text
 
     css = client.get("/studio/assets/studio.css").text
     assert '--sg-blue:#2F5BEB' in css
@@ -377,3 +377,32 @@ def test_new_draft_approval_is_accessible_responsive_card_not_bare_panel(studio_
     assert ".sg-draft-alert{" in css
     assert "grid-template-columns:38px minmax(0,1fr)" in css
     assert 'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto' in css
+
+
+def test_v8_typography_consistent_across_all_studio_views(studio_v5):
+    client, db, company, _ = studio_v5
+    base = f"/studio/products/{company.id}"
+    css = client.get("/studio/assets/studio.css").text
+    assert css.rfind("/* v8: comprehensive ServGo typography") > css.rfind("/* v6.1:")
+    for needle in (
+        "--sg-font-ui:",
+        "--sg-fs-body:15px",
+        ".sg-dashboard-feed .sg-section-head h2",
+        ".sg-mini-row b",
+        ".material-body h4",
+        ".calendar-topic b",
+        ".sg-review-item h3",
+        ".sg-storyboard-card p",
+        ".sg-post-preview",
+        ".studio-page input",
+        ".sg-draft-alert h2",
+        "font-weight:600",
+        "font-size:15px;min-height:44px",
+    ):
+        assert needle in css, needle
+    for route in ("", "/create", "/review", "/calendar", "/materials", "/channels", "/plan"):
+        result = client.get(base + route)
+        assert result.status_code == 200, route
+        assert "studio.css?v=8" in result.text
+        assert 'data-studio-build="20261011-ux8"' in result.text
+        assert "/studio/assets/servgo.svg" in result.text
