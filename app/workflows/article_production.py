@@ -778,7 +778,7 @@ class ArticleProduction:
                 elif name == 'article_writer':
                     stage_rule = (
                         ' Include >=2000 body characters across >=4 sections. Output only advice or hypothesis '
-                        'sections. Do not output factual sections, claim IDs or grounded claims; verified ServGo '
+                        'sections. Do not output factual sections, claim IDs or grounded claims; verified company '
                         'facts are inserted deterministically by the application after this stage.'
                     )
                 elif name == 'conversion_editor':
@@ -808,19 +808,19 @@ class ArticleProduction:
                         ' This is the final commercial-quality pass over prior_stage_outputs.human_editor. Keep every '
                         'verified fact grounded and preserve exactly one fact_rendering per verified_product_facts source. '
                         'Make the article impossible to confuse with generic SaaS copy: anchor it in the specific niche, '
-                        'specific pain and specific moment where the owner/admin loses time, attention or a client path. '
+                        'specific pain and specific moment where the target customer experiences a meaningful problem. '
                         'Use the sequence SCENE -> PAIN -> COST/FRICTION -> BETTER MECHANISM -> VERIFIED PRODUCT BRIDGE -> CTA. '
                         'The title must create tension or curiosity without clickbait. The lead must earn the next paragraph. '
                         'Delete filler, abstract claims, repeated caveats, “digital transformation” language and bland lists. '
                         'Apply a hard information-style edit: short useful paragraphs, active verbs, concrete nouns, meaningful '
                         'headings, no throat-clearing, no duplicated thought, no sentence kept merely to sound expert. '
-                        'The reader should feel a real operational scene, not read a scientific disclaimer. '
+                        'The reader should recognize a real situation, not read a scientific disclaimer. '
                         'Use gentle situational humor only when it fits the verified brand voice, topic and audience. '
                         'For therapy, health, grief, conflict, financial distress or other sensitive situations, prioritize '
                         'empathy and clarity: humor may be entirely absent. Research humor_angles are optional examples, '
                         'never an instruction to insert jokes. Never mock clients, staff or vulnerable people; no cringe, '
                         'fake quotes or slang overload. Source-specific third-party numbers/case results MAY be used '
-                        'when they are present in marketing_research; keep their scope clear and never turn them into a company '
+                        'when they are present in marketing_research; keep their scope clear and never turn them into an outcome '
                         'guarantee. Clearly illustrative scenario counts MAY be used as examples, not as measured results. '
                         'Make the product feel like the logical answer to the pain without promising guaranteed growth. '
                         'End with ONE concrete CTA. '
