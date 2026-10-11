@@ -108,22 +108,34 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
                 controls = (f'<form class="c-connect" data-platform="{key}"><label>{esc(item["account_label"])}<input name="account_id" required value="{esc(channel.account_id if channel else "")}" autocomplete="off"></label>'
                     '<label>Токен доступа<input name="token" type="password" required autocomplete="new-password" placeholder="Хранится зашифрованным на сервере"></label>'
                     f'<span class="c-help">{help_text}</span><button class="btn primary" type="submit">Проверить и подключить</button></form>')
-                if key in {"youtube", "instagram"}:
+                if key in {"youtube", "instagram", "threads", "vk", "vk_video"}:
+                    credential = {"youtube": "social_google_client_id", "instagram": "social_instagram_client_id",
+                                  "threads": "social_threads_client_id", "vk": "social_vk_client_id",
+                                  "vk_video": "social_vk_client_id"}[key]
                     ready = bool(getattr(svc.settings, "social_oauth_redirect_base", None) and
-                                 getattr(svc.settings, "social_google_client_id" if key == "youtube"
-                                         else "social_instagram_client_id", None))
-                    oauth = (f'<a class="btn primary" href="/products/{product_id}/comments/oauth/{key}/start">'
-                             'Подключить через официальный вход ↗</a>') if ready else (
-                             '<p class="c-help">Вход через аккаунт появится после настройки приложения '
-                             'в Google Cloud или Meta администратором ServGo.</p>')
-                    controls = oauth + '<details class="c-guide"><summary>Расширенный способ: вручную</summary>' + controls + '</details>'
+                                 getattr(svc.settings, credential, None))
+                    target = f"/products/{product_id}/comments/oauth/{key}/start"
+                    if ready and key in {"vk", "vk_video"}:
+                        oauth = (f'<form method="get" action="{target}">'
+                                 '<label>ID вашего сообщества ВК (без club/public)'
+                                 '<input type="text" inputmode="numeric" pattern="[1-9][0-9]*" '
+                                 'name="account_id" required placeholder="123456789"></label>'
+                                 '<button class="btn primary" type="submit">Войти через VK ID ↗</button></form>')
+                    elif ready:
+                        oauth = (f'<a class="btn primary" href="{target}">'
+                                 'Подключить через официальный вход ↗</a>')
+                    else:
+                        oauth = ('<p class="c-help">Официальное подключение появится после настройки '
+                                 'приложения соцсети администратором ServGo.</p>')
+                    controls = (oauth + '<details class="c-guide"><summary>Ручной способ, если OAuth недоступен</summary>'
+                                + controls + '</details>')
                 if channel:
                     controls += f'<div class="c-actions"><button class="btn ghost" data-sync="{key}">Загрузить комментарии</button><button class="btn ghost" data-disconnect="{key}">Отключить</button></div>'
             else:
                 controls = f'<a class="btn ghost" href="{base}?tab=test&platform={key}">Подготовить ответ</a>'
             cards.append(f'<section class="panel c-platform"><div class="c-card-head"><h2>{esc(item["name"])}</h2><span class="chip {"blue" if channel else ""}">{esc(badge)}</span></div><p class="c-meta">{"Доступ напрямую" if key in {"vk", "vk_video"} else "Через зарубежный сервер" if item["live"] else "Ручной режим"}</p><details class="c-guide"><summary>Как получить ID и токен · {len(item["steps"])} шага</summary><ol>{steps}</ol>{docs}</details><p>{esc(item["limits"])}</p>{controls}</section>')
         content = ('<section class="panel c-platform-intro"><h2>Подключите аккаунты бизнеса</h2>'
-            '<p>Для Instagram и YouTube основной способ подключения — официальная авторизация. Пароли не передаются ServGo. Для Telegram-автопостинга используется отдельное подключение каналов.</p>'
+            '<p>Для Instagram, YouTube, Threads и VK основной способ подключения — официальная авторизация. Пароли не передаются ServGo. Для Telegram-автопостинга используется отдельное подключение каналов.</p>'
             '<p>Где поддерживается официальный вход, нажмите кнопку подключения. Ручной ввод токенов оставлен в расширенном разделе для временных интеграций.</p>'
             '<p>Для Google и Meta потребуется приложение в кабинете разработчика. Если его ещё нет, подготовку доступа выполняет владелец аккаунта или разработчик интеграции. Для ручной работы подключение не требуется: откройте «Проверка ответов».</p></section>'
             '<div class="c-platform-grid">' + ''.join(cards) + '</div>')
