@@ -189,24 +189,36 @@ async def run_due_telegram_post_once(session_factory, settings, *, api=None, now
     from app.telegram_control_bot import TelegramAPI
     bot = api or TelegramAPI(settings.telegram_bot_token, settings.telegram_proxy_url)
     with session_factory() as db:
-        intents = list(db.scalars(select(Artifact).where(
-            Artifact.kind == "telegram_publish_intent",
-            Artifact.status == ArtifactStatus.APPROVED,
-        ).order_by(Artifact.created_at, Artifact.id).limit(500)))
+        # Query only pending publications, not the first N historic intents.
+        # This prevents starvation when the archive contains thousands of posts.
+        queued_publications = list(db.scalars(select(Publication).where(
+            Publication.channel == "telegram",
+            Publication.status == "scheduled",
+        ).order_by(Publication.created_at, Publication.id).limit(500)))
         selected = None
-        for intent in intents:
+        for pub in queued_publications:
+            intent = db.scalar(select(Artifact).where(
+                Artifact.product_id == pub.product_id,
+                Artifact.kind == "telegram_publish_intent",
+                Artifact.title == "Telegram schedule " + str(pub.id),
+            ))
+            if intent is None or intent.status != ArtifactStatus.APPROVED:
+                pub.status = "failed_before_send"
+                db.commit()
+                return 1
             try:
                 data = json.loads(intent.content)
                 when = datetime.fromisoformat(data["scheduled_at"])
-                if when.tzinfo is None or when > now:
+                if when.tzinfo is None or data.get("publication_id") != str(pub.id):
+                    raise ValueError("Invalid publication intent")
+                if when > now:
                     continue
-                pub_id = UUID(data["publication_id"])
             except (ValueError, TypeError, KeyError):
-                continue
-            pub = db.get(Publication, pub_id)
-            if pub is not None and pub.status == "scheduled":
-                selected = (intent.id, data, pub_id)
-                break
+                pub.status = "failed_before_send"
+                db.commit()
+                return 1
+            selected = (intent.id, data, pub.id)
+            break
         if selected is None:
             return 0
         intent_id, data, pub_id = selected
