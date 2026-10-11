@@ -52,6 +52,8 @@ class SocialOAuthAttempt(UUIDMixin, TimestampMixin, Base):
     state_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    target_account_id: Mapped[str | None] = mapped_column(String(100))
+    pkce_verifier: Mapped[str | None] = mapped_column(String(150))
 
 
 class TelegramPlanMedia(UUIDMixin, TimestampMixin, Base):
