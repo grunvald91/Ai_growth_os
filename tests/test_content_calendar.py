@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from app.content.calendar import (EditorialPlan, _expand_anchor_slots, approve_plan, pause_plan, plan_record, planning_context,
-    queue_plan, record_publication, render_calendar, run_planner_once, save_preferences, tick_calendar)
+    queue_plan, record_publication, render_calendar, run_planner_once, save_preferences, tick_calendar, reschedule_slot)
 from app.core.config import Settings
 from app.llm.fake import FakeLLMProvider
 from app.llm.schemas import LLMResponse, LLMUsage
@@ -335,3 +335,56 @@ async def test_invented_evidence_is_repaired_with_exact_allowed_ids(db,tmp_path)
     assert schema['$defs']['ChannelChoice']['properties']['evidence_refs']['items']['enum']==allowed
     assert schema['$defs']['Slot']['properties']['evidence_refs']['items']['enum']==allowed
     assert db.scalar(select(Artifact).where(Artifact.kind=='editorial_plan')) is not None
+
+
+def test_reschedule_one_slot_preserves_package_and_rejects_collisions(db):
+    company = Product(name='Кафе', slug='cafe-calendar-move')
+    db.add(company)
+    db.flush()
+    original = datetime(2026, 10, 15, 12, tzinfo=timezone(timedelta(hours=3)))
+    base = {
+        'generated_at':'2026-10-11T00:00:00+03:00',
+        'approval_state':'active', 'timezone':'Europe/Moscow', 'horizon_days':14,
+        'slots':[
+            {
+                'slot_id':'1', 'package_key':'campaign-1', 'platform':'telegram',
+                'topic':'Сезонное меню', 'publish_at':original.isoformat(),
+                'prepare_at':(original-timedelta(hours=24)).isoformat(),
+                'day_offset':3, 'hour':12, 'minute':0, 'prepare_lead_hours':24,
+                'state':'ready_for_review', 'task_id':None,
+            },
+            {
+                'slot_id':'2', 'package_key':'campaign-2', 'platform':'telegram',
+                'topic':'Кофе', 'publish_at':(original+timedelta(days=2)).isoformat(),
+                'prepare_at':(original+timedelta(days=1)).isoformat(),
+                'day_offset':5, 'hour':12, 'minute':0, 'prepare_lead_hours':24,
+                'state':'planned', 'task_id':None,
+            },
+        ],
+    }
+    row = Artifact(product_id=company.id, kind='editorial_plan', title='План',
+                   content=json.dumps(base), status='approved')
+    db.add(row)
+    db.commit()
+    fixed_now = datetime(2026, 10, 11, 8, tzinfo=timezone.utc)
+    dest = datetime(2026, 10, 16, 15, tzinfo=timezone(timedelta(hours=3)))
+    moved = reschedule_slot(db, row.id, '1', dest, now=fixed_now)
+    assert moved['publish_at'] == dest.isoformat()
+    assert moved['day_offset'] == 4
+    assert moved['hour'] == 15
+    assert moved['prepare_at'] == (dest-timedelta(hours=24)).isoformat()
+    assert moved['topic'] == 'Сезонное меню'
+    assert moved['state'] == 'ready_for_review'
+    assert json.loads(row.content)['slots'][1]['topic'] == 'Кофе'
+    with pytest.raises(ValueError, match='уже есть материал'):
+        reschedule_slot(
+            db, row.id, '1', original+timedelta(days=2), now=fixed_now,
+        )
+    with pytest.raises(ValueError, match='периода этого плана'):
+        reschedule_slot(
+            db, row.id, '1', original+timedelta(days=20), now=fixed_now,
+        )
+    with pytest.raises(ValueError, match='в будущем'):
+        reschedule_slot(
+            db, row.id, '1', original-timedelta(days=5), now=fixed_now,
+        )
