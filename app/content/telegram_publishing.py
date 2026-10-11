@@ -97,7 +97,8 @@ def connected_channels(db, product_id: UUID) -> list[Artifact]:
     ).order_by(Artifact.created_at, Artifact.id)))
 
 
-def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now=None) -> Publication:
+def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now=None,
+                  plan_id: UUID | None = None, slot_id: str | None = None) -> Publication:
     """Explicit owner scheduling; multiple channels may be targeted independently."""
     now = now or datetime.now(timezone.utc)
     if when.tzinfo is None or when.utcoffset() is None:
@@ -119,6 +120,34 @@ def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now
         raise ValueError("Выбранный Telegram-канал не подключён к этой компании")
     channel = json.loads(connection.content)
     content = json.loads(source.content)
+    plan_row = None
+    plan = None
+    plan_slot = None
+    if plan_id is not None or slot_id is not None:
+        if plan_id is None or slot_id is None:
+            raise ValueError("Для календаря нужны план и публикационный слот")
+        plan_row = db.scalar(select(Artifact).where(
+            Artifact.id == plan_id, Artifact.product_id == source.product_id,
+            Artifact.kind == "editorial_plan",
+        ).with_for_update().execution_options(populate_existing=True))
+        if plan_row is None:
+            raise LookupError("Контент-план не найден")
+        plan = json.loads(plan_row.content)
+        if plan.get("approval_state") != "active":
+            raise ValueError("Подключи действующий, утверждённый контент-план")
+        selected = [v for v in plan.get("slots", [])
+                    if str(v.get("slot_id")) == str(slot_id)]
+        if len(selected) != 1:
+            raise LookupError("Слот календаря не найден")
+        plan_slot = selected[0]
+        if (plan_slot.get("platform") != "telegram" or
+                plan_slot.get("task_id") != str(source.task_id) or
+                plan_slot.get("publication_url")):
+            raise ValueError("Этот пост не связан с Telegram-слотом календаря")
+        if datetime.fromisoformat(plan_slot["publish_at"]).astimezone(timezone.utc) != when.astimezone(timezone.utc):
+            raise ValueError("Время должно совпадать с подтверждённым календарём")
+        if plan_slot.get("telegram_publication_id"):
+            raise ValueError("На этот слот уже назначена публикация")
     if source.status != ArtifactStatus.APPROVED or content.get("channel") != "telegram":
         raise ValueError("Сначала утверди готовый пост для Telegram")
     if not content.get("body"):
@@ -150,6 +179,8 @@ def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now
         "connection_id": str(connection.id),
         "chat_id": channel["chat_id"],
         "scheduled_at": when.astimezone(timezone.utc).isoformat(),
+        "plan_id": str(plan_id) if plan_id is not None else None,
+        "slot_id": str(slot_id) if slot_id is not None else None,
     }
     ArtifactService(db).create(
         product_id=source.product_id, kind="telegram_publish_intent",
@@ -157,6 +188,11 @@ def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now
         content=json.dumps(intent_value, ensure_ascii=False),
         status="approved",
     )
+    if plan_row is not None:
+        plan_slot["telegram_publication_id"] = str(publication.id)
+        plan_slot["telegram_connection_id"] = str(connection.id)
+        plan_slot["state"] = "scheduled"
+        plan_row.content = json.dumps(plan, ensure_ascii=False)
     db.commit()
     return publication
 
@@ -173,6 +209,30 @@ def cancel_scheduled_post(db, publication_id: UUID) -> Publication:
     if pub.status != "scheduled":
         raise ValueError("Отменить можно только публикацию, которая ещё не отправлена")
     pub.status = "cancelled"
+    intent = db.scalar(select(Artifact).where(
+        Artifact.product_id == pub.product_id,
+        Artifact.kind == "telegram_publish_intent",
+        Artifact.title == "Telegram schedule " + str(pub.id),
+    ))
+    if intent:
+        try:
+            meta = json.loads(intent.content)
+            if meta.get("plan_id"):
+                plan = db.scalar(select(Artifact).where(
+                    Artifact.id == UUID(meta["plan_id"]),
+                    Artifact.product_id == pub.product_id,
+                    Artifact.kind == "editorial_plan",
+                ).with_for_update().execution_options(populate_existing=True))
+                if plan:
+                    plan_data = json.loads(plan.content)
+                    for slot in plan_data.get("slots", []):
+                        if slot.get("telegram_publication_id") == str(pub.id):
+                            slot["telegram_publication_id"] = None
+                            slot["telegram_connection_id"] = None
+                            slot["state"] = "ready_for_review"
+                    plan.content = json.dumps(plan_data, ensure_ascii=False)
+        except (ValueError, TypeError, KeyError):
+            pass
     db.commit()
     return pub
 
@@ -264,6 +324,19 @@ async def run_due_telegram_post_once(session_factory, settings, *, api=None, now
             pub.status = "published"
             pub.external_reference = "telegram:" + data["chat_id"] + ":" + str(result["message_id"])
             pub.published_at = datetime.now(timezone.utc)
+            if data.get("plan_id"):
+                db.scalar(select(Product).where(Product.id == pub.product_id).with_for_update())
+                plan_row = db.scalar(select(Artifact).where(
+                    Artifact.id == UUID(data["plan_id"]), Artifact.product_id == pub.product_id,
+                    Artifact.kind == "editorial_plan",
+                ).with_for_update().execution_options(populate_existing=True))
+                if plan_row is not None:
+                    plan = json.loads(plan_row.content)
+                    for slot in plan.get("slots", []):
+                        if slot.get("telegram_publication_id") == str(pub.id):
+                            slot["state"] = "published"
+                            slot["telegram_message_id"] = result["message_id"]
+                    plan_row.content = json.dumps(plan, ensure_ascii=False)
         except Exception:
             # The Bot API may have delivered despite a network timeout.
             # Never replay automatically: an owner must reconcile this result.
