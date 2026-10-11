@@ -29,9 +29,10 @@ class TelegramContent:
         self.topic_product = None
         self.metrics_article = None
         self.plan_product = None
+        self.post_target = None  # (product_id, channel) for a single post
 
     async def menu(self, chat_id):
-        self.topic_product = self.metrics_article = self.plan_product = None
+        self.topic_product = self.metrics_article = self.plan_product = self.post_target = None
         with self.sessions() as db:
             products = list(db.scalars(select(Product).order_by(Product.name).limit(20)))
             buttons = [[{'text':p.name, 'callback_data':f'content:product:{p.id}'}] for p in products]
@@ -52,9 +53,20 @@ class TelegramContent:
             text = f'📝 {product.name}\n\nПакет: SEO-статья и адаптации, включая Дзен и Telegram, плюс отдельные production-ready сценарии/раскадровки для YouTube Shorts и Instagram Reels.\nВидео здесь не генерируется и не рендерится. Публикация — после проверки, вручную до подключения площадок.'
             if tasks:
                 text += '\n\nПоследние задачи:\n' + '\n'.join(f'• {t.title[:65]} — {statuses.get(t.status.value, t.status.value)}' for t in tasks)
-            buttons = [[{'text':'▶️ Создать пакет', 'callback_data':f'content:queue:{product.id}'},
-                        {'text':'✍️ Своя тема', 'callback_data':f'content:topic:{product.id}'}]]
+            buttons = [[{'text':'✍️ Один пост', 'callback_data':f'content:postchannels:{product.id}'},
+                        {'text':'📦 Полный пакет', 'callback_data':f'content:queue:{product.id}'}],
+                       [{'text':'✏️ Тема полного пакета', 'callback_data':f'content:topic:{product.id}'}]]
             buttons.append([{'text':'📅 Контент-план', 'callback_data':f'content:calendar:{product.id}'}])
+            recent_posts = list(db.scalars(select(Artifact).where(
+                Artifact.product_id == product.id, Artifact.kind == 'channel_text'
+            ).order_by(Artifact.created_at.desc()).limit(10)))
+            for post in recent_posts:
+                try:
+                    meta = json.loads(post.content)
+                except (ValueError, TypeError):
+                    continue
+                if meta.get('origin') == 'quick_post':
+                    buttons.append([{'text':'📝 ' + post.title[:50], 'callback_data':f'content:asset:{post.id}'}])
             buttons += [[{'text':a.title[:60], 'callback_data':f'content:article:{a.id}'}] for a in articles]
             buttons.append([{'text':'🔄 Обновить', 'callback_data':f'content:product:{product.id}'}])
         await self.bot._send(chat_id, text, reply_markup={'inline_keyboard':buttons})
@@ -78,6 +90,16 @@ class TelegramContent:
                 await self.bot._send(chat, '✅ Требования сохранены. Редактор готовит новый контент-план для подтверждения.')
             except (ValueError, LookupError) as exc:
                 await self.bot._send(chat, str(exc))
+            return True
+        if self.post_target:
+            product_id, channel = self.post_target
+            try:
+                with self.sessions() as db:
+                    queue_content(db, product_id, text, format='post', channel=channel)
+                self.post_target = None
+                await self.bot._send(chat, '✅ Один пост поставлен в очередь. Материал появится в разделе компании для проверки. Публикация не запускается.')
+            except ValueError:
+                await self.bot._send(chat, 'Напиши тему одним сообщением, от 3 до 300 символов.')
             return True
         if self.topic_product:
             try:
@@ -185,7 +207,31 @@ class TelegramContent:
         try:
             _, action, raw = data.split(':',2)
             record_id = UUID(raw)
-            if action == 'calendar':
+            if action == 'postchannels':
+                self.topic_product = self.metrics_article = self.plan_product = self.post_target = None
+                with self.sessions() as db:
+                    if db.get(Product, record_id) is None:
+                        raise LookupError('Компания не найдена')
+                choices = [
+                    ('Telegram', 'posttg'), ('ВКонтакте', 'postvk'),
+                    ('Дзен', 'postdzen'), ('vc.ru', 'postvc'), ('TenChat', 'postten'),
+                ]
+                buttons = [[{'text':label, 'callback_data':f'content:{action_name}:{record_id}'}]
+                           for label, action_name in choices]
+                await self.bot._send(chat, 'Выбери площадку для одного поста. ИИ создаст текст для проверки, без публикации.',
+                                     reply_markup={'inline_keyboard':buttons})
+            elif action in {'posttg', 'postvk', 'postdzen', 'postvc', 'postten'}:
+                channel = {
+                    'posttg': 'telegram', 'postvk': 'vk', 'postdzen': 'dzen',
+                    'postvc': 'vc_ru', 'postten': 'tenchat',
+                }[action]
+                with self.sessions() as db:
+                    if db.get(Product, record_id) is None:
+                        raise LookupError('Компания не найдена')
+                self.post_target = (record_id, channel)
+                self.topic_product = self.metrics_article = self.plan_product = None
+                await self.bot._send(chat, 'Напиши тему поста одним сообщением. Пример: «3 ошибки при выборе подарочного букета».')
+            elif action == 'calendar':
                 await self.calendar(chat, record_id)
             elif action == 'plan':
                 from app.content.calendar import queue_plan
@@ -221,6 +267,7 @@ class TelegramContent:
                 await self.product(chat, record_id)
             elif action in {'queue','topic'}:
                 if action == 'topic':
+                    self.post_target = None
                     self.topic_product = record_id
                     await self.bot._send(chat, 'Напиши тему статьи одним сообщением, до 300 символов.')
                 else:
