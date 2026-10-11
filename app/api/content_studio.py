@@ -839,6 +839,52 @@ def product_dashboard(db: Session, product: Product) -> str:
     generated = (plan or {}).get("generated_at")
     review = (plan or {}).get("review_at")
 
+    review_count = sum(
+        1 for art in artifacts
+        if art.kind in {"channel_text", "creative_brief"}
+        and art.status == ArtifactStatus.AWAITING_APPROVAL
+    )
+    pending_count = db.scalar(select(Publication.id).where(
+        Publication.product_id == product.id,
+        Publication.channel == "telegram",
+        Publication.status == "scheduled",
+    ).limit(1))
+    publishing = list(db.scalars(select(Publication).where(
+        Publication.product_id == product.id,
+        Publication.channel == "telegram",
+    ).order_by(Publication.created_at.desc()).limit(150)))
+    scheduled_count = sum(1 for p in publishing if p.status == "scheduled")
+    published_count = sum(1 for p in publishing if p.status == "published")
+    unsafe_count = sum(1 for p in publishing
+                       if p.status in {"delivery_unknown", "sending", "failed_before_send"})
+    attention_html = f"""
+    <section class="sg-workflow-banner" aria-labelledby="start-working">
+      <div><span class="sg-overline">ВАШ СЛЕДУЮЩИЙ ШАГ</span>
+        <h2 id="start-working">Контент, которым легко управлять</h2>
+        <p>Поставьте задачу ИИ-команде. Затем проверьте текст или сценарий,
+        внесите правки и отдельно разрешите публикацию.</p>
+      </div>
+      <div class="sg-hero-actions"><a class="btn primary" href="/studio/products/{product.id}/create">
+        ＋ Создать материал</a>
+        <a class="btn secondary" href="/studio/products/{product.id}/review">На проверке · {review_count}</a>
+      </div>
+    </section>
+    <div class="sg-priority-strip">
+      <a class="sg-priority-item" href="/studio/products/{product.id}/review">
+        <strong>{review_count}</strong><span>Ждут проверки</span><em>Посмотреть →</em></a>
+      <a class="sg-priority-item" href="/studio/products/{product.id}/channels">
+        <strong>{scheduled_count}</strong><span>В расписании Telegram</span><em>Открыть →</em></a>
+      <a class="sg-priority-item" href="/studio/products/{product.id}/channels">
+        <strong>{unsafe_count}</strong><span>Нужно проверить отправку</span><em>Статусы →</em></a>
+    </div>
+    <nav class="sg-quick-links" aria-label="Инструменты">
+      <a href="/studio/products/{product.id}/plan">▣ Контент-план</a>
+      <a href="/studio/products/{product.id}/materials">▤ Библиотека</a>
+      <a href="/studio/products/{product.id}/channels">↗ Каналы</a>
+      <a href="/studio/products/{product.id}/analytics">⌁ Результаты</a>
+    </nav>
+    """
+
     return f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -855,8 +901,8 @@ def product_dashboard(db: Session, product: Product) -> str:
     <header class="topbar">
       <div>
         <div class="eyebrow">GROWTH STUDIO <span class="beta">BETA</span></div>
-        <h1>Growth Studio</h1>
-        <p class="subtitle">Готовые идеи, тексты и медиаконтент для роста ваших бронирований.</p>
+        <h1>Маркетинг компании</h1>
+        <p class="subtitle">Создание, согласование и публикации — в одном понятном рабочем пространстве.</p>
       </div>
       <div class="top-actions">
         <div class="cycle-card">
@@ -868,6 +914,7 @@ def product_dashboard(db: Session, product: Product) -> str:
         </a>
       </div>
     </header>
+    {attention_html}
     {mobile_dashboard_html(
         product=product,
         plan_row=plan_row,
@@ -893,7 +940,7 @@ def product_dashboard(db: Session, product: Product) -> str:
           <div class="package-tools">
             <span class="chip">Сформирован: {fmt_dt(generated)}</span>
             <span class="chip">Пересмотр: {fmt_dt(review)}</span>
-            <span class="chip">Публикация остаётся ручной</span>
+            <span class="chip">Telegram — по отдельному утверждению и при подключении канала</span>
           </div>
         </section>
       </div>
