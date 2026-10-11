@@ -1509,3 +1509,230 @@ def studio_queue_package(product_id: UUID, plan_id: UUID, package_key: str, db: 
     row.content = json.dumps(plan, ensure_ascii=False)
     db.commit()
     return RedirectResponse(f"/studio/products/{product_id}/packages/{quote(package_key, safe='')}", status_code=303)
+
+
+# Growth Studio v5: the same authenticated owner workflow on the website,
+# without requiring Telegram chat commands. These POSTs are subject to
+# require_studio_auth and require_studio_csrf on the entire router.
+
+async def _studio_form(request: Request) -> dict[str, str]:
+    raw = await request.body()
+    if len(raw) > 12000:
+        raise HTTPException(413, "Слишком большой запрос")
+    if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/x-www-form-urlencoded":
+        raise HTTPException(415, "Ожидается форма")
+    try:
+        parsed = parse_qs(raw.decode("utf-8"), keep_blank_values=True,
+                          max_num_fields=14, strict_parsing=False)
+    except (UnicodeError, ValueError):
+        raise HTTPException(400, "Некорректная форма") from None
+    return {k: v[-1].strip() for k, v in parsed.items() if v}
+
+
+def _owner_product(db: Session, product_id: UUID) -> Product:
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(404, "Компания не найдена")
+    return product
+
+
+@router.get("/studio/products/{product_id}/create", response_class=HTMLResponse)
+def studio_create_page(product_id: UUID, created: bool = False, db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    html_body = create_content_html(product.id, created=created)
+    response = HTMLResponse(studio_page_shell(
+        product, active="create", title="Создать материал",
+        subtitle="Одна задача, одна площадка и понятный результат — без лишних настроек.",
+        body=html_body,
+    ))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.post("/studio/products/{product_id}/create")
+async def studio_create_submit(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    chosen = fields.get("format", "post")
+    topic = fields.get("topic", "")
+    audience = fields.get("audience") or None
+    brief = fields.get("editorial_brief") or None
+    try:
+        if chosen == "package":
+            queue_content(db, product.id, topic, audience=audience, editorial_brief=brief)
+        elif chosen == "post":
+            queue_content(db, product.id, topic, format="post",
+                          channel=fields.get("channel"), audience=audience, editorial_brief=brief)
+        elif chosen in {"short_video", "story", "static_image"}:
+            command = CreativeRequest(mode="creative", product_id=product.id, topic=topic,
+                                      format=chosen, platform=fields.get("channel") or "",
+                                      audience=audience, editorial_brief=brief)
+            queue_creative(db, command)
+        else:
+            raise ValueError("Неизвестный формат")
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(422, str(exc)) from None
+    return RedirectResponse(f"/studio/products/{product.id}/create?created=1", status_code=303)
+
+
+@router.get("/studio/products/{product_id}/review", response_class=HTMLResponse)
+def studio_review_page(product_id: UUID, kind: str = "all", db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    if kind not in {"all", "text", "creative"}:
+        kind = "all"
+    records = list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product.id,
+        Artifact.kind.in_(["channel_text", "creative_brief"]),
+        Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
+    ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(250)))
+    response = HTMLResponse(studio_page_shell(
+        product, active="review", title="На проверке",
+        subtitle="Только готовые материалы, для которых необходимо ваше решение.",
+        body=review_html(product.id, records, filter_name=kind),
+    ))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.post("/studio/products/{product_id}/review/{artifact_id}/approve")
+def studio_material_approve(product_id: UUID, artifact_id: UUID, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    db.scalar(select(Product).where(Product.id == product_id).with_for_update())
+    row = db.scalar(select(Artifact).where(
+        Artifact.id == artifact_id, Artifact.product_id == product_id,
+        Artifact.kind.in_(["channel_text", "creative_brief"])
+    ).with_for_update().execution_options(populate_existing=True))
+    if row is None:
+        raise HTTPException(404, "Материал не найден")
+    if row.status == ArtifactStatus.APPROVED:
+        return RedirectResponse(f"/studio/products/{product_id}/materials/{artifact_id}", status_code=303)
+    if row.status != ArtifactStatus.AWAITING_APPROVAL:
+        raise HTTPException(409, "Согласовать эту версию уже нельзя")
+    if row.kind == "channel_text":
+        source = parse_json(row)
+        if not source.get("body"):
+            raise HTTPException(409, "Текст материала отсутствует")
+        pending = db.scalar(select(Task.id).where(
+            Task.product_id == product_id,
+            Task.assigned_agent == "content_editor",
+            Task.title == "EDIT: " + str(row.id),
+            Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING])
+        ).limit(1))
+        if pending:
+            raise HTTPException(409, "Доработка ещё выполняется — подтвердите новую версию")
+    row.status = ArtifactStatus.APPROVED
+    row.version += 1
+    db.commit()
+    return RedirectResponse(f"/studio/products/{product_id}/materials/{artifact_id}", status_code=303)
+
+
+@router.post("/studio/products/{product_id}/review/{artifact_id}/revise")
+async def studio_material_revise(product_id: UUID, artifact_id: UUID,
+                                 request: Request, db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    row = db.get(Artifact, artifact_id)
+    if row is None or row.product_id != product.id or row.kind != "channel_text":
+        raise HTTPException(404, "Пост не найден")
+    fields = await _studio_form(request)
+    try:
+        queue_post_edit(db, artifact_id, fields.get("feedback", ""))
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f"/studio/products/{product_id}/review", status_code=303)
+
+
+@router.get("/studio/products/{product_id}/channels", response_class=HTMLResponse)
+def studio_channels(product_id: UUID, added: bool = False, scheduled: bool = False,
+                    db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    connections = connected_channels(db, product.id)
+    publications = list(db.scalars(select(Publication).where(
+        Publication.product_id == product.id,
+        Publication.channel == "telegram",
+    ).order_by(Publication.created_at.desc(), Publication.id.desc()).limit(30)))
+    candidate_posts = list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product.id,
+        Artifact.kind == "channel_text",
+        Artifact.status == ArtifactStatus.APPROVED,
+    ).order_by(Artifact.created_at.desc()).limit(200)))
+    approved_posts = [row for row in candidate_posts if parse_json(row).get("channel") == "telegram"]
+    response = HTMLResponse(studio_page_shell(
+        product, active="channels", title="Каналы и публикации",
+        subtitle="Подключения, назначенные отправки и реальные результаты Telegram.",
+        body=channels_html(product.id, connections, publications, approved_posts,
+                           added=added, scheduled=scheduled),
+    ))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.post("/studio/products/{product_id}/channels/connect")
+async def studio_connect_channel(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    from app.telegram_control_bot import TelegramAPI
+    settings = get_settings()
+    if not settings.telegram_bot_token:
+        raise HTTPException(409, "Telegram-бот ещё не настроен на сервере")
+    try:
+        api = TelegramAPI(settings.telegram_bot_token, settings.telegram_proxy_url)
+        verified = await verify_channel(api, fields.get("channel", ""))
+        save_verified_channel(db, product_id, verified)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    except Exception:
+        raise HTTPException(502, "Не удалось проверить канал. Проверьте права бота и повторите.") from None
+    return RedirectResponse(f"/studio/products/{product_id}/channels?added=1", status_code=303)
+
+
+@router.post("/studio/products/{product_id}/publishing/schedule")
+async def studio_schedule_post(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    try:
+        post_id = UUID(fields.get("post_id", ""))
+        connection_id = UUID(fields.get("connection_id", ""))
+        local = datetime.fromisoformat(fields.get("when", ""))
+        if local.tzinfo is not None:
+            raise ValueError("Выберите местное время Москвы, без смещения")
+        when = local.replace(tzinfo=ZoneInfo("Europe/Moscow"))
+        post = db.get(Artifact, post_id)
+        if post is None or post.product_id != product_id:
+            raise LookupError("Пост другой компании")
+        schedule_post(db, post_id, connection_id, when)
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(422, str(exc)) from None
+    return RedirectResponse(f"/studio/products/{product_id}/channels?scheduled=1", status_code=303)
+
+
+@router.post("/studio/products/{product_id}/publishing/{publication_id}/cancel")
+def studio_cancel_publication(product_id: UUID, publication_id: UUID, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    publication = db.get(Publication, publication_id)
+    if publication is None or publication.product_id != product_id:
+        raise HTTPException(404, "Публикация не найдена")
+    try:
+        cancel_scheduled_post(db, publication_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f"/studio/products/{product_id}/channels", status_code=303)
+
+
+@router.post("/studio/products/{product_id}/plans/{plan_id}/slots/{slot_id}/move")
+async def studio_slot_move(product_id: UUID, plan_id: UUID, slot_id: str,
+                           request: Request, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    plan = db.get(Artifact, plan_id)
+    if plan is None or plan.product_id != product_id or plan.kind != "editorial_plan":
+        raise HTTPException(404, "Контент-план не найден")
+    fields = await _studio_form(request)
+    try:
+        local = datetime.fromisoformat(fields.get("when", ""))
+        if local.tzinfo is not None:
+            raise ValueError("Выберите дату в часовом поясе плана")
+        current = parse_json(plan)
+        when = local.replace(tzinfo=ZoneInfo(current.get("timezone") or "Europe/Moscow"))
+        reschedule_slot(db, plan_id, slot_id, when)
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f"/studio/products/{product_id}/calendar", status_code=303)
