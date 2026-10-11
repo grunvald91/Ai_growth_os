@@ -63,6 +63,11 @@ STATUS_LABELS = {
     "failed": "Ошибка",
     "missed": "Пропущено",
     "cancelled": "Отменено",
+    "awaiting_approval": "На проверке",
+    "approved": "Утверждено",
+    "rejected": "Предыдущая версия",
+    "failed_before_send": "Не отправлено",
+    "sending": "Отправляется",
 }
 
 
@@ -285,6 +290,27 @@ def artifact_kind_label(record: Artifact, value: dict | None = None) -> str:
     return record.kind.replace("_", " ").title()
 
 
+def display_material_title(record: Artifact, value: dict | None = None) -> str:
+    """Show business-facing labels without modifying the original artifact title."""
+    value = value or parse_json(record)
+    raw = (record.title or "").strip()
+    normalized = raw.casefold().replace("_", " ").replace("-", " ")
+    aliases = {
+        "telegram derivative brief": "Бриф для Telegram",
+        "dzen derivative brief": "Бриф для Дзена",
+        "story derivative brief": "Сценарий Stories",
+        "static image derivative brief": "Бриф изображения",
+        "short video derivative brief": "Идея короткого видео",
+        "content distribution": "План публикаций",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    if normalized.endswith(" derivative brief"):
+        channel = normalized.removesuffix(" derivative brief")
+        return f"Бриф для {platform_label(channel)}"
+    return raw or artifact_kind_label(record, value)
+
+
 def artifact_text(record: Artifact, value: dict | None = None) -> str:
     value = value or parse_json(record)
     if not value:
@@ -434,7 +460,7 @@ def asset_dialog(record: Artifact) -> str:
 def material_card(product_id: UUID, record: Artifact) -> str:
     value = parse_json(record)
     kind = artifact_kind(record)
-    title = esc(record.title)
+    title = esc(display_material_title(record, value))
     label = esc(artifact_kind_label(record, value))
     text = artifact_text(record, value)
     meta = excerpt(text, 90)
@@ -598,7 +624,7 @@ def mobile_material_card(product_id: UUID, record: Artifact) -> str:
         f'<a class="m-material {kind}" href="/studio/products/{product_id}/materials/{record.id}">'
         f'<span class="m-material-type">{esc(artifact_kind_label(record, value))}</span>'
         f'<span class="m-material-thumb">{("▧" if kind == "article" else "▶" if kind == "video" else "✦")}</span>'
-        f'<b>{esc(record.title)}</b>'
+        f'<b>{esc(display_material_title(record, value))}</b>'
         f'<small>{esc(excerpt(artifact_text(record, value), 55))}</small>'
         '</a>'
     )
@@ -881,7 +907,7 @@ def product_dashboard(db: Session, product: Product) -> str:
     attention_html = f"""
     <section class="sg-workflow-banner" aria-labelledby="start-working">
       <div><span class="sg-overline">ВАШ СЛЕДУЮЩИЙ ШАГ</span>
-        <h2 id="start-working">Контент, которым легко управлять</h2>
+        <h2 id="start-working">Маркетинг под контролем</h2>
         <p>Поставьте задачу ИИ-команде. Затем проверьте текст или сценарий,
         внесите правки и отдельно разрешите публикацию.</p>
       </div>
