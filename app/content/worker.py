@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 from sqlalchemy import select, update
 from app.content.render import asset_path, render_video
+from app.content.quick_post import QuickPostRequest, run_quick_post
 from app.core.composition import build_article_production
 from app.models.domain import AgentRun, Artifact, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
@@ -21,10 +22,19 @@ async def run_content_once(session_factory, settings):
             try:
                 if request is None:
                     raise ValueError('Missing content request')
-                data = ArticleProductionInput.model_validate_json(request.content)
-                if data.product_id != product_id:
-                    raise ValueError('Wrong product')
-                result = await build_article_production(db, settings).run(data.model_copy(update={'task_id': task_id}))
+                raw = json.loads(request.content)
+                if raw.get("mode") == "post":
+                    data = QuickPostRequest.model_validate(raw)
+                    if data.product_id != product_id:
+                        raise ValueError("Wrong product")
+                    await run_quick_post(db, settings, data.model_copy(update={"task_id": task_id}))
+                else:
+                    data = ArticleProductionInput.model_validate(raw)
+                    if data.product_id != product_id:
+                        raise ValueError('Wrong product')
+                    await build_article_production(db, settings).run(
+                        data.model_copy(update={'task_id': task_id})
+                    )
                 return 1
             except (Exception, asyncio.CancelledError) as exc:
                 db.rollback()
