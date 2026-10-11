@@ -286,11 +286,17 @@ class TelegramContent:
                 Task.assigned_agent == 'editorial_planner').order_by(Task.created_at.desc()).limit(1)))
             buttons = [[{'text':'🗓 Составить / пересмотреть', 'callback_data':f'content:plan:{product_id}'}],
                        [{'text':'✏️ Мои площадки и ресурсы', 'callback_data':f'content:preferences:{product_id}'}]]
-            text = '📅 Контент-план: ' + product.name + '\nРедактор выбирает площадки, частоту и форматы, назначает подготовку заранее. Расписание запускается после подтверждения. Публикация пока вручную.'
+            text = ('📅 Контент-план: ' + product.name +
+                    '\nРедактор выбирает площадки и назначает подготовку заранее. '
+                    'После подтверждения запускается подготовка, не публикация. '
+                    'Telegram можно отправлять по согласованному расписанию только в подключённые '
+                    'каналы и после утверждения текста.')
             if tasks:
                 text += '\nПоследняя работа редактора: ' + {'queued':'в очереди', 'running':'готовит план', 'completed':'план готов', 'failed':'ошибка; можно повторить'}.get(tasks[0].status.value, tasks[0].status.value)
             if plans:
-                latest = json.loads(plans[0].content)
+                current = next((row for row in plans
+                                if json.loads(row.content).get('approval_state') == 'active'), plans[0])
+                latest = json.loads(current.content)
                 text += '\n\n' + render_calendar(latest)
                 for item in plans:
                     value = json.loads(item.content)
