@@ -22,6 +22,21 @@
     catch (error) { say(error.message || "Неизвестная ошибка"); }
     finally { if (button) button.disabled = false; }
   };
+  document.getElementById("social-check-proxy")?.addEventListener("click", event => {
+    run(event.currentTarget, async () => {
+      const output = document.getElementById("social-proxy-result");
+      output.textContent = "Проверяем HTTPS через прокси…";
+      const result = await send("/connection-check", {});
+      if (!result.configured) {
+        output.textContent = result.note;
+        return;
+      }
+      output.textContent = result.targets.map(row =>
+        (row.reachable ? "✓ " : "× ") + row.platform + " — " +
+        (row.http_status ? "HTTP " + row.http_status : "нет подтверждения HTTPS")
+      ).join("\n") + "\n" + result.note;
+    });
+  });
   document.getElementById("social-connect")?.addEventListener("submit", event => {
     event.preventDefault();
     const form = event.target;
