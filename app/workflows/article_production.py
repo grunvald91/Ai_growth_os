@@ -266,6 +266,8 @@ def _ensure_derivative_source_adaptation(brief, *, strategy, seo):
 
 def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
     """Build six safe channel texts from the already validated marketing article."""
+    if stage_inputs.get('company_slug') not in (None, 'servgo'):
+        raise ValueError('ServGo-specific text fallback is not safe for this company')
     prior = stage_inputs.get('prior_stage_outputs') or {}
     article = prior.get('marketing_editor') or {}
     conversion = prior.get('conversion_editor') or {}
@@ -377,6 +379,8 @@ def _platform_text_fallback_payload(stage_inputs: dict) -> dict:
 
 def _creative_fallback_payload(name: str, stage_inputs: dict) -> dict:
     """Build a safe, production-usable creative brief if an optional LLM creative stage fails."""
+    if stage_inputs.get('company_slug') not in (None, 'servgo'):
+        raise ValueError('ServGo-specific creative fallback is not safe for this company')
     prior = stage_inputs.get('prior_stage_outputs') or {}
     strategy = prior.get('content_strategist') or {}
     article = prior.get('marketing_editor') or {}
