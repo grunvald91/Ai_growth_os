@@ -99,6 +99,27 @@ async def check_layout(page, name, width, route):
           };
           if (parseFloat(metrics.bodyFontSize) < 14)
             errors.push('Body text too small');
+          const importantLabels = [
+            '.sg-mini-row small', '.sg-draft-alert p', '.sg-section-head p',
+            '.calendar-topic small', '.material-body p', '.sg-field small',
+            '.sg-review-item p', '.sg-publication-row small'
+          ];
+          const undersized = importantLabels.flatMap(selector =>
+            Array.from(document.querySelectorAll(selector)).slice(0, 30)
+              .filter(el => {
+                const st = getComputedStyle(el);
+                return st.display !== 'none' && st.visibility !== 'hidden'
+                       && parseFloat(st.fontSize) < 11.5;
+              })
+              .map(el => selector + '=' + getComputedStyle(el).fontSize)
+          );
+          if (undersized.length)
+            errors.push('Undersized labels: ' + undersized.slice(0, 6).join(', '));
+          const form = document.querySelector('.sg-field input, .sg-field textarea, .sg-field select');
+          if (form && parseFloat(getComputedStyle(form).fontSize) < 16)
+            errors.push('Mobile form font below 16px (iOS zoom risk)');
+          if (document.querySelectorAll('.mobile-nav').length !== 1)
+            errors.push('Expected exactly one mobile navigation');
           return {route, width, build, metrics, errors};
         }""",
         {"width": width, "route": route},
