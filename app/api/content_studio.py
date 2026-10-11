@@ -44,6 +44,8 @@ STATUS_LABELS = {
     "preparing": "Готовится",
     "running": "Готовится",
     "ready_for_review": "Готово к проверке",
+    "scheduled": "Назначено к отправке",
+    "published": "Опубликовано",
     "completed": "Готово",
     "failed": "Ошибка",
     "missed": "Пропущено",
