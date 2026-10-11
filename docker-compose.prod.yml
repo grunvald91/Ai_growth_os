@@ -78,6 +78,7 @@ services:
       SKILLS_ROOT: /app/skills
       TELEGRAM_POLL_TIMEOUT_SECONDS: ${TELEGRAM_POLL_TIMEOUT_SECONDS:-25}
       TELEGRAM_PROXY_URL: ${TELEGRAM_PROXY_URL:-http://188.120.254.223:8891}
+      CONTENT_TELEGRAM_AUTOPOST_ENABLED: ${CONTENT_TELEGRAM_AUTOPOST_ENABLED:-false}
     volumes:
       - company_products:/app/company_products
     depends_on:
