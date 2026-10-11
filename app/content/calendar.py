@@ -690,6 +690,61 @@ def tick_calendar(db, settings, now=None):
     return queued
 
 
+
+def reschedule_slot(db, plan_id: UUID, slot_id: str, publish_at: datetime, *, now=None):
+    """Move one publication slot without rewriting its topic or requeueing the package.
+
+    A publication date must be future, inside the original plan horizon, and
+    distinct from other slots on that platform. Approved materials are untouched.
+    """
+    now = now or now_utc()
+    if publish_at.tzinfo is None or publish_at.utcoffset() is None:
+        raise ValueError('Укажи дату и время с часовым поясом')
+    row, _ = plan_record(db, plan_id)
+    db.scalar(select(Product).where(Product.id == row.product_id).with_for_update())
+    row, plan = plan_record(db, plan_id, locked=True)
+    if plan.get('approval_state') not in {'active', 'draft'}:
+        raise ValueError('Этот план уже остановлен или заменён')
+    matches = [slot for slot in plan.get('slots', []) if str(slot.get('slot_id')) == str(slot_id)]
+    if len(matches) != 1:
+        raise LookupError('Публикационный слот не найден')
+    slot = matches[0]
+    if slot.get('publication_url') or slot.get('state') == 'published':
+        raise ValueError('Опубликованный материал нельзя переносить')
+    destination = publish_at.astimezone(ZoneInfo(plan['timezone']))
+    if destination <= now.astimezone(destination.tzinfo):
+        raise ValueError('Новое время публикации должно быть в будущем')
+    if destination > now.astimezone(destination.tzinfo) + timedelta(days=90):
+        raise ValueError('Нельзя переносить дальше чем на 90 дней')
+    original = datetime.fromisoformat(slot['publish_at']).astimezone(destination.tzinfo)
+    original_offset = timedelta(days=int(slot['day_offset']), hours=int(slot['hour']),
+                                minutes=int(slot.get('minute', 0)))
+    start = (original - original_offset).date()
+    day_offset = (destination.date() - start).days
+    if not (0 <= day_offset < int(plan['horizon_days'])):
+        raise ValueError('Дата должна оставаться внутри периода этого плана')
+    for other in plan['slots']:
+        if other is slot or other['platform'] != slot['platform']:
+            continue
+        dt = datetime.fromisoformat(other['publish_at'])
+        if dt.astimezone(timezone.utc) == destination.astimezone(timezone.utc):
+            raise ValueError('На этой площадке уже есть материал на выбранное время')
+    lead = timedelta(hours=int(slot.get('prepare_lead_hours', 24)))
+    slot.update({
+        'publish_at': destination.isoformat(),
+        'prepare_at': (destination - lead).isoformat(),
+        'day_offset': day_offset,
+        'hour': destination.hour,
+        'minute': destination.minute,
+    })
+    if slot.get('state') == 'missed' and not slot.get('task_id'):
+        slot['state'] = 'planned'
+    row.content = encode(plan)
+    db.commit()
+    return slot
+
+
+
 def render_calendar(plan):
     lines = ['📅 Редакторский план', 'Статус: ' + {'draft': 'ожидает подтверждения', 'active': 'подготовка по расписанию',
         'paused': 'приостановлен', 'superseded': 'заменён новым планом'}.get(plan['approval_state'], plan['approval_state']),
