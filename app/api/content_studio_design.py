@@ -486,3 +486,8 @@ STUDIO_JS = r"""
   }));
 })();
 """
+
+# Task-first redesign layered over the existing dashboard and its legacy selectors.
+from app.api.content_studio_refresh import CSS as STUDIO_REFRESH_CSS, JS as STUDIO_REFRESH_JS
+STUDIO_CSS += "\n" + STUDIO_REFRESH_CSS
+STUDIO_JS += "\n" + STUDIO_REFRESH_JS
