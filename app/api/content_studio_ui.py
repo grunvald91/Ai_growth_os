@@ -39,11 +39,13 @@ def create_content_html(product_id, *, created=False) -> str:
         f'<b>{esc(name)}</b><small>{esc(description)}</small></span></label>'
         for i, (key,name,description) in enumerate(FORMAT_CHOICES)
     )
-    # In no-JS browsers, the default post must remain submit-ready.
-    # The client replaces these options when the format changes.
+    # Without JavaScript, all compatible channels remain selectable in
+    # explicitly labeled groups. JS narrows these to the chosen format.
     option_groups = "".join(
-        f'<option value="{esc(k)}">{esc(label)}</option>'
-        for k,label in CHANNELS["post"]
+        '<optgroup label="' + esc(next(name for key,name,_ in FORMAT_CHOICES if key == fmt)) + '">'
+        + "".join(f'<option value="{esc(key)}">{esc(label)}</option>'
+                  for key,label in platforms) + '</optgroup>'
+        for fmt,platforms in CHANNELS.items()
     )
     feedback = ('<div class="sg-notice" role="status">✓ Задание добавлено в очередь. '
                 f'<a href="{base}/review">Посмотреть результаты и согласование</a></div>'
