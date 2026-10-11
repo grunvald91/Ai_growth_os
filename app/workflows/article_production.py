@@ -808,11 +808,11 @@ class ArticleProduction:
                         'Apply a hard information-style edit: short useful paragraphs, active verbs, concrete nouns, meaningful '
                         'headings, no throat-clearing, no duplicated thought, no sentence kept merely to sound expert. '
                         'The reader should feel a real operational scene, not read a scientific disclaimer. '
-                        'You MUST include at least one light situational humor beat, and normally one or two are enough. '
-                        'Use research humor_angles when available; otherwise invent an original observational joke about the '
-                        'process itself (calendar/message chaos, endless slot negotiation, admin-as-human-CRM). Humor targets '
-                        'the absurdity of the process, never clients, staff or vulnerable people; no cringe, fake quotes or '
-                        'slang overload. Use contrast and rhythm. Source-specific third-party numbers/case results MAY be used '
+                        'Use gentle situational humor only when it fits the verified brand voice, topic and audience. '
+                        'For therapy, health, grief, conflict, financial distress or other sensitive situations, prioritize '
+                        'empathy and clarity: humor may be entirely absent. Research humor_angles are optional examples, '
+                        'never an instruction to insert jokes. Never mock clients, staff or vulnerable people; no cringe, '
+                        'fake quotes or slang overload. Source-specific third-party numbers/case results MAY be used '
                         'when they are present in marketing_research; keep their scope clear and never turn them into a ServGo '
                         'guarantee. Clearly illustrative scenario counts MAY be used as examples, not as measured results. '
                         'Make the product feel like the logical answer to the pain without promising guaranteed growth. '
@@ -823,8 +823,8 @@ class ArticleProduction:
                         ' Make each adaptation publishable and persuasive, not merely safe. Start from the platform-fit '
                         'pain or scene, deliver one useful insight quickly, connect it to the verified product mechanism, '
                         'and use one concrete CTA. Preserve the sharper voice of marketing_editor and its concise '
-                        'information-style edit. Every reader-facing adaptation MUST contain at least one light situational '
-                        'humor beat or analogy tied to the operational pain; never trade clarity for comedy. '
+                        'information-style edit. Humor is optional and must follow the brand voice and audience sensitivity; '
+                        'never force an analogy or joke into a serious or vulnerable situation. '
                         'Do not repeat internal caveats unless genuinely necessary. Do not invent product guarantees or outcomes.'
                     )
                 elif name == 'repurposing_editor':
@@ -842,7 +842,7 @@ class ArticleProduction:
                         'on-screen text, transition, sound/music note and a concise but usable generation_prompt for every '
                         'shot. Include avoid_in_generation where useful, subtitle style, cover frame, edit rhythm, '
                         'editing/mix notes, CTA frame, caption variants, export spec and production notes. Include at least '
-                        'one situational humor beat in the spoken script or visual action. Be production-ready without '
+                        'optional situation-appropriate humor only when it improves the idea; never force a joke. Be production-ready without '
                         'overexplaining repeated visual details.'
                     )
                 elif name == 'story_director':
@@ -869,8 +869,8 @@ class ArticleProduction:
                         'the final shot must end at 30, and every adjacent shot must be contiguous. Every shot must '
                         'contain non-empty on_screen_text and a detailed generation_prompt. Use a platform-specific '
                         'pattern interrupt or pain-led hook, a clear payoff, full spoken script, cover, captions, CTA, '
-                        'camera/movement, transition and edit/mix guidance. Include at least one tasteful situational '
-                        'humor beat that sharpens recognition of the pain; never mock the audience. Keep every line concise '
+                        'camera/movement, transition and edit/mix guidance. Humor is optional and should only '
+                        'appear when appropriate for the audience and brand; never mock people. Keep every line concise '
                         'and useful in the spirit of Russian information-style editing. Do not render or generate a file.'
                     )
                 if name == 'platform_writer':
