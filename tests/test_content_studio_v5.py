@@ -193,3 +193,53 @@ def test_channel_schedule_form_does_not_send_before_due_and_is_company_scoped(st
                        follow_redirects=False).status_code == 303
     db.refresh(pub)
     assert pub.status == "cancelled"
+
+
+def test_web_planner_can_receive_requirements_without_replacing_current_plan(studio_v5):
+    client, db, company, _ = studio_v5
+    base = f"/studio/products/{company.id}"
+    plan = client.get(base + "/plan")
+    assert plan.status_code == 200
+    assert "Нужен новый план?" in plan.text
+    result = client.post(base + "/plan/generate", data={
+        "requirements": "Нужен план на 14 дней: полезные посты и две идеи короткого видео.",
+    }, follow_redirects=False)
+    assert result.status_code == 303
+    preference = db.scalar(select(Artifact).where(
+        Artifact.product_id == company.id,
+        Artifact.kind == "editorial_preferences",
+    ))
+    assert preference is not None
+    task = db.scalar(select(Task).where(
+        Task.product_id == company.id, Task.assigned_agent == "editorial_planner",
+    ))
+    assert task is not None and task.status == TaskStatus.QUEUED
+    assert list(db.scalars(select(Publication))) == []
+
+
+def test_storyboard_page_is_clearly_an_unrendered_brief(studio_v5):
+    client, db, company, _ = studio_v5
+    scene = {
+        "number": 1, "start_second": 0, "end_second": 8,
+        "purpose": "Показать основу композиции",
+        "on_screen_text": "Красота в деталях",
+        "visual_prompt": "Вертикальный кадр мастерской: стол, цветы, естественный свет",
+        "action_or_animation": "Медленное движение камеры",
+        "spoken_text": "Покажем детали подготовки",
+    }
+    creative = Artifact(
+        product_id=company.id, kind="creative_brief", title="Stories о цветах",
+        status="awaiting_approval", content=json.dumps({
+            "format":"story", "platform":"telegram",
+            "frames":[scene], "preview_text":"Черновик Stories, не готовое изображение",
+        }, ensure_ascii=False),
+    )
+    db.add(creative)
+    db.commit()
+    base=f"/studio/products/{company.id}"
+    response=client.get(base + f"/materials/{creative.id}")
+    assert response.status_code == 200
+    assert "Кадр 1" in response.text
+    assert "не создавались" in response.text
+    assert "Утвердить материал" in response.text
+    assert "sg-storyboard-screen" in response.text
