@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     review_skill: str | None = None
     studio_admin_username: str | None = None
     studio_admin_password: str | None = None
+    studio_public_origin: str | None = None
     telegram_bot_token: str | None = None
     telegram_owner_chat_id: int | None = None
     telegram_poll_timeout_seconds: int = 25
