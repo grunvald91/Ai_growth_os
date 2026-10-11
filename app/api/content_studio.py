@@ -235,7 +235,7 @@ def artifact_kind(record: Artifact) -> str:
     if record.kind in {"video_script", "short_video_brief"}:
         return "video"
     if record.kind == "creative_brief":
-        return "video" if parse_json(record).get("format") == "short_video" else "other"
+        return "video" if parse_json(record).get("format") == "short_video" else "creative"
     return "other"
 
 
@@ -841,7 +841,7 @@ def product_dashboard(db: Session, product: Product) -> str:
 
     review_count = sum(
         1 for art in artifacts
-        if art.kind in {"channel_text", "creative_brief"}
+        if art.kind in {"channel_text", "creative_brief", "article", "video_script"}
         and art.status == ArtifactStatus.AWAITING_APPROVAL
     )
     pending_count = db.scalar(select(Publication.id).where(
@@ -1215,7 +1215,8 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
           <a class="tab {'active' if kind == 'all' else ''}" href="/studio/products/{product.id}/materials?q={quote(q)}">Все</a>
           <a class="tab {'active' if kind == 'article' else ''}" href="/studio/products/{product.id}/materials?kind=article&q={quote(q)}">Статьи</a>
           <a class="tab {'active' if kind == 'post' else ''}" href="/studio/products/{product.id}/materials?kind=post&q={quote(q)}">Посты</a>
-          <a class="tab {'active' if kind == 'video' else ''}" href="/studio/products/{product.id}/materials?kind=video&q={quote(q)}">Сценарии</a>
+          <a class="tab {'active' if kind == 'video' else ''}" href="/studio/products/{product.id}/materials?kind=video&q={quote(q)}">Видеосценарии</a>
+        <a class="tab {'active' if kind == 'creative' else ''}" href="/studio/products/{product.id}/materials?kind=creative&q={quote(q)}">Stories и визуалы</a>
         </div>
         <button class="btn secondary small" type="submit">Найти</button>
       </form>
@@ -1508,7 +1509,7 @@ def studio_materials(product_id: UUID, kind: str = "all", q: str = "", db: Sessi
     product = db.get(Product, product_id)
     if product is None:
         raise HTTPException(404, "Product not found")
-    if kind not in {"all", "article", "post", "video"}:
+    if kind not in {"all", "article", "post", "video", "creative"}:
         kind = "all"
     response = HTMLResponse(materials_page(db, product, kind=kind, q=q))
     response.headers["Cache-Control"] = "no-store"
@@ -1696,7 +1697,7 @@ def studio_review_page(product_id: UUID, kind: str = "all", db: Session = Depend
         kind = "all"
     records = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product.id,
-        Artifact.kind.in_(["channel_text", "creative_brief"]),
+        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script"]),
         Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
     ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(250)))
     response = HTMLResponse(studio_page_shell(
@@ -1714,7 +1715,7 @@ def studio_material_approve(product_id: UUID, artifact_id: UUID, db: Session = D
     db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     row = db.scalar(select(Artifact).where(
         Artifact.id == artifact_id, Artifact.product_id == product_id,
-        Artifact.kind.in_(["channel_text", "creative_brief"])
+        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script"])
     ).with_for_update().execution_options(populate_existing=True))
     if row is None:
         raise HTTPException(404, "Материал не найден")
