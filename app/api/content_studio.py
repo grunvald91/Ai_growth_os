@@ -1734,7 +1734,7 @@ async def studio_material_revise(product_id: UUID, artifact_id: UUID,
 
 @router.get("/studio/products/{product_id}/channels", response_class=HTMLResponse)
 def studio_channels(product_id: UUID, added: bool = False, scheduled: bool = False,
-                    db: Session = Depends(get_db)):
+                    post_id: UUID | None = None, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
     connections = connected_channels(db, product.id)
     publications = list(db.scalars(select(Publication).where(
@@ -1751,7 +1751,8 @@ def studio_channels(product_id: UUID, added: bool = False, scheduled: bool = Fal
         product, active="channels", title="Каналы и публикации",
         subtitle="Подключения, назначенные отправки и реальные результаты Telegram.",
         body=channels_html(product.id, connections, publications, approved_posts,
-                           added=added, scheduled=scheduled),
+                           added=added, scheduled=scheduled, selected_post=post_id,
+                           autopost_enabled=get_settings().content_telegram_autopost_enabled),
     ))
     response.headers["Cache-Control"] = "no-store"
     return response
