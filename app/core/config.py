@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     xai_reasoning_effort: Literal["low", "medium", "high", "xhigh"] = "low"
     xai_timeout_seconds: float = 300.0
     llm_fallback_models: str = "grok-4.7"
+    openrouter_api_key: str | None = None
+    whiteboard_storyboard_model: str = ""
+    whiteboard_image_model: str = ""
+    whiteboard_speech_model: str = ""
+    whiteboard_regions_model: str = ""
+    whiteboard_voice: str = "Kore"
+    whiteboard_proxy_url: str | None = None
     # Jeff is an optional OpenAI-compatible decision endpoint, never a search adapter.
     jeff_api_key: str | None = None
     jeff_base_url: str | None = None
@@ -51,7 +58,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    @field_validator("studio_users_file", mode="before")
+    @field_validator("studio_users_file", "whiteboard_proxy_url", mode="before")
     @classmethod
     def optional_account_file(cls, value):
         return None if value == "" else value

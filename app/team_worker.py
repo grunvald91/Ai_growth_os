@@ -148,6 +148,9 @@ def _recover_transient_failed_experiment_tasks(
 
 async def run_once() -> int:
     settings = get_settings()
+    from app.content.whiteboard.worker import run_whiteboard_once
+    if await run_whiteboard_once(SessionLocal, settings):
+        return 1
     from app.competitive_intelligence.worker import run_intelligence_once
     if await run_intelligence_once(SessionLocal, settings):
         return 1

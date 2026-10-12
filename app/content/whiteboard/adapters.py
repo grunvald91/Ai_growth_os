@@ -33,7 +33,8 @@ class LLMStoryboardProvider:
             "Each beat requires a short label, one spoken sentence (narration), "
             "and a description of one simple isolated hand-drawn icon (visual). "
             "Use this arc: a question, curiosity gap, visual explanation, and a final insight. The final insight must not invent an unsupported surprising fact. "
-            "Aim for approximately 30 seconds total. Avoid unsupported factual claims, "
+            "Use exactly two beats per scene, at most 60 spoken words across all scenes. "
+            "Aim for approximately 25 seconds of narration, leaving a final hold. Avoid unsupported factual claims, "
             "personal data, URLs, and promises. Do not add markdown."
         )
         response = await self.service.generate(LLMRequest(
@@ -46,10 +47,11 @@ class LLMStoryboardProvider:
 
 
 class OpenRouterBase:
-    def __init__(self, *, api_key: str, model: str, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(self, *, api_key: str, model: str, client: httpx.AsyncClient | None = None, proxy_url: str | None = None) -> None:
         if not api_key or not model:
             raise ValueError("Explicit provider API key and model are required")
         self.key, self.model, self.client = api_key, model, client
+        self.proxy_url = proxy_url
 
     async def post(self, endpoint: str, payload: dict[str, Any]) -> httpx.Response:
         headers = {"Authorization": f"Bearer {self.key}"}
@@ -59,6 +61,7 @@ class OpenRouterBase:
             async with httpx.AsyncClient(
                 base_url="https://openrouter.ai/api/v1/",
                 timeout=httpx.Timeout(120.0),
+                proxy=self.proxy_url, trust_env=False, follow_redirects=False,
             ) as client:
                 response = await client.post(endpoint, json=payload, headers=headers)
         response.raise_for_status()
@@ -131,6 +134,7 @@ class OpenRouterRegionProvider(OpenRouterBase):
         )
         payload = {
             "model": self.model,
+            "max_tokens": 1400,
             "messages": [{
                 "role": "user", "content": [
                     {"type": "text", "text": prompt},
