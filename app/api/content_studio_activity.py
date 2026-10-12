@@ -266,15 +266,16 @@ def activity_overview(product_id: UUID, items: list[dict]) -> str:
         )
     return (
         '<section class="sg-surface sg-overview-work" data-sg-work-overview>'
-        '<div class="sg-section-head"><div><h2>Сейчас в работе</h2>'
-        '<p>Задания не пропадут: вернуться можно в любой момент.</p></div>'
+        '<div class="sg-section-head"><div><h2>' +
+        ("Сейчас создаётся" if working else "Последние задания") +
+        '</h2><p>Задания не пропадут: вернуться можно в любой момент.</p></div>'
         f'<a class="sg-mini-link" href="{base}/work">Все задания →</a></div>'
         + "".join(cards) + '</section>'
     )
 
 
 def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
-                     results: list[Artifact]) -> str:
+                     results: list[Artifact], request: Artifact | None = None) -> str:
     base = f"/studio/products/{product_id}"
     key = task_state(task)
     label, tone, description = STATES.get(key, ("Проверить", "queued", ""))
@@ -319,8 +320,9 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         in {"content_factory", "content_creative", "content_editor"} and not results else ""
     )
     return (
-        f'<section class="sg-surface sg-work-detail"><span class="sg-work-status sg-work-{tone}">'
-        f'{safe(label)}</span><h2>{safe(task_title(task))}</h2><p>{safe(explanation)}</p>'
+        f'<section class="sg-surface sg-work-detail" data-sg-task="{task.id}" data-sg-state="{key}">'
+        f'<span class="sg-work-status sg-work-{tone}">'
+        f'{safe(label)}</span><h2>{safe(task_title(task, request))}</h2><p>{safe(explanation)}</p>'
         f'<div class="sg-work-steps"><h3>Этапы создания</h3><ol>{"".join(steps)}</ol></div>'
         f'<div class="sg-work-results"><h3>Результаты</h3>'
         + ("".join(rendered) or '<p>Результаты появятся здесь после подготовки.</p>')
