@@ -104,6 +104,12 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
     by_request = {}
     for record in requests:
         by_request.setdefault(record.task_id, record)
+    runs = list(db.scalars(select(AgentRun).where(
+        AgentRun.task_id.in_(ids),
+    ).order_by(AgentRun.started_at, AgentRun.id)))
+    by_runs = {}
+    for run in runs:
+        by_runs.setdefault(run.task_id, []).append(run)
     results = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.task_id.in_(ids),
         Artifact.kind.in_(RESULT_KINDS),
@@ -130,6 +136,10 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
                 "title": art.title,
                 "status": getattr(art.status, "value", str(art.status)),
             } for art in items[:15]],
+            "stage_signature": "|".join(
+                str(run.id) + ":" + run.status
+                for run in by_runs.get(task.id, [])[-20:]
+            ),
             "created_at": task.created_at.isoformat() if task.created_at else None,
         })
     return output
@@ -342,8 +352,9 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         if key in {"failed", "cancelled"} and task.assigned_agent
         in {"content_factory", "content_creative", "content_editor"} and not results else ""
     )
+    stage_sig = "|".join(str(run.id) + ":" + run.status for run in runs[-20:])
     return (
-        f'<section class="sg-surface sg-work-detail" data-sg-task="{task.id}" data-sg-state="{key}">'
+        f'<section class="sg-surface sg-work-detail" data-sg-task="{task.id}" data-sg-state="{key}" data-sg-stage="{safe(stage_sig)}">'
         f'<span class="sg-work-status sg-work-{tone}">'
         f'{safe(label)}</span><h2>{safe(task_title(task, request))}</h2><p>{safe(explanation)}</p>'
         f'<div class="sg-work-steps"><h3>Этапы создания</h3><ol>{"".join(steps)}</ol></div>'
