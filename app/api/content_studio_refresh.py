@@ -69,6 +69,8 @@ textarea:focus-visible,select:focus-visible{outline:3px solid #83b8d8;outline-of
 .sg-layout-two{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(290px,.85fr);gap:18px;align-items:start}
 .sg-aside-stack{display:grid;gap:18px;min-width:0}
 .sg-create-form{padding:27px}
+[data-studio-create] [hidden]{display:none!important}
+.sg-create-form .sg-warning[role=alert]{font-size:14px;padding:16px;margin-bottom:18px;line-height:1.5}
 .sg-format-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 24px;padding:0;border:0}
 .sg-choice{position:relative;display:block;cursor:pointer}
 .sg-choice input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
@@ -303,7 +305,7 @@ JS = r"""
     if(window.fetch){
       const notice=document.createElement('div');
       notice.className='sg-warning';notice.hidden=true;notice.setAttribute('role','alert');
-      notice.setAttribute('tabindex','-1');notice.style.cssText='font-size:14px;padding:16px;margin-bottom:18px;line-height:1.5';
+      notice.setAttribute('tabindex','-1');
       form.prepend(notice);
       let busy=false;
       form.addEventListener('submit',async event=>{
