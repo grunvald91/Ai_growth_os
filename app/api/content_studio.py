@@ -16,12 +16,14 @@ from uuid import UUID
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse, FileResponse
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 
 from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
 from app.api.content_studio_brand import SERVGO_FAVICON_SVG, servgo_brand_html
+from app.api.content_studio_article import render_article
+from app.content.render import asset_path
 from app.api.content_studio_activity import (work_items, notice_items, notice_html,
     activity_html, activity_overview, task_detail_html, RESULT_KINDS)
 from app.api.content_studio_ui import create_content_html, review_html, channels_html
@@ -45,7 +47,7 @@ router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_s
 MATERIAL_KINDS = {
     "article", "channel_text", "video_script", "content_distribution",
     "dzen_brief", "telegram_brief", "short_video_brief",
-    "story_brief", "static_image_brief", "creative_brief",
+    "story_brief", "static_image_brief", "creative_brief", "video_render",
 }
 
 STATUS_LABELS = {
@@ -107,20 +109,9 @@ def latest_plan(db: Session, product_id: UUID, *, prefer_active: bool = True):
 
 
 def article_preview_html(text: str) -> str:
-    """A safe Markdown subset: escape all input before adding any markup."""
-    lines = []
-    for raw in text.splitlines():
-        safe = esc(raw)
-        safe = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", safe)
-        heading = re.match(r"^(#{1,3})\s+(.+)$", safe)
-        if heading:
-            level = len(heading[1]) + 1
-            lines.append(f"<h{level}>{heading[2]}</h{level}>")
-        elif safe.startswith("- "):
-            lines.append(f'<p class="sg-article-bullet">• {safe[2:]}</p>')
-        elif safe:
-            lines.append(f"<p>{safe}</p>")
-    return "".join(lines)
+    """Readable, escaped Markdown. Raw text remains available for editing."""
+    return render_article(text)
+
 
 
 def latest_draft(db: Session, product_id: UUID):
@@ -262,7 +253,7 @@ def artifact_kind(record: Artifact) -> str:
         return "article"
     if record.kind in {"channel_text", "dzen_brief", "telegram_brief"}:
         return "post"
-    if record.kind in {"video_script", "short_video_brief"}:
+    if record.kind in {"video_script", "short_video_brief", "video_render"}:
         return "video"
     if record.kind in {"creative_brief", "story_brief", "static_image_brief"}:
         return "creative"
@@ -273,6 +264,8 @@ def artifact_kind_label(record: Artifact, value: dict | None = None) -> str:
     value = value or parse_json(record)
     if record.kind == "article":
         return "Статья"
+    if record.kind == "video_render":
+        return "Готовый видеоролик MP4"
     if record.kind == "channel_text":
         return platform_label(value.get("channel", "")) or "Пост"
     if record.kind in {"video_script", "short_video_brief"}:
@@ -317,6 +310,8 @@ def artifact_text(record: Artifact, value: dict | None = None) -> str:
     value = value or parse_json(record)
     if not value:
         return record.content
+    if record.kind == "video_render":
+        return "Готовый видеофайл MP4 — откройте для просмотра или скачивания."
     if record.kind == "article":
         return str(value.get("full_article") or value.get("reader_article") or value.get("body") or record.content)
     if record.kind == "channel_text":
@@ -1453,6 +1448,28 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
           </div>
         </section>
         """
+    elif record.kind == "video_render":
+        vid = f"/studio/products/{product.id}/renders/{record.id}/video.mp4"
+        cover = f"/studio/products/{product.id}/renders/{record.id}/cover.png"
+        content = f"""
+        <section class="sg-surface sg-video-file">
+          <div class="sg-section-head"><div><h2>Готовый MP4</h2>
+          <p>Это действительно созданный видеофайл, а не изображение раскадровки.</p></div></div>
+          <video controls preload="metadata" playsinline poster="{cover}?preview=1">
+            <source src="{vid}?preview=1" type="video/mp4">
+            Ваш браузер не поддерживает воспроизведение MP4.
+          </video>
+          <div class="sg-inline-actions">
+            <a class="btn primary" href="{vid}">Скачать видео MP4</a>
+            <a class="btn secondary" href="/studio/products/{product.id}/renders/{record.id}/subtitles.srt">
+            Скачать субтитры</a>
+            <a class="btn secondary" href="/studio/products/{product.id}/renders/{record.id}/script.txt">
+            Скачать сценарий</a>
+          </div>
+          <p class="sg-muted">Текущий текстовый рендер без озвучки. Для полноценных
+          анимационных объяснений нужен отдельный конвейер видеопроизводства.</p>
+        </section>
+        """
     elif record.kind == "creative_brief":
         frames = value.get("frames") or []
         scenes = "".join(
@@ -1786,6 +1803,38 @@ def studio_material_detail(product_id: UUID, artifact_id: UUID, db: Session = De
         raise HTTPException(404, "Material not found")
     response = HTMLResponse(material_detail_page(db, product, record))
     response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.get("/studio/products/{product_id}/renders/{render_id}/{filename}")
+def studio_rendered_asset(product_id: UUID, render_id: UUID, filename: str,
+                          preview: bool = False, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    if filename not in {"video.mp4", "cover.png", "script.txt", "subtitles.srt"}:
+        raise HTTPException(404, "Файл не найден")
+    video = db.scalar(select(Artifact).where(
+        Artifact.id == render_id, Artifact.product_id == product_id,
+        Artifact.kind == "video_render",
+    ))
+    if video is None:
+        raise HTTPException(404, "Видеофайл не найден")
+    metadata = parse_json(video)
+    try:
+        script_id = UUID(str(metadata["script_id"]))
+        path = asset_path(get_settings().products_root, product_id, script_id, filename)
+    except (ValueError, KeyError, TypeError):
+        raise HTTPException(404, "Некорректные данные видео") from None
+    if not path.is_file():
+        raise HTTPException(404, "Файл ещё не сохранён или недоступен")
+    types = {"video.mp4": "video/mp4", "cover.png": "image/png",
+             "script.txt": "text/plain; charset=utf-8",
+             "subtitles.srt": "text/plain; charset=utf-8"}
+    response = FileResponse(
+        str(path), media_type=types[filename], filename=filename,
+        content_disposition_type="inline" if preview else "attachment",
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
 
