@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
@@ -21,7 +22,7 @@ from .runtime import ReadinessError, SingleCallStoryboardLLM, preflight, safe_er
 
 def build_pipeline(settings, payload, store):
     privacy = PrivacyGateway()
-    service = LLMService(privacy_gateway=privacy, provider=SingleCallStoryboardLLM(settings))
+    service = LLMService(privacy_gateway=privacy, provider=SingleCallStoryboardLLM(settings, diagnostic_directory=store.directory))
     return WhiteboardPipeline(
         storyboard=LLMStoryboardProvider(service, model=payload.models.storyboard),
         images=OpenRouterImageProvider(api_key=settings.openrouter_api_key, model=payload.models.image, proxy_url=settings.whiteboard_proxy_url),
@@ -30,7 +31,7 @@ def build_pipeline(settings, payload, store):
         renderer=MarkerSweepRenderer(), sanitizer=privacy, checkpoints=store)
 
 
-def _failure(session_factory, product_id, task_id, code):
+def _failure(session_factory, product_id, task_id, code, *, exception=None):
     with session_factory() as db:
         task = owner_task(db, product_id, task_id, lock=True)
         if task.status == TaskStatus.CANCELLED:
@@ -40,7 +41,20 @@ def _failure(session_factory, product_id, task_id, code):
         state = db.scalar(select(Artifact).where(Artifact.task_id == task.id,
                                                 Artifact.kind == 'whiteboard_job_state'))
         if state:
-            value = json.loads(state.content); value.update(stage='failed', error=code)
+            value = json.loads(state.content)
+            value['failed_stage'] = value.get('stage')
+            if exception is not None:
+                details = {'exception_type': type(exception).__name__}
+                from pydantic import ValidationError
+                import httpx
+                if isinstance(exception, ValidationError):
+                    details['validation_types'] = sorted({e['type'] for e in exception.errors(include_input=False)})
+                if isinstance(exception, httpx.HTTPStatusError):
+                    details['http_status'] = exception.response.status_code
+                value['diagnostic'] = details
+                logging.getLogger(__name__).warning('whiteboard_failed %s', json.dumps({
+                    'task_id': str(task_id), 'stage': value['failed_stage'], 'code': code, **details}))
+            value.update(stage='failed', error=code)
             state.content = json.dumps(value)
         db.execute(update(AgentRun).where(AgentRun.task_id == task_id, AgentRun.status == 'running')
                    .values(status='failed', error=code, finished_at=datetime.now(timezone.utc)))
@@ -119,5 +133,5 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
         _failure(session_factory, product_id, task_id, 'interrupted')
         raise
     except Exception as exc:
-        _failure(session_factory, product_id, task_id, safe_error(exc))
+        _failure(session_factory, product_id, task_id, safe_error(exc), exception=exc)
     return 1
