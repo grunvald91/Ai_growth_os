@@ -118,11 +118,13 @@ class SingleCallStoryboardLLM:
         self.settings, self.client = settings, client
         self.diagnostic_directory = diagnostic_directory
 
-    def record_response(self, response):
+    def record_response(self, response, *, name='storyboard'):
         # Private response capture permits offline diagnosis without repeating a paid call.
         # No request, credentials, headers or URL are recorded.
         if self.diagnostic_directory is None:
             return
+        if not re.fullmatch(r'[a-z][a-z-]{0,40}', name):
+            raise ValueError('Invalid diagnostic name')
         directory = Path(self.diagnostic_directory)
         if directory.is_symlink() or any(p.is_symlink() for p in directory.parents):
             raise ValueError('Symlink diagnostic directory rejected')
@@ -133,7 +135,7 @@ class SingleCallStoryboardLLM:
             if key:
                 body = body.replace(key, '[REDACTED]')
         body = PrivacyGateway().sanitize_text(body)
-        path = directory / ('storyboard-response-' + uuid4().hex + '.json')
+        path = directory / (name + '-response-' + uuid4().hex + '.json')
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, 'w') as stream:
             json.dump({'http_status': response.status_code, 'body': body}, stream, ensure_ascii=False)
