@@ -917,29 +917,32 @@ def product_dashboard(db: Session, product: Product) -> str:
                        for status in ("delivery_unknown", "sending", "failed_before_send"))
     attention_html = f"""
     <section class="sg-workflow-banner" aria-labelledby="start-working">
-      <div><span class="sg-overline">ВАШ СЛЕДУЮЩИЙ ШАГ</span>
-        <h2 id="start-working">Маркетинг под контролем</h2>
-        <p>Поставьте задачу ИИ-команде. Затем проверьте текст или сценарий,
-        внесите правки и отдельно разрешите публикацию.</p>
+      <div>
+        <span class="sg-overline">SERVGO · ИИ-МАРКЕТИНГ</span>
+        <h2 id="start-working">Что будем создавать?</h2>
+        <p>Укажите тему — ИИ-команда подготовит материал.
+        Все этапы и результаты можно посмотреть в разделе «В работе».</p>
       </div>
-      <div class="sg-hero-actions"><a class="btn primary" href="/studio/products/{product.id}/create">
-        ＋ Создать материал</a>
-        <a class="btn secondary" href="/studio/products/{product.id}/review">На проверке · {review_count}</a>
+      <div class="sg-hero-actions">
+        <a class="btn primary" href="/studio/products/{product.id}/create">＋ Создать материал</a>
+        <a class="btn secondary" href="/studio/products/{product.id}/work">Мои задания →</a>
       </div>
     </section>
+    """
+    overview_extra = f"""
     <div class="sg-priority-strip">
       <a class="sg-priority-item" href="/studio/products/{product.id}/review">
-        <strong>{review_count}</strong><span>Ждут проверки</span><em>Посмотреть →</em></a>
+        <strong>{review_count}</strong><span>Ждут проверки</span><em>Открыть →</em></a>
       <a class="sg-priority-item" href="/studio/products/{product.id}/channels">
-        <strong>{scheduled_count}</strong><span>В расписании Telegram</span><em>Открыть →</em></a>
+        <strong>{scheduled_count}</strong><span>В расписании Telegram</span><em>Публикации →</em></a>
       <a class="sg-priority-item" href="/studio/products/{product.id}/channels">
-        <strong>{unsafe_count}</strong><span>Нужно проверить отправку</span><em>Статусы →</em></a>
+        <strong>{unsafe_count}</strong><span>Отправку нужно проверить</span><em>Статусы →</em></a>
     </div>
-    <nav class="sg-quick-links" aria-label="Инструменты">
-      <a href="/studio/products/{product.id}/plan">▣ Контент-план</a>
-      <a href="/studio/products/{product.id}/materials">▤ Библиотека</a>
-      <a href="/studio/products/{product.id}/channels">↗ Каналы</a>
-      <a href="/studio/products/{product.id}/analytics">⌁ Результаты</a>
+    <nav class="sg-quick-links" aria-label="Дополнительные инструменты">
+      <a href="/studio/products/{product.id}/plan">Контент-план</a>
+      <a href="/studio/products/{product.id}/calendar">Календарь</a>
+      <a href="/studio/products/{product.id}/review">На согласовании</a>
+      <a href="/studio/products/{product.id}/channels">Публикации</a>
     </nav>
     """
 
@@ -1017,6 +1020,8 @@ def product_dashboard(db: Session, product: Product) -> str:
     {attention_html}
     {new_draft_notice}
     {activity_overview(product.id, work_items(db, product.id, limit=16))}
+    <details class="sg-legacy-details sg-dashboard-extra"><summary>Контент-план, календарь и другие инструменты</summary>
+    {overview_extra}
     {quick_feed}
     {mobile_dashboard_html(
         product=product,
@@ -1030,7 +1035,7 @@ def product_dashboard(db: Session, product: Product) -> str:
         horizon=horizon,
         channels=channels,
     )}
-    <details class="sg-legacy-details"><summary>Развернуть подробный контроль плана, пакетов и материалов</summary>
+    <details class="sg-legacy-details"><summary>Расширенная информация</summary>
     <div class="desktop-only-dashboard">
     {kpis}
     <div class="workspace">
@@ -1050,6 +1055,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       {selected_preview(first_material)}
     </div>
     </div>
+    </details>
     </details>
   </main>
 </div></div>
