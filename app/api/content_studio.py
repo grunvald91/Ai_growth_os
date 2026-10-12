@@ -1075,7 +1075,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=10"></script>
+<script src="/studio/assets/studio.js?v=11"></script>
 </body></html>"""
 
 
@@ -1173,7 +1173,7 @@ def studio_page_shell(
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=10"></script>
+<script src="/studio/assets/studio.js?v=11"></script>
 </body></html>"""
 
 

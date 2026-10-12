@@ -285,11 +285,13 @@ JS = r"""
     const wrapper=form.querySelector('[data-create-platform]');
     const rerender=()=>{
       const type=form.querySelector('input[name=format]:checked')?.value||'post';
+      const previousChannel=select.value;
       select.replaceChildren();
       for(const [key,label] of (options[type]||[])){
         const opt=document.createElement('option');opt.value=key;opt.textContent=label;
         select.appendChild(opt);
       }
+      if((options[type]||[]).some(([key])=>key===previousChannel))select.value=previousChannel;
       const full=type==='package';
       wrapper.hidden=full;
       select.required=!full;
@@ -298,6 +300,52 @@ JS = r"""
     };
     form.querySelectorAll('input[name=format]').forEach(x=>x.addEventListener('change',rerender));
     rerender();
+    if(window.fetch){
+      const notice=document.createElement('div');
+      notice.className='sg-warning';notice.hidden=true;notice.setAttribute('role','alert');
+      notice.setAttribute('tabindex','-1');notice.style.cssText='font-size:14px;padding:16px;margin-bottom:18px;line-height:1.5';
+      form.prepend(notice);
+      let busy=false;
+      form.addEventListener('submit',async event=>{
+        event.preventDefault();
+        if(busy)return;
+        busy=true;notice.hidden=true;
+        const button=form.querySelector('button[type=submit]');
+        const label=button.textContent;
+        button.disabled=true;button.textContent='Отправляем задание…';
+        form.setAttribute('aria-busy','true');
+        try{
+          const response=await fetch(form.action,{method:'POST',credentials:'same-origin',
+            headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},
+            body:new URLSearchParams(new FormData(form))});
+          const target=new URL(response.url,location.href);
+          if(response.ok&&response.redirected&&target.origin===location.origin&&
+              target.pathname.startsWith(form.getAttribute('action').replace(/\/create$/,'/tasks/'))){
+            location.assign(target.href);return;
+          }
+          let message;
+          if(!response.ok){
+            if((response.headers.get('content-type')||'').includes('application/json')){
+              const error=await response.json();
+              if(error.message)message=error.message+(error.error_id?' Код ошибки: '+error.error_id+'.':'');
+            }else if((response.headers.get('content-type')||'').includes('text/html')){
+              const page=new DOMParser().parseFromString(await response.text(),'text/html');
+              message=page.querySelector('[role=alert]')?.textContent;
+            }
+          }
+          message=message||(response.status===403?'Запрос не прошёл проверку адреса страницы. Повторите отправку.':
+            response.status===422?'Проверьте формат, площадку и длину заполненных полей.':
+            'Не удалось подтвердить создание задания. Перед повторной отправкой проверьте последние задания ниже.');
+          notice.textContent=message+' Заполненные поля сохранены на этой странице.';
+          notice.hidden=false;notice.focus();
+        }catch(error){
+          notice.textContent='Не удалось получить ответ сервера. Заполненные поля сохранены. Перед повторной отправкой проверьте последние задания — запрос мог уже поступить.';
+          notice.hidden=false;notice.focus();
+        }finally{
+          busy=false;button.disabled=false;button.textContent=label;form.removeAttribute('aria-busy');
+        }
+      });
+    }
   }
   const alertFields=document.querySelectorAll('[data-confirm]');
   alertFields.forEach(button=>button.addEventListener('click',ev=>{
