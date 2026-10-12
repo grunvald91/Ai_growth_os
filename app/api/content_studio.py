@@ -906,9 +906,20 @@ def product_dashboard(db: Session, product: Product) -> str:
     dialogs = "".join(asset_dialog(record) for record in material_records[:60])
     plan_state = (plan or {}).get("approval_state") or "draft"
     draft_row, draft = latest_draft(db, product.id)
+    # One prominent, self-contained action card instead of raw text appended
+    # to a generic .panel (which collided with its layout on narrow screens).
     new_draft_notice = (
-        f'<div class="panel" role="status"><b>Новый контент-план ожидает согласования.</b> '
-        f'<a class="btn secondary small" href="/studio/products/{product.id}/plan?view=draft">Открыть черновик →</a></div>'
+        f'<section class="sg-draft-alert" role="region" aria-labelledby="sg-draft-title">'
+        '<div class="sg-draft-alert-icon" aria-hidden="true">✓</div>'
+        '<div class="sg-draft-alert-copy">'
+        '<span class="sg-draft-alert-eyebrow">ГОТОВО К ПРОВЕРКЕ</span>'
+        '<h2 id="sg-draft-title">Новый контент-план готов</h2>'
+        '<p>ИИ подготовил новый вариант. Текущий план продолжит работать, '
+        'пока вы не утвердите новый.</p>'
+        '</div>'
+        f'<a class="btn primary sg-draft-alert-action" href="/studio/products/{product.id}/plan?view=draft">'
+        'Посмотреть план <span aria-hidden="true">→</span></a>'
+        '</section>'
         if draft_row and draft_row != plan_row and plan_state == "active" else ""
     )
     generated = (plan or {}).get("generated_at")
@@ -998,12 +1009,13 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f7f9fc">
+  <meta name="servgo-studio-build" content="20261012-ux10">
   <title>Growth Studio · {esc(product.name)}</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=9">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=10">
 </head>
 <body>
-<div class="studio-page"><div class="studio-layout">
+<div class="studio-page" data-studio-build="20261012-ux10"><div class="studio-layout">
   {sidebar_html(product.id)}
   {mobile_header_html(product)}
   {mobile_nav_html(product.id)}
@@ -1025,6 +1037,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       </div>
     </header>
     {attention_html}
+    {new_draft_notice}
     {quick_feed}
     {mobile_dashboard_html(
         product=product,
@@ -1038,7 +1051,6 @@ def product_dashboard(db: Session, product: Product) -> str:
         horizon=horizon,
         channels=channels,
     )}
-    {new_draft_notice}
     <details class="sg-legacy-details"><summary>Развернуть подробный контроль плана, пакетов и материалов</summary>
     <div class="desktop-only-dashboard">
     {kpis}
@@ -1063,7 +1075,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=9"></script>
+<script src="/studio/assets/studio.js?v=10"></script>
 </body></html>"""
 
 
@@ -1130,12 +1142,13 @@ def studio_page_shell(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f7f9fc">
+  <meta name="servgo-studio-build" content="20261012-ux10">
   <title>{esc(title)} · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=9">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=10">
 </head>
 <body>
-<div class="studio-page"><div class="studio-layout">
+<div class="studio-page" data-studio-build="20261012-ux10"><div class="studio-layout">
   {sidebar_html(product.id, active)}
   {mobile_header_html(product)}
   {mobile_nav_html(product.id, active)}
@@ -1160,7 +1173,7 @@ def studio_page_shell(
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=9"></script>
+<script src="/studio/assets/studio.js?v=10"></script>
 </body></html>"""
 
 
@@ -1688,7 +1701,7 @@ def product_selector(products: list[Product]) -> str:
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=9"></head>
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=10"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>

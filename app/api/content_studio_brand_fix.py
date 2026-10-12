@@ -81,6 +81,75 @@ body{background:var(--sg-bg);color:var(--sg-text);font-family:Montserrat,ui-sans
 .product-pill .sg-product-avatar{object-fit:contain;flex:0 0 38px}
 .mobile-nav{display:none}
 @media(max-height:720px) and (min-width:921px){.sidebar-promo{display:none}}
+/* v6.1: readable native typography. Montserrat stays in the official brand
+   wordmark only; interface text uses platform fonts with natural 400–700 weights. */
+:root{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans",Arial,sans-serif;
+}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans",Arial,sans-serif;
+  font-size:15px;font-weight:400;line-height:1.55;letter-spacing:0;
+}
+button,input,select,textarea{font:inherit}
+h1,h2,h3,h4,h5,h6{font-weight:700;letter-spacing:-.015em;line-height:1.35}
+p,small,.subtitle{font-weight:400;line-height:1.55}
+b,strong{font-weight:650}
+.sg-official-brand-name{
+  font-family:Montserrat,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  font-weight:800;letter-spacing:-.035em;
+}
+.topbar h1,.route-page-head h1{font-weight:700;letter-spacing:-.025em}
+.sg-section-head h2,.sg-surface h2{font-weight:700;letter-spacing:-.02em;line-height:1.35}
+.sg-workflow-banner h2{font-weight:700;letter-spacing:-.015em}
+.sg-mini-row b{font-size:14px;font-weight:600;line-height:1.45}
+.sg-mini-row small{font-size:12px;line-height:1.45}
+.sg-dashboard-feed .sg-section-head h2{font-weight:700;font-size:18px}
+.sg-dashboard-feed .sg-section-head p{font-size:13px}
+.sg-overline,.sg-draft-alert-eyebrow{font-weight:650;letter-spacing:.07em}
+.sg-priority-item strong{font-weight:700}
+.sg-priority-item span{font-weight:400}
+.sg-priority-item em{font-weight:600}
+.sidebar .nav a{font-weight:500}
+.sidebar .nav a.active{font-weight:650}
+.btn,.sg-quick-links a,.mobile-nav :is(a,button){font-weight:600}
+.sg-mini-link,.sg-legacy-details>summary{font-weight:600}
+.sg-draft-alert{
+  display:grid;grid-template-columns:44px minmax(0,1fr) auto;
+  align-items:center;gap:16px;
+  min-width:0;
+  background:#F2F5FF;border:1px solid #DBE3FA;
+  border-radius:16px;padding:19px 21px;
+  margin:0 0 18px;
+  box-shadow:0 1px 3px rgba(13,27,42,.035);
+}
+.sg-draft-alert-icon{
+  display:grid;place-items:center;width:44px;height:44px;flex:0 0 44px;
+  border-radius:12px;background:#DEE8FF;color:#2F5BEB;
+  font-size:21px;font-weight:650;
+}
+.sg-draft-alert-copy{min-width:0}
+.sg-draft-alert-eyebrow{display:block;font-size:11px;line-height:1.25;color:#3055B3;margin-bottom:5px}
+.sg-draft-alert h2{font-size:18px;line-height:1.35;font-weight:700;margin:0 0 5px;letter-spacing:-.015em;color:#17283E}
+.sg-draft-alert p{font-size:13px;line-height:1.5;font-weight:400;margin:0;color:#576B83;max-width:690px}
+.sg-draft-alert-action{
+  flex-shrink:0;min-height:44px;
+  padding:11px 17px;
+  font-size:13px;white-space:nowrap;
+  text-decoration:none;
+}
+.sg-draft-alert-action span{font-size:16px}
+@media(max-width:780px){
+  .sg-draft-alert{grid-template-columns:38px minmax(0,1fr);gap:9px 12px;padding:16px}
+  .sg-draft-alert-icon{width:38px;height:38px;grid-row:1}
+  .sg-draft-alert-copy{grid-column:2;grid-row:1}
+  .sg-draft-alert-action{grid-column:1/-1;width:100%;margin-top:5px}
+}
+@media(max-width:375px){
+  .sg-draft-alert{padding:14px;gap:10px}
+  .sg-draft-alert h2{font-size:17px}
+  .sg-draft-alert p{font-size:12px}
+  .sg-draft-alert-action{font-size:13px}
+}
 @media(max-width:1180px) and (min-width:921px){
  .studio-layout{grid-template-columns:218px minmax(0,1fr)}
  .sidebar .sg-official-brand-name{font-size:21px}

@@ -289,7 +289,7 @@ def test_official_servgo_brand_matches_booking_component(studio_v5):
     assert "/studio/assets/servgo.svg" in main.text
     assert 'sg-official-brand-name">Serv<span>Go</span>' in main.text
     assert '<span class="brand-mark">S</span>' not in main.text
-    assert 'studio.css?v=9' in main.text
+    assert 'studio.css?v=10' in main.text
 
     css = client.get("/studio/assets/studio.css").text
     assert '--sg-blue:#2F5BEB' in css
@@ -344,3 +344,71 @@ def test_recent_materials_use_russian_status_and_readable_titles(studio_v5):
     assert "На проверке" in page.text
     assert "awaiting_approval</small>" not in page.text
     assert "telegram derivative brief</b>" not in page.text
+
+
+def test_new_draft_approval_is_accessible_responsive_card_not_bare_panel(studio_v5):
+    """Reproduce the cramped/overflowing notice reported on Android."""
+    client, db, company, _ = studio_v5
+    now = datetime.now(timezone.utc)
+    active = Artifact(
+        product_id=company.id, kind="editorial_plan", title="Рабочий контент-план",
+        status="approved",
+        content=json.dumps({
+            "approval_state": "active",
+            "generated_at": (now - timedelta(days=2)).isoformat(),
+            "timezone": "Europe/Moscow", "horizon_days": 14, "slots": [],
+        }, ensure_ascii=False),
+    )
+    draft = Artifact(
+        product_id=company.id, kind="editorial_plan", title="Новый вариант плана",
+        status="draft",
+        content=json.dumps({
+            "approval_state": "draft",
+            "generated_at": now.isoformat(),
+            "timezone": "Europe/Moscow", "horizon_days": 14, "slots": [],
+        }, ensure_ascii=False),
+    )
+    db.add_all([active, draft])
+    db.commit()
+    page = client.get(f"/studio/products/{company.id}")
+    assert page.status_code == 200
+    assert page.text.count('class="sg-draft-alert"') == 1
+    assert page.text.count('id="sg-draft-title"') == 1
+    assert "Новый контент-план готов" in page.text
+    assert "Текущий план продолжит работать" in page.text
+    assert f'/studio/products/{company.id}/plan?view=draft' in page.text
+    assert page.text.index('class="sg-draft-alert"') < page.text.index('class="sg-dashboard-feed"')
+    assert 'class="panel" role="status"><b>Новый контент-план' not in page.text
+    css = client.get("/studio/assets/studio.css").text
+    assert ".sg-draft-alert{" in css
+    assert "grid-template-columns:38px minmax(0,1fr)" in css
+    assert 'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto' in css
+
+
+def test_v8_typography_consistent_across_all_studio_views(studio_v5):
+    client, db, company, _ = studio_v5
+    base = f"/studio/products/{company.id}"
+    css = client.get("/studio/assets/studio.css").text
+    assert css.rfind("/* v8: comprehensive ServGo typography") > css.rfind("/* v6.1:")
+    for needle in (
+        "--sg-font-ui:",
+        "--sg-fs-body:15px",
+        ".sg-dashboard-feed .sg-section-head h2",
+        ".sg-mini-row b",
+        ".material-body h4",
+        ".calendar-topic b",
+        ".sg-review-item h3",
+        ".sg-storyboard-card p",
+        ".sg-post-preview",
+        ".studio-page input",
+        ".sg-draft-alert h2",
+        "font-weight:600",
+        "font-size:16px;min-height:44px",
+    ):
+        assert needle in css, needle
+    for route in ("", "/create", "/review", "/calendar", "/materials", "/channels", "/plan"):
+        result = client.get(base + route)
+        assert result.status_code == 200, route
+        assert "studio.css?v=10" in result.text
+        assert 'data-studio-build="20261012-ux10"' in result.text
+        assert "/studio/assets/servgo.svg" in result.text
