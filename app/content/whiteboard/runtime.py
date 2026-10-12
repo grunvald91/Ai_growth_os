@@ -2,6 +2,11 @@
 from __future__ import annotations
 
 import re
+import json
+import logging
+import os
+from pathlib import Path
+from uuid import uuid4
 
 import httpx
 from pydantic import field_validator
@@ -45,6 +50,8 @@ MESSAGES = {
     'approval_invalid': 'Подтверждение отсутствует или относится к другой версии задания.',
     'call_limit': 'Достигнут подтверждённый лимит API-вызовов. Автоматического повтора нет.',
     'generation_failed': 'Генерация остановлена. Завершённые этапы сохранены; стоимость незавершённого вызова может быть неизвестна. Автоматического повтора нет.',
+    'storyboard_empty': 'Модель сценария вернула пустой ответ. Генерация остановлена до создания изображений.',
+    'storyboard_truncated': 'Модель сценария исчерпала лимит токенов до завершения ответа. Генерация остановлена до создания изображений.',
     'interrupted': 'Worker был остановлен. Этапы сохранены; требуется проверить результат и списания у провайдера перед новым запуском.',
     'cancelled': 'Задание остановлено. Начатый API-вызов мог завершиться и быть оплачен; следующие вызовы запрещены.',
 }
@@ -107,8 +114,29 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
 
 class SingleCallStoryboardLLM:
     """Configured ClaudeHub-compatible provider, exactly one POST and no fallbacks."""
-    def __init__(self, settings, *, client=None):
+    def __init__(self, settings, *, client=None, diagnostic_directory=None):
         self.settings, self.client = settings, client
+        self.diagnostic_directory = diagnostic_directory
+
+    def record_response(self, response):
+        # Private response capture permits offline diagnosis without repeating a paid call.
+        # No request, credentials, headers or URL are recorded.
+        if self.diagnostic_directory is None:
+            return
+        directory = Path(self.diagnostic_directory)
+        if directory.is_symlink() or any(p.is_symlink() for p in directory.parents):
+            raise ValueError('Symlink diagnostic directory rejected')
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        from app.privacy import PrivacyGateway
+        body = response.text if len(response.content) <= 100000 else '{}'
+        for key in (self.settings.xai_api_key, self.settings.openrouter_api_key):
+            if key:
+                body = body.replace(key, '[REDACTED]')
+        body = PrivacyGateway().sanitize_text(body)
+        path = directory / ('storyboard-response-' + uuid4().hex + '.json')
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, 'w') as stream:
+            json.dump({'http_status': response.status_code, 'body': body}, stream, ensure_ascii=False)
 
     async def generate(self, request):
         settings = self.settings
@@ -122,11 +150,25 @@ class SingleCallStoryboardLLM:
         async def send(connection):
             response = await connection.post('chat/completions', json=payload,
                                              headers={'Authorization': 'Bearer ' + settings.xai_api_key})
+            self.record_response(response)
             response.raise_for_status()
             data = response.json()
             usage = data.get('usage') or {}
+            choice = data['choices'][0]
+            content = choice['message'].get('content')
+            reason = choice.get('finish_reason')
+            logging.getLogger(__name__).warning('whiteboard_storyboard_response %s', json.dumps({
+                'http_status': response.status_code,
+                'finish_reason': reason if reason in {'stop', 'length', 'content_filter', 'tool_calls'} else 'unknown',
+                'content_chars': len(content) if isinstance(content, str) else 0,
+                'output_tokens': usage.get('completion_tokens'),
+            }))
+            if reason == 'length':
+                raise ReadinessError('storyboard_truncated')
+            if not isinstance(content, str) or not content.strip():
+                raise ReadinessError('storyboard_empty')
             return LLMResponse(model=str(data.get('model') or request.model),
-                               content=data['choices'][0]['message']['content'],
+                               content=content,
                                usage=LLMUsage(input_tokens=usage.get('prompt_tokens', 0), output_tokens=usage.get('completion_tokens', 0)))
         if self.client is not None:
             return await send(self.client)
