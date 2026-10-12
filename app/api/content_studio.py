@@ -2147,6 +2147,15 @@ async def studio_material_approve(product_id: UUID, artifact_id: UUID, request: 
         fields = await _studio_form(request)
         if fields.get("facts_confirmed") != "yes":
             raise HTTPException(422, "Сначала проверьте числа, цены и результаты в полном просмотре материала")
+    if row.kind == "video_render":
+        metadata = parse_json(row)
+        try:
+            script_id = UUID(str(metadata["script_id"]))
+            video_file = asset_path(get_settings().products_root, product_id, script_id, "video.mp4")
+        except (ValueError, KeyError, TypeError):
+            raise HTTPException(409, "У видео нет корректных исходных данных") from None
+        if not video_file.is_file():
+            raise HTTPException(409, "Видеофайл ещё не создан или недоступен")
     if row.kind == "channel_text":
         source = parse_json(row)
         if not source.get("body"):
