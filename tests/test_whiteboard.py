@@ -28,7 +28,9 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"fake-image-fixture"
 
 
 def request(**changes):
-    return WhiteboardRequest(product_id=uuid4(), topic="Зачем бизнесу онлайн-запись", **changes)
+    values = {"product_id": uuid4(), "topic": "Зачем бизнесу онлайн-запись"}
+    values.update(changes)
+    return WhiteboardRequest(**values)
 
 
 def scene():
