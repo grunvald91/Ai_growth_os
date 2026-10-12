@@ -166,15 +166,15 @@ JS = r"""
      const jobs=Array.isArray(data.jobs)?data.jobs:[];
      if(detail){
        const changed=jobs.find(j=>j.id===detail.dataset.sgTask &&
-           j.state!==detail.dataset.sgState);
+           (j.state!==detail.dataset.sgState ||
+            j.stage_signature!==detail.dataset.sgStage));
        if(changed&&document.visibilityState==='visible')location.reload();
      }
      if(workList||showWork){
        const active=jobs.filter(j=>j.state==='queued'||j.state==='running');
-       if(!workList&&!active.length)return;
        const statuses=jobs.slice(0,30).map(j=>j.id+':'+j.state+':'+j.artifacts.length).join('|');
        const store=workList||showWork;
-       if(store.dataset.sgSignature&&store.dataset.sgSignature!==statuses&&
+       if(store.hasAttribute('data-sg-signature')&&store.dataset.sgSignature!==statuses&&
           document.activeElement?.tagName!=='INPUT' &&
           document.activeElement?.tagName!=='TEXTAREA' ){
           location.reload();
