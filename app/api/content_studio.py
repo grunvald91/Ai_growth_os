@@ -16,7 +16,7 @@ from uuid import UUID
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 
@@ -1931,15 +1931,10 @@ async def studio_manual_edit(product_id: UUID, artifact_id: UUID, request: Reque
 def studio_create_page(product_id: UUID, created: bool = False, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
     html_body = create_content_html(product.id, created=created)
-    jobs = list(db.scalars(select(Task).where(
-        Task.product_id == product.id,
-        Task.assigned_agent.in_(["content_factory", "content_creative", "content_editor"]),
-    ).order_by(Task.created_at.desc(), Task.id.desc()).limit(20)))
-    if jobs:
-        html_body += '<section class="sg-surface"><h2>Последние задания</h2>' + ''.join(
-            f'<p><a href="/studio/products/{product.id}/tasks/{job.id}">{esc(job.title)}</a> · '
-            f'{esc(status_label(getattr(job.status, "value", job.status)))}</p>' for job in jobs
-        ) + '</section>'
+    # Tasks have a dedicated persistent workspace; never duplicate a raw
+    # technical job log below the creative form.
+    html_body += ('<p class="sg-create-work-link"><a href="/studio/products/'
+                  f'{product.id}/work">Посмотреть все запущенные задания →</a></p>')
     response = HTMLResponse(studio_page_shell(
         product, active="create", title="Создать материал",
         subtitle="Одна задача, одна площадка и понятный результат — без лишних настроек.",
@@ -1979,33 +1974,60 @@ async def studio_create_submit(product_id: UUID, request: Request, db: Session =
     return RedirectResponse(f"/studio/products/{product.id}/tasks/{task.id}", status_code=303)
 
 
+@router.get("/studio/products/{product_id}/work", response_class=HTMLResponse)
+def studio_work_page(product_id: UUID, tab: str = "all", db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    tab = tab if tab in {"all", "active", "ready", "problems"} else "all"
+    html_body = activity_html(product.id, work_items(db, product.id), tab=tab)
+    result = HTMLResponse(studio_page_shell(
+        product, active="work", title="В работе",
+        subtitle="Здесь видно, что создаётся, что готово и что требует внимания.",
+        body=html_body,
+    ))
+    result.headers["Cache-Control"] = "private, no-store"
+    return result
+
+
+@router.get("/studio/products/{product_id}/activity.json")
+def studio_activity_json(product_id: UUID, db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    jobs = work_items(db, product.id, limit=45)
+    notes = notice_items(db, product.id, limit=10)
+    response = JSONResponse({
+        "jobs": jobs,
+        "notices": notes,
+        "attention_count": len(notes),
+        "active_count": sum(1 for job in jobs if job["state"] in {"queued", "running"}),
+    })
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 @router.get("/studio/products/{product_id}/tasks/{task_id}", response_class=HTMLResponse)
 def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
-    task = db.get(Task, task_id)
-    if task is None or task.product_id != product_id:
+    task = db.scalar(select(Task).where(Task.id == task_id, Task.product_id == product_id))
+    if task is None:
         raise HTTPException(404, "Задание не найдено")
-    runs = list(db.scalars(select(AgentRun).where(AgentRun.task_id == task_id).order_by(AgentRun.started_at, AgentRun.id)))
-    materials = list(db.scalars(select(Artifact).where(
-        Artifact.task_id == task_id, Artifact.product_id == product_id,
-        Artifact.kind.in_(MATERIAL_KINDS),
+    runs = list(db.scalars(select(AgentRun).where(
+        AgentRun.task_id == task.id,
+    ).order_by(AgentRun.started_at, AgentRun.id)))
+    results = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id,
+        Artifact.product_id == product_id,
+        Artifact.kind.in_(RESULT_KINDS),
     ).order_by(Artifact.created_at, Artifact.id)))
-    state = getattr(task.status, "value", str(task.status))
-    progress = ''.join(f'<li>{esc(run.agent_name)} · {esc(status_label(run.status))}</li>' for run in runs)
-    links = ''.join(f'<p><a class="btn secondary" href="/studio/products/{product_id}/materials/{row.id}">{esc(row.title)}</a></p>' for row in materials)
-    retry = (f'<p role="alert">Подготовка не завершилась. Проверьте профиль компании и повторите задание.</p>'
-             f'<form method="post" action="/studio/products/{product_id}/tasks/{task_id}/retry"><button class="btn primary">Повторить подготовку</button></form>'
-             if state in {"failed", "cancelled"} else '')
-    body = f'<section class="sg-surface"><h2>{esc(task.title)}</h2><p role="status">{esc(status_label(state))}</p><ul>{progress}</ul>{links}{retry}'
-    if state in {"queued", "running"}:
-        body += '<p>Задание сохранено. Эту страницу можно закрыть; обработка продолжится. Статус обновляется автоматически.</p>'
-    if state == "completed" and not materials:
-        body += '<p>Задание завершено. Откройте контент-план или список материалов.</p>'
-    body += f'<a href="/studio/products/{product_id}/create">К заданиям</a></section>'
-    response = HTMLResponse(studio_page_shell(product, active="create", title="Подготовка материала", subtitle="Прогресс, результат и повтор при ошибке.", body=body))
-    response.headers["Cache-Control"] = "no-store"
-    if state in {"queued", "running"}:
-        response.headers["Refresh"] = "8"
+    request = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.product_id == product_id,
+        Artifact.kind.in_(["content_request", "creative_request", "edit_request"]),
+    ).order_by(Artifact.created_at.desc()).limit(1))
+    body = task_detail_html(product.id, task, runs, results, request=request)
+    response = HTMLResponse(studio_page_shell(
+        product, active="work", title="Создание материала",
+        subtitle="Настоящий статус задания, этапы ИИ-команды и готовые результаты.",
+        body=body,
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
     return response
 
 
