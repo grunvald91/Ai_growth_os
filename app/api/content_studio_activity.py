@@ -105,9 +105,19 @@ def task_title(task: Task, request: Artifact | None = None) -> str:
 
 
 def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
-    tasks = list(db.scalars(select(Task).where(
-        Task.product_id == product_id, Task.assigned_agent.in_(WORK_AGENTS)
+    # Pin unfinished jobs, including long-running items which would otherwise
+    # vanish if more than 'limit' newer tasks were scheduled by the calendar.
+    base = (Task.product_id == product_id, Task.assigned_agent.in_(WORK_AGENTS))
+    pinned = list(db.scalars(select(Task).where(
+        *base, Task.status.in_([
+            TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.WAITING_APPROVAL,
+        ])
+    ).order_by(Task.created_at.desc(), Task.id.desc()).limit(max(10, limit // 2))))
+    recent = list(db.scalars(select(Task).where(
+        *base,
     ).order_by(Task.created_at.desc(), Task.id.desc()).limit(limit)))
+    tasks = pinned + [row for row in recent if row.id not in {task.id for task in pinned}]
+    tasks = tasks[:max(limit, len(pinned))]
     if not tasks:
         return []
     ids = [task.id for task in tasks]
