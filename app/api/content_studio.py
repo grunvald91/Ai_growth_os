@@ -22,6 +22,8 @@ from sqlalchemy.orm import Session
 
 from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
 from app.api.content_studio_brand import SERVGO_FAVICON_SVG, servgo_brand_html
+from app.api.content_studio_activity import (work_items, notice_items, notice_html,
+    activity_html, activity_overview, task_detail_html, RESULT_KINDS)
 from app.api.content_studio_ui import create_content_html, review_html, channels_html
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.content.calendar import (PLATFORMS, approve_plan, pause_plan,
@@ -344,6 +346,7 @@ def brand_html() -> str:
 
 
 def sidebar_html(product_id: UUID, active: str = "overview") -> str:
+    """Four everyday destinations; advanced features deliberately secondary."""
     base = f"/studio/products/{product_id}"
     def item(name: str, href: str, icon: str, label: str) -> str:
         current = ' class="active" aria-current="page"' if active == name else ""
@@ -351,27 +354,26 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
     return f"""
     <aside class="sidebar">
       {servgo_brand_html(href=base)}
-      <div class="nav-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
+      <div class="nav-label">МОЯ РАБОТА</div>
       <nav class="nav" aria-label="Основная навигация">
         {item("overview", base, "⌂", "Главная")}
-        {item("create", base + "/create", "＋", "Создать")}
-        {item("review", base + "/review", "✓", "На проверке")}
-        {item("calendar", base + "/calendar", "▦", "Календарь")}
-        {item("materials", base + "/materials", "▤", "Материалы")}
+        {item("create", base + "/create", "＋", "Создать материал")}
+        {item("work", base + "/work", "◴", "В работе")}
+        {item("materials", base + "/materials", "▤", "Мои материалы")}
       </nav>
-      <div class="nav-label">УПРАВЛЕНИЕ</div>
-      <nav class="nav" aria-label="Дополнительные инструменты">
-        {item("plan", base + "/plan", "☷", "Контент-план")}
-        {item("channels", base + "/channels", "↗", "Каналы и публикации")}
-        {item("analytics", base + "/analytics", "⌁", "Результаты")}
-        <a href="/studio?choose=1"><span class="nav-ico" aria-hidden="true">⇄</span>Другой проект</a>
-      </nav>
+      <details class="sg-side-extras">
+        <summary>Настройки маркетинга и другое</summary>
+        <nav class="nav" aria-label="Дополнительные инструменты">
+          {item("review", base + "/review", "✓", "На согласовании")}
+          {item("plan", base + "/plan", "☷", "Контент-план")}
+          {item("calendar", base + "/calendar", "▦", "Календарь")}
+          {item("channels", base + "/channels", "↗", "Публикации")}
+          {item("analytics", base + "/analytics", "⌁", "Результаты")}
+          <a href="/studio?choose=1"><span class="nav-ico" aria-hidden="true">⇄</span>Другой проект</a>
+        </nav>
+      </details>
       <div class="sidebar-spacer"></div>
-      <div class="sidebar-promo">
-        <b>Проще, чем управлять агентами</b>
-        <p>Выберите задачу, проверьте результат и согласуйте публикацию.</p>
-      </div>
-      <div class="sidebar-foot">ServGo · Growth Studio</div>
+      <div class="sidebar-foot">ServGo · Маркетинг</div>
     </aside>
     """
 
@@ -385,10 +387,11 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
     <nav class="mobile-nav" aria-label="Быстрая навигация">
       {item("overview", base, "⌂", "Главная")}
       {item("create", base + "/create", "＋", "Создать")}
-      {item("review", base + "/review", "✓", "Проверить")}
-      {item("calendar", base + "/calendar", "▦", "Календарь")}
+      {item("work", base + "/work", "◴", "В работе")}
+      {item("materials", base + "/materials", "▤", "Готово")}
     </nav>
     """
+
 
 
 def mobile_header_html(product: Product) -> str:
@@ -999,6 +1002,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   {mobile_header_html(product)}
   {mobile_nav_html(product.id)}
   <main class="main">
+    <div class="sg-global-status">{notice_html(product.id)}</div>
     <header class="topbar">
       <div>
         <div class="eyebrow">GROWTH STUDIO <span class="beta">BETA</span></div>
@@ -1017,6 +1021,7 @@ def product_dashboard(db: Session, product: Product) -> str:
     </header>
     {attention_html}
     {new_draft_notice}
+    {activity_overview(product.id, work_items(db, product.id, limit=16))}
     {quick_feed}
     {mobile_dashboard_html(
         product=product,
@@ -1132,6 +1137,7 @@ def studio_page_shell(
   {mobile_header_html(product)}
   {mobile_nav_html(product.id, active)}
   <main class="main route-main">
+    <div class="sg-global-status">{notice_html(product.id)}</div>
     <div class="route-mobile-brand">{mobile_logo_html(product.id)}</div>
     <header class="route-page-head">
       <div>
@@ -1144,9 +1150,8 @@ def studio_page_shell(
     </header>
     <nav class="sg-route-utility" aria-label="Перейти к другим действиям">
       <a href="/studio/products/{product.id}/create">＋ Создать</a>
-      <a href="/studio/products/{product.id}/review">✓ На проверке</a>
+      <a href="/studio/products/{product.id}/work">◴ В работе</a>
       <a href="/studio/products/{product.id}/materials">▤ Материалы</a>
-      <a href="/studio/products/{product.id}/channels">↗ Публикации</a>
     </nav>
     <div class="route-content">{body}</div>
   </main>
