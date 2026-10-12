@@ -154,3 +154,55 @@ def test_mp4_link_only_for_real_render_and_only_for_own_company(owner_studio, tm
     assert delivered.content == path.read_bytes()
     assert client.get(f"/studio/products/{other.id}/renders/{video.id}/video.mp4").status_code == 404
     assert client.get(base + f"/renders/{video.id}/../../../../etc/passwd").status_code != 200
+
+
+def test_completed_planner_opens_its_real_draft_not_a_missing_material(owner_studio):
+    client, db, company, _ = owner_studio
+    task = Task(product_id=company.id, title="EDITORIAL_PLAN",
+                assigned_agent="editorial_planner", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    plan = Artifact(product_id=company.id, task_id=task.id,
+                    kind="editorial_plan", title="Редакторский план",
+                    status="awaiting_approval",
+                    content=json.dumps({
+                        "approval_state":"draft",
+                        "generated_at":"2026-10-12T18:00:00+03:00",
+                        "timezone":"Europe/Moscow",
+                        "strategy":"Подготовить публикации для аудитории",
+                        "slots": [],
+                    }, ensure_ascii=False))
+    db.add(plan)
+    db.commit()
+    base=f"/studio/products/{company.id}"
+    jobs=client.get(base+"/activity.json").json()["jobs"]
+    assert jobs[0]["state"] == "completed"
+    assert jobs[0]["artifacts"][0]["kind"] == "editorial_plan"
+    page=client.get(base+f"/tasks/{task.id}")
+    assert page.status_code == 200
+    assert f'{base}/plan?view=draft' in page.text
+    assert "Новый контент-план" in page.text
+    assert "Готово материалов: 1" in page.text
+
+
+def test_short_video_brief_is_never_offered_as_downloadable_mp4(owner_studio):
+    client, db, company, _ = owner_studio
+    task=Task(product_id=company.id, title="CREATIVE: short_video",
+              assigned_agent="content_creative", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    output=Artifact(product_id=company.id, task_id=task.id,
+                    kind="creative_brief", title="Сценарий объяснения",
+                    status="awaiting_approval",content=json.dumps({
+                        "format":"short_video", "platform":"youtube_shorts",
+                        "frames":[], "preview_text":"Сценарий и раскадровка",
+                    },ensure_ascii=False))
+    db.add(output)
+    db.commit()
+    base=f"/studio/products/{company.id}"
+    detail=client.get(base+f"/tasks/{task.id}")
+    assert detail.status_code == 200
+    assert "MP4 создаётся отдельным заданием" in detail.text
+    material=client.get(base+f"/materials/{output.id}")
+    assert material.status_code == 200
+    assert "Скачать видео MP4" not in material.text
