@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from typing import Any
 
 import httpx
@@ -20,6 +21,52 @@ from app.llm.service import LLMService
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
+def parse_storyboard(content: str) -> WhiteboardStoryboard:
+    """Validate JSON or the provider's explicit Russian Scene/Beat/Reply/Icon blocks.
+
+    This is a deterministic format conversion, never another model call. Unknown
+    lines, missing fields and out-of-order blocks fail rather than being guessed.
+    """
+    value = content.strip()
+    if value.startswith('```json\n') and value.endswith('\n```'):
+        value = value[8:-4].strip()
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        pass
+    else:
+        return WhiteboardStoryboard.model_validate(decoded)
+    scenes = []
+    scene = beat = None
+    for line in value.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        heading = re.fullmatch(r'Сцена\s+(\d+)\s*:\s*(.+)', line)
+        if heading:
+            if int(heading[1]) != len(scenes) + 1:
+                raise ValueError('Storyboard scene order invalid')
+            scene = {'title': heading[2], 'beats': []}
+            scenes.append(scene); beat = None
+            continue
+        heading = re.fullmatch(r'Бит\s+(\d+)\s*:\s*(.+)', line)
+        if heading and scene is not None:
+            if int(heading[1]) != len(scene['beats']) + 1:
+                raise ValueError('Storyboard beat order invalid')
+            beat = {'label': heading[2]}
+            scene['beats'].append(beat)
+            continue
+        field = re.fullmatch(r'(Реплика|Иконка)\s*:\s*(.+)', line)
+        if field and beat is not None:
+            key = 'narration' if field[1] == 'Реплика' else 'visual'
+            if key in beat:
+                raise ValueError('Duplicate storyboard field')
+            beat[key] = field[2]
+            continue
+        raise ValueError('Unsupported storyboard response format')
+    return WhiteboardStoryboard.model_validate({'scenes': scenes})
+
+
 class LLMStoryboardProvider:
     """Reuse Growth OS's PrivacyGateway -> LLMService provider boundary."""
 
@@ -28,6 +75,8 @@ class LLMStoryboardProvider:
 
     async def plan(self, request: WhiteboardRequest) -> WhiteboardStoryboard:
         prompt = (
+            'Return exactly one JSON object: {"scenes":[{"title":"...","beats":[{"label":"...","narration":"...","visual":"..."}]}]}. '
+            "Use these exact keys; no headings, prose or Markdown outside the JSON. "
             "Write a natural Russian-language whiteboard explainer. "
             "Output precisely three scenes, each with 2-6 short sequential beats. "
             "Each beat requires a short label, one spoken sentence (narration), "
@@ -43,7 +92,7 @@ class LLMStoryboardProvider:
             max_tokens=2200,
             response_schema=WhiteboardStoryboard.model_json_schema(),
         ))
-        return WhiteboardStoryboard.model_validate_json(response.content)
+        return parse_storyboard(response.content)
 
 
 class OpenRouterBase:
