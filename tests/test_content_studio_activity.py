@@ -206,3 +206,40 @@ def test_short_video_brief_is_never_offered_as_downloadable_mp4(owner_studio):
     material=client.get(base+f"/materials/{output.id}")
     assert material.status_code == 200
     assert "Скачать видео MP4" not in material.text
+
+
+def test_old_running_job_does_not_disappear_behind_newer_history(owner_studio):
+    from datetime import datetime, timedelta, timezone
+    from app.api.content_studio_activity import work_items
+    _, db, company, _ = owner_studio
+    ancient = Task(product_id=company.id, title="Long running content",
+                   assigned_agent="content_factory", status=TaskStatus.RUNNING,
+                   created_at=datetime.now(timezone.utc)-timedelta(days=9))
+    db.add(ancient)
+    for idx in range(30):
+        db.add(Task(
+            product_id=company.id, title=f"Completed package {idx}",
+            assigned_agent="content_factory", status=TaskStatus.COMPLETED,
+        ))
+    db.commit()
+    results=work_items(db,company.id,limit=10)
+    assert results[0]["id"]==str(ancient.id)
+    assert results[0]["state"]=="running"
+
+
+def test_agent_progress_signature_changes_when_step_finishes(owner_studio):
+    from app.api.content_studio_activity import work_items
+    _, db, company, _ = owner_studio
+    job=Task(product_id=company.id, title="Post",
+             assigned_agent="content_factory", status=TaskStatus.RUNNING)
+    db.add(job)
+    db.flush()
+    stage=AgentRun(task_id=job.id,agent_name="post_strategist",status="running")
+    db.add(stage)
+    db.commit()
+    before=work_items(db,company.id)[0]["stage_signature"]
+    stage.status="completed"
+    db.commit()
+    after=work_items(db,company.id)[0]["stage_signature"]
+    assert before!=after
+    assert "completed" in after
