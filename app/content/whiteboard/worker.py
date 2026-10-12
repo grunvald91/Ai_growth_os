@@ -133,5 +133,12 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
         _failure(session_factory, product_id, task_id, 'interrupted')
         raise
     except Exception as exc:
+        import httpx
+        if isinstance(exc, httpx.HTTPStatusError):
+            try:
+                SingleCallStoryboardLLM(settings, diagnostic_directory=directory / 'stages').record_response(
+                    exc.response, name='provider-error')
+            except Exception:
+                logging.getLogger(__name__).warning('whiteboard_diagnostic_capture_failed task_id=%s', task_id)
         _failure(session_factory, product_id, task_id, safe_error(exc), exception=exc)
     return 1
