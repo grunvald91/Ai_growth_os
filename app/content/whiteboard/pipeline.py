@@ -43,6 +43,8 @@ class WhiteboardPipeline:
         speech: SpeechProvider, regions: RegionProvider, renderer: VideoRenderer,
         sanitizer=None,
     ) -> None:
+        if sanitizer is None or not callable(getattr(sanitizer, "sanitize_text", None)):
+            raise ValueError("PrivacyGateway is required for outbound AI stages")
         self.storyboard = storyboard
         self.images = images
         self.speech = speech
