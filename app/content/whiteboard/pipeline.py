@@ -5,7 +5,6 @@ explicitly by a future owner-approved worker, not loaded from global secrets.
 """
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import Protocol
 
@@ -56,7 +55,16 @@ class WhiteboardPipeline:
         if self.sanitizer is not None and self.sanitizer.sanitize_text(text) != text:
             raise ValueError("Sensitive text is not allowed in a video generation request")
 
-    async def produce(self, request: WhiteboardRequest, destination: Path) -> WhiteboardOutput:
+    async def produce(
+        self, request: WhiteboardRequest, destination: Path, *, approval_verified: bool = False,
+    ) -> WhiteboardOutput:
+        destination = Path(destination)
+        if destination.suffix.lower() != ".mp4" or not destination.parent.is_dir():
+            raise ValueError("An existing output directory and .mp4 file name are required")
+        if destination.exists():
+            raise FileExistsError("Refusing to overwrite an existing video")
+        if not request.request_generation or not approval_verified:
+            raise PermissionError("Verified owner approval is required for paid generation")
         self._check_text(request.topic)
         storyboard = await self.storyboard.plan(request)
         if len(storyboard.scenes) != request.scenes:
@@ -76,19 +84,16 @@ class WhiteboardPipeline:
             regions.check_for(scene)
             # Separate beat clips: exact drawing windows can later be measured
             # with ffprobe instead of guessing from pauses or character count.
-            speech = tuple(await asyncio.gather(*(
-                self.speech.synthesize(beat.narration, language=request.language, voice=request.voice)
-                for beat in scene.beats
-            )))
+            speech_parts = []
+            for beat in scene.beats:
+                speech_parts.append(await self.speech.synthesize(
+                    beat.narration, language=request.language, voice=request.voice,
+                ))
+            speech = tuple(speech_parts)
             assets_for_scene = WhiteboardSceneAssets(scene, image, speech, regions)
             assets_for_scene.validate()
             assets.append(assets_for_scene)
 
-        destination = Path(destination)
-        if destination.suffix.lower() != ".mp4" or not destination.parent.is_dir():
-            raise ValueError("An existing output directory and .mp4 file name are required")
-        if destination.exists():
-            raise FileExistsError("Refusing to overwrite an existing video")
         duration = await self.renderer.render(tuple(assets), destination, request)
         if not destination.is_file() or destination.stat().st_size == 0:
             raise RuntimeError("Renderer did not produce a nonempty MP4")
