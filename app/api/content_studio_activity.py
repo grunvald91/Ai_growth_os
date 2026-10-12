@@ -152,6 +152,24 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
             "url": f"/studio/products/{product_id}/materials/{row.id}",
             "id": str(row.id),
         })
+    # Some historical pipeline outputs are saved as draft rather than as
+    # awaiting_approval. Surface recent completed outputs without claiming
+    # they were approved or published.
+    recent_drafts = list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id,
+        Artifact.status == ArtifactStatus.DRAFT,
+        Artifact.kind.in_(RESULT_KINDS),
+        Artifact.created_at >= datetime.now(timezone.utc) - timedelta(days=3),
+    ).order_by(Artifact.created_at.desc()).limit(4)))
+    known = {note["id"] for note in notes}
+    for draft in recent_drafts:
+        if str(draft.id) not in known:
+            notes.append({
+                "kind": "review",
+                "text": "Материал подготовлен: " + draft.title[:95],
+                "url": f"/studio/products/{product_id}/materials/{draft.id}",
+                "id": str(draft.id),
+            })
     plans = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.kind == "editorial_plan",
     ).order_by(Artifact.created_at.desc()).limit(12)))
@@ -189,7 +207,7 @@ def notice_html(product_id: UUID) -> str:
     <details class="sg-notifications" data-sg-notifications
              data-feed-url="/studio/products/{product_id}/activity.json">
       <summary aria-label="Уведомления о материалах">
-        <span aria-hidden="true">♧</span>
+        <span aria-hidden="true">🔔</span>
         <span class="sg-notify-label">Уведомления</span>
         <span class="sg-notify-count" data-sg-count hidden>0</span>
       </summary>
