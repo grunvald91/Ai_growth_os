@@ -144,11 +144,14 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
     recent = datetime.now(timezone.utc) - timedelta(days=21)
     candidates = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
-        Artifact.kind.in_(RESULT_KINDS - {"video_render"}),
+        Artifact.kind.in_(RESULT_KINDS),
     ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(limit)))
     for row in candidates:
         notes.append({
-            "kind": "review", "text": "Материал готов к проверке: " + row.title[:95],
+            "kind": "review", "text": (
+                "Готов MP4: " if row.kind == "video_render" else
+                "Материал готов к проверке: "
+            ) + row.title[:95],
             "url": f"/studio/products/{product_id}/materials/{row.id}",
             "id": str(row.id),
         })
@@ -318,7 +321,9 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
                  "video_render": "Видеофайл MP4"}.get(result.kind, "Материал")
         rendered.append(
             f'<a class="sg-work-result" href="{link}">'
-            f'<div><span>{safe(label)}</span><b>{safe(title)}</b></div>'
+            f'<div><span>{safe(label)}</span><b>{safe(title)}</b>'
+            + ('<small>Это сценарий и кадры. MP4 создаётся отдельным заданием.</small>'
+               if result.kind == "creative_brief" else '') + '</div>'
             '<span aria-hidden="true">Открыть →</span></a>'
         )
     if key == "completed" and not count:
