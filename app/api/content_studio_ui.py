@@ -112,7 +112,7 @@ def review_html(product_id, records, *, filter_name="all") -> str:
     for row in records:
         try: data=json.loads(row.content)
         except (ValueError,TypeError): data={}
-        is_creative=row.kind in {"creative_brief", "video_script"}
+        is_creative=row.kind in {"creative_brief", "video_script", "video_render"}
         if filter_name=="text" and is_creative: continue
         if filter_name=="creative" and not is_creative: continue
         preview=(data.get("body") or data.get("preview_text") or
@@ -122,7 +122,7 @@ def review_html(product_id, records, *, filter_name="all") -> str:
             preview=str(preview)
         preview=preview[:320]
         channel=data.get("platform") or data.get("channel") or "Материал"
-        kind={"creative_brief":"Креативный бриф", "video_script":"Сценарий",
+        kind={"creative_brief":"Креативный бриф", "video_script":"Сценарий", "video_render":"Готовый MP4",
               "article":"Статья", "channel_text":"Пост"}.get(row.kind, "Материал")
         action=f'{base}/materials/{row.id}'
         approve=(f'{base}/review/{row.id}/approve')
