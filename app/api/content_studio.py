@@ -904,7 +904,7 @@ def product_dashboard(db: Session, product: Product) -> str:
 
     review_count = db.scalar(select(func.count(Artifact.id)).where(
         Artifact.product_id == product.id,
-        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script"]),
+        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script", "video_render"]),
         Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
     )) or 0
     publishing_counts = dict(db.execute(
@@ -1554,7 +1554,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
         content += '<section class="sg-surface"><h3>История материала</h3><div class="preview-actions">' + ''.join(
             f'<a class="btn ghost small" href="/studio/products/{product.id}/materials/{item.id}">Версия {index}</a>'
             for index, item in enumerate(versions, 1)) + '</div></section>'
-    if record.kind in {"channel_text", "creative_brief", "article", "video_script"}:
+    if record.kind in {"channel_text", "creative_brief", "article", "video_script", "video_render"}:
         status = record.status
         form_actions = ""
         if status in {ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED}:
@@ -2117,7 +2117,7 @@ def studio_review_page(product_id: UUID, kind: str = "all", db: Session = Depend
         kind = "all"
     records = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product.id,
-        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script"]),
+        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script", "video_render"]),
         Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
     ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(250)))
     response = HTMLResponse(studio_page_shell(
@@ -2135,7 +2135,7 @@ async def studio_material_approve(product_id: UUID, artifact_id: UUID, request: 
     db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     row = db.scalar(select(Artifact).where(
         Artifact.id == artifact_id, Artifact.product_id == product_id,
-        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script"])
+        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script", "video_render"])
     ).with_for_update().execution_options(populate_existing=True))
     if row is None:
         raise HTTPException(404, "Материал не найден")
