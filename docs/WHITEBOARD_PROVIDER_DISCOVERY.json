@@ -1,0 +1,431 @@
+{
+  "checked_at": "2026-10-12T13:25:30.117009+00:00",
+  "auth_used": false,
+  "generation_calls": 0,
+  "catalogs": [
+    {
+      "kind": "images",
+      "source": "https://openrouter.ai/api/v1/images/models",
+      "http_status": 200,
+      "status": "read",
+      "models": [
+        {
+          "id": "google/gemini-nano-banana-2.1",
+          "pricing": null,
+          "supported_parameters": {
+            "resolution": {
+              "type": "enum",
+              "values": [
+                "1K",
+                "2K",
+                "4K"
+              ]
+            },
+            "aspect_ratio": {
+              "type": "enum",
+              "values": [
+                "1:1",
+                "1:4",
+                "1:8",
+                "2:3",
+                "3:2",
+                "3:4",
+                "4:1",
+                "4:3",
+                "4:5",
+                "5:4",
+                "8:1",
+                "9:16",
+                "16:9",
+                "21:9"
+              ]
+            },
+            "n": {
+              "type": "range",
+              "min": 1,
+              "max": 1
+            },
+            "input_references": {
+              "type": "range",
+              "min": 0,
+              "max": 14
+            }
+          },
+          "supported_voices": null
+        },
+        {
+          "id": "google/gemini-3.1-flash-lite-image",
+          "pricing": null,
+          "supported_parameters": {
+            "resolution": {
+              "type": "enum",
+              "values": [
+                "1K"
+              ]
+            },
+            "aspect_ratio": {
+              "type": "enum",
+              "values": [
+                "1:1",
+                "1:4",
+                "1:8",
+                "2:3",
+                "3:2",
+                "3:4",
+                "4:1",
+                "4:3",
+                "4:5",
+                "5:4",
+                "8:1",
+                "9:16",
+                "16:9",
+                "21:9"
+              ]
+            },
+            "n": {
+              "type": "range",
+              "min": 1,
+              "max": 1
+            },
+            "input_references": {
+              "type": "range",
+              "min": 0,
+              "max": 14
+            }
+          },
+          "supported_voices": null
+        },
+        {
+          "id": "google/gemini-3.1-flash-image",
+          "pricing": null,
+          "supported_parameters": {
+            "resolution": {
+              "type": "enum",
+              "values": [
+                "512",
+                "1K",
+                "2K",
+                "4K"
+              ]
+            },
+            "aspect_ratio": {
+              "type": "enum",
+              "values": [
+                "1:1",
+                "1:4",
+                "1:8",
+                "2:3",
+                "3:2",
+                "3:4",
+                "4:1",
+                "4:3",
+                "4:5",
+                "5:4",
+                "8:1",
+                "9:16",
+                "16:9",
+                "21:9"
+              ]
+            },
+            "n": {
+              "type": "range",
+              "min": 1,
+              "max": 1
+            },
+            "input_references": {
+              "type": "range",
+              "min": 0,
+              "max": 14
+            }
+          },
+          "supported_voices": null
+        },
+        {
+          "id": "google/gemini-3-pro-image",
+          "pricing": null,
+          "supported_parameters": {
+            "resolution": {
+              "type": "enum",
+              "values": [
+                "1K",
+                "2K",
+                "4K"
+              ]
+            },
+            "aspect_ratio": {
+              "type": "enum",
+              "values": [
+                "1:1",
+                "2:3",
+                "3:2",
+                "3:4",
+                "4:3",
+                "4:5",
+                "5:4",
+                "9:16",
+                "16:9",
+                "21:9"
+              ]
+            },
+            "n": {
+              "type": "range",
+              "min": 1,
+              "max": 1
+            },
+            "input_references": {
+              "type": "range",
+              "min": 0,
+              "max": 14
+            }
+          },
+          "supported_voices": null
+        },
+        {
+          "id": "google/gemini-3.1-flash-image-preview",
+          "pricing": null,
+          "supported_parameters": {
+            "resolution": {
+              "type": "enum",
+              "values": [
+                "512",
+                "1K",
+                "2K",
+                "4K"
+              ]
+            },
+            "aspect_ratio": {
+              "type": "enum",
+              "values": [
+                "1:1",
+                "1:4",
+                "1:8",
+                "2:3",
+                "3:2",
+                "3:4",
+                "4:1",
+                "4:3",
+                "4:5",
+                "5:4",
+                "8:1",
+                "9:16",
+                "16:9",
+                "21:9"
+              ]
+            },
+            "n": {
+              "type": "range",
+              "min": 1,
+              "max": 1
+            },
+            "input_references": {
+              "type": "range",
+              "min": 0,
+              "max": 14
+            }
+          },
+          "supported_voices": null
+        },
+        {
+          "id": "google/gemini-3-pro-image-preview",
+          "pricing": null,
+          "supported_parameters": {
+            "resolution": {
+              "type": "enum",
+              "values": [
+                "1K",
+                "2K",
+                "4K"
+              ]
+            },
+            "aspect_ratio": {
+              "type": "enum",
+              "values": [
+                "1:1",
+                "2:3",
+                "3:2",
+                "3:4",
+                "4:3",
+                "4:5",
+                "5:4",
+                "9:16",
+                "16:9",
+                "21:9"
+              ]
+            },
+            "n": {
+              "type": "range",
+              "min": 1,
+              "max": 1
+            },
+            "input_references": {
+              "type": "range",
+              "min": 0,
+              "max": 14
+            }
+          },
+          "supported_voices": null
+        },
+        {
+          "id": "google/gemini-2.5-flash-image",
+          "pricing": null,
+          "supported_parameters": {
+            "aspect_ratio": {
+              "type": "enum",
+              "values": [
+                "1:1",
+                "2:3",
+                "3:2",
+                "3:4",
+                "4:3",
+                "4:5",
+                "5:4",
+                "9:16",
+                "16:9",
+                "21:9"
+              ]
+            },
+            "n": {
+              "type": "range",
+              "min": 1,
+              "max": 1
+            },
+            "input_references": {
+              "type": "range",
+              "min": 0,
+              "max": 3
+            }
+          },
+          "supported_voices": null
+        }
+      ]
+    },
+    {
+      "kind": "speech",
+      "source": "https://openrouter.ai/api/v1/models?output_modalities=speech",
+      "http_status": 200,
+      "status": "read",
+      "models": [
+        {
+          "id": "google/gemini-3.8-flash-lite-tts",
+          "pricing": {
+            "prompt": "0.0000005",
+            "completion": "0.000006"
+          },
+          "supported_parameters": [],
+          "supported_voices": [
+            "Zephyr",
+            "Puck",
+            "Charon",
+            "Kore",
+            "Fenrir",
+            "Leda",
+            "Orus",
+            "Aoede",
+            "Callirrhoe",
+            "Autonoe",
+            "Enceladus",
+            "Iapetus",
+            "Umbriel",
+            "Algieba",
+            "Despina",
+            "Erinome",
+            "Algenib",
+            "Rasalgethi",
+            "Laomedeia",
+            "Achernar",
+            "Alnilam",
+            "Schedar",
+            "Gacrux",
+            "Pulcherrima",
+            "Achird",
+            "Zubenelgenubi",
+            "Vindemiatrix",
+            "Sadachbia",
+            "Sadaltager",
+            "Sulafat"
+          ]
+        },
+        {
+          "id": "google/gemini-3.8-flash-tts",
+          "pricing": {
+            "prompt": "0.0000005",
+            "completion": "0.000009"
+          },
+          "supported_parameters": [],
+          "supported_voices": [
+            "Zephyr",
+            "Puck",
+            "Charon",
+            "Kore",
+            "Fenrir",
+            "Leda",
+            "Orus",
+            "Aoede",
+            "Callirrhoe",
+            "Autonoe",
+            "Enceladus",
+            "Iapetus",
+            "Umbriel",
+            "Algieba",
+            "Despina",
+            "Erinome",
+            "Algenib",
+            "Rasalgethi",
+            "Laomedeia",
+            "Achernar",
+            "Alnilam",
+            "Schedar",
+            "Gacrux",
+            "Pulcherrima",
+            "Achird",
+            "Zubenelgenubi",
+            "Vindemiatrix",
+            "Sadachbia",
+            "Sadaltager",
+            "Sulafat"
+          ]
+        },
+        {
+          "id": "google/gemini-3.1-flash-tts-preview",
+          "pricing": {
+            "prompt": "0.000001",
+            "completion": "0.00002"
+          },
+          "supported_parameters": [],
+          "supported_voices": [
+            "Zephyr",
+            "Puck",
+            "Charon",
+            "Kore",
+            "Fenrir",
+            "Leda",
+            "Orus",
+            "Aoede",
+            "Callirrhoe",
+            "Autonoe",
+            "Enceladus",
+            "Iapetus",
+            "Umbriel",
+            "Algieba",
+            "Despina",
+            "Erinome",
+            "Algenib",
+            "Rasalgethi",
+            "Laomedeia",
+            "Achernar",
+            "Alnilam",
+            "Schedar",
+            "Gacrux",
+            "Pulcherrima",
+            "Achird",
+            "Zubenelgenubi",
+            "Vindemiatrix",
+            "Sadachbia",
+            "Sadaltager",
+            "Sulafat"
+          ]
+        }
+      ]
+    }
+  ]
+}

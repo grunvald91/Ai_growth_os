@@ -41,7 +41,7 @@ class WhiteboardPipeline:
     def __init__(
         self, *, storyboard: StoryboardProvider, images: ImageProvider,
         speech: SpeechProvider, regions: RegionProvider, renderer: VideoRenderer,
-        sanitizer=None,
+        sanitizer=None, checkpoints=None,
     ) -> None:
         if sanitizer is None or not callable(getattr(sanitizer, "sanitize_text", None)):
             raise ValueError("PrivacyGateway is required for outbound AI stages")
@@ -51,6 +51,7 @@ class WhiteboardPipeline:
         self.regions = regions
         self.renderer = renderer
         self.sanitizer = sanitizer
+        self.checkpoints = checkpoints
 
     def _check_text(self, text: str) -> None:
         # Guard all external media calls, not just the LLM storyboard request.
@@ -68,7 +69,14 @@ class WhiteboardPipeline:
         if not request.request_generation or not approval_verified:
             raise PermissionError("Verified owner approval is required for paid generation")
         self._check_text(request.topic)
-        storyboard = await self.storyboard.plan(request)
+        if self.checkpoints is not None:
+            if self.checkpoints.identity['request'] != request.model_dump(mode='json'):
+                raise ValueError('Checkpoint request does not match this job')
+            storyboard = await self.checkpoints.json_stage(
+                'storyboard', lambda: self.storyboard.plan(request), WhiteboardStoryboard,
+            )
+        else:
+            storyboard = await self.storyboard.plan(request)
         if len(storyboard.scenes) != request.scenes:
             raise ValueError("Storyboard scene count mismatch")
         for scene in storyboard.scenes:
@@ -78,19 +86,38 @@ class WhiteboardPipeline:
 
         assets: list[WhiteboardSceneAssets] = []
         # Sequential scenes bound concurrent API pressure and simplify failure recovery.
-        for scene in storyboard.scenes:
-            image = await self.images.generate(scene, request)
+        for scene_index, scene in enumerate(storyboard.scenes):
+            prefix = f'scene-{scene_index:02}'
+            if self.checkpoints is not None:
+                image = await self.checkpoints.bytes_stage(
+                    prefix + '-image', lambda: self.images.generate(scene, request),
+                )
+            else:
+                image = await self.images.generate(scene, request)
             if not isinstance(image, bytes) or not image.startswith(b"\x89PNG\r\n\x1a\n"):
                 raise ValueError("Image provider returned invalid PNG bytes")
-            regions = await self.regions.detect(scene, image)
+            if self.checkpoints is not None:
+                regions = await self.checkpoints.json_stage(
+                    prefix + '-regions', lambda: self.regions.detect(scene, image), WhiteboardRegionPlan,
+                )
+            else:
+                regions = await self.regions.detect(scene, image)
             regions.check_for(scene)
             # Separate beat clips: exact drawing windows can later be measured
             # with ffprobe instead of guessing from pauses or character count.
             speech_parts = []
-            for beat in scene.beats:
-                speech_parts.append(await self.speech.synthesize(
-                    beat.narration, language=request.language, voice=request.voice,
-                ))
+            for beat_index, beat in enumerate(scene.beats):
+                async def synthesize():
+                    return await self.speech.synthesize(
+                        beat.narration, language=request.language, voice=request.voice,
+                    )
+                if self.checkpoints is not None:
+                    audio = await self.checkpoints.bytes_stage(
+                        f'{prefix}-beat-{beat_index:02}-speech', synthesize, limit=10_000_000,
+                    )
+                else:
+                    audio = await synthesize()
+                speech_parts.append(audio)
             speech = tuple(speech_parts)
             assets_for_scene = WhiteboardSceneAssets(scene, image, speech, regions)
             assets_for_scene.validate()

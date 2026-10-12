@@ -1,6 +1,6 @@
 # ServGo Growth OS — Whiteboard video integration plan
 
-Status: foundation + independently implemented CPU marker-sweep renderer.
+Status: foundation + independent CPU marker-sweep renderer + stage checkpoints + local CLI.
 A real MP4 was verified with synthetic images/audio; no paid API calls or deployment.
 Branch: `wip/whiteboard-video-foundation`.
 
@@ -48,8 +48,10 @@ export MP4. Never aut​opublish.
    on success/failure. Complete MP4/SRT/PNG/JSON files are published without
    overwrites using same-filesystem hard links. Multi-file publication is not a
    crash-atomic transaction; job-level crash recovery remains to implement.
-4. Implement persisted job progress, retries, cancel, idempotency, authenticated
-   owner-only endpoints, explicit per-job API spend cap, and CostRecord audit.
+4. Per-run stage checkpoints, integrity checks and exclusive locking are added.
+   Interrupted/failed calls block automatic repeats. Still required: DB worker
+   progress, cancellation, global idempotency, authenticated owner-only endpoints,
+   persisted approval binding, per-job spend control and CostRecord audit.
 5. Integrate mode selector, review step and playback in existing studio CSS.
 6. Run local tests (no Actions), then a single owner-authorized paid run.
 
@@ -100,3 +102,20 @@ from a dedicated CPU process. Use an existing product-owned output directory.
 This local renderer makes no model calls and does not authorize the paid pipeline.
 The paid pipeline still requires verified owner approval and must remain unexposed
 until persisted authorization, spend control and authenticated owner routes exist.
+
+## Continuation — checkpoint and CLI acceptance
+
+2026-10-12: 21 tests passed with `tests/test_whiteboard_checkpoints.py` included.
+The same complete pipeline was run again using cached stages, then re-rendered
+through the offline CLI, with no second provider calls. Failed/interrupted and
+concurrent same-run execution, cache corruption/symlinks, changed request/model
+identity and key-safe diagnostics were tested. All AI stages used test providers.
+
+Commands and exact limits are documented in `WHITEBOARD_VIDEO_RUNBOOK.md`.
+Public image/TTS catalog GET requests succeeded without authentication; snapshot
+and source URLs are in `WHITEBOARD_PROVIDER_DISCOVERY.json`. No model generation
+was performed. Available catalogue entries do not confirm access with the user's
+key, Russian voice quality or actual per-video charges.
+
+Doctor checked actual project Settings including `XAI_API_KEY`; text and media
+keys were absent and no whiteboard model IDs were configured.
