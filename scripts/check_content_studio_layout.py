@@ -38,7 +38,7 @@ ROUTES = [
     ("materials", "/materials"),
     ("channels", "/channels"),
 ]
-EXPECTED_BUILD = "20261011-ux8"
+EXPECTED_BUILD = "20261012-work9"
 
 
 async def check_layout(page, name, width, route):
@@ -63,7 +63,7 @@ async def check_layout(page, name, width, route):
           const style = (el) => el ? getComputedStyle(el) : null;
           const errors = [];
           if (!layout || !main) errors.push('Main layout missing');
-          if (!build || build !== '20261011-ux8')
+          if (!build || build !== '20261012-work9')
             errors.push('Wrong deployed build: ' + String(build));
           if (document.documentElement.scrollWidth > innerWidth + 2)
             errors.push('Horizontal overflow: ' + document.documentElement.scrollWidth
@@ -77,7 +77,7 @@ async def check_layout(page, name, width, route):
               errors.push('Mobile navigation overlaps main');
             if (navText.includes('Комментарии') || navText.includes('Ещё'))
               errors.push('Legacy mobile menu detected: ' + navText);
-            if (!navText.includes('Создать') || !navText.includes('Календарь'))
+            if (!navText.includes('Создать') || !navText.includes('В работе'))
               errors.push('Wrong mobile menu: ' + navText);
           }
           if (notice) {
