@@ -172,6 +172,7 @@ async def test_documented_openrouter_image_and_speech_routes_use_bearer():
     assert [row[0] for row in recorded] == ["/api/v1/images", "/api/v1/audio/speech"]
     assert all(row[1] == "Bearer test-key" for row in recorded)
     assert recorded[0][2]["aspect_ratio"] == "9:16"
+    assert recorded[0][2]["output_format"] == "png"
     assert recorded[1][2]["response_format"] == "mp3"
 
 

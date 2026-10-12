@@ -32,7 +32,7 @@ class LLMStoryboardProvider:
             "Output precisely three scenes, each with 2-6 short sequential beats. "
             "Each beat requires a short label, one spoken sentence (narration), "
             "and a description of one simple isolated hand-drawn icon (visual). "
-            "Use an engaging hook, an evidence-safe explanation, and a conclusion. "
+            "Use this arc: a question, curiosity gap, visual explanation, and a final insight. The final insight must not invent an unsupported surprising fact. "
             "Aim for approximately 30 seconds total. Avoid unsupported factual claims, "
             "personal data, URLs, and promises. Do not add markdown."
         )
@@ -82,7 +82,7 @@ class OpenRouterImageProvider(OpenRouterBase):
         )
         response = await self.post("images", {
             "model": self.model, "prompt": prompt, "aspect_ratio": request.aspect_ratio,
-            "resolution": "1K", "n": 1,
+            "resolution": "1K", "output_format": "png", "n": 1,
         })
         data = response.json().get("data") or []
         if len(data) != 1 or not isinstance(data[0].get("b64_json"), str):

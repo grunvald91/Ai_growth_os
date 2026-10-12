@@ -1,6 +1,7 @@
 # ServGo Growth OS — Whiteboard video integration plan
 
-Status: foundation only; **no generated videos, paid API requests, or deployment**.
+Status: foundation + independently implemented CPU marker-sweep renderer.
+A real MP4 was verified with synthetic images/audio; no paid API calls or deployment.
 Branch: `wip/whiteboard-video-foundation`.
 
 ## Verified integration points
@@ -39,10 +40,14 @@ export MP4. Never aut​opublish.
 1. Confirm provider model IDs, voice IDs, supported image formats and
    9:16 capability with live model discovery; probe HTTP schemas without
    committing secrets. In particular ClaudeHub image API shape is not verified.
-2. Add a renderer adapter, licensed drawing engine or independent algorithm;
-   measure MP3 duration per beat with ffprobe; ensure chronological animation.
-3. Put generated assets in bounded temporary storage under products_root;
-   atomic final MP4 and covers, subtitles, clean failed-job leftovers.
+2. Renderer adapter added: `MarkerSweepRenderer`. It decodes each MP3 to 24 kHz
+   mono PCM and counts samples for exact beat boundaries, reveals rectangular
+   regions in strokes, and verifies final streams/duration with ffprobe.
+   This pilot is not upstream contour tracing/handwriting reconstruction.
+3. Renderer uses bounded temporary files beside the destination and removes them
+   on success/failure. Complete MP4/SRT/PNG/JSON files are published without
+   overwrites using same-filesystem hard links. Multi-file publication is not a
+   crash-atomic transaction; job-level crash recovery remains to implement.
 4. Implement persisted job progress, retries, cancel, idempotency, authenticated
    owner-only endpoints, explicit per-job API spend cap, and CostRecord audit.
 5. Integrate mode selector, review step and playback in existing studio CSS.
@@ -66,3 +71,32 @@ export MP4. Never aut​opublish.
 - https://openrouter.ai/docs/guides/overview/multimodal/image-generation
 - https://openrouter.ai/docs/guides/overview/multimodal/tts
 - https://openrouter.ai/docs/guides/overview/multimodal/image-understanding
+
+## Codespaces validation — 2026-10-12
+
+- Existing Codespace: `silver-space-winner-r467jjq6q695cxr77`.
+- Isolated worktree: `/workspaces/servgo-animator`; existing workspace preserved.
+- Runtime observed: Python 3.14.2, Pillow 12.3.0; FFmpeg/FFprobe installed.
+- Command: `python -m pytest tests/test_whiteboard.py tests/test_whiteboard_render.py -q --disable-warnings`.
+- 13 tests passed, including real H.264/AAC 9:16 MP4 at 180x320, 30 seconds,
+  subtitles, cover, measured beat timeline, no future-beat reveal, overlap/corrupt
+  audio rejection, and >30-second narration rejection without output.
+- Production default is 720x1280 at 20 fps; full-resolution throughput, peak
+  memory on the 2 GB server, Python 3.12 and real Russian TTS remain unverified.
+- Short narration keeps the final image and silence to reach 30 seconds; long
+  narration fails rather than being accelerated or cut.
+- Renderer async entry point uses a thread; cancellation is not implemented.
+- Expected provider key variables were absent; `.env` was absent in the existing
+  Growth OS workspace. Secret values were not printed or requested in chat.
+- No GitHub Actions were manually started; no production changes.
+- Image adapter requests PNG explicitly. Validate the selected model's supported
+  parameters before using it; the adapter does not perform model discovery.
+
+### Direct local rendering of prepared assets
+
+Pass three `WhiteboardSceneAssets` instances and a validated `WhiteboardRequest`
+to `MarkerSweepRenderer().render(...)` from an async worker, or `render_sync(...)`
+from a dedicated CPU process. Use an existing product-owned output directory.
+This local renderer makes no model calls and does not authorize the paid pipeline.
+The paid pipeline still requires verified owner approval and must remain unexposed
+until persisted authorization, spend control and authenticated owner routes exist.
