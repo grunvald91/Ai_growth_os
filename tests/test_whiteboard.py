@@ -110,13 +110,13 @@ async def test_pipeline_stages_create_one_output_and_one_audio_per_beat(tmp_path
         storyboard=planner, images=FakeImages(), speech=speech,
         regions=FakeRegions(), renderer=render, sanitizer=PrivacyGateway(),
     )
-    output = await worker.produce(request(), tmp_path / "video.mp4")
+    output = await worker.produce(request(request_generation=True), tmp_path / "video.mp4", approval_verified=True)
     assert output.scene_count == 3 and output.duration_seconds == 30.0
     assert output.video_path.is_file()
     assert render.asset_count == 3 and len(speech.seen) == 6
     assert all(entry[1] == "ru" for entry in speech.seen)
     with pytest.raises(FileExistsError):
-        await worker.produce(request(), tmp_path / "video.mp4")
+        await worker.produce(request(request_generation=True), tmp_path / "video.mp4", approval_verified=True)
 
 
 @pytest.mark.asyncio
@@ -127,7 +127,7 @@ async def test_pipeline_rejects_secret_before_any_provider_call(tmp_path):
         regions=FakeRegions(), renderer=FakeRenderer(), sanitizer=PrivacyGateway(),
     )
     with pytest.raises(ValueError, match="Sensitive text"):
-        await worker.produce(request(topic="Пароль sk-hub-abcdefgh123456789 для демонстрации"), tmp_path / "x.mp4")
+        await worker.produce(request(topic="Пароль sk-hub-abcdefgh123456789 для демонстрации", request_generation=True), tmp_path / "x.mp4", approval_verified=True)
     assert planner.calls == 0
 
 
@@ -202,3 +202,15 @@ async def test_storyboard_adapter_reuses_privacy_service():
     service = LLMService(privacy_gateway=PrivacyGateway(), provider=Provider())
     got = await LLMStoryboardProvider(service, model="test-model").plan(request())
     assert len(got.scenes) == 3
+
+
+@pytest.mark.asyncio
+async def test_pipeline_disallows_unapproved_paid_execution(tmp_path):
+    planner = FakePlanner()
+    pipeline = WhiteboardPipeline(
+        storyboard=planner, images=FakeImages(), speech=FakeSpeech(),
+        regions=FakeRegions(), renderer=FakeRenderer(),
+    )
+    with pytest.raises(PermissionError):
+        await pipeline.produce(request(request_generation=True), tmp_path / "no.mp4")
+    assert planner.calls == 0
