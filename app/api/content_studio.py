@@ -989,13 +989,13 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f7f9fc">
-  <meta name="servgo-studio-build" content="20261011-ux8">
+  <meta name="servgo-studio-build" content="20261012-work9">
   <title>Growth Studio · {esc(product.name)}</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=8">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=9">
 </head>
 <body>
-<div class="studio-page" data-studio-build="20261011-ux8"><div class="studio-layout">
+<div class="studio-page" data-studio-build="20261012-work9"><div class="studio-layout">
   {sidebar_html(product.id)}
   {mobile_header_html(product)}
   {mobile_nav_html(product.id)}
@@ -1060,7 +1060,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=8"></script>
+<script src="/studio/assets/studio.js?v=9"></script>
 </body></html>"""
 
 
@@ -1127,13 +1127,13 @@ def studio_page_shell(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f7f9fc">
-  <meta name="servgo-studio-build" content="20261011-ux8">
+  <meta name="servgo-studio-build" content="20261012-work9">
   <title>{esc(title)} · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=8">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=9">
 </head>
 <body>
-<div class="studio-page" data-studio-build="20261011-ux8"><div class="studio-layout">
+<div class="studio-page" data-studio-build="20261012-work9"><div class="studio-layout">
   {sidebar_html(product.id, active)}
   {mobile_header_html(product)}
   {mobile_nav_html(product.id, active)}
@@ -1158,7 +1158,7 @@ def studio_page_shell(
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=8"></script>
+<script src="/studio/assets/studio.js?v=9"></script>
 </body></html>"""
 
 
@@ -1353,7 +1353,7 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
         "all": MATERIAL_KINDS,
         "article": {"article"},
         "post": {"channel_text", "dzen_brief", "telegram_brief"},
-        "video": {"video_script", "short_video_brief"},
+        "video": {"video_script", "short_video_brief", "video_render"},
         "creative": {"creative_brief", "story_brief", "static_image_brief"},
     }
     kind = kind if kind in kinds else "all"
@@ -1708,7 +1708,7 @@ def product_selector(products: list[Product]) -> str:
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=8"></head>
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=9"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
