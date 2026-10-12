@@ -48,6 +48,20 @@ def safe(value) -> str:
     return html.escape(str(value if value is not None else ""), quote=True)
 
 
+def readable_artifact_title(artifact: Artifact) -> str:
+    """Never show internal derivative-brief names to the business owner."""
+    raw = str(artifact.title or "").strip()
+    normalized = raw.casefold().replace("_", " ").replace("-", " ")
+    labels = {
+        "telegram derivative brief": "Задание для Telegram",
+        "dzen derivative brief": "Задание для Дзена",
+        "short video derivative brief": "Сценарий короткого видео",
+        "static image derivative brief": "Бриф изображения",
+        "story derivative brief": "Бриф Stories",
+    }
+    return labels.get(normalized, raw or "Материал")
+
+
 def task_state(task: Task) -> str:
     return getattr(task.status, "value", str(task.status))
 
@@ -133,7 +147,7 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
             "description": explanation,
             "artifacts": [{
                 "id": str(art.id), "kind": art.kind,
-                "title": art.title,
+                "title": readable_artifact_title(art),
                 "status": getattr(art.status, "value", str(art.status)),
             } for art in items[:15]],
             "stage_signature": "|".join(
@@ -161,7 +175,7 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
             "kind": "review", "text": (
                 "Готов MP4: " if row.kind == "video_render" else
                 "Материал готов к проверке: "
-            ) + row.title[:95],
+            ) + readable_artifact_title(row)[:95],
             "url": f"/studio/products/{product_id}/materials/{row.id}",
             "id": str(row.id),
         })
@@ -179,7 +193,7 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
         if str(draft.id) not in known:
             notes.append({
                 "kind": "review",
-                "text": "Материал подготовлен: " + draft.title[:95],
+                "text": "Материал подготовлен: " + readable_artifact_title(draft)[:95],
                 "url": f"/studio/products/{product_id}/materials/{draft.id}",
                 "id": str(draft.id),
             })
@@ -324,7 +338,7 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         steps.append(f'<li><span>{safe(stage)}</span><b>{safe(state)}</b></li>')
     rendered = []
     for result in results:
-        title = result.title[:100] or "Материал"
+        title = readable_artifact_title(result)[:100]
         link = (f"{base}/plan?view=draft" if result.kind == "editorial_plan"
                 else f"{base}/materials/{result.id}")
         label = {"article": "Статья", "channel_text": "Готовый пост",
