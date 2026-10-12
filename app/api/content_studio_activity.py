@@ -41,7 +41,7 @@ STAGE_NAMES = {
 }
 RESULT_KINDS = {"article", "channel_text", "video_script", "creative_brief", "video_render",
                 "content_distribution", "dzen_brief", "telegram_brief",
-                "short_video_brief", "story_brief", "static_image_brief"}
+                "short_video_brief", "story_brief", "static_image_brief", "editorial_plan"}
 
 
 def safe(value) -> str:
@@ -154,7 +154,7 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
     recent = datetime.now(timezone.utc) - timedelta(days=21)
     candidates = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
-        Artifact.kind.in_(RESULT_KINDS),
+        Artifact.kind.in_(RESULT_KINDS - {"editorial_plan"}),
     ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(limit)))
     for row in candidates:
         notes.append({
@@ -171,7 +171,7 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
     recent_drafts = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id,
         Artifact.status == ArtifactStatus.DRAFT,
-        Artifact.kind.in_(RESULT_KINDS),
+        Artifact.kind.in_(RESULT_KINDS - {"editorial_plan"}),
         Artifact.created_at >= datetime.now(timezone.utc) - timedelta(days=3),
     ).order_by(Artifact.created_at.desc()).limit(4)))
     known = {note["id"] for note in notes}
@@ -325,10 +325,12 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
     rendered = []
     for result in results:
         title = result.title[:100] or "Материал"
-        link = f"{base}/materials/{result.id}"
+        link = (f"{base}/plan?view=draft" if result.kind == "editorial_plan"
+                else f"{base}/materials/{result.id}")
         label = {"article": "Статья", "channel_text": "Готовый пост",
                  "video_script": "Сценарий видео", "creative_brief": "Раскадровка",
-                 "video_render": "Видеофайл MP4"}.get(result.kind, "Материал")
+                 "video_render": "Видеофайл MP4",
+                 "editorial_plan": "Новый контент-план"}.get(result.kind, "Материал")
         rendered.append(
             f'<a class="sg-work-result" href="{link}">'
             f'<div><span>{safe(label)}</span><b>{safe(title)}</b>'
