@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 
 class AgentRole(StrEnum):
+    COMMENT_SALES = "comment_sales"
     COMPANY_INTAKE = "company_intake"
     CMO = "cmo"
     RESEARCH_PMM = "research_pmm"
@@ -56,6 +57,12 @@ class AgentConfig(BaseModel):
 
 
 AGENT_CONFIGS = MappingProxyType({
+    AgentRole.COMMENT_SALES: AgentConfig(
+        role=AgentRole.COMMENT_SALES,
+        responsibilities=("Draft polite business-grounded comment replies and identify needs without pressure.",
+                          "Escalate complaints and missing facts; never publish or initiate private messages."),
+        allowed_operations=frozenset({ToolOperation.GENERATE_DRAFT}),
+    ),
     AgentRole.COMPANY_INTAKE: AgentConfig(
         role=AgentRole.COMPANY_INTAKE,
         responsibilities=("Collect source-grounded company inputs, expose conflicts and missing data.",

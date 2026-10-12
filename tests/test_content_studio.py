@@ -1,16 +1,17 @@
 import json
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.db.models import Base
 from app.db.session import get_db
 from app.main import app
-from app.models.domain import Artifact, Product, Task, TaskStatus
+from app.api.content_studio import latest_plan, latest_draft, state_for_group, reconcile_plan_states
+from app.models.domain import Artifact, Product, Task, TaskStatus, ArtifactStatus
 
 
 @pytest.fixture
@@ -295,3 +296,212 @@ def test_studio_calendar_date_filter_and_material_search_work(studio_db):
         assert "Нужная статья" not in posts.text
     finally:
         app.dependency_overrides.clear()
+
+
+def test_active_plan_is_stable_when_new_draft_is_generated(studio_db):
+    db = studio_db
+    product = Product(name="Пекарня", slug="bakery-plan")
+    db.add(product)
+    db.flush()
+    active = make_plan(approval_state="active")
+    active["generated_at"] = "2026-10-01T12:00:00+00:00"
+    active["slots"][0]["topic"] = active["slots"][1]["topic"] = "Действующий календарь"
+    draft = make_plan(approval_state="draft")
+    draft["generated_at"] = "2026-10-11T12:00:00+00:00"
+    draft["slots"][0]["topic"] = draft["slots"][1]["topic"] = "Новый план"
+    current_row = Artifact(product_id=product.id, kind="editorial_plan", title="Действует",
+                           content=json.dumps(active, ensure_ascii=False))
+    draft_row = Artifact(product_id=product.id, kind="editorial_plan", title="Черновик",
+                         content=json.dumps(draft, ensure_ascii=False))
+    db.add_all([current_row, draft_row])
+    db.commit()
+
+    selected, _ = latest_plan(db, product.id)
+    newest_draft, _ = latest_draft(db, product.id)
+    assert selected.id == current_row.id
+    assert newest_draft.id == draft_row.id
+
+    client = client_for(db)
+    try:
+        base = f"/studio/products/{product.id}"
+        dashboard = client.get(base)
+        assert dashboard.status_code == 200
+        assert "Действующий календарь" in dashboard.text
+        assert "Новый контент-план готов" in dashboard.text
+        assert f'href="{base}/plan?view=draft"' in dashboard.text
+
+        current_page = client.get(base + "/plan")
+        assert "Действующий календарь" in current_page.text
+        assert "Новый план" not in current_page.text
+
+        draft_page = client.get(base + "/plan?view=draft")
+        assert "Новый план" in draft_page.text
+        assert f'/plans/{draft_row.id}/approve' in draft_page.text
+        assert "Действующий план" in draft_page.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_failed_package_can_retry_without_duplicate_or_replacing_active_job(studio_db):
+    db = studio_db
+    product = Product(name="Салон", slug="salon-retry")
+    db.add(product)
+    db.flush()
+    previous_task = Task(product_id=product.id, title="calendar:legacy",
+                         assigned_agent="content_factory", status=TaskStatus.FAILED)
+    db.add(previous_task)
+    db.flush()
+    plan = make_plan(previous_task.id, approval_state="active")
+    for slot in plan["slots"]:
+        slot["state"] = "failed"
+    plan_row = Artifact(product_id=product.id, kind="editorial_plan", title="План",
+                        content=json.dumps(plan, ensure_ascii=False))
+    db.add(plan_row)
+    db.commit()
+
+    client = client_for(db)
+    try:
+        base = f"/studio/products/{product.id}"
+        detail = client.get(base + "/packages/pkg-1")
+        assert detail.status_code == 200
+        assert "Повторить подготовку" in detail.text
+        response = client.post(
+            base + f"/plans/{plan_row.id}/packages/pkg-1/queue", follow_redirects=False
+        )
+        assert response.status_code == 303
+        db.refresh(plan_row)
+        refreshed_slots = json.loads(plan_row.content)["slots"]
+        ids = {slot["task_id"] for slot in refreshed_slots}
+        assert len(ids) == 1
+        assert str(previous_task.id) not in ids
+        assert {slot["state"] for slot in refreshed_slots} == {"queued"}
+        new_task = db.get(Task, UUID(next(iter(ids))))
+        assert new_task is not None
+        assert new_task.status == TaskStatus.QUEUED
+        assert new_task.product_id == product.id
+        assert db.get(Task, previous_task.id).status == TaskStatus.FAILED
+
+        duplicate = client.post(
+            base + f"/plans/{plan_row.id}/packages/pkg-1/queue", follow_redirects=False
+        )
+        assert duplicate.status_code == 409
+        assert len(list(db.scalars(select(Task).where(
+            Task.product_id == product.id, Task.assigned_agent == "content_factory"
+        )))) == 2
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_studio_group_states_include_completed_and_cancelled():
+    assert state_for_group([{"state": "completed"}]) == "completed"
+    assert state_for_group([{"state": "cancelled"}]) == "cancelled"
+    assert state_for_group([{"state": "ready_for_review"}, {"state": "planned"}]) == "ready_for_review"
+    assert state_for_group([{"state": "failed"}, {"state": "completed"}]) == "failed"
+
+
+def test_failed_task_is_visible_before_scheduler_tick_without_persisting_derived_status(studio_db):
+    db = studio_db
+    product = Product(name="Компания", slug="company-stale-state")
+    db.add(product)
+    db.flush()
+    task = Task(product_id=product.id, title="CONTENT: current",
+                assigned_agent="content_factory", status=TaskStatus.FAILED)
+    db.add(task)
+    db.flush()
+    plan = make_plan(task.id, approval_state="active")
+    for slot in plan["slots"]:
+        slot["state"] = "queued"
+    row = Artifact(product_id=product.id, kind="editorial_plan", title="План",
+                   content=json.dumps(plan, ensure_ascii=False))
+    db.add(row)
+    db.commit()
+
+    reconciled = reconcile_plan_states(db, product.id, json.loads(row.content))
+    assert {slot["state"] for slot in reconciled["slots"]} == {"failed"}
+    assert {slot["state"] for slot in json.loads(row.content)["slots"]} == {"queued"}
+    client = client_for(db)
+    try:
+        detail = client.get(f"/studio/products/{product.id}/packages/pkg-1")
+        assert detail.status_code == 200
+        assert "Повторить подготовку" in detail.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_studio_post_detail_shows_version_history_and_editorial_warnings(studio_db):
+    db = studio_db
+    product = Product(name="Студия цветов", slug="flowers-versioned")
+    db.add(product)
+    db.flush()
+    origin = Artifact(
+        product_id=product.id, kind="channel_text",
+        title="Первый вариант",
+        content=json.dumps({
+            "origin": "quick_post", "title": "Первый вариант",
+            "channel": "telegram", "body": "Старая версия",
+            "quality_warnings": ["Уберите общие слова"],
+        }, ensure_ascii=False),
+        status=ArtifactStatus.REJECTED,
+    )
+    db.add(origin)
+    db.flush()
+    revision = Artifact(
+        product_id=product.id, kind="channel_text",
+        title="Второй вариант",
+        content=json.dumps({
+            "origin": "owner_revision", "title": "Второй вариант",
+            "channel": "telegram", "body": "Новая версия",
+            "revision_of": str(origin.id),
+            "revision_root_id": str(origin.id),
+            "revision_number": 2,
+            "quality_warnings": ["Уточните доказательства"],
+        }, ensure_ascii=False),
+        status=ArtifactStatus.AWAITING_APPROVAL,
+    )
+    db.add(revision)
+    db.commit()
+    client = client_for(db)
+    try:
+        response = client.get(f"/studio/products/{product.id}/materials/{revision.id}")
+        assert response.status_code == 200
+        assert "История текста" in response.text
+        assert "Проверить перед публикацией" in response.text
+        assert "Уточните доказательства" in response.text
+        assert f"/materials/{origin.id}" in response.text
+        assert f"/materials/{revision.id}" in response.text
+        assert "Новая версия" in response.text
+    finally:
+        app.dependency_overrides.clear()
+def test_mobile_navigation_keeps_three_controls_and_all_sections():
+    from html.parser import HTMLParser
+    from uuid import uuid4
+    from app.api.content_studio import mobile_nav_html
+
+    class Navigation(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.in_bottom = False
+            self.controls = []
+            self.links = []
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == 'nav' and attrs.get('class') == 'mobile-nav':
+                self.in_bottom = True
+            if self.in_bottom and tag in ('a', 'button'):
+                self.controls.append(attrs)
+            if tag == 'a':
+                self.links.append(attrs.get('href'))
+        def handle_endtag(self, tag):
+            if tag == 'nav':
+                self.in_bottom = False
+
+    product_id = uuid4()
+    html = mobile_nav_html(product_id, 'intelligence')
+    nav = Navigation(); nav.feed(html)
+    assert len(nav.controls) == 3
+    assert nav.controls[-1]['data-open-dialog'] == 'mobile-sections'
+    assert 'active' in nav.controls[-1]['class']
+    for route in ['plan', 'materials', 'calendar', 'analytics', 'comments']:
+        assert f'/studio/products/{product_id}/{route}' in nav.links
+    assert f'/intelligence?product_id={product_id}' in nav.links
+    assert 'aria-labelledby="mobile-sections-title"' in html
