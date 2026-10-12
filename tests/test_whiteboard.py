@@ -211,7 +211,7 @@ async def test_pipeline_disallows_unapproved_paid_execution(tmp_path):
     planner = FakePlanner()
     pipeline = WhiteboardPipeline(
         storyboard=planner, images=FakeImages(), speech=FakeSpeech(),
-        regions=FakeRegions(), renderer=FakeRenderer(),
+        regions=FakeRegions(), renderer=FakeRenderer(), sanitizer=PrivacyGateway(),
     )
     with pytest.raises(PermissionError):
         await pipeline.produce(request(request_generation=True), tmp_path / "no.mp4")
