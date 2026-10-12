@@ -35,9 +35,11 @@ the SSH greeting from `155.212.162.47:22`. Observed failures:
 
 No existing reusable SSH process/control socket was found in the Codespace.
 DNS for Growth Studio and the server's configured hostname resolves to the same
-server IP. TCP connections were established to ports 22 and 443; a read from
-port 22 returned HTTP status/date text, not an SSH greeting. This observation
-does not identify the root cause of the connection failure.
+server IP. The direct TCP check timed out on port 22 and connected on port 443.
+The cause of the intermittent connection failure was not established.
+At 2026-10-12 19:20:04 UTC, SSH via the configured server hostname,
+using the existing IP-bound host key, succeeded. Work continued with that
+verified connection; the deployment/execution status below is a checkpoint.
 
 Codespace HTTPS request to the public `/health` path returned HTTP 404.
 This is not a health confirmation: the verified application health check in
