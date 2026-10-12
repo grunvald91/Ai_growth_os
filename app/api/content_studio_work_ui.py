@@ -85,6 +85,25 @@ CSS = r"""
 .sg-side-extras .nav a{font-size:12px}
 .sg-work-list{min-height:90px}
 .sg-legacy-details{margin-top:10px}
+.sg-dashboard-extra{margin-top:8px;background:#FAFBFD}
+.sg-dashboard-extra>summary{font-size:14px;font-weight:600;padding:12px}
+.sg-dashboard-extra .sg-priority-strip{margin:16px 0}
+.sg-dashboard-extra .sg-quick-links{margin:0 0 16px}
+.sg-dashboard-extra .sg-dashboard-feed{margin:13px 0}
+.sg-rendered-article{max-width:790px;margin:0 auto;color:#23384D;font-size:16px;line-height:1.76;overflow-wrap:anywhere}
+.sg-rendered-article h2{font-size:24px;margin:26px 0 12px;line-height:1.3}
+.sg-rendered-article h3{font-size:20px;margin:22px 0 11px;line-height:1.38}
+.sg-rendered-article h4{font-size:18px;margin:19px 0 9px;line-height:1.42}
+.sg-rendered-article p{font-size:16px;line-height:1.76;color:#263A51;margin:11px 0}
+.sg-rendered-article ul,.sg-rendered-article ol{padding-left:26px;margin:13px 0 19px}
+.sg-rendered-article li{font-size:16px;margin:7px 0;line-height:1.7}
+.sg-rendered-article blockquote{border-left:3px solid #8BA8EE;padding:9px 16px;background:#F3F6FF;border-radius:0 9px 9px 0;color:#405B77}
+.sg-rendered-article code{background:#F0F3F7;padding:2px 4px;border-radius:5px;font-size:14px}
+.sg-rendered-article pre{max-width:100%;overflow:auto;padding:14px;border-radius:11px;background:#F2F5F8}
+.sg-rendered-article a{color:#2556DF;text-decoration:underline}
+.sg-video-file video{width:100%;max-width:410px;max-height:650px;display:block;border-radius:14px;background:#101820;margin:17px auto}
+.sg-video-file .sg-inline-actions{gap:9px;margin:20px 0}
+
 @media(max-width:920px){
  .sg-global-status{margin:0 0 10px;min-height:42px}
  .sg-notifications>summary{padding:8px 13px}
