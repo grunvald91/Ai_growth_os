@@ -261,7 +261,7 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     "team_role": agent, "task_type": "creative_brief",
                     "reasoning_effort": "low", "provider_timeout_seconds": 100,
                 },
-            )), timeout=210)
+            )), timeout=210 + llm.extra_timeout_seconds)
             if response.stop_reason not in (None, "end_turn", "stop_sequence"):
                 raise ValueError("Incomplete creative output")
             if len(response.content) > 65000:
