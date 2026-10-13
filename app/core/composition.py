@@ -22,7 +22,7 @@ def build_intake(db: Session, settings: Settings, provider: LLMProvider | None =
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     return CompanyIntakeService(
         db, products_root=settings.products_root,
-        llm=LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings)),
+        llm=LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings), critic_enabled=settings.agent_critic_enabled),
         model=settings.llm_model, provider_name=settings.llm_provider,
     )
 
@@ -72,7 +72,7 @@ def build_article_production(
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     return ArticleProduction(
         db=db,
-        llm=LLMService(privacy_gateway=privacy, provider=provider),
+        llm=LLMService(privacy_gateway=privacy, provider=provider, critic_enabled=settings.agent_critic_enabled),
         privacy=privacy,
         products_root=settings.products_root,
         provider_name=settings.llm_provider,
@@ -90,7 +90,7 @@ def build_review(
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     return DailyGrowthReview(
         db=db,
-        llm=LLMService(privacy_gateway=privacy, provider=provider),
+        llm=LLMService(privacy_gateway=privacy, provider=provider, critic_enabled=settings.agent_critic_enabled),
         privacy=privacy,
         skills=SkillLoader(settings.skills_root),
         tools=tools or FakeToolGateway(),
@@ -110,7 +110,7 @@ def build_team_cycle(
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     return TeamCycle(
         db=db,
-        llm=LLMService(privacy_gateway=privacy, provider=provider),
+        llm=LLMService(privacy_gateway=privacy, provider=provider, critic_enabled=settings.agent_critic_enabled),
         privacy=privacy,
         products_root=settings.products_root,
         provider_name=settings.llm_provider,
@@ -129,7 +129,7 @@ def build_intelligence(db: Session, settings: Settings, provider: LLMProvider | 
         jeff_provider = XAIProvider(api_key=settings.jeff_api_key, base_url=settings.jeff_base_url,
             model=settings.jeff_model, timeout_seconds=30, reasoning_effort="low")
     return IntelligenceService(db,
-        llm=LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings)),
-        jeff=LLMService(privacy_gateway=privacy, provider=jeff_provider) if jeff_provider else None,
+        llm=LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings), critic_enabled=settings.agent_critic_enabled),
+        jeff=LLMService(privacy_gateway=privacy, provider=jeff_provider, critic_enabled=settings.agent_critic_enabled) if jeff_provider else None,
         model=settings.llm_model, jeff_model=settings.jeff_model, provider_name=settings.llm_provider,
         products_root=settings.products_root, threshold=settings.intelligence_confidence_threshold)
