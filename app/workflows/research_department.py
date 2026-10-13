@@ -205,7 +205,7 @@ class ResearchDepartment:
                             },
                         )
                     ),
-                    timeout=WORKER_TIMEOUT_SECONDS,
+                    timeout=WORKER_TIMEOUT_SECONDS + self.llm.extra_timeout_seconds,
                 )
                 if len(response.content) > 80_000 or response.stop_reason not in (
                     None, "end_turn", "stop_sequence"
@@ -240,7 +240,7 @@ class ResearchDepartment:
                                 },
                             )
                         ),
-                        timeout=WORKER_TIMEOUT_SECONDS,
+                        timeout=WORKER_TIMEOUT_SECONDS + self.llm.extra_timeout_seconds,
                     )
                     if len(repair.content) > 80_000 or repair.stop_reason not in (
                         None, "end_turn", "stop_sequence"
@@ -327,7 +327,7 @@ class ResearchDepartment:
                         },
                     )
                 ),
-                timeout=LEAD_TIMEOUT_SECONDS,
+                timeout=LEAD_TIMEOUT_SECONDS + self.llm.extra_timeout_seconds,
             )
             if len(lead_response.content) > 100_000 or lead_response.stop_reason not in (
                 None, "end_turn", "stop_sequence"
@@ -362,7 +362,7 @@ class ResearchDepartment:
                             },
                         )
                     ),
-                    timeout=LEAD_TIMEOUT_SECONDS,
+                    timeout=LEAD_TIMEOUT_SECONDS + self.llm.extra_timeout_seconds,
                 )
                 if len(repair.content) > 100_000 or repair.stop_reason not in (
                     None, "end_turn", "stop_sequence"
