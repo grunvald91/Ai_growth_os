@@ -12,6 +12,7 @@ from typing import Literal
 
 import httpx
 
+from app.llm.costing import estimate_cost_usd
 from app.llm.provider import LLMProvider
 from app.llm.schemas import LLMRequest, LLMResponse
 
@@ -206,6 +207,15 @@ class ModelRouter:
         if needs_search and not self.provider_supports_web_search:
             raise WebSearchUnavailable("Live web search is not implemented in the active provider adapter")
         required = self._tier_for(role, phase)
+        complexity = metadata.get("routing_complexity", "normal")
+        if complexity not in {"low", "normal", "high"}:
+            raise RoutingError("routing_complexity must be low, normal or high")
+        # Task difficulty can raise but never lower a role's minimum quality floor.
+        if complexity == "high":
+            required = "premium"
+        elif complexity == "normal" and required == "economy":
+            # Routine writer work stays economical unless explicitly marked high.
+            pass
         preferred = self.overrides.get(f"{role}:{phase}") or (
             self.overrides.get(role) if phase == "main" else None
         )
@@ -216,8 +226,8 @@ class ModelRouter:
         ]
         if preferred is not None:
             ordered = [self._catalog[name] for name in preferred]
-            if phase == "critic" and any(_TIERS[p.tier] < _TIERS[required] for p in ordered):
-                raise RoutingError("Critic cannot use an underpowered manual override")
+            if any(_TIERS[p.tier] < _TIERS[required] for p in ordered):
+                raise RoutingError("Override is below the task's quality floor")
             if needs_search and not all(p.web_search_verified for p in ordered):
                 raise WebSearchUnavailable("Override does not have validated web search")
         else:
@@ -267,10 +277,23 @@ class ModelRoutingProvider:
                     "model": model,
                     "metadata": {
                         key: value for key, value in request.metadata.items()
-                        if key != "routing_phase"
+                        if key not in {"routing_phase", "routing_complexity"}
                     },
                 })
-                return await self.provider.generate(forwarded)
+                response = await self.provider.generate(forwarded)
+                profile = self.router._catalog[model]
+                # A gateway may reply with a different canonical model ID. Never
+                # claim the configured tariff applies to an unknown upstream alias.
+                if (response.usage is not None and response.model == model
+                        and profile.input_usd_per_million is not None
+                        and profile.output_usd_per_million is not None):
+                    estimate = estimate_cost_usd(
+                        response.usage.input_tokens, response.usage.output_tokens,
+                        input_usd_per_million=profile.input_usd_per_million,
+                        output_usd_per_million=profile.output_usd_per_million,
+                    )
+                    response = response.model_copy(update={"estimated_cost_usd": estimate})
+                return response
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code not in _TRANSIENT_STATUS:
                     raise
