@@ -433,7 +433,8 @@ async def run_planner_once(session_factory, settings, llm=None):
                     from app.core.composition import build_llm_provider, SAFE_LLM_METADATA_FIELDS
                     from app.llm.service import LLMService
                     llm = LLMService(privacy_gateway=PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS),
-                                     provider=build_llm_provider(settings))
+                                     provider=build_llm_provider(settings),
+                                     critic_enabled=settings.agent_critic_enabled)
                 await run_viral_content_research(db=db, settings=settings, llm=llm, task=task, context=context)
                 context, digest = planning_context(db, settings, task.product_id)
             evidence_ids = sorted({r['id'] for r in context['research'] + context['observations'] + GUIDANCE}
@@ -445,7 +446,8 @@ async def run_planner_once(session_factory, settings, llm=None):
                 from app.core.composition import build_llm_provider, SAFE_LLM_METADATA_FIELDS
                 from app.llm.service import LLMService
                 llm = LLMService(privacy_gateway=PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS),
-                                 provider=build_llm_provider(settings))
+                                 provider=build_llm_provider(settings),
+                                     critic_enabled=settings.agent_critic_enabled)
             prompt = (
                 'You are editorial_planner, a Russian-speaking managing editor. Return ONLY the supplied JSON schema. '
                 'Choose channels and cadence using this company, real supplied marketing research, latest cumulative '
@@ -515,7 +517,7 @@ async def run_planner_once(session_factory, settings, llm=None):
                     metadata={'team_role': 'editorial_planner', 'reasoning_effort': 'low', 'task_type': 'content_calendar'},
                 )
                 try:
-                    response = await asyncio.wait_for(llm.generate(request), 180 if not injected_llm else 300)
+                    response = await asyncio.wait_for(llm.generate(request), 180 + llm.extra_timeout_seconds if not injected_llm else 300 + llm.extra_timeout_seconds)
                 except asyncio.TimeoutError:
                     if injected_llm:
                         raise
@@ -535,10 +537,11 @@ async def run_planner_once(session_factory, settings, llm=None):
                     fallback_llm = LLMService(
                         privacy_gateway=PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS),
                         provider=build_llm_provider(fallback_settings),
+                        critic_enabled=settings.agent_critic_enabled,
                     )
                     response = await asyncio.wait_for(
                         fallback_llm.generate(request.model_copy(update={'model': fallback_model})),
-                        240,
+                        240 + fallback_llm.extra_timeout_seconds,
                     )
                 attempts.append(response)
                 error_code = 'incomplete_response'
