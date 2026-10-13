@@ -245,6 +245,10 @@ def team_preview(config: RouterConfig):
 def team_update(body: RouterUpdate, settings: Settings = Depends(get_settings)):
     try:
         preview = preview_configuration(body.config)
+        if body.config.enabled and settings.llm_provider != "xai":
+            raise HTTPException(422, "This router requires the configured OpenAI-compatible gateway")
+        if body.config.enabled and not settings.xai_api_key:
+            raise HTTPException(422, "The gateway API key must be configured before activation")
         if body.config.enabled and not preview["ready"]:
             raise HTTPException(422, {
                 "message": "Configure safe main and critic routes before enabling.",
