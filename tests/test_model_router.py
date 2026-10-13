@@ -174,3 +174,47 @@ async def test_search_rejection_never_contacts_provider():
     with pytest.raises(WebSearchUnavailable):
         await provider.generate(req("company_intake", requires_web_search=True))
     assert not fake.requests
+
+
+def test_high_complexity_never_downgrades_writer_and_overrides():
+    assert router().select(req("article_writer", routing_complexity="high")).candidates == ("best",)
+    with pytest.raises(RoutingError, match="quality floor"):
+        router(overrides_json='{"article_writer":["small"]}').select(
+            req("article_writer", routing_complexity="high")
+        )
+    with pytest.raises(RoutingError, match="routing_complexity"):
+        router().select(req("article_writer", routing_complexity="fake"))
+
+
+@pytest.mark.asyncio
+async def test_router_prices_observed_usage_not_requested_token_ceiling():
+    from decimal import Decimal
+    fake = FakeProvider()
+    r = ModelRoutingProvider(provider=fake, router=router())
+    result = await r.generate(req("cmo"))
+    assert result.model == "best"
+    assert result.estimated_cost_usd == Decimal("0.000015")
+    assert result.usage.input_tokens == 15
+
+
+@pytest.mark.asyncio
+async def test_alias_or_missing_usage_never_produces_false_estimate():
+    class UnknownAliasProvider:
+        async def generate(self, request):
+            return LLMResponse(content="ok", model="unverified-alias",
+                               usage=LLMUsage(input_tokens=100, output_tokens=10))
+
+    from app.llm.schemas import LLMUsage
+    aliased = await ModelRoutingProvider(
+        provider=UnknownAliasProvider(), router=router()
+    ).generate(req("cmo"))
+    assert aliased.estimated_cost_usd is None
+
+    class NoUsageProvider:
+        async def generate(self, request):
+            return LLMResponse(content="ok", model=request.model)
+
+    missing = await ModelRoutingProvider(
+        provider=NoUsageProvider(), router=router()
+    ).generate(req("cmo"))
+    assert missing.estimated_cost_usd is None

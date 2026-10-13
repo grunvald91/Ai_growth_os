@@ -40,3 +40,20 @@ Existing Company Intake continues to extract facts from provided URLs/documents;
 Run `python -m pytest -q tests/test_model_router.py` without API keys, network access or server. To activate, verify model IDs, enter actual prices if enforcing a ceiling, enable a premium model for CMO, optionally assign Company Intake to K3, and switch `MODEL_ROUTER_ENABLED=true` in a controlled environment. Inspect resulting `AgentRun.model` and token usage records.
 
 The monetary cost currently persisted by several existing workflows remains `unknown` even when tokens are recorded. Accurate per-tenant cost and durable budget enforcement need follow-up work. No server deployment is included here.
+
+
+## Phase 2: model availability and cost observability
+
+The operator can use `python -m app.llm.model_catalog --remote` **locally** after configuring `XAI_API_KEY`. It makes exactly one read-only `GET /models` request to the trusted HTTPS gateway and lists exact model IDs. No chat/completion generation and no external search subscription are started. A provider may reject this endpoint: this is a capability limitation, not proof that models are unavailable. Do not put API keys in logs or CLI arguments.
+
+Availability via `GET /models` is **not** proof of web search, Russian-language website access, source quality, region availability or billed price. Kimi K3 remains disabled until tested with operator authorization; no paid model or search probe is executed automatically. The existing provider still rejects `requires_web_search` because it has no verified search-tool protocol.
+
+The router now accepts trusted `routing_complexity=low|normal|high` metadata. High complexity upgrades quality to premium; it never downgrades an expensive/high-risk role. All overrides must satisfy that minimum.
+
+When enabled and when a configured model returns actual input and output token counts, the router attaches `estimated_cost_usd` calculated from the configured per-model tariff. This value is **not** a verified ClaudeHub charge. The downstream CostRecord keeps `amount=0` and `cost_known=false`, and adds `details.estimated_amount_usd` with its price basis; zero must never be treated as a free call. Unknown tariff, unknown model alias, or missing usage => unknown estimate.
+
+`app.llm.usage_report.report_product_usage(db, product_id)` exposes read-only, product-scoped token and estimated-price aggregation for future **authenticated** dashboards. No public endpoint was added because this API currently lacks a complete owner/tenant authorization boundary.
+
+To enable this in production Docker Compose, explicitly supply `MODEL_ROUTER_ENABLED=true` **and** `MODEL_ROUTER_PROFILES` JSON with a premium model for CMO. Optional: `MODEL_ROUTER_OVERRIDES` JSON and `MODEL_ROUTER_MAX_CALL_USD`. The configuration is forwarded to api, worker and Telegram only when set. Keep defaults off until verified provider IDs and prices are entered.
+
+Known gaps: no direct provider billing reconciliation, no hard cumulative per-company spending quota, no live search tool integration, no web UI/authenticated management API, no actual critic invocation. All remain pending.

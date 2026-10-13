@@ -33,6 +33,11 @@ services:
       XAI_BASE_URL: ${XAI_BASE_URL:-https://api.claudehub.fun/v1}
       XAI_REASONING_EFFORT: ${XAI_REASONING_EFFORT:-medium}
       LLM_FALLBACK_MODELS: ${LLM_FALLBACK_MODELS:-gemini-flash-3.8}
+      # Disabled unless explicitly configured; no implicit paid search calls.
+      MODEL_ROUTER_ENABLED: ${MODEL_ROUTER_ENABLED:-false}
+      MODEL_ROUTER_PROFILES: '${MODEL_ROUTER_PROFILES:-}'
+      MODEL_ROUTER_OVERRIDES: '${MODEL_ROUTER_OVERRIDES:-{}}'
+      MODEL_ROUTER_MAX_CALL_USD: '${MODEL_ROUTER_MAX_CALL_USD:-}'
       PRODUCTS_ROOT: /app/company_products
       SKILLS_ROOT: /app/skills
     volumes:
@@ -71,6 +76,11 @@ services:
       XAI_BASE_URL: ${XAI_BASE_URL:-https://api.claudehub.fun/v1}
       XAI_REASONING_EFFORT: ${TEAM_XAI_REASONING_EFFORT:-low}
       LLM_FALLBACK_MODELS: ${TEAM_LLM_FALLBACK_MODELS:-grok-4.7}
+      # Disabled unless explicitly configured; no implicit paid search calls.
+      MODEL_ROUTER_ENABLED: ${MODEL_ROUTER_ENABLED:-false}
+      MODEL_ROUTER_PROFILES: '${MODEL_ROUTER_PROFILES:-}'
+      MODEL_ROUTER_OVERRIDES: '${MODEL_ROUTER_OVERRIDES:-{}}'
+      MODEL_ROUTER_MAX_CALL_USD: '${MODEL_ROUTER_MAX_CALL_USD:-}'
       PRODUCTS_ROOT: /app/company_products
       SKILLS_ROOT: /app/skills
       TELEGRAM_POLL_TIMEOUT_SECONDS: ${TELEGRAM_POLL_TIMEOUT_SECONDS:-25}
@@ -97,6 +107,11 @@ services:
       XAI_BASE_URL: ${XAI_BASE_URL:-https://api.claudehub.fun/v1}
       XAI_REASONING_EFFORT: ${TEAM_XAI_REASONING_EFFORT:-low}
       LLM_FALLBACK_MODELS: ${TEAM_LLM_FALLBACK_MODELS:-grok-4.7}
+      # Disabled unless explicitly configured; no implicit paid search calls.
+      MODEL_ROUTER_ENABLED: ${MODEL_ROUTER_ENABLED:-false}
+      MODEL_ROUTER_PROFILES: '${MODEL_ROUTER_PROFILES:-}'
+      MODEL_ROUTER_OVERRIDES: '${MODEL_ROUTER_OVERRIDES:-{}}'
+      MODEL_ROUTER_MAX_CALL_USD: '${MODEL_ROUTER_MAX_CALL_USD:-}'
       PRODUCTS_ROOT: /app/company_products
       SKILLS_ROOT: /app/skills
       TEAM_WORKER_BATCH_SIZE: ${TEAM_WORKER_BATCH_SIZE:-1}

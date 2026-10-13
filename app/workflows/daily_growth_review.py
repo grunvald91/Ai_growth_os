@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.agents import AGENT_CONFIGS, AgentRole
+from app.llm.costing import usage_cost_details
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
 from app.models.domain import AgentRun, CostRecord, Product, TaskStatus
@@ -197,5 +198,4 @@ class DailyGrowthReview:
         self.db.add(CostRecord(product_id=product_id, agent_run_id=run_id, category='llm',
             provider=self.provider_name, amount=0, currency='USD',
             input_tokens=max(0, usage.input_tokens), output_tokens=max(0, usage.output_tokens),
-            incurred_at=datetime.now(timezone.utc), details={'cost_known': False,
-            'note': 'Usage recorded; monetary price unavailable, zero is not a free-cost claim.'}))
+            incurred_at=datetime.now(timezone.utc), details=usage_cost_details(response)))

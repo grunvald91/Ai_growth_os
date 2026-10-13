@@ -32,6 +32,7 @@ from app.content.viral_research import (
     build_search_queries,
     parse_youtube_search_page,
 )
+from app.llm.costing import usage_cost_details
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
 from app.models.domain import AgentRun, Artifact, CostRecord, Task
@@ -985,11 +986,7 @@ async def run_viral_content_research(
                     input_tokens=max(0, generated.usage.input_tokens),
                     output_tokens=max(0, generated.usage.output_tokens),
                     incurred_at=datetime.now(timezone.utc),
-                    details={
-                        "cost_known": False,
-                        "task_type": "viral_content_research",
-                        "model": generated.model,
-                    },
+                    details={**usage_cost_details(generated), "task_type": "viral_content_research"},,
                 ))
         db.commit()
         return artifact
