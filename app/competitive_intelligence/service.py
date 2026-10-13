@@ -220,7 +220,7 @@ class IntelligenceService:
                 max_tokens=1500 if "triage" in stage else 4500,
                 response_schema=schema.model_json_schema(),
                 metadata={"task_type": stage, "team_role": AGENT, "reasoning_effort": "low"})),
-                timeout=30 if use_jeff else 120)
+                timeout=(30 if use_jeff else 120) + llm.extra_timeout_seconds)
             if len(response.content) > 100_000 or response.stop_reason not in (None, "end_turn", "stop_sequence"):
                 raise ValueError("Incomplete model response")
             parsed = schema.model_validate(self._clean(json.loads(response.content)))
