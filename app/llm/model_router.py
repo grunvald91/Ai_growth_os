@@ -158,7 +158,10 @@ class ModelRouter:
         # Current XAIProvider cannot complete a search tool call.
         self.provider_supports_web_search = provider_supports_web_search
         for role, models in self.overrides.items():
-            required = self._tier_for(role, "main")
+            target_role, separator, target_phase = role.partition(":")
+            if separator and target_phase != "critic":
+                raise RoutingError("Only role:critic overrides are supported")
+            required = self._tier_for(target_role, target_phase if separator else "main")
             for model in models:
                 profile = self._catalog.get(model)
                 if not profile or not profile.enabled or _TIERS[profile.tier] < _TIERS[required]:
@@ -264,7 +267,7 @@ class ModelRoutingProvider:
                     "model": model,
                     "metadata": {
                         key: value for key, value in request.metadata.items()
-                        if key not in {"routing_phase", "requires_web_search"}
+                        if key != "routing_phase"
                     },
                 })
                 return await self.provider.generate(forwarded)
