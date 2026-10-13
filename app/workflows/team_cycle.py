@@ -241,7 +241,7 @@ class TeamCycle:
                         },
                     )
                 ),
-                timeout=SPECIALIST_TIMEOUTS.get(task_type, 120),
+                timeout=SPECIALIST_TIMEOUTS.get(task_type, 120) + self.llm.extra_timeout_seconds,
             )
             error_code = "invalid_specialist_output"
             if len(response.content) > 120_000 or response.stop_reason not in (
