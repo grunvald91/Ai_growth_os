@@ -158,6 +158,11 @@ class OpenRouterImageProvider(OpenRouterBase):
             except (KeyError, IndexError, TypeError) as exc:
                 raise ValueError("Gemini did not return one inline PNG") from exc
         else:
+            if self.model == "black-forest-labs/flux.2-pro":
+                # FLUX.2 Pro advertises aspect_ratio and output_format, but
+                # no resolution tier. Use its default dimensions and validate
+                # the bounded 9:16 PNG in the renderer.
+                payload.pop("resolution")
             response = await self.post("images", payload)
             data = response.json().get("data") or []
         if len(data) != 1 or not isinstance(data[0].get("b64_json"), str):
