@@ -110,6 +110,27 @@ def test_queue_immutable_review_dedupes_and_cannot_approve_stale_digest(environm
 
 
 @pytest.mark.asyncio
+async def test_approved_job_models_are_scoped_and_do_not_change_shared_settings(environment):
+    factory, settings, product_id, _ = environment
+    original = configured_models(settings)
+    chosen = original.model_copy(update={'image': 'black-forest-labs/flux.2-pro',
+        'speech': 'x-ai/grok-voice-tts-1.0', 'regions': 'qwen/qwen3-vl-30b-a3b-instruct'})
+    with factory() as db:
+        task = queue_job(db, WhiteboardRequest(product_id=product_id, topic='Как работает онлайн-запись', voice='eve'), chosen)
+        task_id = task.id
+    approve(environment, task_id)
+    async def check(scoped, models, voice):
+        assert scoped is not settings and configured_models(scoped) == chosen == models
+        assert scoped.whiteboard_voice == voice == 'eve'
+        assert scoped.openrouter_api_key == settings.openrouter_api_key
+        return {'ready': True}
+    assert await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=check) == 1
+    assert configured_models(settings) == original and settings.whiteboard_voice == 'Kore'
+    with factory() as db:
+        assert db.get(Task, task_id).status == TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
 async def test_worker_never_picks_unapproved_request(environment):
     factory, settings, product_id, _ = environment
     task_id = new_job(environment)
