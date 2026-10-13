@@ -104,9 +104,16 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                     raise ReadinessError('approval_invalid')
                 value = json.loads(state.content); value.update(stage='preflight', error=None)
                 state.content = json.dumps(value); db.commit()
-            await (readiness or preflight)(settings, payload.models, payload.request.voice)
+            # The immutable approved request owns this job's model/voice choice.
+            # Copy only these public fields; never alter shared settings or .env.
+            job_settings = settings.model_copy(update={
+                **{'whiteboard_' + name + '_model': value
+                   for name, value in payload.models.model_dump().items()},
+                'whiteboard_voice': payload.request.voice,
+            })
+            await (readiness or preflight)(job_settings, payload.models, payload.request.voice)
             store = CheckpointStore(directory / 'stages', payload.request, models=payload.models.model_dump())
-            pipeline = (factory or build_pipeline)(settings, payload, store)
+            pipeline = (factory or build_pipeline)(job_settings, payload, store)
             ledger = CallLedger(session_factory, product_id, task_id)
             for attribute, stage in (('storyboard', 'storyboard'), ('images', 'image'), ('speech', 'speech'), ('regions', 'regions')):
                 setattr(pipeline, attribute, GuardedStage(getattr(pipeline, attribute), stage, ledger))
