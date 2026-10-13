@@ -310,7 +310,11 @@ def test_mobile_navigation_does_not_overlay_cards_and_sidebar_has_no_duplicate_c
         assert markup.index('class="mobile-nav"') < markup.index('<main class="main')
         sidebar = markup.split('<aside class="sidebar">', 1)[1].split('</aside>', 1)[0]
         assert sidebar.count(f'href="{base}/calendar"') == 1
-        assert "Комментарии" not in sidebar
+        # The advanced Comments tool stays discoverable, but isn't one of
+        # the four primary navigation actions.
+        core = sidebar.split('aria-label="Основная навигация"',1)[1].split('</nav>',1)[0]
+        assert "Комментарии" not in core
+        assert "Комментарии" in sidebar
     css = client.get("/studio/assets/studio.css").text
     assert 'position:sticky!important' in css
     assert 'bottom:auto!important' in css
