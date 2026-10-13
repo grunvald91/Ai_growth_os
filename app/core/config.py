@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     jeff_model: str = "jeff"
     intelligence_confidence_threshold: float = Field(default=.8, ge=0, le=1)
     intelligence_campaign_enabled: bool = True
+    # Disabled until explicitly enabled for a measured rollout; review adds LLM calls.
+    agent_critic_enabled: bool = False
     skills_root: Path = Path("skills")
     products_root: Path = Path("products")
     review_skill: str | None = None
