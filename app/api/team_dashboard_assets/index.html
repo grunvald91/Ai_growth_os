@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#F3F7FC"><title>ИИ-команда · ServGo</title>
+<link rel="stylesheet" href="/studio/team/assets/team.css"></head>
+<body>
+<div class="layout">
+<aside class="sidebar">
+ <a class="brand" href="/studio"><span class="brand-icon">S</span><span><strong>ServGo</strong><small>AI Growth OS</small></span></a>
+ <div class="nav-label">Платформа</div>
+ <a class="nav" href="/studio"><span>⌂</span> Growth Studio</a>
+ <a class="nav active" href="/studio/team"><span>♧</span> ИИ-команда</a>
+ <div class="sidebar-note"><strong>Одна команда. Разные модели.</strong><p>Оптимальная модель для каждой задачи, с контролем качества и расходов.</p></div>
+ <div class="sidebar-bottom">🔒 Доступ только владельцу<br>Ключи API не передаются в браузер.</div>
+</aside>
+<main class="main">
+ <header class="topbar"><div><p class="eyebrow">SERVGO · УПРАВЛЕНИЕ ИИ</p><h1>Команда и модели <span class="sparkle">✳</span></h1>
+ <p class="subtitle">Управляйте тем, кто думает, кто создаёт, а кто проверяет результат.</p></div>
+ <div class="top-actions"><span id="dirty" class="dirty" hidden>● Есть изменения</span><button class="button light" id="previewButton" type="button">Проверить настройки</button><button class="button primary" id="saveButton" type="button">Сохранить</button></div>
+ </header>
+ <div id="error" class="alert error" role="alert" hidden></div><div id="notice" class="alert success" role="status" hidden></div>
+ <div class="stats">
+  <div class="stat"><span>Сотрудников и этапов</span><strong id="statRoles">—</strong><small>Логические роли платформы</small></div>
+  <div class="stat"><span>Доступных моделей</span><strong id="statModels">—</strong><small>Из настроенного каталога</small></div>
+  <div class="stat"><span>Не готовых маршрутов</span><strong id="statIssues">—</strong><small>Основная модель и критик</small></div>
+  <div class="stat"><span>Работа роутера</span><strong id="statEnabled">—</strong><small>Влияет на будущие вызовы</small></div>
+ </div>
+ <section class="top-settings">
+  <div><h2>Общие настройки</h2><p>Роутер назначает модели. Сам по себе он не запускает критика.</p></div>
+  <label class="toggle-line"><input type="checkbox" id="enableRouter"><span class="switch"></span><span>Включить Model Router</span></label>
+  <label class="budget">Лимит расчётной стоимости одного вызова (USD)<input id="budget" placeholder="Не ограничено" inputmode="decimal" autocomplete="off"><small>Это оценка, а не лимит реального счёта провайдера.</small></label>
+ </section>
+ <div class="tabs" role="tablist" aria-label="Разделы управления">
+  <button class="tab selected" data-tab="team" type="button">♧ Сотрудники</button>
+  <button class="tab" data-tab="models" type="button">◈ Модели и тарифы</button>
+  <button class="tab" data-tab="expenses" type="button">▥ Расходы</button>
+ </div>
+ <section id="teamPanel" class="panel">
+  <div class="section-head"><div><h2>Распределение моделей</h2><p>Для каждого сотрудника можно выбрать основную, резервную модель и отдельную модель критика.</p></div><label class="search-label"><input id="roleSearch" type="search" placeholder="Поиск должности…" autocomplete="off"></label></div>
+  <div class="explain"><span class="badge economy">Эконом</span> Простые задачи <span class="badge balanced">Баланс</span> Средняя сложность <span class="badge premium">Премиум</span> Стратегия</div>
+  <div id="roleGroups"></div>
+ </section>
+ <section id="modelsPanel" class="panel" hidden>
+  <div class="section-head"><div><h2>Каталог моделей</h2><p>Тарифы вводятся вручную. Присутствие модели в каталоге ещё не означает наличие веб-поиска.</p></div><button class="button light" id="catalogButton" type="button">Проверить ClaudeHub</button></div>
+  <div class="tip">⚑ Проверка каталога не запускает платную генерацию. Поиск в российских источниках и работа поисковых инструментов требуют отдельного тестирования.</div>
+  <div id="modelRows" class="model-rows"></div>
+  <div class="model-add"><input id="newModel" placeholder="ID новой модели у провайдера" maxlength="120"><select id="newTier"><option value="economy">Эконом</option><option value="balanced">Баланс</option><option value="premium">Премиум</option></select><button id="addModel" class="button light" type="button">+ Добавить</button></div>
+  <div id="catalogResult" class="catalog-result"></div>
+ </section>
+ <section id="expensesPanel" class="panel" hidden>
+  <div class="section-head"><div><h2>Расходы ИИ-команды</h2><p>Оценочные затраты на основе токенов и заданных тарифов. Фактические списания ClaudeHub отдельно не подтверждены.</p></div></div>
+  <div class="expense-controls"><select id="productSelect"></select><button id="usageButton" class="button light" type="button">Обновить отчёт</button></div>
+  <div class="expense-totals"><div><span>Расчётная стоимость</span><strong id="totalUsd">—</strong></div><div><span>Вызовы с токенами</span><strong id="totalCalls">—</strong></div><div><span>Без проверенного тарифа</span><strong id="unpricedCalls">—</strong></div></div>
+  <div id="expenseRows" class="expense-rows"><p class="empty">Выберите проект и обновите отчёт.</p></div>
+  <p class="footnote">Показываются только сохранённые записи. Нулевая сумма в старых записях не означает бесплатное выполнение.</p>
+ </section>
+ <footer class="footer"><span>ServGo AI Growth OS · Model Router</span><span>Сохранение настроек не является деплоем на сервер</span></footer>
+</main></div>
+<div id="authOverlay" class="auth-overlay">
+ <form id="authForm" class="auth-card" autocomplete="off">
+   <span class="lock">🔐</span><h2>Управление ИИ-командой</h2>
+   <p>Для доступа нужен токен владельца из настройки <code>MODEL_ROUTER_ADMIN_TOKEN</code>.</p>
+   <input type="password" id="ownerToken" placeholder="Токен владельца" required autocomplete="off" aria-label="Токен владельца">
+   <button class="button primary full" type="submit">Открыть панель</button>
+   <p class="auth-error" id="authError" role="alert"></p>
+   <small>Токен хранится только в памяти текущей вкладки, без cookies и localStorage.</small>
+ </form>
+</div>
+<script src="/studio/team/assets/team.js" defer></script>
+</body></html>

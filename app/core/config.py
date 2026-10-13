@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     llm_fallback_models: str = "grok-4.7"
     # Opt-in, operator-verified LLM routing; unverified models stay disabled.
     model_router_enabled: bool = False
+    model_router_admin_token: str | None = None
     model_router_profiles: str = (
         '[{"model":"kimi-2.7","tier":"economy"},'
         '{"model":"deepseek-v4.1-flash","tier":"economy"},'

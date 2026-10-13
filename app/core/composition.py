@@ -5,6 +5,7 @@ from app.core.config import Settings
 from app.llm.anthropic import AnthropicProvider
 from app.llm.fallback import FallbackProvider
 from app.llm.model_router import ModelRouter, ModelRoutingProvider
+from app.llm.router_store import effective_router_settings
 from app.llm.provider import LLMProvider
 from app.llm.service import LLMService
 from app.llm.xai import XAIProvider
@@ -29,6 +30,7 @@ def build_intake(db: Session, settings: Settings, provider: LLMProvider | None =
 
 
 def build_llm_provider(settings: Settings) -> LLMProvider:
+    settings = effective_router_settings(settings)
     if settings.llm_provider == "anthropic":
         if settings.model_router_enabled:
             raise ValueError("Model Router currently supports only the configured xai-compatible gateway")

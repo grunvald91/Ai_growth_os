@@ -33,6 +33,7 @@ services:
       XAI_BASE_URL: ${XAI_BASE_URL:-https://api.claudehub.fun/v1}
       XAI_REASONING_EFFORT: ${XAI_REASONING_EFFORT:-medium}
       LLM_FALLBACK_MODELS: ${LLM_FALLBACK_MODELS:-gemini-flash-3.8}
+      MODEL_ROUTER_ADMIN_TOKEN: ${MODEL_ROUTER_ADMIN_TOKEN:-}
       # Disabled unless explicitly configured; no implicit paid search calls.
       MODEL_ROUTER_ENABLED: ${MODEL_ROUTER_ENABLED:-false}
       MODEL_ROUTER_PROFILES: '${MODEL_ROUTER_PROFILES:-}'

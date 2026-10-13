@@ -57,3 +57,29 @@ When enabled and when a configured model returns actual input and output token c
 To enable this in production Docker Compose, explicitly supply `MODEL_ROUTER_ENABLED=true` **and** `MODEL_ROUTER_PROFILES` JSON with a premium model for CMO. Optional: `MODEL_ROUTER_OVERRIDES` JSON and `MODEL_ROUTER_MAX_CALL_USD`. The configuration is forwarded to api, worker and Telegram only when set. Keep defaults off until verified provider IDs and prices are entered.
 
 Known gaps: no direct provider billing reconciliation, no hard cumulative per-company spending quota, no live search tool integration, no web UI/authenticated management API, no actual critic invocation. All remain pending.
+
+
+## Owner-only team dashboard (Phase 3)
+
+The new `/studio/team` page is reachable from Growth Studio's sidebar and mobile navigation. It uses a **separate mandatory owner bearer token**, not the platform's unprotected development APIs. The HTML/CSS/JS shell contains no secrets and makes no provider calls on initial load.
+
+1. Set a fresh random `MODEL_ROUTER_ADMIN_TOKEN` of **at least 32 characters** in the deployment environment for the **API container only**. Keep the token private; never commit it.
+2. Open `/studio/team` behind HTTPS/your existing web-edge authentication and enter the token. The token is retained only in the tab's JavaScript memory, not saved to localStorage, cookies or a database.
+3. Edit enabled models, operator-researched USD per million token prices, main/fallback routing and critic model per role. The dashboard includes the 27 registered roles plus four additional content-pipeline stages.
+4. Click **Проверить настройки** to preview deterministic route selection without generating tokens. The dashboard refuses to enable a policy with missing main or critic model coverage.
+5. Save. It writes a private `PRODUCTS_ROOT/.model-router-config.json` with optimistic revision protection, a filesystem lock, atomic file replacement and mode `0600`. The shared production `company_products` volume is already mounted into API, worker and Telegram. Fresh `build_llm_provider(settings)` calls read this file and pick up the latest policy; no deployment/restart is necessary for such **new** provider instances. An already running request may finish with its old policy.
+6. The **Модели** tab can explicitly invoke an authenticated, read-only `GET /models` request to the configured provider. This is not a paid inference test and cannot establish web search.
+7. The **Расходы** tab reads per-product, role-grouped stored usage estimates. It is not a provider billing report.
+
+New endpoints:
+- `GET /api/admin/team` — owner-scoped configuration, route preview and product names.
+- `POST /api/admin/team/preview` — validate *draft*, with no persistence or inference.
+- `PUT /api/admin/team` — atomic update with `expected_revision`; stale updates return HTTP 409.
+- `GET /api/admin/team/catalog` — optional, explicit read-only provider model listing.
+- `GET /api/admin/team/usage?product_id=...` — read-only aggregated usage for one project.
+
+Every data and mutation endpoint requires the long owner bearer token, including reads. No API keys are returned. When the token is unset, the endpoints return HTTP 503 and configuration cannot be edited. Use HTTPS and edge-level access control in production as additional protection.
+
+This is a **platform-owner panel**, not multi-tenant self-service. Tenant-specific model budgets/permissions and an audited role-based identity system need their own phase before exposing this feature to individual client-business owners. The toggle does **not** activate the critic workflow, search adapters, or provider-side spending limits. The cost ceiling is only a pre-call estimate, not a hard billing cap.
+
+Quick offline smoke test: `python -m pytest -q tests/test_team_dashboard.py tests/test_model_router.py tests/test_model_router_composition.py tests/test_model_router_costing.py tests/test_model_catalog.py`. JavaScript uses a static same-origin asset and no external dependencies.

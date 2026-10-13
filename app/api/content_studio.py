@@ -236,6 +236,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         {item("materials", base + "/materials", "▱", "Библиотека")}
         <a href="{base}/plan#unknowns"><span class="nav-ico">✦</span>Идеи и неизвестные</a>
         <a href="/studio?choose=1"><span class="nav-ico">⇄</span>Проекты</a>
+        <a href="/studio/team"><span class="nav-ico">♧</span>ИИ-команда</a>
       </nav>
       <div class="sidebar-spacer"></div>
       <div class="sidebar-promo">
@@ -257,6 +258,7 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
       {item("plan", base + "/plan", "▣", "План")}
       {item("materials", base + "/materials", "▤", "Материалы")}
       {item("calendar", base + "/calendar", "□", "Календарь")}
+      {item("team", "/studio/team", "♧", "Команда")}
     </nav>
     """
 
