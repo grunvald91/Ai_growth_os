@@ -47,7 +47,8 @@ REVIEW_TIMEOUT = 20
 REVISION_TIMEOUT = 35
 
 
-def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisions: list[dict] | None = None) -> LLMResponse:
+def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisions: list[dict] | None = None,
+            findings: list[dict] | None = None) -> LLMResponse:
     usage = original.usage or LLMUsage()
     usage = LLMUsage(
         input_tokens=usage.input_tokens + sum(r.usage.input_tokens if r.usage else 0 for r in extra),
@@ -59,6 +60,7 @@ def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisi
             "status": status,
             "extra_calls": len(extra),
             "decisions": decisions or [],
+            "findings": findings or [],
             "extra_usage_by_model": [
                 {"model": r.model, "input_tokens": r.usage.input_tokens if r.usage else 0,
                  "output_tokens": r.usage.output_tokens if r.usage else 0}
@@ -160,13 +162,19 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
              "rationale": decision.rationale}
             for decision in revision.decisions
         ]
+        summary = [
+            {"id": f.id, "severity": f.severity, "problem": f.problem,
+             "evidence": f.evidence_in_draft, "suggestion": f.proposed_fix,
+             "goal_alignment": f.link_to_original_goal}
+            for f in material
+        ]
         if not any(d.decision == "accept" for d in revision.decisions):
-            return _record(original, "all_rejected", extra, decisions)
+            return _record(original, "all_rejected", extra, decisions, summary)
         validator.validate(revision.updated_output)
         content = json.dumps(revision.updated_output, ensure_ascii=False)
         if len(content) > 70000:
             raise ValueError("Oversized revision")
-        return _record(original.model_copy(update={"content": content}), "revised", extra, decisions)
+        return _record(original.model_copy(update={"content": content}), "revised", extra, decisions, summary)
     except (Exception,):
         # Optional critique must not turn an existing successful draft into failure.
         # CancelledError is BaseException and correctly propagates to the caller.
