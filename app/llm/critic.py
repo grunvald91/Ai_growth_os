@@ -139,6 +139,10 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
             "required": ["decisions", "updated_output"],
             "additionalProperties": False,
         }
+        # Pydantic refs point to the schema root (#/$defs/...); lift them
+        # to the wrapper root as well so nested original schemas resolve.
+        if request.response_schema.get("$defs"):
+            revision_response_schema["$defs"] = request.response_schema["$defs"]
         revise_response = await asyncio.wait_for(generate(LLMRequest(
             system_prompt=(
                 "You are the ORIGINAL AUTHOR. Evaluate EVERY critic suggestion independently "
