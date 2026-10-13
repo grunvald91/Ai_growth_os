@@ -76,13 +76,44 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
     if (not request.metadata.get("team_role") or not request.response_schema
             or original.stop_reason not in (None, "end_turn", "stop_sequence")):
         return original
-    task = json.dumps({
+    # Full prior stage outputs can dwarf the actual business assignment.
+    # Keep goal, request and trusted facts first; explicitly identify omitted context.
+    review_messages = []
+    for message in request.messages[:4]:
+        content = message.content
+        if len(content) > 12000:
+            try:
+                raw = json.loads(content)
+            except (ValueError, TypeError):
+                raw = None
+            if isinstance(raw, dict):
+                preferred = ("request", "task", "task_brief", "parent_task",
+                             "product", "company_name", "company_slug",
+                             "verified_product_facts", "goal_records",
+                             "channel_profile", "constraints")
+                compact = {}
+                for key in preferred:
+                    if key in raw:
+                        value = json.dumps(raw[key], ensure_ascii=False)
+                        if len(value) < 4500 and len(json.dumps(compact, ensure_ascii=False)) + len(value) < 10500:
+                            compact[key] = raw[key]
+                compact["context_truncated"] = True
+                content = json.dumps(compact, ensure_ascii=False)
+            else:
+                content = content[:10000] + "\\n[ADDITIONAL CONTEXT OMITTED]"
+        review_messages.append({"role": message.role, "content": content})
+    instructions = request.system_prompt or ""
+    # Original response format is provided separately as schema_text.
+    if len(instructions) > 11000:
+        instructions = instructions[:11000] + "\\n[REMAINING INSTRUCTIONS OMITTED]"
+    task = {
         "role": request.metadata["team_role"],
-        "original_instructions": request.system_prompt,
-        "original_task": [message.model_dump() for message in request.messages],
-    }, ensure_ascii=False)
+        "original_instructions": instructions,
+        "original_task": review_messages,
+    }
     schema_text = json.dumps(request.response_schema, ensure_ascii=False)
-    if len(task) > 24000 or len(schema_text) > 24000 or len(original.content) > 70000:
+    task_text = json.dumps(task, ensure_ascii=False)
+    if len(task_text) > 24000 or len(schema_text) > 24000 or len(original.content) > 70000:
         return _record(original, "skipped_size_limit", [])
 
     try:
