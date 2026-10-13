@@ -127,6 +127,18 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
         if not material:
             return _record(original, "no_material_issues", extra)
 
+        # Constrain updated_output to the exact original contract, including nested refs.
+        # An unconstrained JSON object is not accepted by some strict-schema providers.
+        revision_response_schema = {
+            "type": "object",
+            "properties": {
+                "decisions": {"type": "array", "items": Decision.model_json_schema(),
+                              "minItems": 1, "maxItems": 3},
+                "updated_output": request.response_schema,
+            },
+            "required": ["decisions", "updated_output"],
+            "additionalProperties": False,
+        }
         revise_response = await asyncio.wait_for(generate(LLMRequest(
             system_prompt=(
                 "You are the ORIGINAL AUTHOR. Evaluate EVERY critic suggestion independently "
@@ -146,7 +158,7 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
             }, ensure_ascii=False))],
             model=request.model,
             max_tokens=min(20000, max(2400, request.max_tokens + 1000)),
-            response_schema=Revision.model_json_schema(),
+            response_schema=revision_response_schema,
             metadata={"reasoning_effort": "low", "team_role": request.metadata["team_role"],
                       "task_type": "apply_quality_feedback", "provider_timeout_seconds": REVISION_TIMEOUT},
         )), REVISION_TIMEOUT)
