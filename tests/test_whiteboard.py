@@ -177,6 +177,18 @@ async def test_documented_openrouter_image_and_speech_routes_use_bearer():
 
 
 @pytest.mark.asyncio
+async def test_grok_speech_explicitly_selects_russian_without_retries():
+    seen = []
+    def handler(req):
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, content=b'ID3' + b'x' * 200)
+    async with httpx.AsyncClient(base_url="https://openrouter.ai/api/v1/", transport=httpx.MockTransport(handler)) as client:
+        await OpenRouterSpeechProvider(api_key='test', model='x-ai/grok-voice-tts-1.0', client=client).synthesize('Русская речь.', language='ru', voice='eve')
+    assert len(seen) == 1 and seen[0]['provider']['options']['xai']['language'] == 'ru'
+    assert seen[0]['input'] == 'Русская речь.' and seen[0]['voice'] == 'eve'
+
+
+@pytest.mark.asyncio
 async def test_flux_pro_uses_only_its_supported_image_parameters():
     seen = []
     def handler(req):
