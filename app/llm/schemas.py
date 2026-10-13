@@ -28,3 +28,4 @@ class LLMResponse(BaseModel):
     model: str
     usage: LLMUsage | None = None
     stop_reason: str | None = None
+    quality_review: dict[str, Any] | None = None
