@@ -278,10 +278,16 @@ def notice_html(product_id: UUID) -> str:
     </details>"""
 
 
+def work_url(product_id: UUID, item: dict) -> str:
+    base = f"/studio/products/{product_id}"
+    kind = "whiteboard" if item.get("agent") == "whiteboard_renderer" else "tasks"
+    return f"{base}/{kind}/{item['id']}"
+
+
 def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
     base = f"/studio/products/{product_id}"
-    tabs = (("all", "Все"), ("active", "В работе"), ("ready", "Готово"),
-            ("problems", "Ошибки"))
+    tabs = (("all", "Все"), ("active", "В работе"), ("approval", "Нужно решение"),
+            ("ready", "Готово"), ("problems", "Ошибки"))
     selector = '<nav class="sg-work-tabs" aria-label="Состояния заданий">' + "".join(
         f'<a href="{base}/work?tab={name}" class="{"active" if name==tab else ""}">'
         f'{label}</a>' for name, label in tabs
@@ -289,7 +295,8 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
     visible = [i for i in items if (
         tab == "all" or
         (tab == "active" and i["state"] in {"queued", "running"}) or
-        (tab == "ready" and i["state"] in {"completed", "waiting_approval"}) or
+        (tab == "approval" and i["state"] == "waiting_approval") or
+        (tab == "ready" and i["state"] == "completed") or
         (tab == "problems" and i["state"] in {"failed", "cancelled"})
     )]
     cards = []
@@ -303,7 +310,7 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
             if artifact_count else item["description"]
         )
         cards.append(
-            f'<a class="sg-work-item sg-work-{item["tone"]}" href="{base}/tasks/{item["id"]}">'
+            f'<a class="sg-work-item sg-work-{item["tone"]}" href="{work_url(product_id, item)}">'
             f'<div class="sg-work-item-main"><b>{safe(item["title"])}</b>'
             f'<p>{safe(summary)}</p></div>'
             f'<span class="sg-work-status sg-work-{item["tone"]}">{safe(label)}</span>'
@@ -335,7 +342,7 @@ def activity_overview(product_id: UUID, items: list[dict]) -> str:
     cards = []
     for item in (working[:4] or recent[:4]):
         cards.append(
-            f'<a class="sg-work-item sg-work-{item["tone"]}" href="{base}/tasks/{item["id"]}">'
+            f'<a class="sg-work-item sg-work-{item["tone"]}" href="{work_url(product_id, item)}">'
             f'<div class="sg-work-item-main"><b>{safe(item["title"])}</b>'
             f'<p>{safe(item["description"])}</p></div>'
             f'<span class="sg-work-status sg-work-{item["tone"]}">{safe(item["label"])}</span>'
