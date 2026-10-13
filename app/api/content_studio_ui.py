@@ -87,6 +87,15 @@ def create_content_html(product_id, *, created=False, fields=None, error=None) -
         </form>
       </section>
       <aside class="sg-aside-stack">
+        <section class="sg-surface sg-animator-entry">
+          <span class="sg-overline">ВИДЕО С АНИМАЦИЕЙ И ОЗВУЧКОЙ</span>
+          <h2>Рисованное видеообъяснение</h2>
+          <p>Короткое объяснение с рисунками и русской озвучкой. Отдельный
+          процесс генерации с этапами, просмотром и скачиванием MP4.</p>
+          <p class="sg-muted">Платные обращения к моделям запускаются
+          только после отдельного подтверждения.</p>
+          <a class="btn primary" href="{base}/whiteboard">Создать рисованное видео →</a>
+        </section>
         <section class="sg-surface sg-guide"><div class="sg-guide-icon">✦</div>
           <h2>Как работает ИИ-команда</h2>
           <ol class="sg-steps"><li><b>Создаёт</b><span>Под конкретную компанию, формат и аудиторию.</span></li>
