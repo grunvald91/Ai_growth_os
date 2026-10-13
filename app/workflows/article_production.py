@@ -902,6 +902,7 @@ class ArticleProduction:
                         'fallback_used': bool(fallback_reason),
                         'fallback_reason': fallback_reason,
                         'output': parsed.model_dump(mode='json'),
+                        'quality_review': response.quality_review if not fallback_reason and response else None,
                     }, ensure_ascii=False),
                     status='draft',
                 )
