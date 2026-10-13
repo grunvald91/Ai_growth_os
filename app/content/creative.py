@@ -175,7 +175,8 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
 
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     llm = LLMService(
-        privacy_gateway=privacy, provider=provider or build_llm_provider(settings)
+        privacy_gateway=privacy, provider=provider or build_llm_provider(settings),
+        critic_enabled=settings.agent_critic_enabled,
     )
     product = db.get(Product, request.product_id)
     task = db.get(Task, task_id)
