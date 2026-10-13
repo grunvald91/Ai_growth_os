@@ -17,7 +17,7 @@ from .checkpoints import CheckpointStore, CheckpointError, _Lock
 from .jobs import AGENT, CallLedger, GuardedStage, job_directory, owner_task, records
 from .pipeline import WhiteboardPipeline
 from .render import MarkerSweepRenderer
-from .runtime import ReadinessError, SingleCallStoryboardLLM, preflight, safe_error
+from .runtime import ReadinessError, SingleCallStoryboardLLM, preflight, safe_error, scoped_settings
 
 
 def build_pipeline(settings, payload, store):
@@ -106,14 +106,21 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                 state.content = json.dumps(value); db.commit()
             # The immutable approved request owns this job's model/voice choice.
             # Copy only these public fields; never alter shared settings or .env.
-            job_settings = settings.model_copy(update={
-                **{'whiteboard_' + name + '_model': value
-                   for name, value in payload.models.model_dump().items()},
-                'whiteboard_voice': payload.request.voice,
-            })
+            job_settings = scoped_settings(settings, payload.models, payload.request.voice)
             await (readiness or preflight)(job_settings, payload.models, payload.request.voice)
             store = CheckpointStore(directory / 'stages', payload.request, models=payload.models.model_dump())
             pipeline = (factory or build_pipeline)(job_settings, payload, store)
+            def progress(update):
+                with session_factory() as db:
+                    current = owner_task(db, product_id, task_id, lock=True)
+                    _, saved, approved, checked = records(db, current, lock=True)
+                    if current.status != TaskStatus.RUNNING or approved.status != 'approved' or checked != payload:
+                        raise ReadinessError('cancelled' if current.status == TaskStatus.CANCELLED else 'approval_invalid')
+                    value = json.loads(saved.content)
+                    value.update(update)
+                    saved.content = json.dumps(value)
+                    db.commit()
+            pipeline.progress = progress
             ledger = CallLedger(session_factory, product_id, task_id)
             for attribute, stage in (('storyboard', 'storyboard'), ('images', 'image'), ('speech', 'speech'), ('regions', 'regions')):
                 setattr(pipeline, attribute, GuardedStage(getattr(pipeline, attribute), stage, ledger))
@@ -133,6 +140,8 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                         'cost_usd': None, 'cost_known': False, 'human_review_required': True}, ensure_ascii=False))
                 db.add(result); db.flush()
                 value = json.loads(state.content); value.update(stage='completed', error=None, artifact_id=str(result.id))
+                if value.get('progress_total') is not None:
+                    value['progress_done'] = value['progress_total']
                 state.content = json.dumps(value)
                 task.status = TaskStatus.COMPLETED
                 db.commit()

@@ -201,8 +201,22 @@ async def test_full_owner_interface_worker_and_real_mp4(environment, tmp_path, m
         page = browser.get(url)
         assert page.status_code == 200 and '<video controls' in page.text
         assert '13 из 13' in page.text and 'Скачать MP4' in page.text
+        assert 'Завершено этапов: 14 из 14' in page.text
+        assert '/files/video.vtt' in page.text
         download = browser.get(url + '/files/video.mp4')
         assert download.status_code == 200 and b'ftyp' in download.content[:32]
+        attachment = browser.get(url + '/files/video.mp4?download=true')
+        assert attachment.content == download.content
+        assert attachment.headers['content-disposition'] == 'attachment; filename="video.mp4"'
+        seek = browser.get(url + '/files/video.mp4', headers={'Range': 'bytes=0-31'})
+        assert seek.status_code == 206 and seek.content == download.content[:32]
+        subtitles = browser.get(url + '/files/video.vtt')
+        assert subtitles.status_code == 200 and subtitles.text.startswith('WEBVTT\n\n')
+        assert '00:00:00.000 --> ' in subtitles.text and 'text/vtt' in subtitles.headers['content-type']
+        assert browser.get(f'/studio/products/{other_id}/whiteboard/{task_id}/files/video.vtt').status_code == 404
+        index = browser.get(f'/studio/products/{product_id}/whiteboard')
+        assert 'Видео готово' in index.text and 'Посмотреть видео' in index.text
+        assert '/files/video.mp4?download=true' in index.text
         assert browser.get(url + '/files/video.srt').status_code == 200
         assert browser.get(url + '/files/stages').status_code == 404
         assert browser.get(f'/studio/products/{other_id}/whiteboard/{task_id}/files/video.mp4').status_code == 404

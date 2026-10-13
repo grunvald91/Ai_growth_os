@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import re
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
@@ -14,7 +16,7 @@ from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.content_studio import _owner_product, _studio_form, esc, studio_page_shell
 from app.content.whiteboard.contracts import Contract, WhiteboardRequest
 from app.content.whiteboard.jobs import AGENT, approve_job, cancel_job, digest, job_directory, owner_task, queue_job, records
-from app.content.whiteboard.runtime import MESSAGES, ReadinessError, configured_models, preflight
+from app.content.whiteboard.runtime import MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import Task, TaskStatus
@@ -22,10 +24,14 @@ from pydantic import Field
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 
+STATUS_NAMES = {'waiting_approval': 'Ожидает подтверждения', 'queued': 'В очереди', 'running': 'Готовится',
+                'completed': 'Видео готово', 'failed': 'Остановлено после ошибки', 'cancelled': 'Отменено'}
+
 
 class CreateJob(Contract):
     topic: str = Field(min_length=8, max_length=400)
     max_api_calls: int = Field(default=13, ge=13, le=25)
+    profile: Literal['configured', 'flux_ru'] = 'configured'
 
 
 class ApproveJob(Contract):
@@ -54,10 +60,10 @@ def _load(db, product_id, task_id):
 
 def _queue(db, product, body, settings):
     try:
-        models = configured_models(settings)
+        models, voice = generation_profile(settings, body.profile)
     except ValueError:
         raise HTTPException(503, MESSAGES['configuration_missing']) from None
-    request = WhiteboardRequest(product_id=product.id, topic=body.topic, voice=settings.whiteboard_voice)
+    request = WhiteboardRequest(product_id=product.id, topic=body.topic, voice=voice)
     try:
         return queue_job(db, request, models, max_api_calls=body.max_api_calls)
     except ValueError:
@@ -75,7 +81,7 @@ async def _approve(db, product_id, task_id, body, actor, settings):
     task = owner_task(db, product_id, task_id)
     _, saved, _, payload = records(db, task)
     try:
-        await preflight(settings, payload.models, payload.request.voice)
+        await preflight(scoped_settings(settings, payload.models, payload.request.voice), payload.models, payload.request.voice)
     except ReadinessError as exc:
         # Short transaction after network I/O. Do not overwrite cancellation.
         task = owner_task(db, product_id, task_id, lock=True)
@@ -135,16 +141,28 @@ def page(product, title, body, *, status=200, refresh=False):
 
 def job_html(state, product_id, *, error=None):
     base = f'/studio/products/{product_id}/whiteboard/{state["task_id"]}'
-    names = {'waiting_approval': 'Ожидает подтверждения', 'queued': 'В очереди', 'running': 'Готовится',
-             'completed': 'Готово к проверке', 'failed': 'Остановлено после ошибки', 'cancelled': 'Отменено'}
     stages = {'storyboard': 'Сценарий', 'image': 'Рисунок', 'regions': 'Области рисования', 'speech': 'Озвучка',
-              'preflight': 'Проверка API', 'queued': 'Очередь', 'completed': 'Рендер завершён'}
+              'preflight': 'Проверка доступа к моделям', 'queued': 'Очередь',
+              'rendering': 'Сборка MP4 из рисунков и озвучки', 'completed': 'Видео собрано'}
     code = state.get('error')
     warning = error or MESSAGES.get(code)
     body = (f'<section class="sg-surface"><h2>{esc(state["request"]["topic"])}</h2>'
-            f'<p role="status">{esc(names.get(state["status"], state["status"]))}</p>'
+            f'<p role="status">{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p>'
             f'<p>{esc(stages.get(state.get("stage"), "Подготовка задания"))} · '
             f'API-вызовы: {state["calls"]} из {state["max_api_calls"]}</p>')
+    scene = state.get('scene_index')
+    beat = state.get('beat_index')
+    if isinstance(scene, int) and 0 <= scene < 3:
+        body += f'<p>Сцена {scene + 1} из 3'
+        if isinstance(beat, int) and 0 <= beat < 6:
+            body += f' · реплика {beat + 1}'
+        body += '</p>'
+    total, done = state.get('progress_total'), state.get('progress_done', 0)
+    if isinstance(total, int) and isinstance(done, int) and 0 <= done <= total <= 100 and total:
+        body += (f'<p>Завершено этапов: {done} из {total}</p>'
+                 f'<progress aria-label="Завершённые этапы создания видео" value="{done}" max="{total}" style="width:100%"></progress>')
+    if state.get('failed_stage') in stages:
+        body += f'<p>Ошибка на этапе: {esc(stages[state["failed_stage"]])}</p>'
     if warning:
         body += f'<p class="sg-warning" role="alert">{esc(warning)}</p>'
     if state['status'] == 'waiting_approval':
@@ -161,16 +179,103 @@ def job_html(state, product_id, *, error=None):
     if state['status'] in {'queued', 'running', 'waiting_approval'}:
         body += (f'<form method="post" action="{base}/cancel"><button class="btn secondary">Остановить задание</button></form>')
     if state['status'] in {'queued', 'running'}:
-        body += '<p>Можно закрыть страницу. Worker продолжит работу; статус обновляется автоматически.</p>'
+        body += '<p>Можно закрыть страницу. Генерация продолжится; статус обновляется автоматически. Задание останется в списке ваших анимаций.</p>'
     if state['status'] == 'completed':
         body += (f'<video controls playsinline preload="metadata" poster="{base}/files/video.png" '
-                 f'style="width:min(100%,360px);max-height:70vh" src="{base}/files/video.mp4"></video>'
+                 f'style="width:min(100%,360px);max-height:70vh" src="{base}/files/video.mp4">'
+                 f'<track kind="subtitles" srclang="ru" label="Русский" src="{base}/files/video.vtt">'
+                 '</video>'
                  '<p>Проверьте рисунки, факты, русский текст, озвучку и субтитры перед публикацией. Публикация выполняется отдельно.</p>'
                  '<div class="sg-form-bottom">' + ''.join(
-                     f'<a class="btn secondary" href="{base}/files/{name}" download>{label}</a>'
+                     f'<a class="btn secondary" href="{base}/files/{name}?download=true" download>{label}</a>'
                      for name, label in [('video.mp4', 'Скачать MP4'), ('video.srt', 'Субтитры'),
                                          ('video.png', 'Обложка'), ('video.json', 'Тайминг')]) + '</div>')
     body += f'<p><a href="/studio/products/{product_id}/whiteboard">К рисованным видео</a></p></section>'
+    return body
+
+
+def creation_form(product_id, *, fields=None, error=None):
+    fields = fields or {}
+    base = f'/studio/products/{product_id}/whiteboard'
+    profile = fields.get('profile', 'flux_ru')
+    maximum = str(fields.get('max_api_calls', '13'))
+    body = '<section class="sg-surface"><h2>Создать анимацию с озвучкой</h2><p>Вертикальное видео на 30 секунд: три сцены, русская озвучка, MP4, обложка и субтитры. Перед запуском вы подтвердите платную генерацию. Доступ к моделям проверяется перед платным запуском.</p>'
+    if error:
+        body += f'<p class="sg-warning" role="alert">{esc(error)}</p>'
+    body += (f'<form method="post" action="{base}" class="sg-form">'
+             '<label class="sg-field"><span>Что объяснить в видео?</span><textarea name="topic" minlength="8" maxlength="400" rows="3" required '
+             f'placeholder="Например: почему пилот добавляет тягу при посадке на авианосец">{esc(fields.get("topic", ""))}</textarea></label>'
+             '<details><summary>Настройки генерации</summary>'
+             '<label class="sg-field"><span>Вариант генерации</span><select name="profile">' + ''.join(
+                 f'<option value="{value}"' + (' selected' if profile == value else '') + f'>{label}</option>'
+                 for value, label in [('flux_ru', 'FLUX — рисунки, Grok — русская озвучка'), ('configured', 'Модели из настроек сервера')]) +
+             '</select><small>Выбор сохраняется только для этого задания. Модели и голос можно проверить перед подтверждением.</small></label>'
+             '<label class="sg-field"><span>Максимум платных API-вызовов</span><select name="max_api_calls">' + ''.join(
+                 f'<option value="{value}"' + (' selected' if maximum == str(value) else '') + f'>{label}</option>'
+                 for value, label in [(13, '13 — три сцены по две реплики'), (19, '19'), (25, '25')]) +
+             '</select><small>Это лимит обращений к моделям; точная сумма списаний неизвестна.</small></label></details>'
+             '<button class="btn primary">Сохранить и перейти к подтверждению</button></form></section>')
+    return body
+
+
+def history_html(states, product_id):
+    base = f'/studio/products/{product_id}/whiteboard'
+    body = '<section class="sg-surface"><h2>Ваши анимации</h2><div id="whiteboard-jobs" aria-live="polite">'
+    for state in states:
+        url = f'{base}/{state["task_id"]}'
+        body += (f'<article><p><a href="{url}">{esc(state["request"]["topic"])}</a></p>'
+                 f'<p>{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p>')
+        if state['status'] == 'completed':
+            body += (f'<p><a class="btn primary" href="{url}">Посмотреть видео</a> '
+                     f'<a class="btn secondary" href="{url}/files/video.mp4?download=true" download>Скачать MP4</a></p>')
+        body += '</article>'
+    if not states:
+        body += '<p>Здесь появятся ваши задания. К каждому можно вернуться после закрытия страницы.</p>'
+    body += '</div></section>'
+    # Poll only read-only job status; leave the user's draft form untouched.
+    body += '''<script>
+    (() => {
+      const root = document.getElementById('whiteboard-jobs');
+      const base = ''' + json.dumps(base) + ''';
+      const endpoint = ''' + json.dumps(f'/products/{product_id}/whiteboard/jobs') + ''';
+      const names = ''' + json.dumps(STATUS_NAMES, ensure_ascii=False) + ''';
+      async function refresh() {
+        if (document.hidden) return;
+        try {
+          const response = await fetch(endpoint, {credentials:'same-origin', cache:'no-store'});
+          if (!response.ok) return;
+          const states = await response.json();
+          if (!Array.isArray(states) || !states.length) return;
+          const fragment = document.createDocumentFragment();
+          for (const state of states) {
+            if (!/^[0-9a-f-]{36}$/.test(state.task_id)) continue;
+            const article = document.createElement('article');
+            const title = document.createElement('p');
+            const link = document.createElement('a');
+            link.href = base + '/' + state.task_id;
+            link.textContent = state.request.topic;
+            title.append(link); article.append(title);
+            const status = document.createElement('p');
+            status.textContent = names[state.status] || 'Обновление статуса';
+            article.append(status);
+            if (state.status === 'completed') {
+              const actions = document.createElement('p');
+              const view = document.createElement('a');
+              view.href = link.href; view.className = 'btn primary'; view.textContent = 'Посмотреть видео';
+              const download = document.createElement('a');
+              download.href = link.href + '/files/video.mp4?download=true';
+              download.className = 'btn secondary'; download.textContent = 'Скачать MP4'; download.download = 'video.mp4';
+              actions.append(view, document.createTextNode(' '), download); article.append(actions);
+            }
+            fragment.append(article);
+          }
+          root.replaceChildren(fragment);
+        } catch (_) {}
+      }
+      setInterval(refresh, 8000);
+      document.addEventListener('visibilitychange', refresh);
+    })();
+    </script>'''
     return body
 
 
@@ -179,27 +284,15 @@ async def studio_index(product_id: UUID, db: Session = Depends(get_db), settings
     product = _owner_product(db, product_id)
     error = None
     try:
-        models = configured_models(settings)
-        await preflight(settings, models, settings.whiteboard_voice)
-    except (ReadinessError, ValueError) as exc:
-        error = MESSAGES.get(getattr(exc, 'code', 'configuration_missing'), MESSAGES['configuration_missing'])
-    base = f'/studio/products/{product_id}/whiteboard'
-    body = '<section class="sg-surface"><h2>Рисованное видео с озвучкой</h2><p>Три сцены, последовательное рисование, MP4, обложка и субтитры. Перед запуском вы подтвердите платные API-вызовы.</p>'
-    if error:
-        body += f'<p class="sg-warning" role="alert">{esc(error)} Черновик задания можно сохранить сейчас.</p>'
-    body += (f'<form method="post" action="{base}" class="sg-form">'
-             '<label class="sg-field"><span>Тема объяснения</span><textarea name="topic" minlength="8" maxlength="400" rows="3" required '
-             'placeholder="Например: как клиент выбирает время без переписки"></textarea></label>'
-             '<label class="sg-field"><span>Максимум платных API-вызовов</span><select name="max_api_calls">'
-             '<option value="13">13 — три сцены по два шага</option><option value="19">19</option><option value="25">25</option></select>'
-             '<small>Это лимит обращений к моделям; точная сумма списаний неизвестна.</small></label>'
-             '<button class="btn primary">Сохранить и перейти к подтверждению</button></form></section>')
+        generation_profile(settings, 'flux_ru')
+        if not settings.openrouter_api_key or not settings.xai_api_key:
+            error = MESSAGES['configuration_missing']
+    except ValueError:
+        error = MESSAGES['configuration_missing']
+    body = creation_form(product_id, error=error)
     tasks = list(db.scalars(select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT)
                            .order_by(Task.created_at.desc(), Task.id.desc()).limit(20)))
-    if tasks:
-        body += '<section class="sg-surface"><h2>Задания</h2>' + ''.join(
-            f'<p><a href="{base}/{task.id}">{esc(task.description)}</a> · {esc(task.status.value)}</p>'
-            for task in tasks) + '</section>'
+    body += history_html([_load(db, product_id, task.id) for task in tasks], product_id)
     return page(product, 'Рисованное видео', body)
 
 
@@ -208,10 +301,15 @@ async def studio_create(product_id: UUID, request: Request, db: Session = Depend
     product = _owner_product(db, product_id)
     fields = await _studio_form(request)
     try:
-        body = CreateJob(topic=fields.get('topic', ''), max_api_calls=fields.get('max_api_calls', '13'))
+        body = CreateJob(topic=fields.get('topic', ''), max_api_calls=fields.get('max_api_calls', '13'),
+                         profile=fields.get('profile', 'configured'))
     except ValueError:
-        raise HTTPException(422, 'Тема: 8–400 символов. Лимит: 13–25 вызовов.') from None
-    task = _queue(db, product, body, settings)
+        return page(product, 'Создать анимацию', creation_form(product_id, fields=fields,
+                    error='Тема: 8–400 символов. Лимит: 13–25 вызовов. Выберите вариант генерации.'), status=422)
+    try:
+        task = _queue(db, product, body, settings)
+    except HTTPException as exc:
+        return page(product, 'Создать анимацию', creation_form(product_id, fields=fields, error=exc.detail), status=exc.status_code)
     return RedirectResponse(f'/studio/products/{product_id}/whiteboard/{task.id}', status_code=303)
 
 
@@ -248,12 +346,22 @@ def studio_cancel(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)
 
 
 @router.get('/studio/products/{product_id}/whiteboard/{task_id}/files/{filename}')
-def studio_file(product_id: UUID, task_id: UUID, filename: str, db: Session = Depends(get_db), settings=Depends(get_settings)):
+def studio_file(product_id: UUID, task_id: UUID, filename: str, download: bool = False, db: Session = Depends(get_db), settings=Depends(get_settings)):
     state = _load(db, product_id, task_id)
-    types = {'video.mp4': 'video/mp4', 'video.srt': 'application/x-subrip', 'video.png': 'image/png', 'video.json': 'application/json'}
+    types = {'video.mp4': 'video/mp4', 'video.srt': 'application/x-subrip', 'video.png': 'image/png', 'video.json': 'application/json', 'video.vtt': 'text/vtt'}
     if state['status'] != 'completed' or filename not in types:
         raise HTTPException(404, 'Файл не найден')
-    target = job_directory(settings.products_root, product_id, task_id) / 'output' / filename
+    target = job_directory(settings.products_root, product_id, task_id) / 'output' / ('video.srt' if filename == 'video.vtt' else filename)
     if target.is_symlink() or target.parent.is_symlink() or not target.is_file():
         raise HTTPException(404, 'Файл не найден')
-    return FileResponse(target, media_type=types[filename], headers={'Cache-Control': 'private, no-store'})
+    if filename == 'video.vtt':
+        if target.stat().st_size > 128_000:
+            raise HTTPException(404, 'Файл не найден')
+        text = re.sub(r'(?m)^(\d{2}:\d{2}:\d{2}),(\d{3})( --> \d{2}:\d{2}:\d{2}),(\d{3})$',
+                      r'\1.\2\3.\4', target.read_text(encoding='utf-8'))
+        headers = {'Cache-Control': 'private, no-store'}
+        if download:
+            headers['Content-Disposition'] = 'attachment; filename="video.vtt"'
+        return Response('WEBVTT\n\n' + text, media_type='text/vtt', headers=headers)
+    return FileResponse(target, media_type=types[filename], filename=filename if download else None,
+                        headers={'Cache-Control': 'private, no-store'})

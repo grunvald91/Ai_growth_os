@@ -34,6 +34,24 @@ def configured_models(settings) -> WhiteboardModels:
                               for name in ('storyboard', 'image', 'speech', 'regions')})
 
 
+def scoped_settings(settings, models: WhiteboardModels, voice: str):
+    """Copy public job choices, retaining the existing credentials and proxy."""
+    return settings.model_copy(update={
+        **{'whiteboard_' + name + '_model': value for name, value in models.model_dump().items()},
+        'whiteboard_voice': voice,
+    })
+
+
+def generation_profile(settings, profile: str):
+    if profile == 'flux_ru':
+        return WhiteboardModels(storyboard=settings.whiteboard_storyboard_model,
+            image='black-forest-labs/flux.2-pro', speech='x-ai/grok-voice-tts-1.0',
+            regions='qwen/qwen3-vl-30b-a3b-instruct'), 'eve'
+    if profile == 'configured':
+        return configured_models(settings), settings.whiteboard_voice
+    raise ValueError('Unknown generation profile')
+
+
 class ReadinessError(RuntimeError):
     def __init__(self, code: str):
         self.code = code
