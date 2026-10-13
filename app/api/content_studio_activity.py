@@ -147,11 +147,24 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
     by_results = {}
     for result in results:
         by_results.setdefault(result.task_id, []).append(result)
+    animator_states = {record.task_id: record for record in db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id, Artifact.task_id.in_(ids),
+        Artifact.kind == "whiteboard_job_state",
+    ))}
     output = []
     for task in tasks:
         key = task_state(task)
         title, kind, explanation = STATES.get(key, ("Проверить статус", "queued", "Состояние задачи уточняется"))
         items = by_results.get(task.id, [])
+        animator_stage = None
+        animator_calls = None
+        if task.assigned_agent == "whiteboard_renderer" and task.id in animator_states:
+            try:
+                animator_data = json.loads(animator_states[task.id].content)
+                animator_stage = animator_data.get("stage")
+                animator_calls = animator_data.get("calls")
+            except (TypeError, ValueError):
+                pass
         # 'completed' means the worker finished its job, not that a material
         # was approved or that a video file exists.
         output.append({
@@ -167,6 +180,8 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
                 "title": readable_artifact_title(art),
                 "status": getattr(art.status, "value", str(art.status)),
             } for art in items[:15]],
+            "animator_stage": animator_stage,
+            "animator_calls": animator_calls,
             "stage_signature": "|".join(
                 str(run.id) + ":" + run.status
                 for run in by_runs.get(task.id, [])[-20:]
