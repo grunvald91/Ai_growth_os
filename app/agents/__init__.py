@@ -255,6 +255,7 @@ class Agent:
                 + ", ".join(sorted(self.config.allowed_operations))
             ),
             messages=[LLMMessage(role="user", content=task)],
+            metadata={"team_role": self.config.role.value},
         ))
         request = ToolRequest.model_validate_json(response.content)
         if (request.product_id, request.task_id, request.resource_id) != (
