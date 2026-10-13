@@ -177,19 +177,34 @@ async def test_documented_openrouter_image_and_speech_routes_use_bearer():
 
 
 @pytest.mark.asyncio
-async def test_gemini_image_omits_unsupported_format_and_keeps_png_validation():
+async def test_gemini_image_uses_one_chat_request_and_keeps_png_validation():
     seen = []
     def handler(req):
+        assert req.url.path == '/api/v1/chat/completions'
         seen.append(json.loads(req.content))
-        return httpx.Response(200, json={"data": [{
-            "b64_json": base64.b64encode(PNG).decode(), "media_type": "image/png",
-        }]})
+        return httpx.Response(200, json={"choices": [{"message": {"images": [{
+            "image_url": {"url": "data:image/png;base64," + base64.b64encode(PNG).decode()},
+        }]}}]})
     async with httpx.AsyncClient(base_url="https://openrouter.ai/api/v1/", transport=httpx.MockTransport(handler)) as client:
         result = await OpenRouterImageProvider(api_key="test", model="google/gemini-3.1-flash-image", client=client).generate(scene(), request())
     assert result == PNG
     assert len(seen) == 1 and "output_format" not in seen[0]
     assert seen[0]["model"] == "google/gemini-3.1-flash-image"
-    assert seen[0]["aspect_ratio"] == "9:16" and seen[0]["resolution"] == "1K"
+    assert seen[0]["image_config"] == {"aspect_ratio": "9:16", "image_size": "1K"}
+    assert seen[0]["modalities"] == ["image", "text"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('url', ['https://example.com/image.png', 'data:image/jpeg;base64,eA==', 'data:image/png;base64,eA=='])
+async def test_gemini_rejects_non_png_without_another_request(url):
+    calls = []
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(200, json={"choices": [{"message": {"images": [{"image_url": {"url": url}}]}}]})
+    async with httpx.AsyncClient(base_url="https://openrouter.ai/api/v1/", transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ValueError):
+            await OpenRouterImageProvider(api_key="test", model="google/gemini-3.1-flash-image", client=client).generate(scene(), request())
+    assert len(calls) == 1
 
 
 @pytest.mark.asyncio
