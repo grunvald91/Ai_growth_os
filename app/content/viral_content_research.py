@@ -818,7 +818,7 @@ async def run_viral_content_research(
                         raise ValueError("pain referenced unknown product fact")
 
             async def generate_and_validate(active_llm, request):
-                generated = await asyncio.wait_for(active_llm.generate(request), timeout=180)
+                generated = await asyncio.wait_for(active_llm.generate(request), timeout=180 + getattr(active_llm, 'extra_timeout_seconds', 0))
                 analysis_responses.append(generated)
                 parsed = ViralContentAnalysisDraft.model_validate_json(generated.content)
                 validate_integrity(parsed)
