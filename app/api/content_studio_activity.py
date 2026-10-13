@@ -26,6 +26,20 @@ STATES = {
     "failed": ("Ошибка подготовки", "error", "Задание остановилось с ошибкой, а не исчезло."),
     "cancelled": ("Отменено", "error", "Создание остановлено."),
 }
+ANIMATOR_PHASES = {
+    "waiting_approval": "Нужно подтвердить создание",
+    "queued": "Ожидает запуска",
+    "preflight": "Проверка доступности моделей",
+    "storyboard": "Подготовка сценария",
+    "image": "Создание рисунков",
+    "regions": "Подготовка анимации",
+    "speech": "Создание озвучки",
+    "render": "Сборка видеофайла",
+    "completed": "Видеофайл готов",
+    "failed": "Ошибка подготовки",
+    "cancelled": "Отменено",
+}
+
 STAGE_NAMES = {
     "creative_strategist": "Изучение темы и аудитории",
     "creative_director": "Сценарий и раскадровка",
@@ -324,10 +338,15 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
         label = item["label"]
         if item["state"] == "completed" and artifact_count:
             label = "Материалы готовы"
-        summary = (
-            f'{artifact_count} материалов. Откройте результат и проверьте перед публикацией.'
-            if artifact_count else item["description"]
-        )
+        if item.get("agent") == "whiteboard_renderer":
+            stage = ANIMATOR_PHASES.get(str(item.get("animator_stage")), item["description"])
+            calls = item.get("animator_calls")
+            summary = stage + (f" · API-вызовов: {calls}" if isinstance(calls, int) else "")
+        else:
+            summary = (
+                f'{artifact_count} материалов. Откройте результат и проверьте перед публикацией.'
+                if artifact_count else item["description"]
+            )
         cards.append(
             f'<a class="sg-work-item sg-work-{item["tone"]}" href="{work_url(product_id, item)}">'
             f'<div class="sg-work-item-main"><b>{safe(item["title"])}</b>'
@@ -350,7 +369,7 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
 
 def activity_overview(product_id: UUID, items: list[dict]) -> str:
     base = f"/studio/products/{product_id}"
-    working = [x for x in items if x["state"] in {"queued", "running"}]
+    working = [x for x in items if x["state"] in {"queued", "running", "waiting_approval"}]
     recent = items[:5]
     if not working and not recent:
         return (
@@ -363,7 +382,7 @@ def activity_overview(product_id: UUID, items: list[dict]) -> str:
         cards.append(
             f'<a class="sg-work-item sg-work-{item["tone"]}" href="{work_url(product_id, item)}">'
             f'<div class="sg-work-item-main"><b>{safe(item["title"])}</b>'
-            f'<p>{safe(item["description"])}</p></div>'
+            f'<p>{safe(ANIMATOR_PHASES.get(str(item.get("animator_stage")), item["description"]) if item.get("agent") == "whiteboard_renderer" else item["description"])}</p></div>'
             f'<span class="sg-work-status sg-work-{item["tone"]}">{safe(item["label"])}</span>'
             '<span class="sg-work-arrow" aria-hidden="true">→</span></a>'
         )
