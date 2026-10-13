@@ -10,6 +10,10 @@ class LLMService:
         self._provider = provider
         self._critic_enabled = critic_enabled
 
+    @property
+    def extra_timeout_seconds(self) -> int:
+        return 60 if self._critic_enabled else 0
+
     async def generate(self, request: LLMRequest) -> LLMResponse:
         sanitized_request = self._privacy_gateway.sanitize(request)
         original = await self._provider.generate(sanitized_request)
