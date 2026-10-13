@@ -186,9 +186,14 @@ class OpenRouterSpeechProvider(OpenRouterBase):
             raise ValueError("Only Russian is enabled for this pilot")
         if len(text) > 320:
             raise ValueError("Speech segment exceeds pilot limit")
-        response = await self.post("audio/speech", {
+        payload = {
             "model": self.model, "input": text, "voice": voice, "response_format": "mp3",
-        })
+        }
+        if self.model == "x-ai/grok-voice-tts-1.0":
+            # xAI's built-in voices are multilingual; explicitly select Russian
+            # through OpenRouter's documented provider-options passthrough.
+            payload["provider"] = {"options": {"xai": {"language": "ru"}}}
+        response = await self.post("audio/speech", payload)
         audio = response.content
         if not (100 <= len(audio) <= 10_000_000):
             raise ValueError("TTS returned empty or oversized audio")
