@@ -268,6 +268,8 @@ class TeamCycle:
             run.model = response.model
             run.finished_at = datetime.now(timezone.utc)
             run.output_references = [{"kind": "artifact", "id": str(artifact.id)}]
+            if response.quality_review:
+                run.output_references.append({"kind": "quality_review", "data": response.quality_review})
             self.db.get(Task, task.id).status = TaskStatus.COMPLETED
             self._record_usage(product.id, run_id, response)
             self.db.commit()
