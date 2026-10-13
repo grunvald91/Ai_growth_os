@@ -364,6 +364,8 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
           {item("calendar", base + "/calendar", "▦", "Календарь")}
           {item("channels", base + "/channels", "↗", "Публикации")}
           {item("analytics", base + "/analytics", "⌁", "Результаты")}
+          {item("comments", base + "/comments", "☷", "Комментарии")}
+          {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
           <a href="/studio?choose=1"><span class="nav-ico" aria-hidden="true">⇄</span>Другой проект</a>
         </nav>
       </details>
@@ -942,6 +944,9 @@ def product_dashboard(db: Session, product: Product) -> str:
       <a href="/studio/products/{product.id}/plan">Контент-план</a>
       <a href="/studio/products/{product.id}/calendar">Календарь</a>
       <a href="/studio/products/{product.id}/review">На согласовании</a>
+      <a href="/studio/products/{product.id}/whiteboard">Рисованное видео</a>
+      <a href="/studio/products/{product.id}/comments">Комментарии</a>
+      <a href="/intelligence?product_id={product.id}">Бизнес-разведка</a>
       <a href="/studio/products/{product.id}/channels">Публикации</a>
     </nav>
     """
@@ -1153,6 +1158,15 @@ def studio_page_shell(
       <a href="/studio/products/{product.id}/create">＋ Создать</a>
       <a href="/studio/products/{product.id}/work">◴ В работе</a>
       <a href="/studio/products/{product.id}/materials">▤ Материалы</a>
+      <details class="sg-inline-more">
+        <summary>Ещё инструменты</summary>
+        <div><a href="/studio/products/{product.id}/plan">Контент-план</a>
+        <a href="/studio/products/{product.id}/calendar">Календарь</a>
+        <a href="/studio/products/{product.id}/whiteboard">Рисованное видео</a>
+        <a href="/studio/products/{product.id}/comments">Комментарии</a>
+        <a href="/intelligence?product_id={product.id}">Бизнес-разведка</a>
+        <a href="/studio/products/{product.id}/channels">Публикации</a></div>
+      </details>
     </nav>
     <div class="route-content">{body}</div>
   </main>
@@ -2032,7 +2046,7 @@ async def studio_create_submit(product_id: UUID, request: Request, db: Session =
 @router.get("/studio/products/{product_id}/work", response_class=HTMLResponse)
 def studio_work_page(product_id: UUID, tab: str = "all", db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
-    tab = tab if tab in {"all", "active", "ready", "problems"} else "all"
+    tab = tab if tab in {"all", "active", "approval", "ready", "problems"} else "all"
     html_body = activity_html(product.id, work_items(db, product.id), tab=tab)
     result = HTMLResponse(studio_page_shell(
         product, active="work", title="В работе",
@@ -2064,6 +2078,8 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
     task = db.scalar(select(Task).where(Task.id == task_id, Task.product_id == product_id))
     if task is None:
         raise HTTPException(404, "Задание не найдено")
+    if task.assigned_agent == "whiteboard_renderer":
+        return RedirectResponse(f"/studio/products/{product_id}/whiteboard/{task_id}", status_code=303)
     runs = list(db.scalars(select(AgentRun).where(
         AgentRun.task_id == task.id,
     ).order_by(AgentRun.started_at, AgentRun.id)))
