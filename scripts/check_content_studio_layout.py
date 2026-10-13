@@ -38,7 +38,7 @@ ROUTES = [
     ("materials", "/materials"),
     ("channels", "/channels"),
 ]
-EXPECTED_BUILD = "20261012-work9"
+EXPECTED_BUILD = "20261013-unified10"
 
 
 async def check_layout(page, name, width, route):
@@ -63,7 +63,7 @@ async def check_layout(page, name, width, route):
           const style = (el) => el ? getComputedStyle(el) : null;
           const errors = [];
           if (!layout || !main) errors.push('Main layout missing');
-          if (!build || build !== '20261012-work9')
+          if (!build || build !== '20261013-unified10')
             errors.push('Wrong deployed build: ' + String(build));
           if (document.documentElement.scrollWidth > innerWidth + 2)
             errors.push('Horizontal overflow: ' + document.documentElement.scrollWidth
