@@ -1,12 +1,13 @@
 """Real local media acceptance tests. Synthetic tones, no paid AI calls."""
 import io
 import json
+import math
 from pathlib import Path
 import shutil
 import subprocess
 from uuid import uuid4
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageChops
 import pytest
 
 from app.content.whiteboard.contracts import (
@@ -57,6 +58,66 @@ def test_future_beat_is_hidden_and_previous_beat_remains_visible():
         assert first.getpixel((130, 230)) == (255, 255, 255)
         assert second.getpixel((40, 40)) == (255, 0, 0)
         assert second.getpixel((130, 230)) == (0, 0, 255)
+
+
+def incomplete_assets(audio=b"ID3fixture"):
+    item = assets(audio)
+    # Structurally valid detector output, but neither box contains the drawing.
+    plan = WhiteboardRegionPlan(regions=[
+        WhiteboardRegion(beat_index=0, box=(0, 0, 100, 50)),
+        WhiteboardRegion(beat_index=1, box=(900, 950, 1000, 1000)),
+    ])
+    return WhiteboardSceneAssets(item.scene, item.image_png, item.narration_chunks, plan)
+
+
+def test_omitted_drawing_is_swept_in_final_beat_before_scene_boundary():
+    item = incomplete_assets()
+    renderer = MarkerSweepRenderer(width=180, height=320, fps=5)
+    with Image.open(io.BytesIO(item.image_png)) as image:
+        early = renderer.frame(image, item, (1.0, 1.0), 0.9)
+        middle = renderer.frame(image, item, (1.0, 1.0), 1.4)
+        complete = renderer.frame(image, item, (1.0, 1.0), 1.9)
+        assert early.getpixel((40, 40)) == (255, 255, 255)
+        assert middle.getpixel((40, 40)) == (255, 0, 0)
+        assert middle.getpixel((130, 230)) == (255, 255, 255)
+        assert ImageChops.difference(complete, image).getbbox() is None
+
+
+def test_completion_does_not_reveal_canvas_in_a_middle_beat():
+    item = assets()
+    scene = WhiteboardScene(title=item.scene.title, beats=[*item.scene.beats, item.scene.beats[-1]])
+    regions = WhiteboardRegionPlan(regions=[*item.regions.regions,
+        WhiteboardRegion(beat_index=2, box=(0, 950, 100, 1000))])
+    extended = WhiteboardSceneAssets(scene, item.image_png, (b"audio",) * 3, regions)
+    renderer = MarkerSweepRenderer(width=180, height=320, fps=5)
+    image = Image.new("RGB", (180, 320), "black")
+    middle = renderer.frame(image, extended, (1.0, 1.0, 1.0), 1.9)
+    assert middle.getpixel((90, 160)) == (255, 255, 255)
+    final = renderer.frame(image, extended, (1.0, 1.0, 1.0), 2.9)
+    assert ImageChops.difference(final, image).getbbox() is None
+
+
+def test_encoded_first_two_scenes_finish_drawing_even_with_incomplete_regions(tmp_path, tone):
+    item = incomplete_assets(tone)
+    renderer = MarkerSweepRenderer(width=180, height=320, fps=5)
+    destination = tmp_path / "incomplete.mp4"
+    renderer.render_sync((item,) * 3, destination, req())
+    manifest = json.loads(destination.with_suffix(".json").read_text())
+    assert manifest["completion_policy"] == "full_canvas_during_final_beat"
+    ends = [beat["end"] for beat in manifest["beats"] if beat["beat"] == 1]
+    indices = [math.ceil(end * renderer.fps) - 1 for end in ends]
+    selection = "+".join(f"eq(n,{index})" for index in indices)
+    frames = subprocess.run(["ffmpeg", "-v", "error", "-i", str(destination),
+        "-vf", f"select='{selection}'", "-vsync", "0", "-f", "rawvideo",
+        "-pix_fmt", "rgb24", "pipe:1"], capture_output=True, check=True).stdout
+    frame_bytes = 180 * 320 * 3
+    assert len(frames) == 3 * frame_bytes
+    for index in range(3):
+        image = Image.frombytes("RGB", (180, 320), frames[index * frame_bytes:(index + 1) * frame_bytes])
+        red, green, blue = image.getpixel((40, 40))
+        assert red > 200 and green < 50 and blue < 50
+        red, green, blue = image.getpixel((130, 230))
+        assert blue > 200 and red < 50 and green < 50
 
 
 @pytest.mark.asyncio
@@ -118,3 +179,4 @@ def test_long_narration_is_not_truncated_or_sped_up(tmp_path, tone):
     with pytest.raises(ValueError, match="exceeds 30 seconds"):
         renderer.render_sync((assets(long_audio),) * 3, tmp_path / "long.mp4", req())
     assert list(tmp_path.iterdir()) == []
+

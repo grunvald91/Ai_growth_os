@@ -82,13 +82,19 @@ class MarkerSweepRenderer:
         mask = Image.new("L", image.size, 0)
         draw = ImageDraw.Draw(mask)
         w, h = image.size
-        for region in assets.regions.regions:
-            if region.beat_index > beat:
+        boxes = [(region.beat_index, region.box) for region in assets.regions.regions]
+        # A detector can label only captions and omit the actual illustration.
+        # Reveal the remaining canvas during the final beat, before the scene
+        # switch; the post-narration full frame is not sampled for earlier scenes.
+        if beat == len(durations) - 1:
+            boxes.append((beat, (0, 0, 1000, 1000)))
+        for region_beat, box in boxes:
+            if region_beat > beat:
                 continue
-            x1, y1, x2, y2 = region.box
+            x1, y1, x2, y2 = box
             left, top = x1 * w // 1000, y1 * h // 1000
             right, bottom = math.ceil(x2 * w / 1000), math.ceil(y2 * h / 1000)
-            amount = 1.0 if region.beat_index < beat else progress
+            amount = 1.0 if region_beat < beat else progress
             stripe = max(2, (bottom - top) // 24)
             rows = math.ceil((bottom - top) / stripe)
             stroke = amount * rows
@@ -167,7 +173,12 @@ class MarkerSweepRenderer:
                         elapsed = index / self.fps
                         scene_index = min(bisect.bisect_right(ends, elapsed), len(scenes) - 1)
                         offset = ends[scene_index - 1] if scene_index else 0.0
-                        frame = self.frame(images[scene_index], scenes[scene_index], durations[scene_index], elapsed - offset)
+                        # Frame sampling can skip the final 15% of a short beat.
+                        # Keep one complete frame immediately before each switch.
+                        if elapsed + 1 / self.fps >= ends[scene_index]:
+                            frame = images[scene_index]
+                        else:
+                            frame = self.frame(images[scene_index], scenes[scene_index], durations[scene_index], elapsed - offset)
                         process.stdin.write(frame.tobytes())
                     process.stdin.close()
                     if process.wait(timeout=10) != 0:
@@ -190,7 +201,7 @@ class MarkerSweepRenderer:
             srt, cover, manifest = root / "captions.srt", root / "cover.png", root / "manifest.json"
             srt.write_text("\n".join(subtitles), encoding="utf-8")
             images[0].save(cover, format="PNG")
-            manifest.write_text(json.dumps({"renderer": "independent_marker_sweep_v1", "product_id": str(request.product_id), "duration_seconds": duration, "narration_seconds": total_samples / SAMPLE_RATE, "width": self.size[0], "height": self.size[1], "fps": self.fps, "beats": timeline, "video_sha256": hashlib.sha256(rendered.read_bytes()).hexdigest()}, ensure_ascii=False, indent=2), encoding="utf-8")
+            manifest.write_text(json.dumps({"renderer": "independent_marker_sweep_v2", "completion_policy": "full_canvas_during_final_beat", "product_id": str(request.product_id), "duration_seconds": duration, "narration_seconds": total_samples / SAMPLE_RATE, "width": self.size[0], "height": self.size[1], "fps": self.fps, "beats": timeline, "video_sha256": hashlib.sha256(rendered.read_bytes()).hexdigest()}, ensure_ascii=False, indent=2), encoding="utf-8")
             try:
                 # Same-filesystem hard links publish complete files without overwrite.
                 for source, target in zip((rendered, srt, cover, manifest), targets, strict=True):
@@ -201,3 +212,4 @@ class MarkerSweepRenderer:
                     path.unlink()
                 raise
             return duration
+
