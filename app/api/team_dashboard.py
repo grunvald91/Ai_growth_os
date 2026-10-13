@@ -80,6 +80,41 @@ _NAMES = {
 }
 
 
+_DESCRIPTIONS = {
+    "cmo": "Определяет стратегию, приоритеты и задачи всей команды.",
+    "research_lead": "Объединяет исследования и проверяет обоснованность выводов.",
+    "company_intake": "Собирает и сверяет подтверждённые сведения о компании.",
+    "research_pmm": "Анализирует аудиторию, рынок и позиционирование.",
+    "segment_researcher": "Готовит проверяемые гипотезы о сегментах клиентов.",
+    "channel_researcher": "Исследует каналы привлечения и условия экспериментов.",
+    "problem_researcher": "Сопоставляет проблемы клиентов с возможностями продукта.",
+    "competitor_voc_researcher": "Анализирует предоставленные отзывы конкурентов и их источники.",
+    "viral_video_researcher": "Изучает публичные данные и приёмы популярных видео.",
+    "viral_content_researcher": "Находит темы, боли и форматы по подтверждённым источникам.",
+    "content_seo": "Разрабатывает задания на SEO и контент.",
+    "content_strategist": "Выбирает тему, задачу и структуру материала.",
+    "seo_editor": "Формирует поисковые запросы, заголовки и структуру статей.",
+    "article_writer": "Пишет статьи по подготовленному заданию.",
+    "human_facing_editor": "Делает тексты ясными, полезными и удобными для читателя.",
+    "marketing_editor": "Усиливает продающую подачу и конкретику без выдуманных фактов.",
+    "conversion_editor": "Планирует призывы к действию и путь до заявки.",
+    "repurposing_editor": "Перерабатывает исходный материал в разные форматы.",
+    "platform_writer": "Готовит готовые публикации под конкретную площадку.",
+    "scriptwriter": "Разрабатывает сценарии и первые секунды роликов.",
+    "creative_director": "Предлагает визуальные концепции и ход повествования.",
+    "video_producer": "Готовит производственные задания для видеоматериалов.",
+    "video_director": "Создаёт подробную покадровую режиссуру и монтажные указания.",
+    "story_director": "Планирует сторис, кадры, подписи и переходы.",
+    "visual_designer": "Готовит композиции, стили и задания для изображений.",
+    "youtube_shorts_director": "Адаптирует сценарии и кадры для YouTube Shorts.",
+    "instagram_reels_director": "Создаёт сценарии и кадры под Instagram Reels.",
+    "distribution": "Планирует распространение одобренного контента.",
+    "community_manager": "Подготавливает работу с сообществами и коммуникациями.",
+    "analytics": "Структурирует фактические показатели маркетинговой воронки.",
+    "cro": "Предлагает эксперименты по повышению конверсии.",
+}
+
+
 def role_descriptors() -> list[dict]:
     roles = {role.value for role in AgentRole} | {
         "repurposing_editor", "platform_writer",
@@ -94,7 +129,7 @@ def role_descriptors() -> list[dict]:
             listed.append({
                 "id": name, "name": _NAMES.get(name, name.replace("_", " ").title()),
                 "department": department,
-                "description": " ".join(config.responsibilities) if config else "Создание контента для конкретной площадки.",
+                "description": _DESCRIPTIONS.get(name, "Подготавливает задания для конкретной площадки."),
                 "registered": config is not None,
             })
     missing = roles - {item["id"] for item in listed}
