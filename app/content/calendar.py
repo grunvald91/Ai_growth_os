@@ -517,7 +517,7 @@ async def run_planner_once(session_factory, settings, llm=None):
                     metadata={'team_role': 'editorial_planner', 'reasoning_effort': 'low', 'task_type': 'content_calendar'},
                 )
                 try:
-                    response = await asyncio.wait_for(llm.generate(request), 180 + llm.extra_timeout_seconds if not injected_llm else 300 + llm.extra_timeout_seconds)
+                    response = await asyncio.wait_for(llm.generate(request), (180 if not injected_llm else 300) + getattr(llm, 'extra_timeout_seconds', 0))
                 except asyncio.TimeoutError:
                     if injected_llm:
                         raise
