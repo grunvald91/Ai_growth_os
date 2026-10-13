@@ -100,7 +100,7 @@ class DailyGrowthReview:
                     'context': self._sanitize_tree(context), 'analytics': self._sanitize_tree(snapshot)}))],
                 model=self.model, max_tokens=6000, response_schema=CMOReview.model_json_schema(),
                 metadata={"team_role": "cmo", "task_type": "growth_review", "reasoning_effort": "low"},
-            )), timeout=CMO_TIMEOUT_SECONDS)
+            )), timeout=CMO_TIMEOUT_SECONDS + self.llm.extra_timeout_seconds)
             error_code = 'invalid_strategy_output'
             if len(response.content) > 100_000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
                 raise ValueError('Incomplete or oversized response')
