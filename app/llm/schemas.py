@@ -1,4 +1,5 @@
 from typing import Any, Literal
+from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
@@ -28,3 +29,5 @@ class LLMResponse(BaseModel):
     model: str
     usage: LLMUsage | None = None
     stop_reason: str | None = None
+    # Router estimate using operator-entered rates, not a billed amount.
+    estimated_cost_usd: Decimal | None = Field(default=None, ge=0)
