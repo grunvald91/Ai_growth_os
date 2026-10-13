@@ -177,6 +177,22 @@ async def test_documented_openrouter_image_and_speech_routes_use_bearer():
 
 
 @pytest.mark.asyncio
+async def test_gemini_image_omits_unsupported_format_and_keeps_png_validation():
+    seen = []
+    def handler(req):
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, json={"data": [{
+            "b64_json": base64.b64encode(PNG).decode(), "media_type": "image/png",
+        }]})
+    async with httpx.AsyncClient(base_url="https://openrouter.ai/api/v1/", transport=httpx.MockTransport(handler)) as client:
+        result = await OpenRouterImageProvider(api_key="test", model="google/gemini-3.1-flash-image", client=client).generate(scene(), request())
+    assert result == PNG
+    assert len(seen) == 1 and "output_format" not in seen[0]
+    assert seen[0]["model"] == "google/gemini-3.1-flash-image"
+    assert seen[0]["aspect_ratio"] == "9:16" and seen[0]["resolution"] == "1K"
+
+
+@pytest.mark.asyncio
 async def test_openrouter_vision_regions_are_typed():
     seen = []
 
@@ -217,3 +233,4 @@ async def test_pipeline_disallows_unapproved_paid_execution(tmp_path):
     with pytest.raises(PermissionError):
         await pipeline.produce(request(request_generation=True), tmp_path / "no.mp4")
     assert planner.calls == 0
+
