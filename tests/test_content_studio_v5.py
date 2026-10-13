@@ -289,7 +289,7 @@ def test_official_servgo_brand_matches_booking_component(studio_v5):
     assert "/studio/assets/servgo.svg" in main.text
     assert 'sg-official-brand-name">Serv<span>Go</span>' in main.text
     assert '<span class="brand-mark">S</span>' not in main.text
-    assert 'studio.css?v=9' in main.text
+    assert 'studio.css?v=10' in main.text
 
     css = client.get("/studio/assets/studio.css").text
     assert '--sg-blue:#2F5BEB' in css
@@ -407,6 +407,6 @@ def test_v8_typography_consistent_across_all_studio_views(studio_v5):
     for route in ("", "/create", "/review", "/calendar", "/materials", "/channels", "/plan"):
         result = client.get(base + route)
         assert result.status_code == 200, route
-        assert "studio.css?v=9" in result.text
-        assert 'data-studio-build="20261012-work9"' in result.text
+        assert "studio.css?v=10" in result.text
+        assert 'data-studio-build="20261013-unified10"' in result.text
         assert "/studio/assets/servgo.svg" in result.text
