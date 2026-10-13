@@ -285,7 +285,8 @@ async def test_original_schema_with_nested_refs_can_be_validated_after_revision(
     assert result.quality_review["status"] == "revised"
     schema = provider.requests[2].response_schema
     Draft202012Validator.check_schema(schema)
-    Draft202012Validator(schema).validate(json.loads(provider.requests[2].response_schema
-        and json.dumps({"decisions": [{"finding_id": "m1", "decision": "accept",
-                                      "rationale": "Necessary for onboarding"}],
-                        "updated_output": json.loads(result.content)})))
+    Draft202012Validator(schema).validate({
+        "decisions": [{"finding_id": "m1", "decision": "accept",
+                       "rationale": "Necessary for onboarding"}],
+        "updated_output": json.loads(result.content),
+    })
