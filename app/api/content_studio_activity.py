@@ -16,12 +16,12 @@ from sqlalchemy.orm import Session
 
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, Task, TaskStatus
 
-WORK_AGENTS = ("content_factory", "content_creative", "content_editor", "content_renderer", "editorial_planner")
+WORK_AGENTS = ("content_factory", "content_creative", "content_editor", "content_renderer", "editorial_planner", "whiteboard_renderer")
 
 STATES = {
     "queued": ("В очереди", "queued", "Задание принято. Ожидает свободного обработчика."),
     "running": ("Создаётся", "running", "ИИ-команда работает. Можно закрыть страницу."),
-    "waiting_approval": ("Ждёт решения", "review", "Проверьте готовые материалы."),
+    "waiting_approval": ("Нужно подтверждение", "review", "Проверьте тему и подтвердите создание видео. Платные вызовы требуют отдельного согласия."),
     "completed": ("Подготовлено", "done", "Задание завершено. Результаты доступны ниже."),
     "failed": ("Ошибка подготовки", "error", "Задание остановилось с ошибкой, а не исчезло."),
     "cancelled": ("Отменено", "error", "Создание остановлено."),
@@ -38,10 +38,14 @@ STAGE_NAMES = {
     "marketing_strategist": "Маркетинговая стратегия",
     "marketing_editor": "Редактирование статьи",
     "conversion_editor": "Редактирование призыва к действию",
+    "whiteboard_storyboard": "Подготовка сценария",
+    "whiteboard_image": "Создание рисунков",
+    "whiteboard_regions": "Определение анимации рисунка",
+    "whiteboard_speech": "Создание озвучки",
 }
 RESULT_KINDS = {"article", "channel_text", "video_script", "creative_brief", "video_render",
                 "content_distribution", "dzen_brief", "telegram_brief",
-                "short_video_brief", "story_brief", "static_image_brief", "editorial_plan"}
+                "short_video_brief", "story_brief", "static_image_brief", "editorial_plan", "whiteboard_video"}
 
 
 def safe(value) -> str:
@@ -77,6 +81,8 @@ def task_title(task: Task, request: Artifact | None = None) -> str:
         except (ValueError, TypeError):
             pass
     topic = str(data.get("topic") or "").strip()
+    if task.assigned_agent == "whiteboard_renderer":
+        return task.description or "Рисованное видеообъяснение"
     if task.assigned_agent == "editorial_planner":
         return "Новый контент-план"
     if task.assigned_agent == "content_renderer":
@@ -150,6 +156,7 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
         # was approved or that a video file exists.
         output.append({
             "id": str(task.id),
+            "agent": task.assigned_agent,
             "title": task_title(task, by_request.get(task.id)),
             "state": key,
             "label": title,
