@@ -138,6 +138,10 @@ class OpenRouterImageProvider(OpenRouterBase):
             "All visible labels are in Russian. "
             f"Scene title: {scene.title}. Icons in narration order: {elements}"
         )
+        if len(scene.beats) == 2:
+            prompt += (' Title in the top 15% of the canvas. Below it, place the complete first diagram '
+                       'in the left half and the complete second diagram in the right half, with a clear '
+                       'white gutter. Keep every part, arrow and label inside its own diagram area.')
         if corrections:
             prompt += ('\nThe primary author accepted ONLY these necessary corrections. Redraw this same scene, '
                        'preserving topic, labels, diagram order and other correct elements: ' +
@@ -226,9 +230,12 @@ class OpenRouterRegionProvider(OpenRouterBase):
             "Return JSON object with 'regions': one or more rectangles for each beat. "
             "Each rectangle has beat_index (0-based) and box [xmin,ymin,xmax,ymax] "
             "in normalized 0..1000 image coordinates. "
-            "Identify isolated visible icons/labels, avoid overlaps where possible. "
-            "Do not fabricate elements. Beat labels, in order: "
-            + "; ".join(f"{i}: {b.label}" for i, b in enumerate(scene.beats))
+            "Each rectangle must contain the ENTIRE relevant diagram, not only its caption: "
+            "all parts, tails/hooks, arrows, connecting lines and labels belonging to that beat. "
+            "Use the narration and visual specification to assign the whole object to its spoken beat. "
+            "Include the scene heading as a separate beat-0 region. Avoid overlaps between different beats "
+            "and do not reveal a later diagram during an earlier beat. Do not fabricate elements. "
+            "Beats, in order: " + json.dumps([{'beat_index': i, **b.model_dump()} for i, b in enumerate(scene.beats)], ensure_ascii=False)
         )
         payload = {
             "model": self.model,
