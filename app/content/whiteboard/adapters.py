@@ -136,13 +136,30 @@ class OpenRouterImageProvider(OpenRouterBase):
             "model": self.model, "prompt": prompt, "aspect_ratio": request.aspect_ratio,
             "resolution": "1K", "output_format": "png", "n": 1,
         }
-        # Gemini's Image API endpoints do not advertise output_format. Sending
-        # it excludes every endpoint and returns 404 even though the model exists.
-        # Gemini returns PNG by default; validate the actual bytes below.
+        # This multimodal Gemini model is served via Chat Completions. The
+        # dedicated Image API currently returns 404 despite advertising it.
+        # Select the transport before calling; never retry or change the model.
         if self.model == "google/gemini-3.1-flash-image":
-            payload.pop("output_format")
-        response = await self.post("images", payload)
-        data = response.json().get("data") or []
+            response = await self.post("chat/completions", {
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "modalities": ["image", "text"],
+                "image_config": {"aspect_ratio": request.aspect_ratio, "image_size": "1K"},
+            })
+            try:
+                images = response.json()["choices"][0]["message"]["images"]
+                if len(images) != 1:
+                    raise ValueError("Expected one generated image")
+                url = images[0]["image_url"]["url"]
+                prefix = "data:image/png;base64,"
+                if not isinstance(url, str) or not url.startswith(prefix):
+                    raise ValueError("Expected inline PNG; remote image URLs are rejected")
+                data = [{"b64_json": url[len(prefix):], "media_type": "image/png"}]
+            except (KeyError, IndexError, TypeError) as exc:
+                raise ValueError("Gemini did not return one inline PNG") from exc
+        else:
+            response = await self.post("images", payload)
+            data = response.json().get("data") or []
         if len(data) != 1 or not isinstance(data[0].get("b64_json"), str):
             raise ValueError("Image API did not return one base64 image")
         if data[0].get("media_type") not in (None, "image/png"):
