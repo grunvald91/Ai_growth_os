@@ -17,6 +17,18 @@ class Settings(BaseSettings):
     xai_reasoning_effort: Literal["low", "medium", "high", "xhigh"] = "low"
     xai_timeout_seconds: float = 300.0
     llm_fallback_models: str = "grok-4.7"
+    # Opt-in, operator-verified LLM routing; unverified models stay disabled.
+    model_router_enabled: bool = False
+    model_router_profiles: str = (
+        '[{"model":"kimi-2.7","tier":"economy"},'
+        '{"model":"deepseek-v4.1-flash","tier":"economy"},'
+        '{"model":"grok-4.7","tier":"balanced"},'
+        '{"model":"kimi-k3","tier":"balanced","enabled":false},'
+        '{"model":"claude-sonnet-5-5","tier":"balanced","enabled":false},'
+        '{"model":"claude-opus-5-5","tier":"premium","enabled":false}]'
+    )
+    model_router_overrides: str = "{}"
+    model_router_max_call_usd: str | None = None
     skills_root: Path = Path("skills")
     products_root: Path = Path("products")
     review_skill: str | None = None
