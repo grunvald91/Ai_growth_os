@@ -121,7 +121,7 @@ small,.sg-field small,.sg-footnote,.sg-field-help{font-size:var(--sg-fs-caption)
 .back-link{font-size:13px;line-height:1.45;font-weight:600}
 .sg-draft-alert,.sg-surface,.panel{overflow-wrap:break-word}
 @media(max-width:920px){
-  .mobile-nav :is(a,button){font-size:12px;line-height:1.35;font-weight:600}
+  .mobile-nav a{font-size:12px;line-height:1.35;font-weight:600}
   .sg-mobile-project{font-size:12px;font-weight:600}
   .sg-mobile-shell-head .sg-official-brand-name{font-size:22px}
   .sg-dashboard-feed .sg-section-head h2{font-size:19px}
@@ -154,7 +154,7 @@ small,.sg-field small,.sg-footnote,.sg-field-help{font-size:var(--sg-fs-caption)
   .material-body p{font-size:12px;white-space:normal}
 }
 @media(max-width:375px){
-  .mobile-nav :is(a,button){font-size:11px}
+  .mobile-nav a{font-size:11px}
   .sg-draft-alert h2{font-size:17px}
   .sg-workflow-banner h2{font-size:21px}
   .sg-mini-row b{font-size:13px}
