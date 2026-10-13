@@ -132,10 +132,16 @@ class OpenRouterImageProvider(OpenRouterBase):
             "All visible labels are in Russian. "
             f"Scene title: {scene.title}. Icons in narration order: {elements}"
         )
-        response = await self.post("images", {
+        payload = {
             "model": self.model, "prompt": prompt, "aspect_ratio": request.aspect_ratio,
             "resolution": "1K", "output_format": "png", "n": 1,
-        })
+        }
+        # Gemini's Image API endpoints do not advertise output_format. Sending
+        # it excludes every endpoint and returns 404 even though the model exists.
+        # Gemini returns PNG by default; validate the actual bytes below.
+        if self.model == "google/gemini-3.1-flash-image":
+            payload.pop("output_format")
+        response = await self.post("images", payload)
         data = response.json().get("data") or []
         if len(data) != 1 or not isinstance(data[0].get("b64_json"), str):
             raise ValueError("Image API did not return one base64 image")
