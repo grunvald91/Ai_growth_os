@@ -172,3 +172,120 @@ async def test_large_context_is_compacted_instead_of_skipping_review():
                               critic_enabled=True).generate(request)
     assert len(provider.requests) == 2
     assert result.quality_review["status"] == "no_material_issues"
+
+
+@pytest.mark.asyncio
+async def test_more_than_three_material_findings_all_get_author_decisions():
+    # A fixed cap must never hide additional material failures.
+    original = {"title": "Plan", "steps": ["Traffic"]}
+    problems = [
+        {"id": f"m{i}", "severity": "critical" if i % 2 else "major",
+         "problem": f"Missing essential onboarding requirement number {i}",
+         "evidence_in_draft": "Draft contains only Traffic",
+         "proposed_fix": f"Add an actionable onboarding requirement {i}",
+         "link_to_original_goal": "All eight are explicitly requested onboarding needs"}
+        for i in range(1, 9)
+    ]
+    revised = {"title": "Plan", "steps": ["Traffic", *[f"Onboarding {i}" for i in range(1, 9)]]}
+    responses = [
+        original, {"findings": problems},
+        {"decisions": [
+            {"finding_id": f"m{i}", "decision": "accept",
+             "rationale": "Essential to the approved onboarding goal"}
+            for i in range(1, 9)
+        ], "updated_output": revised},
+    ]
+    provider = SequenceProvider(responses)
+    result = await run(provider)
+    assert result.quality_review["status"] == "revised"
+    assert len(result.quality_review["findings"]) == 8
+    assert len(result.quality_review["decisions"]) == 8
+    assert json.loads(result.content) == revised
+    review_schema = provider.requests[1].response_schema
+    decisions_schema = provider.requests[2].response_schema
+    assert review_schema["properties"]["findings"].get("maxItems") is None
+    assert decisions_schema["properties"]["decisions"].get("maxItems") is None
+    assert len(provider.requests) == 3
+
+
+@pytest.mark.asyncio
+async def test_multiple_findings_mixed_accept_reject_keep_author_authority():
+    problems = [
+        {"id": f"issue{i}", "severity": "major",
+         "problem": "Missing material requirement for the approved task",
+         "evidence_in_draft": "Only the first step appears",
+         "proposed_fix": "Add the required step only if actually absent",
+         "link_to_original_goal": "An approved customer onboarding objective"}
+        for i in range(6)
+    ]
+    decisions = [
+        {"finding_id": f"issue{i}", "decision": "accept" if i % 2 == 0 else "reject",
+         "rationale": "Checked against the original objective and existing draft"}
+        for i in range(6)
+    ]
+    provider = SequenceProvider([
+        {"title": "Plan", "steps": ["Onboarding"]},
+        {"findings": problems},
+        {"decisions": decisions,
+         "updated_output": {"title": "Plan", "steps": ["Onboarding", "Followup"]}},
+    ])
+    result = await run(provider)
+    assert result.quality_review["status"] == "revised"
+    assert [d["decision"] for d in result.quality_review["decisions"]] == [
+        "accept", "reject", "accept", "reject", "accept", "reject"
+    ]
+    assert len(provider.requests) == 3
+
+
+@pytest.mark.asyncio
+async def test_missing_one_author_decision_rejects_partial_revision():
+    problems = [
+        {"id": f"issue{i}", "severity": "major",
+         "problem": "The planned onboarding stage is incomplete",
+         "evidence_in_draft": "No confirmation stage appears",
+         "proposed_fix": "Include a confirmed next-step stage",
+         "link_to_original_goal": "Original goal requires confirmed onboarding"}
+        for i in range(6)
+    ]
+    provider = SequenceProvider([
+        {"title": "Plan", "steps": ["Before"]},
+        {"findings": problems},
+        {"decisions": [
+            {"finding_id": f"issue{i}", "decision": "accept",
+             "rationale": "Essential for the onboarding objective"}
+            for i in range(5)
+        ], "updated_output": {"title": "Plan", "steps": ["After"]}},
+    ])
+    result = await run(provider)
+    assert result.quality_review["status"] == "review_unavailable"
+    assert json.loads(result.content)["steps"] == ["Before"]
+
+
+@pytest.mark.asyncio
+async def test_original_schema_with_nested_refs_can_be_validated_after_revision():
+    from jsonschema import Draft202012Validator
+    class Step(BaseModel):
+        label: str = Field(min_length=1)
+
+    class NestedDraft(BaseModel):
+        title: str
+        steps: list[Step]
+
+    request = task()
+    request.response_schema = NestedDraft.model_json_schema()
+    provider = SequenceProvider([
+        {"title": "Plan", "steps": [{"label": "Research"}]},
+        finding(),
+        {"decisions": [{"finding_id": "m1", "decision": "accept",
+                        "rationale": "Necessary for the original onboarding goal"}],
+         "updated_output": {"title": "Plan", "steps": [{"label": "Onboarding"}]}},
+    ])
+    result = await LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
+                              critic_enabled=True).generate(request)
+    assert result.quality_review["status"] == "revised"
+    schema = provider.requests[2].response_schema
+    Draft202012Validator.check_schema(schema)
+    Draft202012Validator(schema).validate(json.loads(provider.requests[2].response_schema
+        and json.dumps({"decisions": [{"finding_id": "m1", "decision": "accept",
+                                      "rationale": "Necessary for onboarding"}],
+                        "updated_output": json.loads(result.content)})))
