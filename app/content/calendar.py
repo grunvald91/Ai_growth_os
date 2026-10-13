@@ -447,7 +447,7 @@ async def run_planner_once(session_factory, settings, llm=None):
                 from app.llm.service import LLMService
                 llm = LLMService(privacy_gateway=PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS),
                                  provider=build_llm_provider(settings),
-                                     critic_enabled=settings.agent_critic_enabled)
+                                 critic_enabled=settings.agent_critic_enabled)
             prompt = (
                 'You are editorial_planner, a Russian-speaking managing editor. Return ONLY the supplied JSON schema. '
                 'Choose channels and cadence using this company, real supplied marketing research, latest cumulative '
