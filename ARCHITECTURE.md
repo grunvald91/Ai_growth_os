@@ -289,7 +289,7 @@ article-production stages through one shared `LLMService` quality gate.
 Original objective and constraints
     -> Specialist produces typed first draft
     -> Validate the original JSON schema
-    -> Subordinate critic identifies <= 3 material issues
+    -> Subordinate critic identifies all materially relevant issues (no count cap)
        (may return zero; no tools or side effects)
     -> If any issue is critical/major:
            original specialist reviews each issue
@@ -309,7 +309,7 @@ Original objective and constraints
   or empty review finishes immediately without a second author call.
 * The original agent has the final editorial decision and can reject any
   recommendation with a reason. If all are rejected, the ORIGINAL bytes win.
-* At most **one critic call and one author revision call** per eligible draft.
+* There is **no arbitrary maximum number of substantive findings**. Reviewer output is still bounded by available model context, output tokens and execution timeout; if incomplete, keep the valid original rather than silently claiming a full review.\n* At most **one critic call and one author revision call** per eligible draft.
   A malformed response, unavailable reviewer, timeout, invalid correction or
   oversized context falls back to the already-valid original draft.
 * This is **not** permission to execute external operations. Existing
