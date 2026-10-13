@@ -15,7 +15,7 @@ from app.workflows.article_production import ArticleProduction
 from app.workflows.daily_growth_review import DailyGrowthReview
 from app.workflows.team_cycle import TeamCycle
 
-SAFE_LLM_METADATA_FIELDS = {"reasoning_effort", "team_role", "task_type", "conversation_id", "provider_timeout_seconds", "routing_phase", "requires_web_search"}
+SAFE_LLM_METADATA_FIELDS = {"reasoning_effort", "team_role", "task_type", "conversation_id", "provider_timeout_seconds", "routing_phase", "routing_complexity", "requires_web_search"}
 
 
 def build_intake(db: Session, settings: Settings, provider: LLMProvider | None = None):
