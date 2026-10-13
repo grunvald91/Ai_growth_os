@@ -2,8 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [main, "feature/**", "deploy/**"]
+    branches: [main, "deploy/**"]
   pull_request:
+
+# One validation per PR commit, no duplicate branch push CI.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
