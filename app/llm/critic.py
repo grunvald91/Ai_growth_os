@@ -27,7 +27,7 @@ class Finding(BaseModel):
 
 class Findings(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    findings: list[Finding] = Field(default_factory=list, max_length=3)
+    findings: list[Finding] = Field(default_factory=list)
 
 
 class Decision(BaseModel):
@@ -39,12 +39,12 @@ class Decision(BaseModel):
 
 class Revision(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    decisions: list[Decision] = Field(min_length=1, max_length=3)
+    decisions: list[Decision] = Field(min_length=1)
     updated_output: dict
 
 
-REVIEW_TIMEOUT = 20
-REVISION_TIMEOUT = 35
+REVIEW_TIMEOUT = 45
+REVISION_TIMEOUT = 75
 
 
 def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisions: list[dict] | None = None,
@@ -130,7 +130,8 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
         report_response = await asyncio.wait_for(generate(LLMRequest(
             system_prompt=(
                 "You are a subordinate CRITIC, not the task owner. Examine only the original "
-                "objective and explicit constraints. Flag at most THREE material issues: "
+                "objective and explicit constraints. Find ALL material issues, without an arbitrary "
+                "number limit; do not stop after a fixed number of findings. Focus on: "
                 "factual inconsistency, missing essential requirement, serious UX or safety "
                 "failure. Each finding needs a location/evidence in the draft, a concrete "
                 "correction and a clear link to the original goal. Do not invent requirements, "
@@ -143,7 +144,7 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
             messages=[LLMMessage(role="user", content=json.dumps({
                 "task": task, "candidate": candidate,
             }, ensure_ascii=False))],
-            model=request.model, max_tokens=1800,
+            model=request.model, max_tokens=min(16000, max(5000, len(original.content) // 2)),
             response_schema=Findings.model_json_schema(),
             metadata={"reasoning_effort": "low", "team_role": "internal_critic",
                       "task_type": "quality_review", "provider_timeout_seconds": REVIEW_TIMEOUT},
@@ -164,7 +165,7 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
             "type": "object",
             "properties": {
                 "decisions": {"type": "array", "items": Decision.model_json_schema(),
-                              "minItems": 1, "maxItems": 3},
+                              "minItems": 1},
                 "updated_output": request.response_schema,
             },
             "required": ["decisions", "updated_output"],
@@ -192,7 +193,7 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
                 "material_findings": [f.model_dump() for f in material],
             }, ensure_ascii=False))],
             model=request.model,
-            max_tokens=min(20000, max(2400, request.max_tokens + 1000)),
+            max_tokens=min(20000, max(6000, request.max_tokens + 3500)),
             response_schema=revision_response_schema,
             metadata={"reasoning_effort": "low", "team_role": request.metadata["team_role"],
                       "task_type": "apply_quality_feedback", "provider_timeout_seconds": REVISION_TIMEOUT},
