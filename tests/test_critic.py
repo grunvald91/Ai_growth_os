@@ -134,3 +134,41 @@ async def test_invalid_initial_draft_is_not_reviewed():
     result = await run(provider)
     assert len(provider.requests) == 1
     assert result.quality_review is None
+
+
+@pytest.mark.asyncio
+async def test_review_revision_schema_reuses_original_contract():
+    from jsonschema import Draft202012Validator
+    provider = SequenceProvider([
+        {"title": "Draft", "steps": ["Traffic"]}, finding(),
+        {"decisions": [{"finding_id": "m1", "decision": "accept",
+                        "rationale": "Onboarding is essential"}],
+         "updated_output": {"title": "Draft", "steps": ["Onboarding"]}},
+    ])
+    await run(provider)
+    sent = provider.requests[2].response_schema
+    assert sent["properties"]["updated_output"] == task().response_schema
+    Draft202012Validator.check_schema(sent)
+    Draft202012Validator(sent).validate({
+        "decisions": [{"finding_id": "m1", "decision": "accept",
+                       "rationale": "Onboarding is essential"}],
+        "updated_output": {"title": "Draft", "steps": ["Onboarding"]},
+    })
+
+
+@pytest.mark.asyncio
+async def test_large_context_is_compacted_instead_of_skipping_review():
+    provider = SequenceProvider([
+        {"title": "Draft", "steps": ["Onboarding"]},
+        {"findings": []},
+    ])
+    request = task()
+    request.messages[0].content = json.dumps({
+        "request": {"goal": "Explain customer onboarding"},
+        "task": {"title": "Onboarding steps"},
+        "prior_stage_outputs": {"history": "example " * 9000},
+    })
+    result = await LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
+                              critic_enabled=True).generate(request)
+    assert len(provider.requests) == 2
+    assert result.quality_review["status"] == "no_material_issues"
