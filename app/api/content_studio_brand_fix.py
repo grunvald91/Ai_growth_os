@@ -52,7 +52,7 @@ body{background:var(--sg-bg);color:var(--sg-text);font-family:Montserrat,ui-sans
 .btn.primary:hover{background:#244BD6;color:#fff}
 .btn.secondary,.btn.ghost{color:#284E9C;border:1px solid #DAE0EA;background:#fff}
 .btn.secondary:hover,.btn.ghost:hover{background:#F3F6FF;color:#244BD6}
-.btn:focus-visible,.mobile-nav :is(a,button):focus-visible,.sg-official-brand:focus-visible,.sg-mobile-project:focus-visible{outline:3px solid #819DFF;outline-offset:2px}
+.btn:focus-visible,.mobile-nav a:focus-visible,.sg-official-brand:focus-visible,.sg-mobile-project:focus-visible{outline:3px solid #819DFF;outline-offset:2px}
 .sg-overline{font-size:11px;font-weight:750;letter-spacing:.1em;color:#697991}
 .sg-workflow-banner{background:linear-gradient(120deg,#F0F4FF,#F8FAFF);border:1px solid #DFE7FA;box-shadow:none;padding:24px 27px}
 .sg-workflow-banner h2{color:#0D1B2A;font-size:clamp(21px,2vw,26px);font-weight:800;line-height:1.28}
@@ -111,7 +111,7 @@ b,strong{font-weight:650}
 .sg-priority-item em{font-weight:600}
 .sidebar .nav a{font-weight:500}
 .sidebar .nav a.active{font-weight:650}
-.btn,.sg-quick-links a,.mobile-nav :is(a,button){font-weight:600}
+.btn,.sg-quick-links a,.mobile-nav a{font-weight:600}
 .sg-mini-link,.sg-legacy-details>summary{font-weight:600}
 .sg-draft-alert{
   display:grid;grid-template-columns:44px minmax(0,1fr) auto;
@@ -171,15 +171,15 @@ b,strong{font-weight:650}
    padding:8px 10px;border-radius:10px;font-size:12px;font-weight:680;color:#42586E;
    max-width:43%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .sg-mobile-project span{font-size:17px;color:#536A90}
- .mobile-nav{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;
+ .mobile-nav{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;
    position:sticky!important;top:0!important;right:auto!important;left:auto!important;bottom:auto!important;
    width:100%;min-height:55px;z-index:45;padding:6px 10px;
    background:rgba(255,255,255,.98);border-top:0;border-bottom:1px solid #E5EAF2;
    border-radius:0;box-shadow:none;backdrop-filter:blur(12px)}
- .mobile-nav :is(a,button){display:flex;align-items:center;justify-content:center;gap:6px;flex-direction:row;
+ .mobile-nav a{display:flex;align-items:center;justify-content:center;gap:6px;flex-direction:row;
    text-align:center;font-weight:700;color:#5A6A7F;font-size:12px;min-width:0;min-height:43px;
-   border:0;background:transparent;font-family:inherit;cursor:pointer;border-radius:10px;padding:7px 3px;white-space:nowrap}
- .mobile-nav :is(a,button).active{color:#2F5BEB;background:#EDF2FF}
+   border-radius:10px;padding:7px 3px;white-space:nowrap}
+ .mobile-nav a.active{color:#2F5BEB;background:#EDF2FF}
  .mobile-nav .m-ico{font-size:17px;line-height:1}
  .main,.route-main{padding:18px 15px 38px;min-width:0;width:100%;flex:1}
  .route-mobile-brand{display:none!important}
@@ -211,7 +211,7 @@ b,strong{font-weight:650}
  .route-page-head h1{font-size:25px}
 }
 @media(max-width:375px){
- .mobile-nav :is(a,button){font-size:11px;gap:4px}
+ .mobile-nav a{font-size:11px;gap:4px}
  .mobile-nav .m-ico{font-size:16px}
  .sg-mobile-shell-head{padding:8px 11px}
  .sg-workflow-banner{padding:17px 15px}
