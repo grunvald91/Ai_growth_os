@@ -214,7 +214,7 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                         "reasoning_effort": "low", "provider_timeout_seconds": 90,
                     },
                 )),
-                timeout=180,
+                timeout=180 + llm.extra_timeout_seconds,
             )
             if reply.stop_reason not in (None, "end_turn", "stop_sequence"):
                 raise ValueError("AI answer was interrupted")
