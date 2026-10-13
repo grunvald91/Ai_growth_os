@@ -47,7 +47,7 @@ router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_s
 MATERIAL_KINDS = {
     "article", "channel_text", "video_script", "content_distribution",
     "dzen_brief", "telegram_brief", "short_video_brief",
-    "story_brief", "static_image_brief", "creative_brief", "video_render",
+    "story_brief", "static_image_brief", "creative_brief", "video_render", "whiteboard_video",
 }
 
 STATUS_LABELS = {
@@ -253,7 +253,7 @@ def artifact_kind(record: Artifact) -> str:
         return "article"
     if record.kind in {"channel_text", "dzen_brief", "telegram_brief"}:
         return "post"
-    if record.kind in {"video_script", "short_video_brief", "video_render"}:
+    if record.kind in {"video_script", "short_video_brief", "video_render", "whiteboard_video"}:
         return "video"
     if record.kind in {"creative_brief", "story_brief", "static_image_brief"}:
         return "creative"
@@ -266,6 +266,8 @@ def artifact_kind_label(record: Artifact, value: dict | None = None) -> str:
         return "Статья"
     if record.kind == "video_render":
         return "Готовый видеоролик MP4"
+    if record.kind == "whiteboard_video":
+        return "Рисованное видео с озвучкой"
     if record.kind == "channel_text":
         return platform_label(value.get("channel", "")) or "Пост"
     if record.kind in {"video_script", "short_video_brief"}:
@@ -312,6 +314,8 @@ def artifact_text(record: Artifact, value: dict | None = None) -> str:
         return record.content
     if record.kind == "video_render":
         return "Готовый видеофайл MP4 — откройте для просмотра или скачивания."
+    if record.kind == "whiteboard_video":
+        return "Рисованное видео MP4 — нажмите, чтобы посмотреть и скачать."
     if record.kind == "article":
         return str(value.get("full_article") or value.get("reader_article") or value.get("body") or record.content)
     if record.kind == "channel_text":
@@ -1367,7 +1371,7 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
         "all": MATERIAL_KINDS,
         "article": {"article"},
         "post": {"channel_text", "dzen_brief", "telegram_brief"},
-        "video": {"video_script", "short_video_brief", "video_render"},
+        "video": {"video_script", "short_video_brief", "video_render", "whiteboard_video"},
         "creative": {"creative_brief", "story_brief", "static_image_brief"},
     }
     kind = kind if kind in kinds else "all"
@@ -1821,6 +1825,12 @@ def studio_material_detail(product_id: UUID, artifact_id: UUID, db: Session = De
     record = db.get(Artifact, artifact_id)
     if record is None or record.product_id != product.id or record.kind not in MATERIAL_KINDS:
         raise HTTPException(404, "Material not found")
+    if record.kind == "whiteboard_video":
+        if not record.task_id:
+            raise HTTPException(404, "Исходное задание видео не найдено")
+        return RedirectResponse(
+            f"/studio/products/{product_id}/whiteboard/{record.task_id}", status_code=303,
+        )
     response = HTMLResponse(material_detail_page(db, product, record))
     response.headers["Cache-Control"] = "no-store"
     return response
