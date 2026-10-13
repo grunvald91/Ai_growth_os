@@ -104,6 +104,17 @@ CSS = r"""
 .sg-video-file video{width:100%;max-width:410px;max-height:650px;display:block;border-radius:14px;background:#101820;margin:17px auto}
 .sg-video-file .sg-inline-actions{gap:9px;margin:20px 0}
 
+.sg-animator-top{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px;
+  align-items:center;margin:0 0 17px;padding:22px 24px}
+.sg-animator-top h2{font-size:20px;margin:6px 0}
+.sg-animator-top p{max-width:620px;margin:6px 0}
+.sg-animator-top small{display:block;color:#51657A;font-size:12px;line-height:1.45;margin-top:6px}
+.sg-animator-top .btn{min-width:225px;max-width:260px}
+@media(max-width:660px){
+ .sg-animator-top{grid-template-columns:1fr;gap:12px;padding:18px 16px}
+ .sg-animator-top h2{font-size:18px}
+ .sg-animator-top .btn{max-width:none;width:100%;margin:0}
+}
 .sg-animator-entry{border:1px solid #DDE6FB;background:#F8FAFF}
 .sg-animator-entry h2{font-size:18px;line-height:1.35;margin:8px 0}
 .sg-animator-entry p{font-size:13px;line-height:1.55;margin:9px 0}
