@@ -21,7 +21,7 @@ class CheckpointError(RuntimeError):
 
 
 class CheckpointStore:
-    def __init__(self, directory: Path, request: WhiteboardRequest, *, models: dict[str, str]):
+    def __init__(self, directory: Path, request: WhiteboardRequest, *, models: dict[str, str], visual_review=False):
         if set(models) != {'storyboard', 'image', 'speech', 'regions'} or any(
             not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}', value)
             or value.startswith(('sk-', 'sk_')) for value in models.values()
@@ -36,6 +36,9 @@ class CheckpointStore:
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.directory, 0o700)
         self.identity = {'request': request.model_dump(mode='json'), 'models': dict(models)}
+        if visual_review:
+            from .review import REVIEW_POLICY
+            self.identity['visual_review'] = REVIEW_POLICY
         self.fingerprint = hashlib.sha256(json.dumps(self.identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         with self._lock():
             if self._path('manifest.json').exists():
@@ -79,6 +82,8 @@ class CheckpointStore:
         try:
             state = json.loads(path.read_text(encoding='utf-8'))
             identity = {'request': state['request'], 'models': state['models']}
+            if 'visual_review' in state:
+                identity['visual_review'] = state['visual_review']
             actual = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
             if state['schema_version'] != 1 or state['fingerprint'] != self.fingerprint or actual != self.fingerprint or not isinstance(state['stages'], dict):
                 raise ValueError('identity mismatch')
@@ -164,3 +169,4 @@ class _Lock:
         if self.descriptor is not None:
             fcntl.flock(self.descriptor, fcntl.LOCK_UN)
             os.close(self.descriptor)
+

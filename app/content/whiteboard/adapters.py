@@ -80,7 +80,9 @@ class LLMStoryboardProvider:
             "Write a natural Russian-language whiteboard explainer. "
             "Output precisely three scenes, each with 2-6 short sequential beats. "
             "Each beat requires a short label, one spoken sentence (narration), "
-            "and a description of one simple isolated hand-drawn icon (visual). "
+            "and a precise description of one clean educational diagram (visual). "
+            "Specify essential attachment points, orientation, relative position and motion direction for technical objects. "
+            "Simplify shapes, never the underlying mechanism. Describe visible evidence, not abstract labels alone. "
             "Use this arc: a question, curiosity gap, visual explanation, and a final insight. The final insight must not invent an unsupported surprising fact. "
             "Use exactly two beats per scene, at most 60 spoken words across all scenes. "
             "Aim for approximately 25 seconds of narration, leaving a final hold. Avoid unsupported factual claims, "
@@ -120,18 +122,27 @@ class OpenRouterBase:
 class OpenRouterImageProvider(OpenRouterBase):
     """Documented POST /images endpoint, PNG or JPEG must be inspected per model."""
 
-    async def generate(self, scene: WhiteboardScene, request: WhiteboardRequest) -> bytes:
+    async def generate(self, scene: WhiteboardScene, request: WhiteboardRequest, *, corrections=()) -> bytes:
         elements = "; ".join(
             f"{index + 1}: {b.visual} (label: {b.label})"
             for index, b in enumerate(scene.beats)
         )
         prompt = (
-            "Single frame of a clean hand-drawn whiteboard explainer; pure white "
+            "Single frame of a polished educational whiteboard explainer; pure white "
             "background, dark marker outlines, flat restrained colours, no photos, "
             "no gradients. Separate non-overlapping icons; leave generous margins. "
+            "Confident smooth precise linework, consistent stroke width, coherent proportions, "
+            "clear silhouettes and legible Russian typography; no wobbly scribbles or malformed geometry. "
+            "Simple diagrams must preserve correct attachment points, orientation and physical mechanisms "
+            "described in the specification. Keep the entire objects visible and separate in narration order. "
             "All visible labels are in Russian. "
             f"Scene title: {scene.title}. Icons in narration order: {elements}"
         )
+        if corrections:
+            prompt += ('\nThe primary author accepted ONLY these necessary corrections. Redraw this same scene, '
+                       'preserving topic, labels, diagram order and other correct elements: ' +
+                       json.dumps([{'beat_index': i.beat_index, 'visible_defect': i.evidence,
+                                    'correction': i.correction} for i in corrections], ensure_ascii=False))
         payload = {
             "model": self.model, "prompt": prompt, "aspect_ratio": request.aspect_ratio,
             "resolution": "1K", "output_format": "png", "n": 1,
@@ -176,6 +187,11 @@ class OpenRouterImageProvider(OpenRouterBase):
         if len(image) > 12_000_000 or not image.startswith(PNG_SIGNATURE):
             raise ValueError("Image API response is not a valid-sized PNG")
         return image
+
+    async def revise(self, scene, request, corrections):
+        if not corrections or len(corrections) > 12:
+            raise ValueError('Explicit accepted corrections required')
+        return await self.generate(scene, request, corrections=corrections)
 
 
 class OpenRouterSpeechProvider(OpenRouterBase):

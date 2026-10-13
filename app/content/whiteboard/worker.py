@@ -17,6 +17,7 @@ from .checkpoints import CheckpointStore, CheckpointError, _Lock
 from .jobs import AGENT, CallLedger, GuardedStage, job_directory, owner_task, records
 from .pipeline import WhiteboardPipeline
 from .render import MarkerSweepRenderer
+from .review import OpenRouterVisualCritic, LLMVisualAuthor
 from .runtime import ReadinessError, SingleCallStoryboardLLM, preflight, safe_error, scoped_settings
 
 
@@ -28,7 +29,11 @@ def build_pipeline(settings, payload, store):
         images=OpenRouterImageProvider(api_key=settings.openrouter_api_key, model=payload.models.image, proxy_url=settings.whiteboard_proxy_url),
         speech=OpenRouterSpeechProvider(api_key=settings.openrouter_api_key, model=payload.models.speech, proxy_url=settings.whiteboard_proxy_url),
         regions=OpenRouterRegionProvider(api_key=settings.openrouter_api_key, model=payload.models.regions, proxy_url=settings.whiteboard_proxy_url),
-        renderer=MarkerSweepRenderer(), sanitizer=privacy, checkpoints=store)
+        renderer=MarkerSweepRenderer(), sanitizer=privacy, checkpoints=store,
+        visual_review=payload.visual_review, max_api_calls=payload.max_api_calls,
+        critic=OpenRouterVisualCritic(api_key=settings.openrouter_api_key, model=payload.models.regions,
+            proxy_url=settings.whiteboard_proxy_url) if payload.visual_review else None,
+        visual_author=LLMVisualAuthor(service, model=payload.models.storyboard) if payload.visual_review else None)
 
 
 def _failure(session_factory, product_id, task_id, code, *, exception=None):
@@ -108,8 +113,16 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
             # Copy only these public fields; never alter shared settings or .env.
             job_settings = scoped_settings(settings, payload.models, payload.request.voice)
             await (readiness or preflight)(job_settings, payload.models, payload.request.voice)
-            store = CheckpointStore(directory / 'stages', payload.request, models=payload.models.model_dump())
+            store = CheckpointStore(directory / 'stages', payload.request, models=payload.models.model_dump(),
+                                    visual_review=payload.visual_review)
+            if payload.visual_repair_from is not None:
+                from .repair import prime_visual_repair
+                try:
+                    await prime_visual_repair(session_factory, job_settings, product_id, payload, store)
+                except (CheckpointError, ValueError):
+                    raise ReadinessError('repair_source_invalid') from None
             pipeline = (factory or build_pipeline)(job_settings, payload, store)
+            pipeline.cached_audio_only = payload.visual_repair_from is not None
             def progress(update):
                 with session_factory() as db:
                     current = owner_task(db, product_id, task_id, lock=True)
@@ -124,6 +137,12 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
             ledger = CallLedger(session_factory, product_id, task_id)
             for attribute, stage in (('storyboard', 'storyboard'), ('images', 'image'), ('speech', 'speech'), ('regions', 'regions')):
                 setattr(pipeline, attribute, GuardedStage(getattr(pipeline, attribute), stage, ledger))
+            if payload.visual_review:
+                if not pipeline.visual_review:
+                    raise ReadinessError('approval_invalid')
+                pipeline.revision_images = GuardedStage(pipeline.images.provider, 'image_revision', ledger)
+                pipeline.critic = GuardedStage(pipeline.critic, 'visual_review', ledger)
+                pipeline.visual_author = GuardedStage(pipeline.visual_author, 'visual_decision', ledger)
             output_dir = directory / 'output'
             output_dir.mkdir(exist_ok=True, mode=0o700)
             async with asyncio.timeout(1200):
@@ -137,7 +156,8 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                     title='Рисованное видео: ' + payload.request.topic[:180], status=ArtifactStatus.AWAITING_APPROVAL,
                     content=json.dumps({'task_id': str(task_id), 'duration_seconds': output.duration_seconds,
                         'scene_count': output.scene_count, 'storyboard': output.storyboard.model_dump(),
-                        'cost_usd': None, 'cost_known': False, 'human_review_required': True}, ensure_ascii=False))
+                        'cost_usd': None, 'cost_known': False, 'human_review_required': True,
+                        'visual_review': output.visual_review}, ensure_ascii=False))
                 db.add(result); db.flush()
                 value = json.loads(state.content); value.update(stage='completed', error=None, artifact_id=str(result.id))
                 if value.get('progress_total') is not None:

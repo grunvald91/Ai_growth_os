@@ -86,3 +86,5 @@ class WhiteboardOutput:
     scene_count: int
     # Only the renderer can determine actual audio/video duration.
     duration_seconds: float
+    visual_review: dict | None = None
+

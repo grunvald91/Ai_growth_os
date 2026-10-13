@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 import shutil
 import sys
+import hashlib
 
 from .checkpoints import CheckpointStore
 from .contracts import WhiteboardRegionPlan, WhiteboardRequest, WhiteboardSceneAssets, WhiteboardStoryboard
@@ -48,18 +49,40 @@ def render_checkpoint(directory: Path, destination: Path, *, width=720, height=1
         raise ValueError('Manifest exceeds size limit')
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     request = WhiteboardRequest.model_validate(manifest['request'])
-    store = CheckpointStore(directory, request, models=manifest['models'])
+    from .review import REVIEW_POLICY, VisualReview, VisualDecision
+    policy = manifest.get('visual_review')
+    if policy not in (None, REVIEW_POLICY):
+        raise ValueError('Unsupported visual review policy')
+    store = CheckpointStore(directory, request, models=manifest['models'], visual_review=bool(policy))
     storyboard = WhiteboardStoryboard.model_validate_json(store.load('storyboard', limit=64_000))
+    if policy:
+        review = VisualReview.model_validate_json(store.load('visual-review', limit=64_000))
+        review.check_for(storyboard)
+        decision = VisualDecision.model_validate_json(store.load('visual-decision', limit=64_000))
+        decision.check_for(review)
     scenes = []
+    image_hashes = []
     for index, scene in enumerate(storyboard.scenes):
         prefix = f'scene-{index:02}'
-        image = store.load(prefix + '-image')
+        revised = bool(policy) and bool(decision.accepted(review, index))
+        image = store.load(prefix + ('-image-revised' if revised else '-image'))
+        if policy:
+            image_hashes.append({'scene_index': index,
+                'original_sha256': hashlib.sha256(store.load(prefix + '-image')).hexdigest(),
+                'final_sha256': hashlib.sha256(image).hexdigest()})
         regions = WhiteboardRegionPlan.model_validate_json(store.load(prefix + '-regions', limit=64_000))
         audio = tuple(store.load(f'{prefix}-beat-{beat_index:02}-speech', limit=10_000_000)
             for beat_index in range(len(scene.beats)))
         scenes.append(WhiteboardSceneAssets(scene, image, audio, regions))
     renderer = MarkerSweepRenderer(width=width, height=height, fps=fps)
     duration = renderer.render_sync(tuple(scenes), destination, request)
+    if policy:
+        metadata = destination.with_suffix('.json')
+        value = json.loads(metadata.read_text())
+        value['visual_review'] = {'policy': policy, 'critic_passes': 1, 'review': review.model_dump(),
+            'author_decision': decision.model_dump(), 'redrawn_scenes': [i for i in range(3) if decision.accepted(review, i)],
+            'revised_images_reviewed_again': False, 'human_review_required': True, 'images': image_hashes}
+        metadata.write_text(json.dumps(value, ensure_ascii=False, indent=2))
     return {'video': str(destination), 'duration_seconds': duration, 'provider_calls': 0}
 
 
@@ -89,3 +112,4 @@ def main(argv=None) -> int:
 
 if __name__ == '__main__':
     raise SystemExit(main())
+

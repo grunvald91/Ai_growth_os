@@ -17,6 +17,7 @@ from app.api.content_studio import _owner_product, _studio_form, esc, studio_pag
 from app.content.whiteboard.contracts import Contract, WhiteboardRequest
 from app.content.whiteboard.jobs import AGENT, approve_job, cancel_job, digest, job_directory, owner_task, queue_job, records
 from app.content.whiteboard.runtime import MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings
+from app.content.whiteboard.checkpoints import CheckpointError
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import Task, TaskStatus
@@ -32,6 +33,7 @@ class CreateJob(Contract):
     topic: str = Field(min_length=8, max_length=400)
     max_api_calls: int = Field(default=13, ge=13, le=25)
     profile: Literal['configured', 'flux_ru'] = 'configured'
+    visual_review: bool = False
 
 
 class ApproveJob(Contract):
@@ -44,6 +46,9 @@ def job_state(db, product_id, task_id):
     source, state, approval, payload = records(db, task)
     return {'task_id': str(task.id), 'status': task.status.value, 'request': payload.request.model_dump(mode='json'),
             'models': payload.models.model_dump(), 'max_api_calls': payload.max_api_calls,
+            'visual_review_enabled': payload.visual_review,
+            'visual_repair_from': str(payload.visual_repair_from) if payload.visual_repair_from else None,
+            'inherited_calls': payload.inherited_calls,
             'request_digest': digest(source.content), 'approval_status': approval.status,
             **json.loads(state.content)}
 
@@ -65,9 +70,9 @@ def _queue(db, product, body, settings):
         raise HTTPException(503, MESSAGES['configuration_missing']) from None
     request = WhiteboardRequest(product_id=product.id, topic=body.topic, voice=voice)
     try:
-        return queue_job(db, request, models, max_api_calls=body.max_api_calls)
+        return queue_job(db, request, models, max_api_calls=body.max_api_calls, visual_review=body.visual_review)
     except ValueError:
-        raise HTTPException(422, 'Проверьте тему и лимит: ключи и персональные данные нельзя включать в видео.') from None
+        raise HTTPException(422, 'Проверьте тему и лимит: с проверкой рисунков выберите 19 или 25 вызовов. Ключи и персональные данные нельзя включать в видео.') from None
 
 
 async def _approve(db, product_id, task_id, body, actor, settings):
@@ -142,6 +147,9 @@ def page(product, title, body, *, status=200, refresh=False):
 def job_html(state, product_id, *, error=None):
     base = f'/studio/products/{product_id}/whiteboard/{state["task_id"]}'
     stages = {'storyboard': 'Сценарий', 'image': 'Рисунок', 'regions': 'Области рисования', 'speech': 'Озвучка',
+              'visual_review': 'Критик проверяет рисунки', 'visual_decision': 'Автор разбирает замечания',
+              'image_revision': 'Перерисовка выбранной сцены',
+              'audio_reuse': 'Использование исходной озвучки без генерации',
               'preflight': 'Проверка доступа к моделям', 'queued': 'Очередь',
               'rendering': 'Сборка MP4 из рисунков и озвучки', 'completed': 'Видео собрано'}
     code = state.get('error')
@@ -165,6 +173,27 @@ def job_html(state, product_id, *, error=None):
         body += f'<p>Ошибка на этапе: {esc(stages[state["failed_stage"]])}</p>'
     if warning:
         body += f'<p class="sg-warning" role="alert">{esc(warning)}</p>'
+    if state.get('visual_review_enabled'):
+        body += '<p>Один проход визуального критика. Автор выбирает существенные исправления; каждая выбранная сцена перерисовывается максимум один раз.</p>'
+    if state.get('visual_repair_from'):
+        body += ('<p><strong>Переделка рисунков с исходной озвучкой.</strong> Сценарий, голос и аудиофайлы сохраняются. '
+                 'Новая озвучка запрещена. Раскрытие рисунков привязано к длительности исходных реплик.</p>'
+                 f'<p>Из исходного задания перенесено вызовов: {state["inherited_calls"]}. '
+                 f'На визуальную правку осталось не более {state["max_api_calls"] - state["inherited_calls"]} вызовов в общем лимите.</p>')
+    review = state.get('visual_review_result')
+    if isinstance(review, dict):
+        body += '<details><summary>Замечания критика и решение автора</summary>'
+        decisions = {d['issue_id']: d for d in review.get('author_decision', {}).get('decisions', [])}
+        issues = review.get('review', {}).get('issues', [])
+        if not issues:
+            body += '<p>Критик не сообщил замечаний. Это не гарантия фактической точности рисунков.</p>'
+        for issue in issues:
+            choice = decisions.get(issue['id'], {})
+            label = 'Выбрано для исправления' if choice.get('accept') else 'Не принято к исправлению'
+            body += (f'<p><strong>Сцена {issue["scene_index"] + 1}: {label}</strong><br>'
+                     f'{esc(issue["evidence"])}<br>Предложение: {esc(issue["correction"])}<br>'
+                     f'Решение автора: {esc(choice.get("reason", ""))}</p>')
+        body += '<p>Второго прохода критика после перерисовки нет. Перед публикацией проверьте итоговые рисунки.</p></details>'
     if state['status'] == 'waiting_approval':
         model_names = ' · '.join(esc(value) for value in state['models'].values())
         body += (f'<details><summary>Модели и голос</summary><p>{model_names}</p>'
@@ -190,6 +219,10 @@ def job_html(state, product_id, *, error=None):
                      f'<a class="btn secondary" href="{base}/files/{name}?download=true" download>{label}</a>'
                      for name, label in [('video.mp4', 'Скачать MP4'), ('video.srt', 'Субтитры'),
                                          ('video.png', 'Обложка'), ('video.json', 'Тайминг')]) + '</div>')
+        if not state.get('visual_repair_from'):
+            body += (f'<form method="post" action="{base}/repair" class="sg-form">'
+                     '<button class="btn secondary">Переделать рисунки, сохранить озвучку</button>'
+                     '<small>Сначала создаётся запрос на проверку и исправление рисунков. Платные вызовы начнутся только после подтверждения; сценарий и звук не генерируются заново.</small></form>')
     body += f'<p><a href="/studio/products/{product_id}/whiteboard">К рисованным видео</a></p></section>'
     return body
 
@@ -198,7 +231,8 @@ def creation_form(product_id, *, fields=None, error=None):
     fields = fields or {}
     base = f'/studio/products/{product_id}/whiteboard'
     profile = fields.get('profile', 'flux_ru')
-    maximum = str(fields.get('max_api_calls', '13'))
+    maximum = str(fields.get('max_api_calls', '19'))
+    visual_review = fields.get('visual_review', 'once')
     body = '<section class="sg-surface"><h2>Создать анимацию с озвучкой</h2><p>Вертикальное видео на 30 секунд: три сцены, русская озвучка, MP4, обложка и субтитры. Перед запуском вы подтвердите платную генерацию. Доступ к моделям проверяется перед платным запуском.</p>'
     if error:
         body += f'<p class="sg-warning" role="alert">{esc(error)}</p>'
@@ -210,9 +244,13 @@ def creation_form(product_id, *, fields=None, error=None):
                  f'<option value="{value}"' + (' selected' if profile == value else '') + f'>{label}</option>'
                  for value, label in [('flux_ru', 'FLUX — рисунки, Grok — русская озвучка'), ('configured', 'Модели из настроек сервера')]) +
              '</select><small>Выбор сохраняется только для этого задания. Модели и голос можно проверить перед подтверждением.</small></label>'
+             '<label class="sg-field"><span>Проверка рисунков</span><select name="visual_review">' + ''.join(
+                 f'<option value="{value}"' + (' selected' if visual_review == value else '') + f'>{label}</option>'
+                 for value, label in [('once', 'Критик один раз, автор выбирает исправления'), ('off', 'Без критика')]) +
+             '</select><small>Проверяются механика, расположение деталей, соответствие озвучке и читаемость. Для трёх сцен по две реплики: до 18 вызовов с исправлениями; выберите лимит 19 или 25.</small></label>'
              '<label class="sg-field"><span>Максимум платных API-вызовов</span><select name="max_api_calls">' + ''.join(
                  f'<option value="{value}"' + (' selected' if maximum == str(value) else '') + f'>{label}</option>'
-                 for value, label in [(13, '13 — три сцены по две реплики'), (19, '19'), (25, '25')]) +
+                 for value, label in [(13, '13 — без проверки рисунков'), (19, '19 — с проверкой рисунков'), (25, '25')]) +
              '</select><small>Это лимит обращений к моделям; точная сумма списаний неизвестна.</small></label></details>'
              '<button class="btn primary">Сохранить и перейти к подтверждению</button></form></section>')
     return body
@@ -302,7 +340,7 @@ async def studio_create(product_id: UUID, request: Request, db: Session = Depend
     fields = await _studio_form(request)
     try:
         body = CreateJob(topic=fields.get('topic', ''), max_api_calls=fields.get('max_api_calls', '13'),
-                         profile=fields.get('profile', 'configured'))
+                         profile=fields.get('profile', 'configured'), visual_review=fields.get('visual_review') == 'once')
     except ValueError:
         return page(product, 'Создать анимацию', creation_form(product_id, fields=fields,
                     error='Тема: 8–400 символов. Лимит: 13–25 вызовов. Выберите вариант генерации.'), status=422)
@@ -343,6 +381,19 @@ def studio_cancel(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)
     _load(db, product_id, task_id)
     cancel_job(db, product_id, task_id)
     return RedirectResponse(f'/studio/products/{product_id}/whiteboard/{task_id}', status_code=303)
+
+
+@router.post('/studio/products/{product_id}/whiteboard/{task_id}/repair')
+def studio_repair(product_id: UUID, task_id: UUID, db: Session = Depends(get_db), settings=Depends(get_settings)):
+    state = _load(db, product_id, task_id)
+    from app.content.whiteboard.repair import queue_visual_repair
+    try:
+        task = queue_visual_repair(db, settings, product_id, task_id)
+    except (ReadinessError, ValueError, CheckpointError) as exc:
+        code = getattr(exc, 'code', 'repair_source_invalid')
+        return page(_owner_product(db, product_id), 'Визуальная правка',
+            job_html(state, product_id, error=MESSAGES[code]), status=409)
+    return RedirectResponse(f'/studio/products/{product_id}/whiteboard/{task.id}', status_code=303)
 
 
 @router.get('/studio/products/{product_id}/whiteboard/{task_id}/files/{filename}')
