@@ -104,6 +104,22 @@ CSS = r"""
 .sg-video-file video{width:100%;max-width:410px;max-height:650px;display:block;border-radius:14px;background:#101820;margin:17px auto}
 .sg-video-file .sg-inline-actions{gap:9px;margin:20px 0}
 
+.sg-animator-entry{border:1px solid #DDE6FB;background:#F8FAFF}
+.sg-animator-entry h2{font-size:18px;line-height:1.35;margin:8px 0}
+.sg-animator-entry p{font-size:13px;line-height:1.55;margin:9px 0}
+.sg-animator-entry .btn{display:inline-flex;width:100%;align-items:center;justify-content:center;margin-top:12px}
+.sg-inline-more{position:relative;align-self:center}
+.sg-inline-more>summary{list-style:none;cursor:pointer;border:1px solid #DFE7F1;
+  min-height:42px;border-radius:10px;padding:10px 12px;font-size:12px;font-weight:600;color:#34527B;background:#fff}
+.sg-inline-more>summary::-webkit-details-marker{display:none}
+.sg-inline-more>summary:hover{background:#F2F6FF}
+.sg-inline-more>div{position:absolute;top:calc(100% + 7px);right:0;z-index:80;
+  width:min(260px,calc(100vw - 24px));border-radius:12px;display:grid;gap:3px;
+  padding:9px;background:#fff;border:1px solid #E2E8F2;
+  box-shadow:0 15px 30px rgba(13,27,42,.12)}
+.sg-inline-more>div>a{display:block;padding:9px 11px;text-decoration:none;
+  font-size:13px;color:#354F6B;border-radius:8px;min-height:38px}
+.sg-inline-more>div>a:hover{background:#EEF3FF;color:#214AC3}
 @media(max-width:920px){
  .sg-global-status{margin:0 0 10px;min-height:42px}
  .sg-notifications>summary{padding:8px 13px}
