@@ -96,7 +96,8 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     # Resolve the configured provider BEFORE changing task state: missing keys
     # must never strand an already-claimed job in RUNNING.
-    llm = LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings))
+    llm = LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings),
+                     critic_enabled=settings.agent_critic_enabled)
     product = db.get(Product, request.product_id)
     if product is None:
         raise LookupError("Company not found")
