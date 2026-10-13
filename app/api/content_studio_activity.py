@@ -203,12 +203,15 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
         Artifact.kind.in_(RESULT_KINDS - {"editorial_plan"}),
     ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(limit)))
     for row in candidates:
+        is_animator = row.kind == "whiteboard_video"
         notes.append({
             "kind": "review", "text": (
+                "Рисованное видео готово: " if is_animator else
                 "Готов MP4: " if row.kind == "video_render" else
                 "Материал готов к проверке: "
             ) + readable_artifact_title(row)[:95],
-            "url": f"/studio/products/{product_id}/materials/{row.id}",
+            "url": (f"/studio/products/{product_id}/whiteboard/{row.task_id}"
+                     if is_animator else f"/studio/products/{product_id}/materials/{row.id}"),
             "id": str(row.id),
         })
     # Some historical pipeline outputs are saved as draft rather than as
@@ -244,6 +247,20 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
                 "id": str(plan.id),
             })
             break
+    # Approval is a separate required owner decision before paid Animator
+    # providers are called. Show it as an actionable alert.
+    awaiting = list(db.scalars(select(Task).where(
+        Task.product_id == product_id,
+        Task.assigned_agent == "whiteboard_renderer",
+        Task.status == TaskStatus.WAITING_APPROVAL,
+    ).order_by(Task.created_at.desc()).limit(5)))
+    for task in awaiting:
+        notes.append({
+            "kind": "review",
+            "text": "Подтвердите создание рисованного видео (платные API)",
+            "url": f"/studio/products/{product_id}/whiteboard/{task.id}",
+            "id": str(task.id),
+        })
     failed = list(db.scalars(select(Task).where(
         Task.product_id == product_id,
         Task.assigned_agent.in_(WORK_AGENTS),
@@ -254,7 +271,9 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
             continue
         notes.append({
             "kind": "error", "text": "Не удалось подготовить материал — проверьте задание",
-            "url": f"/studio/products/{product_id}/tasks/{task.id}",
+            "url": (f"/studio/products/{product_id}/whiteboard/{task.id}"
+                     if task.assigned_agent == "whiteboard_renderer"
+                     else f"/studio/products/{product_id}/tasks/{task.id}"),
             "id": str(task.id),
         })
     return notes[:limit]
