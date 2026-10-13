@@ -1,70 +1,79 @@
-# Paid whiteboard retry: prepared, not yet executed
+# Платный повтор whiteboard: видео создано, визуальная правка проверяется
 
-2026-10-12. Owner explicitly authorized another paid attempt of the same video
-and repair of failures until completion, retaining the prior 25-call job limit.
+Контрольная точка 2026-10-13. Этот документ заменяет прежний отчёт «prepared, not executed».
 
-## Completed prerequisites
+## Подтверждённый результат
 
-Branch: `wip/whiteboard-live-pilot`, based on production application baseline
-`f1118b392c38d9ec29335939082783bc69c85b71`.
-Diagnostic/test commit:
-[e2f78a0](https://github.com/grunvald91/Ai_growth_os/commit/e2f78a06101ab91856e851bc963ec3493d6b788c).
+Продолжение задания: `34ff3a5e-be3f-448d-913e-4f66518506bf`.
+[Страница ролика](https://growth.servgo.ru/studio/products/04392041-ea09-4853-874e-8060bee7286c/whiteboard/34ff3a5e-be3f-448d-913e-4f66518506bf).
+[MP4](https://growth.servgo.ru/studio/products/04392041-ea09-4853-874e-8060bee7286c/whiteboard/34ff3a5e-be3f-448d-913e-4f66518506bf/files/video.mp4).
 
-Prepared changes:
-- Private, per-job storyboard response capture (0600), excluding request,
-  credentials, headers and URL; configured keys and patterned secrets redacted.
-- Explicit empty/truncated storyboard response error codes.
-- Persist failed stage, exception type, HTTP status or validation error types,
-  without raw exception inputs/response bodies in UI/logs.
-- One provider POST per attempt; no automatic paid retry.
+Воркер завершил первую сборку. Файлы MP4, PNG, SRT и JSON существуют.
+FFprobe: 30.000000 с, 720×1280, H.264, AAC 24000 Гц, 600 кадров.
+Озвучка 23.64 с. MP4 476135 байт, SHA256:
+`ec43f6cfb9848012b4810a20956a189e13be268d925dc185bec3063873745cb1`.
+Полное декодирование FFmpeg прошло без ошибок. Визуальная проверка выявила
+недостаточную разметку: первые две сцены раскрывают преимущественно подписи,
+скрывая части иконок. Эту версию нельзя считать окончательно проверенной.
 
-Local Python 3.12 verification: **42 passed in 5.89 seconds**. This is 38 existing
-whiteboard tests plus four new parametrized diagnostic checks. No live model
-calls are part of these tests. Tests ran with the available dependency bundle
-and included synthetic render/worker cases.
+Всего **16 зарезервированных API-вызовов из 25**, включая четыре вызова
+предыдущего задания `611e441c-d9c2-486b-a779-f2822d88ddac` и 12 вызовов
+продолжения. Счётчик перенесён, не обнулён. Фактическая сумма списаний
+для ролика не подтверждена; денежный лимит ключа не изменялся.
 
-## Execution blocker
+## Исправления генерации
 
-The patch has NOT been deployed, and a new paid job has NOT been created,
-approved, or initiated by the agent during this retry session.
+Оплаченный ответ kimi-2.7 вернул русские блоки «Сцена/Бит/Реплика/Иконка» вместо
+JSON. Добавлен строгий детерминированный разбор. Полученный сценарий
+восстановлен и переиспользован без дополнительной генерации.
 
-The existing Codespace SSH path, which worked earlier, no longer completes
-the SSH greeting from `155.212.162.47:22`. Observed failures:
-- a 30-second command timeout;
-- explicit SSH connection timeout during banner exchange, exit 255.
+Gemini Image API вернул 404; каталог не поддерживает отправленный output_format.
+Удаление этого параметра также не устранило 404. Вызов той же модели через
+Chat Completions вернул HTTP403: Blocked by Google AI Studio, с предыдущим
+отказом Blocked by Google. Ключ действителен, остаток лимита положительный.
+Точная причина ограничения Google за этим ответом не установлена.
 
-No existing reusable SSH process/control socket was found in the Codespace.
-DNS for Growth Studio and the server's configured hostname resolves to the same
-server IP. The direct TCP check timed out on port 22 and connected on port 443.
-The cause of the intermittent connection failure was not established.
-At 2026-10-12 19:20:04 UTC, SSH via the configured server hostname,
-using the existing IP-bound host key, succeeded. Work continued with that
-verified connection; the deployment/execution status below is a checkpoint.
+Для одного продолжения выбраны FLUX.2 Pro, Qwen3 VL 30B и Grok Voice TTS 1.0,
+голос eve, язык ru. Три рисунка, три разметки и шесть MP3 получены и сохранены.
+Модели и голос привязаны к новому неизменяемому запросу и одобрению владельца.
+Настройки копируются в пределах задания после проверки одобрения.
+Общий .env и модели будущих заданий не менялись.
 
-Codespace HTTPS request to the public `/health` path returned HTTP 404.
-This is not a health confirmation: the verified application health check in
-earlier deployment work uses server loopback port 8091. Do not infer that
-the server is down or that SSH credentials are wrong from these observations.
+Автоматическая проверка отклонила попытку общей замены моделей/голоса в .env.
+Она не была выполнена. Использован вариант с настройками только этого ролика,
+без изменения общих секретов и без расширения доступа.
 
-## Known prior job state
+## Текущая визуальная правка
 
-Most recent successful database inspection was at 2026-10-12 19:06:35 UTC:
-job `33dfd4ff-8cf3-4265-9eb6-dfc299b55d8a` failed during storyboard,
-one reserved provider call of 25, no generated MP4/image/audio files.
-The precise failure cause was not retained by the old diagnostic code.
-This prior observation must not be presented as a fresh database check.
+Исходные рисунки проверены: каждый содержит заголовок и две раздельные
+иконки слева/справа. Подготовлено раскрытие заголовка в первом бите и каждой
+полной иконки в её бите. Рисунки и звук не генерируются заново.
 
-## Continuation
+Первая локальная пересборка остановилась в FFmpeg (BrokenPipeError).
+Вторая пересборка в воркере запущена с 10 fps и ограничением 600 с,
+с сохранением журнала кодировщика. Её успешное завершение ещё не подтверждено.
+На сервере наблюдалась нагрузка 116.83 при одном CPU; SSH периодически
+задерживается/истекает по тайм-ауту. Подготавливается сборка из тех же
+кешированных материалов в CodeSpace (два CPU, FFmpeg, Pillow и Pydantic доступны).
 
-Restore or reuse working, verified SSH access, without exposing credentials.
-Check active worker jobs before any service restart. Overlay only the tested
-changed modules on the latest production source/image; preserve concurrent
-changes, current origin configuration, database and persistent volumes.
-Deploy diagnostic code first. Create a new request with the exact previous
-topic/models/voice and 25-call envelope, bind its approval to the owner's
-explicit retry instruction, then monitor its stage ledger and private responses.
-Reconcile successful/unknown calls before further paid attempts; do not loop
-blindly. Verify a completed MP4 before reporting success.
+До завершения новой проверки нельзя сообщать, что визуальный дефект устранён.
+Новые платные вызовы после первоначальных 16 не запускались.
 
-GitHub Actions deliberately launched in this session: 0.
-The latest test commit's queried PR workflow list was empty.
+## Код и проверки
+
+[Код](https://github.com/grunvald91/Ai_growth_os/commit/4cd4544b8022b1eee899e4ea954dc9727b125f14).
+44 локальные проверки: passed за 2.50 с.
+44 проверки серверного образа: passed за 13.33 с.
+Покрыты параметры моделей, русская речь, неизменяемое одобрение,
+изоляция настроек задания и поток интерфейс → воркер → настоящий тестовый MP4.
+
+Развёрнуты только изменённые модули поверх текущих образов API/worker.
+Откат и исходные файлы сохранены. Миграции БД не выполнялись.
+Доступ к файлам остаётся закрытым обычной авторизацией Growth Studio.
+Авторизованный просмотр реальной страницы в облачном браузере не проверен:
+его сессия не имеет учётных данных Studio.
+
+GitHub Actions намеренно запущено: **0**.
+Запрос списка PR-workflows для последнего кодового коммита вернул пустой список;
+это первая страница PR-запусков, а не полная телеметрия всех workflows.
+Подтверждённые billable minutes недоступны.
