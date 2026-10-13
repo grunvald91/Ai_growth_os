@@ -177,6 +177,19 @@ async def test_documented_openrouter_image_and_speech_routes_use_bearer():
 
 
 @pytest.mark.asyncio
+async def test_flux_pro_uses_only_its_supported_image_parameters():
+    seen = []
+    def handler(req):
+        assert req.url.path == '/api/v1/images'
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(PNG).decode(), "media_type": "image/png"}]})
+    async with httpx.AsyncClient(base_url="https://openrouter.ai/api/v1/", transport=httpx.MockTransport(handler)) as client:
+        assert await OpenRouterImageProvider(api_key="test", model="black-forest-labs/flux.2-pro", client=client).generate(scene(), request()) == PNG
+    assert len(seen) == 1 and 'resolution' not in seen[0]
+    assert seen[0]['aspect_ratio'] == '9:16' and seen[0]['output_format'] == 'png' and seen[0]['n'] == 1
+
+
+@pytest.mark.asyncio
 async def test_gemini_image_uses_one_chat_request_and_keeps_png_validation():
     seen = []
     def handler(req):
