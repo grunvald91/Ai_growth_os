@@ -203,7 +203,7 @@ async def test_quick_post_with_enabled_critic_persists_findings_and_usage(db, tm
         Artifact.task_id==task.id,Artifact.kind=="agent_quality_review"
     )))
     checks=[json.loads(row.content) for row in review_rows]
-    assert {check["status"] for check in checks}=={"no_material_issues","all_rejected"}
+    assert {check["status"] for check in checks}=={"no_material_issues","revision_pending","all_rejected"}
     rejected=next(check for check in checks if check["status"]=="all_rejected")
     assert rejected["findings"][0]["id"]=="extra1"
     assert rejected["decisions"][0]["decision"]=="reject"
