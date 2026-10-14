@@ -297,3 +297,24 @@ def test_composition_builds_model_fallback_chain():
         "claude-opus-5-5",
         "grok-4.7",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("usage", [None, {}, {"prompt_tokens": 12},
+                                  {"completion_tokens": 20}])
+async def test_xai_missing_or_partial_usage_is_unknown(monkeypatch, usage):
+    monkeypatch.setattr("app.llm.xai.httpx.AsyncClient", FakeAsyncClient)
+    original_payload = FakeAsyncClient.response_payload
+    candidate = {
+        "model": "grok-4.7",
+        "choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}],
+    }
+    if usage is not None:
+        candidate["usage"] = usage
+    FakeAsyncClient.response_payload = candidate
+    try:
+        response = await XAIProvider(api_key="test-key").generate(
+            LLMRequest(messages=[LLMMessage(role="user", content="hello")]))
+        assert response.usage is None
+    finally:
+        FakeAsyncClient.response_payload = original_payload
