@@ -639,7 +639,13 @@ class ResearchDepartment:
         return value
 
     def _record_usage(self, product_id: UUID, run_id: UUID, response) -> None:
-        if response is None or response.usage is None:
+        if response is None:
+            return
+        run = self.db.get(AgentRun, run_id)
+        if run is not None:
+            persist_critic_audit(self.db, product_id=product_id, task_id=run.task_id,
+                                 run_id=run_id, response=response)
+        if response.usage is None:
             return
         self.db.add(CostRecord(
             product_id=product_id,
@@ -654,7 +660,3 @@ class ResearchDepartment:
             details=critic_cost_details(response,
                 note="Usage recorded; monetary price unavailable, zero is not a free-cost claim."),
         ))
-        run = self.db.get(AgentRun, run_id)
-        if run is not None:
-            persist_critic_audit(self.db, product_id=product_id, task_id=run.task_id,
-                                 run_id=run_id, response=response)
