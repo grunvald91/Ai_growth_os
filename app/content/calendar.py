@@ -15,7 +15,7 @@ from sqlalchemy import select, update
 from app.company_profile import load_company_profile, profile_snapshot
 from app.content.service import queue_content
 from app.content.viral_content_research import run_viral_content_research
-from app.llm.audit import critic_cost_details, persist_critic_audit
+from app.llm.audit import critic_cost_details, persist_critic_audit, persist_critic_attempt_event
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, CostRecord, Metric, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
@@ -426,6 +426,7 @@ async def run_planner_once(session_factory, settings, llm=None):
         db.commit()
         response = None
         attempts = []
+        attempt_failures = []
         error_code = "context"
         try:
             context, digest = planning_context(db, settings, task.product_id)
@@ -520,6 +521,10 @@ async def run_planner_once(session_factory, settings, llm=None):
                 try:
                     response = await asyncio.wait_for(llm.generate(request), (180 if not injected_llm else 300) + getattr(llm, 'extra_timeout_seconds', 0))
                 except asyncio.TimeoutError:
+                    attempt_failures.append({
+                        "status": "provider_timeout", "model": request.model,
+                        "attempt": attempt + 1,
+                    })
                     if injected_llm:
                         raise
                     fallback_model = next(
@@ -540,10 +545,23 @@ async def run_planner_once(session_factory, settings, llm=None):
                         provider=build_llm_provider(fallback_settings),
                         critic_enabled=settings.agent_critic_enabled,
                     )
-                    response = await asyncio.wait_for(
-                        fallback_llm.generate(request.model_copy(update={'model': fallback_model})),
-                        240 + fallback_llm.extra_timeout_seconds,
-                    )
+                    try:
+                        response = await asyncio.wait_for(
+                            fallback_llm.generate(request.model_copy(update={'model': fallback_model})),
+                            240 + fallback_llm.extra_timeout_seconds,
+                        )
+                    except Exception:
+                        attempt_failures.append({
+                            "status": "fallback_error", "model": fallback_model,
+                            "attempt": attempt + 1,
+                        })
+                        raise
+                except Exception:
+                    attempt_failures.append({
+                        "status": "provider_error", "model": request.model,
+                        "attempt": attempt + 1,
+                    })
+                    raise
                 attempts.append(response)
                 error_code = 'incomplete_response'
                 if response.stop_reason not in {None, 'end_turn', 'stop_sequence'} or len(response.content) > 150000:
@@ -625,6 +643,22 @@ async def run_planner_once(session_factory, settings, llm=None):
                     attempt_response, task_type='content_calendar',
                     attempt=index, model=attempt_response.model,
                 ),
+            ))
+        for event in attempt_failures:
+            persist_critic_attempt_event(
+                db, product_id=task.product_id, task_id=task.id,
+                run_id=run.id, event=event,
+            )
+            db.add(CostRecord(
+                product_id=task.product_id, agent_run_id=run.id, category='llm',
+                provider=settings.llm_provider, amount=0, currency='USD',
+                incurred_at=now_utc(), input_tokens=None, output_tokens=None,
+                details={
+                    'cost_known': False, 'task_type': 'content_calendar',
+                    'model': event['model'], 'attempt': event['attempt'],
+                    'review_status': event['status'], 'usage_incomplete': True,
+                    'observed_tokens_only': True,
+                },
             ))
         run.finished_at = now_utc()
         db.commit()
