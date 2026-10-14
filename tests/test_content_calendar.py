@@ -410,3 +410,59 @@ def test_planning_context_knows_verified_telegram_channels_without_credentials(d
     assert context['verified_telegram_channels'][0]['scheduled_publication_requires_owner_approval'] is True
     assert 'chat_id' not in context['verified_telegram_channels'][0]
     assert isinstance(digest, str) and len(digest) == 64
+
+
+@pytest.mark.asyncio
+async def test_planner_critic_keeps_advisory_findings_and_unknown_tokens(db, tmp_path):
+    product, settings = setup(db, tmp_path)
+    settings.agent_critic_enabled = True
+    task = db.scalar(select(Task).where(
+        Task.assigned_agent == 'editorial_planner',
+        Task.status == TaskStatus.QUEUED,
+    ))
+
+    class PlannerWithCritic:
+        def __init__(self):
+            self.requests = []
+        async def generate(self, request):
+            self.requests.append(request)
+            if request.metadata.get('task_type') == 'quality_review':
+                payload = {'findings': [{
+                    'id': 'important1', 'severity': 'major',
+                    'problem': 'The proposed calendar omits a necessary editorial constraint',
+                    'evidence_in_draft': 'No restriction on the requested channel',
+                    'proposed_fix': 'Keep the company-required channel restriction',
+                    'link_to_original_goal': 'Original owner request requires a restricted channel',
+                }]}
+                # Intentionally no usage despite successful response.
+                return LLMResponse(content=json.dumps(payload), model='critic-no-usage',
+                                   usage=None, stop_reason='end_turn')
+            return LLMResponse(content=json.dumps(draft(), ensure_ascii=False),
+                               model='planner', usage=LLMUsage(input_tokens=24, output_tokens=34),
+                               stop_reason='end_turn')
+
+    provider = PlannerWithCritic()
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
+                     critic_enabled=True)
+    assert await run_planner_once(lambda: Borrow(db), settings, llm) == 1
+    assert len(provider.requests) == 2
+    assert db.get(Task, task.id).status == TaskStatus.COMPLETED
+    plan = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == 'editorial_plan',
+    ))
+    assert plan is not None
+    reviews = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == 'agent_quality_review',
+    )))
+    assert len(reviews) == 1
+    review = json.loads(reviews[0].content)
+    assert review['status'] == 'advisory_only_no_domain_validator'
+    assert review['findings'][0]['id'] == 'important1'
+    assert review['extra_usage_by_model'][0]['input_tokens'] is None
+    run = db.scalar(select(AgentRun).where(AgentRun.task_id == task.id))
+    assert {'kind': 'artifact', 'id': str(reviews[0].id)} in run.output_references
+    costs = list(db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)))
+    assert len(costs) == 1
+    assert costs[0].input_tokens == 24
+    assert costs[0].details['usage_incomplete'] is True
+    assert costs[0].details['extra_usage_by_model'][0]['usage_known'] is False
