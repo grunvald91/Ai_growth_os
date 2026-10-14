@@ -567,6 +567,13 @@ async def run_planner_once(session_factory, settings, llm=None):
                     task_type="content_calendar", provider=settings.llm_provider,
                 )
 
+            def record_review_progress(snapshot):
+                persist_critic_audit(
+                    db, product_id=task.product_id, task_id=task.id,
+                    run_id=run.id, response=snapshot,
+                )
+                db.commit()
+
             messages = [LLMMessage(role='user', content=encode({'now': now_utc(), **context}))]
             for attempt in range(2):
                 error_code = 'provider'
@@ -581,7 +588,8 @@ async def run_planner_once(session_factory, settings, llm=None):
                 )
                 try:
                     response = await asyncio.wait_for(
-                        llm.generate(request, on_observed=record_model_call)
+                        llm.generate(request, on_observed=record_model_call,
+                                     on_review_progress=record_review_progress)
                         if per_call_accounted else llm.generate(request),
                         (180 if not injected_llm else 300) + getattr(llm, 'extra_timeout_seconds', 0),
                     )
@@ -614,7 +622,8 @@ async def run_planner_once(session_factory, settings, llm=None):
                         active_model = fallback_model
                         response = await asyncio.wait_for(
                             fallback_llm.generate(request.model_copy(update={'model': fallback_model}),
-                                                  on_observed=record_model_call),
+                                                  on_observed=record_model_call,
+                                                  on_review_progress=record_review_progress),
                             240 + fallback_llm.extra_timeout_seconds,
                         )
                     except Exception:
