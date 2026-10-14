@@ -115,9 +115,16 @@ class XAIProvider:
         if not isinstance(content, str) or not content:
             raise ValueError("xAI response content is empty")
 
-        usage = data.get("usage") or {}
-        input_tokens = usage.get("prompt_tokens", usage.get("input_tokens", 0))
-        output_tokens = usage.get("completion_tokens", usage.get("output_tokens", 0))
+        reported_usage = data.get("usage")
+        # Absent or partial usage is UNKNOWN, not an observed 0/0 billable call.
+        # Neither later critic aggregation nor reporting may treat it as complete.
+        usage = None
+        if isinstance(reported_usage, dict):
+            input_tokens = reported_usage.get("prompt_tokens", reported_usage.get("input_tokens"))
+            output_tokens = reported_usage.get("completion_tokens", reported_usage.get("output_tokens"))
+            if input_tokens is not None and output_tokens is not None:
+                usage = LLMUsage(input_tokens=max(0, int(input_tokens)),
+                                 output_tokens=max(0, int(output_tokens)))
 
         finish_reason = choice.get("finish_reason")
         stop_reason = "end_turn" if finish_reason == "stop" else finish_reason
@@ -125,9 +132,6 @@ class XAIProvider:
         return LLMResponse(
             content=content,
             model=str(data.get("model") or request.model or self._model),
-            usage=LLMUsage(
-                input_tokens=max(0, int(input_tokens or 0)),
-                output_tokens=max(0, int(output_tokens or 0)),
-            ),
+            usage=usage,
             stop_reason=stop_reason,
         )
