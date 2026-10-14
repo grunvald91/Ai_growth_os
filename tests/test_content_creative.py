@@ -214,3 +214,38 @@ async def test_critic_invalid_timeline_preserves_valid_creative_and_audit(db, tm
     assert len(costs)==5
     assert [c.details["llm_stage"] for c in costs].count("critic")==2
     assert [c.details["llm_stage"] for c in costs].count("revision")==1
+
+@pytest.mark.asyncio
+async def test_invalid_creative_evidence_keeps_call_costs_and_critic_audit(db, tmp_path):
+    from app.models.domain import CostRecord
+    company = Product(name="Flower studio", slug="creative-invalid-evidence")
+    db.add(company)
+    db.commit()
+    request = CreativeRequest(mode="creative", product_id=company.id, format="story",
+                              platform="telegram", topic="Choose flowers")
+    task = queue_creative(db, request)
+    invalid = strategy_payload()
+    invalid["evidence_ids"] = ["nonexistent-source"]
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+        async def generate(self, task_request):
+            self.calls.append(task_request)
+            value = {"findings": []} if task_request.metadata.get("task_type") == "quality_review" else invalid
+            return LLMResponse(content=json.dumps(value), model="fake",
+                               usage=LLMUsage(input_tokens=11, output_tokens=12))
+
+    provider = Provider()
+    assert not await run_creative_once(
+        db, Settings(_env_file=None, products_root=tmp_path, agent_critic_enabled=True),
+        request, task_id=task.id, provider=provider)
+    assert len(provider.calls) == 2
+    assert db.get(Task, task.id).status == TaskStatus.FAILED
+    costs = list(db.scalars(select(CostRecord).where(CostRecord.product_id == company.id)))
+    assert len(costs) == 2
+    assert [x.details["llm_stage"] for x in costs] == ["author", "critic"]
+    reviews = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "agent_quality_review")))
+    assert len(reviews) == 1
+    assert json.loads(reviews[0].content)["status"] == "no_material_issues"
