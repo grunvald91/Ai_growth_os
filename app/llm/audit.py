@@ -13,12 +13,26 @@ from app.services.artifacts import ArtifactService
 
 def critic_cost_details(response, **extra) -> dict:
     audit = (response.quality_review or {}) if response is not None else {}
+    by_model = audit.get("extra_usage_by_model") or []
+    missing_reported_usage = bool(audit.get("usage_unknown_for_failed_calls"))
+    missing_model_usage = any(
+        row.get("usage_known") is False
+        or row.get("input_tokens") is None
+        or row.get("output_tokens") is None
+        for row in by_model if isinstance(row, dict)
+    )
+    incomplete = (
+        response is None or response.usage is None
+        or missing_reported_usage or missing_model_usage
+        or audit.get("status") in {"review_unavailable", "revision_unavailable"}
+    )
     return {
         "cost_known": False,
         **extra,
         "review_status": audit.get("status"),
-        "extra_usage_by_model": audit.get("extra_usage_by_model", []),
-        "usage_incomplete": audit.get("status") in {"review_unavailable", "revision_unavailable"},
+        "extra_usage_by_model": by_model,
+        "usage_incomplete": bool(incomplete),
+        "observed_tokens_only": bool(incomplete),
     }
 
 
