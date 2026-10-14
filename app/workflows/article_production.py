@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
+from app.llm.audit import critic_cost_details
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
 from app.models.domain import AgentRun, Artifact, CostRecord, Decision, Experiment, Product, Task, TaskStatus
@@ -1143,4 +1144,6 @@ class ArticleProduction:
                         provider=self.provider_name, amount=0, currency='USD',
                         input_tokens=max(0, response.usage.input_tokens),
                         output_tokens=max(0, response.usage.output_tokens), incurred_at=datetime.now(timezone.utc),
-                        details={'cost_known': False, 'note': 'Usage recorded; monetary price unavailable.'}))
+                        details=critic_cost_details(
+                            response, note='Usage recorded; monetary price unavailable.',
+                        )))
