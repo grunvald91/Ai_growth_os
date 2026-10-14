@@ -10,6 +10,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from app.agents import AGENT_CONFIGS, AgentRole
+from app.llm.audit import critic_cost_details
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
@@ -381,10 +382,9 @@ class TeamCycle:
                 input_tokens=max(0, response.usage.input_tokens),
                 output_tokens=max(0, response.usage.output_tokens),
                 incurred_at=datetime.now(timezone.utc),
-                details={
-                    "cost_known": False,
-                    "model": response.model,
-                    "note": "Usage recorded; monetary price unavailable, zero is not a free-cost claim.",
-                },
+                details=critic_cost_details(
+                    response, model=response.model,
+                    note="Usage recorded; monetary price unavailable, zero is not a free-cost claim.",
+                ),
             )
         )
