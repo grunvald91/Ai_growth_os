@@ -18,7 +18,8 @@ class LLMService:
 
     async def generate(self, request: LLMRequest, *,
                        validate_revision: Callable[[dict], None] | None = None,
-                       on_observed: Callable[[str, LLMResponse], None] | None = None) -> LLMResponse:
+                       on_observed: Callable[[str, LLMResponse], None] | None = None,
+                       on_review_progress: Callable[[LLMResponse], None] | None = None) -> LLMResponse:
         sanitized_request = self._privacy_gateway.sanitize(request)
 
         def observe(stage: str, reply: LLMResponse) -> LLMResponse:
@@ -44,4 +45,5 @@ class LLMService:
             original=original,
             generate=review_generate,
             validate_revision=validate_revision,
+            on_review_progress=on_review_progress,
         )
