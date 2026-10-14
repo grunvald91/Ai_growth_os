@@ -92,7 +92,8 @@ async def test_no_domain_validator_blocks_uncertified_replacement():
     assert len(result.quality_review["findings"])==1
 
 
-def test_oversized_quick_post_company_restrictions_fail_closed():
+@pytest.mark.asyncio
+async def test_oversized_quick_post_company_restrictions_fail_closed():
     payload = {
         "company_name": "Flowers", "topic": "Selecting a bouquet",
         "audience": "Parents", "brief": "No fabricated guarantees",
@@ -102,7 +103,11 @@ def test_oversized_quick_post_company_restrictions_fail_closed():
     }
     # The mandatory brand policy cannot fit. A truncated audit would be
     # misleading, so no reviewer should receive a partial task.
-    assert _review_messages(req(payload)) is None
+    provider = FakeGateway([{"title":"Original","steps":["Valid"]}])
+    response = await LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
+                               critic_enabled=True).generate(req(payload))
+    assert response.quality_review["status"] == "skipped_incomplete_context"
+    assert len(provider.requests) == 1
 
 
 def test_small_brand_policy_survives_quick_post_compaction():
