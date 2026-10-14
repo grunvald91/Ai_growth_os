@@ -49,7 +49,7 @@ def finding(severity="major"):
 
 async def run(provider, *, enabled=True):
     return await LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
-                            critic_enabled=enabled).generate(task())
+                            critic_enabled=enabled).generate(task(), validate_revision=lambda data: Draft.model_validate(data))
 
 
 @pytest.mark.asyncio
@@ -257,7 +257,7 @@ async def test_missing_one_author_decision_rejects_partial_revision():
         ], "updated_output": {"title": "Plan", "steps": ["After"]}},
     ])
     result = await run(provider)
-    assert result.quality_review["status"] == "review_unavailable"
+    assert result.quality_review["status"] == "revision_unavailable"
     assert json.loads(result.content)["steps"] == ["Before"]
 
 
@@ -281,7 +281,9 @@ async def test_original_schema_with_nested_refs_can_be_validated_after_revision(
          "updated_output": {"title": "Plan", "steps": [{"label": "Onboarding"}]}},
     ])
     result = await LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
-                              critic_enabled=True).generate(request)
+                              critic_enabled=True).generate(
+                                  request, validate_revision=lambda data: NestedDraft.model_validate(data)
+                              )
     assert result.quality_review["status"] == "revised"
     schema = provider.requests[2].response_schema
     Draft202012Validator.check_schema(schema)
