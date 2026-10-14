@@ -214,6 +214,7 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             "deliverable": "text_only_director_ready_brief",
         }
         strategy = None
+        stage_reviews = {}
         for idx, (agent, schema) in enumerate((
             ("creative_strategist", CreativeStrategy),
             ("creative_director", CreativeDraft),
@@ -251,6 +252,16 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     "one frame with times 0 and 0 plus accurate overlay text. "
                     "Do not output a fabricated file, render ID or posting confirmation."
                 )
+            def validate_candidate(data):
+                parsed = schema.model_validate(data)
+                if any(source_id not in verified for source_id in parsed.evidence_ids):
+                    raise ValueError("Unknown product evidence in creative brief")
+                if agent == "creative_director" and (
+                    parsed.format != request.format or parsed.platform != request.platform
+                ):
+                    raise ValueError("LLM changed the selected format or platform")
+                return parsed
+
             response = await asyncio.wait_for(llm.generate(LLMRequest(
                 system_prompt=rules,
                 messages=[LLMMessage(role="user", content=json.dumps(stage_payload, ensure_ascii=False))],
@@ -261,18 +272,13 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     "team_role": agent, "task_type": "creative_brief",
                     "reasoning_effort": "low", "provider_timeout_seconds": 100,
                 },
-            )), timeout=210 + llm.extra_timeout_seconds)
+            ), validate_revision=validate_candidate), timeout=210 + llm.extra_timeout_seconds)
             if response.stop_reason not in (None, "end_turn", "stop_sequence"):
                 raise ValueError("Incomplete creative output")
             if len(response.content) > 65000:
                 raise ValueError("Creative output exceeds bound")
-            result = schema.model_validate(json.loads(response.content))
-            if any(source_id not in verified for source_id in result.evidence_ids):
-                raise ValueError("Unknown product evidence in creative brief")
-            if agent == "creative_director" and (
-                result.format != request.format or result.platform != request.platform
-            ):
-                raise ValueError("LLM changed the selected format or platform")
+            result = validate_candidate(json.loads(response.content))
+            stage_reviews[agent] = response.quality_review
             if response.usage is not None:
                 db.add(CostRecord(
                     product_id=product.id, agent_run_id=run.id,
@@ -281,12 +287,20 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     input_tokens=max(0, response.usage.input_tokens),
                     output_tokens=max(0, response.usage.output_tokens),
                     incurred_at=datetime.now(timezone.utc),
-                    details={"cost_known": False, "task_type": "creative_brief"},
+                    details={
+                        "cost_known": False, "task_type": "creative_brief",
+                        "model": response.model,
+                        "review_status": (response.quality_review or {}).get("status"),
+                        "extra_usage_by_model": (response.quality_review or {}).get("extra_usage_by_model", []),
+                    },
                 ))
             check = ArtifactService(db).create(
                 product_id=product.id, task_id=task.id, agent_run_id=run.id,
                 kind="content_stage_output", title=agent + ": draft",
-                content=json.dumps(result.model_dump(mode="json"), ensure_ascii=False),
+                content=json.dumps({
+                    "output": result.model_dump(mode="json"),
+                    "quality_review": response.quality_review,
+                }, ensure_ascii=False),
             )
             run.status = "completed"
             run.finished_at = datetime.now(timezone.utc)
@@ -306,6 +320,7 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                 "review_notes": ["Черновой бриф; видео или изображение не созданы"],
                 "quality_warnings": facts_warnings,
                 "fact_check_required": bool(facts_warnings),
+                "ai_quality_reviews": stage_reviews,
             }, ensure_ascii=False),
             status="awaiting_approval",
         )
