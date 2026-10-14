@@ -15,6 +15,7 @@ from sqlalchemy import select, update
 from app.company_profile import load_company_profile, profile_snapshot
 from app.content.service import queue_content
 from app.content.viral_content_research import run_viral_content_research
+from app.llm.audit import critic_cost_details, persist_critic_audit
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, CostRecord, Metric, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
@@ -584,8 +585,15 @@ async def run_planner_once(session_factory, settings, llm=None):
                      'starts_at': base.isoformat(), 'ends_at': (base + timedelta(days=plan.horizon_days)).isoformat(),
                      'review_at': (base + timedelta(days=plan.review_after_days)).isoformat(),
                      'review_requested': False, 'approval_state': 'draft', 'generated_at': now_utc().isoformat()}
-            ArtifactService(db).create(product_id=task.product_id, task_id=task.id, agent_run_id=run.id,
-                kind='editorial_plan', title='Редакторский план и календарь', content=encode(value), status='awaiting_approval')
+            plan_artifact = ArtifactService(db).create(
+                product_id=task.product_id, task_id=task.id, agent_run_id=run.id,
+                kind='editorial_plan', title='Редакторский план и календарь',
+                content=encode(value), status='awaiting_approval',
+            )
+            run.output_references = [
+                *(run.output_references or []),
+                {'kind': 'artifact', 'id': str(plan_artifact.id)},
+            ]
             task.status = TaskStatus.COMPLETED
             run.status = 'completed'
             run.model = response.model
@@ -599,12 +607,25 @@ async def run_planner_once(session_factory, settings, llm=None):
                 run.finished_at = now_utc()
                 db.commit()
                 raise
-        for attempt_response in attempts:
-            if attempt_response.usage:
-                db.add(CostRecord(product_id=task.product_id, agent_run_id=run.id, category='llm',
-                    provider=settings.llm_provider, amount=0, currency='USD', incurred_at=now_utc(),
-                    input_tokens=attempt_response.usage.input_tokens, output_tokens=attempt_response.usage.output_tokens,
-                    details={'cost_known': False}))
+        # Every returned attempt is auditable, including the first invalid
+        # response, an advisory-only critic finding, and a later workflow error.
+        for index, attempt_response in enumerate(attempts, 1):
+            persist_critic_audit(
+                db, product_id=task.product_id, task_id=task.id,
+                run_id=run.id, response=attempt_response,
+            )
+            usage = attempt_response.usage
+            db.add(CostRecord(
+                product_id=task.product_id, agent_run_id=run.id, category='llm',
+                provider=settings.llm_provider, amount=0, currency='USD',
+                incurred_at=now_utc(),
+                input_tokens=usage.input_tokens if usage is not None else None,
+                output_tokens=usage.output_tokens if usage is not None else None,
+                details=critic_cost_details(
+                    attempt_response, task_type='content_calendar',
+                    attempt=index, model=attempt_response.model,
+                ),
+            ))
         run.finished_at = now_utc()
         db.commit()
         return 1
