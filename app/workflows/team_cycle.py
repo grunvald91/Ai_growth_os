@@ -10,10 +10,10 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from app.agents import AGENT_CONFIGS, AgentRole
-from app.llm.audit import critic_cost_details
+from app.llm.audit import persist_critic_audit, persist_observed_llm_call
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
-from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
+from app.models.domain import AgentRun, Artifact, Product, Task, TaskStatus
 from app.privacy import PrivacyGateway
 from app.services.artifacts import ArtifactService
 from app.workflows.context import load_context
@@ -226,6 +226,18 @@ class TeamCycle:
                     "context_limits": context["limits"],
                 }
             )
+            def validate_candidate(data):
+                candidate = schema.model_validate(data)
+                self._validate_task_specific(task_type, candidate)
+                return candidate
+
+            def record_call(stage, observed):
+                persist_observed_llm_call(
+                    self.db, product_id=product.id, task_id=task.id,
+                    run_id=run_id, response=observed, stage=stage,
+                    task_type=task_type, provider=self.provider_name,
+                )
+
             error_code = "provider_request_failed"
             response = await asyncio.wait_for(
                 self.llm.generate(
@@ -240,10 +252,16 @@ class TeamCycle:
                             "team_role": role.value,
                             "task_type": task_type,
                         },
-                    )
+                    ), validate_revision=validate_candidate,
+                    on_observed=record_call,
                 ),
                 timeout=SPECIALIST_TIMEOUTS.get(task_type, 120) + self.llm.extra_timeout_seconds,
             )
+            persist_critic_audit(
+                self.db, product_id=product.id, task_id=task.id,
+                run_id=run_id, response=response,
+            )
+            self.db.commit()
             error_code = "invalid_specialist_output"
             if len(response.content) > 120_000 or response.stop_reason not in (
                 None,
@@ -268,11 +286,11 @@ class TeamCycle:
             run.status = "completed"
             run.model = response.model
             run.finished_at = datetime.now(timezone.utc)
-            run.output_references = [{"kind": "artifact", "id": str(artifact.id)}]
-            if response.quality_review:
-                run.output_references.append({"kind": "quality_review", "data": self._sanitize_tree(response.quality_review)})
+            run.output_references = [
+                *(run.output_references or []),
+                {"kind": "artifact", "id": str(artifact.id)},
+            ]
             self.db.get(Task, task.id).status = TaskStatus.COMPLETED
-            self._record_usage(product.id, run_id, response)
             self.db.commit()
             return TeamTaskResult(
                 task_id=task.id,
@@ -368,23 +386,3 @@ class TeamCycle:
             return {key: self._sanitize_tree(item) for key, item in value.items()}
         return value
 
-    def _record_usage(self, product_id: UUID, run_id: UUID, response) -> None:
-        if response is None or response.usage is None:
-            return
-        self.db.add(
-            CostRecord(
-                product_id=product_id,
-                agent_run_id=run_id,
-                category="llm",
-                provider=self.provider_name,
-                amount=0,
-                currency="USD",
-                input_tokens=max(0, response.usage.input_tokens),
-                output_tokens=max(0, response.usage.output_tokens),
-                incurred_at=datetime.now(timezone.utc),
-                details=critic_cost_details(
-                    response, model=response.model,
-                    note="Usage recorded; monetary price unavailable, zero is not a free-cost claim.",
-                ),
-            )
-        )
