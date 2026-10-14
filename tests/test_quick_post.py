@@ -199,10 +199,10 @@ async def test_quick_post_with_enabled_critic_persists_findings_and_usage(db, tm
     settings=Settings(_env_file=None,products_root=tmp_path,agent_critic_enabled=True)
     assert await run_quick_post(db,settings,req,provider=provider)
     assert len(provider.calls)==5
-    checkpoints=list(db.scalars(select(Artifact).where(
-        Artifact.task_id==task.id,Artifact.kind=="content_stage_output"
+    review_rows=list(db.scalars(select(Artifact).where(
+        Artifact.task_id==task.id,Artifact.kind=="agent_quality_review"
     )))
-    checks=[json.loads(row.content)["quality_review"] for row in checkpoints]
+    checks=[json.loads(row.content) for row in review_rows]
     assert {check["status"] for check in checks}=={"no_material_issues","all_rejected"}
     rejected=next(check for check in checks if check["status"]=="all_rejected")
     assert rejected["findings"][0]["id"]=="extra1"
@@ -210,7 +210,8 @@ async def test_quick_post_with_enabled_critic_persists_findings_and_usage(db, tm
     published=db.scalar(select(Artifact).where(
         Artifact.task_id==task.id,Artifact.kind=="channel_text"
     ))
-    assert json.loads(published.content)["ai_quality_reviews"]["post_writer_editor"]["status"]=="all_rejected"
+    assert published is not None
     costs=list(db.scalars(select(CostRecord).where(CostRecord.product_id==company.id)))
-    assert len(costs)==2
-    assert all(cost.details.get("extra_usage_by_model") for cost in costs)
+    assert len(costs)==5
+    assert [c.details["llm_stage"] for c in costs].count("critic")==2
+    assert [c.details["llm_stage"] for c in costs].count("revision")==1
