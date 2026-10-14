@@ -49,6 +49,11 @@ REVISION_TIMEOUT = 75
 # An advisory review must never silently omit the goal, restrictions, or facts.
 # Every workflow passes its own payload contract; unknown oversized payloads
 # can only retain explicitly present generic goal/task fields.
+TEAM_TASK_TYPES = frozenset({
+    "analytics", "article_brief", "video_brief", "content_plan",
+    "distribution_plan",
+})
+
 REQUIRED_CONTEXT = {
     "quick_post": ("company_name", "topic", "audience", "brief", "channel", "channel_guidance", "verified_facts"),
     "creative_brief": ("company", "topic", "audience", "editorial_brief", "format", "platform", "verified_product_facts"),
@@ -76,12 +81,18 @@ def _review_messages(request: LLMRequest) -> list[dict] | None:
                 return None
             workflow = str(request.metadata.get("task_type", ""))
             required = REQUIRED_CONTEXT.get(workflow)
+            if workflow in TEAM_TASK_TYPES:
+                # TeamCycle keeps its governing task brief and restrictions
+                # separate from the short task descriptor. Dropping any of
+                # these can make a false "no issues" result appear trustworthy.
+                required = (
+                    "task", "task_brief", "product", "stable_product_context",
+                    "available_records", "context_limits",
+                )
             if required is None:
-                # Generic workflow: a goal and a task must both survive. Never
-                # accept a compact payload that contains only a company name.
-                required = tuple(k for k in ("request", "task") if k in raw)
-                if not required:
-                    return None
+                # Unknown workflow payloads have no verified compaction
+                # contract. A reviewer must never assess a partial task.
+                return None
             if any(key not in raw for key in required):
                 return None
             if workflow == "article_production" and "prior_stage_outputs" in raw:
