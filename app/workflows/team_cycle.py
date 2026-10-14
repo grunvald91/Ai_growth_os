@@ -238,6 +238,13 @@ class TeamCycle:
                     task_type=task_type, provider=self.provider_name,
                 )
 
+            def record_review_progress(snapshot):
+                persist_critic_audit(
+                    self.db, product_id=product.id, task_id=task.id,
+                    run_id=run_id, response=snapshot,
+                )
+                self.db.commit()
+
             error_code = "provider_request_failed"
             response = await asyncio.wait_for(
                 self.llm.generate(
@@ -254,6 +261,7 @@ class TeamCycle:
                         },
                     ), validate_revision=validate_candidate,
                     on_observed=record_call,
+                    on_review_progress=record_review_progress,
                 ),
                 timeout=SPECIALIST_TIMEOUTS.get(task_type, 120) + self.llm.extra_timeout_seconds,
             )
