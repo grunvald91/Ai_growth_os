@@ -194,3 +194,119 @@ def test_audit_helper_stores_immutable_review_artifact_and_extra_tokens(db):
     details = critic_cost_details(answer, task_type="research")
     assert details["usage_incomplete"] is True
     assert details["extra_usage_by_model"][0]["input_tokens"] == 110
+
+
+def test_team_context_compaction_keeps_brief_and_governing_constraints():
+    payload = {
+        "task": {"title": "Distribution plan", "description": "Use task brief"},
+        "task_brief": {"goal": "Grow organically", "constraints": [
+            "No paid advertising", "Telegram only", "Do not collect contact details",
+        ]},
+        "product": {"name": "Flowers"},
+        "stable_product_context": "Company products and verified company facts",
+        "available_records": {"goal": [{"id": "goal1", "title": "Long-term trust"}]},
+        "context_limits": {"max_records": 15},
+        "context_extra_nonessential": "old history " * 2000,
+    }
+    request = LLMRequest(
+        messages=[LLMMessage(role="user",content=json.dumps(payload))],
+        metadata={"team_role": "distribution", "task_type": "distribution_plan"},
+        response_schema=Draft.model_json_schema(),
+    )
+    compacted = _review_messages(request)
+    assert compacted is not None
+    retained=json.loads(compacted[0]["content"])
+    assert retained["task_brief"]==payload["task_brief"]
+    assert retained["product"]==payload["product"]
+    assert retained["available_records"]==payload["available_records"]
+    assert retained["context_limits"]==payload["context_limits"]
+    assert retained["stable_product_context"]==payload["stable_product_context"]
+    assert "context_extra_nonessential" not in retained
+    assert retained["context_truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_team_review_skips_when_required_brief_does_not_fit():
+    task_payload={
+        "task": {"title": "Distribution plan"},
+        "task_brief": {"constraints":["No paid advertising", "Telegram only"],
+                       "instructions":"critical constraint "*900},
+        "product": {"name":"Flowers"},
+        "stable_product_context": "Business profile",
+        "available_records": {"goal":[]},
+        "context_limits": {"max_records":8},
+    }
+    request=LLMRequest(messages=[LLMMessage(role="user",content=json.dumps(task_payload))],
+                       metadata={"team_role":"distribution","task_type":"distribution_plan"},
+                       response_schema=Draft.model_json_schema())
+    provider=FakeGateway([{"title":"Valid original","steps":["Organic Telegram"]}])
+    result=await LLMService(privacy_gateway=PrivacyGateway(),provider=provider,
+                            critic_enabled=True).generate(request)
+    assert result.quality_review["status"]=="skipped_incomplete_context"
+    assert len(provider.requests)==1
+
+
+def test_unregistered_long_context_workflow_fails_closed():
+    request=LLMRequest(
+        messages=[LLMMessage(role="user",content=json.dumps({
+            "task":{"title":"Demo"},"request":{"goal":"Demo"},
+            "constraints":"Do not advertise "+("more instructions "*1000),
+        }))],
+        metadata={"team_role":"custom_role","task_type":"unregistered_workflow"},
+    )
+    assert _review_messages(request) is None
+
+
+@pytest.mark.asyncio
+async def test_successful_critic_response_without_usage_is_marked_incomplete():
+    from app.llm.audit import critic_cost_details
+    class MissingUsage(FakeGateway):
+        async def generate(self, request):
+            self.requests.append(request)
+            answer=self.replies.pop(0)
+            return LLMResponse(
+                content=json.dumps(answer),model="missing-usage",
+                usage=LLMUsage(input_tokens=7,output_tokens=8)
+                    if len(self.requests)==1 else None,
+                stop_reason="end_turn",
+            )
+    gateway=MissingUsage([{"title":"Good","steps":["First"]},{"findings":[]}])
+    response=await LLMService(privacy_gateway=PrivacyGateway(),provider=gateway,
+                              critic_enabled=True).generate(req({
+        "company_name":"Flowers","topic":"Flowers care","audience":"Buyers",
+        "brief":"Be clear","channel":"telegram","channel_guidance":"One CTA",
+        "verified_facts":{},
+    }),validate_revision=checked)
+    assert response.quality_review["status"]=="no_material_issues"
+    assert response.quality_review["usage_unknown_for_failed_calls"] is True
+    critic_tokens=response.quality_review["extra_usage_by_model"][0]
+    assert critic_tokens["usage_known"] is False
+    assert critic_tokens["input_tokens"] is None and critic_tokens["output_tokens"] is None
+    assert response.usage.input_tokens==7
+    assert critic_cost_details(response)["usage_incomplete"] is True
+    assert critic_cost_details(response)["observed_tokens_only"] is True
+
+
+def test_accurately_reported_zero_tokens_is_not_unknown():
+    from app.llm.audit import critic_cost_details
+    response=LLMResponse(
+        content="{}",model="real-zero",
+        usage=LLMUsage(input_tokens=0,output_tokens=0),
+        quality_review={
+            "status":"no_material_issues",
+            "usage_unknown_for_failed_calls":False,
+            "extra_usage_by_model":[{
+                "model":"real-zero","usage_known":True,
+                "input_tokens":0,"output_tokens":0,
+            }],
+        },
+    )
+    details=critic_cost_details(response)
+    assert details["usage_incomplete"] is False
+    assert details["observed_tokens_only"] is False
+
+
+def test_article_module_has_valid_python_syntax():
+    import ast
+    from pathlib import Path
+    ast.parse(Path("app/workflows/article_production.py").read_text(encoding="utf-8"))
