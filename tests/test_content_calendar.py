@@ -462,11 +462,12 @@ async def test_planner_critic_keeps_advisory_findings_and_unknown_tokens(db, tmp
     run = db.scalar(select(AgentRun).where(AgentRun.task_id == task.id))
     assert {'kind': 'artifact', 'id': str(reviews[0].id)} in run.output_references
     costs = list(db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)))
-    assert len(costs) == 1
-    assert costs[0].input_tokens == 24
-    assert costs[0].details['usage_incomplete'] is True
-    assert costs[0].details['extra_usage_by_model'][0]['usage_known'] is False
-
+    assert len(costs) == 2
+    author = next(c for c in costs if c.details.get("llm_stage") == "author")
+    critic = next(c for c in costs if c.details.get("llm_stage") == "critic")
+    assert author.input_tokens == 24
+    assert critic.input_tokens is None
+    assert critic.details["usage_incomplete"] is True
 
 @pytest.mark.asyncio
 async def test_planner_timeout_keeps_attempt_audit_with_null_not_zero_tokens(db, tmp_path):
@@ -586,13 +587,11 @@ async def test_cancelled_second_planner_attempt_preserves_first_critic_audit_and
                for a in audit_artifacts)
 
     costs = list(db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)))
-    assert len(costs) == 2
-    observed = next(record for record in costs
-                    if record.details.get('review_status') == 'advisory_only_no_domain_validator')
-    pending = next(record for record in costs
-                   if record.details.get('review_status') == 'provider_cancelled')
-    assert observed.input_tokens == 30 and observed.output_tokens == 42
-    assert observed.details['extra_usage_by_model'][0]['input_tokens'] == 6
-    assert observed.details['usage_incomplete'] is False
+    assert len(costs) == 3
+    author = next(r for r in costs if r.details.get("llm_stage") == "author")
+    critic = next(r for r in costs if r.details.get("llm_stage") == "critic")
+    pending = next(r for r in costs if r.details.get("review_status") == "provider_cancelled")
+    assert author.input_tokens == 24 and author.output_tokens == 34
+    assert critic.input_tokens == 6 and critic.output_tokens == 8
     assert pending.input_tokens is None and pending.output_tokens is None
-    assert pending.details['usage_incomplete'] is True
+    assert pending.details["usage_incomplete"] is True
