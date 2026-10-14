@@ -226,6 +226,13 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                     provider=settings.llm_provider,
                 )
 
+            def record_review_progress(snapshot):
+                persist_critic_audit(
+                    db, product_id=product.id, task_id=task.id,
+                    run_id=run.id, response=snapshot,
+                )
+                db.commit()
+
             reply = await asyncio.wait_for(
                 llm.generate(LLMRequest(
                     system_prompt=system,
@@ -238,7 +245,8 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                         "reasoning_effort": "low", "provider_timeout_seconds": 90,
                     },
                 ), validate_revision=validate_candidate,
-                on_observed=record_model_call),
+                on_observed=record_model_call,
+                on_review_progress=record_review_progress),
                 timeout=180 + llm.extra_timeout_seconds,
             )
             persist_critic_audit(
