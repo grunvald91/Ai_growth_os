@@ -107,7 +107,8 @@ async def test_invalid_revision_falls_back_to_valid_original():
     ])
     result = await run(provider)
     assert json.loads(result.content)["steps"] == ["Onboarding"]
-    assert result.quality_review["status"] == "review_unavailable"
+    assert result.quality_review["status"] == "revision_unavailable"
+    assert result.quality_review["findings"][0]["id"] == "m1"
 
 
 @pytest.mark.asyncio
