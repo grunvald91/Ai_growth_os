@@ -7,6 +7,7 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
+from typing import Literal
 
 from sqlalchemy import select
 
@@ -26,6 +27,7 @@ class JobRequest(Contract):
     models: WhiteboardModels
     max_api_calls: int = Field(default=25, ge=13, le=25)
     visual_review: bool = False
+    image_provider: Literal['openrouter', 'claudehub'] = 'openrouter'
     visual_repair_from: UUID | None = None
     repair_source_digest: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     repair_manifest_sha256: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
@@ -35,6 +37,8 @@ class JobRequest(Contract):
     def review_budget(self):
         if self.visual_review and self.max_api_calls < 18:
             raise ValueError('One visual review and up to three redraws require at least 18 calls')
+        if self.image_provider == 'claudehub' and self.models.image != 'gemini-3.1-flash-image':
+            raise ValueError('ClaudeHub image generation must use Gemini 3.1 Flash Image')
         if self.visual_repair_from is not None:
             if not self.visual_review or not self.repair_source_digest or not self.repair_manifest_sha256:
                 raise ValueError('A visual repair must bind its original approved request and media manifest')
@@ -72,17 +76,18 @@ def records(db, task, *, lock=False):
     return source, state, approval, payload
 
 
-def queue_job(db, request: WhiteboardRequest, models: WhiteboardModels, *, max_api_calls=25, visual_review=False):
+def queue_job(db, request: WhiteboardRequest, models: WhiteboardModels, *, max_api_calls=25, visual_review=False, image_provider='openrouter'):
     if PrivacyGateway().sanitize_text(request.topic) != request.topic:
         raise ValueError('Sensitive text is not allowed')
     product = db.scalar(select(Product).where(Product.id == request.product_id).with_for_update())
     if product is None:
         raise LookupError('Product not found')
     payload = JobRequest(request=request.model_copy(update={'request_generation': True}),
-                         models=models, max_api_calls=max_api_calls, visual_review=visual_review)
+                         models=models, max_api_calls=max_api_calls, visual_review=visual_review, image_provider=image_provider)
     # Preserve the exact legacy serialization when this feature is not selected.
     content = payload.model_dump_json(exclude={'visual_repair_from', 'repair_source_digest',
-        'repair_manifest_sha256', 'inherited_calls'} | ({'visual_review'} if not visual_review else set()))
+        'repair_manifest_sha256', 'inherited_calls'} | ({'visual_review'} if not visual_review else set())
+        | ({'image_provider'} if image_provider == 'openrouter' else set()))
     title = 'WHITEBOARD-JOB: ' + digest(content)[:24]
     existing = db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == AGENT,
                                            Task.title == title, Task.status.in_([
@@ -175,7 +180,8 @@ class CallLedger:
                 raise ReadinessError('call_limit')
             model_stage = {'visual_review': 'regions', 'visual_decision': 'storyboard', 'image_revision': 'image'}.get(stage, stage)
             run = AgentRun(task_id=task.id, agent_name='whiteboard_' + stage,
-                           provider='configured_text' if model_stage == 'storyboard' else 'openrouter',
+                           provider='configured_text' if model_stage == 'storyboard' else
+                               payload.image_provider if model_stage == 'image' else 'openrouter',
                            model=getattr(payload.models, model_stage), status='running',
                            started_at=datetime.now(timezone.utc), input_references=[str(source.id)])
             db.add(run); db.flush()

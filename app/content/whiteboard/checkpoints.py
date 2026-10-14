@@ -21,7 +21,9 @@ class CheckpointError(RuntimeError):
 
 
 class CheckpointStore:
-    def __init__(self, directory: Path, request: WhiteboardRequest, *, models: dict[str, str], visual_review=False):
+    def __init__(self, directory: Path, request: WhiteboardRequest, *, models: dict[str, str], visual_review=False, image_provider=None):
+        if image_provider not in (None, 'claudehub'):
+            raise ValueError('Unsupported explicit image provider')
         if set(models) != {'storyboard', 'image', 'speech', 'regions'} or any(
             not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}', value)
             or value.startswith(('sk-', 'sk_')) for value in models.values()
@@ -39,6 +41,8 @@ class CheckpointStore:
         if visual_review:
             from .review import REVIEW_POLICY
             self.identity['visual_review'] = REVIEW_POLICY
+        if image_provider:
+            self.identity['image_provider'] = image_provider
         self.fingerprint = hashlib.sha256(json.dumps(self.identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         with self._lock():
             if self._path('manifest.json').exists():
@@ -84,6 +88,8 @@ class CheckpointStore:
             identity = {'request': state['request'], 'models': state['models']}
             if 'visual_review' in state:
                 identity['visual_review'] = state['visual_review']
+            if 'image_provider' in state:
+                identity['image_provider'] = state['image_provider']
             actual = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
             if state['schema_version'] != 1 or state['fingerprint'] != self.fingerprint or actual != self.fingerprint or not isinstance(state['stages'], dict):
                 raise ValueError('identity mismatch')
@@ -110,6 +116,21 @@ class CheckpointStore:
             if stage is None:
                 raise CheckpointError('Stage has not completed')
             return self._cached(name, stage, limit=limit)
+
+    def record_import(self, name, *, source_job_id, source_model_id):
+        from uuid import UUID
+        source_job_id = str(UUID(str(source_job_id)))
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}', source_model_id):
+            raise ValueError('Invalid imported source model ID')
+        with self._lock():
+            state = self._read_manifest()
+            stage = state['stages'][name]
+            self._cached(name, stage, limit=12_000_000)
+            origin = {'source_job_id':source_job_id, 'source_model_id':source_model_id}
+            if stage.get('imported_from') not in (None, origin):
+                raise CheckpointError('Imported media provenance changed')
+            stage['imported_from'] = origin
+            self._write_manifest(state)
 
     @staticmethod
     def _validate_name(name: str) -> None:

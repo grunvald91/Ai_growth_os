@@ -21,20 +21,20 @@ def test_ui_profile_is_bound_to_review_and_approval_without_changing_global_sett
         inspected.append(models)
         assert scoped is not settings
         assert configured_models(scoped) == models
-        assert models.image == 'black-forest-labs/flux.2-pro'
+        assert models.image == 'gemini-3.1-flash-image'
         assert models.speech == 'x-ai/grok-voice-tts-1.0' and voice == scoped.whiteboard_voice == 'eve'
         assert scoped.openrouter_api_key == settings.openrouter_api_key
         return {'ready': True}
     monkeypatch.setattr(api, 'preflight', inspect)
     with client() as browser:
         created = browser.post(f'/products/{product_id}/whiteboard/jobs',
-            json={'topic': 'Почему самолёт садится на авианосец', 'profile': 'flux_ru'})
+            json={'topic': 'Почему самолёт садится на авианосец', 'profile': 'gemini_ru'})
         assert created.status_code == 201
         state = created.json()
         assert state['calls'] == 0 and state['approval_status'] == 'pending'
         task_id = UUID(state['task_id'])
         page = browser.get(f'/studio/products/{product_id}/whiteboard/{task_id}')
-        assert 'black-forest-labs/flux.2-pro' in page.text and 'eve' in page.text
+        assert 'gemini-3.1-flash-image' in page.text and 'eve' in page.text
         assert 'video controls' not in page.text
         approval = browser.post(f'/products/{product_id}/whiteboard/jobs/{task_id}/approve',
             json={'request_digest': state['request_digest'], 'confirmed': True})
@@ -82,10 +82,10 @@ def test_invalid_owner_form_retains_escaped_topic_and_selected_settings(environm
     topic = '</textarea><script>alert(1)</script>'
     with client() as browser:
         response = browser.post(f'/studio/products/{product_id}/whiteboard',
-            data={'topic': topic, 'max_api_calls': '12', 'profile': 'flux_ru'})
+            data={'topic': topic, 'max_api_calls': '12', 'profile': 'gemini_ru'})
         assert response.status_code == 422 and 'text/html' in response.headers['content-type']
         assert '&lt;/textarea&gt;&lt;script&gt;alert(1)&lt;/script&gt;' in response.text
-        assert topic not in response.text and 'value="flux_ru" selected' in response.text
+        assert topic not in response.text and 'value="gemini_ru" selected' in response.text
     with factory() as db:
         assert list(db.scalars(select(Task))) == []
 
@@ -100,7 +100,7 @@ def test_index_exposes_return_path_and_russian_job_status(environment, monkeypat
         response = browser.get(f'/studio/products/{product_id}/whiteboard')
         assert response.status_code == 200 and 'Ваши анимации' in response.text
         assert 'Ожидает подтверждения' in response.text and f'/whiteboard/{task_id}' in response.text
-        assert 'value="flux_ru" selected' in response.text
+        assert 'value="gemini_ru" selected' in response.text
         assert 'Скачать MP4</a>' not in response.text
         assert 'Refresh' not in response.headers
 

@@ -31,7 +31,7 @@ class VisualIssue(Contract):
 
 class VisualReview(Contract):
     checked_scenes: list[int] = Field(min_length=3, max_length=3)
-    issues: list[VisualIssue] = Field(default_factory=list, max_length=12)
+    issues: list[VisualIssue] = Field(default_factory=list)
 
     @model_validator(mode='after')
     def distinct(self):
@@ -53,7 +53,7 @@ class IssueDecision(Contract):
 
 
 class VisualDecision(Contract):
-    decisions: list[IssueDecision] = Field(default_factory=list, max_length=12)
+    decisions: list[IssueDecision] = Field(default_factory=list)
 
     def check_for(self, review):
         issues = {i.id: i for i in review.issues}
@@ -85,7 +85,8 @@ class OpenRouterVisualCritic(OpenRouterBase):
             'For each issue name the visible object/location as evidence and a specific minimal correction. '
             'Do not claim external fact checking or invent references. If uncertain, mark confidence uncertain. '
             'Severity blocking/major only for demonstrably misleading or unreadable content, minor otherwise. '
-            'Return strict JSON matching this schema, Russian evidence/correction, up to 12 issues, '
+            'Report every substantial visible issue concisely; do not impose an arbitrary issue count. '
+            'Return strict JSON matching this schema, Russian evidence/correction, '
             'checked_scenes [0,1,2], no prose: ' + json.dumps(VisualReview.model_json_schema()) +
             '\nStoryboard (0-based scene and beat indices): ' + storyboard.model_dump_json()
         )

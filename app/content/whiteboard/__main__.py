@@ -53,7 +53,8 @@ def render_checkpoint(directory: Path, destination: Path, *, width=720, height=1
     policy = manifest.get('visual_review')
     if policy not in (None, REVIEW_POLICY):
         raise ValueError('Unsupported visual review policy')
-    store = CheckpointStore(directory, request, models=manifest['models'], visual_review=bool(policy))
+    store = CheckpointStore(directory, request, models=manifest['models'], visual_review=bool(policy),
+                            image_provider=manifest.get('image_provider'))
     storyboard = WhiteboardStoryboard.model_validate_json(store.load('storyboard', limit=64_000))
     if policy:
         review = VisualReview.model_validate_json(store.load('visual-review', limit=64_000))

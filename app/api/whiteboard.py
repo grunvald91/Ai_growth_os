@@ -32,7 +32,7 @@ STATUS_NAMES = {'waiting_approval': 'Ожидает подтверждения',
 class CreateJob(Contract):
     topic: str = Field(min_length=8, max_length=400)
     max_api_calls: int = Field(default=13, ge=13, le=25)
-    profile: Literal['configured', 'flux_ru'] = 'configured'
+    profile: Literal['configured', 'gemini_ru'] = 'configured'
     visual_review: bool = False
 
 
@@ -47,6 +47,7 @@ def job_state(db, product_id, task_id):
     return {'task_id': str(task.id), 'status': task.status.value, 'request': payload.request.model_dump(mode='json'),
             'models': payload.models.model_dump(), 'max_api_calls': payload.max_api_calls,
             'visual_review_enabled': payload.visual_review,
+            'image_provider': payload.image_provider,
             'visual_repair_from': str(payload.visual_repair_from) if payload.visual_repair_from else None,
             'inherited_calls': payload.inherited_calls,
             'request_digest': digest(source.content), 'approval_status': approval.status,
@@ -70,7 +71,8 @@ def _queue(db, product, body, settings):
         raise HTTPException(503, MESSAGES['configuration_missing']) from None
     request = WhiteboardRequest(product_id=product.id, topic=body.topic, voice=voice)
     try:
-        return queue_job(db, request, models, max_api_calls=body.max_api_calls, visual_review=body.visual_review)
+        return queue_job(db, request, models, max_api_calls=body.max_api_calls, visual_review=body.visual_review,
+                         image_provider='claudehub')
     except ValueError:
         raise HTTPException(422, 'Проверьте тему и лимит: с проверкой рисунков выберите 19 или 25 вызовов. Ключи и персональные данные нельзя включать в видео.') from None
 
@@ -175,6 +177,8 @@ def job_html(state, product_id, *, error=None):
         body += f'<p class="sg-warning" role="alert">{esc(warning)}</p>'
     if state.get('visual_review_enabled'):
         body += '<p>Один проход визуального критика. Автор выбирает существенные исправления; каждая выбранная сцена перерисовывается максимум один раз.</p>'
+    if state.get('image_provider') == 'claudehub':
+        body += '<p>Новые рисунки и перерисовки: Gemini 3.1 Flash Image через API ClaudeHub. Автоматической замены модели или провайдера нет.</p>'
     if state.get('visual_repair_from'):
         body += ('<p><strong>Переделка рисунков с исходной озвучкой.</strong> Сценарий, голос и аудиофайлы сохраняются. '
                  'Новая озвучка запрещена. Раскрытие рисунков привязано к длительности исходных реплик.</p>'
@@ -230,7 +234,7 @@ def job_html(state, product_id, *, error=None):
 def creation_form(product_id, *, fields=None, error=None):
     fields = fields or {}
     base = f'/studio/products/{product_id}/whiteboard'
-    profile = fields.get('profile', 'flux_ru')
+    profile = fields.get('profile', 'gemini_ru')
     maximum = str(fields.get('max_api_calls', '19'))
     visual_review = fields.get('visual_review', 'once')
     body = '<section class="sg-surface"><h2>Создать анимацию с озвучкой</h2><p>Вертикальное видео на 30 секунд: три сцены, русская озвучка, MP4, обложка и субтитры. Перед запуском вы подтвердите платную генерацию. Доступ к моделям проверяется перед платным запуском.</p>'
@@ -242,7 +246,7 @@ def creation_form(product_id, *, fields=None, error=None):
              '<details><summary>Настройки генерации</summary>'
              '<label class="sg-field"><span>Вариант генерации</span><select name="profile">' + ''.join(
                  f'<option value="{value}"' + (' selected' if profile == value else '') + f'>{label}</option>'
-                 for value, label in [('flux_ru', 'FLUX — рисунки, Grok — русская озвучка'), ('configured', 'Модели из настроек сервера')]) +
+                 for value, label in [('gemini_ru', 'Gemini 3.1 Flash Image / ClaudeHub — рисунки, Grok — озвучка'), ('configured', 'Gemini / ClaudeHub — рисунки, остальные модели из настроек сервера')]) +
              '</select><small>Выбор сохраняется только для этого задания. Модели и голос можно проверить перед подтверждением.</small></label>'
              '<label class="sg-field"><span>Проверка рисунков</span><select name="visual_review">' + ''.join(
                  f'<option value="{value}"' + (' selected' if visual_review == value else '') + f'>{label}</option>'
@@ -322,7 +326,7 @@ async def studio_index(product_id: UUID, db: Session = Depends(get_db), settings
     product = _owner_product(db, product_id)
     error = None
     try:
-        generation_profile(settings, 'flux_ru')
+        generation_profile(settings, 'gemini_ru')
         if not settings.openrouter_api_key or not settings.xai_api_key:
             error = MESSAGES['configuration_missing']
     except ValueError:

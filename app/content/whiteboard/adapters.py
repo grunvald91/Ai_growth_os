@@ -8,6 +8,9 @@ from __future__ import annotations
 import base64
 import json
 import re
+import io
+import math
+from urllib.parse import urlsplit
 from typing import Any
 
 import httpx
@@ -193,9 +196,58 @@ class OpenRouterImageProvider(OpenRouterBase):
         return image
 
     async def revise(self, scene, request, corrections):
-        if not corrections or len(corrections) > 12:
+        if not corrections:
             raise ValueError('Explicit accepted corrections required')
         return await self.generate(scene, request, corrections=corrections)
+
+
+class ClaudeHubGeminiImageProvider(OpenRouterImageProvider):
+    """Only Gemini 3.1 Flash Image, through ClaudeHub's documented Image API."""
+
+    def __init__(self, *, api_key, base_url, model='gemini-3.1-flash-image', client=None):
+        url = urlsplit(base_url)
+        if (model != 'gemini-3.1-flash-image' or url.scheme != 'https' or url.hostname != 'api.claudehub.fun'
+                or url.port not in (None, 443) or url.path.rstrip('/') != '/v1'
+                or url.username or url.password or url.query or url.fragment):
+            raise ValueError('Gemini 3.1 Flash Image at the trusted ClaudeHub API is required')
+        super().__init__(api_key=api_key, model=model, client=client)
+        self.base_url = base_url.rstrip('/') + '/'
+
+    async def post(self, endpoint, payload):
+        if endpoint != 'images' or payload['model'] != 'gemini-3.1-flash-image':
+            raise ValueError('No alternative image model or transport is permitted')
+        # ClaudeHub documents model/prompt/size, not OpenRouter's resolution/image_config.
+        body = {'model': self.model, 'prompt': payload['prompt'], 'size': '1024x1792'}
+        headers = {'Authorization': 'Bearer ' + self.key}
+        if self.client is not None:
+            response = await self.client.post('images/generations', json=body, headers=headers)
+        else:
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=120,
+                    trust_env=False, follow_redirects=False) as client:
+                response = await client.post('images/generations', json=body, headers=headers)
+        response.raise_for_status()
+        return response
+
+    async def generate(self, scene, request, *, corrections=()):
+        image = await super().generate(scene, request, corrections=corrections)
+        from PIL import Image
+        with Image.open(io.BytesIO(image)) as source:
+            width, height = source.size
+            if source.format != 'PNG' or width * height > 10_000_000:
+                raise ValueError('ClaudeHub must return a bounded PNG')
+            # Its documented portrait size is 1024x1792. Pad to exact 9:16,
+            # preserving geometry and every source pixel, never crop/stretch objects.
+            unit = math.ceil(max(width / 9, height / 16))
+            target = (9 * unit, 16 * unit)
+            if target[0] * target[1] > 10_000_000:
+                raise ValueError('Padded image exceeds bounds')
+            canvas = Image.new('RGBA', target, 'white')
+            canvas.alpha_composite(source.convert('RGBA'), ((target[0]-width)//2, (target[1]-height)//2))
+            output = io.BytesIO(); canvas.convert('RGB').save(output, format='PNG')
+        result = output.getvalue()
+        if len(result) > 12_000_000:
+            raise ValueError('Padded PNG exceeds size limit')
+        return result
 
 
 class OpenRouterSpeechProvider(OpenRouterBase):

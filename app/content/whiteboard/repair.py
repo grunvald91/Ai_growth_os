@@ -22,7 +22,8 @@ def source_store(db, settings, product_id, source_id):
     directory = job_directory(settings.products_root, product_id, source_id) / 'stages'
     if not (directory / 'manifest.json').is_file():
         raise ReadinessError('repair_source_invalid')
-    store = CheckpointStore(directory, payload.request, models=payload.models.model_dump(), visual_review=payload.visual_review)
+    store = CheckpointStore(directory, payload.request, models=payload.models.model_dump(), visual_review=payload.visual_review,
+                           image_provider='claudehub' if payload.image_provider == 'claudehub' else None)
     return source, json.loads(state.content), payload, store
 
 
@@ -43,8 +44,9 @@ def queue_visual_repair(db, settings, product_id, source_id):
         for beat in range(len(scene.beats)):
             audio = store.load(f'scene-{index:02}-beat-{beat:02}-speech', limit=10_000_000)
             audio_hashes.append({'scene_index': index, 'beat_index': beat, 'sha256': hashlib.sha256(audio).hexdigest()})
-    payload = JobRequest(request=original.request, models=original.models,
+    payload = JobRequest(request=original.request, models=original.models.model_copy(update={'image':'gemini-3.1-flash-image'}),
         max_api_calls=original.max_api_calls, visual_review=True, visual_repair_from=UUID(str(source_id)),
+        image_provider='claudehub',
         repair_source_digest=digest(source.content), repair_manifest_sha256=hashlib.sha256((store.directory/'manifest.json').read_bytes()).hexdigest(),
         inherited_calls=value['calls'])
     content = payload.model_dump_json()
@@ -69,15 +71,20 @@ async def prime_visual_repair(session_factory, settings, product_id, payload, de
         source, value, original, store = source_store(db, settings, product_id, payload.visual_repair_from)
         if (digest(source.content) != payload.repair_source_digest
                 or hashlib.sha256((store.directory/'manifest.json').read_bytes()).hexdigest() != payload.repair_manifest_sha256
-                or original.request != payload.request or original.models != payload.models
+                or original.request != payload.request
+                or original.models.model_copy(update={'image':'gemini-3.1-flash-image'}) != payload.models
+                or payload.image_provider != 'claudehub'
                 or value['calls'] != payload.inherited_calls):
             raise ReadinessError('repair_source_invalid')
         story = WhiteboardStoryboard.model_validate_json(store.load('storyboard',limit=64_000))
         async def saved_story():return story
         await destination.json_stage('storyboard',saved_story,WhiteboardStoryboard)
+        destination.record_import('storyboard',source_job_id=payload.visual_repair_from,source_model_id=original.models.storyboard)
         for index,scene in enumerate(story.scenes):
             for name,limit in [(f'scene-{index:02}-image',12_000_000),
                                *[(f'scene-{index:02}-beat-{beat:02}-speech',10_000_000) for beat in range(len(scene.beats))]]:
                 data = store.load(name,limit=limit)
                 async def saved():return data
                 await destination.bytes_stage(name,saved,limit=limit)
+                destination.record_import(name,source_job_id=payload.visual_repair_from,
+                    source_model_id=original.models.speech if name.endswith('-speech') else original.models.image)

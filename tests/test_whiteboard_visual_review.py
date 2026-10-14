@@ -201,6 +201,12 @@ def test_author_cannot_accept_minor_or_unknown_advice():
     with pytest.raises(ValidationError):review(issue(),issue())
 
 
+def test_substantial_issues_are_not_limited_to_three_or_twelve():
+    report=review(*[issue().model_copy(update={'id':f's0-hook-{i}'}) for i in range(15)])
+    result=decision(report)
+    assert len(result.accepted(report,0))==15
+
+
 @pytest.mark.asyncio
 async def test_vision_adapter_sends_three_images_in_one_request_and_rejects_incomplete_reply():
     seen=[]

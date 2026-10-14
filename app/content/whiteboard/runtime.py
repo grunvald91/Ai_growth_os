@@ -43,12 +43,12 @@ def scoped_settings(settings, models: WhiteboardModels, voice: str):
 
 
 def generation_profile(settings, profile: str):
-    if profile == 'flux_ru':
+    if profile == 'gemini_ru':
         return WhiteboardModels(storyboard=settings.whiteboard_storyboard_model,
-            image='black-forest-labs/flux.2-pro', speech='x-ai/grok-voice-tts-1.0',
+            image='gemini-3.1-flash-image', speech='x-ai/grok-voice-tts-1.0',
             regions='qwen/qwen3-vl-30b-a3b-instruct'), 'eve'
     if profile == 'configured':
-        return configured_models(settings), settings.whiteboard_voice
+        return configured_models(settings).model_copy(update={'image':'gemini-3.1-flash-image'}), settings.whiteboard_voice
     raise ValueError('Unknown generation profile')
 
 
@@ -75,6 +75,8 @@ MESSAGES = {
     'review_budget': 'В сценарии больше реплик, чем предусмотрено лимитом проверки рисунков. Генерация остановлена до изображений; автоматического повтора нет.',
     'repair_source_invalid': 'Исходный сценарий или озвучка не прошли проверку сохранённых файлов. Визуальная правка остановлена; новая озвучка не запускается.',
     'repair_budget': 'В подтверждённом лимите исходного ролика осталось меньше 8 вызовов для визуальной правки. Повтор автоматически не запускается.',
+    'image_provider_required': 'Новые рисунки разрешены только через Gemini 3.1 Flash Image в ClaudeHub. Создайте новый запрос с этими настройками; автоматической замены нет.',
+    'claudehub_image_unavailable': 'Gemini 3.1 Flash Image недоступна с текущим ключом ClaudeHub. Новые изображения не заказаны; замены модели нет.',
 }
 
 
@@ -89,7 +91,7 @@ def safe_error(exc) -> str:
     return 'generation_failed'
 
 
-async def preflight(settings, models: WhiteboardModels, voice: str, *, client=None):
+async def preflight(settings, models: WhiteboardModels, voice: str, *, client=None, claudehub_client=None):
     """Only GETs. Fail before any paid call, using the actual adapter's HTTP client."""
     if not settings.openrouter_api_key or not settings.xai_api_key:
         raise ReadinessError('configuration_missing')
@@ -108,7 +110,10 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
             raise ReadinessError('openrouter_key_invalid')
         if response.status_code != 200:
             raise ReadinessError('openrouter_unavailable')
-        for endpoint, chosen in (('images/models', models.image), ('models?output_modalities=speech', models.speech), ('models', models.regions)):
+        catalogues = [('models?output_modalities=speech', models.speech), ('models', models.regions)]
+        if models.image != 'gemini-3.1-flash-image':
+            catalogues.insert(0, ('images/models', models.image))
+        for endpoint, chosen in catalogues:
             result = await client.get(endpoint, headers=headers)
             if result.status_code != 200:
                 raise ReadinessError('openrouter_unavailable')
@@ -121,7 +126,22 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
                 if voices and voice not in voices:
                     raise ReadinessError('model_unavailable')
         return {'ready': True, 'code': 'ready'}
+    async def check_claudehub(connection):
+        response = await connection.get('models', headers={'Authorization':'Bearer '+settings.xai_api_key})
+        if response.status_code != 200 or not any(item.get('id') == 'gemini-3.1-flash-image' for item in response.json().get('data',[])):
+            raise ReadinessError('claudehub_image_unavailable')
     try:
+        if models.image == 'gemini-3.1-flash-image':
+            from urllib.parse import urlsplit
+            url = urlsplit(settings.xai_base_url)
+            if url.scheme != 'https' or url.hostname != 'api.claudehub.fun' or url.path.rstrip('/') != '/v1' or url.username or url.password or url.query or url.fragment:
+                raise ReadinessError('claudehub_image_unavailable')
+            if claudehub_client is not None:
+                await check_claudehub(claudehub_client)
+            else:
+                async with httpx.AsyncClient(base_url=settings.xai_base_url.rstrip('/')+'/', timeout=15,
+                        follow_redirects=False, trust_env=False) as connection:
+                    await check_claudehub(connection)
         if client is not None:
             return await check(client)
         async with httpx.AsyncClient(base_url='https://openrouter.ai/api/v1/', timeout=15, follow_redirects=False,

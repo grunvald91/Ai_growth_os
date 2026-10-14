@@ -12,7 +12,7 @@ from sqlalchemy import select, update
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, Task, TaskStatus
 from app.llm.service import LLMService
 from app.privacy import PrivacyGateway
-from .adapters import LLMStoryboardProvider, OpenRouterImageProvider, OpenRouterRegionProvider, OpenRouterSpeechProvider
+from .adapters import LLMStoryboardProvider, ClaudeHubGeminiImageProvider, OpenRouterRegionProvider, OpenRouterSpeechProvider
 from .checkpoints import CheckpointStore, CheckpointError, _Lock
 from .jobs import AGENT, CallLedger, GuardedStage, job_directory, owner_task, records
 from .pipeline import WhiteboardPipeline
@@ -22,11 +22,13 @@ from .runtime import ReadinessError, SingleCallStoryboardLLM, preflight, safe_er
 
 
 def build_pipeline(settings, payload, store):
+    if payload.image_provider != 'claudehub' or payload.models.image != 'gemini-3.1-flash-image':
+        raise ReadinessError('image_provider_required')
     privacy = PrivacyGateway()
     service = LLMService(privacy_gateway=privacy, provider=SingleCallStoryboardLLM(settings, diagnostic_directory=store.directory))
     return WhiteboardPipeline(
         storyboard=LLMStoryboardProvider(service, model=payload.models.storyboard),
-        images=OpenRouterImageProvider(api_key=settings.openrouter_api_key, model=payload.models.image, proxy_url=settings.whiteboard_proxy_url),
+        images=ClaudeHubGeminiImageProvider(api_key=settings.xai_api_key, base_url=settings.xai_base_url, model=payload.models.image),
         speech=OpenRouterSpeechProvider(api_key=settings.openrouter_api_key, model=payload.models.speech, proxy_url=settings.whiteboard_proxy_url),
         regions=OpenRouterRegionProvider(api_key=settings.openrouter_api_key, model=payload.models.regions, proxy_url=settings.whiteboard_proxy_url),
         renderer=MarkerSweepRenderer(), sanitizer=privacy, checkpoints=store,
@@ -114,7 +116,8 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
             job_settings = scoped_settings(settings, payload.models, payload.request.voice)
             await (readiness or preflight)(job_settings, payload.models, payload.request.voice)
             store = CheckpointStore(directory / 'stages', payload.request, models=payload.models.model_dump(),
-                                    visual_review=payload.visual_review)
+                                    visual_review=payload.visual_review,
+                                    image_provider='claudehub' if payload.image_provider == 'claudehub' else None)
             if payload.visual_repair_from is not None:
                 from .repair import prime_visual_repair
                 try:
