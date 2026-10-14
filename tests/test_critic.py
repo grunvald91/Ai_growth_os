@@ -370,3 +370,95 @@ async def test_each_completed_call_is_observed_before_critic_cancellation():
                            observed.append((stage, value.usage.input_tokens,
                                             value.usage.output_tokens)))
     assert observed == [("author", 24, 34)]
+
+
+@pytest.mark.asyncio
+async def test_validated_major_finding_persisted_before_revision_is_cancelled():
+    """The critic's finding must be durably observable before cancelled author work."""
+    import asyncio
+
+    class CancelledRevision:
+        def __init__(self):
+            self.requests = []
+        async def generate(self, request):
+            self.requests.append(request)
+            if request.metadata.get("task_type") == "apply_quality_feedback":
+                raise asyncio.CancelledError()
+            payload = (finding() if request.metadata.get("task_type") == "quality_review"
+                       else {"title": "Plan", "steps": ["Traffic"]})
+            return LLMResponse(
+                content=json.dumps(payload), model="fake",
+                usage=LLMUsage(input_tokens=24, output_tokens=34),
+                stop_reason="end_turn",
+            )
+
+    provider = CancelledRevision()
+    observed = []
+    reviews = []
+    with pytest.raises(asyncio.CancelledError):
+        await LLMService(
+            privacy_gateway=PrivacyGateway(), provider=provider,
+            critic_enabled=True,
+        ).generate(
+            task(),
+            validate_revision=lambda data: Draft.model_validate(data),
+            on_observed=lambda stage, reply: observed.append(
+                (stage, reply.usage.input_tokens, reply.usage.output_tokens)),
+            on_review_progress=lambda reply: reviews.append(reply.quality_review),
+        )
+    assert len(provider.requests) == 3
+    assert [stage for stage, _, _ in observed] == ["author", "critic"]
+    assert [item["status"] for item in reviews] == [
+        "revision_pending", "revision_cancelled"
+    ]
+    assert all(item["findings"][0]["id"] == "m1" for item in reviews)
+    assert all(item["findings"][0]["severity"] == "major" for item in reviews)
+    assert reviews[1]["usage_unknown_for_failed_calls"] is True
+
+
+@pytest.mark.asyncio
+async def test_invalid_critic_report_is_never_logged_as_validated():
+    provider = SequenceProvider([
+        {"title": "Plan", "steps": ["Traffic"]},
+        {"findings": [{"id": "m1", "severity": "major", "problem": "Incomplete"}]},
+    ])
+    audit = []
+    result = await LLMService(
+        privacy_gateway=PrivacyGateway(), provider=provider,
+        critic_enabled=True,
+    ).generate(
+        task(), validate_revision=lambda data: Draft.model_validate(data),
+        on_review_progress=lambda response: audit.append(response.quality_review),
+    )
+    assert result.quality_review["status"] == "review_unavailable"
+    assert audit == []
+
+
+@pytest.mark.asyncio
+async def test_failed_intermediate_audit_does_not_silently_start_revision():
+    class Provider:
+        def __init__(self):
+            self.requests = []
+        async def generate(self, request):
+            self.requests.append(request)
+            payload = finding() if len(self.requests) == 2 else {
+                "title": "Plan", "steps": ["Traffic"],
+            }
+            return LLMResponse(content=json.dumps(payload), model="fake",
+                               usage=LLMUsage(input_tokens=1, output_tokens=1),
+                               stop_reason="end_turn")
+    provider = Provider()
+
+    def fail_audit(_response):
+        raise OSError("database unavailable")
+
+    from app.llm.critic import ReviewAuditPersistenceError
+    with pytest.raises(ReviewAuditPersistenceError):
+        await LLMService(
+            privacy_gateway=PrivacyGateway(), provider=provider,
+            critic_enabled=True,
+        ).generate(
+            task(), validate_revision=lambda data: Draft.model_validate(data),
+            on_review_progress=fail_audit,
+        )
+    assert len(provider.requests) == 2
