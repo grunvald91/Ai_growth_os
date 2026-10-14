@@ -263,16 +263,22 @@ async def test_team_review_skips_when_required_brief_does_not_fit():
     assert len(provider.requests)==1
 
 
-def test_unregistered_long_context_workflow_fails_closed():
-    request=LLMRequest(
-        messages=[LLMMessage(role="user",content=json.dumps({
-            "task":{"title":"Demo"},"request":{"goal":"Demo"},
-            "constraints":"Do not advertise "+("more instructions "*1000),
+@pytest.mark.asyncio
+async def test_unregistered_long_context_workflow_fails_closed():
+    request = LLMRequest(
+        messages=[LLMMessage(role="user", content=json.dumps({
+            "task": {"title": "Demo"}, "request": {"goal": "Demo"},
+            "constraints": "Do not advertise " + ("more instructions " * 2000),
         }))],
-        metadata={"team_role":"custom_role","task_type":"unregistered_workflow"},
+        metadata={"team_role": "custom_role", "task_type": "unregistered_workflow"},
+        response_schema=Draft.model_json_schema(),
     )
-    assert _review_messages(request) is None
-
+    provider = FakeGateway([{"title": "Original", "steps": ["Safe"]}])
+    result = await LLMService(
+        privacy_gateway=PrivacyGateway(), provider=provider,
+        critic_enabled=True).generate(request)
+    assert result.quality_review["status"] == "skipped_incomplete_context"
+    assert len(provider.requests) == 1
 
 @pytest.mark.asyncio
 async def test_successful_critic_response_without_usage_is_marked_incomplete():
