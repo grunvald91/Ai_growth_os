@@ -595,3 +595,42 @@ async def test_cancelled_second_planner_attempt_preserves_first_critic_audit_and
     assert critic.input_tokens == 6 and critic.output_tokens == 8
     assert pending.input_tokens is None and pending.output_tokens is None
     assert pending.details["usage_incomplete"] is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_critic_keeps_already_completed_author_usage(db, tmp_path):
+    import asyncio
+    product, settings = setup(db, tmp_path)
+    settings.agent_critic_enabled = True
+    task = db.scalar(select(Task).where(
+        Task.assigned_agent == "editorial_planner", Task.status == TaskStatus.QUEUED))
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+        async def generate(self, request):
+            self.calls.append(request)
+            if request.metadata.get("task_type") == "quality_review":
+                raise asyncio.CancelledError()
+            return LLMResponse(
+                content=json.dumps(draft(), ensure_ascii=False),
+                model="planner", usage=LLMUsage(input_tokens=24, output_tokens=34),
+                stop_reason="end_turn")
+
+    provider = Provider()
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
+                     critic_enabled=True)
+    with pytest.raises(asyncio.CancelledError):
+        await run_planner_once(lambda: Borrow(db), settings, llm)
+
+    assert len(provider.calls) == 2
+    run = db.scalar(select(AgentRun).where(AgentRun.task_id == task.id))
+    assert run.status == "failed"
+    rows = list(db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)))
+    observed = [r for r in rows if r.details.get("llm_stage") == "author"]
+    assert len(observed) == 1
+    assert (observed[0].input_tokens, observed[0].output_tokens) == (24, 34)
+    unknown = [r for r in rows if r.details.get("review_status") == "provider_cancelled"]
+    assert len(unknown) == 1
+    assert unknown[0].input_tokens is None
+    assert unknown[0].details["usage_incomplete"] is True
