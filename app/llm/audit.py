@@ -36,6 +36,36 @@ def critic_cost_details(response, **extra) -> dict:
     }
 
 
+def persist_critic_attempt_event(db, *, product_id, task_id, run_id, event: dict) -> str:
+    """An attempted but unanswered provider call has unknown cost and tokens.
+
+    Store a bounded reason code, never raw prompts, source data or credentials.
+    """
+    status = str(event.get("status") or "provider_error")
+    if status not in {"provider_error", "provider_timeout", "fallback_error"}:
+        raise ValueError("Unsupported provider attempt audit status")
+    record = ArtifactService(db).create(
+        product_id=product_id, task_id=task_id, agent_run_id=run_id,
+        kind="agent_quality_review", title="Unanswered planner model call",
+        content=json.dumps({
+            "status": status,
+            "attempt": int(event.get("attempt", 0)),
+            "model": str(event.get("model", ""))[:120],
+            "usage_known": False,
+            "usage_incomplete": True,
+            "findings": [],
+            "decisions": [],
+        }, ensure_ascii=False),
+        status="draft",
+    )
+    run = db.get(AgentRun, run_id)
+    run.output_references = [
+        *(run.output_references or []),
+        {"kind": "artifact", "id": str(record.id)},
+    ]
+    return str(record.id)
+
+
 def persist_critic_audit(db, *, product_id, task_id, run_id, response) -> str | None:
     if response is None or not response.quality_review:
         return None
