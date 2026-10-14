@@ -39,6 +39,34 @@ def decision(report, *, accept=True):
         else 'Совет не требуется для исходной задачи и не принят.') for i in report.issues])
 
 
+def grouped_author_response():
+    return {'review': {'accepted': [{'issue_id':'s0-hook', 'scene_index':0, 'beat_index':0,
+        'reason':'Исправить подтверждённое расположение крюка.',
+        'correction':'Показать крюк под хвостом самолёта.'}], 'rejected':[
+        {'issue_id':'s1-hook', 'scene_index':1, 'beat_index':0,
+         'reason':'Стилистическое изменение не требуется.'}]}}
+
+
+def test_author_grouped_endpoint_response_preserves_explicit_decisions():
+    report = review(issue(), issue(1, category='style'))
+    value = VisualDecision.from_author_json(json.dumps(grouped_author_response()), report)
+    assert [(d.issue_id,d.accept) for d in value.decisions] == [('s0-hook',True),('s1-hook',False)]
+    assert value.accepted(report,0) == (report.issues[0],)
+
+
+@pytest.mark.parametrize('change',['unknown','duplicate','missing','wrong_scene','extra','accept_style'])
+def test_author_grouped_response_cannot_expand_or_ambiguously_change_decisions(change):
+    report=review(issue(),issue(1,category='style'));body=grouped_author_response()
+    accepted=body['review']['accepted'];rejected=body['review']['rejected']
+    if change=='unknown':accepted[0]['issue_id']='s2-other'
+    if change=='duplicate':accepted.append(dict(accepted[0]))
+    if change=='missing':rejected.clear()
+    if change=='wrong_scene':accepted[0]['scene_index']=2
+    if change=='extra':accepted[0]['new_narration']='Change the entire story'
+    if change=='accept_style':accepted.extend(rejected);rejected.clear()
+    with pytest.raises(ValueError):VisualDecision.from_author_json(json.dumps(body),report)
+
+
 def pipeline_factory(seen, report, *, fail=False, selected=True):
     def build(settings, payload, store):
         p = fake_factory(settings, payload, store)

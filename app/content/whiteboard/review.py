@@ -55,6 +55,41 @@ class IssueDecision(Contract):
 class VisualDecision(Contract):
     decisions: list[IssueDecision] = Field(default_factory=list)
 
+    @classmethod
+    def from_author_json(cls, content, review):
+        value = json.loads(content)
+        # Some compatible endpoints ignore json_schema and return explicit
+        # accepted/rejected lists. Translate only that bounded, unambiguous
+        # format; never discard arbitrary extra fields or infer acceptance.
+        if isinstance(value, dict) and set(value) == {'review'}:
+            grouped = value['review']
+            if not isinstance(grouped, dict) or set(grouped) != {'accepted', 'rejected'}:
+                raise ValueError('Invalid author decision envelope')
+            issues = {i.id: i for i in review.issues}
+            decisions = []
+            for group, accepted in [('accepted', True), ('rejected', False)]:
+                if not isinstance(grouped[group], list):
+                    raise ValueError('Author decisions must be lists')
+                for entry in grouped[group]:
+                    allowed = {'issue_id', 'reason', 'scene_index', 'beat_index', 'correction'}
+                    if not isinstance(entry, dict) or set(entry) - allowed or not {'issue_id', 'reason'} <= set(entry):
+                        raise ValueError('Invalid grouped author decision')
+                    issue = issues.get(entry['issue_id'])
+                    if issue is None or any(key in entry and
+                            (type(entry[key]) is not int or entry[key] != getattr(issue, key))
+                            for key in ('scene_index', 'beat_index')):
+                        raise ValueError('Author decision refers to a different issue')
+                    if 'correction' in entry and (not isinstance(entry['correction'], str) or
+                            not 12 <= len(entry['correction']) <= 500):
+                        raise ValueError('Invalid optional author correction')
+                    # The author's optional restatement never replaces the
+                    # critic's accepted correction or the original story.
+                    decisions.append({'issue_id':entry['issue_id'], 'accept':accepted, 'reason':entry['reason']})
+            value = {'decisions':decisions}
+        result = cls.model_validate(value)
+        result.check_for(review)
+        return result
+
     def check_for(self, review):
         issues = {i.id: i for i in review.issues}
         ids = [d.issue_id for d in self.decisions]
@@ -121,6 +156,6 @@ class LLMVisualAuthor:
             messages=[LLMMessage(role='user', content=json.dumps({'storyboard': storyboard.model_dump(),
                 'advice': review.model_dump()}, ensure_ascii=False))],
             max_tokens=4000, response_schema=VisualDecision.model_json_schema()))
-        decision = VisualDecision.model_validate_json(response.content)
+        decision = VisualDecision.from_author_json(response.content, review)
         decision.check_for(review)
         return decision
