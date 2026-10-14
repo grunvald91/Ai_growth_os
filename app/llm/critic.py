@@ -46,6 +46,63 @@ class Revision(BaseModel):
 REVIEW_TIMEOUT = 45
 REVISION_TIMEOUT = 75
 
+# An advisory review must never silently omit the goal, restrictions, or facts.
+# Every workflow passes its own payload contract; unknown oversized payloads
+# can only retain explicitly present generic goal/task fields.
+REQUIRED_CONTEXT = {
+    "quick_post": ("company_name", "topic", "channel", "channel_guidance", "verified_facts"),
+    "creative_brief": ("company", "topic", "format", "platform", "verified_product_facts"),
+    "article_production": ("request", "company_name", "verified_product_facts"),
+}
+OPTIONAL_CONTEXT = {
+    "quick_post": ("audience", "brief", "strategy"),
+    "creative_brief": ("audience", "editorial_brief", "strategy"),
+    "article_production": ("company_slug", "channel_profile", "constraints"),
+}
+
+
+def _review_messages(request: LLMRequest) -> list[dict] | None:
+    if len(request.messages) > 4 or (request.system_prompt and len(request.system_prompt) > 11000):
+        return None
+    result = []
+    for message in request.messages:
+        content = message.content
+        if len(content) > 12000:
+            try:
+                raw = json.loads(content)
+            except (ValueError, TypeError):
+                return None
+            if not isinstance(raw, dict):
+                return None
+            workflow = str(request.metadata.get("task_type", ""))
+            required = REQUIRED_CONTEXT.get(workflow)
+            if required is None:
+                # Generic workflow: a goal and a task must both survive. Never
+                # accept a compact payload that contains only a company name.
+                required = tuple(k for k in ("request", "task") if k in raw)
+                if not required:
+                    return None
+            if any(key not in raw for key in required):
+                return None
+            fields = list(dict.fromkeys((*required, *OPTIONAL_CONTEXT.get(workflow, ()))))
+            compact = {key: raw[key] for key in fields if key in raw}
+            compact["context_truncated"] = True
+            encoded = json.dumps(compact, ensure_ascii=False)
+            if len(encoded) > 10500:
+                return None
+            content = encoded
+        result.append({"role": message.role, "content": content})
+    return result
+
+
+def _material_summary(material: list[Finding]) -> list[dict]:
+    return [
+        {"id": f.id, "severity": f.severity, "problem": f.problem,
+         "evidence": f.evidence_in_draft, "suggestion": f.proposed_fix,
+         "goal_alignment": f.link_to_original_goal}
+        for f in material
+    ]
+
 
 def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisions: list[dict] | None = None,
             findings: list[dict] | None = None) -> LLMResponse:
@@ -71,41 +128,16 @@ def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisi
 
 
 async def second_opinion(*, request: LLMRequest, original: LLMResponse,
-                         generate: Callable[[LLMRequest], Awaitable[LLMResponse]]) -> LLMResponse:
+                         generate: Callable[[LLMRequest], Awaitable[LLMResponse]],
+                         validate_revision: Callable[[dict], None] | None = None) -> LLMResponse:
     """Only structured agent drafts are eligible; no change to authorization policy."""
     if (not request.metadata.get("team_role") or not request.response_schema
             or original.stop_reason not in (None, "end_turn", "stop_sequence")):
         return original
-    # Full prior stage outputs can dwarf the actual business assignment.
-    # Keep goal, request and trusted facts first; explicitly identify omitted context.
-    review_messages = []
-    for message in request.messages[:4]:
-        content = message.content
-        if len(content) > 12000:
-            try:
-                raw = json.loads(content)
-            except (ValueError, TypeError):
-                raw = None
-            if isinstance(raw, dict):
-                preferred = ("request", "task", "task_brief", "parent_task",
-                             "product", "company_name", "company_slug",
-                             "verified_product_facts", "goal_records",
-                             "channel_profile", "constraints")
-                compact = {}
-                for key in preferred:
-                    if key in raw:
-                        value = json.dumps(raw[key], ensure_ascii=False)
-                        if len(value) < 4500 and len(json.dumps(compact, ensure_ascii=False)) + len(value) < 10500:
-                            compact[key] = raw[key]
-                compact["context_truncated"] = True
-                content = json.dumps(compact, ensure_ascii=False)
-            else:
-                content = content[:10000] + "\\n[ADDITIONAL CONTEXT OMITTED]"
-        review_messages.append({"role": message.role, "content": content})
+    review_messages = _review_messages(request)
+    if review_messages is None:
+        return _record(original, "skipped_incomplete_context", [])
     instructions = request.system_prompt or ""
-    # Original response format is provided separately as schema_text.
-    if len(instructions) > 11000:
-        instructions = instructions[:11000] + "\\n[REMAINING INSTRUCTIONS OMITTED]"
     task = {
         "role": request.metadata["team_role"],
         "original_instructions": instructions,
@@ -125,6 +157,8 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
         return original
 
     extra: list[LLMResponse] = []
+    material_summary: list[dict] = []
+    decisions: list[dict] = []
     try:
         report_response = await asyncio.wait_for(generate(LLMRequest(
             system_prompt=(
@@ -155,8 +189,15 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
         if len({finding.id for finding in report.findings}) != len(report.findings):
             raise ValueError("Duplicate findings")
         material = [f for f in report.findings if f.severity in ("major", "critical")]
+        material_summary = _material_summary(material)
         if not material:
-            return _record(original, "no_material_issues", extra)
+            return _record(original, "no_material_issues", extra,
+                           findings=_material_summary(report.findings))
+        if validate_revision is None:
+            # No generic JSON Schema can represent arbitrary cross-field,
+            # source and workflow invariants. Never apply an unchecked edit.
+            return _record(original, "advisory_only_no_domain_validator", extra,
+                           findings=material_summary)
 
         # Constrain updated_output to the exact original contract, including nested refs.
         # An unconstrained JSON object is not accepted by some strict-schema providers.
@@ -208,20 +249,21 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
              "rationale": decision.rationale}
             for decision in revision.decisions
         ]
-        summary = [
-            {"id": f.id, "severity": f.severity, "problem": f.problem,
-             "evidence": f.evidence_in_draft, "suggestion": f.proposed_fix,
-             "goal_alignment": f.link_to_original_goal}
-            for f in material
-        ]
         if not any(d.decision == "accept" for d in revision.decisions):
-            return _record(original, "all_rejected", extra, decisions, summary)
+            return _record(original, "all_rejected", extra, decisions, material_summary)
         validator.validate(revision.updated_output)
+        try:
+            validate_revision(revision.updated_output)
+        except (ValueError, ValidationError, AssertionError, TypeError):
+            return _record(original, "rejected_domain_revision", extra, decisions,
+                           material_summary)
         content = json.dumps(revision.updated_output, ensure_ascii=False)
         if len(content) > 70000:
             raise ValueError("Oversized revision")
-        return _record(original.model_copy(update={"content": content}), "revised", extra, decisions, summary)
-    except (Exception,):
-        # Optional critique must not turn an existing successful draft into failure.
-        # CancelledError is BaseException and correctly propagates to the caller.
-        return _record(original, "review_unavailable", extra)
+        return _record(original.model_copy(update={"content": content}), "revised", extra, decisions, material_summary)
+    except Exception:
+        # Preserve already obtained findings even if the author's correction
+        # times out, is malformed or violates the domain contract.
+        # CancelledError is BaseException and correctly propagates.
+        status = "revision_unavailable" if material_summary else "review_unavailable"
+        return _record(original, status, extra, decisions, material_summary)
