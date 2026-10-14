@@ -155,9 +155,10 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
                          generate: Callable[[LLMRequest], Awaitable[LLMResponse]],
                          validate_revision: Callable[[dict], None] | None = None) -> LLMResponse:
     """Only structured agent drafts are eligible; no change to authorization policy."""
-    if (not request.metadata.get("team_role") or not request.response_schema
-            or original.stop_reason not in (None, "end_turn", "stop_sequence")):
-        return original
+    if not request.metadata.get("team_role") or not request.response_schema:
+        return _record(original, "skipped_ineligible", [])
+    if original.stop_reason not in (None, "end_turn", "stop_sequence"):
+        return _record(original, "skipped_incomplete_original", [])
     review_messages = _review_messages(request)
     if review_messages is None:
         return _record(original, "skipped_incomplete_context", [])
@@ -174,11 +175,11 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
     try:
         candidate = json.loads(original.content)
         if not isinstance(candidate, dict):
-            return original
+            return _record(original, "skipped_invalid_original", [])
         validator = Draft202012Validator(request.response_schema)
         validator.validate(candidate)
     except (ValueError, TypeError, JSONSchemaError):
-        return original
+        return _record(original, "skipped_invalid_original", [])
 
     extra: list[LLMResponse] = []
     material_summary: list[dict] = []
