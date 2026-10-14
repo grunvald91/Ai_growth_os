@@ -154,3 +154,43 @@ async def test_anthropic_receives_full_revision_schema_in_system(monkeypatch):
     assert "finding_id" in system
     assert "decisions" in system and "updated_output" in system
     assert json.dumps(schema,ensure_ascii=False) in system
+
+
+def test_audit_helper_stores_immutable_review_artifact_and_extra_tokens(db):
+    from sqlalchemy import select
+    from app.llm.audit import critic_cost_details, persist_critic_audit
+    from app.models.domain import Product, Task, AgentRun, Artifact, TaskStatus
+
+    company = Product(name="Test business", slug="audit-critic-sample")
+    db.add(company)
+    db.flush()
+    task = Task(product_id=company.id, assigned_agent="research", title="Audit sample",
+                status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    run = AgentRun(task_id=task.id, agent_name="research", status="completed")
+    db.add(run)
+    db.flush()
+
+    answer = LLMResponse(
+        content='{"report":"retained"}', model="author",
+        quality_review={
+            "status": "revision_unavailable",
+            "findings": [{"id": "major1", "severity": "major",
+                          "problem": "Missing critical sourced information"}],
+            "decisions": [],
+            "extra_usage_by_model": [{"model":"critic", "input_tokens":110,"output_tokens":38}],
+        },
+    )
+    audit_id = persist_critic_audit(db, product_id=company.id, task_id=task.id,
+                                    run_id=run.id, response=answer)
+    db.commit()
+    stored = db.scalar(select(Artifact).where(Artifact.kind == "agent_quality_review",
+                                               Artifact.product_id == company.id))
+    assert audit_id == str(stored.id)
+    assert stored.agent_run_id == run.id
+    assert json.loads(stored.content)["findings"][0]["id"] == "major1"
+    assert {"kind":"artifact","id":audit_id} in db.get(AgentRun,run.id).output_references
+    details = critic_cost_details(answer, task_type="research")
+    assert details["usage_incomplete"] is True
+    assert details["extra_usage_by_model"][0]["input_tokens"] == 110
