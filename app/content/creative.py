@@ -292,31 +292,15 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                 raise ValueError("Creative output exceeds bound")
             result = validate_candidate(json.loads(response.content))
             stage_reviews[agent] = response.quality_review
-            if response.usage is not None:
-                db.add(CostRecord(
-                    product_id=product.id, agent_run_id=run.id,
-                    category="llm", provider=settings.llm_provider,
-                    amount=0, currency="USD",
-                    input_tokens=max(0, response.usage.input_tokens),
-                    output_tokens=max(0, response.usage.output_tokens),
-                    incurred_at=datetime.now(timezone.utc),
-                    details=critic_cost_details(
-                        response, task_type="creative_brief", model=response.model,
-                    ),
-                ))
             check = ArtifactService(db).create(
                 product_id=product.id, task_id=task.id, agent_run_id=run.id,
                 kind="content_stage_output", title=agent + ": draft",
                 content=json.dumps(result.model_dump(mode="json"), ensure_ascii=False),
             )
-            references = [{"kind": "artifact", "id": str(check.id)}]
-            if response.quality_review is not None:
-                review_artifact = ArtifactService(db).create(
-                    product_id=product.id, task_id=task.id, agent_run_id=run.id,
-                    kind="agent_quality_review", title=agent + ": quality review",
-                    content=json.dumps(response.quality_review, ensure_ascii=False),
-                )
-                references.append({"kind": "artifact", "id": str(review_artifact.id)})
+            references = [
+                *(run.output_references or []),
+                {"kind": "artifact", "id": str(check.id)},
+            ]
             run.status = "completed"
             run.finished_at = datetime.now(timezone.utc)
             run.output_references = references
@@ -335,7 +319,6 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                 "review_notes": ["Черновой бриф; видео или изображение не созданы"],
                 "quality_warnings": facts_warnings,
                 "fact_check_required": bool(facts_warnings),
-                "ai_quality_reviews": stage_reviews,
             }, ensure_ascii=False),
             status="awaiting_approval",
         )
