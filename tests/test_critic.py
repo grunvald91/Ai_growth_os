@@ -159,7 +159,7 @@ async def test_review_revision_schema_reuses_original_contract():
 
 
 @pytest.mark.asyncio
-async def test_large_context_is_compacted_instead_of_skipping_review():
+async def test_large_context_skips_review_without_dropping_constraints():
     provider = SequenceProvider([
         {"title": "Draft", "steps": ["Onboarding"]},
         {"findings": []},
@@ -176,8 +176,8 @@ async def test_large_context_is_compacted_instead_of_skipping_review():
     })
     result = await LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
                               critic_enabled=True).generate(request)
-    assert len(provider.requests) == 2
-    assert result.quality_review["status"] == "no_material_issues"
+    assert len(provider.requests) == 1
+    assert result.quality_review["status"] == "skipped_incomplete_context"
 
 
 @pytest.mark.asyncio
@@ -326,7 +326,7 @@ async def test_compaction_keeps_quick_post_company_restrictions():
     safe_payload = json.loads(reviewer_task["original_task"][0]["content"])
     assert safe_payload["company_context"] == original_payload["company_context"]
     assert "discounts" in safe_payload["company_context"]
-    assert "prior_notes" not in safe_payload
+    assert safe_payload["prior_notes"] == original_payload["prior_notes"]
 
 
 @pytest.mark.asyncio
@@ -337,7 +337,7 @@ async def test_oversized_mandatory_company_policy_skips_critic_entirely():
         "company": "Test", "topic": "Launch", "audience": "Visitors",
         "editorial_brief": "A launch post", "format": "story",
         "platform": "telegram", "verified_product_facts": {},
-        "company_profile": "Deny discounts. " + "X" * 16000,
+        "company_profile": "Deny discounts. " + "X" * 36000,
     })
     provider = SequenceProvider([{"title": "Plan", "steps": ["Step"]}])
     result = await LLMService(
