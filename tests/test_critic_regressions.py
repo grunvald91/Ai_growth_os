@@ -213,7 +213,7 @@ def test_audit_helper_stores_immutable_review_artifact_and_extra_tokens(db):
     assert details["extra_usage_by_model"][0]["input_tokens"] == 110
 
 
-def test_team_context_compaction_keeps_brief_and_governing_constraints():
+def test_team_context_never_drops_unknown_company_policy():
     payload = {
         "task": {"title": "Distribution plan", "description": "Use task brief"},
         "task_brief": {"goal": "Grow organically", "constraints": [
@@ -223,7 +223,7 @@ def test_team_context_compaction_keeps_brief_and_governing_constraints():
         "stable_product_context": "Company products and verified company facts",
         "available_records": {"goal": [{"id": "goal1", "title": "Long-term trust"}]},
         "context_limits": {"max_records": 15},
-        "context_extra_nonessential": "old history " * 2000,
+        "new_unknown_policy_field": "Never offer discounts",
     }
     request = LLMRequest(
         messages=[LLMMessage(role="user",content=json.dumps(payload))],
@@ -238,8 +238,8 @@ def test_team_context_compaction_keeps_brief_and_governing_constraints():
     assert retained["available_records"]==payload["available_records"]
     assert retained["context_limits"]==payload["context_limits"]
     assert retained["stable_product_context"]==payload["stable_product_context"]
-    assert "context_extra_nonessential" not in retained
-    assert retained["context_truncated"] is True
+    assert retained == payload
+    assert retained["new_unknown_policy_field"] == "Never offer discounts"
 
 
 @pytest.mark.asyncio
@@ -247,7 +247,7 @@ async def test_team_review_skips_when_required_brief_does_not_fit():
     task_payload={
         "task": {"title": "Distribution plan"},
         "task_brief": {"constraints":["No paid advertising", "Telegram only"],
-                       "instructions":"critical constraint "*900},
+                       "instructions":"critical constraint "*2200},
         "product": {"name":"Flowers"},
         "stable_product_context": "Business profile",
         "available_records": {"goal":[]},
