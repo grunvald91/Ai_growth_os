@@ -1,3 +1,5 @@
+import json
+
 from app.llm.schemas import LLMRequest, LLMResponse, LLMUsage
 
 
@@ -20,6 +22,15 @@ class AnthropicProvider:
         }
         if request.system_prompt is not None:
             parameters["system"] = request.system_prompt
+        if request.response_schema is not None:
+            # This adapter uses Anthropic messages.create, which has no
+            # response_schema argument. Provide the FULL schema explicitly,
+            # including $defs and required decision fields, rather than
+            # asking the model to guess an unseen JSON contract.
+            schema_text = json.dumps(request.response_schema, ensure_ascii=False)
+            parameters["system"] = (parameters.get("system", "") +
+                "\\nReturn ONLY one JSON object matching the following full response schema: \\n" +
+                schema_text)
         if request.temperature is not None:
             parameters["temperature"] = request.temperature
 
