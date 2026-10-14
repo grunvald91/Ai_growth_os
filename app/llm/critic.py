@@ -46,69 +46,11 @@ class Revision(BaseModel):
 REVIEW_TIMEOUT = 45
 REVISION_TIMEOUT = 75
 
-# An advisory review must never silently omit the goal, restrictions, or facts.
-# Every workflow passes its own payload contract; unknown oversized payloads
-# can only retain explicitly present generic goal/task fields.
-TEAM_TASK_TYPES = frozenset({
-    "analytics", "article_brief", "video_brief", "content_plan",
-    "distribution_plan",
-})
-
-REQUIRED_CONTEXT = {
-    "quick_post": ("company_name", "topic", "audience", "brief", "channel", "channel_guidance", "verified_facts", "company_context"),
-    "creative_brief": ("company", "topic", "audience", "editorial_brief", "format", "platform", "verified_product_facts", "company_profile"),
-    "article_production": ("request", "company_name", "verified_product_facts", "product_context"),
-}
-OPTIONAL_CONTEXT = {
-    "quick_post": ("strategy",),
-    "creative_brief": ("strategy",),
-    "article_production": ("company_slug", "channel_profile", "constraints"),
-}
-
-
-def _review_messages(request: LLMRequest) -> list[dict] | None:
-    if len(request.messages) > 4 or (request.system_prompt and len(request.system_prompt) > 11000):
-        return None
-    result = []
-    for message in request.messages:
-        content = message.content
-        if len(content) > 12000:
-            try:
-                raw = json.loads(content)
-            except (ValueError, TypeError):
-                return None
-            if not isinstance(raw, dict):
-                return None
-            workflow = str(request.metadata.get("task_type", ""))
-            required = REQUIRED_CONTEXT.get(workflow)
-            if workflow in TEAM_TASK_TYPES:
-                # TeamCycle keeps its governing task brief and restrictions
-                # separate from the short task descriptor. Dropping any of
-                # these can make a false "no issues" result appear trustworthy.
-                required = (
-                    "task", "task_brief", "product", "stable_product_context",
-                    "available_records", "context_limits",
-                )
-            if required is None:
-                # Unknown workflow payloads have no verified compaction
-                # contract. A reviewer must never assess a partial task.
-                return None
-            if any(key not in raw for key in required):
-                return None
-            if workflow == "article_production" and "prior_stage_outputs" in raw:
-                required = (*required, "prior_stage_outputs")
-            if workflow == "quick_post" and "research_hypotheses" in raw:
-                # Research cautions may also constrain permitted claims.
-                required = (*required, "research_hypotheses")
-            fields = list(dict.fromkeys((*required, *OPTIONAL_CONTEXT.get(workflow, ()))))
-            compact = {key: raw[key] for key in fields if key in raw}
-            compact["context_truncated"] = True
-            encoded = json.dumps(compact, ensure_ascii=False)
-            if len(encoded) > 10500:
-                return None
-            content = encoded
-        result.append({"role": message.role, "content": content})
-    return result
+# Reviewer must see the COMPLETE original task. No key-based compaction:
+# new profile fields can contain binding constraints we do not yet know about.
+# Oversized context is explicitly skipped rather than silently altered.
+def _review_messages(request: LLMRequest) -> list[dict]:
+    return [message.model_dump() for message in request.messages]
 
 
 def _material_summary(material: list[Finding]) -> list[dict]:
@@ -163,8 +105,6 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
     if original.stop_reason not in (None, "end_turn", "stop_sequence"):
         return _record(original, "skipped_incomplete_original", [])
     review_messages = _review_messages(request)
-    if review_messages is None:
-        return _record(original, "skipped_incomplete_context", [])
     instructions = request.system_prompt or ""
     task = {
         "role": request.metadata["team_role"],
@@ -172,7 +112,9 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
         "original_task": review_messages,
     }
     task_text = json.dumps(task, ensure_ascii=False)
-    if len(task_text) > 24000 or len(original.content) > 70000:
+    if len(task_text) > 24000:
+        return _record(original, "skipped_incomplete_context", [])
+    if len(original.content) > 70000:
         return _record(original, "skipped_size_limit", [])
 
     try:
