@@ -55,9 +55,9 @@ TEAM_TASK_TYPES = frozenset({
 })
 
 REQUIRED_CONTEXT = {
-    "quick_post": ("company_name", "topic", "audience", "brief", "channel", "channel_guidance", "verified_facts"),
-    "creative_brief": ("company", "topic", "audience", "editorial_brief", "format", "platform", "verified_product_facts"),
-    "article_production": ("request", "company_name", "verified_product_facts"),
+    "quick_post": ("company_name", "topic", "audience", "brief", "channel", "channel_guidance", "verified_facts", "company_context"),
+    "creative_brief": ("company", "topic", "audience", "editorial_brief", "format", "platform", "verified_product_facts", "company_profile"),
+    "article_production": ("request", "company_name", "verified_product_facts", "product_context"),
 }
 OPTIONAL_CONTEXT = {
     "quick_post": ("strategy",),
