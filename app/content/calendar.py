@@ -476,6 +476,7 @@ async def run_planner_once(session_factory, settings, llm=None):
         response = None
         attempts = []
         attempt_failures = []
+        per_call_accounted = False
         error_code = "context"
         try:
             context, digest = planning_context(db, settings, task.product_id)
@@ -712,6 +713,7 @@ async def run_planner_once(session_factory, settings, llm=None):
         _persist_planner_attempts(
             db, task=task, run=run, attempts=attempts,
             attempt_failures=attempt_failures, settings=settings,
+            per_call_accounted=per_call_accounted,
         )
         run.finished_at = now_utc()
         db.commit()
