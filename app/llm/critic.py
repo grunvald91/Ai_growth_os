@@ -120,11 +120,13 @@ def _material_summary(material: list[Finding]) -> list[dict]:
 def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisions: list[dict] | None = None,
             findings: list[dict] | None = None,
             attempted_extra_calls: int | None = None) -> LLMResponse:
-    usage = original.usage or LLMUsage()
-    usage = LLMUsage(
-        input_tokens=usage.input_tokens + sum(r.usage.input_tokens if r.usage else 0 for r in extra),
-        output_tokens=usage.output_tokens + sum(r.usage.output_tokens if r.usage else 0 for r in extra),
-    )
+    known_usages = [r.usage for r in [original, *extra] if r.usage is not None]
+    # Report observed usage only; never invent zero tokens for a provider
+    # response that omitted the usage field.
+    usage = (LLMUsage(
+        input_tokens=sum(item.input_tokens for item in known_usages),
+        output_tokens=sum(item.output_tokens for item in known_usages),
+    ) if known_usages else None)
     return original.model_copy(update={
         "usage": usage,
         "quality_review": {
@@ -132,14 +134,17 @@ def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisi
             "extra_calls": len(extra),
             "attempted_extra_calls": attempted_extra_calls if attempted_extra_calls is not None else len(extra),
             "usage_unknown_for_failed_calls": (
-                (attempted_extra_calls if attempted_extra_calls is not None else len(extra)) > len(extra)
+                original.usage is None
+                or (attempted_extra_calls if attempted_extra_calls is not None else len(extra)) > len(extra)
                 or any(r.usage is None for r in extra)
             ),
+            "original_usage_known": original.usage is not None,
             "decisions": decisions or [],
             "findings": findings or [],
             "extra_usage_by_model": [
-                {"model": r.model, "input_tokens": r.usage.input_tokens if r.usage else 0,
-                 "output_tokens": r.usage.output_tokens if r.usage else 0}
+                {"model": r.model, "usage_known": r.usage is not None,
+                 "input_tokens": r.usage.input_tokens if r.usage else None,
+                 "output_tokens": r.usage.output_tokens if r.usage else None}
                 for r in extra
             ],
         },
