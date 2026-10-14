@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Awaitable, Callable, Literal
 
 from jsonschema import Draft202012Validator, ValidationError as JSONSchemaError
@@ -45,6 +46,11 @@ class Revision(BaseModel):
 
 REVIEW_TIMEOUT = 45
 REVISION_TIMEOUT = 75
+
+
+class ReviewAuditPersistenceError(RuntimeError):
+    """Intermediate critic findings could not be durably recorded."""
+
 
 # Reviewer must see the COMPLETE original task. No key-based compaction:
 # new profile fields can contain binding constraints we do not yet know about.
@@ -98,7 +104,8 @@ def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisi
 
 async def second_opinion(*, request: LLMRequest, original: LLMResponse,
                          generate: Callable[[LLMRequest], Awaitable[LLMResponse]],
-                         validate_revision: Callable[[dict], None] | None = None) -> LLMResponse:
+                         validate_revision: Callable[[dict], None] | None = None,
+                         on_review_progress: Callable[[LLMResponse], None] | None = None) -> LLMResponse:
     """Only structured agent drafts are eligible; no change to authorization policy."""
     if not request.metadata.get("team_role") or not request.response_schema:
         return _record(original, "skipped_ineligible", [])
@@ -129,6 +136,7 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
     extra: list[LLMResponse] = []
     material_summary: list[dict] = []
     decisions: list[dict] = []
+    pending_review_recorded = False
     try:
         report_response = await asyncio.wait_for(generate(LLMRequest(
             system_prompt=(
@@ -168,6 +176,20 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
             # source and workflow invariants. Never apply an unchecked edit.
             return _record(original, "advisory_only_no_domain_validator", extra,
                            findings=material_summary)
+
+        # Persist validated major/critical findings before requesting author revision.
+        # A later cancellation cannot erase the completed critic's report.
+        if on_review_progress is not None:
+            try:
+                on_review_progress(_record(
+                    original, "revision_pending", extra,
+                    findings=material_summary, attempted_extra_calls=2,
+                ))
+            except Exception as exc:
+                raise ReviewAuditPersistenceError(
+                    "Unable to persist validated critic findings"
+                ) from exc
+            pending_review_recorded = True
 
         # Constrain updated_output to the exact original contract, including nested refs.
         # An unconstrained JSON object is not accepted by some strict-schema providers.
@@ -233,6 +255,19 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
         if len(content) > 70000:
             raise ValueError("Oversized revision")
         return _record(original.model_copy(update={"content": content}), "revised", extra, decisions, material_summary)
+    except asyncio.CancelledError:
+        if pending_review_recorded and on_review_progress is not None:
+            # Keep cancellation observable without replacing its earlier findings.
+            try:
+                on_review_progress(_record(
+                    original, "revision_cancelled", extra, decisions,
+                    material_summary, attempted_extra_calls=2,
+                ))
+            except Exception:
+                logging.exception("Failed to persist cancelled critic revision audit")
+        raise
+    except ReviewAuditPersistenceError:
+        raise
     except Exception:
         # Preserve already obtained findings even if the author's correction
         # times out, is malformed or violates the domain contract.
