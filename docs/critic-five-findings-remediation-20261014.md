@@ -60,3 +60,23 @@ git diff --check 90d3468..HEAD
 ```
 
 Do **not** switch on `AGENT_CRITIC_ENABLED` until the final branch passes the gate and a small, monitored provider-specific pilot is reviewed. Do not conflate an unknown provider charge with a verified zero price. No GitHub Actions jobs or paid model tests were initiated by these changes.
+
+
+## Editorial planner cancellation audit — follow-up P2
+
+The planner previously re-raised `asyncio.CancelledError` before the end-of-function audit loop; completed calls and a prior critic's major findings were lost even though the task was marked failed.
+
+The audit/usage write is now shared by success, ordinary failure and cancellation. Cancellation rolls back unfinished business output, records `TaskStatus.FAILED` and the run error, persists the completed review artifacts and cost rows in one commit, then **re-raises** `CancelledError`. An in-flight cancelled provider call is recorded separately as `provider_cancelled` with `input_tokens=null`, `output_tokens=null` and `usage_incomplete=true`, never as zero cost.
+
+Regression: `tests/test_content_calendar.py::test_cancelled_second_planner_attempt_preserves_first_critic_audit_and_cost`. The mock first returns an invalid 14-day plan (slot on day 14), the critic supplies one major finding, and the second planner request raises `CancelledError`. The test asserts 3 requests, propagated cancellation, failed task, no published/generated plan, a retained major finding, a linked audit artifact, known usage for the first 2 completed calls and unknown usage for the aborted call.
+
+```bash
+python -m compileall -q app tests
+python -c "import app.main; print('app.main import OK')"
+python -m pytest -q tests/test_content_calendar.py::test_cancelled_second_planner_attempt_preserves_first_critic_audit_and_cost
+python -m pytest -q tests/test_content_calendar.py tests/test_critic.py tests/test_critic_regressions.py
+python -m pytest -q
+git diff --check 092d6f2..HEAD
+```
+
+The commands above are the acceptance gate; the full Python test suite has **not** been executed in the tool environment. Do not enable `AGENT_CRITIC_ENABLED` or deploy from this branch until the final revision passes.
