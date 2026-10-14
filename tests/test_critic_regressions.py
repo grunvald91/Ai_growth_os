@@ -92,21 +92,33 @@ async def test_no_domain_validator_blocks_uncertified_replacement():
     assert len(result.quality_review["findings"])==1
 
 
-def test_large_quick_post_context_retains_goal_and_source_facts():
-    payload={
-        "company_name":"Flowers", "topic":"Selecting a bouquet",
-        "audience":"Parents", "brief":"No fabricated guarantees",
-        "channel":"telegram", "channel_guidance":"Single CTA",
-        "verified_facts":{"src-1":"Certified supplier"},
-        "company_context":"miscellaneous " * 3000,
+def test_oversized_quick_post_company_restrictions_fail_closed():
+    payload = {
+        "company_name": "Flowers", "topic": "Selecting a bouquet",
+        "audience": "Parents", "brief": "No fabricated guarantees",
+        "channel": "telegram", "channel_guidance": "Single CTA",
+        "verified_facts": {"src-1": "Certified supplier"},
+        "company_context": "Never offer discounts. " + ("brand rules " * 2500),
     }
-    messages=_review_messages(req(payload))
+    # The mandatory brand policy cannot fit. A truncated audit would be
+    # misleading, so no reviewer should receive a partial task.
+    assert _review_messages(req(payload)) is None
+
+
+def test_small_brand_policy_survives_quick_post_compaction():
+    payload = {
+        "company_name": "Flowers", "topic": "Selecting a bouquet",
+        "audience": "Parents", "brief": "No fabricated guarantees",
+        "channel": "telegram", "channel_guidance": "Single CTA",
+        "verified_facts": {"src-1": "Certified supplier"},
+        "company_context": "Never offer discounts.",
+        "research_hypotheses": "Old unrelated research " * 900,
+    }
+    messages = _review_messages(req(payload))
     assert messages is not None
-    selected=json.loads(messages[0]["content"])
-    for key in ("topic","audience","brief","channel","verified_facts"):
-        assert selected[key]==payload[key]
-    assert "company_context" not in selected
-    assert selected["context_truncated"] is True
+    selected = json.loads(messages[0]["content"])
+    assert selected["company_context"] == payload["company_context"]
+    assert selected["verified_facts"] == payload["verified_facts"]
 
 
 @pytest.mark.asyncio
