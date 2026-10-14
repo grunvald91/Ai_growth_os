@@ -15,7 +15,7 @@ from sqlalchemy import select, update
 from app.company_profile import load_company_profile, profile_snapshot
 from app.content.service import queue_content
 from app.content.viral_content_research import run_viral_content_research
-from app.llm.audit import critic_cost_details, persist_critic_audit, persist_critic_attempt_event
+from app.llm.audit import critic_cost_details, persist_critic_audit, persist_critic_attempt_event, persist_observed_llm_call
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, CostRecord, Metric, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
@@ -409,7 +409,8 @@ def recover_stale_planner(db, now=None):
 
 
 
-def _persist_planner_attempts(db, *, task, run, attempts, attempt_failures, settings):
+def _persist_planner_attempts(db, *, task, run, attempts, attempt_failures, settings,
+                              per_call_accounted=False):
     """Persist received reviewer evidence and observed usage in the caller's transaction.
 
     Called for success, ordinary failure, and cancellation, after rollback of
@@ -423,6 +424,8 @@ def _persist_planner_attempts(db, *, task, run, attempts, attempt_failures, sett
             db, product_id=task.product_id, task_id=task.id,
             run_id=run.id, response=attempt_response,
         )
+        if per_call_accounted:
+            continue
         usage = attempt_response.usage
         db.add(CostRecord(
             product_id=task.product_id, agent_run_id=run.id, category='llm',
@@ -553,6 +556,16 @@ async def run_planner_once(session_factory, settings, llm=None):
                 'account-specific analytics are missing. These are resource hypotheses, not scientifically optimal '
                 'quotas. review_after_days is a proposed review, no automatic approval of changes. Write human-facing '
                 'text in natural Russian. No external actions. Schema: ' + encode(response_schema))
+            from app.llm.service import LLMService
+            per_call_accounted = isinstance(llm, LLMService)
+
+            def record_model_call(stage, observed):
+                persist_observed_llm_call(
+                    db, product_id=task.product_id, task_id=task.id,
+                    run_id=run.id, response=observed, stage=stage,
+                    task_type="content_calendar", provider=settings.llm_provider,
+                )
+
             messages = [LLMMessage(role='user', content=encode({'now': now_utc(), **context}))]
             for attempt in range(2):
                 error_code = 'provider'
@@ -566,7 +579,11 @@ async def run_planner_once(session_factory, settings, llm=None):
                     metadata={'team_role': 'editorial_planner', 'reasoning_effort': 'low', 'task_type': 'content_calendar'},
                 )
                 try:
-                    response = await asyncio.wait_for(llm.generate(request), (180 if not injected_llm else 300) + getattr(llm, 'extra_timeout_seconds', 0))
+                    response = await asyncio.wait_for(
+                        llm.generate(request, on_observed=record_model_call)
+                        if per_call_accounted else llm.generate(request),
+                        (180 if not injected_llm else 300) + getattr(llm, 'extra_timeout_seconds', 0),
+                    )
                 except asyncio.TimeoutError:
                     attempt_failures.append({
                         "status": "provider_timeout", "model": request.model,
@@ -595,7 +612,8 @@ async def run_planner_once(session_factory, settings, llm=None):
                     try:
                         active_model = fallback_model
                         response = await asyncio.wait_for(
-                            fallback_llm.generate(request.model_copy(update={'model': fallback_model})),
+                            fallback_llm.generate(request.model_copy(update={'model': fallback_model}),
+                                                  on_observed=record_model_call),
                             240 + fallback_llm.extra_timeout_seconds,
                         )
                     except Exception:
@@ -683,6 +701,7 @@ async def run_planner_once(session_factory, settings, llm=None):
                     _persist_planner_attempts(
                         db, task=task, run=run, attempts=attempts,
                         attempt_failures=attempt_failures, settings=settings,
+                        per_call_accounted=per_call_accounted,
                     )
                     run.finished_at = now_utc()
                     db.commit()
