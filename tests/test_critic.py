@@ -298,3 +298,75 @@ async def test_original_schema_with_nested_refs_can_be_validated_after_revision(
                        "rationale": "Necessary for onboarding"}],
         "updated_output": json.loads(result.content),
     })
+
+
+@pytest.mark.asyncio
+async def test_compaction_keeps_quick_post_company_restrictions():
+    # Regression: a ~12k payload once collapsed to ~195 chars and lost
+    # a company's explicit "no discounts" policy.
+    request = task()
+    request.metadata["task_type"] = "quick_post"
+    original_payload = {
+        "company_name": "Test cafe", "topic": "Customer loyalty",
+        "audience": "Local guests", "brief": "Useful post",
+        "channel": "telegram", "channel_guidance": "Friendly",
+        "verified_facts": {}, "company_context":
+            "Brand constraints: NEVER offer discounts or promotions.",
+        "prior_notes": "x" * 12500,
+    }
+    request.messages[0].content = json.dumps(original_payload)
+    provider = SequenceProvider([
+        {"title": "No discounts", "steps": ["Respect policies"]}, {"findings": []},
+    ])
+    result = await LLMService(
+        privacy_gateway=PrivacyGateway(), provider=provider,
+        critic_enabled=True).generate(request)
+    assert result.quality_review["status"] == "no_material_issues"
+    reviewer_task = json.loads(provider.requests[1].messages[0].content)["task"]
+    safe_payload = json.loads(reviewer_task["original_task"][0]["content"])
+    assert safe_payload["company_context"] == original_payload["company_context"]
+    assert "discounts" in safe_payload["company_context"]
+    assert "prior_notes" not in safe_payload
+
+
+@pytest.mark.asyncio
+async def test_oversized_mandatory_company_policy_skips_critic_entirely():
+    request = task()
+    request.metadata["task_type"] = "creative_brief"
+    request.messages[0].content = json.dumps({
+        "company": "Test", "topic": "Launch", "audience": "Visitors",
+        "editorial_brief": "A launch post", "format": "story",
+        "platform": "telegram", "verified_product_facts": {},
+        "company_profile": "Deny discounts. " + "X" * 16000,
+    })
+    provider = SequenceProvider([{"title": "Plan", "steps": ["Step"]}])
+    result = await LLMService(
+        privacy_gateway=PrivacyGateway(), provider=provider,
+        critic_enabled=True).generate(request)
+    assert len(provider.requests) == 1
+    assert result.quality_review["status"] == "skipped_incomplete_context"
+
+
+@pytest.mark.asyncio
+async def test_each_completed_call_is_observed_before_critic_cancellation():
+    import asyncio
+    class CancelInReview:
+        def __init__(self):
+            self.calls = 0
+        async def generate(self, request):
+            self.calls += 1
+            if self.calls == 2:
+                raise asyncio.CancelledError()
+            return LLMResponse(
+                content=json.dumps({"title":"Plan","steps":["Step"]}),
+                model="fake", usage=LLMUsage(input_tokens=24, output_tokens=34),
+            )
+    provider = CancelInReview()
+    observed = []
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
+                     critic_enabled=True)
+    with pytest.raises(asyncio.CancelledError):
+        await llm.generate(task(), on_observed=lambda stage, value:
+                           observed.append((stage, value.usage.input_tokens,
+                                            value.usage.output_tokens)))
+    assert observed == [("author", 24, 34)]
