@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.llm.audit import persist_critic_audit, persist_observed_llm_call
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.content.quality import post_quality_warnings, factual_claim_warnings
-from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
+from app.models.domain import AgentRun, Artifact, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
 from app.services.tasks import TaskService
 from app.workflows.article_production import product_facts
@@ -173,7 +173,6 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
             "company_context": stable[:10500],
         }
         strategy = None
-        stage_reviews = {}
         for name, schema in (
             ("post_strategist", QuickPostStrategy),
             ("post_writer_editor", QuickPostDraft),
@@ -247,7 +246,6 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                 response=reply,
             )
             db.commit()
-            stage_reviews[name] = reply.quality_review
             if reply.stop_reason not in (None, "end_turn", "stop_sequence"):
                 raise ValueError("AI answer was interrupted")
             output = validate_candidate(_decode(schema, reply.content).model_dump(mode="json"))
