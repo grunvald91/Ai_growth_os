@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.llm.audit import critic_cost_details
+from app.llm.audit import persist_critic_audit, persist_observed_llm_call
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.content.quality import post_quality_warnings, factual_claim_warnings
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
@@ -220,6 +220,13 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                     raise ValueError("Unexpected third-party brand in generated post")
                 return parsed
 
+            def record_model_call(stage, observed):
+                persist_observed_llm_call(
+                    db, product_id=product.id, task_id=task.id, run_id=run.id,
+                    response=observed, stage=stage, task_type="quick_post",
+                    provider=settings.llm_provider,
+                )
+
             reply = await asyncio.wait_for(
                 llm.generate(LLMRequest(
                     system_prompt=system,
@@ -231,36 +238,33 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                         "team_role": name, "task_type": "quick_post",
                         "reasoning_effort": "low", "provider_timeout_seconds": 90,
                     },
-                ), validate_revision=validate_candidate),
+                ), validate_revision=validate_candidate,
+                on_observed=record_model_call),
                 timeout=180 + llm.extra_timeout_seconds,
             )
+            persist_critic_audit(
+                db, product_id=product.id, task_id=task.id, run_id=run.id,
+                response=reply,
+            )
+            db.commit()
+            stage_reviews[name] = reply.quality_review
             if reply.stop_reason not in (None, "end_turn", "stop_sequence"):
                 raise ValueError("AI answer was interrupted")
             output = validate_candidate(_decode(schema, reply.content).model_dump(mode="json"))
-            stage_reviews[name] = reply.quality_review
             if name == "post_strategist":
                 strategy = output
-            if reply.usage:
-                db.add(CostRecord(
-                    product_id=product.id, agent_run_id=run.id, category="llm",
-                    provider=settings.llm_provider, amount=0, currency="USD",
-                    incurred_at=datetime.now(timezone.utc),
-                    input_tokens=max(0, reply.usage.input_tokens),
-                    output_tokens=max(0, reply.usage.output_tokens),
-                    details=critic_cost_details(
-                        reply, task_type="quick_post", model=reply.model,
-                    ),
-                ))
             checkpoint = ArtifactService(db).create(
                 product_id=product.id, task_id=task.id, agent_run_id=run.id,
                 kind="content_stage_output", title=name + ": intermediate output",
                 content=json.dumps({
                     "stage": name, "output": output.model_dump(mode="json"),
-                    "quality_review": reply.quality_review,
                 }, ensure_ascii=False),
                 status="draft",
             )
-            run.output_references = [{"kind": "artifact", "id": str(checkpoint.id)}]
+            run.output_references = [
+                *(run.output_references or []),
+                {"kind": "artifact", "id": str(checkpoint.id)},
+            ]
             run.status = "completed"
             run.finished_at = datetime.now(timezone.utc)
             db.commit()
@@ -277,7 +281,6 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
             "quality_warnings": warnings,
             "fact_check_required": bool(facts_warnings),
             "quality_review": "heuristic_only_requires_owner_review",
-            "ai_quality_reviews": stage_reviews,
             "evidence_ids": output.evidence_ids,
             "origin": "quick_post",
             "publication": "manual_until_channel_connected",
