@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select, update
 
 from app.content.quality import post_quality_warnings, factual_claim_warnings
+from app.llm.audit import critic_cost_details
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
@@ -287,12 +288,9 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     input_tokens=max(0, response.usage.input_tokens),
                     output_tokens=max(0, response.usage.output_tokens),
                     incurred_at=datetime.now(timezone.utc),
-                    details={
-                        "cost_known": False, "task_type": "creative_brief",
-                        "model": response.model,
-                        "review_status": (response.quality_review or {}).get("status"),
-                        "extra_usage_by_model": (response.quality_review or {}).get("extra_usage_by_model", []),
-                    },
+                    details=critic_cost_details(
+                        response, task_type="creative_brief", model=response.model,
+                    ),
                 ))
             check = ArtifactService(db).create(
                 product_id=product.id, task_id=task.id, agent_run_id=run.id,
