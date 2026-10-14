@@ -63,6 +63,7 @@ def render_checkpoint(directory: Path, destination: Path, *, width=720, height=1
         decision.check_for(review)
     scenes = []
     image_hashes = []
+    layout_repairs = []
     for index, scene in enumerate(storyboard.scenes):
         prefix = f'scene-{index:02}'
         revised = bool(policy) and bool(decision.accepted(review, index))
@@ -72,6 +73,10 @@ def render_checkpoint(directory: Path, destination: Path, *, width=720, height=1
                 'original_sha256': hashlib.sha256(store.load(prefix + '-image')).hexdigest(),
                 'final_sha256': hashlib.sha256(image).hexdigest()})
         regions = WhiteboardRegionPlan.model_validate_json(store.load(prefix + '-regions', limit=64_000))
+        from .layout import complete_diagram_regions
+        regions, layout_repair = complete_diagram_regions(scene, image, regions)
+        if layout_repair is not None:
+            layout_repairs.append({'scene_index':index, **layout_repair})
         audio = tuple(store.load(f'{prefix}-beat-{beat_index:02}-speech', limit=10_000_000)
             for beat_index in range(len(scene.beats)))
         scenes.append(WhiteboardSceneAssets(scene, image, audio, regions))
@@ -83,6 +88,8 @@ def render_checkpoint(directory: Path, destination: Path, *, width=720, height=1
         value['visual_review'] = {'policy': policy, 'critic_passes': 1, 'review': review.model_dump(),
             'author_decision': decision.model_dump(), 'redrawn_scenes': [i for i in range(3) if decision.accepted(review, i)],
             'revised_images_reviewed_again': False, 'human_review_required': True, 'images': image_hashes}
+        if layout_repairs:
+            value['visual_review']['region_layout'] = layout_repairs
         metadata.write_text(json.dumps(value, ensure_ascii=False, indent=2))
     return {'video': str(destination), 'duration_seconds': duration, 'provider_calls': 0}
 

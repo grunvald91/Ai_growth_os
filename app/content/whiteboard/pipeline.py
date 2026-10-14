@@ -195,6 +195,12 @@ class WhiteboardPipeline:
             else:
                 regions = await self.regions.detect(scene, image)
             regions.check_for(scene)
+            from .layout import complete_diagram_regions
+            regions, layout_repair = complete_diagram_regions(scene, image, regions)
+            if layout_repair is not None and visual_audit is not None:
+                visual_audit.setdefault('region_layout', []).append({'scene_index':scene_index, **layout_repair})
+                if self.progress:
+                    self.progress({'visual_review_result':visual_audit})
             completed += 1
             # Separate beat clips: exact drawing windows can later be measured
             # with ffprobe instead of guessing from pauses or character count.

@@ -24,7 +24,7 @@ from app.llm.service import LLMService
 from app.models.domain import Approval, Artifact, Product, TaskStatus
 from app.privacy import PrivacyGateway
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"fake-image-fixture"
+PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAFoAAACgCAIAAAADw+wqAAABOUlEQVR4nO3QsRHAIBDAsJD9d34qCk8AhTSBz2tmPo7/dsBb7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7YgPHIgQ9qAzu4gAAAABJRU5ErkJggg==')
 
 
 def request(**changes):
