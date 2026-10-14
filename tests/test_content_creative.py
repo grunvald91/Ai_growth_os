@@ -154,3 +154,59 @@ async def test_worker_dispatches_creative_job(monkeypatch, db, tmp_path):
     assert await run_content_once(session, Settings(products_root=tmp_path)) == 1
     assert calls == [("story", "telegram", task.id)]
 
+
+
+@pytest.mark.asyncio
+async def test_critic_invalid_timeline_preserves_valid_creative_and_audit(db, tmp_path):
+    """Reproduce P1: JSON Schema accepts a broken timeline, Pydantic rejects it."""
+    from app.models.domain import CostRecord
+    original = creative_payload("short_video", "youtube_shorts")
+    invalid = json.loads(json.dumps(original))
+    invalid["frames"][1]["start_second"] = 12  # Original boundary is 8.
+    problem = {"findings": [{
+        "id": "timeline", "severity": "major",
+        "problem": "Storyboard transition lacks necessary visual continuity",
+        "evidence_in_draft": "Storyboard cut between two adjacent frames",
+        "proposed_fix": "Improve the connecting shot without dropping the interval",
+        "link_to_original_goal": "A continuous short video with no missing action",
+    }]}
+    author = {"decisions": [{
+        "finding_id":"timeline", "decision":"accept",
+        "rationale":"Continuity is necessary for this video",
+    }], "updated_output":invalid}
+
+    class Provider:
+        def __init__(self):
+            self.outputs=[strategy_payload(), {"findings":[]}, original, problem, author]
+            self.calls=[]
+        async def generate(self, request):
+            self.calls.append(request)
+            return LLMResponse(content=json.dumps(self.outputs.pop(0), ensure_ascii=False),
+                               model="fake", usage=LLMUsage(input_tokens=80,output_tokens=100),
+                               stop_reason="end_turn")
+
+    company=Product(name="Цветочная мастерская",slug="critic-creative-timeline")
+    db.add(company);db.commit()
+    task_request=CreativeRequest(mode="creative",product_id=company.id,format="short_video",
+                                 platform="youtube_shorts",topic="Выбираем букет")
+    task=queue_creative(db,task_request)
+    provider=Provider()
+    settings=Settings(_env_file=None, products_root=tmp_path,agent_critic_enabled=True)
+    assert await run_creative_once(db,settings,task_request,task_id=task.id,provider=provider)
+    assert db.get(Task,task.id).status==TaskStatus.COMPLETED
+    assert len(provider.calls)==5
+    rows=list(db.scalars(select(Artifact).where(
+        Artifact.task_id==task.id,Artifact.kind=="content_stage_output"
+    )))
+    reviews=[json.loads(row.content)["quality_review"] for row in rows]
+    assert {r["status"] for r in reviews}=={"no_material_issues","rejected_domain_revision"}
+    retained=next(row for row in rows if json.loads(row.content)["output"].get("frames"))
+    assert json.loads(retained.content)["output"]["frames"][1]["start_second"]==8
+    rejected=next(review for review in reviews if review["status"]=="rejected_domain_revision")
+    assert rejected["findings"][0]["id"]=="timeline"
+    assert rejected["decisions"][0]["decision"]=="accept"
+    final=db.scalar(select(Artifact).where(Artifact.task_id==task.id,Artifact.kind=="creative_brief"))
+    assert json.loads(final.content)["ai_quality_reviews"]["creative_director"]["status"]=="rejected_domain_revision"
+    costs=list(db.scalars(select(CostRecord).where(CostRecord.product_id==company.id)))
+    assert len(costs)==2
+    assert any(cost.details.get("extra_usage_by_model") for cost in costs)
