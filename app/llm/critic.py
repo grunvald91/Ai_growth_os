@@ -107,7 +107,8 @@ def _material_summary(material: list[Finding]) -> list[dict]:
 
 
 def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisions: list[dict] | None = None,
-            findings: list[dict] | None = None) -> LLMResponse:
+            findings: list[dict] | None = None,
+            attempted_extra_calls: int | None = None) -> LLMResponse:
     usage = original.usage or LLMUsage()
     usage = LLMUsage(
         input_tokens=usage.input_tokens + sum(r.usage.input_tokens if r.usage else 0 for r in extra),
@@ -118,6 +119,11 @@ def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisi
         "quality_review": {
             "status": status,
             "extra_calls": len(extra),
+            "attempted_extra_calls": attempted_extra_calls if attempted_extra_calls is not None else len(extra),
+            "usage_unknown_for_failed_calls": (
+                (attempted_extra_calls if attempted_extra_calls is not None else len(extra)) > len(extra)
+                or any(r.usage is None for r in extra)
+            ),
             "decisions": decisions or [],
             "findings": findings or [],
             "extra_usage_by_model": [
@@ -270,4 +276,5 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
         # times out, is malformed or violates the domain contract.
         # CancelledError is BaseException and correctly propagates.
         status = "revision_unavailable" if material_summary else "review_unavailable"
-        return _record(original, status, extra, decisions, material_summary)
+        return _record(original, status, extra, decisions, material_summary,
+                       attempted_extra_calls=max(len(extra), 2 if material_summary else 1))
