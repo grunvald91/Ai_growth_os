@@ -149,3 +149,68 @@ async def test_single_post_rejects_unrequested_servgo_brand_for_other_company(db
     assert not list(db.scalars(select(Artifact).where(
         Artifact.task_id == task.id, Artifact.kind == "channel_text"
     )))
+
+
+@pytest.mark.asyncio
+async def test_quick_post_with_enabled_critic_persists_findings_and_usage(db, tmp_path):
+    """The second opinion is queryable even when the author declines an edit."""
+    from app.models.domain import CostRecord
+    company=Product(name="Цветочная мастерская",slug="critic-post-audit")
+    db.add(company);db.commit()
+    task=queue_content(db,company.id,"Букет в подарок",format="post",channel="telegram")
+    artifact=db.scalar(select(Artifact).where(
+        Artifact.task_id==task.id,Artifact.kind=="content_request"
+    ))
+    req=QuickPostRequest.model_validate_json(artifact.content).model_copy(
+        update={"task_id":task.id}
+    )
+    original_provider=FakePostProvider()
+    finding={"findings":[{
+        "id":"extra1", "severity":"major",
+        "problem":"The post could include a helpful preparation tip",
+        "evidence_in_draft":"Current text lacks the preparation tip",
+        "proposed_fix":"Add only the supported practical instruction",
+        "link_to_original_goal":"Request asks for useful advice for a customer",
+    }]}
+    author={"decisions":[{
+        "finding_id":"extra1","decision":"reject",
+        "rationale":"The request does not actually require this change",
+    }],"updated_output":{"ignored":"yes"}}
+
+    class Provider:
+        def __init__(self):
+            self.calls=[]
+            self.review_round=0
+        async def generate(self, request):
+            self.calls.append(request)
+            if request.metadata.get("task_type")=="quality_review":
+                self.review_round+=1
+                data={"findings":[]} if self.review_round==1 else finding
+                return LLMResponse(content=json.dumps(data),model="fake",
+                                   usage=LLMUsage(input_tokens=70,output_tokens=25),
+                                   stop_reason="end_turn")
+            if request.metadata.get("task_type")=="apply_quality_feedback":
+                return LLMResponse(content=json.dumps(author),model="fake",
+                                   usage=LLMUsage(input_tokens=70,output_tokens=25),
+                                   stop_reason="end_turn")
+            return await original_provider.generate(request)
+
+    provider=Provider()
+    settings=Settings(_env_file=None,products_root=tmp_path,agent_critic_enabled=True)
+    assert await run_quick_post(db,settings,req,provider=provider)
+    assert len(provider.calls)==5
+    checkpoints=list(db.scalars(select(Artifact).where(
+        Artifact.task_id==task.id,Artifact.kind=="content_stage_output"
+    )))
+    checks=[json.loads(row.content)["quality_review"] for row in checkpoints]
+    assert {check["status"] for check in checks}=={"no_material_issues","all_rejected"}
+    rejected=next(check for check in checks if check["status"]=="all_rejected")
+    assert rejected["findings"][0]["id"]=="extra1"
+    assert rejected["decisions"][0]["decision"]=="reject"
+    published=db.scalar(select(Artifact).where(
+        Artifact.task_id==task.id,Artifact.kind=="channel_text"
+    ))
+    assert json.loads(published.content)["ai_quality_reviews"]["post_writer_editor"]["status"]=="all_rejected"
+    costs=list(db.scalars(select(CostRecord).where(CostRecord.product_id==company.id)))
+    assert len(costs)==2
+    assert all(cost.details.get("extra_usage_by_model") for cost in costs)
