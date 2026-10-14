@@ -503,3 +503,96 @@ async def test_planner_timeout_keeps_attempt_audit_with_null_not_zero_tokens(db,
     assert len(records) == 1
     assert records[0].input_tokens is None and records[0].output_tokens is None
     assert records[0].details['usage_incomplete'] is True
+
+
+@pytest.mark.asyncio
+async def test_cancelled_second_planner_attempt_preserves_first_critic_audit_and_cost(db, tmp_path):
+    """Regression: cancellation after reviewer major finding must not discard paid calls."""
+    import asyncio
+
+    product, settings = setup(db, tmp_path)
+    settings.agent_critic_enabled = True
+    task = db.scalar(select(Task).where(
+        Task.assigned_agent == 'editorial_planner',
+        Task.status == TaskStatus.QUEUED,
+    ))
+
+    invalid_plan = draft()
+    invalid_plan['slots'][0]['day_offset'] = 14  # Must be < horizon_days (14).
+    finding = {
+        'findings': [{
+            'id': 'calendar-14', 'severity': 'major',
+            'problem': 'Scheduled content falls outside the requested planning horizon',
+            'evidence_in_draft': 'day_offset=14 with a 14-day horizon',
+            'proposed_fix': 'Move the slot inside the 14-day horizon',
+            'link_to_original_goal': 'The approved plan must stay within fourteen days',
+        }],
+    }
+
+    class CancelDuringRetry:
+        def __init__(self):
+            self.requests = []
+
+        async def generate(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                assert request.metadata['task_type'] == 'content_calendar'
+                return LLMResponse(
+                    content=json.dumps(invalid_plan, ensure_ascii=False),
+                    model='planner', usage=LLMUsage(input_tokens=24, output_tokens=34),
+                    stop_reason='end_turn',
+                )
+            if len(self.requests) == 2:
+                assert request.metadata['task_type'] == 'quality_review'
+                return LLMResponse(
+                    content=json.dumps(finding), model='critic',
+                    usage=LLMUsage(input_tokens=6, output_tokens=8),
+                    stop_reason='end_turn',
+                )
+            assert len(self.requests) == 3
+            assert request.metadata['task_type'] == 'content_calendar'
+            raise asyncio.CancelledError()
+
+    provider = CancelDuringRetry()
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
+                     critic_enabled=True)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_planner_once(lambda: Borrow(db), settings, llm)
+
+    assert len(provider.requests) == 3
+    assert 'validation_errors' in provider.requests[2].messages[-1].content
+    db.refresh(task)
+    assert task.status == TaskStatus.FAILED
+    assert db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == 'editorial_plan',
+    )) is None
+
+    run = db.scalar(select(AgentRun).where(AgentRun.task_id == task.id))
+    assert run is not None and run.status == 'failed'
+    assert run.finished_at is not None
+
+    audit_artifacts = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == 'agent_quality_review',
+    )))
+    assert len(audit_artifacts) == 2
+    audits = [json.loads(row.content) for row in audit_artifacts]
+    review = next(a for a in audits if a['status'] == 'advisory_only_no_domain_validator')
+    cancelled = next(a for a in audits if a['status'] == 'provider_cancelled')
+    assert review['findings'][0]['id'] == 'calendar-14'
+    assert review['extra_usage_by_model'][0]['model'] == 'critic'
+    assert cancelled['attempt'] == 2 and cancelled['usage_known'] is False
+    assert all({'kind': 'artifact', 'id': str(a.id)} in run.output_references
+               for a in audit_artifacts)
+
+    costs = list(db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)))
+    assert len(costs) == 2
+    observed = next(record for record in costs
+                    if record.details.get('review_status') == 'advisory_only_no_domain_validator')
+    pending = next(record for record in costs
+                   if record.details.get('review_status') == 'provider_cancelled')
+    assert observed.input_tokens == 30 and observed.output_tokens == 42
+    assert observed.details['extra_usage_by_model'][0]['input_tokens'] == 6
+    assert observed.details['usage_incomplete'] is False
+    assert pending.input_tokens is None and pending.output_tokens is None
+    assert pending.details['usage_incomplete'] is True
