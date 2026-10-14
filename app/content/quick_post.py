@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.llm.audit import critic_cost_details
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.content.quality import post_quality_warnings, factual_claim_warnings
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
@@ -246,12 +247,9 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                     incurred_at=datetime.now(timezone.utc),
                     input_tokens=max(0, reply.usage.input_tokens),
                     output_tokens=max(0, reply.usage.output_tokens),
-                    details={
-                        "cost_known": False, "task_type": "quick_post",
-                        "model": reply.model,
-                        "review_status": (reply.quality_review or {}).get("status"),
-                        "extra_usage_by_model": (reply.quality_review or {}).get("extra_usage_by_model", []),
-                    },
+                    details=critic_cost_details(
+                        reply, task_type="quick_post", model=reply.model,
+                    ),
                 ))
             checkpoint = ArtifactService(db).create(
                 product_id=product.id, task_id=task.id, agent_run_id=run.id,
