@@ -16,7 +16,7 @@ def critic_cost_details(response, **extra) -> dict:
     by_model = audit.get("extra_usage_by_model") or []
     missing_reported_usage = bool(audit.get("usage_unknown_for_failed_calls"))
     missing_model_usage = any(
-        row.get("usage_known") is False
+        row.get("usage_known") is not True
         or row.get("input_tokens") is None
         or row.get("output_tokens") is None
         for row in by_model if isinstance(row, dict)
