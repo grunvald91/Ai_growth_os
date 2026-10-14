@@ -868,6 +868,13 @@ class ArticleProduction:
                         task_type='article_production', provider=self.provider_name,
                     )
 
+                def record_review_progress(snapshot):
+                    persist_critic_audit(
+                        self.db, product_id=product_id, task_id=task_id,
+                        run_id=run_id, response=snapshot,
+                    )
+                    self.db.commit()
+
                 try:
                     for attempt in range(2):
                         error = f'provider_request_failed:{name}'
@@ -881,7 +888,8 @@ class ArticleProduction:
                                 'task_type': 'article_production',
                                 'provider_timeout_seconds': STAGE_PROVIDER_TIMEOUT_SECONDS.get(name, 90),
                             }), validate_revision=validate_stage_revision,
-                            on_observed=record_model_call),
+                            on_observed=record_model_call,
+                            on_review_progress=record_review_progress),
                             timeout=STAGE_TIMEOUT_SECONDS.get(name, 300) + self.llm.extra_timeout_seconds)
                         persist_critic_audit(
                             self.db, product_id=product_id, task_id=task_id,
