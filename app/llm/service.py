@@ -17,15 +17,31 @@ class LLMService:
         return 125 if self._critic_enabled else 0
 
     async def generate(self, request: LLMRequest, *,
-                       validate_revision: Callable[[dict], None] | None = None) -> LLMResponse:
+                       validate_revision: Callable[[dict], None] | None = None,
+                       on_observed: Callable[[str, LLMResponse], None] | None = None) -> LLMResponse:
         sanitized_request = self._privacy_gateway.sanitize(request)
-        original = await self._provider.generate(sanitized_request)
+
+        def observe(stage: str, reply: LLMResponse) -> LLMResponse:
+            if on_observed is not None:
+                # Caller persists the completed model call immediately.
+                # Deliberately do not swallow persistence failures.
+                on_observed(stage, reply)
+            return reply
+
+        original = observe("author", await self._provider.generate(sanitized_request))
         if not self._critic_enabled:
             return original
+
+        async def review_generate(next_request: LLMRequest) -> LLMResponse:
+            stage = ("critic" if next_request.metadata.get("task_type") == "quality_review"
+                     else "revision")
+            response = await self._provider.generate(self._privacy_gateway.sanitize(next_request))
+            return observe(stage, response)
+
         from app.llm.critic import second_opinion
         return await second_opinion(
             request=sanitized_request,
             original=original,
-            generate=lambda req: self._provider.generate(self._privacy_gateway.sanitize(req)),
+            generate=review_generate,
             validate_revision=validate_revision,
         )
