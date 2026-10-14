@@ -198,10 +198,13 @@ async def test_critic_invalid_timeline_preserves_valid_creative_and_audit(db, tm
     rows=list(db.scalars(select(Artifact).where(
         Artifact.task_id==task.id,Artifact.kind=="content_stage_output"
     )))
-    reviews=[json.loads(row.content)["quality_review"] for row in rows]
+    review_artifacts=list(db.scalars(select(Artifact).where(
+        Artifact.task_id==task.id,Artifact.kind=="agent_quality_review"
+    )))
+    reviews=[json.loads(row.content) for row in review_artifacts]
     assert {r["status"] for r in reviews}=={"no_material_issues","rejected_domain_revision"}
-    retained=next(row for row in rows if json.loads(row.content)["output"].get("frames"))
-    assert json.loads(retained.content)["output"]["frames"][1]["start_second"]==8
+    retained=next(row for row in rows if json.loads(row.content).get("frames"))
+    assert json.loads(retained.content)["frames"][1]["start_second"]==8
     rejected=next(review for review in reviews if review["status"]=="rejected_domain_revision")
     assert rejected["findings"][0]["id"]=="timeline"
     assert rejected["decisions"][0]["decision"]=="accept"
