@@ -11,10 +11,10 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
-from app.llm.audit import critic_cost_details
+from app.llm.audit import persist_critic_audit, persist_observed_llm_call
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
-from app.models.domain import AgentRun, Artifact, CostRecord, Decision, Experiment, Product, Task, TaskStatus
+from app.models.domain import AgentRun, Artifact, Decision, Experiment, Product, Task, TaskStatus
 from app.policies import PolicyEvaluator
 from app.privacy import PrivacyGateway
 from app.services.approvals import ApprovalService
@@ -577,7 +577,6 @@ class ArticleProduction:
         self.db.flush()
         run_ids = [run.id for run in runs]
         self.db.commit()
-        responses = {}
         checkpoint_ids = []
         error = 'context_preparation_failed'
         try:
@@ -862,6 +861,13 @@ class ArticleProduction:
                             raise ValueError('Revised article must preserve all verified source IDs exactly once')
                     return candidate
 
+                def record_model_call(stage, observed):
+                    persist_observed_llm_call(
+                        self.db, product_id=product_id, task_id=task_id,
+                        run_id=run_id, response=observed, stage=stage,
+                        task_type='article_production', provider=self.provider_name,
+                    )
+
                 try:
                     for attempt in range(2):
                         error = f'provider_request_failed:{name}'
@@ -874,10 +880,13 @@ class ArticleProduction:
                                 'team_role': name,
                                 'task_type': 'article_production',
                                 'provider_timeout_seconds': STAGE_PROVIDER_TIMEOUT_SECONDS.get(name, 90),
-                            }), validate_revision=validate_stage_revision),
+                            }), validate_revision=validate_stage_revision,
+                            on_observed=record_model_call),
                             timeout=STAGE_TIMEOUT_SECONDS.get(name, 300) + self.llm.extra_timeout_seconds)
-                        responses.setdefault(run_id, []).append(response)
-                        self._record_usage(product_id, {run_id: [response]})
+                        persist_critic_audit(
+                            self.db, product_id=product_id, task_id=task_id,
+                            run_id=run_id, response=response,
+                        )
                         self.db.commit()
                         error = f'invalid_article_output:{name}'
                         if response.stop_reason in {'length', 'max_tokens'} and attempt == 0:
@@ -919,14 +928,14 @@ class ArticleProduction:
                         'fallback_used': bool(fallback_reason),
                         'fallback_reason': fallback_reason,
                         'output': parsed.model_dump(mode='json'),
-                        'quality_review': self._sanitize(response.quality_review) if not fallback_reason and response else None,
                     }, ensure_ascii=False),
                     status='draft',
                 )
                 checkpoint_ids.append(checkpoint.id)
                 run.status = 'completed'
                 run.finished_at = datetime.now(timezone.utc)
-                run.output_references = [{'kind': 'artifact', 'id': str(checkpoint.id)}]
+                run.output_references = [*(run.output_references or []),
+                                         {'kind': 'artifact', 'id': str(checkpoint.id)}]
                 self.db.commit()
                 outputs.append(parsed)
                 if name not in {'repurposing_editor', 'video_director', 'story_director', 'visual_designer',
@@ -1136,14 +1145,3 @@ class ArticleProduction:
             return {key: self._sanitize(item) for key, item in value.items()}
         return value
 
-    def _record_usage(self, product_id, responses):
-        for run_id, attempts in responses.items():
-            for response in attempts:
-                if response.usage is not None:
-                    self.db.add(CostRecord(product_id=product_id, agent_run_id=run_id, category='llm',
-                        provider=self.provider_name, amount=0, currency='USD',
-                        input_tokens=max(0, response.usage.input_tokens),
-                        output_tokens=max(0, response.usage.output_tokens), incurred_at=datetime.now(timezone.utc),
-                        details=critic_cost_details(
-                            response, note='Usage recorded; monetary price unavailable.',
-                        )))
