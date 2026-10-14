@@ -157,7 +157,8 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
             }, ensure_ascii=False))],
             model=request.model, max_tokens=min(16000, max(5000, len(original.content) // 2)),
             response_schema=Findings.model_json_schema(),
-            metadata={"reasoning_effort": "low", "team_role": "internal_critic",
+            metadata={"reasoning_effort": "low", "team_role": request.metadata["team_role"],
+                      "routing_phase": "critic",
                       "task_type": "quality_review", "provider_timeout_seconds": REVIEW_TIMEOUT},
         )), REVIEW_TIMEOUT)
         extra.append(report_response)

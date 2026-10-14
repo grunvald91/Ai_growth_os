@@ -556,8 +556,15 @@ class ResearchDepartment:
     @staticmethod
     def _merge_usage(first, second):
         if first.usage is not None and second.usage is not None:
-            second.usage.input_tokens += first.usage.input_tokens
-            second.usage.output_tokens += first.usage.output_tokens
+            second.usage = second.usage.model_copy(update={
+                "input_tokens": second.usage.input_tokens + first.usage.input_tokens,
+                "output_tokens": second.usage.output_tokens + first.usage.output_tokens,
+            })
+            # Both retry calls must be priced; otherwise monetary estimate unknown.
+            if first.estimated_cost_usd is not None and second.estimated_cost_usd is not None:
+                second.estimated_cost_usd += first.estimated_cost_usd
+            else:
+                second.estimated_cost_usd = None
         return second
 
     @staticmethod

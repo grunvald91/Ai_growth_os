@@ -4,6 +4,9 @@ from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.health import router as health_router
 
 app = FastAPI(title="AI Growth OS", version="0.1.0")
+from app.api.content_studio_auth import StudioOriginError
+from app.api.content_studio_errors import studio_origin_error
+app.add_exception_handler(StudioOriginError, studio_origin_error)
 app.include_router(health_router)
 
 from app.api.products import router as products_router
@@ -30,3 +33,8 @@ app.include_router(content_studio_router)
 
 from app.api.comments import router as comments_router
 app.include_router(comments_router, dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
+from app.api.team_dashboard import router as team_dashboard_router
+app.include_router(team_dashboard_router)
+
+from app.api.whiteboard import router as whiteboard_router
+app.include_router(whiteboard_router)

@@ -363,6 +363,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         {item("analytics", base + "/analytics", "⌁", "Аналитика")}
         {item("comments", base + "/comments", "☷", "Комментарии")}
         {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
+        {item("team", "/studio/team", "♧", "ИИ-команда")}
       </nav>
       <div class="nav-label">УПРАВЛЕНИЕ</div>
       <nav class="nav" aria-label="Дополнительные инструменты">
@@ -406,6 +407,7 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
         {item("analytics", base + "/analytics", "⌁", "Аналитика")}
         {item("comments", base + "/comments", "☷", "Комментарии")}
         {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
+        {item("team", "/studio/team", "♧", "ИИ-команда")}
         <a href="/studio?choose=1" aria-label="Выбрать проект"><span class="m-ico">⇄</span>Выбрать проект</a>
       </nav>
     </dialog>
@@ -1075,7 +1077,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=10"></script>
+<script src="/studio/assets/studio.js?v=11"></script>
 </body></html>"""
 
 
@@ -1173,7 +1175,7 @@ def studio_page_shell(
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=10"></script>
+<script src="/studio/assets/studio.js?v=11"></script>
 </body></html>"""
 
 
@@ -1953,7 +1955,7 @@ def studio_create_page(product_id: UUID, created: bool = False, db: Session = De
     html_body = create_content_html(product.id, created=created)
     jobs = list(db.scalars(select(Task).where(
         Task.product_id == product.id,
-        Task.assigned_agent.in_(["content_factory", "content_creative", "content_editor"]),
+        Task.assigned_agent.in_(["content_factory", "content_creative", "content_editor", "whiteboard_renderer"]),
     ).order_by(Task.created_at.desc(), Task.id.desc()).limit(20)))
     if jobs:
         html_body += '<section class="sg-surface"><h2>Последние задания</h2>' + ''.join(
@@ -2005,6 +2007,8 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
     task = db.get(Task, task_id)
     if task is None or task.product_id != product_id:
         raise HTTPException(404, "Задание не найдено")
+    if task.assigned_agent == "whiteboard_renderer":
+        return RedirectResponse(f"/studio/products/{product_id}/whiteboard/{task_id}", status_code=303)
     runs = list(db.scalars(select(AgentRun).where(AgentRun.task_id == task_id).order_by(AgentRun.started_at, AgentRun.id)))
     materials = list(db.scalars(select(Artifact).where(
         Artifact.task_id == task_id, Artifact.product_id == product_id,

@@ -9,6 +9,8 @@ from __future__ import annotations
 import secrets
 import hashlib
 import json
+import logging
+from uuid import uuid4
 from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request
@@ -17,6 +19,39 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from app.core.config import Settings, get_settings
 
 _basic = HTTPBasic(auto_error=False)
+_logger = logging.getLogger(__name__)
+
+
+class StudioOriginError(HTTPException):
+    """A denied command; presentation must never turn it into an accepted write."""
+
+
+def _origin_for_log(value: str | None) -> str:
+    if not value:
+        return "missing"
+    if value == "null":
+        return "null"
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme and parsed.hostname:
+            port = f":{parsed.port}" if parsed.port else ""
+            return f"{parsed.scheme}://{parsed.hostname}{port}"[:256]
+    except ValueError:
+        pass
+    return "invalid"
+
+
+def _reject_origin(request: Request, status: int, detail: str, configured: str | None):
+    error_id = uuid4().hex[:12]
+    request.state.studio_origin_error_id = error_id
+    _logger.warning("studio_origin_rejected %s", json.dumps({
+        "error_id": error_id, "reason": detail, "path": request.url.path,
+        "configured_origin": _origin_for_log(configured),
+        "origin": _origin_for_log(request.headers.get("origin")),
+        "referer_origin": _origin_for_log(request.headers.get("referer")),
+        "sec_fetch_site": request.headers.get("sec-fetch-site", "")[:32],
+    }, ensure_ascii=True))
+    raise StudioOriginError(status, detail)
 
 
 def require_studio_auth(
@@ -116,25 +151,28 @@ def require_studio_csrf(
         return None
     configured = settings.studio_public_origin
     if not configured:
-        raise HTTPException(503, "Studio public origin is not configured")
+        _reject_origin(request, 503, "Studio public origin is not configured", configured)
     allowed = urlsplit(configured)
     if allowed.scheme != "https" or not allowed.netloc or allowed.username or allowed.password:
-        raise HTTPException(503, "Studio public origin must be an HTTPS origin")
+        _reject_origin(request, 503, "Studio public origin must be an HTTPS origin", configured)
     if allowed.path not in ("", "/") or allowed.query or allowed.fragment:
-        raise HTTPException(503, "Studio public origin must not include a path or query")
+        _reject_origin(request, 503, "Studio public origin must not include a path or query", configured)
     if request.headers.get("sec-fetch-site", "").casefold() == "cross-site":
-        raise HTTPException(403, "Cross-site action rejected")
+        _reject_origin(request, 403, "Cross-site action rejected", configured)
 
     submitted_origin = request.headers.get("origin")
     if not submitted_origin:
         # Legacy browser fallback; never guess the trusted origin from Host.
         submitted_origin = request.headers.get("referer")
     if not submitted_origin:
-        raise HTTPException(403, "Origin verification required")
-    received = urlsplit(submitted_origin)
+        _reject_origin(request, 403, "Origin verification required", configured)
+    try:
+        received = urlsplit(submitted_origin)
+    except ValueError:
+        _reject_origin(request, 403, "Cross-origin action rejected", configured)
     if (received.scheme.casefold() != allowed.scheme.casefold()
             or received.netloc.casefold() != allowed.netloc.casefold()
             or received.username or received.password):
-        raise HTTPException(403, "Cross-origin action rejected")
+        _reject_origin(request, 403, "Cross-origin action rejected", configured)
     return None
 

@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.llm.anthropic import AnthropicProvider
 from app.llm.fallback import FallbackProvider
+from app.llm.model_router import ModelRouter, ModelRoutingProvider
+from app.llm.router_store import effective_router_settings
 from app.llm.provider import LLMProvider
 from app.llm.service import LLMService
 from app.llm.xai import XAIProvider
@@ -14,7 +16,7 @@ from app.workflows.article_production import ArticleProduction
 from app.workflows.daily_growth_review import DailyGrowthReview
 from app.workflows.team_cycle import TeamCycle
 
-SAFE_LLM_METADATA_FIELDS = {"reasoning_effort", "team_role", "task_type", "conversation_id", "provider_timeout_seconds"}
+SAFE_LLM_METADATA_FIELDS = {"reasoning_effort", "team_role", "task_type", "conversation_id", "provider_timeout_seconds", "routing_phase", "routing_complexity", "requires_web_search"}
 
 
 def build_intake(db: Session, settings: Settings, provider: LLMProvider | None = None):
@@ -28,7 +30,10 @@ def build_intake(db: Session, settings: Settings, provider: LLMProvider | None =
 
 
 def build_llm_provider(settings: Settings) -> LLMProvider:
+    settings = effective_router_settings(settings)
     if settings.llm_provider == "anthropic":
+        if settings.model_router_enabled:
+            raise ValueError("Model Router currently supports only the configured xai-compatible gateway")
         if not settings.anthropic_api_key:
             raise ValueError("Configure ANTHROPIC_API_KEY")
         return AnthropicProvider(
@@ -50,6 +55,14 @@ def build_llm_provider(settings: Settings) -> LLMProvider:
             )
 
         primary = make_provider(settings.llm_model)
+        if settings.model_router_enabled:
+            router = ModelRouter(
+                profiles_json=settings.model_router_profiles,
+                overrides_json=settings.model_router_overrides,
+                max_call_usd=settings.model_router_max_call_usd,
+                provider_supports_web_search=False,  # No search-tool adapter in XAIProvider yet.
+            )
+            return ModelRoutingProvider(provider=primary, router=router)
         fallback_models = []
         for raw in settings.llm_fallback_models.split(","):
             model = raw.strip()

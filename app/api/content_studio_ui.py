@@ -87,6 +87,10 @@ def create_content_html(product_id, *, created=False, fields=None, error=None) -
         </form>
       </section>
       <aside class="sg-aside-stack">
+        <section class="sg-surface sg-guide"><h3>Рисованное видео с озвучкой</h3>
+          <p>Готовый вертикальный MP4: три сцены, русская озвучка, рисование и субтитры. Платные модели запускаются после отдельного подтверждения.</p>
+          <a class="btn secondary" href="{base}/whiteboard">Создать рисованное видео →</a>
+        </section>
         <section class="sg-surface sg-guide"><div class="sg-guide-icon">✦</div>
           <h2>Как работает ИИ-команда</h2>
           <ol class="sg-steps"><li><b>Создаёт</b><span>Под конкретную компанию, формат и аудиторию.</span></li>
@@ -238,4 +242,3 @@ def channels_html(product_id, connections, publications, approved_posts, *, adde
         </section>
       </aside>
     </div>"""
-

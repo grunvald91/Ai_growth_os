@@ -9,6 +9,7 @@ import json
 from datetime import datetime, timezone
 
 from app.models.domain import CostRecord
+from app.llm.costing import usage_cost_details
 
 from app.models.domain import AgentRun
 from app.services.artifacts import ArtifactService
@@ -30,7 +31,7 @@ def critic_cost_details(response, **extra) -> dict:
         or audit.get("status") in {"review_unavailable", "revision_unavailable"}
     )
     return {
-        "cost_known": False,
+        **usage_cost_details(response),
         **extra,
         "review_status": audit.get("status"),
         "extra_usage_by_model": by_model,
@@ -105,7 +106,7 @@ def persist_observed_llm_call(db, *, product_id, task_id, run_id, response,
         output_tokens=usage.output_tokens if usage is not None else None,
         incurred_at=datetime.now(timezone.utc),
         details={
-            "cost_known": False,
+            **usage_cost_details(response),
             "usage_incomplete": usage is None,
             "observed_tokens_only": usage is None,
             "task_type": task_type,
