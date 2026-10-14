@@ -172,6 +172,7 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
             "company_context": stable[:10500],
         }
         strategy = None
+        stage_reviews = {}
         for name, schema in (
             ("post_strategist", QuickPostStrategy),
             ("post_writer_editor", QuickPostDraft),
@@ -202,6 +203,22 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                    "Start with the hook, make the post useful and finish with exactly one CTA. "
                    "Keep the text scannable and remove boilerplate. Return only the schema.")
             )
+            def validate_candidate(data):
+                parsed = schema.model_validate(data)
+                if name == "post_writer_editor" and request.channel == "telegram":
+                    from app.content.telegram_publishing import validate_telegram_text
+                    validate_telegram_text(parsed.body)
+                if any(source_id not in facts for source_id in parsed.evidence_ids):
+                    raise ValueError("AI referenced unverified company facts")
+                if name != "post_strategist" and (
+                    product.slug != "servgo"
+                    and "servgo" not in request.topic.casefold()
+                    and "servgo" not in (request.editorial_brief or "").casefold()
+                    and "servgo" in (parsed.title + " " + parsed.body).casefold()
+                ):
+                    raise ValueError("Unexpected third-party brand in generated post")
+                return parsed
+
             reply = await asyncio.wait_for(
                 llm.generate(LLMRequest(
                     system_prompt=system,
@@ -213,26 +230,15 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                         "team_role": name, "task_type": "quick_post",
                         "reasoning_effort": "low", "provider_timeout_seconds": 90,
                     },
-                )),
+                ), validate_revision=validate_candidate),
                 timeout=180 + llm.extra_timeout_seconds,
             )
             if reply.stop_reason not in (None, "end_turn", "stop_sequence"):
                 raise ValueError("AI answer was interrupted")
-            output = _decode(schema, reply.content)
-            if name == "post_writer_editor" and request.channel == "telegram":
-                from app.content.telegram_publishing import validate_telegram_text
-                validate_telegram_text(output.body)
-            if any(source_id not in facts for source_id in output.evidence_ids):
-                raise ValueError("AI referenced unverified company facts")
+            output = validate_candidate(_decode(schema, reply.content).model_dump(mode="json"))
+            stage_reviews[name] = reply.quality_review
             if name == "post_strategist":
                 strategy = output
-            elif (
-                product.slug != "servgo" and
-                "servgo" not in request.topic.casefold() and
-                "servgo" not in (request.editorial_brief or "").casefold() and
-                "servgo" in (output.title + " " + output.body).casefold()
-            ):
-                raise ValueError("Unexpected third-party brand in generated post")
             if reply.usage:
                 db.add(CostRecord(
                     product_id=product.id, agent_run_id=run.id, category="llm",
@@ -240,13 +246,19 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                     incurred_at=datetime.now(timezone.utc),
                     input_tokens=max(0, reply.usage.input_tokens),
                     output_tokens=max(0, reply.usage.output_tokens),
-                    details={"cost_known": False, "task_type": "quick_post"},
+                    details={
+                        "cost_known": False, "task_type": "quick_post",
+                        "model": reply.model,
+                        "review_status": (reply.quality_review or {}).get("status"),
+                        "extra_usage_by_model": (reply.quality_review or {}).get("extra_usage_by_model", []),
+                    },
                 ))
             checkpoint = ArtifactService(db).create(
                 product_id=product.id, task_id=task.id, agent_run_id=run.id,
                 kind="content_stage_output", title=name + ": intermediate output",
                 content=json.dumps({
                     "stage": name, "output": output.model_dump(mode="json"),
+                    "quality_review": reply.quality_review,
                 }, ensure_ascii=False),
                 status="draft",
             )
@@ -267,6 +279,7 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
             "quality_warnings": warnings,
             "fact_check_required": bool(facts_warnings),
             "quality_review": "heuristic_only_requires_owner_review",
+            "ai_quality_reviews": stage_reviews,
             "evidence_ids": output.evidence_ids,
             "origin": "quick_post",
             "publication": "manual_until_channel_connected",
