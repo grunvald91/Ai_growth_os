@@ -466,3 +466,40 @@ async def test_planner_critic_keeps_advisory_findings_and_unknown_tokens(db, tmp
     assert costs[0].input_tokens == 24
     assert costs[0].details['usage_incomplete'] is True
     assert costs[0].details['extra_usage_by_model'][0]['usage_known'] is False
+
+
+@pytest.mark.asyncio
+async def test_planner_timeout_keeps_attempt_audit_with_null_not_zero_tokens(db, tmp_path):
+    product, settings = setup(db, tmp_path)
+    settings.agent_critic_enabled = True
+    task = db.scalar(select(Task).where(
+        Task.assigned_agent == 'editorial_planner',
+        Task.status == TaskStatus.QUEUED,
+    ))
+
+    class TimedOutProvider:
+        def __init__(self):
+            self.calls = 0
+        async def generate(self, request):
+            self.calls += 1
+            raise TimeoutError('Simulated provider timeout')
+
+    provider = TimedOutProvider()
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
+                     critic_enabled=True)
+    assert await run_planner_once(lambda: Borrow(db), settings, llm) == 1
+    assert provider.calls == 1
+    assert db.get(Task, task.id).status == TaskStatus.FAILED
+    events = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == 'agent_quality_review',
+    )))
+    assert len(events) == 1
+    audit = json.loads(events[0].content)
+    assert audit['status'] == 'provider_timeout'
+    assert audit['usage_known'] is False
+    run = db.scalar(select(AgentRun).where(AgentRun.task_id == task.id))
+    assert {'kind': 'artifact', 'id': str(events[0].id)} in run.output_references
+    records = list(db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)))
+    assert len(records) == 1
+    assert records[0].input_tokens is None and records[0].output_tokens is None
+    assert records[0].details['usage_incomplete'] is True
