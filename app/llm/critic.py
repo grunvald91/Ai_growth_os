@@ -50,13 +50,13 @@ REVISION_TIMEOUT = 75
 # Every workflow passes its own payload contract; unknown oversized payloads
 # can only retain explicitly present generic goal/task fields.
 REQUIRED_CONTEXT = {
-    "quick_post": ("company_name", "topic", "channel", "channel_guidance", "verified_facts"),
-    "creative_brief": ("company", "topic", "format", "platform", "verified_product_facts"),
+    "quick_post": ("company_name", "topic", "audience", "brief", "channel", "channel_guidance", "verified_facts"),
+    "creative_brief": ("company", "topic", "audience", "editorial_brief", "format", "platform", "verified_product_facts"),
     "article_production": ("request", "company_name", "verified_product_facts"),
 }
 OPTIONAL_CONTEXT = {
-    "quick_post": ("audience", "brief", "strategy"),
-    "creative_brief": ("audience", "editorial_brief", "strategy"),
+    "quick_post": ("strategy",),
+    "creative_brief": ("strategy",),
     "article_production": ("company_slug", "channel_profile", "constraints"),
 }
 
@@ -84,6 +84,8 @@ def _review_messages(request: LLMRequest) -> list[dict] | None:
                     return None
             if any(key not in raw for key in required):
                 return None
+            if workflow == "article_production" and "prior_stage_outputs" in raw:
+                required = (*required, "prior_stage_outputs")
             fields = list(dict.fromkeys((*required, *OPTIONAL_CONTEXT.get(workflow, ()))))
             compact = {key: raw[key] for key in fields if key in raw}
             compact["context_truncated"] = True
