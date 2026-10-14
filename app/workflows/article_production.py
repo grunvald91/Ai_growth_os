@@ -853,12 +853,12 @@ class ArticleProduction:
                     candidate = _parse_stage_payload(schema, json.dumps(data, ensure_ascii=False))
                     candidate = schema.model_validate(self._sanitize(candidate.model_dump(mode='json')))
                     sources = stage_inputs.get('verified_product_facts') or {}
-                    for fact in getattr(candidate, 'fact_renderings', ()):
-                        if fact.source_id not in sources:
-                            raise ValueError('Revised article added an unverified source')
-                    for claim in getattr(candidate, 'claims', ()):
-                        if claim.source_id not in sources:
-                            raise ValueError('Revised article added an unverified claim')
+                    if isinstance(candidate, ArticleDraft):
+                        validate_grounding(candidate, sources)
+                    if isinstance(candidate, HumanEditedArticle):
+                        ids = [fact.source_id for fact in candidate.fact_renderings]
+                        if len(ids) != len(set(ids)) or set(ids) != set(sources):
+                            raise ValueError('Revised article must preserve all verified source IDs exactly once')
                     return candidate
 
                 try:
