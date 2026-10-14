@@ -42,7 +42,7 @@ def persist_critic_attempt_event(db, *, product_id, task_id, run_id, event: dict
     Store a bounded reason code, never raw prompts, source data or credentials.
     """
     status = str(event.get("status") or "provider_error")
-    if status not in {"provider_error", "provider_timeout", "fallback_error"}:
+    if status not in {"provider_error", "provider_timeout", "provider_cancelled", "fallback_error"}:
         raise ValueError("Unsupported provider attempt audit status")
     record = ArtifactService(db).create(
         product_id=product_id, task_id=task_id, agent_run_id=run_id,
