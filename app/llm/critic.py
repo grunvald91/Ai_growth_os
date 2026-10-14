@@ -256,7 +256,9 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
         validator.validate(revision.updated_output)
         try:
             validate_revision(revision.updated_output)
-        except (ValueError, ValidationError, AssertionError, TypeError):
+        except Exception:
+            # Any domain validator failure is advisory-only: retain the
+            # already-valid original, with an explicit rejected status.
             return _record(original, "rejected_domain_revision", extra, decisions,
                            material_summary)
         content = json.dumps(revision.updated_output, ensure_ascii=False)
