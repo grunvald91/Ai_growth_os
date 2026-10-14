@@ -215,3 +215,38 @@ async def test_quick_post_with_enabled_critic_persists_findings_and_usage(db, tm
     assert len(costs)==5
     assert [c.details["llm_stage"] for c in costs].count("critic")==2
     assert [c.details["llm_stage"] for c in costs].count("revision")==1
+
+@pytest.mark.asyncio
+async def test_invalid_evidence_still_persists_both_model_calls_and_review(db, tmp_path):
+    from app.models.domain import CostRecord
+    company = Product(name="Salon", slug="post-invalid-audit")
+    db.add(company)
+    db.commit()
+    task = queue_content(db, company.id, "How to choose care", format="post", channel="vk")
+    row = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "content_request"))
+    bad_author = FakePostProvider(bad_evidence=True)
+
+    class Provider:
+        async def generate(self, request):
+            if request.metadata.get("task_type") == "quality_review":
+                return LLMResponse(content='{"findings":[]}', model="critic",
+                                   usage=LLMUsage(input_tokens=6, output_tokens=8))
+            return await bad_author.generate(request)
+
+    success = await run_quick_post(
+        db, Settings(_env_file=None, products_root=tmp_path, agent_critic_enabled=True),
+        QuickPostRequest.model_validate_json(row.content).model_copy(update={"task_id": task.id}),
+        provider=Provider())
+    assert success is False
+    assert db.get(Task, task.id).status == TaskStatus.FAILED
+    costs = list(db.scalars(select(CostRecord).where(CostRecord.product_id == company.id)))
+    assert len(costs) == 2
+    assert {(x.details["llm_stage"], x.input_tokens) for x in costs} == {
+        ("author", 90), ("critic", 6)}
+    reviews = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "agent_quality_review")))
+    assert len(reviews) == 1
+    assert json.loads(reviews[0].content)["status"] == "no_material_issues"
+    assert not list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "channel_text")))
