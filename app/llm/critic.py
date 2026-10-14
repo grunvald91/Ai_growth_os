@@ -97,6 +97,9 @@ def _review_messages(request: LLMRequest) -> list[dict] | None:
                 return None
             if workflow == "article_production" and "prior_stage_outputs" in raw:
                 required = (*required, "prior_stage_outputs")
+            if workflow == "quick_post" and "research_hypotheses" in raw:
+                # Research cautions may also constrain permitted claims.
+                required = (*required, "research_hypotheses")
             fields = list(dict.fromkeys((*required, *OPTIONAL_CONTEXT.get(workflow, ()))))
             compact = {key: raw[key] for key in fields if key in raw}
             compact["context_truncated"] = True
