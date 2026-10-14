@@ -80,3 +80,54 @@ git diff --check 092d6f2..HEAD
 ```
 
 The commands above are the acceptance gate; the full Python test suite has **not** been executed in the tool environment. Do not enable `AGENT_CRITIC_ENABLED` or deploy from this branch until the final revision passes.
+
+
+## Third review: company constraints and per-call accounting (14 October)
+
+New five-point review identified additional release blockers. Fixes were added on
+this feature branch without enabling the reviewer or deploying it:
+
+1. **P1 complete context:** quick-post compaction preserves `company_context`,
+   creative preserves `company_profile`, and article production preserves
+   `product_context` alongside original goals/brief/verified facts. Quick-post
+   research cautions are also preserved when present. If all governing context
+   cannot fit, the review is **skipped** (not treated as passed).
+2. **P2 failing business validation:** quick-post, creative, team-cycle and
+   article-stage workflows persist every completed LLM call immediately using
+   `persist_observed_llm_call`, before evidence/brand/timeline validation. A
+   single canonical `agent_quality_review` artifact is linked through
+   `AgentRun.output_references`, including after domain-validation failure.
+3. **P2 cancellation inside review:** `LLMService.generate` now accepts an
+   optional synchronous `on_observed(stage, response)` hook. It is called
+   immediately after completed author/critic/revision provider calls. The
+   editorial planner saves observed costs before a later cancellation; it still
+   propagates `CancelledError`. An interrupted call has unknown, not zero,
+   cost metadata. The hook is also used by quick-post and creative.
+4. **P2 missing provider usage:** `app/llm/xai.py` returns `usage=None`
+   for missing or partial token information. Even a successful provider
+   response never manufactures 0/0 tokens.
+5. **P2 Compose:** `AGENT_CRITIC_ENABLED: ${AGENT_CRITIC_ENABLED:-false}` is
+   set in production `api`, `telegram` and `worker` services.
+
+The old prose earlier in this file describes the state *before* these fixes;
+the canonical per-call audit replaces the prior aggregated-cost assumptions
+in the affected workflows. This branch has additional tests for restricted
+company context, invalid evidence IDs, cancellation during the reviewer call,
+missing usage and Compose environment propagation.
+
+**Remaining acceptance gate (not yet executed on the complete checkout):**
+
+```bash
+python -m compileall -q app tests
+python -m pytest -q tests/test_critic.py tests/test_critic_regressions.py \
+  tests/test_critic_compose.py tests/test_xai_provider.py \
+  tests/test_quick_post.py tests/test_content_creative.py \
+  tests/test_content_calendar.py tests/test_team_cycle.py tests/test_articles.py
+python -m pytest -q
+git diff --check
+```
+
+Some research, analytics and administrative workflows still intentionally use
+advisory-only review when no safe `validate_revision` callback is configured.
+This must not be marketed as universal automatic editing. A live ClaudeHub
+pilot and owner approval remain prerequisites to enabling production criticism.
