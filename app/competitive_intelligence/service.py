@@ -12,6 +12,7 @@ from app.competitive_intelligence.contracts import ResearchPlan, RunInput, Synth
 from app.competitive_intelligence.evidence_store import normalize
 from app.competitive_intelligence.jeff_router import triage
 from app.competitive_intelligence.synthesis import PLAN_PROMPT, SYNTHESIS_PROMPT, validate_report
+from app.llm.audit import critic_cost_details, persist_critic_audit
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
 from app.privacy import PrivacyGateway
@@ -246,7 +247,12 @@ class IntelligenceService:
                 self.db.add(CostRecord(product_id=UUID(state["product_id"]), agent_run_id=run.id,
                     category="llm", provider=run.provider, amount=0, currency="USD",
                     input_tokens=max(0, response.usage.input_tokens), output_tokens=max(0, response.usage.output_tokens),
-                    incurred_at=datetime.now(timezone.utc), details={"cost_known": False, "stage": stage}))
+                    incurred_at=datetime.now(timezone.utc),
+                    details=critic_cost_details(response, stage=stage)))
+            persist_critic_audit(
+                self.db, product_id=UUID(state["product_id"]), task_id=UUID(state["id"]),
+                run_id=run.id, response=response,
+            )
             self.db.commit()
 
     def follow_up(self, run_id: UUID, brief: str):
