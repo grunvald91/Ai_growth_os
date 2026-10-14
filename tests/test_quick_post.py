@@ -250,3 +250,73 @@ async def test_invalid_evidence_still_persists_both_model_calls_and_review(db, t
     assert json.loads(reviews[0].content)["status"] == "no_material_issues"
     assert not list(db.scalars(select(Artifact).where(
         Artifact.task_id == task.id, Artifact.kind == "channel_text")))
+
+
+@pytest.mark.asyncio
+async def test_cancelled_author_revision_keeps_critic_findings_in_database(db, tmp_path):
+    import asyncio
+    from app.models.domain import AgentRun, CostRecord
+
+    company = Product(name="Studio", slug="post-cancelled-author-revision")
+    db.add(company)
+    db.commit()
+    task = queue_content(db, company.id, "Gift selection", format="post", channel="vk")
+    row = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "content_request"))
+    request = QuickPostRequest.model_validate_json(row.content).model_copy(
+        update={"task_id": task.id})
+    initial = FakePostProvider()
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+        async def generate(self, llm_request):
+            self.calls.append(llm_request)
+            stage = llm_request.metadata.get("task_type")
+            if stage == "apply_quality_feedback":
+                raise asyncio.CancelledError()
+            if stage == "quality_review":
+                data = {"findings": [{
+                    "id": "urgent", "severity": "major",
+                    "problem": "A required customer preparation step is missing",
+                    "evidence_in_draft": "Draft only asks for a product choice",
+                    "proposed_fix": "Add a verified preparation step to the plan",
+                    "link_to_original_goal": "The goal is actionable purchasing advice",
+                }]}
+                return LLMResponse(
+                    content=json.dumps(data), model="critic",
+                    usage=LLMUsage(input_tokens=6, output_tokens=8),
+                    stop_reason="end_turn")
+            return await initial.generate(llm_request)
+
+    provider = Provider()
+    with pytest.raises(asyncio.CancelledError):
+        await run_quick_post(
+            db, Settings(_env_file=None, products_root=tmp_path,
+                         agent_critic_enabled=True),
+            request, provider=provider,
+        )
+    assert len(provider.calls) == 3
+    assert db.get(Task, task.id).status == TaskStatus.FAILED
+
+    reviews = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "agent_quality_review")))
+    payloads = [json.loads(row.content) for row in reviews]
+    assert {p["status"] for p in payloads} == {
+        "revision_pending", "revision_cancelled",
+    }
+    assert all(p["findings"][0]["id"] == "urgent" for p in payloads)
+
+    costs = list(db.scalars(select(CostRecord).where(
+        CostRecord.product_id == company.id)))
+    assert len(costs) == 2
+    assert [c.details["llm_stage"] for c in costs] == ["author", "critic"]
+    assert [c.input_tokens for c in costs] == [90, 6]
+    runs = list(db.scalars(select(AgentRun).where(AgentRun.task_id == task.id)))
+    assert all(run.status == "failed" for run in runs)
+    references = [
+        {"kind": "artifact", "id": str(row.id)} for row in reviews
+    ]
+    assert all(reference in runs[0].output_references for reference in references)
+    assert not list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "channel_text")))
