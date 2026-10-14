@@ -305,7 +305,6 @@ class TeamCycle:
             failed_run.error = error_code
             failed_run.finished_at = datetime.now(timezone.utc)
             self.db.get(Task, task.id).status = TaskStatus.FAILED
-            self._record_usage(product.id, run_id, response)
             self.db.commit()
             if isinstance(exc, asyncio.CancelledError):
                 raise
