@@ -134,7 +134,8 @@ async def test_invalid_initial_draft_is_not_reviewed():
     provider = SequenceProvider([{"title": "Plan"}])
     result = await run(provider)
     assert len(provider.requests) == 1
-    assert result.quality_review is None
+    assert result.quality_review["status"] == "skipped_invalid_original"
+    assert result.quality_review["extra_calls"] == 0
 
 
 @pytest.mark.asyncio
