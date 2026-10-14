@@ -35,3 +35,28 @@ git diff --check 90d3468..HEAD
 Expected behavior for five synthetic reproductions: (1) invalid 30-second storyboard change rejected and original still completes; (2) oversized facts yield a clear skip, while compacted posts retain topic/brief/channel/facts; (3) Anthropic receives the entire JSON contract; (4) author timeout keeps major findings and author decision status; (5) creative and quick-post outputs retain reviewer audit/extra model usage and remain unposted without owner approval.
 
 Production activation also needs a bounded test batch on a real provider with cost/latency metrics, rollback and owner sign-off.
+
+
+## Second review: four follow-up release blockers (base ac553526, 14 October)
+
+These four items were confirmed by the external local reviewer and have now been **changed in source code**, but the following commands must be re-run on the final commit. Previous isolated results of 567 passed/1 skipped applied only to a temporary copy with a single syntax correction, **not** to this branch with follow-up changes.
+
+1. **P0 (import failure):** restored the missing `}` between `metadata={...}` and `validate_revision=...` in `article_production.py`. Added an AST syntax regression check.
+2. **P2 (lost TeamCycle restrictions):** large requests for `analytics`, `article_brief`, `video_brief`, `content_plan`, `distribution_plan` require the whole `task`, `task_brief`, `product`, `stable_product_context`, `available_records`, and `context_limits`. If any required context exceeds its budget, return `skipped_incomplete_context`. Unknown task types can no longer silently compact task + request while dropping the actual constraints. Added explicit TeamCycle context retention, oversized skip and unknown-workflow tests.
+3. **P2 (editorial planner audit):** every returned planner LLM response is accounted for; where a review exists, an `agent_quality_review` artifact and `AgentRun.output_references` link preserve its status, `findings`, and decisions. Unanswered primary/fallback attempts also generate sanitized attempt records with `provider_timeout`, `provider_error`, or `fallback_error`, unknown-token CostRecord rows and no secret-containing provider error text. The main plan remains gated by owner approval. Added completed-plan/review and provider-timeout integration tests.
+4. **P2 (false complete usage):** `critic.py` now preserves `usage=None` when no token report exists. Per-model extra usage is `null` (not `0`) for missing reports and explicitly labelled `usage_known=false`. The cost details helper reads these flags, `usage_unknown_for_failed_calls`, and response usage; all critic-connected core workflows now use the helper, including creative, quick-post, article, calendar and TeamCycle. Zero tokens are distinguishable from missing usage. Added tests for successful criticism with missing usage and genuine zero counts.
+
+### Final offline acceptance gate
+
+```bash
+python -m compileall -q app tests
+python -c "import app.main; print('app.main import OK')"
+python -m pytest -q tests/test_critic.py tests/test_critic_regressions.py \
+  tests/test_content_calendar.py tests/test_content_creative.py \
+  tests/test_quick_post.py tests/test_articles.py \
+  tests/test_research_department.py tests/test_team_cycle.py
+python -m pytest -q
+git diff --check 90d3468..HEAD
+```
+
+Do **not** switch on `AGENT_CRITIC_ENABLED` until the final branch passes the gate and a small, monitored provider-specific pilot is reviewed. Do not conflate an unknown provider charge with a verified zero price. No GitHub Actions jobs or paid model tests were initiated by these changes.
