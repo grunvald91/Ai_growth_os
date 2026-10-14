@@ -6,6 +6,9 @@ typed payloads backwards compatible and survives a rejected author edit.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
+
+from app.models.domain import CostRecord
 
 from app.models.domain import AgentRun
 from app.services.artifacts import ArtifactService
@@ -81,3 +84,35 @@ def persist_critic_audit(db, *, product_id, task_id, run_id, response) -> str | 
     references.append({"kind": "artifact", "id": str(record.id)})
     run.output_references = references
     return str(record.id)
+
+
+def persist_observed_llm_call(db, *, product_id, task_id, run_id, response,
+                              stage: str, task_type: str, provider: str) -> None:
+    """Durably account for ONE completed provider call before later validation.
+
+    This is intentionally a narrow workflow helper, not a new audit framework.
+    All returned responses, including malformed business output and responses
+    without usage, produce exactly one cost observation. An unknown token count
+    is stored as SQL NULL, never as a claimed zero.
+    """
+    if stage not in {"author", "critic", "revision"}:
+        raise ValueError("Unsupported LLM observation stage")
+    usage = response.usage
+    db.add(CostRecord(
+        product_id=product_id, agent_run_id=run_id, category="llm",
+        provider=provider, amount=0, currency="USD",
+        input_tokens=usage.input_tokens if usage is not None else None,
+        output_tokens=usage.output_tokens if usage is not None else None,
+        incurred_at=datetime.now(timezone.utc),
+        details={
+            "cost_known": False,
+            "usage_incomplete": usage is None,
+            "observed_tokens_only": usage is None,
+            "task_type": task_type,
+            "llm_stage": stage,
+            "model": response.model,
+        },
+    ))
+    # Commit before invoking the next model or running business-level checks:
+    # rollback or CancelledError later cannot erase known usage.
+    db.commit()
