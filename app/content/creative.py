@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select, update
 
 from app.content.quality import post_quality_warnings, factual_claim_warnings
-from app.llm.audit import critic_cost_details
+from app.llm.audit import persist_critic_audit, persist_observed_llm_call
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
@@ -263,6 +263,12 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     raise ValueError("LLM changed the selected format or platform")
                 return parsed
 
+            def record_model_call(stage, observed):
+                persist_observed_llm_call(
+                    db, product_id=product.id, task_id=task.id, run_id=run.id,
+                    response=observed, stage=stage, task_type="creative_brief",
+                    provider=settings.llm_provider,
+                )
             response = await asyncio.wait_for(llm.generate(LLMRequest(
                 system_prompt=rules,
                 messages=[LLMMessage(role="user", content=json.dumps(stage_payload, ensure_ascii=False))],
@@ -273,7 +279,13 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     "team_role": agent, "task_type": "creative_brief",
                     "reasoning_effort": "low", "provider_timeout_seconds": 100,
                 },
-            ), validate_revision=validate_candidate), timeout=210 + llm.extra_timeout_seconds)
+            ), validate_revision=validate_candidate,
+                on_observed=record_model_call), timeout=210 + llm.extra_timeout_seconds)
+            persist_critic_audit(
+                db, product_id=product.id, task_id=task.id, run_id=run.id,
+                response=response,
+            )
+            db.commit()
             if response.stop_reason not in (None, "end_turn", "stop_sequence"):
                 raise ValueError("Incomplete creative output")
             if len(response.content) > 65000:
