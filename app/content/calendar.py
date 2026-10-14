@@ -408,6 +408,52 @@ def recover_stale_planner(db, now=None):
     return recovered
 
 
+
+def _persist_planner_attempts(db, *, task, run, attempts, attempt_failures, settings):
+    """Persist received reviewer evidence and observed usage in the caller's transaction.
+
+    Called for success, ordinary failure, and cancellation, after rollback of
+    partial business output when necessary. Only completed responses have
+    measurable usage; interrupted calls have unknown, not zero, token counts.
+    """
+    # Every returned attempt is auditable, including the first invalid
+    # response, an advisory-only critic finding, and a later workflow error.
+    for index, attempt_response in enumerate(attempts, 1):
+        persist_critic_audit(
+            db, product_id=task.product_id, task_id=task.id,
+            run_id=run.id, response=attempt_response,
+        )
+        usage = attempt_response.usage
+        db.add(CostRecord(
+            product_id=task.product_id, agent_run_id=run.id, category='llm',
+            provider=settings.llm_provider, amount=0, currency='USD',
+            incurred_at=now_utc(),
+            input_tokens=usage.input_tokens if usage is not None else None,
+            output_tokens=usage.output_tokens if usage is not None else None,
+            details=critic_cost_details(
+                attempt_response, task_type='content_calendar',
+                attempt=index, model=attempt_response.model,
+            ),
+        ))
+    for event in attempt_failures:
+        persist_critic_attempt_event(
+            db, product_id=task.product_id, task_id=task.id,
+            run_id=run.id, event=event,
+        )
+        db.add(CostRecord(
+            product_id=task.product_id, agent_run_id=run.id, category='llm',
+            provider=settings.llm_provider, amount=0, currency='USD',
+            incurred_at=now_utc(), input_tokens=None, output_tokens=None,
+            details={
+                'cost_known': False, 'task_type': 'content_calendar',
+                'model': event['model'], 'attempt': event['attempt'],
+                'review_status': event['status'], 'usage_incomplete': True,
+                'observed_tokens_only': True,
+            },
+        ))
+
+
+
 async def run_planner_once(session_factory, settings, llm=None):
     injected_llm = llm is not None
     with session_factory() as db:
@@ -510,6 +556,7 @@ async def run_planner_once(session_factory, settings, llm=None):
             messages = [LLMMessage(role='user', content=encode({'now': now_utc(), **context}))]
             for attempt in range(2):
                 error_code = 'provider'
+                active_model = settings.llm_model
                 request = LLMRequest(
                     model=settings.llm_model,
                     system_prompt=prompt,
@@ -546,6 +593,7 @@ async def run_planner_once(session_factory, settings, llm=None):
                         critic_enabled=settings.agent_critic_enabled,
                     )
                     try:
+                        active_model = fallback_model
                         response = await asyncio.wait_for(
                             fallback_llm.generate(request.model_copy(update={'model': fallback_model})),
                             240 + fallback_llm.extra_timeout_seconds,
@@ -622,44 +670,30 @@ async def run_planner_once(session_factory, settings, llm=None):
             task.status = TaskStatus.FAILED
             run.status, run.error = 'failed', ('editorial_plan_failed:' + error_code + ':' + type(exc).__name__)[:1000]
             if isinstance(exc, asyncio.CancelledError):
-                run.finished_at = now_utc()
-                db.commit()
+                # The retry can be cancelled *after* an earlier critic response.
+                # Preserve every completed response and its known usage before
+                # propagating cancellation; do not rerun or publish anything.
+                if error_code == 'provider':
+                    attempt_failures.append({
+                        "status": "provider_cancelled",
+                        "model": active_model,
+                        "attempt": len(attempts) + 1,
+                    })
+                try:
+                    _persist_planner_attempts(
+                        db, task=task, run=run, attempts=attempts,
+                        attempt_failures=attempt_failures, settings=settings,
+                    )
+                    run.finished_at = now_utc()
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    logging.exception("Failed to persist cancelled editorial planner audit")
                 raise
-        # Every returned attempt is auditable, including the first invalid
-        # response, an advisory-only critic finding, and a later workflow error.
-        for index, attempt_response in enumerate(attempts, 1):
-            persist_critic_audit(
-                db, product_id=task.product_id, task_id=task.id,
-                run_id=run.id, response=attempt_response,
-            )
-            usage = attempt_response.usage
-            db.add(CostRecord(
-                product_id=task.product_id, agent_run_id=run.id, category='llm',
-                provider=settings.llm_provider, amount=0, currency='USD',
-                incurred_at=now_utc(),
-                input_tokens=usage.input_tokens if usage is not None else None,
-                output_tokens=usage.output_tokens if usage is not None else None,
-                details=critic_cost_details(
-                    attempt_response, task_type='content_calendar',
-                    attempt=index, model=attempt_response.model,
-                ),
-            ))
-        for event in attempt_failures:
-            persist_critic_attempt_event(
-                db, product_id=task.product_id, task_id=task.id,
-                run_id=run.id, event=event,
-            )
-            db.add(CostRecord(
-                product_id=task.product_id, agent_run_id=run.id, category='llm',
-                provider=settings.llm_provider, amount=0, currency='USD',
-                incurred_at=now_utc(), input_tokens=None, output_tokens=None,
-                details={
-                    'cost_known': False, 'task_type': 'content_calendar',
-                    'model': event['model'], 'attempt': event['attempt'],
-                    'review_status': event['status'], 'usage_incomplete': True,
-                    'observed_tokens_only': True,
-                },
-            ))
+        _persist_planner_attempts(
+            db, task=task, run=run, attempts=attempts,
+            attempt_failures=attempt_failures, settings=settings,
+        )
         run.finished_at = now_utc()
         db.commit()
         return 1
