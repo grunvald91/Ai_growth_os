@@ -297,14 +297,19 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             check = ArtifactService(db).create(
                 product_id=product.id, task_id=task.id, agent_run_id=run.id,
                 kind="content_stage_output", title=agent + ": draft",
-                content=json.dumps({
-                    "output": result.model_dump(mode="json"),
-                    "quality_review": response.quality_review,
-                }, ensure_ascii=False),
+                content=json.dumps(result.model_dump(mode="json"), ensure_ascii=False),
             )
+            references = [{"kind": "artifact", "id": str(check.id)}]
+            if response.quality_review is not None:
+                review_artifact = ArtifactService(db).create(
+                    product_id=product.id, task_id=task.id, agent_run_id=run.id,
+                    kind="agent_quality_review", title=agent + ": quality review",
+                    content=json.dumps(response.quality_review, ensure_ascii=False),
+                )
+                references.append({"kind": "artifact", "id": str(review_artifact.id)})
             run.status = "completed"
             run.finished_at = datetime.now(timezone.utc)
-            run.output_references = [{"kind": "artifact", "id": str(check.id)}]
+            run.output_references = references
             db.commit()
             if idx == 0:
                 strategy = result
