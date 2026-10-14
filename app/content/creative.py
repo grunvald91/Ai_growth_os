@@ -18,7 +18,7 @@ from sqlalchemy import select, update
 from app.content.quality import post_quality_warnings, factual_claim_warnings
 from app.llm.audit import persist_critic_audit, persist_observed_llm_call
 from app.llm.schemas import LLMMessage, LLMRequest
-from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
+from app.models.domain import AgentRun, Artifact, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
 from app.services.tasks import TaskService
 from app.workflows.article_production import product_facts
@@ -215,7 +215,6 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             "deliverable": "text_only_director_ready_brief",
         }
         strategy = None
-        stage_reviews = {}
         for idx, (agent, schema) in enumerate((
             ("creative_strategist", CreativeStrategy),
             ("creative_director", CreativeDraft),
@@ -291,7 +290,6 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             if len(response.content) > 65000:
                 raise ValueError("Creative output exceeds bound")
             result = validate_candidate(json.loads(response.content))
-            stage_reviews[agent] = response.quality_review
             check = ArtifactService(db).create(
                 product_id=product.id, task_id=task.id, agent_run_id=run.id,
                 kind="content_stage_output", title=agent + ": draft",
