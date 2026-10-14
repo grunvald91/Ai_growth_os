@@ -873,7 +873,7 @@ class ArticleProduction:
                                 'team_role': name,
                                 'task_type': 'article_production',
                                 'provider_timeout_seconds': STAGE_PROVIDER_TIMEOUT_SECONDS.get(name, 90),
-                            ), validate_revision=validate_stage_revision),
+                            }), validate_revision=validate_stage_revision),
                             timeout=STAGE_TIMEOUT_SECONDS.get(name, 300) + self.llm.extra_timeout_seconds)
                         responses.setdefault(run_id, []).append(response)
                         self._record_usage(product_id, {run_id: [response]})
