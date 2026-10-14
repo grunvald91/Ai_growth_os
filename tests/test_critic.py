@@ -165,9 +165,13 @@ async def test_large_context_is_compacted_instead_of_skipping_review():
     ])
     request = task()
     request.messages[0].content = json.dumps({
-        "request": {"goal": "Explain customer onboarding"},
-        "task": {"title": "Onboarding steps"},
-        "prior_stage_outputs": {"history": "example " * 9000},
+        "task": {"title": "Onboarding steps", "description": "Explain onboarding"},
+        "task_brief": {"target": "New customers", "constraints": ["No paid ads", "Telegram only"]},
+        "product": {"name": "Demo company"},
+        "stable_product_context": "Verified information about the company",
+        "available_records": {"goal": [], "metric": []},
+        "context_limits": {"max_items": 8},
+        "irrelevant_history": "example " * 9000,
     })
     result = await LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
                               critic_enabled=True).generate(request)
