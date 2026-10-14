@@ -268,6 +268,13 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     response=observed, stage=stage, task_type="creative_brief",
                     provider=settings.llm_provider,
                 )
+            def record_review_progress(snapshot):
+                persist_critic_audit(
+                    db, product_id=product.id, task_id=task.id,
+                    run_id=run.id, response=snapshot,
+                )
+                db.commit()
+
             response = await asyncio.wait_for(llm.generate(LLMRequest(
                 system_prompt=rules,
                 messages=[LLMMessage(role="user", content=json.dumps(stage_payload, ensure_ascii=False))],
@@ -279,7 +286,8 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     "reasoning_effort": "low", "provider_timeout_seconds": 100,
                 },
             ), validate_revision=validate_candidate,
-                on_observed=record_model_call), timeout=210 + llm.extra_timeout_seconds)
+                on_observed=record_model_call,
+                on_review_progress=record_review_progress), timeout=210 + llm.extra_timeout_seconds)
             persist_critic_audit(
                 db, product_id=product.id, task_id=task.id, run_id=run.id,
                 response=response,
