@@ -112,7 +112,7 @@ def test_small_brand_policy_survives_quick_post_compaction():
         "channel": "telegram", "channel_guidance": "Single CTA",
         "verified_facts": {"src-1": "Certified supplier"},
         "company_context": "Never offer discounts.",
-        "research_hypotheses": "Old unrelated research " * 900,
+        "cached_unrelated_notes": "Old unrelated research " * 900,
     }
     messages = _review_messages(req(payload))
     assert messages is not None
