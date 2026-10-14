@@ -199,3 +199,30 @@ async def test_content_task_requires_matching_format(db, product, tmp_path):
 
     assert result.failed_task_ids == [task.id]
     assert result.artifact_ids == []
+
+
+@pytest.mark.asyncio
+async def test_team_cycle_provider_failure_commits_failed_and_processes_next_task(db, product, tmp_path):
+    """Regression: removed _record_usage must never mask an earlier model failure."""
+    first = add_task(
+        db, product, role="content_seo", task_type="article_brief",
+        title="Provider failed", priority=99,
+    )
+    second = add_task(
+        db, product, role="analytics", task_type="analytics",
+        title="Still process", priority=90,
+    )
+    provider = SequenceProvider([RuntimeError("simulated provider outage"), analytics_output()])
+    cycle = build_team_cycle(
+        db, Settings(_env_file=None, products_root=tmp_path,
+                     agent_critic_enabled=False), provider,
+    )
+    result = await cycle.run(product.id, max_tasks=2, followup_cmo=False)
+    assert result.failed_task_ids == [first.id]
+    assert result.completed_task_ids == [second.id]
+    assert db.get(Task, first.id).status == TaskStatus.FAILED
+    assert db.get(Task, second.id).status == TaskStatus.COMPLETED
+    first_run = db.scalar(select(AgentRun).where(AgentRun.task_id == first.id))
+    assert first_run.status == "failed" and first_run.finished_at is not None
+    assert first_run.error == "provider_request_failed"
+    assert len(provider.requests) == 2
