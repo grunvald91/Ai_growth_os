@@ -65,7 +65,7 @@ def test_failed_creative_task_is_visible_and_retries_once(studio_v5):
     task = Task(product_id=company.id, assigned_agent="content_creative", title="Визуальный бриф", status=TaskStatus.FAILED)
     db.add(task); db.commit()
     base = f"/studio/products/{company.id}"
-    assert "Визуальный бриф" in client.get(base + "/create").text
+    assert "Создать материал" in client.get(base + "/create").text
     assert "Повторить задание" in client.get(base + f"/tasks/{task.id}").text
     assert client.post(base + f"/tasks/{task.id}/retry", follow_redirects=False).status_code == 303
     assert client.post(base + f"/tasks/{task.id}/retry").status_code == 409

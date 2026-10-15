@@ -14,10 +14,10 @@ def esc(value) -> str:
 
 FORMAT_CHOICES = [
     ("post", "Пост", "Готовый текст для одной площадки"),
-    ("short_video", "Короткое видео · сценарий", "Сценарий, кадры и озвучка — не MP4"),
-    ("story", "Stories", "Последовательность экранов — не готовые изображения"),
-    ("static_image", "Изображение · бриф", "Визуальный бриф — не готовая картинка"),
-    ("package", "Полный пакет", "Статья, адаптации и видеосценарии"),
+    ("short_video", "Сценарий видео", "Сценарий ролика: кадры и текст озвучки"),
+    ("story", "Stories", "Текст для нескольких экранов подряд"),
+    ("static_image", "Картинка", "Описание картинки для дизайнера"),
+    ("package", "Полный пакет", "Статья, посты и сценарии сразу"),
 ]
 
 CHANNELS = {
@@ -54,31 +54,20 @@ def create_content_html(product_id, *, created=False, fields=None, error=None) -
     if error:
         feedback = f'<div class="sg-warning" role="alert">{esc(error)}</div>'
     return f"""
-    <section class="sg-surface sg-animator-entry sg-animator-top">
-      <div><span class="sg-overline">НОВЫЙ ФОРМАТ · ВИДЕО С ОЗВУЧКОЙ</span>
-        <h2>Рисованное видеообъяснение</h2>
-        <p>Закажите анимированный ролик. Сценарий, рисунки, голос и готовый MP4
-        будут доступны в отдельном задании.</p>
-        <small>Платные API-вызовы — только после вашего подтверждения.</small>
-      </div>
-      <a class="btn primary" href="{base}/whiteboard">Создать рисованное видео →</a>
-    </section>
-    <div class="sg-layout-two">
+    <div class="sg-create-single">
       <section class="sg-surface sg-create-form">
-        <div class="sg-section-head"><div><span class="sg-overline">ШАГ 1 · МАТЕРИАЛ</span>
-        <h2>Что будем создавать?</h2><p>Выберите результат, а не целую цепочку ИИ-агентов.</p></div></div>
         {feedback}
         <form method="post" action="{base}/create" class="sg-form" id="sg-create-form" data-studio-create>
           <fieldset class="sg-format-grid"><legend class="sr-only">Формат материала</legend>{choices}</fieldset>
           <div class="sg-fields">
-            <label class="sg-field" data-create-platform><span>Площадка</span>
+            <label class="sg-field" data-create-platform><span>Где опубликуем</span>
               <select name="channel" aria-label="Площадка">{option_groups}</select>
-              <small>Список меняется в зависимости от формата</small>
+              <small>Показаны площадки, подходящие для выбранного вида</small>
             </label>
             <label class="sg-field sg-wide"><span>Тема или задача</span>
               <textarea name="topic" minlength="3" maxlength="300" rows="3"
                 placeholder="Например: три ошибки при выборе массажной процедуры" required>{esc(fields.get("topic", ""))}</textarea>
-              <small>Одно предложение обычными словами. Подробности ИИ возьмёт из профиля компании.</small>
+              <small>Одно предложение. Подробности ИИ возьмёт из профиля компании.</small>
             </label>
             <label class="sg-field sg-wide"><span>Для кого пишем <em>· необязательно</em></span>
               <input name="audience" maxlength="300" value="{esc(fields.get('audience', ''))}" placeholder="Например: занятые родители с детьми">
@@ -89,29 +78,13 @@ def create_content_html(product_id, *, created=False, fields=None, error=None) -
             </label>
           </div>
           <div class="sg-form-bottom">
-            <div class="sg-form-hint"><span aria-hidden="true">✓</span> Создание не публикует материал.
-            После подготовки можно проверить, изменить и утвердить.</div>
+            <div class="sg-form-hint"><span aria-hidden="true">✓</span> Ничего не опубликуется само: сначала вы всё проверите.</div>
             <button class="btn primary sg-primary-action" type="submit">Создать материал <span aria-hidden="true">→</span></button>
           </div>
         </form>
       </section>
-      <aside class="sg-aside-stack">
-        <section class="sg-surface sg-guide"><h3>Рисованное видео с озвучкой</h3>
-          <p>Готовый вертикальный MP4: три сцены, русская озвучка, рисование и субтитры. Платные модели запускаются после отдельного подтверждения.</p>
-          <a class="btn secondary" href="{base}/whiteboard">Создать рисованное видео →</a>
-        </section>
-        <section class="sg-surface sg-guide"><div class="sg-guide-icon">✦</div>
-          <h2>Как работает ИИ-команда</h2>
-          <ol class="sg-steps"><li><b>Создаёт</b><span>Под конкретную компанию, формат и аудиторию.</span></li>
-          <li><b>Даёт на проверку</b><span>Вы видите готовый текст или производственный бриф.</span></li>
-          <li><b>Дорабатывает</b><span>Пост можно доработать с ИИ. Все форматы можно исправить вручную; предыдущая версия сохранится.</span></li>
-          <li><b>Публикует отдельно</b><span>Telegram: только утверждённые посты и подключённые каналы.</span></li></ol>
-        </section>
-        <section class="sg-surface sg-guide"><h3>Нужен план на неделю или месяц?</h3>
-          <p>Для работы по расписанию используйте действующий контент-план.</p>
-          <a class="btn secondary" href="{base}/plan">Открыть контент-план →</a>
-        </section>
-      </aside>
+      <p class="sg-create-after">Дальше: ИИ подготовит материал за несколько минут — он появится в «Материалах». Публикуется он только после вашего подтверждения.</p>
+      <p class="sg-create-after">Нужен ролик с рисунками и озвучкой? <a href="{base}/whiteboard">Создать рисованное видео →</a></p>
     </div>"""
 
 def review_html(product_id, records, *, filter_name="all") -> str:

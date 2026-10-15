@@ -77,6 +77,22 @@ details>summary{min-height:44px;padding-top:10px;padding-bottom:10px;box-sizing:
 .sg-mobile-project-name{min-width:0;max-width:112px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sg-mobile-project span[aria-hidden]{flex:0 0 auto}
 .sg-side-mail{margin:14px 0 0}
+
+/* ── Упрощение: одно меню «Другие разделы» только на телефоне; на компьютере есть боковая панель ── */
+@media(min-width:921px){.sg-route-utility{display:none}}
+@media(max-width:920px){.topbar .eyebrow{display:none}}
+.sg-side-extras>summary{justify-content:flex-start;gap:8px}
+.topbar .eyebrow,.route-page-head .eyebrow{display:none}
+@media(max-width:920px){
+.mobile-nav{gap:2px}
+.mobile-nav a{flex-direction:column!important;gap:2px!important;padding:6px 2px;text-align:center;line-height:1.2}
+.mobile-nav a,.mobile-nav a *{font-size:12px}
+.mobile-nav .m-ico{font-size:18px}
+}
+.sg-create-single{max-width:760px}
+.sg-create-after{margin:14px 4px 0;font-size:14px;line-height:1.5;color:#51657A}
+.sg-create-after a{font-weight:650}
+.sg-side-mail{margin-top:10px}
 """
 
 JS = r"""

@@ -52,7 +52,7 @@ def test_task_first_pages_and_mobile_navigation(studio_v5):
 
     create = client.get(base + "/create")
     assert create.status_code == 200
-    for label in ["Пост", "Короткое видео", "Stories", "Изображение", "Полный пакет"]:
+    for label in ["Пост", "Сценарий видео", "Stories", "Картинка", "Полный пакет"]:
         assert label in create.text
     assert 'name="topic"' in create.text
     assert 'data-studio-create' in create.text
@@ -289,7 +289,7 @@ def test_official_servgo_brand_matches_booking_component(studio_v5):
     assert "/studio/assets/servgo.svg" in main.text
     assert 'sg-official-brand-name">Serv<span>Go</span>' in main.text
     assert '<span class="brand-mark">S</span>' not in main.text
-    assert 'studio.css?v=11' in main.text
+    assert 'studio.css?v=13' in main.text
 
     css = client.get("/studio/assets/studio.css").text
     assert '--sg-blue:#2F5BEB' in css
@@ -407,6 +407,6 @@ def test_v8_typography_consistent_across_all_studio_views(studio_v5):
     for route in ("", "/create", "/review", "/calendar", "/materials", "/channels", "/plan"):
         result = client.get(base + route)
         assert result.status_code == 200, route
-        assert "studio.css?v=11" in result.text
+        assert "studio.css?v=13" in result.text
         assert 'data-studio-build="20261013-unified10"' in result.text
         assert "/studio/assets/servgo.svg" in result.text

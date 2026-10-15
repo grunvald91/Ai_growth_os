@@ -80,7 +80,7 @@ def test_pages_do_not_show_internal_jargon(studio):
 def test_dropdown_cannot_leave_the_screen_and_tap_targets_are_large(studio):
     client, base = studio
     css = client.get("/studio/assets/studio.css").text
-    # меню «Ещё инструменты» привязано к левому краю и на телефоне раскрывается в потоке страницы
+    # меню «Другие разделы» привязано к левому краю и на телефоне раскрывается в потоке страницы
     assert ".sg-inline-more>div{left:0;right:auto" in css
     assert ".sg-inline-more>div{position:static" in css
     # фильтры не растягиваются и не режут слова

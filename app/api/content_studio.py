@@ -374,10 +374,10 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         {item("overview", base, "⌂", "Главная")}
         {item("create", base + "/create", "＋", "Создать материал")}
         {item("work", base + "/work", "◴", "В работе")}
-        {item("materials", base + "/materials", "▤", "Мои материалы")}
+        {item("materials", base + "/materials", "▤", "Материалы")}
       </nav>
       <details class="sg-side-extras">
-        <summary>Настройки маркетинга и другое</summary>
+        <summary>Другие разделы</summary>
         <nav class="nav" aria-label="Дополнительные инструменты">
           {item("review", base + "/review", "✓", "На согласовании")}
           {item("plan", base + "/plan", "☷", "Контент-план")}
@@ -390,7 +390,9 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
           <a href="/studio?choose=1"><span class="nav-ico" aria-hidden="true">⇄</span>Другой проект</a>
         </nav>
       </details>
-      <a class="sg-side-mail nav-mail" {MAIL_ATTRS} title="Откроется в новой вкладке"><span class="nav-ico" aria-hidden="true">✉</span>Почта</a>
+      <nav class="nav sg-side-mail" aria-label="Почта">
+        <a class="nav-mail" {MAIL_ATTRS} title="Откроется в новой вкладке"><span class="nav-ico" aria-hidden="true">✉</span>Почта ↗</a>
+      </nav>
       <div class="sidebar-spacer"></div>
       <div class="sidebar-foot">ServGo · Маркетинг</div>
     </aside>
@@ -407,7 +409,7 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
       {item("overview", base, "⌂", "Главная")}
       {item("create", base + "/create", "＋", "Создать")}
       {item("work", base + "/work", "◴", "В работе")}
-      {item("materials", base + "/materials", "▤", "Готово")}
+      {item("materials", base + "/materials", "▤", "Материалы")}
     </nav>
     """
 
@@ -945,14 +947,11 @@ def product_dashboard(db: Session, product: Product) -> str:
     attention_html = f"""
     <section class="sg-workflow-banner" aria-labelledby="start-working">
       <div>
-        <span class="sg-overline">SERVGO · ИИ-МАРКЕТИНГ</span>
         <h2 id="start-working">Что будем создавать?</h2>
-        <p>Укажите тему — ИИ-команда подготовит материал.
-        Все этапы и результаты можно посмотреть в разделе «В работе».</p>
+        <p>Назовите тему — готовый материал появится в «Материалах».</p>
       </div>
       <div class="sg-hero-actions">
         <a class="btn primary" href="/studio/products/{product.id}/create">＋ Создать материал</a>
-        <a class="btn secondary" href="/studio/products/{product.id}/work">Мои задания →</a>
       </div>
     </section>
     """
@@ -1010,7 +1009,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       </section>
       <section class="sg-surface"><div class="sg-section-head"><div><h2>Последние материалы</h2>
         <p>Новые статьи, посты и сценарии вашей команды.</p></div>
-        <a class="sg-mini-link" href="/studio/products/{product.id}/materials">Библиотека →</a></div>
+        <a class="sg-mini-link" href="/studio/products/{product.id}/materials">Все материалы →</a></div>
         <div class="sg-mini-list">{"".join(recent_cards) or '<div class="sg-muted">Начните с создания первого материала.</div>'}</div>
       </section>
     </div>
@@ -1025,7 +1024,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>Growth Studio · {esc(product.name)}</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=11">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=13">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1037,8 +1036,8 @@ def product_dashboard(db: Session, product: Product) -> str:
     <header class="topbar">
       <div>
         <div class="eyebrow">GROWTH STUDIO <span class="beta">BETA</span></div>
-        <h1>Маркетинг компании</h1>
-        <p class="subtitle">Создание, согласование и публикации — в одном понятном рабочем пространстве.</p>
+        <h1>Главная</h1>
+        <p class="subtitle">Здесь вы создаёте посты и видео для соцсетей, проверяете их и публикуете.</p>
       </div>
       <div class="top-actions">
         <div class="cycle-card">
@@ -1163,7 +1162,7 @@ def studio_page_shell(
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>{esc(title)} · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=11">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=13">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1176,18 +1175,14 @@ def studio_page_shell(
     <header class="route-page-head">
       <div>
         <a class="back-link" href="/studio/products/{product.id}">← На главную</a>
-        <div class="eyebrow">GROWTH STUDIO <span class="beta">BETA</span></div>
         <h1>{esc(title)}</h1>
         <p class="subtitle">{esc(subtitle)}</p>
       </div>
       <div class="route-actions">{actions}</div>
     </header>
-    <nav class="sg-route-utility" aria-label="Перейти к другим действиям">
-      <a href="/studio/products/{product.id}/create">＋ Создать</a>
-      <a href="/studio/products/{product.id}/work">◴ В работе</a>
-      <a href="/studio/products/{product.id}/materials">▤ Материалы</a>
+    <nav class="sg-route-utility" aria-label="Другие разделы">
       <details class="sg-inline-more">
-        <summary>Ещё инструменты</summary>
+        <summary>Другие разделы</summary>
         <div><a href="/studio/products/{product.id}/plan">Контент-план</a>
         <a href="/studio/products/{product.id}/calendar">Календарь</a>
         <a href="/studio/products/{product.id}/whiteboard">Рисованное видео</a>
@@ -1297,7 +1292,7 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
     """
     return studio_page_shell(
         product, active="plan", title="Контент-план",
-        subtitle="Темы, площадки, сроки и состояние каждого контент-пакета.",
+        subtitle="Что и когда публикуем: темы, площадки и сроки.",
         body=body, actions=action_html,
     )
 
@@ -1388,7 +1383,7 @@ def calendar_page(db: Session, product: Product, selected_date: str | None = Non
     """
     return studio_page_shell(
         product, active="calendar", title="Календарь",
-        subtitle="Дата, время, площадка, подготовка и состояние каждой публикации.",
+        subtitle="Все запланированные публикации по датам.",
         body=body,
     )
 
@@ -1451,7 +1446,7 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
     body = f"""
     <section class="panel">
       <div class="panel-head"><div class="panel-title"><span class="ico">▤</span><div>
-      <h2>Библиотека</h2><div class="panel-sub">Все статьи, посты, сценарии и визуальные брифы</div>
+      <h2>Все материалы</h2><div class="panel-sub">Всё, что уже создано: тексты, сценарии, картинки</div>
       </div></div>{f'<span class="chip blue">Страница {page}</span>' if page > 1 else ''}</div>
       <form class="library-controls" method="get">
         <input type="hidden" name="kind" value="{esc(kind)}">
@@ -1466,7 +1461,7 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
     """
     return studio_page_shell(
         product, active="materials", title="Материалы",
-        subtitle="Поиск, фильтры и удобный просмотр — без загрузки всей библиотеки.",
+        subtitle="Всё, что уже создано. Откройте материал, чтобы прочитать или поправить.",
         body=body,
     )
 
@@ -1708,7 +1703,7 @@ def package_detail_page(db: Session, product: Product, package_key: str) -> str:
     """
     return studio_page_shell(
         product, active="plan", title=topic,
-        subtitle="Контент-пакет: расписание по площадкам и связанные материалы.",
+        subtitle="Расписание по площадкам и связанные материалы.",
         body=body, actions=queue,
     )
 
@@ -1743,7 +1738,7 @@ def analytics_page(db: Session, product: Product) -> str:
     """
     return studio_page_shell(
         product, active="analytics", title="Аналитика",
-        subtitle="Состояние контент-производства и место для будущих метрик публикаций.",
+        subtitle="Сколько материалов готово и сколько публикаций вышло.",
         body=body,
     )
 
@@ -1755,7 +1750,7 @@ def product_selector(products: list[Product]) -> str:
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=11"></head>
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=13"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
@@ -2045,7 +2040,7 @@ def studio_create_page(product_id: UUID, created: bool = False, db: Session = De
                   f'{product.id}/work">Посмотреть все запущенные задания →</a></p>')
     response = HTMLResponse(studio_page_shell(
         product, active="create", title="Создать материал",
-        subtitle="Одна задача, одна площадка и понятный результат — без лишних настроек.",
+        subtitle="Выберите вид материала и тему — остальное сделает ИИ.",
         body=html_body,
     ))
     response.headers["Cache-Control"] = "no-store"
@@ -2089,7 +2084,7 @@ def studio_work_page(product_id: UUID, tab: str = "all", db: Session = Depends(g
     html_body = activity_html(product.id, work_items(db, product.id), tab=tab)
     result = HTMLResponse(studio_page_shell(
         product, active="work", title="В работе",
-        subtitle="Здесь видно, что создаётся, что готово и что требует внимания.",
+        subtitle="Что сейчас создаётся, что готово и что ждёт вашего решения.",
         body=html_body,
     ))
     result.headers["Cache-Control"] = "private, no-store"
@@ -2134,7 +2129,7 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
     body = task_detail_html(product.id, task, runs, results, request=request)
     response = HTMLResponse(studio_page_shell(
         product, active="work", title="Создание материала",
-        subtitle="Настоящий статус задания, этапы ИИ-команды и готовые результаты.",
+        subtitle="Как идёт работа над материалом и что получилось.",
         body=body,
     ))
     response.headers["Cache-Control"] = "private, no-store"
@@ -2177,7 +2172,7 @@ def studio_review_page(product_id: UUID, kind: str = "all", db: Session = Depend
     ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(250)))
     response = HTMLResponse(studio_page_shell(
         product, active="review", title="На проверке",
-        subtitle="Только готовые материалы, для которых необходимо ваше решение.",
+        subtitle="Прочитайте материал и утвердите его или попросите исправить.",
         body=review_html(product.id, records, filter_name=kind),
     ))
     response.headers["Cache-Control"] = "no-store"
@@ -2280,7 +2275,7 @@ def studio_channels(product_id: UUID, added: bool = False, scheduled: bool = Fal
                                 "when": fmt_dt(parse_dt(meta.get("scheduled_at")).astimezone(ZoneInfo("Europe/Moscow")).isoformat()) + " · Москва" if parse_dt(meta.get("scheduled_at")) else "Дата не указана"}
     response = HTMLResponse(studio_page_shell(
         product, active="channels", title="Каналы и публикации",
-        subtitle="Подключения, назначенные отправки и реальные результаты Telegram.",
+        subtitle="Куда публикуем и что уже отправлено в Telegram.",
         body=channels_html(product.id, connections, publications, approved_posts,
                            added=added, scheduled=scheduled, selected_post=post_id,
                            autopost_enabled=get_settings().content_telegram_autopost_enabled,
