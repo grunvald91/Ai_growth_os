@@ -515,3 +515,7 @@ from app.api.content_studio_work_ui import CSS as STUDIO_WORK_CSS, JS as STUDIO_
 STUDIO_CSS += "\n" + STUDIO_WORK_CSS
 STUDIO_JS += "\n" + STUDIO_WORK_JS
 
+# Fixes found on a real phone: loaded last so they win over every earlier layer.
+from app.api.content_studio_fixes import CSS as STUDIO_FIXES_CSS, JS as STUDIO_FIXES_JS
+STUDIO_CSS += "\n" + STUDIO_FIXES_CSS
+STUDIO_JS += "\n" + STUDIO_FIXES_JS

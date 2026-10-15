@@ -44,6 +44,10 @@ from app.models.domain import AgentRun, Artifact, ArtifactStatus, Product, Publi
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 
+# Веб-почта ServGo. Открывается в новой вкладке, чтобы не уводить из студии.
+MAIL_URL = "https://mail.servgo.ru"
+MAIL_ATTRS = f'href="{MAIL_URL}" target="_blank" rel="noopener noreferrer"'
+
 MATERIAL_KINDS = {
     "article", "channel_text", "video_script", "content_distribution",
     "dzen_brief", "telegram_brief", "short_video_brief",
@@ -77,6 +81,18 @@ STATUS_LABELS = {
 
 def esc(value) -> str:
     return html.escape("" if value is None else str(value))
+
+
+def plural(n: int, one: str, few: str, many: str) -> str:
+    """Русское склонение: 1 публикация, 2 публикации, 5 публикаций."""
+    n = abs(int(n))
+    if n % 100 in range(11, 15):
+        return many
+    if n % 10 == 1:
+        return one
+    if n % 10 in (2, 3, 4):
+        return few
+    return many
 
 
 def parse_json(record: Artifact) -> dict:
@@ -374,6 +390,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
           <a href="/studio?choose=1"><span class="nav-ico" aria-hidden="true">⇄</span>Другой проект</a>
         </nav>
       </details>
+      <a class="sg-side-mail nav-mail" {MAIL_ATTRS} title="Откроется в новой вкладке"><span class="nav-ico" aria-hidden="true">✉</span>Почта</a>
       <div class="sidebar-spacer"></div>
       <div class="sidebar-foot">ServGo · Маркетинг</div>
     </aside>
@@ -402,8 +419,11 @@ def mobile_header_html(product: Product) -> str:
     return f"""
     <header class="sg-mobile-shell-head">
       {servgo_brand_html(compact=True, href=base)}
-      <a class="sg-mobile-project" href="/studio?choose=1"
-         aria-label="Сменить компанию: {esc(product.name)}">{esc(product.name)} <span aria-hidden="true">⌄</span></a>
+      <span class="sg-mobile-actions">
+        <a class="sg-mobile-mail" {MAIL_ATTRS} aria-label="Почта (откроется в новой вкладке)">✉</a>
+        <a class="sg-mobile-project" href="/studio?choose=1"
+           aria-label="Сменить компанию: {esc(product.name)}"><span class="sg-mobile-project-name">{esc(product.name)}</span> <span aria-hidden="true">⌄</span></a>
+      </span>
     </header>
     """
 
@@ -501,7 +521,7 @@ def package_card(
         if platform and platform not in platforms:
             platforms.append(platform)
     chips = "".join(
-        f'<span class="chip blue">{esc(platform_short(p))} · {esc(platform_label(p))}</span>'
+        f'<span class="chip blue">{esc(platform_label(p))}</span>'
         for p in platforms
     )
     first_publish = min((slot.get("publish_at") or "" for slot in group), default="")
@@ -530,7 +550,7 @@ def package_card(
         <div class="chips">{chips}</div>
         <div class="package-foot">
           <span>□ {fmt_dt(first_publish)}</span>
-          <span>{len(group)} публикац.</span>
+          <span>{len(group)} {plural(len(group), "публикация", "публикации", "публикаций")}</span>
         </div>
         <div class="preview-actions"><a class="btn primary small" href="/studio/products/{product.id}/packages/{quote(str(key), safe='')}">Открыть пакет</a>{open_button}{queue_button}</div>
       </div>
@@ -787,9 +807,9 @@ def product_dashboard(db: Session, product: Product) -> str:
     kpis = f"""
     <section class="kpis" id="overview">
       <div class="kpi blue"><span class="kpi-icon">▱</span><div><strong>{len(groups)}</strong><small>контент-пакетов<br>в текущем цикле</small></div></div>
-      <div class="kpi green"><span class="kpi-icon">□</span><div><strong>{esc(horizon)}</strong><small>дней<br>горизонт плана</small></div></div>
+      <div class="kpi green"><span class="kpi-icon">□</span><div><strong>{esc(horizon)}</strong><small>дней<br>охватывает план</small></div></div>
       <div class="kpi purple"><span class="kpi-icon">⌘</span><div><strong>{len(channels)}</strong><small>площадок<br>в контент-плане</small></div></div>
-      <div class="kpi orange"><span class="kpi-icon">✓</span><div><strong>{ready}</strong><small>слотов<br>готово к проверке</small></div></div>
+      <div class="kpi orange"><span class="kpi-icon">✓</span><div><strong>{ready}</strong><small>публикаций<br>готово к проверке</small></div></div>
     </section>
     """
 
@@ -1005,7 +1025,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>Growth Studio · {esc(product.name)}</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=10">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=11">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1022,7 +1042,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       </div>
       <div class="top-actions">
         <div class="cycle-card">
-          <div class="cycle-head"><span>Подготовлено {done_like} из {total_slots} слотов</span><b>{esc(horizon)} дней · {esc(status_label(plan_state))}</b></div>
+          <div class="cycle-head"><span>Подготовлено {done_like} из {total_slots} {plural(total_slots, "публикации", "публикаций", "публикаций")}</span><b>{esc(horizon)} дней · {esc(status_label(plan_state))}</b></div>
           <div class="progress"><span style="width:{progress}%"></span></div>
         </div>
         <a class="product-pill" href="/studio?choose=1">
@@ -1073,7 +1093,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=11"></script>
+<script src="/studio/assets/studio.js?v=12"></script>
 </body></html>"""
 
 
@@ -1143,7 +1163,7 @@ def studio_page_shell(
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>{esc(title)} · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=10">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=11">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1155,7 +1175,7 @@ def studio_page_shell(
     <div class="route-mobile-brand">{mobile_logo_html(product.id)}</div>
     <header class="route-page-head">
       <div>
-        <a class="back-link" href="/studio/products/{product.id}">← Обзор</a>
+        <a class="back-link" href="/studio/products/{product.id}">← На главную</a>
         <div class="eyebrow">GROWTH STUDIO <span class="beta">BETA</span></div>
         <h1>{esc(title)}</h1>
         <p class="subtitle">{esc(subtitle)}</p>
@@ -1176,6 +1196,7 @@ def studio_page_shell(
         <a href="/studio/products/{product.id}/channels">Публикации</a>
         <a href="/studio/products/{product.id}/analytics">Аналитика</a>
         <a href="/studio/team">ИИ-команда</a>
+        <a {MAIL_ATTRS}>Почта ↗</a>
         <a href="/studio?choose=1">Другой проект</a></div>
       </details>
     </nav>
@@ -1183,7 +1204,7 @@ def studio_page_shell(
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=11"></script>
+<script src="/studio/assets/studio.js?v=12"></script>
 </body></html>"""
 
 
@@ -1269,7 +1290,7 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
       </form>
     </section>
     <section class="panel" id="unknowns">
-      <div class="panel-head"><div class="panel-title"><span class="ico">✦</span><div><h2>Идеи и неизвестные</h2>
+      <div class="panel-head"><div class="panel-title"><span class="ico">✦</span><div><h2>Что нужно уточнить</h2>
       <div class="panel-sub">То, что редактор пока считает непроверенным</div></div></div><span class="chip blue">{len(unknowns)}</span></div>
       <div class="route-list">{"".join(f'<div class="route-list-row"><span>?</span><p>{esc(x)}</p></div>' for x in unknowns) or '<div class="empty">Неизвестных нет.</div>'}</div>
     </section>
@@ -1358,7 +1379,7 @@ def calendar_page(db: Session, product: Product, selected_date: str | None = Non
     <section class="panel">
       <div class="panel-head">
         <div class="panel-title"><span class="ico">□</span><div><h2>Расписание публикаций</h2>
-        <div class="panel-sub">Все слоты текущего редакционного цикла</div></div></div>
+        <div class="panel-sub">Все запланированные публикации</div></div></div>
         <a class="btn secondary small" href="/studio/products/{product.id}/calendar">Показать все</a>
       </div>
       <div class="calendar-date-tabs"><div class="tabs">{date_tabs}</div></div>
@@ -1419,7 +1440,8 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
             f'<a class="btn secondary" href="/studio/products/{product.id}/materials'
             f'?kind={kind}&page={page-1}{query_url}">← Назад</a>'
         )
-    nav += f'<span>Страница {page}</span>'
+    if page > 1 or more:
+        nav += f'<span>Страница {page}</span>'
     if more:
         nav += (
             f'<a class="btn secondary" href="/studio/products/{product.id}/materials'
@@ -1430,7 +1452,7 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
     <section class="panel">
       <div class="panel-head"><div class="panel-title"><span class="ico">▤</span><div>
       <h2>Библиотека</h2><div class="panel-sub">Все статьи, посты, сценарии и визуальные брифы</div>
-      </div></div><span class="chip blue">Страница {page}</span></div>
+      </div></div>{f'<span class="chip blue">Страница {page}</span>' if page > 1 else ''}</div>
       <form class="library-controls" method="get">
         <input type="hidden" name="kind" value="{esc(kind)}">
         <label class="search"><input name="q" type="search" value="{esc(query_text)}"
@@ -1704,12 +1726,12 @@ def analytics_page(db: Session, product: Product) -> str:
     body = f"""
     <section class="analytics-grid">
       <div class="kpi blue"><span class="kpi-icon">▱</span><div><strong>{len(state["groups"])}</strong><small>пакетов в текущем плане</small></div></div>
-      <div class="kpi green"><span class="kpi-icon">▤</span><div><strong>{len(materials)}</strong><small>готовых артефактов в библиотеке</small></div></div>
+      <div class="kpi green"><span class="kpi-icon">▤</span><div><strong>{len(materials)}</strong><small>готовых материалов</small></div></div>
       <div class="kpi purple"><span class="kpi-icon">✓</span><div><strong>{completed_tasks}</strong><small>завершённых задач</small></div></div>
       <div class="kpi orange"><span class="kpi-icon">!</span><div><strong>{failed_tasks}</strong><small>задач с ошибкой</small></div></div>
     </section>
     <section class="panel">
-      <div class="panel-head"><div class="panel-title"><span class="ico">⌁</span><div><h2>Статусы публикационных слотов</h2>
+      <div class="panel-head"><div class="panel-title"><span class="ico">⌁</span><div><h2>Статусы публикаций</h2>
       <div class="panel-sub">Реальные данные текущего плана</div></div></div></div>
       <div class="analytics-statuses">{"".join(f'<div><span class="status {status_class(k)}">{esc(status_label(k))}</span><b>{v}</b></div>' for k,v in sorted(state_counts.items())) or '<div class="empty">Слотов нет.</div>'}</div>
     </section>
@@ -1733,7 +1755,7 @@ def product_selector(products: list[Product]) -> str:
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=10"></head>
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=11"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>

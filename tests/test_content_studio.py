@@ -256,7 +256,7 @@ def test_studio_all_navigation_targets_are_real_pages(studio_db):
         assert "Контент-план" in plan_page.text
         assert "Расписание публикаций" in calendar_page.text
         assert "Библиотека" in materials_page.text
-        assert "Статусы публикационных слотов" in analytics_page.text
+        assert "Статусы публикаций" in analytics_page.text
         assert "Тема один" in package_page.text
         assert "Полный рабочий текст статьи" in material_page.text
         assert 'data-copy="material-copy"' in material_page.text
