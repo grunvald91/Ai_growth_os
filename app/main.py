@@ -31,9 +31,6 @@ app.include_router(company_intake_router, dependencies=[Depends(require_studio_a
 from app.api.content_studio import router as content_studio_router
 app.include_router(content_studio_router)
 
-from app.api.whiteboard import router as whiteboard_router
-app.include_router(whiteboard_router)
-
 from app.api.comments import router as comments_router
 app.include_router(comments_router, dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 from app.api.team_dashboard import router as team_dashboard_router
