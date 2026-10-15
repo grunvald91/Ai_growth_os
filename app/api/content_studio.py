@@ -12,18 +12,20 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from urllib.parse import parse_qs
 from zoneinfo import ZoneInfo
-from datetime import datetime
-from pathlib import Path
 from uuid import UUID
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse, FileResponse
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 
 from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
 from app.api.content_studio_brand import SERVGO_FAVICON_SVG, servgo_brand_html
+from app.api.content_studio_article import render_article
+from app.content.render import asset_path
+from app.api.content_studio_activity import (work_items, notice_items, notice_html,
+    activity_html, activity_overview, task_detail_html, RESULT_KINDS)
 from app.api.content_studio_ui import create_content_html, review_html, channels_html
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.content.calendar import (PLATFORMS, approve_plan, pause_plan,
@@ -45,7 +47,7 @@ router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_s
 MATERIAL_KINDS = {
     "article", "channel_text", "video_script", "content_distribution",
     "dzen_brief", "telegram_brief", "short_video_brief",
-    "story_brief", "static_image_brief", "creative_brief",
+    "story_brief", "static_image_brief", "creative_brief", "video_render", "whiteboard_video",
 }
 
 STATUS_LABELS = {
@@ -107,20 +109,9 @@ def latest_plan(db: Session, product_id: UUID, *, prefer_active: bool = True):
 
 
 def article_preview_html(text: str) -> str:
-    """A safe Markdown subset: escape all input before adding any markup."""
-    lines = []
-    for raw in text.splitlines():
-        safe = esc(raw)
-        safe = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", safe)
-        heading = re.match(r"^(#{1,3})\s+(.+)$", safe)
-        if heading:
-            level = len(heading[1]) + 1
-            lines.append(f"<h{level}>{heading[2]}</h{level}>")
-        elif safe.startswith("- "):
-            lines.append(f'<p class="sg-article-bullet">• {safe[2:]}</p>')
-        elif safe:
-            lines.append(f"<p>{safe}</p>")
-    return "".join(lines)
+    """Readable, escaped Markdown. Raw text remains available for editing."""
+    return render_article(text)
+
 
 
 def latest_draft(db: Session, product_id: UUID):
@@ -262,7 +253,7 @@ def artifact_kind(record: Artifact) -> str:
         return "article"
     if record.kind in {"channel_text", "dzen_brief", "telegram_brief"}:
         return "post"
-    if record.kind in {"video_script", "short_video_brief"}:
+    if record.kind in {"video_script", "short_video_brief", "video_render", "whiteboard_video"}:
         return "video"
     if record.kind in {"creative_brief", "story_brief", "static_image_brief"}:
         return "creative"
@@ -273,6 +264,10 @@ def artifact_kind_label(record: Artifact, value: dict | None = None) -> str:
     value = value or parse_json(record)
     if record.kind == "article":
         return "Статья"
+    if record.kind == "video_render":
+        return "Готовый видеоролик MP4"
+    if record.kind == "whiteboard_video":
+        return "Рисованное видео с озвучкой"
     if record.kind == "channel_text":
         return platform_label(value.get("channel", "")) or "Пост"
     if record.kind in {"video_script", "short_video_brief"}:
@@ -317,6 +312,10 @@ def artifact_text(record: Artifact, value: dict | None = None) -> str:
     value = value or parse_json(record)
     if not value:
         return record.content
+    if record.kind == "video_render":
+        return "Готовый видеофайл MP4 — откройте для просмотра или скачивания."
+    if record.kind == "whiteboard_video":
+        return "Рисованное видео MP4 — нажмите, чтобы посмотреть и скачать."
     if record.kind == "article":
         return str(value.get("full_article") or value.get("reader_article") or value.get("body") or record.content)
     if record.kind == "channel_text":
@@ -346,38 +345,37 @@ def brand_html() -> str:
 
 
 def sidebar_html(product_id: UUID, active: str = "overview") -> str:
+    """Four everyday destinations; advanced features deliberately secondary."""
     base = f"/studio/products/{product_id}"
     def item(name: str, href: str, icon: str, label: str) -> str:
         current = ' class="active" aria-current="page"' if active == name else ""
-        return f'<a{current} href="{href}" aria-label="{esc(label)}"><span class="nav-ico" aria-hidden="true">{icon}</span>{label}</a>'
+        return f'<a{current} href="{href}"><span class="nav-ico" aria-hidden="true">{icon}</span>{label}</a>'
     return f"""
     <aside class="sidebar">
       {servgo_brand_html(href=base)}
-      <div class="nav-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
+      <div class="nav-label">МОЯ РАБОТА</div>
       <nav class="nav" aria-label="Основная навигация">
         {item("overview", base, "⌂", "Главная")}
-        {item("create", base + "/create", "＋", "Создать")}
-        {item("review", base + "/review", "✓", "На проверке")}
-        {item("calendar", base + "/calendar", "▦", "Календарь")}
-        {item("materials", base + "/materials", "▤", "Материалы")}
-        {item("analytics", base + "/analytics", "⌁", "Аналитика")}
-        {item("comments", base + "/comments", "☷", "Комментарии")}
-        {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
-        {item("team", "/studio/team", "♧", "ИИ-команда")}
+        {item("create", base + "/create", "＋", "Создать материал")}
+        {item("work", base + "/work", "◴", "В работе")}
+        {item("materials", base + "/materials", "▤", "Мои материалы")}
       </nav>
-      <div class="nav-label">УПРАВЛЕНИЕ</div>
-      <nav class="nav" aria-label="Дополнительные инструменты">
-        {item("plan", base + "/plan", "☷", "Контент-план")}
-        {item("channels", base + "/channels", "↗", "Каналы и публикации")}
-        {item("analytics", base + "/analytics", "⌁", "Результаты")}
-        <a href="/studio?choose=1"><span class="nav-ico" aria-hidden="true">⇄</span>Другой проект</a>
-      </nav>
+      <details class="sg-side-extras">
+        <summary>Настройки маркетинга и другое</summary>
+        <nav class="nav" aria-label="Дополнительные инструменты">
+          {item("review", base + "/review", "✓", "На согласовании")}
+          {item("plan", base + "/plan", "☷", "Контент-план")}
+          {item("calendar", base + "/calendar", "▦", "Календарь")}
+          {item("channels", base + "/channels", "↗", "Публикации")}
+          {item("analytics", base + "/analytics", "⌁", "Результаты")}
+          {item("comments", base + "/comments", "☷", "Комментарии")}
+          {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
+          {item("team", "/studio/team", "♧", "ИИ-команда")}
+          <a href="/studio?choose=1"><span class="nav-ico" aria-hidden="true">⇄</span>Другой проект</a>
+        </nav>
+      </details>
       <div class="sidebar-spacer"></div>
-      <div class="sidebar-promo">
-        <b>Проще, чем управлять агентами</b>
-        <p>Выберите задачу, проверьте результат и согласуйте публикацию.</p>
-      </div>
-      <div class="sidebar-foot">ServGo · Growth Studio</div>
+      <div class="sidebar-foot">ServGo · Маркетинг</div>
     </aside>
     """
 
@@ -386,32 +384,16 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
     base = f"/studio/products/{product_id}"
     def item(name: str, href: str, icon: str, label: str) -> str:
         current = ' class="active" aria-current="page"' if active == name else ""
-        return f'<a{current} href="{href}"><span class="m-ico">{icon}</span>{label}</a>'
-    more_active = ' active' if active not in {"overview", "comments"} else ''
+        return f'<a{current} href="{href}"><span class="m-ico" aria-hidden="true">{icon}</span>{label}</a>'
     return f"""
-    <nav class="mobile-nav" aria-label="Основные разделы">
-      {item("overview", base, "⌂", "Обзор")}
-      {item("comments", base + "/comments", "☷", "Комментарии")}
-      <button class="mobile-more{more_active}" type="button" data-open-dialog="mobile-sections" aria-haspopup="dialog" aria-controls="mobile-sections"><span class="m-ico">☰</span>Ещё</button>
+    <nav class="mobile-nav" aria-label="Быстрая навигация">
+      {item("overview", base, "⌂", "Главная")}
+      {item("create", base + "/create", "＋", "Создать")}
+      {item("work", base + "/work", "◴", "В работе")}
+      {item("materials", base + "/materials", "▤", "Готово")}
     </nav>
-    <dialog id="mobile-sections" class="mobile-sections" aria-labelledby="mobile-sections-title">
-      <div class="mobile-sections-head"><h2 id="mobile-sections-title">Все разделы</h2><button type="button" data-close-dialog aria-label="Закрыть меню">×</button></div>
-      <nav class="mobile-sections-links" aria-label="Все разделы">
-        {item("create", base + "/create", "＋", "Создать")}
-        {item("review", base + "/review", "✓", "На проверке")}
-        {item("channels", base + "/channels", "↗", "Каналы и публикации")}
-        {item("overview", base, "⌂", "Обзор")}
-        {item("plan", base + "/plan", "▣", "Контент-план")}
-        {item("materials", base + "/materials", "▤", "Материалы")}
-        {item("calendar", base + "/calendar", "□", "Календарь")}
-        {item("analytics", base + "/analytics", "⌁", "Аналитика")}
-        {item("comments", base + "/comments", "☷", "Комментарии")}
-        {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
-        {item("team", "/studio/team", "♧", "ИИ-команда")}
-        <a href="/studio?choose=1" aria-label="Выбрать проект"><span class="m-ico">⇄</span>Выбрать проект</a>
-      </nav>
-    </dialog>
     """
+
 
 
 def mobile_header_html(product: Product) -> str:
@@ -929,7 +911,7 @@ def product_dashboard(db: Session, product: Product) -> str:
 
     review_count = db.scalar(select(func.count(Artifact.id)).where(
         Artifact.product_id == product.id,
-        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script"]),
+        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script", "video_render"]),
         Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
     )) or 0
     publishing_counts = dict(db.execute(
@@ -942,29 +924,35 @@ def product_dashboard(db: Session, product: Product) -> str:
                        for status in ("delivery_unknown", "sending", "failed_before_send"))
     attention_html = f"""
     <section class="sg-workflow-banner" aria-labelledby="start-working">
-      <div><span class="sg-overline">ВАШ СЛЕДУЮЩИЙ ШАГ</span>
-        <h2 id="start-working">Маркетинг под контролем</h2>
-        <p>Поставьте задачу ИИ-команде. Затем проверьте текст или сценарий,
-        внесите правки и отдельно разрешите публикацию.</p>
+      <div>
+        <span class="sg-overline">SERVGO · ИИ-МАРКЕТИНГ</span>
+        <h2 id="start-working">Что будем создавать?</h2>
+        <p>Укажите тему — ИИ-команда подготовит материал.
+        Все этапы и результаты можно посмотреть в разделе «В работе».</p>
       </div>
-      <div class="sg-hero-actions"><a class="btn primary" href="/studio/products/{product.id}/create">
-        ＋ Создать материал</a>
-        <a class="btn secondary" href="/studio/products/{product.id}/review">На проверке · {review_count}</a>
+      <div class="sg-hero-actions">
+        <a class="btn primary" href="/studio/products/{product.id}/create">＋ Создать материал</a>
+        <a class="btn secondary" href="/studio/products/{product.id}/work">Мои задания →</a>
       </div>
     </section>
+    """
+    overview_extra = f"""
     <div class="sg-priority-strip">
       <a class="sg-priority-item" href="/studio/products/{product.id}/review">
-        <strong>{review_count}</strong><span>Ждут проверки</span><em>Посмотреть →</em></a>
+        <strong>{review_count}</strong><span>Ждут проверки</span><em>Открыть →</em></a>
       <a class="sg-priority-item" href="/studio/products/{product.id}/channels">
-        <strong>{scheduled_count}</strong><span>В расписании Telegram</span><em>Открыть →</em></a>
+        <strong>{scheduled_count}</strong><span>В расписании Telegram</span><em>Публикации →</em></a>
       <a class="sg-priority-item" href="/studio/products/{product.id}/channels">
-        <strong>{unsafe_count}</strong><span>Нужно проверить отправку</span><em>Статусы →</em></a>
+        <strong>{unsafe_count}</strong><span>Отправку нужно проверить</span><em>Статусы →</em></a>
     </div>
-    <nav class="sg-quick-links" aria-label="Инструменты">
-      <a href="/studio/products/{product.id}/plan">▣ Контент-план</a>
-      <a href="/studio/products/{product.id}/materials">▤ Библиотека</a>
-      <a href="/studio/products/{product.id}/channels">↗ Каналы</a>
-      <a href="/studio/products/{product.id}/analytics">⌁ Результаты</a>
+    <nav class="sg-quick-links" aria-label="Дополнительные инструменты">
+      <a href="/studio/products/{product.id}/plan">Контент-план</a>
+      <a href="/studio/products/{product.id}/calendar">Календарь</a>
+      <a href="/studio/products/{product.id}/review">На согласовании</a>
+      <a href="/studio/products/{product.id}/whiteboard">Рисованное видео</a>
+      <a href="/studio/products/{product.id}/comments">Комментарии</a>
+      <a href="/intelligence?product_id={product.id}">Бизнес-разведка</a>
+      <a href="/studio/products/{product.id}/channels">Публикации</a>
     </nav>
     """
 
@@ -987,7 +975,7 @@ def product_dashboard(db: Session, product: Product) -> str:
             f'<a class="sg-mini-row" href="/studio/products/{product.id}/materials/{material.id}">'
             f'<span class="sg-mini-kind">▤</span><div><b>{esc(display_material_title(material, meta)[:75])}</b>'
             f'<small>{esc(artifact_kind_label(material, meta))} · '
-            f'{esc(status_label(material.status))}</small></div>'
+            f'{esc(status_label(material.status.value))}</small></div>'
             '<span aria-hidden="true">↗</span></a>'
         )
     quick_feed = f"""
@@ -1011,17 +999,18 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f7f9fc">
-  <meta name="servgo-studio-build" content="20261012-ux10">
+  <meta name="servgo-studio-build" content="20261013-unified10">
   <title>Growth Studio · {esc(product.name)}</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
   <link rel="stylesheet" href="/studio/assets/studio.css?v=10">
 </head>
 <body>
-<div class="studio-page" data-studio-build="20261012-ux10"><div class="studio-layout">
+<div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
   {sidebar_html(product.id)}
   {mobile_header_html(product)}
   {mobile_nav_html(product.id)}
   <main class="main">
+    <div class="sg-global-status">{notice_html(product.id)}</div>
     <header class="topbar">
       <div>
         <div class="eyebrow">GROWTH STUDIO <span class="beta">BETA</span></div>
@@ -1040,6 +1029,9 @@ def product_dashboard(db: Session, product: Product) -> str:
     </header>
     {attention_html}
     {new_draft_notice}
+    {activity_overview(product.id, work_items(db, product.id, limit=16))}
+    <details class="sg-legacy-details sg-dashboard-extra"><summary>Контент-план, календарь и другие инструменты</summary>
+    {overview_extra}
     {quick_feed}
     {mobile_dashboard_html(
         product=product,
@@ -1053,7 +1045,7 @@ def product_dashboard(db: Session, product: Product) -> str:
         horizon=horizon,
         channels=channels,
     )}
-    <details class="sg-legacy-details"><summary>Развернуть подробный контроль плана, пакетов и материалов</summary>
+    <details class="sg-legacy-details"><summary>Расширенная информация</summary>
     <div class="desktop-only-dashboard">
     {kpis}
     <div class="workspace">
@@ -1073,6 +1065,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       {selected_preview(first_material)}
     </div>
     </div>
+    </details>
     </details>
   </main>
 </div></div>
@@ -1144,17 +1137,18 @@ def studio_page_shell(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f7f9fc">
-  <meta name="servgo-studio-build" content="20261012-ux10">
+  <meta name="servgo-studio-build" content="20261013-unified10">
   <title>{esc(title)} · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
   <link rel="stylesheet" href="/studio/assets/studio.css?v=10">
 </head>
 <body>
-<div class="studio-page" data-studio-build="20261012-ux10"><div class="studio-layout">
+<div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
   {sidebar_html(product.id, active)}
   {mobile_header_html(product)}
   {mobile_nav_html(product.id, active)}
   <main class="main route-main">
+    <div class="sg-global-status">{notice_html(product.id)}</div>
     <div class="route-mobile-brand">{mobile_logo_html(product.id)}</div>
     <header class="route-page-head">
       <div>
@@ -1167,9 +1161,17 @@ def studio_page_shell(
     </header>
     <nav class="sg-route-utility" aria-label="Перейти к другим действиям">
       <a href="/studio/products/{product.id}/create">＋ Создать</a>
-      <a href="/studio/products/{product.id}/review">✓ На проверке</a>
+      <a href="/studio/products/{product.id}/work">◴ В работе</a>
       <a href="/studio/products/{product.id}/materials">▤ Материалы</a>
-      <a href="/studio/products/{product.id}/channels">↗ Публикации</a>
+      <details class="sg-inline-more">
+        <summary>Ещё инструменты</summary>
+        <div><a href="/studio/products/{product.id}/plan">Контент-план</a>
+        <a href="/studio/products/{product.id}/calendar">Календарь</a>
+        <a href="/studio/products/{product.id}/whiteboard">Рисованное видео</a>
+        <a href="/studio/products/{product.id}/comments">Комментарии</a>
+        <a href="/intelligence?product_id={product.id}">Бизнес-разведка</a>
+        <a href="/studio/products/{product.id}/channels">Публикации</a></div>
+      </details>
     </nav>
     <div class="route-content">{body}</div>
   </main>
@@ -1370,7 +1372,7 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
         "all": MATERIAL_KINDS,
         "article": {"article"},
         "post": {"channel_text", "dzen_brief", "telegram_brief"},
-        "video": {"video_script", "short_video_brief"},
+        "video": {"video_script", "short_video_brief", "video_render", "whiteboard_video"},
         "creative": {"creative_brief", "story_brief", "static_image_brief"},
     }
     kind = kind if kind in kinds else "all"
@@ -1471,6 +1473,28 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
           </div>
         </section>
         """
+    elif record.kind == "video_render":
+        vid = f"/studio/products/{product.id}/renders/{record.id}/video.mp4"
+        cover = f"/studio/products/{product.id}/renders/{record.id}/cover.png"
+        content = f"""
+        <section class="sg-surface sg-video-file">
+          <div class="sg-section-head"><div><h2>Готовый MP4</h2>
+          <p>Это действительно созданный видеофайл, а не изображение раскадровки.</p></div></div>
+          <video controls preload="metadata" playsinline poster="{cover}?preview=1">
+            <source src="{vid}?preview=1" type="video/mp4">
+            Ваш браузер не поддерживает воспроизведение MP4.
+          </video>
+          <div class="sg-inline-actions">
+            <a class="btn primary" href="{vid}">Скачать видео MP4</a>
+            <a class="btn secondary" href="/studio/products/{product.id}/renders/{record.id}/subtitles.srt">
+            Скачать субтитры</a>
+            <a class="btn secondary" href="/studio/products/{product.id}/renders/{record.id}/script.txt">
+            Скачать сценарий</a>
+          </div>
+          <p class="sg-muted">Текущий текстовый рендер без озвучки. Для полноценных
+          анимационных объяснений нужен отдельный конвейер видеопроизводства.</p>
+        </section>
+        """
     elif record.kind == "creative_brief":
         frames = value.get("frames") or []
         scenes = "".join(
@@ -1549,7 +1573,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
         content += '<section class="sg-surface"><h3>История материала</h3><div class="preview-actions">' + ''.join(
             f'<a class="btn ghost small" href="/studio/products/{product.id}/materials/{item.id}">Версия {index}</a>'
             for index, item in enumerate(versions, 1)) + '</div></section>'
-    if record.kind in {"channel_text", "creative_brief", "article", "video_script"}:
+    if record.kind in {"channel_text", "creative_brief", "article", "video_script", "video_render"}:
         status = record.status
         form_actions = ""
         if status in {ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED}:
@@ -1711,10 +1735,6 @@ def product_selector(products: list[Product]) -> str:
 </main></body></html>"""
 
 
-@router.get("/studio/assets/manrope.woff2")
-def studio_font():
-    return Response((Path(__file__).parent / "assets" / "manrope.woff2").read_bytes(),
-                    media_type="font/woff2", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 @router.get("/studio/assets/servgo.svg")
 def studio_official_logo():
     response = Response(SERVGO_FAVICON_SVG, media_type="image/svg+xml")
@@ -1806,8 +1826,46 @@ def studio_material_detail(product_id: UUID, artifact_id: UUID, db: Session = De
     record = db.get(Artifact, artifact_id)
     if record is None or record.product_id != product.id or record.kind not in MATERIAL_KINDS:
         raise HTTPException(404, "Material not found")
+    if record.kind == "whiteboard_video":
+        if not record.task_id:
+            raise HTTPException(404, "Исходное задание видео не найдено")
+        return RedirectResponse(
+            f"/studio/products/{product_id}/whiteboard/{record.task_id}", status_code=303,
+        )
     response = HTMLResponse(material_detail_page(db, product, record))
     response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.get("/studio/products/{product_id}/renders/{render_id}/{filename}")
+def studio_rendered_asset(product_id: UUID, render_id: UUID, filename: str,
+                          preview: bool = False, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    if filename not in {"video.mp4", "cover.png", "script.txt", "subtitles.srt"}:
+        raise HTTPException(404, "Файл не найден")
+    video = db.scalar(select(Artifact).where(
+        Artifact.id == render_id, Artifact.product_id == product_id,
+        Artifact.kind == "video_render",
+    ))
+    if video is None:
+        raise HTTPException(404, "Видеофайл не найден")
+    metadata = parse_json(video)
+    try:
+        script_id = UUID(str(metadata["script_id"]))
+        path = asset_path(get_settings().products_root, product_id, script_id, filename)
+    except (ValueError, KeyError, TypeError):
+        raise HTTPException(404, "Некорректные данные видео") from None
+    if not path.is_file():
+        raise HTTPException(404, "Файл ещё не сохранён или недоступен")
+    types = {"video.mp4": "video/mp4", "cover.png": "image/png",
+             "script.txt": "text/plain; charset=utf-8",
+             "subtitles.srt": "text/plain; charset=utf-8"}
+    response = FileResponse(
+        str(path), media_type=types[filename], filename=filename,
+        content_disposition_type="inline" if preview else "attachment",
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
 
@@ -1953,15 +2011,10 @@ async def studio_manual_edit(product_id: UUID, artifact_id: UUID, request: Reque
 def studio_create_page(product_id: UUID, created: bool = False, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
     html_body = create_content_html(product.id, created=created)
-    jobs = list(db.scalars(select(Task).where(
-        Task.product_id == product.id,
-        Task.assigned_agent.in_(["content_factory", "content_creative", "content_editor", "whiteboard_renderer"]),
-    ).order_by(Task.created_at.desc(), Task.id.desc()).limit(20)))
-    if jobs:
-        html_body += '<section class="sg-surface"><h2>Последние задания</h2>' + ''.join(
-            f'<p><a href="/studio/products/{product.id}/tasks/{job.id}">{esc(job.title)}</a> · '
-            f'{esc(status_label(getattr(job.status, "value", job.status)))}</p>' for job in jobs
-        ) + '</section>'
+    # Tasks have a dedicated persistent workspace; never duplicate a raw
+    # technical job log below the creative form.
+    html_body += ('<p class="sg-create-work-link"><a href="/studio/products/'
+                  f'{product.id}/work">Посмотреть все запущенные задания →</a></p>')
     response = HTMLResponse(studio_page_shell(
         product, active="create", title="Создать материал",
         subtitle="Одна задача, одна площадка и понятный результат — без лишних настроек.",
@@ -2001,35 +2054,62 @@ async def studio_create_submit(product_id: UUID, request: Request, db: Session =
     return RedirectResponse(f"/studio/products/{product.id}/tasks/{task.id}", status_code=303)
 
 
+@router.get("/studio/products/{product_id}/work", response_class=HTMLResponse)
+def studio_work_page(product_id: UUID, tab: str = "all", db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    tab = tab if tab in {"all", "active", "approval", "ready", "problems"} else "all"
+    html_body = activity_html(product.id, work_items(db, product.id), tab=tab)
+    result = HTMLResponse(studio_page_shell(
+        product, active="work", title="В работе",
+        subtitle="Здесь видно, что создаётся, что готово и что требует внимания.",
+        body=html_body,
+    ))
+    result.headers["Cache-Control"] = "private, no-store"
+    return result
+
+
+@router.get("/studio/products/{product_id}/activity.json")
+def studio_activity_json(product_id: UUID, db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    jobs = work_items(db, product.id, limit=45)
+    notes = notice_items(db, product.id, limit=10)
+    response = JSONResponse({
+        "jobs": jobs,
+        "notices": notes,
+        "attention_count": len(notes),
+        "active_count": sum(1 for job in jobs if job["state"] in {"queued", "running"}),
+    })
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 @router.get("/studio/products/{product_id}/tasks/{task_id}", response_class=HTMLResponse)
 def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
-    task = db.get(Task, task_id)
-    if task is None or task.product_id != product_id:
+    task = db.scalar(select(Task).where(Task.id == task_id, Task.product_id == product_id))
+    if task is None:
         raise HTTPException(404, "Задание не найдено")
     if task.assigned_agent == "whiteboard_renderer":
         return RedirectResponse(f"/studio/products/{product_id}/whiteboard/{task_id}", status_code=303)
-    runs = list(db.scalars(select(AgentRun).where(AgentRun.task_id == task_id).order_by(AgentRun.started_at, AgentRun.id)))
-    materials = list(db.scalars(select(Artifact).where(
-        Artifact.task_id == task_id, Artifact.product_id == product_id,
-        Artifact.kind.in_(MATERIAL_KINDS),
+    runs = list(db.scalars(select(AgentRun).where(
+        AgentRun.task_id == task.id,
+    ).order_by(AgentRun.started_at, AgentRun.id)))
+    results = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id,
+        Artifact.product_id == product_id,
+        Artifact.kind.in_(RESULT_KINDS),
     ).order_by(Artifact.created_at, Artifact.id)))
-    state = getattr(task.status, "value", str(task.status))
-    progress = ''.join(f'<li>{esc(run.agent_name)} · {esc(status_label(run.status))}</li>' for run in runs)
-    links = ''.join(f'<p><a class="btn secondary" href="/studio/products/{product_id}/materials/{row.id}">{esc(row.title)}</a></p>' for row in materials)
-    retry = (f'<p role="alert">Подготовка не завершилась. Проверьте профиль компании и повторите задание.</p>'
-             f'<form method="post" action="/studio/products/{product_id}/tasks/{task_id}/retry"><button class="btn primary">Повторить подготовку</button></form>'
-             if state in {"failed", "cancelled"} else '')
-    body = f'<section class="sg-surface"><h2>{esc(task.title)}</h2><p role="status">{esc(status_label(state))}</p><ul>{progress}</ul>{links}{retry}'
-    if state in {"queued", "running"}:
-        body += '<p>Задание сохранено. Эту страницу можно закрыть; обработка продолжится. Статус обновляется автоматически.</p>'
-    if state == "completed" and not materials:
-        body += '<p>Задание завершено. Откройте контент-план или список материалов.</p>'
-    body += f'<a href="/studio/products/{product_id}/create">К заданиям</a></section>'
-    response = HTMLResponse(studio_page_shell(product, active="create", title="Подготовка материала", subtitle="Прогресс, результат и повтор при ошибке.", body=body))
-    response.headers["Cache-Control"] = "no-store"
-    if state in {"queued", "running"}:
-        response.headers["Refresh"] = "8"
+    request = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.product_id == product_id,
+        Artifact.kind.in_(["content_request", "creative_request", "edit_request"]),
+    ).order_by(Artifact.created_at.desc()).limit(1))
+    body = task_detail_html(product.id, task, runs, results, request=request)
+    response = HTMLResponse(studio_page_shell(
+        product, active="work", title="Создание материала",
+        subtitle="Настоящий статус задания, этапы ИИ-команды и готовые результаты.",
+        body=body,
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
     return response
 
 
@@ -2064,7 +2144,7 @@ def studio_review_page(product_id: UUID, kind: str = "all", db: Session = Depend
         kind = "all"
     records = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product.id,
-        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script"]),
+        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script", "video_render"]),
         Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
     ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(250)))
     response = HTMLResponse(studio_page_shell(
@@ -2082,7 +2162,7 @@ async def studio_material_approve(product_id: UUID, artifact_id: UUID, request: 
     db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     row = db.scalar(select(Artifact).where(
         Artifact.id == artifact_id, Artifact.product_id == product_id,
-        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script"])
+        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script", "video_render"])
     ).with_for_update().execution_options(populate_existing=True))
     if row is None:
         raise HTTPException(404, "Материал не найден")
@@ -2094,6 +2174,15 @@ async def studio_material_approve(product_id: UUID, artifact_id: UUID, request: 
         fields = await _studio_form(request)
         if fields.get("facts_confirmed") != "yes":
             raise HTTPException(422, "Сначала проверьте числа, цены и результаты в полном просмотре материала")
+    if row.kind == "video_render":
+        metadata = parse_json(row)
+        try:
+            script_id = UUID(str(metadata["script_id"]))
+            video_file = asset_path(get_settings().products_root, product_id, script_id, "video.mp4")
+        except (ValueError, KeyError, TypeError):
+            raise HTTPException(409, "У видео нет корректных исходных данных") from None
+        if not video_file.is_file():
+            raise HTTPException(409, "Видеофайл ещё не создан или недоступен")
     if row.kind == "channel_text":
         source = parse_json(row)
         if not source.get("body"):
@@ -2281,3 +2370,4 @@ async def studio_generate_plan(product_id: UUID, request: Request, db: Session =
     except (ValueError, LookupError) as exc:
         raise HTTPException(409, str(exc)) from None
     return RedirectResponse(f"/studio/products/{product_id}/plan", status_code=303)
+

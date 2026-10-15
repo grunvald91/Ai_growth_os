@@ -38,7 +38,7 @@ ROUTES = [
     ("materials", "/materials"),
     ("channels", "/channels"),
 ]
-EXPECTED_BUILD = "20261012-ux10"
+EXPECTED_BUILD = "20261013-unified10"
 
 
 async def check_layout(page, name, width, route):
@@ -63,7 +63,7 @@ async def check_layout(page, name, width, route):
           const style = (el) => el ? getComputedStyle(el) : null;
           const errors = [];
           if (!layout || !main) errors.push('Main layout missing');
-          if (!build || build !== '20261012-ux10')
+          if (!build || build !== '20261013-unified10')
             errors.push('Wrong deployed build: ' + String(build));
           if (document.documentElement.scrollWidth > innerWidth + 2)
             errors.push('Horizontal overflow: ' + document.documentElement.scrollWidth
@@ -75,15 +75,10 @@ async def check_layout(page, name, width, route):
             const rNav = rect(nav), rMain = rect(main);
             if (rNav && rMain && rNav.bottom > rMain.top + 4 && scrollY === 0)
               errors.push('Mobile navigation overlaps main');
-            const controls = nav?.querySelectorAll(':scope > a, :scope > button');
-            if (controls?.length !== 3 || !navText.includes('Обзор')
-                || !navText.includes('Комментарии') || !navText.includes('Ещё'))
+            if (navText.includes('Комментарии') || navText.includes('Ещё'))
+              errors.push('Legacy mobile menu detected: ' + navText);
+            if (!navText.includes('Создать') || !navText.includes('В работе'))
               errors.push('Wrong mobile menu: ' + navText);
-            const links = Array.from(document.querySelectorAll('.mobile-sections-links a'))
-              .map(a => a.getAttribute('href') || '');
-            for (const suffix of ['/create', '/review', '/calendar', '/materials', '/channels'])
-              if (!links.some(href => href.endsWith(suffix)))
-                errors.push('Missing mobile section: ' + suffix);
           }
           if (notice) {
             const r = rect(notice), btn = rect(notice.querySelector('.sg-draft-alert-action'));

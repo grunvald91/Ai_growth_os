@@ -310,15 +310,13 @@ def test_mobile_navigation_does_not_overlay_cards_and_sidebar_has_no_duplicate_c
         assert markup.index('class="mobile-nav"') < markup.index('<main class="main')
         sidebar = markup.split('<aside class="sidebar">', 1)[1].split('</aside>', 1)[0]
         assert sidebar.count(f'href="{base}/calendar"') == 1
+        # The advanced Comments tool stays discoverable, but isn't one of
+        # the four primary navigation actions.
+        core = sidebar.split('aria-label="Основная навигация"',1)[1].split('</nav>',1)[0]
+        assert "Комментарии" not in core
         assert "Комментарии" in sidebar
-        assert "Бизнес-разведка" in sidebar
-        menu = markup.split('class="mobile-sections-links"', 1)[1].split('</nav>', 1)[0]
-        for section in ("create", "review", "channels"):
-            assert f'href="{base}/{section}"' in menu
     css = client.get("/studio/assets/studio.css").text
     assert 'position:sticky!important' in css
-    assert '.mobile-nav :is(a,button)' in css
-    assert 'grid-template-columns:repeat(3,minmax(0,1fr))' in css
     assert 'bottom:auto!important' in css
     assert '.sg-quick-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))' in css
 
@@ -410,5 +408,5 @@ def test_v8_typography_consistent_across_all_studio_views(studio_v5):
         result = client.get(base + route)
         assert result.status_code == 200, route
         assert "studio.css?v=10" in result.text
-        assert 'data-studio-build="20261012-ux10"' in result.text
+        assert 'data-studio-build="20261013-unified10"' in result.text
         assert "/studio/assets/servgo.svg" in result.text

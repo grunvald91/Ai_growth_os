@@ -54,6 +54,15 @@ def create_content_html(product_id, *, created=False, fields=None, error=None) -
     if error:
         feedback = f'<div class="sg-warning" role="alert">{esc(error)}</div>'
     return f"""
+    <section class="sg-surface sg-animator-entry sg-animator-top">
+      <div><span class="sg-overline">НОВЫЙ ФОРМАТ · ВИДЕО С ОЗВУЧКОЙ</span>
+        <h2>Рисованное видеообъяснение</h2>
+        <p>Закажите анимированный ролик. Сценарий, рисунки, голос и готовый MP4
+        будут доступны в отдельном задании.</p>
+        <small>Платные API-вызовы — только после вашего подтверждения.</small>
+      </div>
+      <a class="btn primary" href="{base}/whiteboard">Создать рисованное видео →</a>
+    </section>
     <div class="sg-layout-two">
       <section class="sg-surface sg-create-form">
         <div class="sg-section-head"><div><span class="sg-overline">ШАГ 1 · МАТЕРИАЛ</span>
@@ -116,7 +125,7 @@ def review_html(product_id, records, *, filter_name="all") -> str:
     for row in records:
         try: data=json.loads(row.content)
         except (ValueError,TypeError): data={}
-        is_creative=row.kind in {"creative_brief", "video_script"}
+        is_creative=row.kind in {"creative_brief", "video_script", "video_render"}
         if filter_name=="text" and is_creative: continue
         if filter_name=="creative" and not is_creative: continue
         preview=(data.get("body") or data.get("preview_text") or
@@ -126,7 +135,7 @@ def review_html(product_id, records, *, filter_name="all") -> str:
             preview=str(preview)
         preview=preview[:320]
         channel=data.get("platform") or data.get("channel") or "Материал"
-        kind={"creative_brief":"Креативный бриф", "video_script":"Сценарий",
+        kind={"creative_brief":"Креативный бриф", "video_script":"Сценарий", "video_render":"Готовый MP4",
               "article":"Статья", "channel_text":"Пост"}.get(row.kind, "Материал")
         action=f'{base}/materials/{row.id}'
         approve=(f'{base}/review/{row.id}/approve')

@@ -20,7 +20,13 @@ python -m pytest -q \
   tests/test_content_creative.py \
   tests/test_telegram_publishing.py \
   tests/test_telegram_content_owner_publishing.py \
-  tests/test_content_studio_v5.py
+  tests/test_content_studio_v5.py \
+  tests/test_content_studio_activity.py \
+  tests/test_content_studio_animator_integration.py \
+  tests/test_whiteboard.py \
+  tests/test_whiteboard_jobs.py \
+  tests/test_whiteboard_checkpoints.py \
+  tests/test_whiteboard_render.py
 
 if [[ "${FULL_TESTS:-0}" == "1" ]]; then
   python -m pytest -q
