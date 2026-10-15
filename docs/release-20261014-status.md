@@ -59,3 +59,11 @@
 - /opt/servgo-releases/20261014/payload/remote_rollout.py.
 Сначала проверить журналы и действующие сервисы. Затем исправить причину неуспешной публикации mail/blog, проверить владельческий вход без отправки реальных писем. Доработать/проверить unified UI, проверить отсутствие running whiteboard job перед перезапуском worker. После отдельного разрешения проверить ClaudeHub и включить критика/роутер. Для SMENA — авторизованная публикация именно frontend в Telegram Serverless, не замена VPS QR-экрана.
 Не запускать GitHub Actions. Не пересылать реальные рекламные письма в рамках проверки.
+
+## Продолжение 15.10.2026 (Codespace, SSH; Actions не запускались)
+- Growth: релизный образ `servgo-growth-release:20261014` работает с 14.10 (api healthy, AGENT_CRITIC_ENABLED=false, MODEL_ROUTER_ENABLED=false); перезапуск не требовался, worker не трогали. Откат: `/opt/servgo-releases/20261014/growth-rollback.json`.
+- Unified UI (`wip/studio-unified-workspace-20261013`) НЕ выложен: на самой ветке падают 6 тестов, после слияния с релизом — 7 (обязательный пакет 213). Слияние сохранено в `release/unified-20261015` (4bb6e9e), whiteboard взят из релиза (линия прода 4d4e907).
+- Причина обрыва booking rollout 14.10: DATABASE_URL задан в systemd-юните booking-web-api, а не в .env → InvalidPasswordError до первой записи (backup пуст).
+- Почта: выложено `/opt/servgo-releases/20261015/deploy_mail_20261015.py` (32 файла web/, /etc/servgo/mail.env, drop-in, nginx 443 для mail.servgo.ru). Причина ошибки mail: не было 443-vhost, отвечал сертификат elitles-sochi.ru. servgo-mail-worker НЕ включён; IMAP не настроен. Откат: `... deploy_mail_20261015.py rollback`.
+- Блог: `/opt/servgo-releases/20261015/deploy_blog_20261015.py` (25 файлов webapp/, BLOG_PUBLIC_ORIGIN=https://servgo.ru, маршруты /blog в nginx webapp). /blog — серверный HTML, 4 статьи 200, неверный slug 404, sitemap XML. Откат: `... deploy_blog_20261015.py rollback`.
+- SMENA: не опубликована — нет доступа к grunvald91/SMENA из Codespace и нет tgcloud CLI/авторизации.
