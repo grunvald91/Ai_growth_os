@@ -24,7 +24,7 @@ from app.llm.service import LLMService
 from app.models.domain import Approval, Artifact, Product, TaskStatus
 from app.privacy import PrivacyGateway
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"fake-image-fixture"
+PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAFoAAACgCAIAAAADw+wqAAABOUlEQVR4nO3QsRHAIBDAsJD9d34qCk8AhTSBz2tmPo7/dsBb7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7wo6wI+wIO8KOsCPsCDvCjrAj7Ag7YgPHIgQ9qAzu4gAAAABJRU5ErkJggg==')
 
 
 def request(**changes):
@@ -177,6 +177,62 @@ async def test_documented_openrouter_image_and_speech_routes_use_bearer():
 
 
 @pytest.mark.asyncio
+async def test_grok_speech_explicitly_selects_russian_without_retries():
+    seen = []
+    def handler(req):
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, content=b'ID3' + b'x' * 200)
+    async with httpx.AsyncClient(base_url="https://openrouter.ai/api/v1/", transport=httpx.MockTransport(handler)) as client:
+        await OpenRouterSpeechProvider(api_key='test', model='x-ai/grok-voice-tts-1.0', client=client).synthesize('Русская речь.', language='ru', voice='eve')
+    assert len(seen) == 1 and seen[0]['provider']['options']['xai']['language'] == 'ru'
+    assert seen[0]['input'] == 'Русская речь.' and seen[0]['voice'] == 'eve'
+
+
+@pytest.mark.asyncio
+async def test_flux_pro_uses_only_its_supported_image_parameters():
+    seen = []
+    def handler(req):
+        assert req.url.path == '/api/v1/images'
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(PNG).decode(), "media_type": "image/png"}]})
+    async with httpx.AsyncClient(base_url="https://openrouter.ai/api/v1/", transport=httpx.MockTransport(handler)) as client:
+        assert await OpenRouterImageProvider(api_key="test", model="black-forest-labs/flux.2-pro", client=client).generate(scene(), request()) == PNG
+    assert len(seen) == 1 and 'resolution' not in seen[0]
+    assert seen[0]['aspect_ratio'] == '9:16' and seen[0]['output_format'] == 'png' and seen[0]['n'] == 1
+
+
+@pytest.mark.asyncio
+async def test_gemini_image_uses_one_chat_request_and_keeps_png_validation():
+    seen = []
+    def handler(req):
+        assert req.url.path == '/api/v1/chat/completions'
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, json={"choices": [{"message": {"images": [{
+            "image_url": {"url": "data:image/png;base64," + base64.b64encode(PNG).decode()},
+        }]}}]})
+    async with httpx.AsyncClient(base_url="https://openrouter.ai/api/v1/", transport=httpx.MockTransport(handler)) as client:
+        result = await OpenRouterImageProvider(api_key="test", model="google/gemini-3.1-flash-image", client=client).generate(scene(), request())
+    assert result == PNG
+    assert len(seen) == 1 and "output_format" not in seen[0]
+    assert seen[0]["model"] == "google/gemini-3.1-flash-image"
+    assert seen[0]["image_config"] == {"aspect_ratio": "9:16", "image_size": "1K"}
+    assert seen[0]["modalities"] == ["image", "text"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('url', ['https://example.com/image.png', 'data:image/jpeg;base64,eA==', 'data:image/png;base64,eA=='])
+async def test_gemini_rejects_non_png_without_another_request(url):
+    calls = []
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(200, json={"choices": [{"message": {"images": [{"image_url": {"url": url}}]}}]})
+    async with httpx.AsyncClient(base_url="https://openrouter.ai/api/v1/", transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ValueError):
+            await OpenRouterImageProvider(api_key="test", model="google/gemini-3.1-flash-image", client=client).generate(scene(), request())
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_openrouter_vision_regions_are_typed():
     seen = []
 
@@ -217,3 +273,4 @@ async def test_pipeline_disallows_unapproved_paid_execution(tmp_path):
     with pytest.raises(PermissionError):
         await pipeline.produce(request(request_generation=True), tmp_path / "no.mp4")
     assert planner.calls == 0
+

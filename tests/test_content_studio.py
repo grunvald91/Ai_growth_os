@@ -240,6 +240,9 @@ def test_studio_all_navigation_targets_are_real_pages(studio_db):
         assert f'href="{base}/plan?status=failed"' in overview.text
         assert f'href="{base}/analytics" aria-label="Аналитика"' in overview.text
         assert 'href="/studio?choose=1" aria-label="Выбрать проект"' in overview.text
+        assert 'href="/studio/team"' in overview.text
+        for route in ["comments", "channels", "whiteboard", "review"]:
+            assert f'href="{base}/{route}"' in overview.text
 
         plan_page=client.get(base+"/plan")
         calendar_page=client.get(base+"/calendar")
@@ -472,7 +475,7 @@ def test_studio_post_detail_shows_version_history_and_editorial_warnings(studio_
         assert "Новая версия" in response.text
     finally:
         app.dependency_overrides.clear()
-def test_mobile_navigation_keeps_three_controls_and_all_sections():
+def test_mobile_navigation_has_four_primary_controls():
     from html.parser import HTMLParser
     from uuid import uuid4
     from app.api.content_studio import mobile_nav_html
@@ -482,26 +485,20 @@ def test_mobile_navigation_keeps_three_controls_and_all_sections():
             super().__init__()
             self.in_bottom = False
             self.controls = []
-            self.links = []
         def handle_starttag(self, tag, attrs):
             attrs = dict(attrs)
             if tag == 'nav' and attrs.get('class') == 'mobile-nav':
                 self.in_bottom = True
             if self.in_bottom and tag in ('a', 'button'):
                 self.controls.append(attrs)
-            if tag == 'a':
-                self.links.append(attrs.get('href'))
         def handle_endtag(self, tag):
             if tag == 'nav':
                 self.in_bottom = False
 
     product_id = uuid4()
-    html = mobile_nav_html(product_id, 'intelligence')
-    nav = Navigation(); nav.feed(html)
-    assert len(nav.controls) == 3
-    assert nav.controls[-1]['data-open-dialog'] == 'mobile-sections'
-    assert 'active' in nav.controls[-1]['class']
-    for route in ['plan', 'materials', 'calendar', 'analytics', 'comments']:
-        assert f'/studio/products/{product_id}/{route}' in nav.links
-    assert f'/intelligence?product_id={product_id}' in nav.links
-    assert 'aria-labelledby="mobile-sections-title"' in html
+    nav = Navigation(); nav.feed(mobile_nav_html(product_id, 'work'))
+    base = f'/studio/products/{product_id}'
+    assert [c['href'] for c in nav.controls] == [base, base + '/create', base + '/work', base + '/materials']
+    assert nav.controls[2].get('class') == 'active'
+    # Unified v10 removed the old "Все разделы" dialog; secondary sections live in page links.
+    assert 'mobile-sections' not in mobile_nav_html(product_id)

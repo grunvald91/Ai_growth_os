@@ -49,7 +49,8 @@ def test_long_cyrillic_brief_opens_its_own_task_and_preserves_invalid_form(studi
     assert result.status_code == 303
     page = client.get(result.headers["location"])
     assert page.status_code == 200 and "В очереди" in page.text
-    assert page.headers["refresh"] == "8"
+    # The page polls activity.json and reloads only when the task state changes.
+    assert 'data-sg-state="queued"' in page.text and "обновляется" in page.text
     task = db.scalar(select(Task).where(Task.product_id == company.id))
     payload = db.scalar(select(Artifact).where(Artifact.task_id == task.id))
     assert json.loads(payload.content)["editorial_brief"] == "я" * 3500
@@ -65,7 +66,7 @@ def test_failed_creative_task_is_visible_and_retries_once(studio_v5):
     db.add(task); db.commit()
     base = f"/studio/products/{company.id}"
     assert "Визуальный бриф" in client.get(base + "/create").text
-    assert "Повторить подготовку" in client.get(base + f"/tasks/{task.id}").text
+    assert "Повторить задание" in client.get(base + f"/tasks/{task.id}").text
     assert client.post(base + f"/tasks/{task.id}/retry", follow_redirects=False).status_code == 303
     assert client.post(base + f"/tasks/{task.id}/retry").status_code == 409
 

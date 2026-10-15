@@ -110,6 +110,27 @@ def test_queue_immutable_review_dedupes_and_cannot_approve_stale_digest(environm
 
 
 @pytest.mark.asyncio
+async def test_approved_job_models_are_scoped_and_do_not_change_shared_settings(environment):
+    factory, settings, product_id, _ = environment
+    original = configured_models(settings)
+    chosen = original.model_copy(update={'image': 'black-forest-labs/flux.2-pro',
+        'speech': 'x-ai/grok-voice-tts-1.0', 'regions': 'qwen/qwen3-vl-30b-a3b-instruct'})
+    with factory() as db:
+        task = queue_job(db, WhiteboardRequest(product_id=product_id, topic='Как работает онлайн-запись', voice='eve'), chosen)
+        task_id = task.id
+    approve(environment, task_id)
+    async def check(scoped, models, voice):
+        assert scoped is not settings and configured_models(scoped) == chosen == models
+        assert scoped.whiteboard_voice == voice == 'eve'
+        assert scoped.openrouter_api_key == settings.openrouter_api_key
+        return {'ready': True}
+    assert await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=check) == 1
+    assert configured_models(settings) == original and settings.whiteboard_voice == 'Kore'
+    with factory() as db:
+        assert db.get(Task, task_id).status == TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
 async def test_worker_never_picks_unapproved_request(environment):
     factory, settings, product_id, _ = environment
     task_id = new_job(environment)
@@ -180,8 +201,22 @@ async def test_full_owner_interface_worker_and_real_mp4(environment, tmp_path, m
         page = browser.get(url)
         assert page.status_code == 200 and '<video controls' in page.text
         assert '13 из 13' in page.text and 'Скачать MP4' in page.text
+        assert 'Завершено этапов: 14 из 14' in page.text
+        assert '/files/video.vtt' in page.text
         download = browser.get(url + '/files/video.mp4')
         assert download.status_code == 200 and b'ftyp' in download.content[:32]
+        attachment = browser.get(url + '/files/video.mp4?download=true')
+        assert attachment.content == download.content
+        assert attachment.headers['content-disposition'] == 'attachment; filename="video.mp4"'
+        seek = browser.get(url + '/files/video.mp4', headers={'Range': 'bytes=0-31'})
+        assert seek.status_code == 206 and seek.content == download.content[:32]
+        subtitles = browser.get(url + '/files/video.vtt')
+        assert subtitles.status_code == 200 and subtitles.text.startswith('WEBVTT\n\n')
+        assert '00:00:00.000 --> ' in subtitles.text and 'text/vtt' in subtitles.headers['content-type']
+        assert browser.get(f'/studio/products/{other_id}/whiteboard/{task_id}/files/video.vtt').status_code == 404
+        index = browser.get(f'/studio/products/{product_id}/whiteboard')
+        assert 'Видео готово' in index.text and 'Посмотреть видео' in index.text
+        assert '/files/video.mp4?download=true' in index.text
         assert browser.get(url + '/files/video.srt').status_code == 200
         assert browser.get(url + '/files/stages').status_code == 404
         assert browser.get(f'/studio/products/{other_id}/whiteboard/{task_id}/files/video.mp4').status_code == 404

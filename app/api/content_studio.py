@@ -953,6 +953,9 @@ def product_dashboard(db: Session, product: Product) -> str:
       <a href="/studio/products/{product.id}/comments">Комментарии</a>
       <a href="/intelligence?product_id={product.id}">Бизнес-разведка</a>
       <a href="/studio/products/{product.id}/channels">Публикации</a>
+      <a href="/studio/products/{product.id}/analytics" aria-label="Аналитика">Аналитика</a>
+      <a href="/studio/team">ИИ-команда</a>
+      <a href="/studio?choose=1" aria-label="Выбрать проект">Другой проект</a>
     </nav>
     """
 
@@ -975,7 +978,7 @@ def product_dashboard(db: Session, product: Product) -> str:
             f'<a class="sg-mini-row" href="/studio/products/{product.id}/materials/{material.id}">'
             f'<span class="sg-mini-kind">▤</span><div><b>{esc(display_material_title(material, meta)[:75])}</b>'
             f'<small>{esc(artifact_kind_label(material, meta))} · '
-            f'{esc(status_label(material.status.value))}</small></div>'
+            f'{esc(status_label(getattr(material.status, "value", material.status)))}</small></div>'
             '<span aria-hidden="true">↗</span></a>'
         )
     quick_feed = f"""
@@ -1170,7 +1173,10 @@ def studio_page_shell(
         <a href="/studio/products/{product.id}/whiteboard">Рисованное видео</a>
         <a href="/studio/products/{product.id}/comments">Комментарии</a>
         <a href="/intelligence?product_id={product.id}">Бизнес-разведка</a>
-        <a href="/studio/products/{product.id}/channels">Публикации</a></div>
+        <a href="/studio/products/{product.id}/channels">Публикации</a>
+        <a href="/studio/products/{product.id}/analytics">Аналитика</a>
+        <a href="/studio/team">ИИ-команда</a>
+        <a href="/studio?choose=1">Другой проект</a></div>
       </details>
     </nav>
     <div class="route-content">{body}</div>

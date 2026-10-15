@@ -33,6 +33,7 @@ SIZES = [
 ROUTES = [
     ("overview", ""),
     ("create", "/create"),
+    ("work", "/work"),
     ("review", "/review"),
     ("calendar", "/calendar"),
     ("materials", "/materials"),
