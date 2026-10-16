@@ -19,7 +19,7 @@ from app.prompts import register as register_prompt, text as prompt_text
 
 class Finding(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,16}$")
+    id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,40}$")
     severity: Literal["critical", "major", "minor"]
     problem: str = Field(min_length=8, max_length=650)
     evidence_in_draft: str = Field(min_length=3, max_length=650)
@@ -34,7 +34,7 @@ class Findings(BaseModel):
 
 class Decision(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    finding_id: str = Field(min_length=1, max_length=16)
+    finding_id: str = Field(min_length=1, max_length=40)
     decision: Literal["accept", "reject"]
     rationale: str = Field(min_length=5, max_length=450)
 

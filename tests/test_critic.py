@@ -506,3 +506,11 @@ async def test_marketing_materials_get_reader_and_sales_focused_critic(task_type
             and "CALL TO ACTION" in critic_prompt) is marketing
     assert ("ignore cosmetic" in critic_prompt) is not marketing
     assert ("easier to read" in author_prompt) is marketing
+
+
+def test_descriptive_finding_ids_are_accepted():
+    from app.llm.critic import Decision, Finding
+    Finding(id="audience-pain-long", severity="major", problem="Слабый заход в первой строке",
+            evidence_in_draft="Пока запись", proposed_fix="Начать со сцены владельца",
+            link_to_original_goal="Пост должен цеплять владельца")
+    Decision(finding_id="audience-pain-long", decision="accept", rationale="Согласен")
