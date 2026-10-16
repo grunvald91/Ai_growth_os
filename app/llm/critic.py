@@ -168,7 +168,7 @@ def _material_summary(material: list[Finding]) -> list[dict]:
 
 def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisions: list[dict] | None = None,
             findings: list[dict] | None = None,
-            attempted_extra_calls: int | None = None) -> LLMResponse:
+            attempted_extra_calls: int | None = None, failure_reason: str | None = None) -> LLMResponse:
     known_usages = [r.usage for r in [original, *extra] if r.usage is not None]
     # Report observed usage only; never invent zero tokens for a provider
     # response that omitted the usage field.
@@ -190,6 +190,7 @@ def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisi
             "original_usage_known": original.usage is not None,
             "decisions": decisions or [],
             "findings": findings or [],
+            **({"failure_reason": failure_reason} if failure_reason else {}),
             "extra_usage_by_model": [
                 {"model": r.model, "usage_known": r.usage is not None,
                  "input_tokens": r.usage.input_tokens if r.usage else None,
@@ -348,10 +349,12 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
         raise
     except ReviewAuditPersistenceError:
         raise
-    except Exception:
+    except Exception as exc:
         # Preserve already obtained findings even if the author's correction
         # times out, is malformed or violates the domain contract.
         # CancelledError is BaseException and correctly propagates.
         status = "revision_unavailable" if material_summary else "review_unavailable"
+        reason = type(exc).__name__ + (": " + " ".join(str(exc).split())[:300] if str(exc) else "")
         return _record(original, status, extra, decisions, material_summary,
-                       attempted_extra_calls=max(len(extra), 2 if material_summary else 1))
+                       attempted_extra_calls=max(len(extra), 2 if material_summary else 1),
+                       failure_reason=reason)

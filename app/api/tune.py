@@ -335,5 +335,7 @@ def _review_html(data: dict) -> str:
                      f"{esc(item.get('problem'))}<br><span class=\"muted\">Где: {esc(item.get('evidence'))}</span><br>"
                      f"Предложение: {esc(item.get('suggestion'))}{verdict}</div>")
     models = ", ".join(m.get("model", "") for m in data.get("extra_usage_by_model") or [] if m.get("model"))
+    if data.get("failure_reason"):
+        items.append(f"<p class=\"muted\">Причина: {esc(data['failure_reason'])}</p>")
     return (f"<details{' open' if findings else ''}><summary>Критик: {esc(REVIEW_STATUS.get(status, status))}"
             f"{' · ' + esc(models) if models else ''}</summary>{''.join(items) or '<p class=muted>Замечаний нет.</p>'}</details>")

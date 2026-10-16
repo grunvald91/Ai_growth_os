@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -101,11 +101,26 @@ class QuickPostDraft(StrictModel):
     evidence_ids: list[str] = Field(default_factory=list, max_length=20)
     editor_notes: list[str] = Field(default_factory=list, max_length=8)
 
-    @model_validator(mode="after")
-    def readable(self):
-        if self.cta.casefold() not in self.body.casefold():
-            raise ValueError("Post must contain its single CTA")
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def cta_in_body(cls, data):
+        # Models often paraphrase the CTA inside the text. The post must still end with
+        # its single CTA, so append it instead of failing the whole job.
+        if isinstance(data, dict):
+            body, cta = data.get("body"), data.get("cta")
+            if isinstance(body, str) and isinstance(cta, str) and cta.strip() \
+                    and " ".join(cta.split()).casefold() not in " ".join(body.split()).casefold():
+                data = {**data, "body": body.rstrip() + "\n\n" + cta.strip()}
+        return data
+
+
+def _validation_summary(exc: Exception) -> str:
+    """Field and rule that failed, without echoing generated text."""
+    if isinstance(exc, ValidationError):
+        return ",".join(
+            ".".join(str(part) for part in item.get("loc", ())) + ":" + item.get("type", "validation")
+            for item in exc.errors(include_url=False, include_input=False)[:8])
+    return " ".join(str(exc).split())[:200]
 
 
 def _decode(schema, raw: str):
@@ -270,9 +285,26 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                 response=reply,
             )
             db.commit()
-            if reply.stop_reason not in (None, "end_turn", "stop_sequence"):
-                raise ValueError("AI answer was interrupted")
-            output = validate_candidate(_decode(schema, reply.content).model_dump(mode="json"))
+            try:
+                if reply.stop_reason not in (None, "end_turn", "stop_sequence"):
+                    raise ValueError("AI answer was interrupted")
+                output = validate_candidate(_decode(schema, reply.content).model_dump(mode="json"))
+            except (ValueError, TypeError) as exc:
+                # One repair attempt with the exact problem; no second critic round.
+                problem = _validation_summary(exc)
+                retry = LLMService(privacy_gateway=privacy, provider=llm._provider, critic_enabled=False)
+                reply = await asyncio.wait_for(retry.generate(LLMRequest(
+                    system_prompt=system + " Your previous answer was rejected by validation: " + problem
+                    + ". Fix exactly this and return the complete JSON again.",
+                    messages=[LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False))],
+                    model=settings.llm_model, response_schema=schema.model_json_schema(),
+                    max_tokens=2800 if name == "post_strategist" else 5500,
+                    metadata={"team_role": name, "task_type": "quick_post", "reasoning_effort": "low",
+                              "provider_timeout_seconds": 90},
+                ), on_observed=record_model_call), timeout=180)
+                if reply.stop_reason not in (None, "end_turn", "stop_sequence"):
+                    raise ValueError("AI answer was interrupted") from exc
+                output = validate_candidate(_decode(schema, reply.content).model_dump(mode="json"))
             if name == "post_strategist":
                 strategy = output
             checkpoint = ArtifactService(db).create(
@@ -319,7 +351,8 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
     except (Exception, asyncio.CancelledError) as exc:
         db.rollback()
         cancelled = isinstance(exc, asyncio.CancelledError)
-        safe_code = "quick_post_cancelled" if cancelled else "quick_post_failed:" + type(exc).__name__
+        safe_code = "quick_post_cancelled" if cancelled else (
+            "quick_post_failed:" + type(exc).__name__ + ":" + _validation_summary(exc))[:1000]
         for run_id in run_ids:
             run = db.get(AgentRun, run_id)
             if run is not None and run.status != "completed":

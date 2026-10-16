@@ -241,9 +241,10 @@ async def test_invalid_evidence_still_persists_both_model_calls_and_review(db, t
     assert success is False
     assert db.get(Task, task.id).status == TaskStatus.FAILED
     costs = list(db.scalars(select(CostRecord).where(CostRecord.product_id == company.id)))
-    assert len(costs) == 2
-    assert {(x.details["llm_stage"], x.input_tokens) for x in costs} == {
-        ("author", 90), ("critic", 6)}
+    # The rejected draft gets one repair attempt (recorded too), then the job fails.
+    assert len(costs) == 3
+    assert sorted((x.details["llm_stage"], x.input_tokens) for x in costs) == [
+        ("author", 90), ("author", 90), ("critic", 6)]
     reviews = list(db.scalars(select(Artifact).where(
         Artifact.task_id == task.id, Artifact.kind == "agent_quality_review")))
     assert len(reviews) == 1
@@ -320,3 +321,42 @@ async def test_cancelled_author_revision_keeps_critic_findings_in_database(db, t
     assert all(reference in runs[0].output_references for reference in references)
     assert not list(db.scalars(select(Artifact).where(
         Artifact.task_id == task.id, Artifact.kind == "channel_text")))
+
+
+def test_post_cta_missing_from_body_is_appended_not_rejected():
+    from app.content.quick_post import QuickPostDraft
+    body = "Записи клиентов показывают, какие услуги берут чаще и когда пустуют окна. " * 3
+    draft = QuickPostDraft.model_validate({"title": "Данные о записях", "body": body,
+                                           "cta": "Запишитесь на демонстрацию"})
+    assert draft.body.endswith("Запишитесь на демонстрацию")
+    same = QuickPostDraft.model_validate({"title": "Данные о записях", "body": body + "Запишитесь  на демонстрацию.",
+                                          "cta": "Запишитесь на демонстрацию"})
+    assert same.body.count("Запишитесь") == 1
+
+
+@pytest.mark.asyncio
+async def test_rejected_post_draft_is_repaired_once_with_the_validation_problem(db, tmp_path):
+    company = Product(name="Salon", slug="post-repair-once")
+    db.add(company)
+    db.commit()
+    task = queue_content(db, company.id, "How to choose care", format="post", channel="vk")
+    row = db.scalar(select(Artifact).where(Artifact.task_id == task.id, Artifact.kind == "content_request"))
+    good = FakePostProvider()
+    calls = []
+
+    class Provider:
+        async def generate(self, request):
+            calls.append(request)
+            if request.metadata.get("team_role") == "post_writer_editor" and \
+                    sum(c.metadata.get("team_role") == "post_writer_editor" for c in calls) == 1:
+                return LLMResponse(content='{"title": "x"}', model="author",
+                                   usage=LLMUsage(input_tokens=5, output_tokens=5), stop_reason="end_turn")
+            return await good.generate(request)
+
+    success = await run_quick_post(
+        db, Settings(_env_file=None, products_root=tmp_path),
+        QuickPostRequest.model_validate_json(row.content).model_copy(update={"task_id": task.id}),
+        provider=Provider())
+    assert success is True
+    retry = [c for c in calls if c.metadata.get("team_role") == "post_writer_editor"][-1]
+    assert "rejected by validation" in retry.system_prompt and "body:missing" in retry.system_prompt
