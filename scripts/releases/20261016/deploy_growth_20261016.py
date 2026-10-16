@@ -15,7 +15,9 @@ ROLLBACK = REL / 'growth-rollback.json'
 # Critic bounds: the largest content stage request is ~26k tokens (~90k chars).
 CRITIC_LIMITS = {'AGENT_CRITIC_MAX_CONTEXT_CHARS': '200000',
                  'AGENT_CRITIC_REVIEW_TIMEOUT_SECONDS': '240',
-                 'AGENT_CRITIC_REVISION_TIMEOUT_SECONDS': '300'}
+                 'AGENT_CRITIC_REVISION_TIMEOUT_SECONDS': '300',
+                 # Studio logins allowed to open /studio/tune.
+                 'STUDIO_TUNE_USERNAMES': 'artur'}
 
 
 def run(args, **kw): return subprocess.run(args, check=True, **kw)

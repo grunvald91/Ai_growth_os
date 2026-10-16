@@ -14,14 +14,22 @@ Server: `/opt/servgo-releases/20261016/`. The scripts and the ServGo patch are i
 - Flags and limits are set in the compose overlay written by `deploy_growth_20261016.py up true true`:
   `AGENT_CRITIC_ENABLED=true`, `MODEL_ROUTER_ENABLED=true`, `AGENT_CRITIC_MAX_CONTEXT_CHARS=200000`,
   `AGENT_CRITIC_REVIEW_TIMEOUT_SECONDS=240`, `AGENT_CRITIC_REVISION_TIMEOUT_SECONDS=300`.
-- Router config revision 2 (`set_content_critic.py`):
-  - Content roles use the critic order `kimi-k3` → `claude-sonnet-5-5` → `gpt-6-luna`.
-  - Main routes of all dashboard roles are pinned to the previous routes.
-  - Known gap: roles outside the dashboard list (quick post, rewrite, creative strategist,
-    editorial planner) are auto-routed. Without model prices, the automatic order breaks ties by
-    model name, so they now start with `claude-sonnet-5-5`. Fix pending the owner's decision:
-    enter ClaudeHub prices or pin those roles.
+- Router config revision 4 (`set_content_critic.py`, then `set_model_priorities.py`):
+  - Models are ordered by owner priority inside a tier (1 = first): deepseek-v4.1-flash 1, kimi-2.7 2;
+    grok-4.7 1, kimi-k3 2, claude-sonnet-5-5 3, gpt-6-luna 4; claude-opus-5-5 1. Priorities are
+    editable on «ИИ-команда».
+  - Content roles, quick posts, post rewrites and creative strategy use the critic order
+    `kimi-k3` → `claude-sonnet-5-5` → `gpt-6-luna`.
+  - First choices are unchanged: grok-4.7 for balanced roles, deepseek for economy roles,
+    opus for CMO and research lead.
+- `/studio/tune` (login `artur` only, via `STUDIO_TUNE_USERNAMES`): agent prompts (editable,
+  overrides in `company_products/.prompt-overrides.json`), the package pipeline map, and per-task progress.
+- «Добавить компанию» on the company selector, plus a company profile page (build and confirm the profile).
+- Pending, needs the owner's OK (server nginx change was blocked): in `/etc/nginx/sites-enabled/growth-servgo`,
+  add `location = /tune { return 302 /studio/tune; }` and raise `proxy_read_timeout` for `/studio` from 120s to 300s
+  (building a company profile can take more than 2 minutes).
 - Rollback:
+  - Router: restore `.model-router-config.before-priorities.json` or `.model-router-config.before-critic.json`.
   - Image: `python3 deploy_growth_20261016.py rollback` (back to the 20261015 set).
   - Router config: restore `.model-router-config.before-critic.json`.
 
