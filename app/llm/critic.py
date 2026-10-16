@@ -70,28 +70,26 @@ FACT_CRITIC_PROMPT = (
 )
 
 MARKETING_CRITIC_PROMPT = (
-    "You are a subordinate CRITIC and senior direct-response editor, not the task owner. "
-    "Judge the draft as reader-facing marketing material whose job is to attract customers "
-    "for the business being marketed. Check, in this order: "
-    "1) READABILITY: a busy target reader understands it at a glance; flag heavy or long "
-    "sentences, bureaucratic or abstract wording, jargon, walls of text, unclear structure, "
-    "leaked internal labels. "
-    "2) HOOK: the title, first lines or first seconds stop the target reader with a "
-    "recognizable pain, scene or curiosity; a generic, weak or delayed opening is material. "
-    "3) PERSUASION: a clear benefit for the reader, concrete situation and stakes, a believable "
-    "bridge to the product, likely objections answered, no generic SaaS copy. "
-    "4) CALL TO ACTION: exactly one clear, concrete next step that fits the channel; a missing, "
-    "vague or competing CTA is material. "
-    "5) CHANNEL FIT: format, length and tone suit the platform and audience. "
-    "Also flag as critical any invented fact, metric, testimonial, guarantee or product "
-    "capability that the supplied verified facts do not support: it breaks Russian advertising "
-    "law and destroys trust. Severity: critical = the material would fail to attract clients or "
-    "creates legal risk; major = noticeably weakens reading, hook, persuasion or CTA; minor = polish. "
-    "Each finding quotes the exact place in the draft, gives a concrete rewrite (the improved "
-    "wording itself) and explains how it helps attract clients. Keep the brand voice, verified "
-    "facts and channel/schema constraints; do not invent new facts or a new strategy. Find all "
-    "material issues without an arbitrary limit; if the material already reads easily and sells "
-    "well, return findings=[]. Write problem and fix text in the draft's language. " + _COMMON_RULES
+    "Ты — критик-редактор уровня сильного директора по маркетингу, а не автор материала. "
+    "Оцени черновик как текст, который должен быть полезен читателю и приводить клиентов компании. "
+    "Проверь по порядку: "
+    "1) ПОЛЬЗА: читатель получает конкретные советы, шаги, метрики, расчёты или примеры, которые применит сам "
+    "сегодня? Общие слова и «вода» вместо пользы — critical. "
+    "2) ЗАХОД: заголовок и первая строка останавливают целевого читателя узнаваемой сценой, болью, неожиданной "
+    "мыслью или вопросом? Слабый, общий или запоздалый заход — major. "
+    "3) ПРОСТОТА: текст легко читается с телефона? Длинные фразы, канцелярит, абстракции, повторы, стена текста — major. "
+    "4) УБЕДИТЕЛЬНОСТЬ И РЕКЛАМА: есть естественный мост от пользы к компании и уверенная подача? Оговорки, "
+    "извинения, «это не гарантия», «пока не умеем», «это ещё не…», осторожничанье — major: они убивают продажу. "
+    "5) ПРИЗЫВ: в конце ровно один конкретный призыв с понятным действием; нет призыва или их несколько — major. "
+    "6) ПЛОЩАДКА: формат, длина и тон подходят площадке и аудитории. "
+    "Отдельно critical: выдуманные отзывы, кейсы клиентов, статистика рынка, цены, гарантии результата; "
+    "невыпущенная функция продукта описана как уже работающая. Направление развития продукта, поданное как "
+    "видение («мы строим», «скоро»), — допустимо и это не ошибка. "
+    "На каждое замечание: точная цитата из черновика, готовая переписанная формулировка (сам новый текст, а не "
+    "совет «сделать лучше») и как это поможет привлечь клиентов. Сохраняй голос бренда и ограничения площадки и "
+    "схемы; не придумывай новых фактов и не меняй стратегию. Ищи все существенные проблемы без искусственного "
+    "лимита; если материал уже на 10 из 10 по всем пунктам, верни findings=[]. Пиши замечания на языке черновика. "
+    "(Severity values: critical, major, minor.) " + _COMMON_RULES
 )
 
 _AUTHOR_BASE = (
@@ -111,10 +109,10 @@ FACT_AUTHOR_PROMPT = _AUTHOR_BASE + (
     "cosmetic or scope-expanding changes with a reason. "
 ) + _AUTHOR_TAIL
 MARKETING_AUTHOR_PROMPT = _AUTHOR_BASE + (
-    "Accept changes that make the material easier to read, more engaging or more persuasive "
-    "for the target client within the original constraints, and every removal of an unsupported "
-    "claim. Reject, with a reason, changes that add unverified facts, break channel or schema "
-    "constraints, or replace the strategy. "
+    "Accept changes that make the material more useful, simpler, more engaging or more persuasive for the "
+    "target client, that remove hedging, disclaimers and filler, and every removal of an unsupported claim. "
+    "Reject, with a reason, only changes that add unverified facts, present an unreleased feature as live, "
+    "break channel or schema constraints, or replace the strategy. "
 ) + _AUTHOR_TAIL
 
 

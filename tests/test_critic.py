@@ -502,10 +502,10 @@ async def test_marketing_materials_get_reader_and_sales_focused_critic(task_type
         request, validate_revision=lambda data: Draft.model_validate(data))
     critic_prompt = provider.requests[1].system_prompt
     author_prompt = provider.requests[2].system_prompt
-    assert ("READABILITY" in critic_prompt and "HOOK" in critic_prompt
-            and "CALL TO ACTION" in critic_prompt) is marketing
+    assert ("ПОЛЬЗА" in critic_prompt and "ЗАХОД" in critic_prompt
+            and "ПРИЗЫВ" in critic_prompt) is marketing
     assert ("ignore cosmetic" in critic_prompt) is not marketing
-    assert ("easier to read" in author_prompt) is marketing
+    assert ("remove hedging" in author_prompt) is marketing
 
 
 def test_descriptive_finding_ids_are_accepted():

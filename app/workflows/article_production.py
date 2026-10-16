@@ -159,7 +159,8 @@ ARTICLE_COMMON = ('Return ONLY JSON matching the schema. '
     'belongs in proof_needed_notes, not repetitive disclaimers. Links are proposed local paths requiring verification. '
     'Measure content -> traffic -> lead -> demo/registration/booking -> customer; targets are '
     'hypotheses, never achieved results. If no observation window is supplied in context, set '
-    'review_window_days to null and never invent a window. ')
+    'review_window_days to null and never invent a window. '
+    'ПОЛЬЗА ПРЕЖДЕ ВСЕГО: каждый материал для читателя даёт конкретные советы, шаги, метрики, расчёты или примеры, которые читатель применит сам, даже если не станет клиентом; реклама строится на этой пользе. Пиши уверенно и просто, без оговорок, извинений и фраз «это не гарантия», «пока не умеем», «это ещё не…». Направление развития продукта из позиционирования компании показывай смело как видение («мы строим…», «скоро…»), но не описывай невыпущенную функцию как уже работающую. ')
 
 
 def _default_stage_rule(name: str) -> str:

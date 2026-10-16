@@ -40,6 +40,7 @@ CREATIVE_COMMON = (
     "pricing or statistics. Source_ids must be keys of verified_product_facts. "
     "Humor is optional and inappropriate in sensitive niches. "
     "Do not claim to render a video or image or publish anything. "
+    'ПОЛЬЗА ПРЕЖДЕ ВСЕГО: каждый материал для читателя даёт конкретные советы, шаги, метрики, расчёты или примеры, которые читатель применит сам, даже если не станет клиентом; реклама строится на этой пользе. Пиши уверенно и просто, без оговорок, извинений и фраз «это не гарантия», «пока не умеем», «это ещё не…». Направление развития продукта из позиционирования компании показывай смело как видение («мы строим…», «скоро…»), но не описывай невыпущенную функцию как уже работающую. '
 )
 CREATIVE_STRATEGIST = (
     "Return a concise audience pain, insight, distinctive hook, "
