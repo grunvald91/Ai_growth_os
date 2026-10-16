@@ -9,9 +9,12 @@ POSITIONING = (
     "продукт («мы строим», «скоро»), но не как уже доступные функции."
 )
 HEDGES = ["пока не умеем", "это ещё не отчёт", "это не гарантия"]
+# Owner-provided contacts for calls to action (2026-10-16).
+CONVERSION = ("Запросить демонстрацию ServGo: написать в Telegram @Grunvald или на почту grunvaldlab@gmail.com")
 path = sys.argv[1]
 data = json.load(open(path))
 data["brand"]["positioning"] = POSITIONING
+data["offer"]["primary_conversion_action"] = CONVERSION
 phrases = data["brand"].setdefault("prohibited_phrases", [])
 phrases.extend(h for h in HEDGES if h not in phrases)
 json.dump(data, open(path, "w"), ensure_ascii=False, indent=2)

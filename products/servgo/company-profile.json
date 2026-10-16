@@ -18,7 +18,7 @@
         "description": "Client flow includes business/service selection, optional specialist selection, date/time-slot selection, contact details and confirmation. Client flow includes optional prepayment instructions; the customer can mark payment as sent and attach proof. The owner manually verifies receipt before the booking is confirmed. Client flow includes a booking status page and notifications."
       }
     ],
-    "primary_conversion_action": "Запросить демонстрацию ServGo"
+    "primary_conversion_action": "Запросить демонстрацию ServGo: написать в Telegram @Grunvald или на почту grunvaldlab@gmail.com"
   },
   "commercial": {
     "pricing_model": "Pricing under review for the combined ServGo Growth offer; legacy pricing is paused for new marketing materials.",
