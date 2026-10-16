@@ -14,6 +14,7 @@ from jsonschema import Draft202012Validator, ValidationError as JSONSchemaError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.llm.schemas import LLMMessage, LLMRequest, LLMResponse, LLMUsage
+from app.prompts import register as register_prompt, text as prompt_text
 
 
 class Finding(BaseModel):
@@ -117,16 +118,32 @@ MARKETING_AUTHOR_PROMPT = _AUTHOR_BASE + (
 ) + _AUTHOR_TAIL
 
 
+CRITIC_GROUP = "Критик и доработка"
+register_prompt("critic.marketing", group=CRITIC_GROUP, title="Критик контента: что проверять",
+                description="Проверка статей, постов и брифов: читаемость, цепляющий заход, убедительность, "
+                            "один призыв к действию, соответствие площадке, выдуманные факты.",
+                default=MARKETING_CRITIC_PROMPT)
+register_prompt("critic.marketing_author", group=CRITIC_GROUP, title="Автор контента: как принимать замечания",
+                description="Какие правки критика автор принимает, а какие отклоняет с объяснением.",
+                default=MARKETING_AUTHOR_PROMPT)
+register_prompt("critic.fact", group=CRITIC_GROUP, title="Критик остальных ролей (стратегия, исследования)",
+                description="Проверка фактов, противоречий и обязательных требований задания.",
+                default=FACT_CRITIC_PROMPT)
+register_prompt("critic.fact_author", group=CRITIC_GROUP, title="Автор остальных ролей: как принимать замечания",
+                description="Принимать только обоснованные правки, нужные для цели задания.",
+                default=FACT_AUTHOR_PROMPT)
+
+
 def _is_marketing(request: LLMRequest) -> bool:
     return request.metadata.get("task_type") in MARKETING_TASK_TYPES
 
 
 def _critic_prompt(request: LLMRequest) -> str:
-    return MARKETING_CRITIC_PROMPT if _is_marketing(request) else FACT_CRITIC_PROMPT
+    return prompt_text("critic.marketing" if _is_marketing(request) else "critic.fact")
 
 
 def _author_prompt(request: LLMRequest) -> str:
-    return MARKETING_AUTHOR_PROMPT if _is_marketing(request) else FACT_AUTHOR_PROMPT
+    return prompt_text("critic.marketing_author" if _is_marketing(request) else "critic.fact_author")
 
 
 class ReviewAuditPersistenceError(RuntimeError):

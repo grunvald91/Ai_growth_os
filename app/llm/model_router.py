@@ -49,6 +49,9 @@ class BudgetExceeded(RoutingError):
     """No available model meets the configured estimated cost ceiling."""
 
 
+DEFAULT_PRIORITY = 100
+
+
 @dataclass(frozen=True)
 class ModelProfile:
     model: str
@@ -57,6 +60,9 @@ class ModelProfile:
     input_usd_per_million: Decimal | None = None
     output_usd_per_million: Decimal | None = None
     web_search_verified: bool = False
+    # Owner-set order inside a tier: 1 is tried first. Equal priorities fall back to
+    # known price, then model name.
+    priority: int = DEFAULT_PRIORITY
 
     def __post_init__(self) -> None:
         if not self.model or not self.model.strip() or len(self.model) > 120:
@@ -66,6 +72,8 @@ class ModelProfile:
         for price in (self.input_usd_per_million, self.output_usd_per_million):
             if price is not None and (not price.is_finite() or price < 0):
                 raise RoutingError("Model prices must be finite and nonnegative")
+        if type(self.priority) is not int or not 1 <= self.priority <= 999:
+            raise RoutingError("Model priority must be an integer from 1 to 999")
 
 
 def _parse_profiles(raw: str) -> tuple[ModelProfile, ...]:
@@ -80,7 +88,7 @@ def _parse_profiles(raw: str) -> tuple[ModelProfile, ...]:
     for item in data:
         if not isinstance(item, dict) or set(item) - {
             "model", "tier", "enabled", "input_usd_per_million",
-            "output_usd_per_million", "web_search_verified",
+            "output_usd_per_million", "web_search_verified", "priority",
         }:
             raise RoutingError("Invalid model profile fields")
         try:
@@ -97,6 +105,7 @@ def _parse_profiles(raw: str) -> tuple[ModelProfile, ...]:
                 model=model, tier=tier, enabled=item.get("enabled", True),
                 input_usd_per_million=prices[0], output_usd_per_million=prices[1],
                 web_search_verified=item.get("web_search_verified", False),
+                priority=item.get("priority", DEFAULT_PRIORITY),
             )
         except (KeyError, InvalidOperation, ValueError, TypeError) as exc:
             raise RoutingError("Invalid model profile") from exc
@@ -235,6 +244,7 @@ class ModelRouter:
                 eligible,
                 key=lambda p: (
                     _TIERS[p.tier],
+                    p.priority,
                     self._max_cost(p, request)
                     if self._max_cost(p, request) is not None else Decimal("Infinity"),
                     p.model,

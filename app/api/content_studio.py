@@ -371,7 +371,9 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
           {item("analytics", base + "/analytics", "⌁", "Результаты")}
           {item("comments", base + "/comments", "☷", "Комментарии")}
           {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
+          {item("profile", base + "/profile", "▣", "Профиль компании")}
           {item("team", "/studio/team", "♧", "ИИ-команда")}
+          {item("tune", "/studio/tune", "⚙", "Настройка агентов")}
           <a href="/studio?choose=1"><span class="nav-ico" aria-hidden="true">⇄</span>Другой проект</a>
         </nav>
       </details>
@@ -956,6 +958,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       <a href="/studio/products/{product.id}/channels">Публикации</a>
       <a href="/studio/products/{product.id}/analytics" aria-label="Аналитика">Аналитика</a>
       <a href="/studio/team">ИИ-команда</a>
+      <a href="/studio/tune">Настройка агентов</a>
       <a href="https://servgo.ru/mail">Почта</a>
       <a href="/studio?choose=1" aria-label="Выбрать проект">Другой проект</a>
     </nav>
@@ -1178,6 +1181,7 @@ def studio_page_shell(
         <a href="/studio/products/{product.id}/channels">Публикации</a>
         <a href="/studio/products/{product.id}/analytics">Аналитика</a>
         <a href="/studio/team">ИИ-команда</a>
+        <a href="/studio/tune">Настройка агентов</a>
         <a href="https://servgo.ru/mail">Почта</a>
         <a href="/studio?choose=1">Другой проект</a></div>
       </details>
@@ -1728,7 +1732,9 @@ def analytics_page(db: Session, product: Product) -> str:
         body=body,
     )
 
-def product_selector(products: list[Product]) -> str:
+def product_selector(products: list[Product], *, can_add: bool = False) -> str:
+    add_card = ('<a class="product-link" href="/studio/new"><strong>＋ Добавить компанию</strong>'
+                '<small>Описание, сайт и проверка профиля →</small></a>') if can_add else ""
     cards = "".join(
         f'<a class="product-link" href="/studio/products/{p.id}"><strong>{esc(p.name)}</strong><small>{esc(p.slug)} · открыть Growth Studio →</small></a>'
         for p in products
@@ -1740,7 +1746,7 @@ def product_selector(products: list[Product]) -> str:
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
-<div class="product-list">{cards or '<div class="empty">Проекты ещё не добавлены.</div>'}</div>
+<div class="product-list">{cards or '<div class="empty">Проекты ещё не добавлены.</div>'}{add_card}</div>
 </main></body></html>"""
 
 
@@ -1776,7 +1782,7 @@ def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)
     preferred = next((p for p in products if p.slug == "servgo"), None)
     if preferred is not None and not choose:
         return RedirectResponse(f"/studio/products/{preferred.id}", status_code=302)
-    response = HTMLResponse(product_selector(products))
+    response = HTMLResponse(product_selector(products, can_add=allowed is None))
     response.headers["Cache-Control"] = "no-store"
     return response
 

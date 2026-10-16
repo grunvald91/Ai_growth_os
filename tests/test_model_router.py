@@ -218,3 +218,24 @@ async def test_alias_or_missing_usage_never_produces_false_estimate():
         provider=NoUsageProvider(), router=router()
     ).generate(req("cmo"))
     assert missing.estimated_cost_usd is None
+
+
+def test_owner_priority_orders_models_inside_a_tier():
+    profiles = [
+        {"model": "claude-sonnet-5-5", "tier": "balanced", "priority": 3},
+        {"model": "grok-4.7", "tier": "balanced", "priority": 1},
+        {"model": "kimi-k3", "tier": "balanced", "priority": 2},
+        {"model": "claude-opus-5-5", "tier": "premium", "priority": 1},
+    ]
+    decision = ModelRouter(profiles_json=json.dumps(profiles)).select(req("human_editor"))
+    assert decision.candidates == ("grok-4.7", "kimi-k3", "claude-sonnet-5-5")
+    # Tier floor still comes first: a priority never lifts a weaker tier above a stronger one.
+    profiles[1]["priority"] = 999
+    decision = ModelRouter(profiles_json=json.dumps(profiles)).select(req("human_editor"))
+    assert decision.candidates == ("kimi-k3", "claude-sonnet-5-5", "grok-4.7")
+
+
+@pytest.mark.parametrize("value", [0, 1000, "1", True, 1.5])
+def test_invalid_priority_is_rejected(value):
+    with pytest.raises(RoutingError):
+        ModelRouter(profiles_json=json.dumps([{"model": "grok-4.7", "tier": "balanced", "priority": value}]))

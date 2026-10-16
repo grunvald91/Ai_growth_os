@@ -133,6 +133,11 @@ function renderModels(){
   row.appendChild(field('Класс',dropdown(model.tier,[
    ['economy','Эконом'],['balanced','Баланс'],['premium','Премиум']
   ],function(v){model.tier=v;markDirty();})));
+  var priority=element('input');priority.type='number';priority.min='1';priority.max='999';priority.step='1';
+  priority.value=String(model.priority||100);
+  priority.addEventListener('change',function(){var v=parseInt(priority.value,10);
+   model.priority=(v>=1&&v<=999)?v:100;priority.value=String(model.priority);markDirty();});
+  row.appendChild(field('Приоритет (1 — первая)',priority));
   ['input_usd_per_million','output_usd_per_million'].forEach(function(key,index){
    var input=element('input');input.type='text';input.inputMode='decimal';
    input.placeholder='Неизвестно';input.value=model[key]===undefined||model[key]===null?'':String(model[key]);
@@ -196,7 +201,7 @@ $('addModel').addEventListener('click',function(){
  }
  if(state.config.profiles.length>=40){alertMessage('Достигнут предел в 40 моделей.',true);return;}
  state.config.profiles.push({model:id,tier:$('newTier').value,enabled:false,
-  input_usd_per_million:null,output_usd_per_million:null,web_search_verified:false});
+  input_usd_per_million:null,output_usd_per_million:null,web_search_verified:false,priority:100});
  $('newModel').value='';markDirty();renderModels();
  alertMessage('Модель добавлена выключенной; проверьте доступность и тариф.',false);
 });

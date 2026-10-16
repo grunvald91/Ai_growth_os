@@ -54,7 +54,7 @@ input:focus,select:focus{border-color:#2994fd;box-shadow:0 0 0 3px #1e98ff16}
 .card-summary{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:13px;font-size:11px;color:#8497ae}
 .card-summary strong{font-weight:750;color:#3a739f}
 .card.unavailable{border-color:#f2c7c6}.card .bad-note{color:#d46861}
-.model-rows{display:grid;gap:12px}.model-row{display:grid;grid-template-columns:1.4fr .78fr .82fr .82fr auto;gap:12px;align-items:center;background:#fff;border-radius:15px;border:1px solid #e5ecf5;padding:17px 20px}
+.model-rows{display:grid;gap:12px}.model-row{display:grid;grid-template-columns:1.4fr .78fr .62fr .82fr .82fr auto;gap:12px;align-items:center;background:#fff;border-radius:15px;border:1px solid #e5ecf5;padding:17px 20px}
 .model-id{font-size:14px;font-weight:800;overflow-wrap:anywhere}.model-meta{font-size:11px;color:#95a4b8;margin-top:4px}
 .model-row label{display:grid;gap:6px;font-size:11px;color:#8b9db5;font-weight:750}
 .model-row input[type="checkbox"]{width:18px;height:18px;accent-color:#067cff;vertical-align:middle}
