@@ -106,7 +106,7 @@ class QuickPostRequest(StrictModel):
 class QuickPostStrategy(StrictModel):
     audience_pain: str = Field(min_length=10, max_length=500)
     hook: str = Field(min_length=8, max_length=300)
-    useful_takeaway: str = Field(min_length=10, max_length=600)
+    useful_takeaway: str = Field(min_length=10, max_length=2000)  # 3-5 concrete tips
     suggested_cta: str = Field(min_length=3, max_length=260)
     evidence_ids: list[str] = Field(default_factory=list, max_length=20)
 
@@ -116,7 +116,7 @@ class QuickPostDraft(StrictModel):
     body: str = Field(min_length=160, max_length=3500)
     cta: str = Field(min_length=3, max_length=260)
     evidence_ids: list[str] = Field(default_factory=list, max_length=20)
-    editor_notes: list[str] = Field(default_factory=list, max_length=8)
+    editor_notes: list[str] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="before")
     @classmethod
