@@ -359,6 +359,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         {item("create", base + "/create", "＋", "Создать материал")}
         {item("work", base + "/work", "◴", "В работе")}
         {item("materials", base + "/materials", "▤", "Мои материалы")}
+        <a href="https://servgo.ru/mail"><span class="nav-ico" aria-hidden="true">✉</span>Почта</a>
       </nav>
       <details class="sg-side-extras">
         <summary>Настройки маркетинга и другое</summary>
@@ -955,6 +956,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       <a href="/studio/products/{product.id}/channels">Публикации</a>
       <a href="/studio/products/{product.id}/analytics" aria-label="Аналитика">Аналитика</a>
       <a href="/studio/team">ИИ-команда</a>
+      <a href="https://servgo.ru/mail">Почта</a>
       <a href="/studio?choose=1" aria-label="Выбрать проект">Другой проект</a>
     </nav>
     """
@@ -1176,6 +1178,7 @@ def studio_page_shell(
         <a href="/studio/products/{product.id}/channels">Публикации</a>
         <a href="/studio/products/{product.id}/analytics">Аналитика</a>
         <a href="/studio/team">ИИ-команда</a>
+        <a href="https://servgo.ru/mail">Почта</a>
         <a href="/studio?choose=1">Другой проект</a></div>
       </details>
     </nav>

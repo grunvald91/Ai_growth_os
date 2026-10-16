@@ -410,3 +410,11 @@ def test_v8_typography_consistent_across_all_studio_views(studio_v5):
         assert "studio.css?v=10" in result.text
         assert 'data-studio-build="20261013-unified10"' in result.text
         assert "/studio/assets/servgo.svg" in result.text
+
+
+def test_studio_navigation_links_to_servgo_mail(studio_v5):
+    client, _, company, _ = studio_v5
+    dashboard = client.get(f"/studio/products/{company.id}")
+    assert dashboard.status_code == 200
+    # Sidebar (main nav, not hidden in extras) and the mobile/quick menus.
+    assert dashboard.text.count('href="https://servgo.ru/mail"') >= 2
