@@ -25,6 +25,7 @@ from app.api.content_studio_brand import SERVGO_FAVICON_SVG, servgo_brand_html
 from app.api.content_studio_article import render_article
 from app.content.render import asset_path
 from app.api.content_studio_guide import how_it_works_html, where_html
+from app.api.content_studio_process import team_stats_html
 from app.api.content_studio_activity import (work_items, notice_items, notice_html,
     activity_html, activity_overview, task_detail_html, RESULT_KINDS)
 from app.api.content_studio_ui import create_content_html, review_html, channels_html
@@ -39,7 +40,7 @@ from app.content.creative import CreativeRequest, queue_creative
 from app.content.telegram_publishing import (verify_channel, save_verified_channel,
     connected_channels, schedule_post, cancel_scheduled_post, validate_telegram_text,
     reconcile_publication)
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
 
@@ -1060,7 +1061,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>Growth Studio · {esc(product.name)}</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=17">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=20">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1089,6 +1090,7 @@ def product_dashboard(db: Session, product: Product) -> str:
     {new_draft_notice}
     {how_it_works_html(product.id)}
     {activity_overview(product.id, work_items(db, product.id, limit=16))}
+    {team_stats_html(db, product.id)}
     {where_html(product.id)}
     <details class="sg-legacy-details sg-dashboard-extra"><summary>Подробнее: план, календарь и статистика</summary>
     {overview_extra}
@@ -1200,7 +1202,7 @@ def studio_page_shell(
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>{esc(title)} · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=17">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=20">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1773,7 +1775,7 @@ def product_selector(products: list[Product]) -> str:
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=17"></head>
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=20"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
@@ -2130,7 +2132,8 @@ def studio_activity_json(product_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/studio/products/{product_id}/tasks/{task_id}", response_class=HTMLResponse)
-def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
+def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_db),
+                     settings: Settings = Depends(get_settings)):
     product = _owner_product(db, product_id)
     task = db.scalar(select(Task).where(Task.id == task_id, Task.product_id == product_id))
     if task is None:
@@ -2150,8 +2153,11 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
         Artifact.kind.in_(["content_request", "creative_request", "edit_request"]),
     ).order_by(Artifact.created_at.desc()).limit(1))
     from app.api.content_studio_guide import load_stage_notes
+    from app.api.content_studio_process import load_process
     body = task_detail_html(product.id, task, runs, results, request=request,
-                            stage_notes=load_stage_notes(db, runs))
+                            stage_notes=load_stage_notes(db, runs),
+                            process=load_process(db, task, runs, results,
+                                                 settings.agent_critic_enabled))
     response = HTMLResponse(studio_page_shell(
         product, active="work", title="Создание материала",
         subtitle="Как идёт работа над материалом и что получилось.",

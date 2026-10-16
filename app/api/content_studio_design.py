@@ -521,6 +521,8 @@ STUDIO_CSS += "\n" + STUDIO_FIXES_CSS
 STUDIO_JS += "\n" + STUDIO_FIXES_JS
 from app.api.content_studio_guide import CSS as STUDIO_GUIDE_CSS
 STUDIO_CSS += "\n" + STUDIO_GUIDE_CSS
+from app.api.content_studio_process import CSS as STUDIO_PROCESS_CSS
+STUDIO_CSS += "\n" + STUDIO_PROCESS_CSS
 from app.api.content_studio_air import CSS as STUDIO_AIR_CSS, JS as STUDIO_AIR_JS
 STUDIO_CSS += "\n" + STUDIO_AIR_CSS
 STUDIO_JS += "\n" + STUDIO_AIR_JS

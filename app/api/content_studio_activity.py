@@ -224,6 +224,11 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
             } for art in items[:15]],
             "animator_stage": animator_stage,
             "animator_calls": animator_calls,
+            "agents": len({run.agent_name for run in by_runs.get(task.id, [])}),
+            "steps_total": len(by_runs.get(task.id, [])),
+            "steps_done": sum(run.status == "completed" for run in by_runs.get(task.id, [])),
+            "now_stage": next((STAGE_NAMES.get(run.agent_name, "") for run in by_runs.get(task.id, [])
+                               if run.status == "running"), ""),
             "stage_signature": "|".join(
                 str(run.id) + ":" + run.status
                 for run in by_runs.get(task.id, [])[-20:]
@@ -345,6 +350,15 @@ def work_url(product_id: UUID, item: dict) -> str:
     return f"{base}/{kind}/{item['id']}"
 
 
+def crew_line(item: dict) -> str:
+    """«Агентов: 4 · шагов 2 из 4 · сейчас: …» из реальных шагов задания."""
+    total = item.get("steps_total") or 0
+    if not total:
+        return ""
+    return (f'Агентов: {item["agents"]} · шагов {item["steps_done"]} из {total}'
+            + (f' · сейчас: {item["now_stage"]}' if item.get("now_stage") else ""))
+
+
 def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
     base = f"/studio/products/{product_id}"
     tabs = (("all", "Все"), ("active", "В работе"), ("approval", "Нужно решение"),
@@ -375,6 +389,9 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
                 f'{artifact_count} материалов. Откройте результат и проверьте перед публикацией.'
                 if artifact_count else item["description"]
             )
+            crew = crew_line(item)
+            if crew:
+                summary = crew + ". " + summary if item["state"] != "completed" else crew
         cards.append(
             f'<a class="sg-work-item sg-work-{item["tone"]}" href="{work_url(product_id, item)}">'
             f'<div class="sg-work-item-main"><b>{safe(item["title"])}</b>'
@@ -410,7 +427,7 @@ def activity_overview(product_id: UUID, items: list[dict]) -> str:
         cards.append(
             f'<a class="sg-work-item sg-work-{item["tone"]}" href="{work_url(product_id, item)}">'
             f'<div class="sg-work-item-main"><b>{safe(item["title"])}</b>'
-            f'<p>{safe(ANIMATOR_PHASES.get(str(item.get("animator_stage")), item["description"]) if item.get("agent") == "whiteboard_renderer" else item["description"])}</p></div>'
+            f'<p>{safe(ANIMATOR_PHASES.get(str(item.get("animator_stage")), item["description"]) if item.get("agent") == "whiteboard_renderer" else (crew_line(item) or item["description"]))}</p></div>'
             f'<span class="sg-work-status sg-work-{item["tone"]}">{safe(item["label"])}</span>'
             '<span class="sg-work-arrow" aria-hidden="true">→</span></a>'
         )
@@ -434,8 +451,9 @@ def _minutes(run: AgentRun) -> str:
 
 def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
                      results: list[Artifact], request: Artifact | None = None,
-                     stage_notes: dict | None = None) -> str:
+                     stage_notes: dict | None = None, process=None) -> str:
     from app.api.content_studio_guide import notes_html
+    from app.api import content_studio_process as proc_ui
     stage_notes = stage_notes or {}
     base = f"/studio/products/{product_id}"
     key = task_state(task)
@@ -446,11 +464,16 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         steps.append('<li class="sg-stage"><span class="sg-stage-mk">·</span><div class="sg-stage-body">'
                      '<p class="sg-stage-wait">' + ("Ожидаем запуска обработки." if key == "queued" else
                      "Обработка запущена. Подробные шаги ещё не поступили.") + '</p></div></li>')
-    ordered = sorted(runs[-16:], key=lambda r: (r.started_at is None,
+    ordered = sorted(runs[-60:], key=lambda r: (r.started_at is None,
                      r.started_at.timestamp() if r.started_at else (PIPELINE_ORDER.index(r.agent_name) if r.agent_name in PIPELINE_ORDER else 99)))
     for n, run in enumerate(ordered, 1):
         stage = STAGE_NAMES.get(run.agent_name, "Подготовка материала")
         role = STAGE_ROLES.get(run.agent_name, "")
+        who = proc_ui.agent_title(run.agent_name) if process is not None else ""
+        if who and role:
+            role = f"{who}. {role}"
+        elif who:
+            role = who
         css, state = {
             "queued": ("", "Ждёт очереди"), "running": ("run", "Работает"),
             "completed": ("done", "Готово"), "failed": ("err", "Ошибка"),
@@ -468,13 +491,15 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
             detail = '<p class="sg-stage-wait">Шаг остановился с ошибкой. Задание можно повторить.</p>'
         else:
             detail = '<p class="sg-stage-wait">Начнёт после предыдущего шага.</p>'
+        meta = proc_ui.step_meta_html(run, process) if process is not None else ""
+        critic = proc_ui.step_critic_html(run, process) if process is not None else ""
         mark = "✓" if css == "done" else str(n)
         steps.append(
             f'<li class="sg-stage {css}"><span class="sg-stage-mk" aria-hidden="true">{mark}</span>'
             f'<div class="sg-stage-body"><div class="sg-stage-head"><div><h4>{safe(stage)}</h4>'
             + (f'<small>{safe(role)}</small>' if role else '') + '</div>'
             f'<span class="sg-stage-state">{safe(state)}{(" · " + safe(took)) if took else ""}</span></div>'
-            f'{detail}</div></li>'
+            f'{meta}{detail}{critic}</div></li>'
         )
     rendered = []
     for result in results:
@@ -513,9 +538,11 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         f'<section class="sg-surface sg-work-detail" data-sg-task="{task.id}" data-sg-state="{key}" data-sg-stage="{safe(stage_sig)}">'
         f'<span class="sg-work-status sg-work-{tone}">'
         f'{safe(label)}</span><h2>{safe(task_title(task, request))}</h2><p>{safe(explanation)}</p>'
-        f'<div class="sg-work-steps"><h3>Как шла работа</h3><ol class="sg-stage-list">{"".join(steps)}</ol></div>'
+        + (proc_ui.summary_html(runs, process) if process is not None else '')
+        + f'<div class="sg-work-steps"><h3>Как шла работа</h3><ol class="sg-stage-list">{"".join(steps)}</ol></div>'
         f'<div class="sg-work-results"><h3>Результаты</h3>'
         + ("".join(rendered) or '<p>Результаты появятся здесь после подготовки.</p>')
-        + '</div>' + refresh + fail
+        + '</div>' + (proc_ui.log_html(task, runs, process) if process is not None else '')
+        + refresh + fail
         + f'<p><a class="sg-mini-link" href="{base}/work">← Все задания</a></p></section>'
     )
