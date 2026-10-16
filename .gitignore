@@ -29,3 +29,9 @@ htmlcov/
 data/
 logs/
 *.log
+
+# Local release bundles and server dumps
+docs/*.tgz
+docs/*.tar.gz
+docs/*.zip
+deploy/server/deploy.json

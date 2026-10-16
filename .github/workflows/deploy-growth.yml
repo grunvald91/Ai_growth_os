@@ -1,0 +1,68 @@
+name: Deploy Growth (production)
+
+# Manual only. The "production" environment should require the owner's approval
+# (Settings -> Environments). Tests run first; the server builds the commit itself.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to deploy
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: growth-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install media tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-dejavu-core poppler-utils tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng
+      - name: Install
+        run: python -m pip install -e '.[test]'
+      - name: Tests
+        run: python -m pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      # The repository is private: the server gets the tested commit's sources over SSH.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.test.outputs.sha }}
+      - name: Deploy over the restricted key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          SHA: ${{ needs.test.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_KNOWN_HOSTS" ] && [ -n "$DEPLOY_HOST" ] || {
+            echo "::error::Set secrets DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS and variable DEPLOY_HOST"; exit 1; }
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          git archive --format=tar.gz "$SHA" app alembic/versions pyproject.toml products \
+            | ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes -o BatchMode=yes "root@$DEPLOY_HOST" "deploy $SHA"
