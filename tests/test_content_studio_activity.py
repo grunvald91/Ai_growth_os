@@ -86,7 +86,7 @@ def test_creation_stays_visible_as_queued_and_running(owner_studio):
     page = client.get(result.headers["location"])
     assert page.status_code == 200
     assert "В очереди" in page.text
-    assert "Этапы создания" in page.text
+    assert "Как шла работа" in page.text
     assert "Результаты появятся" in page.text
     activity = client.get(base + "/work?tab=active")
     assert "В очереди" in activity.text
@@ -100,7 +100,7 @@ def test_creation_stays_visible_as_queued_and_running(owner_studio):
     assert active["active_count"] == 1
     detail = client.get(base + f"/tasks/{db_task.id}")
     assert "Изучение темы" in detail.text or "Идея и структура" in detail.text
-    assert "Выполняется" in detail.text
+    assert "Работает" in detail.text
     assert client.get(f"/studio/products/{other.id}/tasks/{db_task.id}").status_code == 404
     assert not list(db.scalars(select(Publication)))
 

@@ -519,3 +519,5 @@ STUDIO_JS += "\n" + STUDIO_WORK_JS
 from app.api.content_studio_fixes import CSS as STUDIO_FIXES_CSS, JS as STUDIO_FIXES_JS
 STUDIO_CSS += "\n" + STUDIO_FIXES_CSS
 STUDIO_JS += "\n" + STUDIO_FIXES_JS
+from app.api.content_studio_guide import CSS as STUDIO_GUIDE_CSS
+STUDIO_CSS += "\n" + STUDIO_GUIDE_CSS
