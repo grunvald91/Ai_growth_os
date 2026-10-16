@@ -37,7 +37,7 @@ CHANNEL_PROFILES = {
     'dzen': 'Discovery-led narrative: relatable opening, readable short sections, useful takeaway and restrained contextual CTA; avoid clickbait.',
     'tenchat': 'Professional practitioner perspective: concrete business problem, operational checklist, discussion question and a low-pressure next step.',
     'vc_ru': 'Analytical business explainer: explicit assumptions, trade-offs, structured argument and evidence gaps; no invented case studies or promotional promises.',
-    'telegram': 'Mobile-first channel reading: concise paragraphs, clear opening value, scannable takeaways and one primary next step; adapt long-form into a standalone brief.',
+    'telegram': 'Mobile-first standalone post, 800-1500 characters: feed-stopping first line, why it matters, 3-5 numbered actionable points, a 1-2 sentence bridge to the company and one CTA; not an article teaser.',
     'faq': 'Question-and-answer structure addressing specific objections; separate known facts from proposed answers requiring verification.',
     'founder': 'Founder-perspective discussion brief: proposed viewpoint and lessons to explore, never fabricated first-person experience.',
     'short_video': 'Production-ready short-video package: spoken hook, scene-by-scene outline, on-screen text and CTA. Rendering is a separate adapter.',
@@ -46,13 +46,13 @@ CHANNEL_PROFILES = {
 }
 
 STAGES = (
-    ('content_strategist', ArticleStrategy, 'Define audience, pain, search intent and an organic article hypothesis.'),
-    ('seo_editor', SEOPlan, 'Choose query, title, hook and long-form outline adapted to the requested channel.'),
-    ('article_writer', ArticleBodyDraft, 'Write the complete long-form article body as advice and hypotheses only. Verified facts are injected deterministically.'),
-    ('conversion_editor', ConversionCore, 'Design the CTA, proposed links, funnel measurement and bounded distribution plan. Do not create derivatives.'),
-    ('human_editor', HumanEditedArticle, 'Turn the safe draft into a complete, engaging reader-facing article without adding unsupported product facts.'),
-    ('marketing_editor', HumanEditedArticle, 'Sharpen the grounded article into specific pain-led marketing copy with tasteful situational humor and one clear CTA.'),
-    ('repurposing_editor', TextDerivativeSet, 'Create six distinct text-channel derivatives only.'),
+    ('content_strategist', ArticleStrategy, 'Определи читателя, его узнаваемую боль, поисковое намерение и главную практическую пользу статьи.'),
+    ('seo_editor', SEOPlan, 'Выбери поисковый запрос, сильный заголовок, заход и план статьи, где каждый раздел даёт читателю действие.'),
+    ('article_writer', ArticleBodyDraft, 'Напиши полный текст статьи: конкретные советы, шаги, расчёты и примеры. Проверенные факты о компании подставляет система.'),
+    ('conversion_editor', ConversionCore, 'Спроектируй один призыв к действию, ссылки, измерение воронки и шаги распространения. Без производных материалов.'),
+    ('human_editor', HumanEditedArticle, 'Сделай из черновика ясную и полезную статью для живого читателя, не добавляя неподтверждённых фактов о продукте.'),
+    ('marketing_editor', HumanEditedArticle, 'Финальная продающая редактура: острый заход, польза, естественный мост к компании и один призыв.'),
+    ('repurposing_editor', TextDerivativeSet, 'Сделай шесть разных текстовых адаптаций статьи под площадки.'),
     ('video_director', ShortVideoDerivativeDraft, 'Write a complete text-only director brief for one vertical short video.'),
     ('story_director', StoryDerivativeDraft, 'Write a complete text-only frame-by-frame brief for one vertical story sequence.'),
     ('visual_designer', StaticImageDerivativeDraft, 'Write a complete text-only design brief for one static promotional image.'),
@@ -169,76 +169,79 @@ def _default_stage_rule(name: str) -> str:
     stage_rule = ''
     if name == 'content_strategist':
         stage_rule = (
-            ' Build the content hypothesis around a recognizable reader pain, the cost/friction of the '
-            'current workflow, and a concrete useful outcome the reader can pursue. When marketing_research '
-            'contains viral_content_research, start from its grounded audience_pains and strongest video/article '
-            'patterns, not from a generic product description. Prefer pains with a verified product_match; '
-            'show the recognizable situation, operational friction and why it matters before proposing the '
-            'mechanism. Treat repeated trend/outlier signals as commercially useful attention evidence: '
-            'you may infer that a theme is promising or visibly recurring when several independent sources align, '
-            'but do not rename that signal as measured market demand. Third-party case numbers may be used as '
-            'source-specific context, never as a guaranteed outcome for the company. Use white-space and humor angles as '
-            'original inspiration, never copy wording. The brief must create a clear '
-            'bridge from the reader problem to the company\'s verified relevance and identify what remains a hypothesis.'
+            ' Ты — контент-стратег. Сначала польза: найди узнаваемую боль целевого читателя и сформулируй, что '
+            'конкретно он унесёт из статьи — 3–5 приёмов, шагов, метрик или расчётов, которые применит сам, '
+            'даже если не станет клиентом. Запиши это в hypothesis по существу, а не общими словами; в angle — '
+            'необычный угол, которым статья отличается от типовых текстов. Если в marketing_research есть '
+            'viral_content_research, начинай с его подтверждённых audience_pains и сильных паттернов статей и '
+            'видео, а не с описания продукта; предпочитай боли с подтверждённым product_match. Повторяющиеся '
+            'сигналы из нескольких независимых источников можно называть заметной темой, но не измеренным '
+            'спросом. Цифры чужих кейсов — только как контекст источника, не как обещание результата компании. '
+            'Чужие формулировки не копируй. В titles дай 2–5 заголовков: конкретная проблема или выгода, без '
+            'кликбейта. Пропиши мост от проблемы читателя к подтверждённой пользе компании.'
         )
     elif name == 'seo_editor':
         stage_rule = (
-            ' Create a search/content plan that is commercially useful as well as helpful. Use supplied '
-            'viral-content pain, article and video patterns to sharpen angles and hooks when available, but '
-            'never invent search volume or rankings. Combine search usefulness with observed tension and '
-            'white-space opportunities. Prefer specific problem-led titles over generic educational wording. '
-            'A title may be declarative and strong when it describes a real problem, a process explained '
-            'by the article, or an achievable reader benefit; it does not have to be a question.'
+            ' Ты — SEO-редактор. Строй план, полезный и для поиска, и для продаж. primary_query — реальная '
+            'формулировка, которой читатель ищет решение своей проблемы; объём запросов и позиции не выдумывай.'
+            ' title — конкретный: проблема, процесс или достижимая выгода; может быть утверждением, не '
+            'обязательно вопросом. hook — первая фраза статьи: узнаваемая сцена или неожиданная мысль, а не '
+            'определение. outline — разделы, каждый из которых даёт читателю конкретное действие, расчёт или '
+            'чек-лист; заголовки разделов говорят, что читатель получит, а не «Введение» и «Заключение». '
+            'Используй боли и паттерны из исследования, чтобы заострить угол.'
         )
     elif name == 'article_writer':
         stage_rule = (
-            ' Include >=2000 body characters across >=4 sections. Output only advice or hypothesis '
-            'sections. Do not output factual sections, claim IDs or grounded claims; verified company '
-            'facts are inserted deterministically by the application after this stage.'
+            ' Ты — автор статьи. Объём тела — не меньше 2000 символов и не меньше 4 разделов. Каждый раздел '
+            'даёт пользу, которую читатель применит сам: конкретные шаги, примеры, расчёты, чек-листы. '
+            'Иллюстративные цифры можно, если из текста ясно, что это пример («допустим, у вас 40 записей в '
+            'неделю…»). Пиши уверенно и просто: одна мысль — один короткий абзац, без вступлений, канцелярита и'
+            ' повторов. Выводи только разделы kind=advice или kind=hypothesis; не выводи разделы с фактами, '
+            'claim_ids и утверждения о компании — проверенные факты о компании подставляет система после этого '
+            'этапа. Что требует подтверждения, запиши в proof_needed_notes, а не в текст.'
         )
     elif name == 'conversion_editor':
         stage_rule = (
-            ' Return only conversion core fields: CTA, proposed local links, one funnel measurement '
-            'plan and bounded distribution steps. Do not create derivative briefs.'
+            ' Ты — редактор конверсии. Верни только поля ядра конверсии: cta, landing_page, internal_links, '
+            'measurement и distribution. cta — ровно один призыв с понятным действием (куда перейти, что '
+            'нажать, что написать), естественно продолжающий пользу статьи, без давления и без обещаний '
+            'результата. Ссылки — предлагаемые локальные пути, требующие проверки. Измерение воронки: материал '
+            '→ трафик → заявка → запись/регистрация → клиент; цели — гипотезы, не достигнутые результаты. '
+            'Производные материалы не создавай.'
         )
     elif name == 'human_editor':
         stage_rule = (
-            ' Rewrite the safe article into a polished human-facing article for an actual reader. Open '
-            'inside a concrete recognizable situation, not with definitions or “businesses often face”. '
-            'Put the operational pain in the first two sentences, make the friction and stakes tangible, '
-            'then explain a clearer workflow. Edit in a concise Russian information style inspired by '
-            'the practical principles of «Пиши, сокращай»: lead with value, use concrete nouns and active verbs, '
-            'one main thought per sentence/paragraph, cut throat-clearing, bureaucratic nouns, filler adjectives, '
-            'repetition and abstract introductions. Prefer a concrete example or number to a vague intensifier. '
-            'Connect the reader problem naturally to verified capabilities of the company being marketed and end with one clear '
-            'next step. Keep uncertainty only where it materially changes a decision. Do not expose internal '
-            'research labels, schemas, proof-gap notes or agent language. Do not invent testimonials, metrics, '
-            'prices, integrations, competitor superiority or product capabilities. Product facts may appear '
-            'ONLY through fact_renderings, exactly one rendering per supplied verified_product_facts source_id. '
-            'Each rendering must faithfully restate only that source fact. Ordinary sections may explain '
-            'problems, advice and hypotheses but cannot introduce new unverified features of the company. '
+            ' Ты — литературный редактор. Твоя задача — ясность и польза для читателя; продающую подачу доведёт'
+            ' следующий редактор. Перепиши черновик в готовую статью: начни внутри конкретной узнаваемой '
+            'ситуации, а не с определений и «бизнес часто сталкивается»; боль — в первых двух фразах. Сохрани и'
+            ' усили все конкретные советы, шаги и расчёты черновика: польза не должна потеряться при редактуре.'
+            ' Информационный стиль в духе «Пиши, сокращай»: польза в начале, конкретные существительные, '
+            'активные глаголы, одна мысль — одна фраза или абзац; убери вводные, канцелярит, пустые '
+            'прилагательные, повторы и абстрактные вступления. Конкретный пример или число лучше размытого '
+            'усилителя. Оговорки оставляй только там, где они меняют решение читателя. Не показывай внутренние '
+            'метки, схемы, заметки о пробелах в доказательствах и язык агентов. Не придумывай отзывы, метрики, '
+            'цены, интеграции, превосходство над конкурентами и возможности продукта. Факты о продукте — ТОЛЬКО'
+            ' через fact_renderings, ровно по одному на каждый source_id из verified_product_facts; каждый '
+            'точно пересказывает только свой факт. Обычные разделы объясняют проблемы, советы и гипотезы, но не'
+            ' вводят новых возможностей компании. В конце — один понятный следующий шаг.'
         )
     elif name == 'marketing_editor':
         stage_rule = (
-            ' This is the final commercial-quality pass over prior_stage_outputs.human_editor. Keep every '
-            'verified fact grounded and preserve exactly one fact_rendering per verified_product_facts source. '
-            'Make the article impossible to confuse with generic SaaS copy: anchor it in the specific niche, '
-            'specific pain and specific moment where the target customer experiences a meaningful problem. '
-            'Use the sequence SCENE -> PAIN -> COST/FRICTION -> BETTER MECHANISM -> VERIFIED PRODUCT BRIDGE -> CTA. '
-            'The title must create tension or curiosity without clickbait. The lead must earn the next paragraph. '
-            'Delete filler, abstract claims, repeated caveats, “digital transformation” language and bland lists. '
-            'Apply a hard information-style edit: short useful paragraphs, active verbs, concrete nouns, meaningful '
-            'headings, no throat-clearing, no duplicated thought, no sentence kept merely to sound expert. '
-            'The reader should recognize a real situation, not read a scientific disclaimer. '
-            'Use gentle situational humor only when it fits the verified brand voice, topic and audience. '
-            'For therapy, health, grief, conflict, financial distress or other sensitive situations, prioritize '
-            'empathy and clarity: humor may be entirely absent. Research humor_angles are optional examples, '
-            'never an instruction to insert jokes. Never mock clients, staff or vulnerable people; no cringe, '
-            'fake quotes or slang overload. Source-specific third-party numbers/case results MAY be used '
-            'when they are present in marketing_research; keep their scope clear and never turn them into an outcome '
-            'guarantee. Clearly illustrative scenario counts MAY be used as examples, not as measured results. '
-            'Make the product feel like the logical answer to the pain without promising guaranteed growth. '
-            'End with ONE concrete CTA. '
+            ' Ты — продающий редактор, финальный проход по prior_stage_outputs.human_editor. Сохрани все '
+            'проверенные факты и ровно один fact_rendering на каждый source из verified_product_facts. Сохрани '
+            'все конкретные советы и расчёты: продажа строится на пользе, а не вместо неё. Последовательность: '
+            'СЦЕНА → БОЛЬ → ЦЕНА ПРОБЛЕМЫ → ПОЛЬЗА (конкретные шаги) → МОСТ К КОМПАНИИ → ОДИН ПРИЗЫВ. Заголовок'
+            ' создаёт напряжение или любопытство без кликбейта; лид заставляет читать дальше. Текст привязан к '
+            'конкретной нише и моменту, когда клиент чувствует проблему, — его нельзя спутать с типовым текстом'
+            ' о SaaS. Пиши уверенно: убери оговорки, извинения, «это не гарантия», «пока не умеем», «цифровую '
+            'трансформацию», общие утверждения и вялые списки. Мост к компании — 1–2 фразы о выгоде для '
+            'читателя; направление развития продукта можно показывать как видение («мы строим…», «скоро…»), но '
+            'не как уже работающую функцию; без пересказа шагов интерфейса и оплаты. Цифры чужих кейсов из '
+            'marketing_research — с понятным источником и без обещания результата; иллюстративные цифры — явно '
+            'как пример. Юмор — только к месту и в голосе бренда; в чувствительных темах (здоровье, горе, '
+            'конфликт, финансовые трудности) — эмпатия и ясность без шуток; никогда не высмеивай клиентов и '
+            'сотрудников. Перед ответом сверь: количество пунктов и числа совпадают с обещанным в заголовке и '
+            'лиде. В конце ровно один конкретный призыв.'
         )
     elif name == 'platform_writer':
         stage_rule = (
@@ -264,10 +267,11 @@ def _default_stage_rule(name: str) -> str:
         )
     elif name == 'repurposing_editor':
         stage_rule = (
-            ' Return exactly six text derivatives only: dzen, tenchat, vc_ru, telegram, faq and founder. '
-            'Do not create video, story or image briefs. Do not output measurement fields; validated '
-            'measurement is injected later. Each derivative must materially adapt the framing, hook, '
-            'outline and CTA to its channel instead of copying the article.'
+            ' Верни ровно шесть текстовых адаптаций: dzen, tenchat, vc_ru, telegram, faq и founder. Видео, '
+            'сторис и изображения не создавай; поля измерений не выводи — их добавит система. Каждая адаптация '
+            'меняет подачу, заход, план и призыв под площадку, а не копирует статью, и сохраняет главное: '
+            'конкретную пользу для читателя и один призыв. Telegram — заход, 3–5 пунктов пользы, мост в 1–2 '
+            'фразы, один призыв.'
         )
     elif name == 'video_director':
         stage_rule = (
