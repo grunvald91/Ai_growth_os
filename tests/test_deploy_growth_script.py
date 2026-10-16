@@ -1,6 +1,8 @@
 import importlib.util
 import io
+import json
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -52,15 +54,29 @@ def test_unpack_requires_app(tmp_path):
 def test_incompatibilities_only_for_dependency_or_schema_changes(tmp_path):
     deploy_growth.unpack(tarball({
         "app/main.py": "",
-        "pyproject.toml": "deps",
+        "pyproject.toml": "",
         "alembic/versions/0001_a.py": "",
     }), tmp_path)
-    base = {"pyproject": "deps", "migrations": ["0001_a.py"]}
-    assert deploy_growth.incompatibilities(tmp_path, base) == []
+    assert deploy_growth.incompatibilities(tmp_path, {"unmet": [], "migrations": ["0001_a.py"]}) == []
 
-    problems = deploy_growth.incompatibilities(tmp_path, {"pyproject": "old", "migrations": []})
-    assert any("pyproject.toml" in p for p in problems)
+    problems = deploy_growth.incompatibilities(tmp_path, {"unmet": ["x>=2 (installed 1)"], "migrations": []})
+    assert any("lacks dependencies: x>=2" in p for p in problems)
     assert any("added ['0001_a.py']" in p for p in problems)
+
+
+def test_base_facts_script_checks_installed_dependencies(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\ndependencies = ["pytest>=1", "pytest<1", "no-such-package-zz>=1"]\n')
+    facts = json.loads(subprocess.run(
+        [sys.executable, "-c", deploy_growth.BASE_FACTS], input=(tmp_path / "pyproject.toml").read_text(),
+        capture_output=True, text=True, check=True).stdout)
+    assert [u.split(" ")[0] for u in facts["unmet"]] == ["pytest<1", "no-such-package-zz>=1"]
+
+    project = (ROOT / "pyproject.toml").read_text()
+    facts = json.loads(subprocess.run(
+        [sys.executable, "-c", deploy_growth.BASE_FACTS], input=project,
+        capture_output=True, text=True, check=True).stdout)
+    assert facts["unmet"] == []
 
 
 def test_deploy_rejects_bad_input_before_touching_the_server():

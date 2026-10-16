@@ -9,8 +9,8 @@ a gzipped tar on stdin.
     deploy_growth.py rollback            # back to the compose set before the last deploy
 
 app/ and products/ are copied onto the configured base image. The base image carries the
-Python dependencies and the database schema, so a commit whose pyproject.toml or Alembic
-migrations differ from the base image is refused: build a new base image (and migrate)
+Python dependencies and the database schema, so a commit whose dependencies the base image
+does not satisfy, or whose Alembic migrations differ from it, is refused: build a new base image (and migrate)
 first, then point deploy.json at it. api/worker/telegram are recreated with the overlay
 environment from deploy.json; on failed health checks the previous set is restored.
 Never prints secrets: production secrets stay in /opt/ai_growth_os/.env on the server.
@@ -40,9 +40,29 @@ HEALTH = ["http://127.0.0.1:8091/health", "http://127.0.0.1:8091/studio/team"]
 KEEP_RELEASES = 5
 MAX_ARCHIVE_BYTES = 200_000_000
 SOURCE_ROOTS = ("app", "products", "alembic", "pyproject.toml")
-BASE_FACTS = ("import json, pathlib; v = pathlib.Path('/app/alembic/versions'); "
-              "print(json.dumps({'pyproject': pathlib.Path('/app/pyproject.toml').read_text(), "
-              "'migrations': sorted(p.name for p in v.glob('*.py'))}))")
+# Runs inside the base image with the commit's pyproject.toml on stdin: which of its
+# dependencies the image does not satisfy, and which migrations the image carries.
+BASE_FACTS = """
+import importlib.metadata as md, json, pathlib, sys, tomllib
+try:
+    from packaging.requirements import Requirement
+except ImportError:
+    from pip._vendor.packaging.requirements import Requirement
+unmet = []
+for line in tomllib.loads(sys.stdin.read())["project"]["dependencies"]:
+    req = Requirement(line)
+    if req.marker and not req.marker.evaluate():
+        continue
+    try:
+        version = md.version(req.name)
+    except md.PackageNotFoundError:
+        unmet.append(line + " (not installed)")
+        continue
+    if not req.specifier.contains(version, prereleases=True):
+        unmet.append(line + " (installed " + version + ")")
+versions = pathlib.Path("/app/alembic/versions")
+print(json.dumps({"unmet": unmet, "migrations": sorted(p.name for p in versions.glob("*.py"))}))
+"""
 
 
 def run(args, **kw):
@@ -119,9 +139,8 @@ def unpack(payload: bytes, target: Path) -> None:
 def incompatibilities(source: Path, base: dict) -> list[str]:
     """What the base image lacks for this commit; empty when only app code changed."""
     problems = []
-    pyproject = source / "pyproject.toml"
-    if not pyproject.is_file() or pyproject.read_text() != base["pyproject"]:
-        problems.append("pyproject.toml differs from the base image (dependencies)")
+    if base["unmet"]:
+        problems.append("the base image lacks dependencies: " + ", ".join(base["unmet"]))
     versions = source / "alembic" / "versions"
     migrations = sorted(p.name for p in versions.glob("*.py")) if versions.is_dir() else []
     if migrations != base["migrations"]:
@@ -131,9 +150,13 @@ def incompatibilities(source: Path, base: dict) -> list[str]:
     return problems
 
 
-def base_facts(base_image: str) -> dict:
-    return json.loads(cap(["docker", "run", "--rm", "--network", "none", "--entrypoint", "python",
-                           base_image, "-c", BASE_FACTS]))
+def base_facts(base_image: str, source: Path) -> dict:
+    pyproject = source / "pyproject.toml"
+    if not pyproject.is_file():
+        raise RuntimeError("archive has no pyproject.toml")
+    return json.loads(subprocess.run(
+        ["docker", "run", "--rm", "-i", "--network", "none", "--entrypoint", "python", base_image,
+         "-c", BASE_FACTS], input=pyproject.read_text(), capture_output=True, text=True, check=True).stdout)
 
 
 def build(base_image: str, source: Path, image: str) -> None:
@@ -178,7 +201,7 @@ def deploy(sha: str, payload: bytes) -> None:
         raise SystemExit(f"{sha[:12]} is already running")
     shutil.rmtree(release, ignore_errors=True)
     unpack(payload, release)
-    problems = incompatibilities(release, base_facts(settings["base_image"]))
+    problems = incompatibilities(release, base_facts(settings["base_image"], release))
     if problems:
         shutil.rmtree(release, ignore_errors=True)
         raise SystemExit("refusing to deploy onto " + settings["base_image"] + ": " + "; ".join(problems)

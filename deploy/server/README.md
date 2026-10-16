@@ -16,8 +16,9 @@ cp deploy.example.json /opt/ai_growth_os/deploy/deploy.json   # then edit it
 ```
 
 - `base_image`: an image built from this repository's `Dockerfile` that matches production's
-  dependencies and Alembic migrations. A commit that changes `pyproject.toml` or adds/removes a
-  migration is refused: build a new base image, apply the migration, update `base_image`.
+  dependencies and Alembic migrations. A commit whose dependencies the image does not satisfy, or
+  that adds/removes a migration, is refused: build a new base image, apply the migration, update
+  `base_image`.
 - `overlay_env`: non-secret flags only. Secrets stay in `/opt/ai_growth_os/.env`.
 
 Generate a dedicated key pair and add the public key to `/root/.ssh/authorized_keys` as a
