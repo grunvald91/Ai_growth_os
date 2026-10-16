@@ -526,6 +526,9 @@ STUDIO_CSS += "\n" + STUDIO_PROCESS_CSS
 from app.api.content_studio_team import CSS as STUDIO_TEAM_CSS, JS as STUDIO_TEAM_JS
 STUDIO_CSS += "\n" + STUDIO_TEAM_CSS
 STUDIO_JS += "\n" + STUDIO_TEAM_JS
+from app.api.content_studio_outputs import CSS as STUDIO_OUTPUTS_CSS, JS as STUDIO_OUTPUTS_JS
+STUDIO_CSS += "\n" + STUDIO_OUTPUTS_CSS
+STUDIO_JS += "\n" + STUDIO_OUTPUTS_JS
 from app.api.content_studio_air import CSS as STUDIO_AIR_CSS, JS as STUDIO_AIR_JS
 STUDIO_CSS += "\n" + STUDIO_AIR_CSS
 STUDIO_JS += "\n" + STUDIO_AIR_JS

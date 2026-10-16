@@ -475,35 +475,10 @@ def asset_dialog(record: Artifact) -> str:
     copy_id = f"copy-{record.id}"
 
     if record.kind in {"video_script", "short_video_brief"}:
+        from app.api.content_studio_outputs import plain_script_of, video_viewer_html
         brief = value.get("production_brief") or value
-        hooks = "".join(f"<li>{esc(x)}</li>" for x in (brief.get("hook_variants") or []))
-        shots = []
-        for shot in brief.get("shots") or []:
-            shots.append(
-                '<div class="story-shot">'
-                '<div class="story-shot-head">'
-                f'<time>{esc(shot.get("start_second"))}–{esc(shot.get("end_second"))} сек.</time>'
-                f'<b>{esc(shot.get("purpose") or shot.get("shot_type") or "Сцена")}</b>'
-                '</div>'
-                f'<p><b>Кадр:</b> {esc(shot.get("visual_description"))}</p>'
-                f'<p><b>Камера:</b> {esc(shot.get("camera_and_movement"))}</p>'
-                f'<p><b>Действие:</b> {esc(shot.get("action"))}</p>'
-                f'<p><b>На экране:</b> {esc(shot.get("on_screen_text"))}</p>'
-                f'<p><b>Переход:</b> {esc(shot.get("transition"))}</p>'
-                f'<div class="story-prompt"><b>Промпт для будущей генерации:</b><br>{esc(shot.get("generation_prompt"))}</div>'
-                '</div>'
-            )
-        shots_html = "".join(shots) or '<div class="empty">Раскадровка ещё не заполнена.</div>'
-        body = (
-            f'<div id="{copy_id}" class="article-text">'
-            f'<b>Площадка:</b> {esc(platform_label(brief.get("target_platform")))}\n'
-            f'<b>Цель:</b> {esc(brief.get("objective"))}\n\n'
-            f'<b>Хуки:</b><ul>{hooks}</ul>'
-            f'<b>Озвучка / диалог:</b>\n{esc(brief.get("voiceover_or_dialogue_script"))}\n\n'
-            f'<b>Монтаж и сведение:</b> {esc(brief.get("editing_mix_notes") or brief.get("editing_rhythm"))}'
-            '</div>'
-            f'<div class="storyboard-grid" style="margin-top:16px">{shots_html}</div>'
-        )
+        body = (video_viewer_html(brief, f"d{str(record.id)[:8]}")
+                + f'<div id="{copy_id}" hidden>{esc(plain_script_of(brief))}</div>')
     else:
         body = f'<div id="{copy_id}" class="article-text">{esc(artifact_text(record, value))}</div>'
 
@@ -1062,7 +1037,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>Growth Studio · {esc(product.name)}</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=26">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=27">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1133,7 +1108,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=13"></script>
+<script src="/studio/assets/studio.js?v=14"></script>
 </body></html>"""
 
 
@@ -1203,7 +1178,7 @@ def studio_page_shell(
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>{esc(title)} · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=26">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=27">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1225,7 +1200,7 @@ def studio_page_shell(
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=13"></script>
+<script src="/studio/assets/studio.js?v=14"></script>
 </body></html>"""
 
 
@@ -1497,29 +1472,15 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
     kind_label = artifact_kind_label(record, value)
     generic_warnings = value.get("quality_warnings") or []
     if record.kind in {"video_script", "short_video_brief"}:
+        from app.api.content_studio_outputs import plain_script_of, video_viewer_html
         brief = value.get("production_brief") or value
-        shots = "".join(
-            '<div class="story-shot">'
-            f'<div class="story-shot-head"><time>{esc(shot.get("start_second"))}–{esc(shot.get("end_second"))} сек.</time><b>{esc(shot.get("purpose") or shot.get("shot_type") or "Сцена")}</b></div>'
-            f'<p><b>Кадр:</b> {esc(shot.get("visual_description"))}</p>'
-            f'<p><b>Камера:</b> {esc(shot.get("camera_and_movement"))}</p>'
-            f'<p><b>Действие:</b> {esc(shot.get("action"))}</p>'
-            f'<p><b>Текст на экране:</b> {esc(shot.get("on_screen_text"))}</p>'
-            f'<p><b>Переход:</b> {esc(shot.get("transition"))}</p>'
-            f'<div class="story-prompt"><b>Промпт:</b><br>{esc(shot.get("generation_prompt"))}</div>'
-            '</div>'
-            for shot in (brief.get("shots") or [])
-        )
         content = f"""
-        <section class="panel material-detail-card">
-          <div class="panel-head"><div class="panel-title"><span class="ico">▶</span><div><h2>Сценарий и раскадровка</h2>
-          <div class="panel-sub">{esc(platform_label(brief.get("target_platform")))}</div></div></div></div>
-          <div class="material-detail-body">
-            <div class="detail-meta"><span class="chip blue">{esc(kind_label)}</span><span class="chip">{esc(record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "")}</span></div>
-            <h2>{esc(display_material_title(record, value))}</h2>
-            <div id="material-copy" class="article-text"><b>Цель:</b> {esc(brief.get("objective"))}\n\n<b>Озвучка / диалог:</b>\n{esc(brief.get("voiceover_or_dialogue_script"))}\n\n<b>Монтаж и сведение:</b> {esc(brief.get("editing_mix_notes") or brief.get("editing_rhythm"))}</div>
-            <div class="storyboard-grid">{shots or '<div class="empty">Раскадровка пока отсутствует.</div>'}</div>
-          </div>
+        <section class="sg-surface sg-video-script">
+          <div class="sg-section-head"><div><span class="sg-overline">СЦЕНАРИЙ · {esc(platform_label(brief.get("target_platform")))}</span>
+          <h2>{esc(display_material_title(record, value))}</h2>
+          <p>{esc(record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "")} · Это текстовый сценарий и раскадровка. Видеофайл создаётся отдельно.</p></div></div>
+          {video_viewer_html(brief, "mv")}
+          <div id="material-copy" hidden>{esc(plain_script_of(brief))}</div>
         </section>
         """
     elif record.kind == "video_render":
@@ -1544,6 +1505,16 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
           анимационных объяснений нужен отдельный конвейер видеопроизводства.</p>
         </section>
         """
+    elif record.kind == "creative_brief" and value.get("format") in {"short_video", "story"} and value.get("frames"):
+        from app.api.content_studio_outputs import video_viewer_html
+        content = f"""
+        <section class="sg-surface sg-video-script">
+          <div class="sg-section-head"><div><span class="sg-overline">СЦЕНАРИЙ · {esc(platform_label(value.get('platform')))}</span>
+          <h2>{esc(display_material_title(record, value))}</h2>
+          <p>Текстовый сценарий и кадры. Медиафайлы не создавались.</p></div></div>
+          {video_viewer_html(value, "mc")}
+          <div id="material-copy" hidden>{esc(artifact_text(record, value))}</div>
+        </section>"""
     elif record.kind == "creative_brief":
         frames = value.get("frames") or []
         scenes = "".join(
@@ -1776,7 +1747,7 @@ def product_selector(products: list[Product]) -> str:
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=26"></head>
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=27"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
@@ -2154,9 +2125,11 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
         Artifact.kind.in_(["content_request", "creative_request", "edit_request"]),
     ).order_by(Artifact.created_at.desc()).limit(1))
     from app.api.content_studio_guide import load_stage_notes
+    from app.api.content_studio_outputs import load_stage_outputs
     from app.api.content_studio_process import load_process
     body = task_detail_html(product.id, task, runs, results, request=request,
                             stage_notes=load_stage_notes(db, runs),
+                            stage_outputs=load_stage_outputs(db, runs),
                             process=load_process(db, task, runs, results,
                                                  settings.agent_critic_enabled))
     response = HTMLResponse(studio_page_shell(

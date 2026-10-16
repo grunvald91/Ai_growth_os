@@ -451,10 +451,13 @@ def _minutes(run: AgentRun) -> str:
 
 def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
                      results: list[Artifact], request: Artifact | None = None,
-                     stage_notes: dict | None = None, process=None) -> str:
+                     stage_notes: dict | None = None, process=None,
+                     stage_outputs: dict | None = None) -> str:
     from app.api.content_studio_guide import notes_html
     from app.api import content_studio_process as proc_ui
+    from app.api import content_studio_outputs as out_ui
     stage_notes = stage_notes or {}
+    stage_outputs = stage_outputs or {}
     base = f"/studio/products/{product_id}"
     key = task_state(task)
     label, tone, description = STATES.get(key, ("Проверить", "queued", ""))
@@ -480,7 +483,11 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         }.get(run.status, ("", "Проверяется"))
         took = _minutes(run) if run.status == "completed" else ""
         notes = stage_notes.get(run.id)
-        if notes:
+        full = stage_outputs.get(run.id)
+        if full:
+            detail = ('<details class="sg-stage-out"><summary>Что вывел этот шаг</summary>'
+                      f'{out_ui.stage_outputs_html(full, "r" + str(n) + "-")}</details>')
+        elif notes:
             detail = ('<details class="sg-stage-out"><summary>Что вывел этот шаг</summary>'
                       f'<div class="sg-note-body">{notes_html(notes)}</div></details>')
         elif run.status == "running":
@@ -533,13 +540,15 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         if key in {"failed", "cancelled"} and task.assigned_agent
         in {"content_factory", "content_creative", "content_editor"} and not results else ""
     )
+    toggle = ('<div class="sg-vid-all"><button class="sg-out-toggle" type="button" data-sg-toggle-outputs>'
+              'Раскрыть все выводы</button></div>' if stage_outputs else "")
     stage_sig = "|".join(str(run.id) + ":" + run.status for run in runs[-20:])
     return (
         f'<section class="sg-surface sg-work-detail" data-sg-task="{task.id}" data-sg-state="{key}" data-sg-stage="{safe(stage_sig)}">'
         f'<span class="sg-work-status sg-work-{tone}">'
         f'{safe(label)}</span><h2>{safe(task_title(task, request))}</h2><p>{safe(explanation)}</p>'
         + (proc_ui.summary_html(runs, process, f"{base}/team-map?task={task.id}") if process is not None else '')
-        + f'<div class="sg-work-steps"><h3>Как шла работа</h3><ol class="sg-stage-list">{"".join(steps)}</ol></div>'
+        + f'<div class="sg-work-steps"><h3>Как шла работа</h3>{toggle}<ol class="sg-stage-list">{"".join(steps)}</ol></div>'
         f'<div class="sg-work-results"><h3>Результаты</h3>'
         + ("".join(rendered) or '<p>Результаты появятся здесь после подготовки.</p>')
         + '</div>' + (proc_ui.log_html(task, runs, process) if process is not None else '')
