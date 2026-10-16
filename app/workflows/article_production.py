@@ -54,8 +54,8 @@ STAGES = (
     ('marketing_editor', HumanEditedArticle, 'Финальная продающая редактура: острый заход, польза, естественный мост к компании и один призыв.'),
     ('repurposing_editor', TextDerivativeSet, 'Сделай шесть разных текстовых адаптаций статьи под площадки.'),
     ('video_director', ShortVideoDerivativeDraft, 'Write a complete text-only director brief for one vertical short video.'),
-    ('story_director', StoryDerivativeDraft, 'Write a complete text-only frame-by-frame brief for one vertical story sequence.'),
-    ('visual_designer', StaticImageDerivativeDraft, 'Write a complete text-only design brief for one static promotional image.'),
+    ('story_director', StoryDerivativeDraft, 'Напиши полный текстовый бриф одной серии сторис: кадр за кадром, с пользой из статьи и одним призывом.'),
+    ('visual_designer', StaticImageDerivativeDraft, 'Напиши полный текстовый бриф одного рекламного изображения: заголовок с пользой, композиция, промпт и призыв.'),
 )
 
 STAGE_TIMEOUT_SECONDS = {
@@ -286,19 +286,28 @@ def _default_stage_rule(name: str) -> str:
         )
     elif name == 'story_director':
         stage_rule = (
-            ' Return ONE story text brief only. No rendering or file generation. Build a complete 9:16 '
-            'sequence of 3-10 frames. For every frame specify duration, purpose, visual description, '
-            'composition, exact on-screen text, animation/transition, interaction if useful and safe-area '
-            'notes. Also specify narrative arc, visual style, typography, final CTA, export spec and '
-            'production notes.'
+            ' Верни ОДИН текстовый бриф сторис; рендер и файлы не создавай. Серия 9:16 из 3–10 кадров. Сюжет '
+            'строится на пользе статьи: кадр 1 — заход, который останавливает пролистывание (узнаваемая сцена, '
+            'неожиданная мысль или вопрос); дальше — польза по шагам, один конкретный шаг, приём или цифра на '
+            'кадр; предпоследний кадр — мост к компании в одну фразу о выгоде для зрителя; последний — один '
+            'призыв с понятным действием. Текст на кадре короткий, читается за 2–3 секунды, без оговорок и '
+            'канцелярита. Для каждого кадра укажи длительность, цель, визуальное описание, композицию, точный '
+            'текст на экране, анимацию или переход, интерактив (опрос, вопрос, стикер) — только если он '
+            'помогает пользе — и заметки о безопасных зонах. Также укажи сюжетную арку, визуальный стиль, '
+            'типографику, финальный призыв, параметры экспорта и заметки для производства.'
         )
     elif name == 'visual_designer':
         stage_rule = (
-            ' Return ONE static_image text brief only. No image generation or file output. Specify target '
-            'formats, objective, visual style, subject, composition, background/environment, lighting '
-            'and mood, typography, exact overlay text, brand elements, a detailed image-generation/design '
-            'prompt, what to avoid, CTA treatment, export spec and production notes. The brief must be '
-            'usable directly in an external image tool or by a designer.'
+            ' Верни ОДИН текстовый бриф статичного изображения; изображение и файлы не создавай. На изображении'
+            ' — один крупный заголовок, который обещает пользу или называет боль читателя, и при необходимости '
+            'одна короткая строка поддержки; весь текст на картинке читается с телефона за 2 секунды, без '
+            'оговорок. Композиция с одной ясной точкой фокуса и свободным местом под текст; визуал показывает '
+            'сцену из жизни аудитории, а не абстрактную «цифровизацию». Польза подробнее и один призыв — в '
+            'подписи и в CTA. Укажи форматы, задачу, визуальный стиль, объект, композицию, фон и окружение, '
+            'свет и настроение, типографику, точный текст на изображении, элементы бренда, подробный промпт для'
+            ' генерации или дизайнера, чего избегать, оформление призыва, параметры экспорта и заметки для '
+            'производства. Бриф должен быть пригоден для прямого использования во внешнем инструменте или '
+            'дизайнером.'
         )
     elif name in {'youtube_shorts_director', 'instagram_reels_director'}:
         target_platform = 'youtube_shorts' if name == 'youtube_shorts_director' else 'instagram_reels'

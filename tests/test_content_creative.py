@@ -240,12 +240,51 @@ async def test_invalid_creative_evidence_keeps_call_costs_and_critic_audit(db, t
     assert not await run_creative_once(
         db, Settings(_env_file=None, products_root=tmp_path, agent_critic_enabled=True),
         request, task_id=task.id, provider=provider)
-    assert len(provider.calls) == 2
+    # Author, critic, then exactly one repair attempt that is still invalid.
+    assert len(provider.calls) == 3
+    assert "rejected by validation" in provider.calls[2].system_prompt
     assert db.get(Task, task.id).status == TaskStatus.FAILED
     costs = list(db.scalars(select(CostRecord).where(CostRecord.product_id == company.id)))
-    assert len(costs) == 2
-    assert [x.details["llm_stage"] for x in costs] == ["author", "critic"]
+    assert len(costs) == 3
+    assert [x.details["llm_stage"] for x in costs] == ["author", "critic", "author"]
     reviews = list(db.scalars(select(Artifact).where(
         Artifact.task_id == task.id, Artifact.kind == "agent_quality_review")))
     assert len(reviews) == 1
     assert json.loads(reviews[0].content)["status"] == "no_material_issues"
+
+
+@pytest.mark.asyncio
+async def test_rejected_creative_stage_is_repaired_once(db, tmp_path):
+    company = Product(name="Flower studio", slug="creative-repair")
+    db.add(company)
+    db.commit()
+    request = CreativeRequest(mode="creative", product_id=company.id, format="static_image",
+                              platform="telegram", topic="Choose flowers")
+    task = queue_creative(db, request)
+    invalid = {**strategy_payload(), "evidence_ids": ["nonexistent-source"]}
+    answers = [invalid, strategy_payload(), creative_payload("static_image", "telegram")]
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+        async def generate(self, task_request):
+            self.calls.append(task_request)
+            return LLMResponse(content=json.dumps(answers[len(self.calls) - 1], ensure_ascii=False),
+                               model="fake", usage=LLMUsage(input_tokens=10, output_tokens=20))
+
+    provider = Provider()
+    assert await run_creative_once(db, Settings(_env_file=None, products_root=tmp_path), request,
+                                   task_id=task.id, provider=provider)
+    assert len(provider.calls) == 3
+    assert "rejected by validation" in provider.calls[1].system_prompt
+    assert db.get(Task, task.id).status == TaskStatus.COMPLETED
+
+
+def test_story_and_image_prompts_are_value_first():
+    from app.prompts import text as prompt_text
+    director = prompt_text("creative.director")
+    assert "польза из core_takeaway" in director and "STORY:" in director and "STATIC_IMAGE:" in director
+    assert "0-30 seconds" in director  # short video rules left as they were
+    assert "core_takeaway" in prompt_text("creative.strategist")
+    assert "один конкретный шаг" in prompt_text("article.rules.story_director")
+    assert "обещает пользу" in prompt_text("article.rules.visual_designer")

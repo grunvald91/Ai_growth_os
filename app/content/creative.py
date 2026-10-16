@@ -17,6 +17,7 @@ from sqlalchemy import select, update
 
 from app.llm.lenient import relax
 from app.prompts import register as register_prompt, text as prompt_text
+from app.content.quick_post import _validation_summary
 from app.content.quality import post_quality_warnings, factual_claim_warnings
 from app.llm.audit import persist_critic_audit, persist_observed_llm_call
 from app.llm.schemas import LLMMessage, LLMRequest
@@ -44,20 +45,30 @@ CREATIVE_COMMON = (
     'ПОЛЬЗА ПРЕЖДЕ ВСЕГО: каждый материал для читателя даёт конкретные советы, шаги, метрики, расчёты или примеры, которые читатель применит сам, даже если не станет клиентом; реклама строится на этой пользе. Пиши уверенно и просто, без оговорок, извинений и фраз «это не гарантия», «пока не умеем», «это ещё не…». Направление развития продукта из позиционирования компании показывай смело как видение («мы строим…», «скоро…»), но не описывай невыпущенную функцию как уже работающую. '
 )
 CREATIVE_STRATEGIST = (
-    "Return a concise audience pain, insight, distinctive hook, "
-    "one useful takeaway and CTA. JSON matching the schema only."
+    "Ты — креативный стратег. Определи: 1) audience_pain — узнаваемую боль или ситуацию зрителя; "
+    "2) audience_insight — почему это важно и во что обходится проблема; 3) core_takeaway — главную "
+    "практическую пользу: один конкретный приём, шаг, расчёт или чек-лист, который зритель применит сам, "
+    "даже если не станет клиентом (по существу, не общими словами); 4) hook — первый кадр или первую "
+    "фразу, которые останавливают ленту: узнаваемая сцена, неожиданная мысль или вопрос; 5) cta — один "
+    "призыв с понятным действием. Верни только JSON по схеме."
 )
 CREATIVE_DIRECTOR = (
-    "Return a complete production-ready TEXT storyboard in JSON. "
-    "Match format and platform exactly. Every frame needs a detailed "
-    "visual generation prompt, precise visible copy, animation/action "
-    "and meaningful purpose. For short_video create 3-8 adjacent "
-    "timed shots covering precisely 0-30 seconds with full spoken "
-    "script, cover and caption. For story create 3-10 contiguous "
-    "frames beginning 0, total at most 90 seconds, with a compelling "
-    "arc and practical interactive concepts. For static_image create "
-    "one frame with times 0 and 0 plus accurate overlay text. "
-    "Do not output a fabricated file, render ID or posting confirmation."
+    "Верни полную готовую к производству ТЕКСТОВУЮ раскадровку в JSON. Формат и площадка — строго как в "
+    "запросе. Строй материал на strategy: первый кадр — заход из hook, дальше — польза из core_takeaway, "
+    "в конце — мост к компании в одну фразу и один призыв (cta). Текст на экране короткий и читается с "
+    "телефона за 2–3 секунды: одна мысль на кадр, конкретные слова, без оговорок и канцелярита. "
+    "У каждого кадра — подробный visual_prompt для генерации, точный текст на экране, действие или анимация "
+    "и понятная цель. caption — готовая подпись к публикации: заход, коротко польза, один призыв. "
+    "cover_text — 2–5 слов, которые обещают пользу. "
+    "STORY: 3–10 последовательных кадров от 0 секунд, всего не больше 90 секунд; сюжет: заход → польза "
+    "по шагам (один шаг — один кадр) → мост к компании → призыв; интерактив (опрос, вопрос, стикер) — "
+    "только если он помогает пользе. "
+    "STATIC_IMAGE: один кадр со временем 0 и 0; на изображении один крупный заголовок с пользой или "
+    "болью и при необходимости одна короткая строка поддержки; композиция с ясной точкой фокуса и местом "
+    "под текст; польза и призыв — в caption. "
+    "For short_video create 3-8 adjacent timed shots covering precisely 0-30 seconds with full spoken "
+    "script, cover and caption. "
+    "Не выводи выдуманные файлы, ID рендера или подтверждение публикации."
 )
 _CR = 'Креативы: видео, сторис, изображение'
 register_prompt('creative.common', group=_CR, title='Общие правила креативов',
@@ -308,11 +319,32 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                 response=response,
             )
             db.commit()
-            if response.stop_reason not in (None, "end_turn", "stop_sequence"):
-                raise ValueError("Incomplete creative output")
-            if len(response.content) > 65000:
-                raise ValueError("Creative output exceeds bound")
-            result = validate_candidate(json.loads(response.content))
+            try:
+                if response.stop_reason not in (None, "end_turn", "stop_sequence"):
+                    raise ValueError("Incomplete creative output")
+                if len(response.content) > 65000:
+                    raise ValueError("Creative output exceeds bound")
+                result = validate_candidate(json.loads(response.content))
+            except (ValueError, TypeError) as exc:
+                # One repair attempt with the exact problem; no second critic round.
+                retry = LLMService(privacy_gateway=privacy, provider=llm._provider, critic_enabled=False)
+                response = await asyncio.wait_for(retry.generate(LLMRequest(
+                    system_prompt=rules + " Your previous answer was rejected by validation: "
+                    + _validation_summary(exc) + ". Fix exactly this and return the complete JSON again.",
+                    messages=[LLMMessage(role="user", content=json.dumps(stage_payload, ensure_ascii=False))],
+                    response_schema=schema.model_json_schema(),
+                    model=settings.llm_model,
+                    max_tokens=3000 if idx == 0 else 8500,
+                    metadata={
+                        "team_role": agent, "task_type": "creative_brief",
+                        "reasoning_effort": "low", "provider_timeout_seconds": 100,
+                    },
+                ), on_observed=record_model_call), timeout=210)
+                if response.stop_reason not in (None, "end_turn", "stop_sequence"):
+                    raise ValueError("Incomplete creative output") from exc
+                if len(response.content) > 65000:
+                    raise ValueError("Creative output exceeds bound") from exc
+                result = validate_candidate(json.loads(response.content))
             check = ArtifactService(db).create(
                 product_id=product.id, task_id=task.id, agent_run_id=run.id,
                 kind="content_stage_output", title=agent + ": draft",
@@ -352,7 +384,7 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             run = db.get(AgentRun, run_id)
             if run is not None and run.status != "completed":
                 run.status = "failed"
-                run.error = "creative_failed:" + type(exc).__name__
+                run.error = ("creative_failed:" + type(exc).__name__ + ":" + _validation_summary(exc))[:1000]
                 run.finished_at = datetime.now(timezone.utc)
         failed = db.get(Task, task.id)
         if failed:
