@@ -13,7 +13,8 @@ class ArtifactService(CRUDService[Artifact]):
     def create(self, *, product_id: UUID, kind: str, title: str, content: str, **values: Any) -> Artifact:
         if "status" in values:
             values["status"] = self._status(values["status"])
-        artifact = Artifact(product_id=product_id, kind=kind, title=title, content=content, **values)
+        # Titles come from model output; the column holds 300 characters.
+        artifact = Artifact(product_id=product_id, kind=kind, title=title[:300], content=content, **values)
         self.db.add(artifact)
         self.db.flush()
         self.db.refresh(artifact)

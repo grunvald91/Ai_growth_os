@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.llm.lenient import relax
 from app.prompts import register as register_prompt, text as prompt_text
 from app.llm.audit import persist_critic_audit, persist_observed_llm_call
 from app.llm.schemas import LLMMessage, LLMRequest
@@ -68,6 +69,7 @@ QUICK_POST_WRITER = (
     "4) один абзац-мост к компании в 1–2 фразы: какую выгоду она даёт читателю сейчас или куда движется "
     "продукт; без пересказа шагов интерфейса, оплаты и технических подробностей; "
     "5) в конце ровно один призыв к действию с понятным действием (куда написать, что нажать). "
+    "Длина: для Telegram 800–1500 символов, для других площадок — сколько нужно для пользы, без воды. "
     "Поле cta должно дословно стоять в конце body. Перед ответом сверь: количество пунктов совпадает с "
     "обещанным в тексте, числа и заголовок согласованы. Пиши короткими простыми фразами, без вычурных метафор. "
     "Без воды, вступлений и повторов. Верни только JSON по схеме."
@@ -104,17 +106,17 @@ class QuickPostRequest(StrictModel):
 
 
 class QuickPostStrategy(StrictModel):
-    audience_pain: str = Field(min_length=10, max_length=500)
-    hook: str = Field(min_length=8, max_length=300)
-    useful_takeaway: str = Field(min_length=10, max_length=2000)  # 3-5 concrete tips
-    suggested_cta: str = Field(min_length=3, max_length=260)
+    audience_pain: str = Field(min_length=10, max_length=2000)
+    hook: str = Field(min_length=8, max_length=1200)
+    useful_takeaway: str = Field(min_length=10, max_length=8000)  # 3-5 concrete tips
+    suggested_cta: str = Field(min_length=3, max_length=1040)
     evidence_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
 class QuickPostDraft(StrictModel):
-    title: str = Field(min_length=5, max_length=240)
-    body: str = Field(min_length=160, max_length=3500)
-    cta: str = Field(min_length=3, max_length=260)
+    title: str = Field(min_length=5, max_length=960)
+    body: str = Field(min_length=160, max_length=14000)
+    cta: str = Field(min_length=3, max_length=1040)
     evidence_ids: list[str] = Field(default_factory=list, max_length=20)
     editor_notes: list[str] = Field(default_factory=list, max_length=20)
 
@@ -146,7 +148,7 @@ def _decode(schema, raw: str):
     data = json.loads(raw)
     if isinstance(data, str):
         data = json.loads(data)
-    return schema.model_validate(data)
+    return schema.model_validate(relax(schema, data))
 
 
 async def run_quick_post(db: Session, settings, request: QuickPostRequest, provider=None):

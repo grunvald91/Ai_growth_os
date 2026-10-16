@@ -8,11 +8,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Awaitable, Callable, Literal
 
 from jsonschema import Draft202012Validator, ValidationError as JSONSchemaError
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from app.llm.lenient import relax
 from app.llm.schemas import LLMMessage, LLMRequest, LLMResponse, LLMUsage
 from app.prompts import register as register_prompt, text as prompt_text
 
@@ -20,11 +22,24 @@ from app.prompts import register as register_prompt, text as prompt_text
 class Finding(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,40}$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def tolerant(cls, data):
+        # Free-form ids and severity synonyms from models are normalised, not rejected.
+        if isinstance(data, dict):
+            data = dict(data)
+            raw = re.sub(r"[^A-Za-z0-9_-]+", "-", str(data.get("id", ""))).strip("-")[:40]
+            data["id"] = raw or "f"
+            severity = str(data.get("severity", "")).lower()
+            data["severity"] = {"high": "critical", "blocker": "critical", "medium": "major",
+                                "low": "minor", "info": "minor"}.get(severity, severity)
+        return data
     severity: Literal["critical", "major", "minor"]
-    problem: str = Field(min_length=8, max_length=650)
-    evidence_in_draft: str = Field(min_length=3, max_length=650)
-    proposed_fix: str = Field(min_length=8, max_length=650)
-    link_to_original_goal: str = Field(min_length=8, max_length=450)
+    problem: str = Field(min_length=8, max_length=4000)
+    evidence_in_draft: str = Field(min_length=3, max_length=4000)
+    proposed_fix: str = Field(min_length=8, max_length=6000)
+    link_to_original_goal: str = Field(min_length=8, max_length=3000)
 
 
 class Findings(BaseModel):
@@ -36,7 +51,7 @@ class Decision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     finding_id: str = Field(min_length=1, max_length=40)
     decision: Literal["accept", "reject"]
-    rationale: str = Field(min_length=5, max_length=450)
+    rationale: str = Field(min_length=5, max_length=3000)
 
 
 class Revision(BaseModel):
@@ -256,7 +271,7 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
         extra.append(report_response)
         if len(report_response.content) > 90000 or report_response.stop_reason not in (None, "end_turn", "stop_sequence"):
             raise ValueError("Incomplete critic report")
-        report = Findings.model_validate_json(report_response.content)
+        report = Findings.model_validate(relax(Findings, json.loads(report_response.content)))
         if len({finding.id for finding in report.findings}) != len(report.findings):
             raise ValueError("Duplicate findings")
         material = [f for f in report.findings if f.severity in ("major", "critical")]
@@ -315,7 +330,7 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
         extra.append(revise_response)
         if len(revise_response.content) > 90000 or revise_response.stop_reason not in (None, "end_turn", "stop_sequence"):
             raise ValueError("Incomplete revision")
-        revision = Revision.model_validate_json(revise_response.content)
+        revision = Revision.model_validate(relax(Revision, json.loads(revise_response.content)))
         ids = {f.id for f in material}
         if len(revision.decisions) != len(material) or {d.finding_id for d in revision.decisions} != ids:
             raise ValueError("Author must address every finding exactly once")

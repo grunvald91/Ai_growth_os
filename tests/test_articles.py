@@ -333,7 +333,7 @@ async def test_copied_derivative_hook_is_repaired_before_persistence(db, product
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'fake_claim', 'external_link', 'extra', 'wrong_kind'])
+@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'external_link', 'wrong_kind'])
 async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, tmp_path, mutation):
     outputs = valid_outputs()
     if mutation == 'malformed': outputs[0] = 'not json'
@@ -1044,3 +1044,30 @@ def test_servgo_specific_fallbacks_cannot_leak_into_another_business():
         _platform_text_fallback_payload(other_company)
     with pytest.raises(ValueError, match='not safe for this company'):
         _creative_fallback_payload('visual_designer', other_company)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mutation', ['fake_claim', 'extra'])
+async def test_unknown_model_fields_are_dropped_not_fatal(db, product, tmp_path, mutation):
+    outputs = valid_outputs()
+    if mutation == 'fake_claim':
+        outputs[2]['claims'] = [dict(claim='Guaranteed growth', quote='Guaranteed growth', source_id='invented')]
+    else:
+        outputs[0]['verified_revenue'] = 1000000
+    workflow, _, request = setup(db, product, tmp_path, outputs)
+    result = await workflow.run(request)
+    assert result.status == 'completed', result.error
+    stored = ' '.join(a.content for a in db.scalars(select(Artifact).where(Artifact.task_id == result.task_id)))
+    assert 'Guaranteed growth' not in stored and 'verified_revenue' not in stored
+
+
+@pytest.mark.asyncio
+async def test_required_stage_gets_one_repair_attempt_with_the_problem(db, product, tmp_path):
+    outputs = valid_outputs()
+    outputs.insert(0, {"wrong": "shape"})  # first strategist answer is invalid
+    workflow, provider, request = setup(db, product, tmp_path, outputs)
+    result = await workflow.run(request)
+    assert result.status == 'completed', result.error
+    strategist = [r for r in provider.requests if r.metadata['team_role'] == 'content_strategist']
+    assert len(strategist) == 2
+    assert 'rejected by validation' in strategist[1].system_prompt

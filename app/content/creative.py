@@ -15,6 +15,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select, update
 
+from app.llm.lenient import relax
 from app.prompts import register as register_prompt, text as prompt_text
 from app.content.quality import post_quality_warnings, factual_claim_warnings
 from app.llm.audit import persist_critic_audit, persist_observed_llm_call
@@ -91,11 +92,11 @@ class CreativeRequest(Strict):
 
 
 class CreativeStrategy(Strict):
-    audience_pain: str = Field(min_length=10, max_length=500)
-    audience_insight: str = Field(min_length=10, max_length=600)
-    hook: str = Field(min_length=8, max_length=260)
-    core_takeaway: str = Field(min_length=10, max_length=600)
-    cta: str = Field(min_length=4, max_length=260)
+    audience_pain: str = Field(min_length=10, max_length=2000)
+    audience_insight: str = Field(min_length=10, max_length=2400)
+    hook: str = Field(min_length=8, max_length=1040)
+    core_takeaway: str = Field(min_length=10, max_length=2400)
+    cta: str = Field(min_length=4, max_length=1040)
     evidence_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
@@ -103,24 +104,24 @@ class CreativeFrame(Strict):
     number: int = Field(ge=1, le=12)
     start_second: int = Field(ge=0, le=120)
     end_second: int = Field(ge=0, le=120)
-    purpose: str = Field(min_length=4, max_length=180)
-    visual_prompt: str = Field(min_length=30, max_length=2200)
-    on_screen_text: str = Field(min_length=3, max_length=260)
-    action_or_animation: str = Field(min_length=5, max_length=450)
-    spoken_text: str = Field(default="", max_length=700)
-    transition: str = Field(default="", max_length=280)
+    purpose: str = Field(min_length=4, max_length=720)
+    visual_prompt: str = Field(min_length=30, max_length=8800)
+    on_screen_text: str = Field(min_length=3, max_length=1040)
+    action_or_animation: str = Field(min_length=5, max_length=1800)
+    spoken_text: str = Field(default="", max_length=2800)
+    transition: str = Field(default="", max_length=1120)
 
 
 class CreativeDraft(Strict):
     format: Literal["short_video", "story", "static_image"]
     platform: str
-    title: str = Field(min_length=5, max_length=240)
-    hook: str = Field(min_length=5, max_length=300)
-    cta: str = Field(min_length=4, max_length=260)
-    voiceover_script: str = Field(default="", max_length=4000)
-    caption: str = Field(min_length=35, max_length=2500)
-    cover_text: str = Field(min_length=3, max_length=240)
-    visual_style: str = Field(min_length=15, max_length=950)
+    title: str = Field(min_length=5, max_length=960)
+    hook: str = Field(min_length=5, max_length=1200)
+    cta: str = Field(min_length=4, max_length=1040)
+    voiceover_script: str = Field(default="", max_length=16000)
+    caption: str = Field(min_length=35, max_length=10000)
+    cover_text: str = Field(min_length=3, max_length=960)
+    visual_style: str = Field(min_length=15, max_length=3800)
     frames: list[CreativeFrame] = Field(min_length=1, max_length=10)
     production_notes: list[str] = Field(default_factory=list, max_length=12)
     evidence_ids: list[str] = Field(default_factory=list, max_length=20)
@@ -267,7 +268,7 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             rules = prompt_text("creative.common") + prompt_text(
                 "creative.strategist" if agent == "creative_strategist" else "creative.director")
             def validate_candidate(data):
-                parsed = schema.model_validate(data)
+                parsed = schema.model_validate(relax(schema, data))
                 if any(source_id not in verified for source_id in parsed.evidence_ids):
                     raise ValueError("Unknown product evidence in creative brief")
                 if agent == "creative_director" and (

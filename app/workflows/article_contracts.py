@@ -5,9 +5,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-Text = Annotated[str, Field(min_length=1, max_length=4000)]
-LongText = Annotated[str, Field(min_length=1, max_length=12000)]
-ShortText = Annotated[str, Field(min_length=1, max_length=300)]
+Text = Annotated[str, Field(min_length=1, max_length=16000)]
+LongText = Annotated[str, Field(min_length=1, max_length=48000)]
+ShortText = Annotated[str, Field(min_length=1, max_length=1200)]
 Channel = Literal['own_site', 'dzen', 'tenchat', 'vc_ru', 'telegram']
 DerivativeKind = Literal[
     'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder',

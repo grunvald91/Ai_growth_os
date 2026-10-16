@@ -12,6 +12,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
+from app.llm.lenient import relax
 from app.llm.audit import persist_critic_audit, persist_observed_llm_call
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
@@ -394,7 +395,16 @@ def _parse_stage_payload(schema, content: str):
                     value = inner
                     continue
         break
-    return schema.model_validate(value)
+    return schema.model_validate(relax(schema, value))
+
+
+def _validation_problem(exc: Exception) -> str:
+    """Which field and rule failed, without echoing generated text."""
+    if isinstance(exc, ValidationError):
+        return ",".join(
+            ".".join(str(part) for part in item.get("loc", ())) + ":" + item.get("type", "validation")
+            for item in exc.errors(include_url=False, include_input=False)[:8])
+    return " ".join(str(exc).split())[:200]
 
 
 def _compact_stage_inputs(name: str, stage_inputs: dict) -> dict:
@@ -953,12 +963,35 @@ class ArticleProduction:
                         if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
                             raise ValueError('Incomplete or oversized response')
                         break
-                    parsed = _parse_stage_payload(schema, response.content)
-                    parsed = schema.model_validate(self._sanitize(parsed.model_dump(mode='json')))
-                    if name in {'youtube_shorts_director', 'instagram_reels_director'}:
-                        # Enforce the final ready-video contract here, so a bad brief
-                        # takes the stage fallback instead of failing the whole package.
-                        parsed = _normalize_ready_video_timeline(parsed)
+                    def accept(content):
+                        value = _parse_stage_payload(schema, content)
+                        value = schema.model_validate(self._sanitize(value.model_dump(mode='json')))
+                        if name in {'youtube_shorts_director', 'instagram_reels_director'}:
+                            # Enforce the final ready-video contract here, so a bad brief
+                            # takes the stage fallback instead of failing the whole package.
+                            value = _normalize_ready_video_timeline(value)
+                        return value
+
+                    try:
+                        parsed = accept(response.content)
+                    except ValueError as rejected:
+                        if name in OPTIONAL_DERIVATIVE_STAGES:
+                            raise  # These stages have a deterministic fallback.
+                        # One repair attempt with the exact problem, without a second critic round.
+                        problem = _validation_problem(rejected)
+                        repair = LLMService(privacy_gateway=self.llm._privacy_gateway, provider=self.llm._provider)
+                        response = await asyncio.wait_for(repair.generate(LLMRequest(
+                            system_prompt=prompt + '\nYour previous answer was rejected by validation: ' + problem
+                            + '. Fix exactly this and return the complete JSON again.',
+                            messages=[LLMMessage(role='user', content=json.dumps(stage_inputs, ensure_ascii=False))],
+                            model=self.model, max_tokens=min(20000, STAGE_MAX_TOKENS.get(name, 10000) * 2),
+                            response_schema=schema.model_json_schema(),
+                            metadata={'reasoning_effort': 'low', 'team_role': name, 'task_type': 'article_production',
+                                      'provider_timeout_seconds': STAGE_PROVIDER_TIMEOUT_SECONDS.get(name, 90)},
+                        ), on_observed=record_model_call), timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
+                        if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
+                            raise rejected
+                        parsed = accept(response.content)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
