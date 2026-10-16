@@ -18,6 +18,7 @@ from app.company_profile import load_company_profile, sanitized_profile
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, CostRecord, Publication, Task, TaskStatus, ToolCall
 from app.policies import PolicyEvaluator
+from app.prompts import register as register_prompt, text as prompt_text
 from app.tools import ToolOperation
 
 
@@ -25,8 +26,13 @@ SYSTEM_PROMPT = """Ты — AI-консультант конкретного б�
 Твоя задача: помочь человеку разобраться и выбрать подходящее решение.
 Отвечай на языке автора, вежливо, естественно, без давления и навязчивых продаж.
 Сначала дай прямой ответ на вопрос. Известную цену назови прямо, с валютой.
+Ответ полезен сам по себе, даже если человек не станет клиентом: конкретика из фактов
+(цена, срок, условие) или один практический совет по его вопросу вместо общих слов.
+Пиши коротко, уверенно и по-человечески: обычно 1–3 коротких предложения, без канцелярита,
+шаблонов вроде «Благодарим за обращение», лишних оговорок и извинений (кроме жалоб).
+Мост к продукту — одна фраза о выгоде под потребность автора, только если она уместна.
 Если для подбора решения не хватает данных — задай один уместный вопрос о потребности.
-Не повторяй вопросы из контекста. Предлагай максимум один следующий шаг, только если уместно.
+Не повторяй вопросы из контекста. Предлагай максимум один следующий шаг с понятным действием, только если уместно.
 Свяжи пользу продукта с потребностью. Если продукт не подходит — честно скажи об этом.
 На благодарность достаточно благодарности. Не продавай в каждом ответе.
 Используй только переданные факты бизнеса и их ID; укажи used_fact_ids.
@@ -43,6 +49,11 @@ SYSTEM_PROMPT = """Ты — AI-консультант конкретного б�
 Длина ответа ограничена настройками. Не используй эмодзи без разрешения.
 Верни только JSON согласно схеме. Никаких внешних действий; ты создаёшь черновик.
 """
+
+register_prompt("comments.reply", group="Ответы в комментариях", title="Продавец в комментариях: правила ответа",
+                description="Как отвечать в публичных комментариях: польза и прямой ответ, тон, один следующий шаг, "
+                            "когда передавать человеку. Проверки жалоб и фактов в коде действуют в любом случае.",
+                default=SYSTEM_PROMPT)
 
 
 def digest(value):
@@ -212,7 +223,7 @@ class CommentService:
             input_references=[str(comment.id), "profile:" + profile_digest] + ([str(settings_record.id)] if settings_record else []))
         self.db.add(run); self.db.flush()
         try:
-            response = await self.llm.generate(LLMRequest(system_prompt=SYSTEM_PROMPT, model=self.settings.llm_model,
+            response = await self.llm.generate(LLMRequest(system_prompt=prompt_text("comments.reply"), model=self.settings.llm_model,
                 max_tokens=1800, response_schema=ReplyDraft.model_json_schema(),
                 messages=[LLMMessage(role="user", content=json.dumps({"facts": facts,
                     "settings": {**config.model_dump(exclude={"facts"}), "max_length": reply_limit(comment.platform, config.max_length)},
