@@ -215,3 +215,97 @@ async def test_old_post_cannot_be_approved_while_owner_revision_is_queued(db, tm
     assert post.status == ArtifactStatus.AWAITING_APPROVAL
     assert "сейчас дорабатывается" in bot.outgoing[-1][0]
     assert db.get(Task, pending.id).status == TaskStatus.QUEUED
+
+
+async def _queued_edit(db, feedback="Сделай заход острее и добавь пример расчёта"):
+    company, post = setup_post(db)
+    queued = queue_post_edit(db, post.id, feedback)
+    req = db.scalar(select(Artifact).where(
+        Artifact.task_id == queued.id, Artifact.kind == "content_edit_request",
+    ))
+    return company, queued, EditRequest.model_validate_json(req.content)
+
+
+def _revised(task_id, db):
+    row = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == "channel_text"))
+    return json.loads(row.content) if row else None
+
+
+@pytest.mark.asyncio
+async def test_revision_uses_quick_post_rules_and_owner_feedback_first(db, tmp_path):
+    _, queued, request = await _queued_edit(db)
+    provider = FakeRewriteProvider()
+    assert await run_post_edit(db, Settings(_env_file=None, products_root=tmp_path), request,
+                               task_id=queued.id, provider=provider)
+    system = provider.requests[0].system_prompt
+    assert system.startswith("Ты — сильный маркетолог")  # shared quick post rules
+    assert "выполни ВСЕ замечания из owner_feedback" in system
+    assert provider.requests[0].metadata["task_type"] == "quick_post"  # marketing critic profile
+
+
+@pytest.mark.asyncio
+async def test_revision_appends_paraphrased_cta_instead_of_failing(db, tmp_path):
+    _, queued, request = await _queued_edit(db)
+
+    class Provider(FakeRewriteProvider):
+        async def generate(self, request):
+            reply = await super().generate(request)
+            data = json.loads(reply.content)
+            data["body"] = data["body"].replace("Напишите нам, чтобы уточнить состав.", "Пишите — подскажем.")
+            return reply.model_copy(update={"content": json.dumps(data, ensure_ascii=False)})
+
+    assert await run_post_edit(db, Settings(_env_file=None, products_root=tmp_path), request,
+                               task_id=queued.id, provider=Provider())
+    data = _revised(queued.id, db)
+    assert data["body"].endswith("Напишите нам, чтобы уточнить состав.")
+
+
+@pytest.mark.asyncio
+async def test_rejected_revision_is_repaired_once_with_the_validation_problem(db, tmp_path):
+    _, queued, request = await _queued_edit(db)
+
+    class Provider(FakeRewriteProvider):
+        async def generate(self, request):
+            reply = await super().generate(request)
+            if len(self.requests) == 1:
+                data = json.loads(reply.content)
+                data["evidence_ids"] = ["invented-source"]
+                return reply.model_copy(update={"content": json.dumps(data, ensure_ascii=False)})
+            return reply
+
+    provider = Provider()
+    assert await run_post_edit(db, Settings(_env_file=None, products_root=tmp_path), request,
+                               task_id=queued.id, provider=provider)
+    assert len(provider.requests) == 2
+    assert "rejected by validation" in provider.requests[1].system_prompt
+    assert _revised(queued.id, db)["evidence_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_revision_with_enabled_critic_records_review_and_every_call(db, tmp_path):
+    from app.models.domain import CostRecord
+    company, queued, request = await _queued_edit(db)
+    base = FakeRewriteProvider()
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+
+        async def generate(self, request):
+            self.calls.append(request)
+            if request.metadata.get("task_type") == "quality_review":
+                return LLMResponse(content=json.dumps({"findings": []}), model="fake",
+                                   usage=LLMUsage(input_tokens=40, output_tokens=5), stop_reason="end_turn")
+            return await base.generate(request)
+
+    provider = Provider()
+    settings = Settings(_env_file=None, products_root=tmp_path, agent_critic_enabled=True)
+    assert await run_post_edit(db, settings, request, task_id=queued.id, provider=provider)
+    review = provider.calls[1]
+    assert review.metadata["task_type"] == "quality_review"
+    assert "критик-редактор" in review.system_prompt  # marketing critic, not the fact critic
+    assert list(db.scalars(select(Artifact).where(
+        Artifact.task_id == queued.id, Artifact.kind == "agent_quality_review")))
+    stages = [c.details["llm_stage"] for c in db.scalars(
+        select(CostRecord).where(CostRecord.product_id == company.id))]
+    assert sorted(stages) == ["author", "critic"]

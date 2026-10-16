@@ -1071,3 +1071,11 @@ async def test_required_stage_gets_one_repair_attempt_with_the_problem(db, produ
     strategist = [r for r in provider.requests if r.metadata['team_role'] == 'content_strategist']
     assert len(strategist) == 2
     assert 'rejected by validation' in strategist[1].system_prompt
+
+
+def test_platform_writer_telegram_follows_quick_post_structure():
+    from app.prompts import text as prompt_text
+    rule = prompt_text('article.rules.platform_writer')
+    for required in ('сначала польза', 'TELEGRAM', 'нумерованным списком', '800–1500',
+                     'ровно один призыв', 'без оговорок', 'TOP-LEVEL FORMAT IS MANDATORY'):
+        assert required in rule

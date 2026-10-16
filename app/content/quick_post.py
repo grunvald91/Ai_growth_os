@@ -113,6 +113,17 @@ class QuickPostStrategy(StrictModel):
     evidence_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
+def append_missing_cta(data):
+    """Models often paraphrase the CTA inside the text. The post must still end with
+    its single CTA, so append it instead of failing the whole job."""
+    if isinstance(data, dict):
+        body, cta = data.get("body"), data.get("cta")
+        if isinstance(body, str) and isinstance(cta, str) and cta.strip() \
+                and " ".join(cta.split()).casefold() not in " ".join(body.split()).casefold():
+            data = {**data, "body": body.rstrip() + "\n\n" + cta.strip()}
+    return data
+
+
 class QuickPostDraft(StrictModel):
     title: str = Field(min_length=5, max_length=960)
     body: str = Field(min_length=160, max_length=14000)
@@ -123,14 +134,7 @@ class QuickPostDraft(StrictModel):
     @model_validator(mode="before")
     @classmethod
     def cta_in_body(cls, data):
-        # Models often paraphrase the CTA inside the text. The post must still end with
-        # its single CTA, so append it instead of failing the whole job.
-        if isinstance(data, dict):
-            body, cta = data.get("body"), data.get("cta")
-            if isinstance(body, str) and isinstance(cta, str) and cta.strip() \
-                    and " ".join(cta.split()).casefold() not in " ".join(body.split()).casefold():
-                data = {**data, "body": body.rstrip() + "\n\n" + cta.strip()}
-        return data
+        return append_missing_cta(data)
 
 
 def _validation_summary(exc: Exception) -> str:

@@ -128,7 +128,7 @@ STAGE_INPUTS['youtube_shorts_director'] = ('content_strategist', 'marketing_edit
 STAGE_INPUTS['instagram_reels_director'] = ('content_strategist', 'marketing_editor', 'conversion_editor')
 
 READY_STAGE_TASKS = (
-    ('platform_writer', 'Write SIX complete reader-facing adaptations, not outlines: Dzen and vc.ru full articles >=2000 characters each; TenChat professional post; Telegram standalone post; FAQ actual questions and answers; founder proposed post without invented first-person experience. Use the edited source article and each channel profile.'),
+    ('platform_writer', 'Write SIX complete reader-facing adaptations, not outlines: Dzen and vc.ru full articles >=2000 characters each; TenChat professional post; Telegram standalone value-first post of 800-1500 characters; FAQ actual questions and answers; founder proposed post without invented first-person experience. Use the edited source article and each channel profile.'),
     ('youtube_shorts_director', 'Create ONE 30-second YouTube Shorts production brief based on the article.'),
     ('instagram_reels_director', 'Create ONE 30-second Instagram Reels production brief based on the article.'),
 )
@@ -242,12 +242,25 @@ def _default_stage_rule(name: str) -> str:
         )
     elif name == 'platform_writer':
         stage_rule = (
-            ' Make each adaptation publishable and persuasive, not merely safe. Start from the platform-fit '
-            'pain or scene, deliver one useful insight quickly, connect it to the verified product mechanism, '
-            'and use one concrete CTA. Preserve the sharper voice of marketing_editor and its concise '
-            'information-style edit. Humor is optional and must follow the brand voice and audience sensitivity; '
-            'never force an analogy or joke into a serious or vulnerable situation. '
-            'Do not repeat internal caveats unless genuinely necessary. Do not invent product guarantees or outcomes.'
+            ' Каждая адаптация — готовый к публикации текст, а не план и не пересказ статьи. Общий принцип для '
+            'всех площадок: сначала польза — читатель уносит конкретные приёмы, шаги, метрики или расчёты из '
+            'статьи, которые применит сам, даже если не станет клиентом; реклама строится на этой пользе. '
+            'Пиши уверенно и просто: без оговорок, извинений и канцелярита, одна мысль — один короткий абзац. '
+            'Сохрани голос и сильные формулировки marketing_editor. Абзац о компании — 1–2 фразы о выгоде для '
+            'читателя или о том, куда движется продукт (как видение, не как уже работающая функция), без '
+            'пересказа шагов интерфейса и оплаты. В конце каждого текста ровно один призыв с понятным действием. '
+            'TELEGRAM — по тем же правилам, что и быстрый пост: 1) первая строка — заход, который останавливает '
+            'ленту (узнаваемая сцена, неожиданная мысль или вопрос); 2) коротко — почему это важно и во что '
+            'обходится проблема; 3) 3–5 конкретных пунктов пользы нумерованным списком, каждый с действием; '
+            '4) мост к компании в 1–2 фразы; 5) один призыв в конце. Длина 800–1500 символов; это '
+            'самостоятельный пост, а не анонс статьи. '
+            'Дзен и vc.ru — полноценные статьи от 2000 символов с подзаголовками; vc.ru — аналитичнее, с '
+            'допущениями и расчётами. TenChat — взгляд практика: проблема бизнеса, чек-лист, вопрос для '
+            'обсуждения. FAQ — реальные вопросы клиентов и конкретные ответы. founder — предлагаемый пост от '
+            'лица основателя без выдуманного личного опыта. '
+            'Перед ответом сверь в каждом тексте: количество пунктов совпадает с обещанным, числа и заголовок '
+            'согласованы. Юмор — по желанию и к месту, без насмешки над людьми. Не придумывай гарантии, '
+            'отзывы, цены и результаты клиентов.'
         )
     elif name == 'repurposing_editor':
         stage_rule = (
