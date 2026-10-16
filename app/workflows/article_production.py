@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import re
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
@@ -104,6 +105,9 @@ STAGE_MAX_TOKENS = {
     'youtube_shorts_director': 5200,
     'instagram_reels_director': 6500,
 }
+
+logger = logging.getLogger(__name__)
+
 
 OPTIONAL_DERIVATIVE_STAGES = {
     'platform_writer',
@@ -280,12 +284,21 @@ def _normalize_ready_video_timeline(brief: ShortVideoDerivativeDraft) -> ShortVi
         shot['start_second'] = round(shot['start_second'] * scale, 6)
         shot['end_second'] = round(shot['end_second'] * scale, 6)
         spoken = shot.get('spoken_text')
+        leaked = re.search(r'''['"]\s*,\s*['"]on_screen_text['"]\s*:\s*['"]?''', spoken or '')
+        if leaked:
+            # The model sometimes glues the next JSON key into spoken_text.
+            visible = spoken[leaked.end():].strip().strip('\'"').strip()
+            shot['spoken_text'] = spoken = spoken[:leaked.start()].strip() or None
+            if visible and not shot.get('on_screen_text'):
+                shot['on_screen_text'] = visible[:300]
         if spoken:
             note = re.search(r'\b(?:avoid(?:_in_generation)?|generation_prompt|production_notes)\s*:', spoken, re.I)
             if note:
                 shot['spoken_text'] = spoken[:note.start()].strip() or None
                 existing = shot.get('avoid_in_generation') or ''
                 shot['avoid_in_generation'] = (existing + '\n' + spoken[note.start():]).strip()[:4000]
+    if not all(shot.get('on_screen_text') for shot in shots):
+        raise ValueError('Every scene needs exact visible copy')
     shots[0]['start_second'] = 0
     shots[-1]['end_second'] = 30
     production['duration_seconds'] = 30
@@ -904,6 +917,10 @@ class ArticleProduction:
                         break
                     parsed = _parse_stage_payload(schema, response.content)
                     parsed = schema.model_validate(self._sanitize(parsed.model_dump(mode='json')))
+                    if name in {'youtube_shorts_director', 'instagram_reels_director'}:
+                        # Enforce the final ready-video contract here, so a bad brief
+                        # takes the stage fallback instead of failing the whole package.
+                        parsed = _normalize_ready_video_timeline(parsed)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
@@ -1122,6 +1139,12 @@ class ArticleProduction:
             self.db.rollback()
             if error == 'context_preparation_failed' and not isinstance(exc, asyncio.CancelledError):
                 error = f'context_preparation_failed:{type(exc).__name__}'
+            logger.warning('Article production failed for task %s: %s (%s)', task_id, error, type(exc).__name__)
+            if run_ids and all(self.db.get(AgentRun, run_id).status == 'completed' for run_id in run_ids):
+                # Every stage succeeded and the package assembly failed: keep the
+                # reason on the last run instead of losing it.
+                last = self.db.get(AgentRun, run_ids[-1])
+                last.error = f'assembly_failed:{error}:{type(exc).__name__}'[:1000]
             for run_id in run_ids:
                 run = self.db.get(AgentRun, run_id)
                 if run.status == 'completed':

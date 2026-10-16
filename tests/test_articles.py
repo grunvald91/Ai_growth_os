@@ -559,6 +559,31 @@ def test_ready_video_timeline_is_normalized_to_30_seconds_and_strips_internal_no
     VideoVariants(videos=[parsed, other])
 
 
+def test_ready_video_normalizer_recovers_on_screen_text_glued_into_spoken_text():
+    from app.workflows.article_contracts import ShortVideoDerivativeDraft
+    from app.workflows.article_production import _normalize_ready_video_timeline
+
+    raw = json.loads(json.dumps(valid_outputs()[7], ensure_ascii=False))
+    raw["production_brief"]["shots"][0]["spoken_text"] = "Лайки есть, записей нет.','on_screen_text':'Лайки ≠ записи"
+    raw["production_brief"]["shots"][0]["on_screen_text"] = None
+    parsed = _normalize_ready_video_timeline(ShortVideoDerivativeDraft.model_validate(raw))
+
+    shot = parsed.production_brief.shots[0]
+    assert shot.spoken_text == "Лайки есть, записей нет."
+    assert shot.on_screen_text == "Лайки ≠ записи"
+
+
+def test_ready_video_normalizer_rejects_scenes_without_visible_copy():
+    from app.workflows.article_contracts import ShortVideoDerivativeDraft
+    from app.workflows.article_production import _normalize_ready_video_timeline
+
+    raw = json.loads(json.dumps(valid_outputs()[7], ensure_ascii=False))
+    raw["production_brief"]["shots"][1]["spoken_text"] = "Текст озвучки.','on_screen_text':"
+    raw["production_brief"]["shots"][1]["on_screen_text"] = None
+    with pytest.raises(ValueError, match="visible copy"):
+        _normalize_ready_video_timeline(ShortVideoDerivativeDraft.model_validate(raw))
+
+
 def test_platform_writer_accepts_alias_wrapper():
     from app.content.contracts import ReadyTextSet
     from app.workflows.article_production import _parse_stage_payload
@@ -632,6 +657,65 @@ async def test_ready_assets_complete_when_video_visual_and_platform_use_fallback
     assert checkpoints["platform_writer"]["fallback_used"] is True
     assert checkpoints["youtube_shorts_director"]["fallback_used"] is False
     assert checkpoints["instagram_reels_director"]["fallback_used"] is False
+
+
+@pytest.mark.asyncio
+async def test_ready_video_without_visible_copy_uses_fallback_instead_of_failing_package(db, product, tmp_path):
+    outputs = valid_outputs()
+    youtube = json.loads(json.dumps(outputs[7], ensure_ascii=False))
+    youtube["production_brief"]["target_platform"] = "youtube_shorts"
+    youtube["production_brief"]["duration_seconds"] = 30
+    youtube["production_brief"]["shots"][2]["end_second"] = 30
+    for shot in youtube["production_brief"]["shots"]:
+        shot["on_screen_text"] = None
+    reels = json.loads(json.dumps(outputs[7], ensure_ascii=False))
+    reels["production_brief"]["target_platform"] = "instagram_reels"
+    reels["production_brief"]["duration_seconds"] = 30
+    reels["production_brief"]["shots"][2]["end_second"] = 30
+    reels["hook"] = "Запись в директе: сколько ручных шагов осталось?"
+    outputs.extend([{}, youtube, reels])
+    workflow, _, request = setup(db, product, tmp_path, outputs, produce_ready_assets=True)
+
+    result = await workflow.run(request)
+
+    assert result.status == "completed", result.error
+    checkpoints = {
+        json.loads(a.content)["stage"]: json.loads(a.content)
+        for a in db.scalars(select(Artifact).where(
+            Artifact.task_id == result.task_id,
+            Artifact.kind == "content_stage_output",
+        ))
+    }
+    assert checkpoints["youtube_shorts_director"]["fallback_used"] is True
+    assert checkpoints["instagram_reels_director"]["fallback_used"] is False
+
+
+@pytest.mark.asyncio
+async def test_package_assembly_failure_is_recorded_on_last_run(db, product, tmp_path, monkeypatch):
+    from app.content import contracts
+
+    outputs = valid_outputs()
+    youtube = json.loads(json.dumps(outputs[7], ensure_ascii=False))
+    youtube["production_brief"]["target_platform"] = "youtube_shorts"
+    youtube["production_brief"]["duration_seconds"] = 30
+    youtube["production_brief"]["shots"][2]["end_second"] = 30
+    reels = json.loads(json.dumps(youtube, ensure_ascii=False))
+    reels["production_brief"]["target_platform"] = "instagram_reels"
+    reels["hook"] = "Запись в директе: сколько ручных шагов осталось?"
+    outputs.extend([{}, youtube, reels])
+    workflow, _, request = setup(db, product, tmp_path, outputs, produce_ready_assets=True)
+
+    def broken(*args, **kwargs):
+        raise ValueError("assembly broke")
+    monkeypatch.setattr(contracts, "VideoVariants", broken)
+
+    result = await workflow.run(request)
+
+    assert result.status == "failed"
+    runs = [db.get(AgentRun, run_id) for run_id in result.run_ids]
+    assert all(run.status == "completed" for run in runs)
+    assert runs[-1].error.startswith("assembly_failed:")
+    assert runs[-1].error.endswith(":ValueError")
 
 
 def test_platform_writer_safe_fallback_builds_six_publishable_texts():
