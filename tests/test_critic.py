@@ -483,3 +483,26 @@ async def test_critic_context_limit_is_configurable():
     assert raised.quality_review["status"] == "no_material_issues"
     assert provider.requests[1].metadata["provider_timeout_seconds"] == 180
     assert service.extra_timeout_seconds == 425
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("task_type,marketing", [
+    ("article_production", True), ("quick_post", True), ("content_plan", False),
+])
+async def test_marketing_materials_get_reader_and_sales_focused_critic(task_type, marketing):
+    request = task()
+    request.metadata["task_type"] = task_type
+    provider = SequenceProvider([
+        {"title": "Plan", "steps": ["Traffic"]}, finding(),
+        {"decisions": [{"finding_id": "m1", "decision": "accept", "rationale": "Clearer hook"}],
+         "updated_output": {"title": "Plan", "steps": ["Traffic", "Onboarding"]}},
+    ])
+    await LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
+                     critic_enabled=True, critic_limits={}).generate(
+        request, validate_revision=lambda data: Draft.model_validate(data))
+    critic_prompt = provider.requests[1].system_prompt
+    author_prompt = provider.requests[2].system_prompt
+    assert ("READABILITY" in critic_prompt and "HOOK" in critic_prompt
+            and "CALL TO ACTION" in critic_prompt) is marketing
+    assert ("ignore cosmetic" in critic_prompt) is not marketing
+    assert ("easier to read" in author_prompt) is marketing
