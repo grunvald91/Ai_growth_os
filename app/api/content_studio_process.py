@@ -304,7 +304,7 @@ def _ordered(runs: list[AgentRun]) -> list[AgentRun]:
                   (PIPELINE_ORDER.index(r.agent_name) if r.agent_name in PIPELINE_ORDER else 99)))
 
 
-def summary_html(runs: list[AgentRun], proc: Process) -> str:
+def summary_html(runs: list[AgentRun], proc: Process, map_href: str = "") -> str:
     if not runs:
         return ""
     names = []
@@ -362,7 +362,9 @@ def summary_html(runs: list[AgentRun], proc: Process) -> str:
                 'Когда его включат, замечания и решения автора появятся под каждым шагом.</p>')
     return (f'<section class="sg-proc" aria-label="Сводка по заданию"><div class="sg-proc-tiles">{"".join(tiles)}</div>'
             f'<ul class="sg-team" aria-label="Команда задания">{team}</ul>'
-            '<a class="sg-mini-link" href="#sg-log">Журнал по строкам ↓</a>' + note + '</section>')
+            '<div class="sg-proc-links"><a class="sg-mini-link" href="#sg-log">Журнал по строкам ↓</a>'
+            + (f'<a class="sg-mini-link" href="{_e(map_href)}">Схема всей команды →</a>' if map_href else '')
+            + '</div>' + note + '</section>')
 
 
 # ── журнал по строкам ──────────────────────────────────────────────────────
@@ -466,6 +468,7 @@ CSS = r"""
 .sg-proc .sg-team li.err::before{background:#B3261E}
 .sg-proc-note{margin:0;padding:12px 14px;border-radius:12px;background:#F7F9FD;color:#41546A;font-size:14px;line-height:1.5}
 .sg-work-log .sg-proc-note{margin-bottom:6px}
+.sg-proc-links{display:flex;flex-wrap:wrap;gap:6px 18px}
 .sg-step-meta{margin:0;font-size:13px;color:#56677C;line-height:1.4}
 .sg-step-meta.warn{color:#8A5A00}
 .sg-critic{border-radius:12px;border:1px solid #DFE6F0;background:#fff;padding:10px 14px;display:grid;gap:8px}

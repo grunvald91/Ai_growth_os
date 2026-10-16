@@ -26,8 +26,9 @@ from app.api.content_studio_article import render_article
 from app.content.render import asset_path
 from app.api.content_studio_guide import how_it_works_html, where_html
 from app.api.content_studio_process import team_stats_html
+from app.api.content_studio_team import team_map_html
 from app.api.content_studio_activity import (work_items, notice_items, notice_html,
-    activity_html, activity_overview, task_detail_html, RESULT_KINDS)
+    activity_html, activity_overview, task_detail_html, task_title, RESULT_KINDS)
 from app.api.content_studio_ui import create_content_html, review_html, channels_html
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.content.calendar import (PLATFORMS, approve_plan, pause_plan,
@@ -1061,7 +1062,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>Growth Studio · {esc(product.name)}</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=20">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=26">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1132,7 +1133,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=12"></script>
+<script src="/studio/assets/studio.js?v=13"></script>
 </body></html>"""
 
 
@@ -1202,7 +1203,7 @@ def studio_page_shell(
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>{esc(title)} · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=20">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=26">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1224,7 +1225,7 @@ def studio_page_shell(
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=12"></script>
+<script src="/studio/assets/studio.js?v=13"></script>
 </body></html>"""
 
 
@@ -1775,7 +1776,7 @@ def product_selector(products: list[Product]) -> str:
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=20"></head>
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=26"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
@@ -2273,6 +2274,33 @@ async def studio_material_revise(product_id: UUID, artifact_id: UUID,
     except (ValueError, LookupError) as exc:
         raise HTTPException(409, str(exc)) from None
     return RedirectResponse(f"/studio/products/{product_id}/tasks/{task.id}", status_code=303)
+
+
+@router.get("/studio/products/{product_id}/team-map", response_class=HTMLResponse)
+def studio_team_map(product_id: UUID, task: UUID | None = None, db: Session = Depends(get_db),
+                    settings: Settings = Depends(get_settings)):
+    product = _owner_product(db, product_id)
+    states: dict[str, str] = {}
+    label = ""
+    if task is not None:
+        row = db.scalar(select(Task).where(Task.id == task, Task.product_id == product_id))
+        if row is not None:
+            weight = {"running": 3, "failed": 2, "queued": 1, "completed": 0}
+            for run in db.scalars(select(AgentRun).where(AgentRun.task_id == row.id)):
+                if run.agent_name not in states or weight.get(run.status, 0) > weight.get(states[run.agent_name], 0):
+                    states[run.agent_name] = run.status
+            request = db.scalar(select(Artifact).where(
+                Artifact.task_id == row.id, Artifact.product_id == product_id,
+                Artifact.kind.in_(["content_request", "creative_request", "edit_request"]),
+            ).order_by(Artifact.created_at.desc()).limit(1))
+            label = task_title(row, request)
+    response = HTMLResponse(studio_page_shell(
+        product, active="team", title="Как устроена команда",
+        subtitle="Кто в ней работает, кто кому передаёт работу и где подключается критик.",
+        body=team_map_html(product.id, settings.agent_critic_enabled, states, label),
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @router.get("/studio/products/{product_id}/channels", response_class=HTMLResponse)

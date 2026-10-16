@@ -140,6 +140,7 @@ def how_it_works_html(product_id: UUID) -> str:
         обычно занимает от получаса до часа. Страницу можно закрыть: задание не пропадёт.
         Что вывел каждый помощник, смотрите в разделе <a href="{base}/work">«В работе»</a>.
       </div>
+      <a class="btn secondary sg-how-map" href="{base}/team-map">Показать схему всей команды →</a>
     </section>"""
 
 
@@ -152,6 +153,7 @@ def where_html(product_id: UUID) -> str:
         ("↗", f"{base}/channels", "Публикации", "Подключить Telegram и посмотреть, что отправлено"),
         ("☷", f"{base}/comments", "Комментарии", "Ответы подписчикам, которые подготовила команда"),
         ("◎", f"/intelligence?product_id={product_id}", "Бизнес-разведка", "Изучить нишу и конкурентов"),
+        ("♧", f"{base}/team-map", "Как устроена команда", "Схема: кто за что отвечает и как работает критик"),
     )
     items = "".join(
         f'<a href="{href}"><span class="sg-where-ic" aria-hidden="true">{ic}</span>'

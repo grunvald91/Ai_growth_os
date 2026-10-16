@@ -538,7 +538,7 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         f'<section class="sg-surface sg-work-detail" data-sg-task="{task.id}" data-sg-state="{key}" data-sg-stage="{safe(stage_sig)}">'
         f'<span class="sg-work-status sg-work-{tone}">'
         f'{safe(label)}</span><h2>{safe(task_title(task, request))}</h2><p>{safe(explanation)}</p>'
-        + (proc_ui.summary_html(runs, process) if process is not None else '')
+        + (proc_ui.summary_html(runs, process, f"{base}/team-map?task={task.id}") if process is not None else '')
         + f'<div class="sg-work-steps"><h3>Как шла работа</h3><ol class="sg-stage-list">{"".join(steps)}</ol></div>'
         f'<div class="sg-work-results"><h3>Результаты</h3>'
         + ("".join(rendered) or '<p>Результаты появятся здесь после подготовки.</p>')
