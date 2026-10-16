@@ -462,3 +462,24 @@ async def test_failed_intermediate_audit_does_not_silently_start_revision():
             on_review_progress=fail_audit,
         )
     assert len(provider.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_critic_context_limit_is_configurable():
+    request = task()
+    request.messages[0].content = json.dumps({"brief": "x" * 30000})
+
+    default = await LLMService(
+        privacy_gateway=PrivacyGateway(),
+        provider=SequenceProvider([{"title": "T", "steps": ["s"]}]),
+        critic_enabled=True, critic_limits={}).generate(request)
+    assert default.quality_review["status"] == "skipped_incomplete_context"
+
+    provider = SequenceProvider([{"title": "T", "steps": ["s"]}, {"findings": []}])
+    service = LLMService(
+        privacy_gateway=PrivacyGateway(), provider=provider, critic_enabled=True,
+        critic_limits={"max_context_chars": 120000, "review_timeout": 180, "revision_timeout": 240})
+    raised = await service.generate(request)
+    assert raised.quality_review["status"] == "no_material_issues"
+    assert provider.requests[1].metadata["provider_timeout_seconds"] == 180
+    assert service.extra_timeout_seconds == 425

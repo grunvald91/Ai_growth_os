@@ -46,6 +46,7 @@ class Revision(BaseModel):
 
 REVIEW_TIMEOUT = 45
 REVISION_TIMEOUT = 75
+MAX_CONTEXT_CHARS = 24000
 
 
 class ReviewAuditPersistenceError(RuntimeError):
@@ -105,7 +106,10 @@ def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisi
 async def second_opinion(*, request: LLMRequest, original: LLMResponse,
                          generate: Callable[[LLMRequest], Awaitable[LLMResponse]],
                          validate_revision: Callable[[dict], None] | None = None,
-                         on_review_progress: Callable[[LLMResponse], None] | None = None) -> LLMResponse:
+                         on_review_progress: Callable[[LLMResponse], None] | None = None,
+                         max_context_chars: int = MAX_CONTEXT_CHARS,
+                         review_timeout: float = REVIEW_TIMEOUT,
+                         revision_timeout: float = REVISION_TIMEOUT) -> LLMResponse:
     """Only structured agent drafts are eligible; no change to authorization policy."""
     if not request.metadata.get("team_role") or not request.response_schema:
         return _record(original, "skipped_ineligible", [])
@@ -119,7 +123,7 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
         "original_task": review_messages,
     }
     task_text = json.dumps(task, ensure_ascii=False)
-    if len(task_text) > 24000:
+    if len(task_text) > max_context_chars:
         return _record(original, "skipped_incomplete_context", [])
     if len(original.content) > 70000:
         return _record(original, "skipped_size_limit", [])
@@ -159,8 +163,8 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
             response_schema=Findings.model_json_schema(),
             metadata={"reasoning_effort": "low", "team_role": request.metadata["team_role"],
                       "routing_phase": "critic",
-                      "task_type": "quality_review", "provider_timeout_seconds": REVIEW_TIMEOUT},
-        )), REVIEW_TIMEOUT)
+                      "task_type": "quality_review", "provider_timeout_seconds": review_timeout},
+        )), review_timeout)
         extra.append(report_response)
         if len(report_response.content) > 90000 or report_response.stop_reason not in (None, "end_turn", "stop_sequence"):
             raise ValueError("Incomplete critic report")
@@ -228,8 +232,8 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
             max_tokens=min(20000, max(6000, request.max_tokens + 3500)),
             response_schema=revision_response_schema,
             metadata={"reasoning_effort": "low", "team_role": request.metadata["team_role"],
-                      "task_type": "apply_quality_feedback", "provider_timeout_seconds": REVISION_TIMEOUT},
-        )), REVISION_TIMEOUT)
+                      "task_type": "apply_quality_feedback", "provider_timeout_seconds": revision_timeout},
+        )), revision_timeout)
         extra.append(revise_response)
         if len(revise_response.content) > 90000 or revise_response.stop_reason not in (None, "end_turn", "stop_sequence"):
             raise ValueError("Incomplete revision")

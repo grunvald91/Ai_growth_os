@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     intelligence_campaign_enabled: bool = True
     # Disabled until explicitly enabled for a measured rollout; review adds LLM calls.
     agent_critic_enabled: bool = False
+    # Critic bounds. The reviewer sees the complete task, so oversized contexts
+    # are skipped rather than compacted; raise these together with the model.
+    agent_critic_max_context_chars: int = Field(default=24000, ge=1000, le=2_000_000)
+    agent_critic_review_timeout_seconds: int = Field(default=45, ge=5, le=900)
+    agent_critic_revision_timeout_seconds: int = Field(default=75, ge=5, le=900)
     # Opt-in, operator-verified LLM routing; unverified models stay disabled.
     model_router_enabled: bool = False
     model_router_admin_token: str | None = None

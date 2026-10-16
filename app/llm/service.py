@@ -7,14 +7,28 @@ from app.privacy import PrivacyGateway
 
 class LLMService:
     def __init__(self, *, privacy_gateway: PrivacyGateway, provider: LLMProvider,
-                 critic_enabled: bool = False) -> None:
+                 critic_enabled: bool = False, critic_limits: dict | None = None) -> None:
         self._privacy_gateway = privacy_gateway
         self._provider = provider
         self._critic_enabled = critic_enabled
+        if critic_limits is None and critic_enabled:
+            from app.core.config import get_settings
+            settings = get_settings()
+            critic_limits = {
+                "max_context_chars": settings.agent_critic_max_context_chars,
+                "review_timeout": settings.agent_critic_review_timeout_seconds,
+                "revision_timeout": settings.agent_critic_revision_timeout_seconds,
+            }
+        self._critic_limits = critic_limits or {}
 
     @property
     def extra_timeout_seconds(self) -> int:
-        return 125 if self._critic_enabled else 0
+        if not self._critic_enabled:
+            return 0
+        from app.llm.critic import REVIEW_TIMEOUT, REVISION_TIMEOUT
+        review = self._critic_limits.get("review_timeout", REVIEW_TIMEOUT)
+        revision = self._critic_limits.get("revision_timeout", REVISION_TIMEOUT)
+        return int(review + revision + 5)
 
     async def generate(self, request: LLMRequest, *,
                        validate_revision: Callable[[dict], None] | None = None,
@@ -46,4 +60,5 @@ class LLMService:
             generate=review_generate,
             validate_revision=validate_revision,
             on_review_progress=on_review_progress,
+            **self._critic_limits,
         )
