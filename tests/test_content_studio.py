@@ -498,7 +498,11 @@ def test_mobile_navigation_has_four_primary_controls():
     product_id = uuid4()
     nav = Navigation(); nav.feed(mobile_nav_html(product_id, 'work'))
     base = f'/studio/products/{product_id}'
-    assert [c['href'] for c in nav.controls] == [base, base + '/create', base + '/work', base + '/materials']
+    hrefs = [c.get('href') for c in nav.controls]
+    assert hrefs[:4] == [base, base + '/create', base + '/work', base + '/materials']
     assert nav.controls[2].get('class') == 'active'
+    # everything else is one tap away in the bottom "Ещё" sheet, mail opens in a new tab
+    for needle in ('/channels', '/comments', '/plan', '/calendar', '/analytics', 'https://mail.servgo.ru', '/studio?choose=1'):
+        assert any(needle in (h or '') for h in hrefs[4:]), needle
     # Unified v10 removed the old "Все разделы" dialog; secondary sections live in page links.
     assert 'mobile-sections' not in mobile_nav_html(product_id)

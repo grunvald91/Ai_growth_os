@@ -47,7 +47,8 @@ router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_s
 
 # Веб-почта ServGo. Открывается в новой вкладке, чтобы не уводить из студии.
 MAIL_URL = "https://mail.servgo.ru"
-MAIL_ATTRS = f'href="{MAIL_URL}" target="_blank" rel="noopener noreferrer"'
+MAIL_ATTRS_ONLY = 'target="_blank" rel="noopener noreferrer"'
+MAIL_ATTRS = f'href="{MAIL_URL}" {MAIL_ATTRS_ONLY}'
 
 MATERIAL_KINDS = {
     "article", "channel_text", "video_script", "content_distribution",
@@ -400,33 +401,67 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
     """
 
 
-def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
+_SVG = {
+    "home": '<path d="M4 11.2 12 4l8 7.2V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z"/>',
+    "plus": '<circle cx="12" cy="12" r="8.5"/><path d="M12 8.2v7.6M8.2 12h7.6"/>',
+    "work": '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.6V12l3 1.8"/>',
+    "mat": '<rect x="4.5" y="4.5" width="6.2" height="6.2" rx="1.6"/><rect x="13.3" y="4.5" width="6.2" height="6.2" rx="1.6"/><rect x="4.5" y="13.3" width="6.2" height="6.2" rx="1.6"/><rect x="13.3" y="13.3" width="6.2" height="6.2" rx="1.6"/>',
+    "more": '<circle cx="6" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/>',
+}
+
+
+def _svg(name: str) -> str:
+    return (f'<svg class="m-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" '
+            f'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{_SVG[name]}</svg>')
+
+
+MORE_SECTIONS = {"review", "plan", "calendar", "channels", "analytics", "comments", "intelligence", "team"}
+
+
+def mobile_nav_html(product_id: UUID, active: str = "overview", product_name: str = "") -> str:
+    """Bottom tab bar: every navigation target sits within thumb reach."""
     base = f"/studio/products/{product_id}"
     def item(name: str, href: str, icon: str, label: str) -> str:
         current = ' class="active" aria-current="page"' if active == name else ""
-        return f'<a{current} href="{href}"><span class="m-ico" aria-hidden="true">{icon}</span>{label}</a>'
+        return f'<a{current} href="{href}">{_svg(icon)}<span>{label}</span></a>'
+    def row(href: str, icon: str, label: str, hint: str, extra: str = "") -> str:
+        return (f'<a class="m-row" href="{href}"{extra}><span class="m-row-ic" aria-hidden="true">{icon}</span>'
+                f'<span class="m-row-text"><b>{label}</b><small>{hint}</small></span>'
+                '<span class="m-row-go" aria-hidden="true">›</span></a>')
+    more_active = " active" if active in MORE_SECTIONS else ""
     return f"""
     <nav class="mobile-nav" aria-label="Быстрая навигация">
-      {item("overview", base, "⌂", "Главная")}
-      {item("create", base + "/create", "＋", "Создать")}
-      {item("work", base + "/work", "◴", "В работе")}
-      {item("materials", base + "/materials", "▤", "Материалы")}
+      {item("overview", base, "home", "Главная")}
+      {item("create", base + "/create", "plus", "Создать")}
+      {item("work", base + "/work", "work", "В работе")}
+      {item("materials", base + "/materials", "mat", "Материалы")}
+      <details class="m-more">
+        <summary class="m-more-sum{more_active}" aria-label="Другие разделы">{_svg("more")}<span>Ещё</span><i class="m-more-badge" hidden></i></summary>
+        <div class="m-sheet" role="dialog" aria-label="Другие разделы">
+          <div class="m-more-slot"></div>
+          {row(base + "/channels", "↗", "Публикации", "Подключить Telegram, что отправлено")}
+          {row(base + "/comments", "☷", "Комментарии", "Ответы подписчикам")}
+          {row(base + "/plan", "▦", "Контент-план", "Что и когда публикуем")}
+          {row(base + "/calendar", "◷", "Календарь", "Публикации по датам")}
+          {row(base + "/analytics", "⌁", "Результаты", "Сколько сделано и опубликовано")}
+          {row(f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка", "Ниша и конкуренты")}
+          {row("/studio/team", "♧", "ИИ-команда", "Кто и как работает")}
+          {row(MAIL_URL, "✉", "Почта", "mail.servgo.ru, новая вкладка", " " + MAIL_ATTRS_ONLY)}
+          {row("/studio?choose=1", "⇄", "Другой проект", esc(product_name) or "Выбрать компанию")}
+        </div>
+      </details>
     </nav>
     """
 
 
 
 def mobile_header_html(product: Product) -> str:
-    """One brand bar on mobile, not a second bottom navigation overlay."""
+    """Top bar is information only; everything tappable lives at the bottom."""
     base = f"/studio/products/{product.id}"
     return f"""
     <header class="sg-mobile-shell-head">
       {servgo_brand_html(compact=True, href=base)}
-      <span class="sg-mobile-actions">
-        <a class="sg-mobile-mail" {MAIL_ATTRS} aria-label="Почта (откроется в новой вкладке)">✉</a>
-        <a class="sg-mobile-project" href="/studio?choose=1"
-           aria-label="Сменить компанию: {esc(product.name)}"><span class="sg-mobile-project-name">{esc(product.name)}</span> <span aria-hidden="true">⌄</span></a>
-      </span>
+      <span class="sg-mobile-project-info" aria-label="Компания: {esc(product.name)}">{esc(product.name)}</span>
     </header>
     """
 
@@ -1025,13 +1060,13 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>Growth Studio · {esc(product.name)}</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=14">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=17">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
   {sidebar_html(product.id)}
   {mobile_header_html(product)}
-  {mobile_nav_html(product.id)}
+  {mobile_nav_html(product.id, "overview", product.name)}
   <main class="main">
     <div class="sg-global-status">{notice_html(product.id)}</div>
     <header class="topbar">
@@ -1165,13 +1200,13 @@ def studio_page_shell(
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>{esc(title)} · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=14">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=17">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
   {sidebar_html(product.id, active)}
   {mobile_header_html(product)}
-  {mobile_nav_html(product.id, active)}
+  {mobile_nav_html(product.id, active, product.name)}
   <main class="main route-main">
     <div class="sg-global-status">{notice_html(product.id)}</div>
     <div class="route-mobile-brand">{mobile_logo_html(product.id)}</div>
@@ -1183,21 +1218,6 @@ def studio_page_shell(
       </div>
       <div class="route-actions">{actions}</div>
     </header>
-    <nav class="sg-route-utility" aria-label="Другие разделы">
-      <details class="sg-inline-more">
-        <summary>Другие разделы</summary>
-        <div><a href="/studio/products/{product.id}/plan">Контент-план</a>
-        <a href="/studio/products/{product.id}/calendar">Календарь</a>
-        <a href="/studio/products/{product.id}/whiteboard">Рисованное видео</a>
-        <a href="/studio/products/{product.id}/comments">Комментарии</a>
-        <a href="/intelligence?product_id={product.id}">Бизнес-разведка</a>
-        <a href="/studio/products/{product.id}/channels">Публикации</a>
-        <a href="/studio/products/{product.id}/analytics">Аналитика</a>
-        <a href="/studio/team">ИИ-команда</a>
-        <a {MAIL_ATTRS}>Почта ↗</a>
-        <a href="/studio?choose=1">Другой проект</a></div>
-      </details>
-    </nav>
     <div class="route-content">{body}</div>
   </main>
 </div></div>
@@ -1753,7 +1773,7 @@ def product_selector(products: list[Product]) -> str:
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=14"></head>
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=17"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
