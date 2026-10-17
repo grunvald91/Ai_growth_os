@@ -24,6 +24,8 @@ from .contracts import WhiteboardRequest, WhiteboardSceneAssets
 
 SAMPLE_RATE = 24000
 MAX_IMAGE_BYTES = 12_000_000
+# Speech models do not obey a time budget; longer narration lengthens the video.
+MAX_VIDEO_SECONDS = 60
 
 
 def _run(args: list[str], *, timeout: int = 30) -> bytes:
@@ -56,8 +58,9 @@ def _validate_regions(assets: WhiteboardSceneAssets) -> None:
 class MarkerSweepRenderer:
     """Stream RGB frames to FFmpeg, retaining only current images and PCM.
 
-    Speech is never sped up or cut to fit: >30 s narration fails. Shorter
-    narration holds the final frame with silence until the 30-second target.
+    Speech is never sped up or cut to fit. Shorter narration holds the final
+    frame with silence until the 30-second target; longer narration extends
+    the video to the narration plus a short tail, up to MAX_VIDEO_SECONDS.
     The async entry point uses a thread; it is not a cancelable job worker.
     """
 
@@ -145,31 +148,33 @@ class MarkerSweepRenderer:
                         raise ValueError("Audio exceeds size limit")
                     source = root / f"{scene_index}-{beat_index}.mp3"
                     source.write_bytes(encoded)
-                    pcm = _run(["ffmpeg", "-v", "error", "-i", str(source), "-t", "31", "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "pipe:1"])
+                    pcm = _run(["ffmpeg", "-v", "error", "-i", str(source), "-t", str(MAX_VIDEO_SECONDS + 1), "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "pipe:1"])
                     samples = len(pcm) // 2
                     if not samples or len(pcm) % 2:
                         raise ValueError("Decoded audio is empty or malformed")
                     start = total_samples / SAMPLE_RATE
                     total_samples += samples
                     end = total_samples / SAMPLE_RATE
-                    if end > request.duration_seconds:
-                        raise ValueError("Narration exceeds 30 seconds; shorten the script")
+                    if end > MAX_VIDEO_SECONDS:
+                        raise ValueError(f"Narration exceeds {MAX_VIDEO_SECONDS} seconds; shorten the script")
                     subtitles.append(f"{len(subtitles) + 1}\n{_timestamp(start)} --> {_timestamp(end)}\n{beat.narration}\n")
                     timeline.append({"scene": scene_index, "beat": beat_index, "start": start, "end": end})
                     scene_durations.append(samples / SAMPLE_RATE)
                     chunks.append(pcm)
                 durations.append(tuple(scene_durations))
                 ends.append(total_samples / SAMPLE_RATE)
+            narration = total_samples / SAMPLE_RATE
+            seconds = max(request.duration_seconds, min(MAX_VIDEO_SECONDS, math.ceil(narration + 0.5)))
             pcm_path = root / "narration.pcm"
-            pcm_path.write_bytes(b"".join(chunks) + b"\0\0" * (request.duration_seconds * SAMPLE_RATE - total_samples))
+            pcm_path.write_bytes(b"".join(chunks) + b"\0\0" * (seconds * SAMPLE_RATE - total_samples))
             rendered = root / "video.mp4"
-            args = ["ffmpeg", "-v", "error", "-nostdin", "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", f"{self.size[0]}x{self.size[1]}", "-framerate", str(self.fps), "-i", "pipe:0", "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "-i", str(pcm_path), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", "-threads", "2", "-c:a", "aac", "-b:a", "96k", "-t", str(request.duration_seconds), "-movflags", "+faststart", str(rendered)]
+            args = ["ffmpeg", "-v", "error", "-nostdin", "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", f"{self.size[0]}x{self.size[1]}", "-framerate", str(self.fps), "-i", "pipe:0", "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "-i", str(pcm_path), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", "-threads", "2", "-c:a", "aac", "-b:a", "96k", "-t", str(seconds), "-movflags", "+faststart", str(rendered)]
             with (root / "ffmpeg.log").open("wb") as log:
                 process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=log)
                 watchdog = threading.Timer(self.timeout, process.kill)
                 watchdog.start()
                 try:
-                    for index in range(request.duration_seconds * self.fps):
+                    for index in range(seconds * self.fps):
                         elapsed = index / self.fps
                         scene_index = min(bisect.bisect_right(ends, elapsed), len(scenes) - 1)
                         offset = ends[scene_index - 1] if scene_index else 0.0
@@ -196,7 +201,7 @@ class MarkerSweepRenderer:
             video = next((s for s in probe["streams"] if s["codec_type"] == "video"), None)
             audio = next((s for s in probe["streams"] if s["codec_type"] == "audio"), None)
             duration = float(probe["format"]["duration"])
-            if not video or not audio or (video["width"], video["height"]) != self.size or abs(duration - request.duration_seconds) > 0.1:
+            if not video or not audio or (video["width"], video["height"]) != self.size or abs(duration - seconds) > 0.1:
                 raise RuntimeError("Encoded video failed media verification")
             srt, cover, manifest = root / "captions.srt", root / "cover.png", root / "manifest.json"
             srt.write_text("\n".join(subtitles), encoding="utf-8")
