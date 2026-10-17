@@ -634,3 +634,10 @@ async def test_cancel_during_critic_keeps_already_completed_author_usage(db, tmp
     assert len(unknown) == 1
     assert unknown[0].input_tokens is None
     assert unknown[0].details["usage_incomplete"] is True
+
+
+def test_calendar_topics_are_reader_value_first_and_hard_rules_stay():
+    from app.prompts import REGISTRY
+    prompt = REGISTRY["calendar.plan"].default
+    assert "КАЧЕСТВО ТЕМ" in prompt and "{evidence_refs}" in prompt
+    assert prompt.index("КАЧЕСТВО ТЕМ") < prompt.index("HARD CALENDAR RULES")

@@ -946,13 +946,13 @@ async def test_editor_prompts_are_commercially_useful_without_weakening_groundin
 
     assert result.status == 'completed', result.error
     by_role = {r.metadata['team_role']: r for r in provider.requests}
-    assert 'grounded audience_pains' in by_role['content_strategist'].system_prompt
-    assert 'commercially useful' in by_role['seo_editor'].system_prompt
-    assert 'concrete recognizable situation' in by_role['human_editor'].system_prompt
+    assert 'подтверждённых audience_pains' in by_role['content_strategist'].system_prompt
+    assert 'полезный и для поиска, и для продаж' in by_role['seo_editor'].system_prompt
+    assert 'конкретной узнаваемой ситуации' in by_role['human_editor'].system_prompt
     assert 'Пиши, сокращай' in by_role['human_editor'].system_prompt
-    assert 'SCENE -> PAIN -> COST/FRICTION' in by_role['marketing_editor'].system_prompt
-    assert 'Use gentle situational humor only when it fits' in by_role['marketing_editor'].system_prompt
-    assert 'humor may be entirely absent' in by_role['marketing_editor'].system_prompt
+    assert 'СЦЕНА → БОЛЬ → ЦЕНА ПРОБЛЕМЫ' in by_role['marketing_editor'].system_prompt
+    assert 'Юмор — только к месту' in by_role['marketing_editor'].system_prompt
+    assert 'без шуток' in by_role['marketing_editor'].system_prompt
     assert 'third-party cases' in by_role['marketing_editor'].system_prompt
     assert 'Write marketing, not an academic paper' in by_role['marketing_editor'].system_prompt
     assert '30-45 seconds' in by_role['video_director'].system_prompt
@@ -1071,3 +1071,29 @@ async def test_required_stage_gets_one_repair_attempt_with_the_problem(db, produ
     strategist = [r for r in provider.requests if r.metadata['team_role'] == 'content_strategist']
     assert len(strategist) == 2
     assert 'rejected by validation' in strategist[1].system_prompt
+
+
+def test_platform_writer_telegram_follows_quick_post_structure():
+    from app.prompts import text as prompt_text
+    rule = prompt_text('article.rules.platform_writer')
+    for required in ('сначала польза', 'TELEGRAM', 'нумерованным списком', '800–1500',
+                     'ровно один призыв', 'без оговорок', 'TOP-LEVEL FORMAT IS MANDATORY'):
+        assert required in rule
+
+
+def test_article_text_chain_rules_are_value_first_and_keep_hard_constraints():
+    from app.prompts import text as prompt_text
+    rules = {name: prompt_text(f'article.rules.{name}') for name in (
+        'content_strategist', 'seo_editor', 'article_writer', 'conversion_editor',
+        'human_editor', 'marketing_editor', 'repurposing_editor')}
+    assert '3–5 приёмов' in rules['content_strategist']
+    assert 'конкретное действие' in rules['seo_editor']
+    assert 'не меньше 2000 символов' in rules['article_writer']
+    assert 'kind=advice' in rules['article_writer']
+    assert 'ровно один призыв' in rules['conversion_editor']
+    assert 'ровно по одному' in rules['human_editor']
+    assert 'Сохрани все конкретные' in rules['marketing_editor']
+    assert 'ровно один fact_rendering' in rules['marketing_editor']
+    assert 'ровно шесть' in rules['repurposing_editor']
+    for name in ('human_editor', 'marketing_editor'):
+        assert 'Не придумывай' in rules[name] or 'не как уже работающую' in rules[name]
