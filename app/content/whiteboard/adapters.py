@@ -114,7 +114,8 @@ class OpenRouterBase:
         else:
             async with httpx.AsyncClient(
                 base_url="https://openrouter.ai/api/v1/",
-                timeout=httpx.Timeout(120.0),
+                # Slow providers must not abort a call that may already be billed.
+                timeout=httpx.Timeout(600.0, connect=15.0),
                 proxy=self.proxy_url, trust_env=False, follow_redirects=False,
             ) as client:
                 response = await client.post(endpoint, json=payload, headers=headers)
@@ -201,7 +202,7 @@ class OpenRouterImageProvider(OpenRouterBase):
         return await self.generate(scene, request, corrections=corrections)
 
 
-IMAGE_TIMEOUT = httpx.Timeout(360.0, connect=15.0)
+IMAGE_TIMEOUT = httpx.Timeout(600.0, connect=15.0)
 
 
 class ClaudeHubGeminiImageProvider(OpenRouterImageProvider):

@@ -215,5 +215,8 @@ class SingleCallStoryboardLLM:
                                usage=LLMUsage(input_tokens=usage.get('prompt_tokens', 0), output_tokens=usage.get('completion_tokens', 0)))
         if self.client is not None:
             return await send(self.client)
-        async with httpx.AsyncClient(base_url=settings.xai_base_url.rstrip('/') + '/', timeout=120, follow_redirects=False) as connection:
+        # A full storyboard at ClaudeHub takes ~2 min typically and up to ~7 min;
+        # a client ReadTimeout drops a call that may already be billed.
+        async with httpx.AsyncClient(base_url=settings.xai_base_url.rstrip('/') + '/',
+                                     timeout=httpx.Timeout(600.0, connect=15.0), follow_redirects=False) as connection:
             return await send(connection)
