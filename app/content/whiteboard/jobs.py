@@ -140,6 +140,39 @@ def approve_job(db, product_id, task_id, *, request_digest, confirmed, decided_b
     return task
 
 
+RESUMABLE_ERRORS = frozenset({'generation_failed', 'interrupted', 'provider_server_error'})
+RESUME_ACTION = 'whiteboard_resume'
+
+
+def can_resume(task_status, value, payload) -> bool:
+    return (task_status == TaskStatus.FAILED and value.get('error') in RESUMABLE_ERRORS
+            and payload.visual_repair_from is None and value.get('calls', 0) < payload.max_api_calls)
+
+
+def resume_job(db, product_id, task_id, *, confirmed, decided_by):
+    """Owner-confirmed continuation of a failed job inside its original call limit.
+
+    Completed checkpoints are reused; only the failed and remaining stages are
+    called again. Never automatic: every resume is a separate audited approval.
+    """
+    db.scalar(select(Product).where(Product.id == product_id).with_for_update())
+    task = owner_task(db, product_id, task_id, lock=True)
+    source, state, approval, payload = records(db, task, lock=True)
+    value = json.loads(state.content)
+    if not confirmed or approval.status != 'approved' or not can_resume(task.status, value, payload):
+        raise ReadinessError('approval_invalid')
+    db.add(Approval(product_id=product_id, artifact_id=source.id, action_type=RESUME_ACTION, risk_level='YELLOW',
+                    status='approved', requested_by='owner', decided_by=decided_by,
+                    decided_at=datetime.now(timezone.utc),
+                    reason=f'resume after {value["error"]} at {value.get("failed_stage")}; calls {value["calls"]}/{payload.max_api_calls}'))
+    value.update(stage='queued', error=None, failed_stage=None, diagnostic=None,
+                 resume_requested=True, resumes=value.get('resumes', 0) + 1)
+    state.content = json.dumps(value)
+    task.status = TaskStatus.QUEUED
+    db.commit()
+    return task
+
+
 def cancel_job(db, product_id, task_id):
     task = owner_task(db, product_id, task_id, lock=True)
     if task.status not in {TaskStatus.WAITING_APPROVAL, TaskStatus.QUEUED, TaskStatus.RUNNING}:

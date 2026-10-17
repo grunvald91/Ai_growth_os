@@ -68,6 +68,7 @@ MESSAGES = {
     'approval_invalid': 'Подтверждение отсутствует или относится к другой версии задания.',
     'call_limit': 'Достигнут подтверждённый лимит API-вызовов. Автоматического повтора нет.',
     'generation_failed': 'Генерация остановлена. Завершённые этапы сохранены; стоимость незавершённого вызова может быть неизвестна. Автоматического повтора нет.',
+    'provider_server_error': 'Сервис модели вернул ошибку на своей стороне (HTTP 5xx) — это сбой провайдера, а не задания. Готовые этапы сохранены; можно продолжить с места остановки.',
     'storyboard_empty': 'Модель сценария вернула пустой ответ. Генерация остановлена до создания изображений.',
     'storyboard_truncated': 'Модель сценария исчерпала лимит токенов до завершения ответа. Генерация остановлена до создания изображений.',
     'interrupted': 'Worker был остановлен. Этапы сохранены; требуется проверить результат и списания у провайдера перед новым запуском.',
@@ -88,6 +89,8 @@ def safe_error(exc) -> str:
             return 'openrouter_security_policy' if 'Access denied by security policy' in exc.response.text else 'openrouter_forbidden'
         if exc.response.status_code == 401:
             return 'openrouter_key_invalid'
+        if exc.response.status_code >= 500:
+            return 'provider_server_error'
     return 'generation_failed'
 
 
