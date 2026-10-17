@@ -1,0 +1,45 @@
+name: ClaudeHub report (read-only)
+
+# Только чтение: статистика вызовов ClaudeHub из agent_runs (длительность,
+# ошибки) и замер отклика бесплатного GET /v1/models. Ключи не печатаются.
+
+on:
+  push:
+    branches: [ccr-545c5158-rcd05z]
+    paths: ['.github/workflows/growth-claudehub-report.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@155.212.162.47 'bash -s' <<'REMOTE' 2>&1 | grep -vE 'sk-|:AA[A-Za-z0-9_-]{20}|Bearer'
+          Q() { docker exec ai-growth-os-postgres-1 psql -U ai_growth -d ai_growth -At -F ' | ' -c "$1"; }
+          echo "== ClaudeHub-routed calls by day (provider xai/claudehub/configured_text): calls | failed | p50 s | p90 s | max s"
+          Q "select started_at::date, count(*), count(*) filter (where status='failed'), round(percentile_cont(0.5) within group (order by extract(epoch from finished_at-started_at))::numeric,1), round(percentile_cont(0.9) within group (order by extract(epoch from finished_at-started_at))::numeric,1), round(max(extract(epoch from finished_at-started_at))::numeric,1) from agent_runs where provider in ('xai','claudehub','configured_text') and started_at > now()-interval '7 days' and finished_at is not null group by 1 order by 1"
+          echo "== by model (7 days): model | calls | failed | p50 s | p90 s"
+          Q "select model, count(*), count(*) filter (where status='failed'), round(percentile_cont(0.5) within group (order by extract(epoch from finished_at-started_at))::numeric,1), round(percentile_cont(0.9) within group (order by extract(epoch from finished_at-started_at))::numeric,1) from agent_runs where provider in ('xai','claudehub','configured_text') and started_at > now()-interval '7 days' and finished_at is not null group by 1 order by 2 desc limit 12"
+          echo "== failures by error (7 days)"
+          Q "select left(coalesce(error,''),90), count(*) from agent_runs where provider in ('xai','claudehub','configured_text') and status='failed' and started_at > now()-interval '7 days' group by 1 order by 2 desc limit 12"
+          echo "== live probe: GET /v1/models x3 (free)"
+          docker exec ai-growth-os-api-1 python - <<'PY'
+          import os, time, httpx
+          base = os.environ.get("XAI_BASE_URL", "https://api.claudehub.fun/v1").rstrip("/")
+          h = {"Authorization": "Bearer " + os.environ.get("XAI_API_KEY", "")}
+          for i in range(3):
+              t = time.monotonic()
+              try:
+                  r = httpx.get(base + "/models", headers=h, timeout=30)
+                  ids = [m.get("id") for m in r.json().get("data", [])] if r.status_code == 200 else []
+                  print(f"try {i+1}: HTTP {r.status_code} in {time.monotonic()-t:.2f}s, models={len(ids)}, kimi-2.7={'kimi-2.7' in ids}, gemini-3.1-flash-image={'gemini-3.1-flash-image' in ids}")
+              except Exception as e:
+                  print(f"try {i+1}: {type(e).__name__} after {time.monotonic()-t:.2f}s")
+          PY
+          REMOTE
