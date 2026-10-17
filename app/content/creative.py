@@ -26,6 +26,7 @@ from app.services.artifacts import ArtifactService
 from app.services.tasks import TaskService
 from app.workflows.article_production import product_facts
 from app.workflows.context import load_context
+from app.llm.timeouts import CALL_WAIT_SECONDS, PROVIDER_TIMEOUT_SECONDS
 
 CREATIVE_PLATFORMS = {
     "short_video": {"youtube_shorts", "instagram_reels", "vk_clips"},
@@ -309,11 +310,11 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                 max_tokens=3000 if idx == 0 else 8500,
                 metadata={
                     "team_role": agent, "task_type": "creative_brief",
-                    "reasoning_effort": "low", "provider_timeout_seconds": 100,
+                    "reasoning_effort": "low", "provider_timeout_seconds": PROVIDER_TIMEOUT_SECONDS,
                 },
             ), validate_revision=validate_candidate,
                 on_observed=record_model_call,
-                on_review_progress=record_review_progress), timeout=210 + llm.extra_timeout_seconds)
+                on_review_progress=record_review_progress), timeout=CALL_WAIT_SECONDS + llm.extra_timeout_seconds)
             persist_critic_audit(
                 db, product_id=product.id, task_id=task.id, run_id=run.id,
                 response=response,
@@ -337,9 +338,9 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     max_tokens=3000 if idx == 0 else 8500,
                     metadata={
                         "team_role": agent, "task_type": "creative_brief",
-                        "reasoning_effort": "low", "provider_timeout_seconds": 100,
+                        "reasoning_effort": "low", "provider_timeout_seconds": PROVIDER_TIMEOUT_SECONDS,
                     },
-                ), on_observed=record_model_call), timeout=210)
+                ), on_observed=record_model_call), timeout=CALL_WAIT_SECONDS)
                 if response.stop_reason not in (None, "end_turn", "stop_sequence"):
                     raise ValueError("Incomplete creative output") from exc
                 if len(response.content) > 65000:

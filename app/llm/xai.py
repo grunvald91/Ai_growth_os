@@ -5,6 +5,7 @@ from typing import Literal
 import httpx
 
 from app.llm.schemas import LLMRequest, LLMResponse, LLMUsage
+from app.llm.timeouts import PROVIDER_TIMEOUT_SECONDS
 
 ReasoningEffort = Literal["low", "medium", "high", "xhigh"]
 
@@ -20,7 +21,7 @@ class XAIProvider:
         model: str = "grok-4.7",
         base_url: str = "https://api.x.ai/v1",
         reasoning_effort: ReasoningEffort = "medium",
-        timeout_seconds: float = 300.0,
+        timeout_seconds: float = PROVIDER_TIMEOUT_SECONDS,
     ) -> None:
         if not api_key:
             raise ValueError("An xAI API key is required")
@@ -78,8 +79,9 @@ class XAIProvider:
         provider_timeout = request.metadata.get("provider_timeout_seconds")
         if isinstance(provider_timeout, (int, float)):
             seconds = float(provider_timeout)
-            if 5.0 <= seconds <= 600.0:
-                timeout = httpx.Timeout(seconds)
+            # Шаги могут просить больший лимит; меньше общего — нет (см. app/llm/timeouts.py).
+            if 5.0 <= seconds <= 3600.0:
+                timeout = httpx.Timeout(max(seconds, PROVIDER_TIMEOUT_SECONDS))
 
         async with httpx.AsyncClient(base_url=self._base_url, timeout=timeout) as client:
             response = None

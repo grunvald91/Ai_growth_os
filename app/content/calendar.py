@@ -21,6 +21,7 @@ from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, CostRecord, Metric, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
 from app.privacy import PrivacyGateway
+from app.llm.timeouts import CALL_WAIT_SECONDS
 
 PLATFORMS = {
     'own_site': ('Сайт / SEO', 'article'), 'dzen': ('Дзен', 'article'),
@@ -608,7 +609,7 @@ async def run_planner_once(session_factory, settings, llm=None):
                         llm.generate(request, on_observed=record_model_call,
                                      on_review_progress=record_review_progress)
                         if per_call_accounted else llm.generate(request),
-                        (180 if not injected_llm else 300) + getattr(llm, 'extra_timeout_seconds', 0),
+                        CALL_WAIT_SECONDS + getattr(llm, 'extra_timeout_seconds', 0),
                     )
                 except asyncio.TimeoutError:
                     attempt_failures.append({
@@ -641,7 +642,7 @@ async def run_planner_once(session_factory, settings, llm=None):
                             fallback_llm.generate(request.model_copy(update={'model': fallback_model}),
                                                   on_observed=record_model_call,
                                                   on_review_progress=record_review_progress),
-                            240 + fallback_llm.extra_timeout_seconds,
+                            CALL_WAIT_SECONDS + fallback_llm.extra_timeout_seconds,
                         )
                     except Exception:
                         attempt_failures.append({

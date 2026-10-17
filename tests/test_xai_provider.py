@@ -7,6 +7,7 @@ from app.core.composition import build_llm_provider
 from app.core.config import Settings
 from app.llm.fallback import FallbackProvider
 from app.llm.schemas import LLMMessage, LLMRequest
+from app.llm.timeouts import PROVIDER_TIMEOUT_SECONDS
 from app.llm.xai import XAIProvider
 
 
@@ -92,18 +93,18 @@ async def test_xai_provider_maps_request_and_usage(monkeypatch):
     assert response.stop_reason == "end_turn"
 
 @pytest.mark.asyncio
-async def test_xai_provider_allows_bounded_request_timeout(monkeypatch):
+async def test_xai_provider_request_timeout_never_below_shared_limit(monkeypatch):
     monkeypatch.setattr("app.llm.xai.httpx.AsyncClient", FakeAsyncClient)
     provider = XAIProvider(api_key="xai-test-secret", timeout_seconds=300)
 
-    await provider.generate(
-        LLMRequest(
-            messages=[LLMMessage(role="user", content="hello")],
-            metadata={"provider_timeout_seconds": 42},
+    for requested, expected in ((42, PROVIDER_TIMEOUT_SECONDS), (900, 900)):
+        await provider.generate(
+            LLMRequest(
+                messages=[LLMMessage(role="user", content="hello")],
+                metadata={"provider_timeout_seconds": requested},
+            )
         )
-    )
-
-    assert FakeAsyncClient.last.timeout.read == 42
+        assert FakeAsyncClient.last.timeout.read == expected
 
 
 

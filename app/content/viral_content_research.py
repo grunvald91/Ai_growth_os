@@ -38,6 +38,7 @@ from app.llm.service import LLMService
 from app.models.domain import AgentRun, Artifact, CostRecord, Task
 from app.privacy import PrivacyGateway
 from app.services.artifacts import ArtifactService
+from app.llm.timeouts import CALL_WAIT_SECONDS, PROVIDER_TIMEOUT_SECONDS
 
 
 class Contract(BaseModel):
@@ -802,7 +803,7 @@ async def run_viral_content_research(
                     "team_role": "viral_content_researcher",
                     "reasoning_effort": "low",
                     "task_type": "viral_content_research",
-                    "provider_timeout_seconds": 90,
+                    "provider_timeout_seconds": PROVIDER_TIMEOUT_SECONDS,
                 },
             )
 
@@ -819,7 +820,7 @@ async def run_viral_content_research(
                         raise ValueError("pain referenced unknown product fact")
 
             async def generate_and_validate(active_llm, request):
-                generated = await asyncio.wait_for(active_llm.generate(request), timeout=180 + getattr(active_llm, 'extra_timeout_seconds', 0))
+                generated = await asyncio.wait_for(active_llm.generate(request), timeout=CALL_WAIT_SECONDS + getattr(active_llm, 'extra_timeout_seconds', 0))
                 analysis_responses.append(generated)
                 parsed = ViralContentAnalysisDraft.model_validate_json(generated.content)
                 validate_integrity(parsed)

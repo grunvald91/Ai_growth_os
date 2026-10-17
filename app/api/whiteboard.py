@@ -18,6 +18,7 @@ from app.content.whiteboard.contracts import Contract, WhiteboardRequest
 from app.content.whiteboard.jobs import AGENT, approve_job, cancel_job, digest, job_directory, owner_task, queue_job, records
 from app.content.whiteboard.runtime import MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings
 from app.content.whiteboard.checkpoints import CheckpointError
+from app.content.durations import duration_notice, task_durations
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import Task, TaskStatus
@@ -231,13 +232,14 @@ def job_html(state, product_id, *, error=None):
     return body
 
 
-def creation_form(product_id, *, fields=None, error=None):
+def creation_form(product_id, *, fields=None, error=None, durations=None):
     fields = fields or {}
     base = f'/studio/products/{product_id}/whiteboard'
     profile = fields.get('profile', 'gemini_ru')
     maximum = str(fields.get('max_api_calls', '19'))
     visual_review = fields.get('visual_review', 'once')
     body = '<section class="sg-surface"><h2>Создать анимацию с озвучкой</h2><p>Вертикальное видео на 30 секунд: три сцены, русская озвучка, MP4, обложка и субтитры. Перед запуском вы подтвердите платную генерацию. Доступ к моделям проверяется перед платным запуском.</p>'
+    body += f'<p class="sg-notice sg-duration-note" role="note">⏱ {esc(duration_notice(durations or {}, "whiteboard"))}</p>'
     if error:
         body += f'<p class="sg-warning" role="alert">{esc(error)}</p>'
     body += (f'<form method="post" action="{base}" class="sg-form">'
@@ -331,7 +333,7 @@ async def studio_index(product_id: UUID, db: Session = Depends(get_db), settings
             error = MESSAGES['configuration_missing']
     except ValueError:
         error = MESSAGES['configuration_missing']
-    body = creation_form(product_id, error=error)
+    body = creation_form(product_id, error=error, durations=task_durations(db))
     tasks = list(db.scalars(select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT)
                            .order_by(Task.created_at.desc(), Task.id.desc()).limit(20)))
     body += history_html([_load(db, product_id, task.id) for task in tasks], product_id)
@@ -346,12 +348,12 @@ async def studio_create(product_id: UUID, request: Request, db: Session = Depend
         body = CreateJob(topic=fields.get('topic', ''), max_api_calls=fields.get('max_api_calls', '13'),
                          profile=fields.get('profile', 'configured'), visual_review=fields.get('visual_review') == 'once')
     except ValueError:
-        return page(product, 'Создать анимацию', creation_form(product_id, fields=fields,
+        return page(product, 'Создать анимацию', creation_form(product_id, fields=fields, durations=task_durations(db),
                     error='Тема: 8–400 символов. Лимит: 13–25 вызовов. Выберите вариант генерации.'), status=422)
     try:
         task = _queue(db, product, body, settings)
     except HTTPException as exc:
-        return page(product, 'Создать анимацию', creation_form(product_id, fields=fields, error=exc.detail), status=exc.status_code)
+        return page(product, 'Создать анимацию', creation_form(product_id, fields=fields, durations=task_durations(db), error=exc.detail), status=exc.status_code)
     return RedirectResponse(f'/studio/products/{product_id}/whiteboard/{task.id}', status_code=303)
 
 

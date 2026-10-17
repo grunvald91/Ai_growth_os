@@ -25,6 +25,7 @@ from app.llm.service import LLMService
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task
 from app.privacy import PrivacyGateway
 from app.services.artifacts import ArtifactService
+from app.llm.timeouts import CALL_WAIT_SECONDS
 
 
 class Contract(BaseModel):
@@ -520,7 +521,7 @@ async def run_viral_video_research(
                         response_schema=ViralAnalysisDraft.model_json_schema(),
                         metadata={"team_role": "viral_video_researcher", "reasoning_effort": "low", "task_type": "viral_video_research"},
                     )),
-                    timeout=180,
+                    timeout=CALL_WAIT_SECONDS,
                 )
                 analysis = ViralAnalysisDraft.model_validate_json(response.content)
                 allowed = {c.source_id for c in candidates}

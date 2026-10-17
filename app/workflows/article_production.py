@@ -31,6 +31,7 @@ from app.workflows.article_contracts import (
     StoryDerivativeDraft, StaticImageDerivativeDraft,
 )
 from app.workflows.context import load_context
+from app.llm.timeouts import CALL_WAIT_SECONDS, PROVIDER_TIMEOUT_SECONDS
 
 CHANNEL_PROFILES = {
     'own_site': 'Search-first evergreen guide: descriptive headings, actionable steps, FAQ opportunities, internal links and a contextual landing-page CTA.',
@@ -975,11 +976,11 @@ class ArticleProduction:
                                 'reasoning_effort': 'low',
                                 'team_role': name,
                                 'task_type': 'article_production',
-                                'provider_timeout_seconds': STAGE_PROVIDER_TIMEOUT_SECONDS.get(name, 90),
+                                'provider_timeout_seconds': PROVIDER_TIMEOUT_SECONDS,
                             }), validate_revision=validate_stage_revision,
                             on_observed=record_model_call,
                             on_review_progress=record_review_progress),
-                            timeout=STAGE_TIMEOUT_SECONDS.get(name, 300) + self.llm.extra_timeout_seconds)
+                            timeout=CALL_WAIT_SECONDS + self.llm.extra_timeout_seconds)
                         persist_critic_audit(
                             self.db, product_id=product_id, task_id=task_id,
                             run_id=run_id, response=response,

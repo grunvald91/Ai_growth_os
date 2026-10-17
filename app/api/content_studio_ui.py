@@ -9,6 +9,8 @@ import json
 from datetime import datetime
 from urllib.parse import quote
 
+from app.content.durations import KINDS, duration_estimate
+
 def esc(value) -> str:
     return html.escape(str(value if value is not None else ""), quote=True)
 
@@ -31,8 +33,10 @@ CHANNELS = {
                      ("dzen", "Дзен"), ("instagram_reels", "Instagram")],
 }
 
-def create_content_html(product_id, *, created=False, fields=None, error=None) -> str:
+def create_content_html(product_id, *, created=False, fields=None, error=None, durations=None) -> str:
     fields = fields or {}
+    timing = "".join(f"<li>{esc(duration_estimate(durations or {}, kind))}</li>"
+                     for kind in ("post", "package", "creative"))
     base = f"/studio/products/{product_id}"
     choices = "".join(
         f'<label class="sg-choice"><input type="radio" name="format" value="{esc(key)}" '
@@ -91,6 +95,10 @@ def create_content_html(product_id, *, created=False, fields=None, error=None) -
           <div class="sg-form-bottom">
             <div class="sg-form-hint"><span aria-hidden="true">✓</span> Создание не публикует материал.
             После подготовки можно проверить, изменить и утвердить.</div>
+            <div class="sg-form-hint sg-duration-note" role="note"><span aria-hidden="true">⏱</span>
+            <div>Сколько ждать результат:<ul>{timing}</ul>ИИ-модели отвечают небыстро. Страницу можно закрыть —
+            задание продолжится, статус виден в разделе <a href="{base}/work">«Задания»</a>.
+            <a href="{base}/speed">Скорость моделей →</a></div></div>
             <button class="btn primary sg-primary-action" type="submit">Создать материал <span aria-hidden="true">→</span></button>
           </div>
         </form>
@@ -113,6 +121,35 @@ def create_content_html(product_id, *, created=False, fields=None, error=None) -
         </section>
       </aside>
     </div>"""
+
+def speed_html(product_id, calls, durations, *, days=7) -> str:
+    base = f"/studio/products/{product_id}"
+    tabs = "".join(f'<a class="tab {"active" if value == days else ""}" href="{base}/speed?days={value}">{value} дней</a>'
+                   for value in (7, 30))
+    rows = "".join(
+        f"<tr><td>{esc(row['provider'])}</td><td>{esc(row['model'])}</td><td>{row['calls']}</td>"
+        f"<td>{row['failed']}</td><td>{row['p50']:.0f} с</td><td>{row['p90']:.0f} с</td><td>{row['max']:.0f} с</td></tr>"
+        for row in calls) or '<tr><td colspan="7">За выбранный период вызовов нет.</td></tr>'
+    kinds = "".join(
+        f"<tr><td>{esc(KINDS[kind][0])}</td><td>{item['count']}</td>"
+        f"<td>{item['median']:.0f} мин</td><td>{item['p90']:.0f} мин</td></tr>"
+        for kind, item in sorted(durations.items()) if kind in KINDS) or '<tr><td colspan="4">Завершённых заданий за 30 дней нет.</td></tr>'
+    return f"""
+    <section class="sg-surface"><div class="sg-section-head"><div><span class="sg-overline">ВЫЗОВЫ МОДЕЛЕЙ</span>
+      <h2>Время ответа по провайдерам</h2>
+      <p>p50 — половина вызовов быстрее этого времени, p90 — 9 из 10 вызовов. Лимит ожидания одного вызова — 10 минут:
+      мы не обрываем медленные ответы, а измеряем их.</p></div></div>
+      <div class="tabs">{tabs}</div>
+      <div class="sg-table-wrap"><table class="sg-table"><thead><tr><th>Провайдер</th><th>Модель</th><th>Вызовов</th>
+      <th>Ошибок</th><th>p50</th><th>p90</th><th>Максимум</th></tr></thead><tbody>{rows}</tbody></table></div>
+    </section>
+    <section class="sg-surface"><div class="sg-section-head"><div><span class="sg-overline">ЗАДАНИЯ ЦЕЛИКОМ</span>
+      <h2>Сколько ждать результат</h2><p>От первого до последнего вызова модели у завершённых заданий за 30 дней.
+      Эти же цифры показываются в формах создания.</p></div></div>
+      <div class="sg-table-wrap"><table class="sg-table"><thead><tr><th>Задание</th><th>Завершено</th>
+      <th>Обычно</th><th>9 из 10 быстрее</th></tr></thead><tbody>{kinds}</tbody></table></div>
+    </section>"""
+
 
 def review_html(product_id, records, *, filter_name="all") -> str:
     base=f"/studio/products/{product_id}"
