@@ -201,6 +201,9 @@ class OpenRouterImageProvider(OpenRouterBase):
         return await self.generate(scene, request, corrections=corrections)
 
 
+IMAGE_TIMEOUT = httpx.Timeout(360.0, connect=15.0)
+
+
 class ClaudeHubGeminiImageProvider(OpenRouterImageProvider):
     """Only Gemini 3.1 Flash Image, through ClaudeHub's documented Image API."""
 
@@ -222,7 +225,9 @@ class ClaudeHubGeminiImageProvider(OpenRouterImageProvider):
         if self.client is not None:
             response = await self.client.post('images/generations', json=body, headers=headers)
         else:
-            async with httpx.AsyncClient(base_url=self.base_url, timeout=120,
+            # Gemini image generation at ClaudeHub regularly takes longer than two
+            # minutes; a client-side ReadTimeout loses an image that is still billed.
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=IMAGE_TIMEOUT,
                     trust_env=False, follow_redirects=False) as client:
                 response = await client.post('images/generations', json=body, headers=headers)
         response.raise_for_status()

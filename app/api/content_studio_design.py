@@ -45,6 +45,9 @@ svg{display:block}
 .brand-mark{width:40px;height:40px;border-radius:14px;background:linear-gradient(145deg,var(--sg-cyan),var(--sg-blue));display:grid;place-items:center;box-shadow:0 8px 18px rgba(11,124,255,.24);color:#fff;font-weight:900;font-size:22px;transform:rotate(-5deg)}
 .brand-name{font-size:24px;font-weight:850;letter-spacing:-.6px;color:var(--sg-navy)}
 .brand-sub{font-size:10px;color:var(--sg-muted);margin-top:1px}
+/* Возврат в админку ServGo (servgo.ru/admin) */
+.back-admin{display:inline-flex;align-items:center;gap:4px;margin:0 10px 14px;padding:7px 11px;border-radius:12px;background:#eef5ff;color:var(--sg-blue);font-size:12px;font-weight:700;text-decoration:none}
+.m-back-admin{display:inline-flex;align-items:center;height:32px;padding:0 10px;border-radius:16px;background:#eef5ff;color:var(--sg-blue);font-size:12px;font-weight:700;text-decoration:none;white-space:nowrap}
 .nav-label{padding:18px 13px 7px;font-size:11px;text-transform:uppercase;letter-spacing:.11em;color:#9aa8c2;font-weight:800}
 .nav{display:grid;gap:5px}
 .nav a{display:flex;align-items:center;gap:11px;padding:11px 13px;border-radius:13px;color:#53627e;font-size:14px;font-weight:700;transition:.18s ease}

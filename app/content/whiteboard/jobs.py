@@ -210,8 +210,9 @@ class GuardedStage:
             run_id = self.ledger.begin(self.stage)
             try:
                 result = await method(*args, **kwargs)
-            except BaseException:
-                self.ledger.finish(run_id, error='provider_call_failed_billing_unknown')
+            except BaseException as exc:
+                # Keep the exception type so a timeout is distinguishable from a refusal.
+                self.ledger.finish(run_id, error=f'provider_call_failed_billing_unknown:{type(exc).__name__}')
                 raise
             self.ledger.finish(run_id)
             return result

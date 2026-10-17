@@ -341,7 +341,7 @@ def visual_class(index: int) -> str:
 
 
 def brand_html() -> str:
-    return servgo_brand_html()
+    return servgo_brand_html() + '<a class="back-admin" href="https://servgo.ru/admin">← Вернуться в админку ServGo</a>'
 
 
 def sidebar_html(product_id: UUID, active: str = "overview") -> str:
@@ -353,6 +353,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
     return f"""
     <aside class="sidebar">
       {servgo_brand_html(href=base)}
+      <a class="back-admin" href="https://servgo.ru/admin">← Вернуться в админку ServGo</a>
       <div class="nav-label">МОЯ РАБОТА</div>
       <nav class="nav" aria-label="Основная навигация">
         {item("overview", base, "⌂", "Главная")}
@@ -548,6 +549,7 @@ def mobile_logo_html(product_id: UUID) -> str:
     <div class="m-brand sg-mobile-brand">
       {servgo_brand_html(compact=True, href=base)}
       <div class="m-logo-actions">
+        <a class="m-back-admin" href="https://servgo.ru/admin" aria-label="Вернуться в админку ServGo">← Админка</a>
         <a class="m-bell" href="{base}/review" aria-label="Материалы на проверке">✓</a>
         <a class="m-avatar" href="/studio?choose=1" aria-label="Сменить компанию">⇄</a>
       </div>
