@@ -276,3 +276,57 @@ operations require operator reconciliation. Compose shares a persistent products
 volume across API/bot/worker and initializes repository assets without overwriting
 approved canonical profiles. Readiness and onboarding state are product-scoped;
 existing experiments continue, while outreach retains its independent approvals.
+
+
+## 17. Advisory critic for each agent (opt-in quality gate)
+
+A specialist owns the assignment and its final draft. Its *internal critic* is a
+secondary, subordinate role—not a new manager or a second CMO. This design
+applies to typed LLM-generated outputs from specialists, research, the CMO and
+article-production stages through one shared `LLMService` quality gate.
+
+```text
+Original objective and constraints
+    -> Specialist produces typed first draft
+    -> Validate the original JSON schema
+    -> Subordinate critic identifies all materially relevant issues (no count cap)
+       (may return zero; no tools or side effects)
+    -> If any issue is critical/major:
+           original specialist reviews each issue
+           ACCEPT (essential and goal-aligned) or REJECT (with reason)
+           performs at most one focused correction
+    -> Validate the exact ORIGINAL output schema
+    -> Existing workflow-specific factual/policy checks
+    -> Persist result; do not auto-publish
+```
+
+* The original goal, audience, verified facts, format, required deliverables and
+  previously approved constraints have priority over the critic's preferences.
+* The critic must identify the concrete flaw, its location in the draft, why it
+  matters to the original task, and one targeted correction. It cannot add a new
+  campaign direction, rewrite for personal taste or claim unverified research.
+* Only `critical` and `major` findings are offered for revision. A `minor`
+  or empty review finishes immediately without a second author call.
+* The original agent has the final editorial decision and can reject any
+  recommendation with a reason. If all are rejected, the ORIGINAL bytes win.
+* There is **no arbitrary maximum number of substantive findings**. Reviewer output is still bounded by available model context, output tokens and execution timeout; if incomplete, keep the valid original rather than silently claiming a full review.\n* At most **one critic call and one author revision call** per eligible draft.
+  A malformed response, unavailable reviewer, timeout, invalid correction or
+  oversized context falls back to the already-valid original draft.
+* This is **not** permission to execute external operations. Existing
+  authorization, approval, grounding, scope, and typed validation remain in
+  force after review. The critic never calls the ToolGateway.
+* An output with no valid JSON/schema or missing role metadata is not silently
+  repaired by the critic; the existing workflow handles invalid output.
+* Reviewer/author outcomes are attached to the returned response as
+  `quality_review`; the team cycle and article-stage checkpoints persist audit
+  metadata. Total usage includes optional review calls and stores extra per-model
+  token usage separately; price remains unknown until provider rates are known.
+
+Operational rollout: `AGENT_CRITIC_ENABLED=false` by default. Explicitly set
+`true` for measured pilot testing; it introduces extra API requests and latency.
+The feature is provider-neutral, passes both secondary prompts through the
+PrivacyGateway and does not change the deployment or production configuration
+by itself. Monitor review outcome rates and costs before broad rollout.
+
+This is a quality-assistance loop rather than an infinite debate, separate from
+human approval and deterministic quality validation.

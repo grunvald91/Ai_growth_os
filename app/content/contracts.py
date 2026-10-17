@@ -24,6 +24,8 @@ class ReadyTextSet(Contract):
         for t in self.texts:
             if t.channel in {'dzen', 'vc_ru'} and len(t.body) < 2000:
                 raise ValueError('Dzen and vc.ru require full articles')
+            if t.channel == 'telegram' and len(t.body.encode('utf-16-le')) // 2 > 4096:
+                raise ValueError('Telegram posts must fit 4096 UTF-16 units')
         return self
 
 class VideoVariants(Contract):

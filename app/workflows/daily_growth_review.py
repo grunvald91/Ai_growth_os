@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.agents import AGENT_CONFIGS, AgentRole
+from app.llm.audit import critic_cost_details, persist_critic_audit
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
 from app.models.domain import AgentRun, CostRecord, Product, TaskStatus
@@ -99,7 +100,8 @@ class DailyGrowthReview:
                 system_prompt=prompt, messages=[LLMMessage(role='user', content=json.dumps({
                     'context': self._sanitize_tree(context), 'analytics': self._sanitize_tree(snapshot)}))],
                 model=self.model, max_tokens=6000, response_schema=CMOReview.model_json_schema(),
-            )), timeout=CMO_TIMEOUT_SECONDS)
+                metadata={"team_role": "cmo", "task_type": "growth_review", "reasoning_effort": "low"},
+            )), timeout=CMO_TIMEOUT_SECONDS + self.llm.extra_timeout_seconds)
             error_code = 'invalid_strategy_output'
             if len(response.content) > 100_000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
                 raise ValueError('Incomplete or oversized response')
@@ -162,6 +164,8 @@ class DailyGrowthReview:
                 {'kind': kind, 'id': str(value)} for kind, values in (
                     ('decision', result.decision_ids), ('task', result.task_ids),
                     ('artifact', result.artifact_ids), ('approval', result.approval_ids)) for value in values]
+            persist_critic_audit(self.db, product_id=product_id, task_id=task_id,
+                                 run_id=run_id, response=response)
             task.status = TaskStatus.COMPLETED
             self.db.commit()
             result.status = 'completed'
@@ -174,6 +178,8 @@ class DailyGrowthReview:
                 failed.finished_at = datetime.now(timezone.utc)
             self.db.get(type(task), task_id).status = TaskStatus.FAILED
             self._record_usage(product_id, run_id, response)
+            persist_critic_audit(self.db, product_id=product_id, task_id=task_id,
+                                 run_id=run_id, response=response)
             self.db.commit()
             if isinstance(exc, asyncio.CancelledError):
                 raise
@@ -196,5 +202,5 @@ class DailyGrowthReview:
         self.db.add(CostRecord(product_id=product_id, agent_run_id=run_id, category='llm',
             provider=self.provider_name, amount=0, currency='USD',
             input_tokens=max(0, usage.input_tokens), output_tokens=max(0, usage.output_tokens),
-            incurred_at=datetime.now(timezone.utc), details={'cost_known': False,
-            'note': 'Usage recorded; monetary price unavailable, zero is not a free-cost claim.'}))
+            incurred_at=datetime.now(timezone.utc), details=critic_cost_details(response,
+            note='Usage recorded; monetary price unavailable, zero is not a free-cost claim.')))

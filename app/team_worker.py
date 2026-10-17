@@ -148,12 +148,24 @@ def _recover_transient_failed_experiment_tasks(
 
 async def run_once() -> int:
     settings = get_settings()
+    from app.content.whiteboard.worker import run_whiteboard_once
+    if await run_whiteboard_once(SessionLocal, settings):
+        return 1
+    from app.competitive_intelligence.worker import run_intelligence_once
+    if await run_intelligence_once(SessionLocal, settings):
+        return 1
     from app.content.calendar import run_planner_once, tick_calendar, recover_stale_planner
     with SessionLocal() as db:
         recover_stale_planner(db)
         tick_calendar(db, settings)
     if await run_planner_once(SessionLocal, settings):
         return 1
+    # Only explicitly scheduled, owner-approved posts can leave the system.
+    # The dispatcher is a durable at-most-once sender and is OFF by default.
+    if settings.content_telegram_autopost_enabled:
+        from app.content.telegram_publishing import run_due_telegram_post_once
+        if await run_due_telegram_post_once(SessionLocal, settings):
+            return 1
     from app.content.worker import run_content_once
     content_count = await run_content_once(SessionLocal, settings)
     if content_count:

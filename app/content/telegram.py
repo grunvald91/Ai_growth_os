@@ -3,15 +3,21 @@ import io
 import json
 import zipfile
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from uuid import UUID
 from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict, Field
 from app.content.render import asset_path
 from app.content.service import queue_content
-from app.models.domain import Artifact, Metric, Product, Task
+from app.content.revisions import queue_post_edit, post_history
+from app.content.calendar import PLATFORMS
+from app.content.creative import CreativeRequest, queue_creative
+from app.content.telegram_publishing import (verify_channel, save_verified_channel,
+    connected_channels, schedule_post, cancel_scheduled_post)
+from app.models.domain import Artifact, ArtifactStatus, Metric, Product, Publication, Task, TaskStatus
 
 LABELS = {'own_site':'SEO / сайт', 'dzen':'Дзен', 'tenchat':'TenChat', 'vc_ru':'vc.ru',
-          'telegram':'Telegram', 'faq':'FAQ', 'founder':'Пост автора'}
+          'telegram':'Telegram', 'vk':'ВКонтакте', 'faq':'FAQ', 'founder':'Пост автора'}
 
 class Observations(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -29,9 +35,17 @@ class TelegramContent:
         self.topic_product = None
         self.metrics_article = None
         self.plan_product = None
+        self.post_target = None  # (product_id, channel) for a single post
+        self.post_edit_target = None  # immutable Artifact ID under revision
+        self.calendar_target = None  # (plan_id, slot_id)
+        self.channel_connect_product = None
+        self.schedule_post_id = None
+        self.schedule_target = None  # (post_id, connection_id)
+        self.creative_target = None  # (company_id, format, platform)
+        self.calendar_publish_slot = None  # (plan_id, slot_id)
 
     async def menu(self, chat_id):
-        self.topic_product = self.metrics_article = self.plan_product = None
+        self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = self.calendar_target = self.channel_connect_product = self.schedule_post_id = self.schedule_target = self.creative_target = self.calendar_publish_slot = None
         with self.sessions() as db:
             products = list(db.scalars(select(Product).order_by(Product.name).limit(20)))
             buttons = [[{'text':p.name, 'callback_data':f'content:product:{p.id}'}] for p in products]
@@ -49,12 +63,35 @@ class TelegramContent:
             articles = list(db.scalars(select(Artifact).where(Artifact.product_id == product.id,
                 Artifact.kind == 'article').order_by(Artifact.created_at.desc()).limit(8)))
             statuses = {'queued':'в очереди','running':'готовится','completed':'готово', 'failed':'ошибка'}
-            text = f'📝 {product.name}\n\nПакет: SEO-статья и адаптации, включая Дзен и Telegram, плюс отдельные production-ready сценарии/раскадровки для YouTube Shorts и Instagram Reels.\nВидео здесь не генерируется и не рендерится. Публикация — после проверки, вручную до подключения площадок.'
+            text = (f'📝 {product.name}\n\n'
+                    'Один пост — быстрая подготовка текста для выбранной площадки. '
+                    'Полный пакет — SEO-статья, адаптации и видеосценарии. '
+                    'Проверка и утверждение обязательны. '
+                    'Видео автоматически не создаётся; публикация отдельно, вручную до подключения площадок.')
             if tasks:
                 text += '\n\nПоследние задачи:\n' + '\n'.join(f'• {t.title[:65]} — {statuses.get(t.status.value, t.status.value)}' for t in tasks)
-            buttons = [[{'text':'▶️ Создать пакет', 'callback_data':f'content:queue:{product.id}'},
-                        {'text':'✍️ Своя тема', 'callback_data':f'content:topic:{product.id}'}]]
+            buttons = [[{'text':'✍️ Один пост', 'callback_data':f'content:postchannels:{product.id}'},
+                        {'text':'📦 Полный пакет', 'callback_data':f'content:queue:{product.id}'}],
+                       [{'text':'✏️ Тема полного пакета', 'callback_data':f'content:topic:{product.id}'}]]
+            buttons.append([{'text':'🎬 Ролики, Stories, изображения', 'callback_data':f'content:creativeformats:{product.id}'}])
             buttons.append([{'text':'📅 Контент-план', 'callback_data':f'content:calendar:{product.id}'}])
+            buttons.append([{'text':'📣 Telegram-каналы и публикации', 'callback_data':f'content:channels:{product.id}'}])
+            recent_posts = list(db.scalars(select(Artifact).where(
+                Artifact.product_id == product.id, Artifact.kind == 'channel_text'
+            ).order_by(Artifact.created_at.desc()).limit(10)))
+            for post in recent_posts:
+                try:
+                    meta = json.loads(post.content)
+                except (ValueError, TypeError):
+                    continue
+                if meta.get('origin') in {'quick_post', 'owner_revision'}:
+                    buttons.append([{'text':'📝 ' + post.title[:50], 'callback_data':f'content:asset:{post.id}'}])
+            recent_creatives = list(db.scalars(select(Artifact).where(
+                Artifact.product_id == product.id,
+                Artifact.kind == 'creative_brief',
+            ).order_by(Artifact.created_at.desc()).limit(8)))
+            buttons += [[{'text':'🎬 ' + item.title[:47], 'callback_data':f'content:asset:{item.id}'}]
+                        for item in recent_creatives]
             buttons += [[{'text':a.title[:60], 'callback_data':f'content:article:{a.id}'}] for a in articles]
             buttons.append([{'text':'🔄 Обновить', 'callback_data':f'content:product:{product.id}'}])
         await self.bot._send(chat_id, text, reply_markup={'inline_keyboard':buttons})
@@ -66,8 +103,87 @@ class TelegramContent:
             await self.menu(chat)
             return True
         if text.startswith('/') or text in {'📊 Главное','✅ На согласование','🧪 Тесты','🔄 Обновить','🏢 Компания','📇 Контакты','📧 Почта'}:
-            self.topic_product = self.metrics_article = self.plan_product = None
+            self.topic_product = self.metrics_article = self.plan_product = self.post_target = self.post_edit_target = self.calendar_target = self.channel_connect_product = self.schedule_post_id = self.schedule_target = self.creative_target = self.calendar_publish_slot = None
             return False
+        if self.creative_target:
+            product_id, creative_format, platform = self.creative_target
+            try:
+                request = CreativeRequest(
+                    mode='creative', product_id=product_id,
+                    format=creative_format, platform=platform, topic=text,
+                )
+                with self.sessions() as db:
+                    queue_creative(db, request)
+                self.creative_target = None
+                await self.bot._send(chat,
+                    '✅ Бриф поставлен в очередь. ИИ подготовит сценарий или визуальную '
+                    'раскадровку на проверку. Видео, фотография и публикация пока не создаются.')
+            except ValueError:
+                await self.bot._send(chat, 'Напиши тему от 3 до 300 символов.')
+            return True
+        if self.channel_connect_product:
+            try:
+                checked = await verify_channel(self.bot.api, text)
+                with self.sessions() as db:
+                    connection = save_verified_channel(db, self.channel_connect_product, checked)
+                self.channel_connect_product = None
+                await self.bot._send(chat,
+                    '✅ Канал подключён: ' + connection.title +
+                    '. Бот проверен как администратор с правом отправки. '
+                    'Публикация возможна только после утверждения текста и назначения даты.')
+            except (ValueError, LookupError) as exc:
+                await self.bot._send(chat, str(exc))
+            except Exception:
+                await self.bot._send(chat,
+                    'Не удалось проверить права бота через Telegram. '
+                    'Добавь бота администратором с правом публикации и попробуй ещё раз.')
+            return True
+        if self.schedule_target:
+            post_id, channel_id = self.schedule_target
+            try:
+                when = datetime.strptime(text, '%d.%m.%Y %H:%M').replace(tzinfo=ZoneInfo('Europe/Moscow'))
+                with self.sessions() as db:
+                    publication = schedule_post(db, post_id, channel_id, when)
+                self.schedule_target = self.schedule_post_id = None
+                enabled = self.settings().content_telegram_autopost_enabled
+                await self.bot._send(chat,
+                    '✅ Публикация запланирована на ' + when.strftime('%d.%m.%Y %H:%M') +
+                    ' (Москва). ' +
+                    ('Автоотправка активна.' if enabled else
+                     'Автоотправка пока выключена на сервере; материал не будет отправлен до включения.'))
+            except (ValueError, LookupError) as exc:
+                await self.bot._send(chat, str(exc))
+            return True
+        if self.calendar_target:
+            plan_id, slot_id = self.calendar_target
+            try:
+                when = datetime.strptime(text, '%d.%m.%Y %H:%M')
+                from app.content.calendar import plan_record, reschedule_slot
+                with self.sessions() as db:
+                    _, plan = plan_record(db, plan_id)
+                    when = when.replace(tzinfo=ZoneInfo(plan['timezone']))
+                    result = reschedule_slot(db, plan_id, slot_id, when)
+                self.calendar_target = None
+                await self.bot._send(
+                    chat, '✅ Время изменено: ' +
+                    datetime.fromisoformat(result['publish_at']).strftime('%d.%m.%Y %H:%M') +
+                    '. Тема и материалы сохранены; новая публикация не отправлялась.'
+                )
+            except (ValueError, LookupError) as exc:
+                await self.bot._send(chat, str(exc))
+            return True
+        if self.post_edit_target:
+            try:
+                with self.sessions() as db:
+                    queue_post_edit(db, self.post_edit_target, text)
+                self.post_edit_target = None
+                await self.bot._send(
+                    chat, '✅ Замечание принято. ИИ-редактор готовит новую версию. '
+                          'Исходный текст сохранён, а новая версия появится на проверку.'
+                )
+            except (ValueError, LookupError) as exc:
+                await self.bot._send(chat, str(exc))
+            return True
         if self.plan_product:
             try:
                 from app.content.calendar import save_preferences, queue_plan
@@ -78,6 +194,16 @@ class TelegramContent:
                 await self.bot._send(chat, '✅ Требования сохранены. Редактор готовит новый контент-план для подтверждения.')
             except (ValueError, LookupError) as exc:
                 await self.bot._send(chat, str(exc))
+            return True
+        if self.post_target:
+            product_id, channel = self.post_target
+            try:
+                with self.sessions() as db:
+                    queue_content(db, product_id, text, format='post', channel=channel)
+                self.post_target = None
+                await self.bot._send(chat, '✅ Один пост поставлен в очередь. Материал появится в разделе компании для проверки. Публикация не запускается.')
+            except ValueError:
+                await self.bot._send(chat, 'Напиши тему одним сообщением, от 3 до 300 символов.')
             return True
         if self.topic_product:
             try:
@@ -160,11 +286,17 @@ class TelegramContent:
                 Task.assigned_agent == 'editorial_planner').order_by(Task.created_at.desc()).limit(1)))
             buttons = [[{'text':'🗓 Составить / пересмотреть', 'callback_data':f'content:plan:{product_id}'}],
                        [{'text':'✏️ Мои площадки и ресурсы', 'callback_data':f'content:preferences:{product_id}'}]]
-            text = '📅 Контент-план: ' + product.name + '\nРедактор выбирает площадки, частоту и форматы, назначает подготовку заранее. Расписание запускается после подтверждения. Публикация пока вручную.'
+            text = ('📅 Контент-план: ' + product.name +
+                    '\nРедактор выбирает площадки и назначает подготовку заранее. '
+                    'После подтверждения запускается подготовка, не публикация. '
+                    'Telegram можно отправлять по согласованному расписанию только в подключённые '
+                    'каналы и после утверждения текста.')
             if tasks:
                 text += '\nПоследняя работа редактора: ' + {'queued':'в очереди', 'running':'готовит план', 'completed':'план готов', 'failed':'ошибка; можно повторить'}.get(tasks[0].status.value, tasks[0].status.value)
             if plans:
-                latest = json.loads(plans[0].content)
+                current = next((row for row in plans
+                                if json.loads(row.content).get('approval_state') == 'active'), plans[0])
+                latest = json.loads(current.content)
                 text += '\n\n' + render_calendar(latest)
                 for item in plans:
                     value = json.loads(item.content)
@@ -184,8 +316,272 @@ class TelegramContent:
     async def callback(self, chat, data):
         try:
             _, action, raw = data.split(':',2)
-            record_id = UUID(raw)
-            if action == 'calendar':
+            if action in {'slotmove', 'planslot'}:
+                raw_plan_id, slot_id = raw.split(':', 1)
+                record_id = UUID(raw_plan_id)
+            else:
+                record_id = UUID(raw)
+            # Leaving the quick-post wizard must not steal a later unrelated
+            # message (company profile, research parameters, statistics, etc.).
+            if action not in {'postchannels', 'posttg', 'postvk', 'postdzen', 'postvc', 'postten'}:
+                self.post_target = None
+            if action != 'editpost':
+                self.post_edit_target = None
+            if action != 'slotmove':
+                self.calendar_target = None
+            if action != 'connecttg':
+                self.channel_connect_product = None
+            if action not in {'schedulechannels', 'schedtg', 'planpost', 'planslot'}:
+                self.schedule_post_id = None
+            if action not in {'planslot', 'schedtg'}:
+                self.calendar_publish_slot = None
+            if action != 'schedtg':
+                self.schedule_target = None
+            if action not in {'creativeformats', 'creativevideo', 'creativestory', 'creativeimage',
+                              'cvyt', 'cvreels', 'cvvk', 'cstg', 'csreels', 'csvk',
+                              'citg', 'civk', 'cidzen', 'cireels'}:
+                self.creative_target = None
+            if action == 'creativeformats':
+                with self.sessions() as db:
+                    if db.get(Product, record_id) is None:
+                        raise LookupError('Компания не найдена')
+                buttons = [[{
+                    'text':label, 'callback_data':f'content:{key}:{record_id}',
+                }] for label,key in [
+                    ('🎥 Короткое видео (только сценарий)', 'creativevideo'),
+                    ('📱 Stories (раскадровка)', 'creativestory'),
+                    ('🖼 Картинка (дизайн-бриф)', 'creativeimage'),
+                ]]
+                await self.bot._send(chat,
+                    'Какой материал создать? Готовим отдельный бриф для одной площадки '
+                    'без запуска большого пакета и без рендера медиа.',
+                    reply_markup={'inline_keyboard':buttons})
+            elif action in {'creativevideo', 'creativestory', 'creativeimage'}:
+                choices = {
+                    'creativevideo': [('YouTube Shorts','cvyt'), ('Instagram Reels','cvreels'),
+                                      ('VK Клипы','cvvk')],
+                    'creativestory': [('Telegram','cstg'), ('Instagram Stories','csreels'),
+                                      ('VK Истории','csvk')],
+                    'creativeimage': [('Telegram','citg'), ('ВКонтакте','civk'),
+                                      ('Дзен','cidzen'), ('Instagram','cireels')],
+                }[action]
+                await self.bot._send(chat, 'Выбери площадку:',
+                    reply_markup={'inline_keyboard': [[{
+                        'text':label, 'callback_data':f'content:{key}:{record_id}'
+                    }] for label,key in choices]})
+            elif action in {'cvyt','cvreels','cvvk','cstg','csreels','csvk',
+                            'citg','civk','cidzen','cireels'}:
+                mapping = {
+                    'cvyt': ('short_video','youtube_shorts'),
+                    'cvreels': ('short_video','instagram_reels'),
+                    'cvvk': ('short_video','vk_clips'),
+                    'cstg': ('story','telegram'), 'csreels': ('story','instagram_reels'),
+                    'csvk': ('story','vk'),
+                    'citg': ('static_image','telegram'), 'civk': ('static_image','vk'),
+                    'cidzen': ('static_image','dzen'), 'cireels': ('static_image','instagram_reels'),
+                }
+                with self.sessions() as db:
+                    if db.get(Product, record_id) is None:
+                        raise LookupError('Компания не найдена')
+                fmt, platform = mapping[action]
+                self.topic_product = self.post_target = self.post_edit_target = None
+                self.plan_product = self.metrics_article = self.channel_connect_product = None
+                self.creative_target = (record_id, fmt, platform)
+                await self.bot._send(chat, 'Напиши тему для сценария/брифа одним сообщением.')
+            elif action == 'channels':
+                with self.sessions() as db:
+                    product = db.get(Product, record_id)
+                    if product is None:
+                        raise LookupError('Компания не найдена')
+                    channels = connected_channels(db, record_id)
+                    publications = list(db.scalars(select(Publication).where(
+                        Publication.product_id == record_id,
+                        Publication.channel == 'telegram',
+                    ).order_by(Publication.created_at.desc()).limit(12)))
+                    actions = [[{
+                        'text':'➕ Подключить Telegram-канал',
+                        'callback_data':f'content:connecttg:{record_id}',
+                    }]]
+                    for pub in publications:
+                        if pub.status in {'scheduled', 'missed', 'failed_before_send'}:
+                            actions.append([{
+                                'text':'✖ Снять с расписания ' + str(pub.id)[:8],
+                                'callback_data':f'content:canceltg:{pub.id}',
+                            }])
+                    summary = '\n'.join('• ' + ch.title for ch in channels) or 'Каналы ещё не подключены.'
+                    summary += '\n\nПоследние публикации:\n'
+                    summary += '\n'.join(
+                        '• ' + pub.status + ' · ' + str(pub.artifact_id)[:8]
+                        for pub in publications
+                    ) or 'Нет запланированных публикаций.'
+                await self.bot._send(chat,
+                    '📣 Telegram-каналы компании: ' + product.name + '\n\n' + summary +
+                    '\n\nДля подключения добавь бота администратором канала с правом публикации. '
+                    'Пароль и токены вручную вводить не нужно.',
+                    reply_markup={'inline_keyboard':actions})
+            elif action == 'connecttg':
+                with self.sessions() as db:
+                    if db.get(Product, record_id) is None:
+                        raise LookupError('Компания не найдена')
+                self.topic_product = self.metrics_article = self.plan_product = None
+                self.channel_connect_product = record_id
+                await self.bot._send(chat,
+                    'Добавь управляющего бота администратором канала с правом публикации. '
+                    'Затем пришли @username канала или его ID (начинается с -100). '
+                    'Я проверю права через официальный Telegram API.')
+            elif action == 'planpost':
+                with self.sessions() as db:
+                    post = db.get(Artifact, record_id)
+                    if post is None or post.kind != 'channel_text' or post.status != ArtifactStatus.APPROVED:
+                        raise LookupError('Сначала утверди Telegram-пост')
+                    if json.loads(post.content).get('channel') != 'telegram':
+                        raise ValueError('Это не Telegram-пост')
+                    plans = list(db.scalars(select(Artifact).where(
+                        Artifact.kind == 'editorial_plan',
+                        Artifact.product_id == post.product_id,
+                    ).order_by(Artifact.created_at.desc()).limit(30)))
+                    matches = []
+                    for row in plans:
+                        plan = json.loads(row.content)
+                        if plan.get('approval_state') == 'active':
+                            for slot in plan.get('slots', []):
+                                if (slot.get('platform') == 'telegram' and
+                                        slot.get('task_id') == str(post.task_id) and
+                                        not slot.get('telegram_publication_id')):
+                                    matches.append((row, slot))
+                self.schedule_post_id = record_id
+                buttons = [[{
+                    'text': '🕒 ' + slot['publish_at'][5:16].replace('T',' ') +
+                            ' · ' + slot['topic'][:22],
+                    'callback_data': f'content:planslot:{row.id}:{slot["slot_id"]}',
+                }] for row,slot in matches[:10]]
+                await self.bot._send(chat,
+                    'Выбери Telegram-слот действующего контент-плана. '
+                    'Если список пуст, сначала добавь пост в подтверждённый план.',
+                    reply_markup={'inline_keyboard':buttons})
+            elif action == 'planslot':
+                if self.schedule_post_id is None:
+                    raise ValueError('Сначала открой утверждённый Telegram-пост')
+                from app.content.calendar import plan_record
+                with self.sessions() as db:
+                    post = db.get(Artifact, self.schedule_post_id)
+                    row, plan = plan_record(db, record_id)
+                    slot = next((v for v in plan.get('slots', [])
+                                 if str(v.get('slot_id')) == str(slot_id)), None)
+                    if (post is None or row.product_id != post.product_id or
+                            plan.get('approval_state') != 'active' or slot is None or
+                            slot.get('platform') != 'telegram' or
+                            slot.get('task_id') != str(post.task_id)):
+                        raise ValueError('Слот не принадлежит этому утверждённому посту')
+                    connections = connected_channels(db, post.product_id)
+                self.calendar_publish_slot = (record_id, slot_id)
+                buttons = [[{
+                    'text': '📣 ' + connection.title[:42],
+                    'callback_data': f'content:schedtg:{connection.id}',
+                }] for connection in connections]
+                await self.bot._send(chat,
+                    'Выбери Telegram-канал для публикации в указанный день. '
+                    'Дата берётся непосредственно из календаря.',
+                    reply_markup={'inline_keyboard':buttons})
+            elif action == 'schedulechannels':
+                with self.sessions() as db:
+                    post = db.get(Artifact, record_id)
+                    if post is None or post.kind != 'channel_text' or post.status != ArtifactStatus.APPROVED:
+                        raise LookupError('Сначала утверди пост')
+                    if json.loads(post.content).get('channel') != 'telegram':
+                        raise ValueError('Автопостинг доступен только для Telegram-постов')
+                    connections = connected_channels(db, post.product_id)
+                self.schedule_post_id = record_id
+                actions = [[{
+                    'text':'📣 ' + connection.title[:42],
+                    'callback_data':f'content:schedtg:{connection.id}',
+                }] for connection in connections]
+                await self.bot._send(chat,
+                    'Выбери канал для утверждённого поста. '
+                    'Если каналов нет, сначала открой раздел Telegram-каналов.',
+                    reply_markup={'inline_keyboard':actions})
+            elif action == 'schedtg':
+                if self.schedule_post_id is None:
+                    raise ValueError('Сначала открой утверждённый пост и выбери публикацию')
+                with self.sessions() as db:
+                    post = db.get(Artifact, self.schedule_post_id)
+                    connection = db.get(Artifact, record_id)
+                    if (post is None or connection is None or post.product_id != connection.product_id
+                            or connection.kind != 'telegram_channel_connection'
+                            or connection.status != ArtifactStatus.APPROVED):
+                        raise ValueError('Канал не принадлежит компании этого поста')
+                if self.calendar_publish_slot:
+                    from app.content.calendar import plan_record
+                    plan_id, slot_key = self.calendar_publish_slot
+                    with self.sessions() as db:
+                        _, plan = plan_record(db, plan_id)
+                        slot = next(v for v in plan['slots']
+                                    if str(v['slot_id']) == str(slot_key))
+                        when = datetime.fromisoformat(slot['publish_at'])
+                        publication = schedule_post(
+                            db, self.schedule_post_id, record_id, when,
+                            plan_id=plan_id, slot_id=slot_key,
+                        )
+                    self.schedule_post_id = self.calendar_publish_slot = self.schedule_target = None
+                    await self.bot._send(chat,
+                        '✅ Публикация привязана к календарю: ' +
+                        when.strftime('%d.%m.%Y %H:%M') + '. ' +
+                        ('Автоотправка включена.' if self.settings().content_telegram_autopost_enabled
+                         else 'Автоотправка выключена на сервере.'))
+                else:
+                    self.schedule_target = (self.schedule_post_id, record_id)
+                    await self.bot._send(chat,
+                        'Пришли дату и время публикации по Москве: ДД.ММ.ГГГГ ЧЧ:ММ. '
+                        'Например: 15.10.2026 12:30. Перед отправкой пост должен оставаться утверждённым.')
+            elif action == 'canceltg':
+                with self.sessions() as db:
+                    cancel_scheduled_post(db, record_id)
+                await self.bot._send(chat, '✅ Публикация отменена до отправки.')
+            elif action == 'slotmove':
+                from app.content.calendar import plan_record
+                with self.sessions() as db:
+                    row, plan = plan_record(db, record_id)
+                    slot = next((x for x in plan['slots']
+                                 if str(x.get('slot_id')) == str(slot_id)), None)
+                    if not slot:
+                        raise LookupError('Слот не найден')
+                    if plan.get('approval_state') not in {'active', 'draft'}:
+                        raise ValueError('План недоступен для переноса')
+                    if slot.get('publication_url'):
+                        raise ValueError('Опубликованный материал нельзя переносить')
+                self.topic_product = self.metrics_article = self.plan_product = None
+                self.post_target = self.post_edit_target = None
+                self.calendar_target = (record_id, slot_id)
+                await self.bot._send(chat,
+                    'Пришли новое время в формате ДД.ММ.ГГГГ ЧЧ:ММ.\n'
+                    f'Площадка: {PLATFORMS[slot["platform"]][0]}. '
+                    'Дата должна оставаться в пределах текущего плана. '
+                    'Перенос не публикует материал автоматически.')
+            elif action == 'postchannels':
+                self.topic_product = self.metrics_article = self.plan_product = self.post_target = None
+                with self.sessions() as db:
+                    if db.get(Product, record_id) is None:
+                        raise LookupError('Компания не найдена')
+                choices = [
+                    ('Telegram', 'posttg'), ('ВКонтакте', 'postvk'),
+                    ('Дзен', 'postdzen'), ('vc.ru', 'postvc'), ('TenChat', 'postten'),
+                ]
+                buttons = [[{'text':label, 'callback_data':f'content:{action_name}:{record_id}'}]
+                           for label, action_name in choices]
+                await self.bot._send(chat, 'Выбери площадку для одного поста. ИИ создаст текст для проверки, без публикации.',
+                                     reply_markup={'inline_keyboard':buttons})
+            elif action in {'posttg', 'postvk', 'postdzen', 'postvc', 'postten'}:
+                channel = {
+                    'posttg': 'telegram', 'postvk': 'vk', 'postdzen': 'dzen',
+                    'postvc': 'vc_ru', 'postten': 'tenchat',
+                }[action]
+                with self.sessions() as db:
+                    if db.get(Product, record_id) is None:
+                        raise LookupError('Компания не найдена')
+                self.post_target = (record_id, channel)
+                self.topic_product = self.metrics_article = self.plan_product = None
+                await self.bot._send(chat, 'Напиши тему поста одним сообщением. Пример: «3 ошибки при выборе подарочного букета».')
+            elif action == 'calendar':
                 await self.calendar(chat, record_id)
             elif action == 'plan':
                 from app.content.calendar import queue_plan
@@ -193,7 +589,7 @@ class TelegramContent:
                     queue_plan(db, record_id)
                 await self.bot._send(chat, '✅ Редактору поручен план. Он учтёт профиль, доступные исследования и записанные результаты. Открой календарь и нажми «Обновить».')
             elif action == 'preferences':
-                self.topic_product = self.metrics_article = None
+                self.topic_product = self.metrics_article = self.post_target = None
                 self.plan_product = record_id
                 await self.bot._send(chat, 'Напиши своими словами: какие аккаунты уже есть, кого привлекаем, сколько времени есть на проверку, какие форматы доступны, на какой период нужен план. Можно указать желаемую частоту, даты и бюджет. Например: «Есть Telegram и Дзен; Shorts хочу протестировать. На проверку — два часа в неделю. План на 14 дней». Неизвестное можно так и назвать.')
             elif action == 'planview':
@@ -205,6 +601,13 @@ class TelegramContent:
                         buttons.insert(0, [{'text':'✅ Подтвердить и готовить', 'callback_data':f'content:planapprove:{record_id}'}])
                     if value['approval_state'] == 'active':
                         buttons.insert(0, [{'text':'⏸ Пауза', 'callback_data':f'content:planpause:{record_id}'}])
+                    if value['approval_state'] in {'active', 'draft'}:
+                        for slot in sorted(value['slots'], key=lambda x: x['publish_at'])[:15]:
+                            buttons.append([{
+                                'text': '🕒 ' + slot['publish_at'][5:16].replace('T', ' ') + ' · ' +
+                                        PLATFORMS[slot['platform']][0][:16],
+                                'callback_data': f'content:slotmove:{record_id}:{slot["slot_id"]}',
+                            }])
                     body = render_calendar(value)
                 await self.bot._send(chat, body, reply_markup={'inline_keyboard':buttons})
             elif action == 'planapprove':
@@ -221,6 +624,7 @@ class TelegramContent:
                 await self.product(chat, record_id)
             elif action in {'queue','topic'}:
                 if action == 'topic':
+                    self.post_target = None
                     self.topic_product = record_id
                     await self.bot._send(chat, 'Напиши тему статьи одним сообщением, до 300 символов.')
                 else:
@@ -230,14 +634,135 @@ class TelegramContent:
                     await self.product(chat, record_id)
             elif action in {'article','download'}:
                 await self.article(chat, record_id, download=action == 'download')
-            elif action == 'asset':
+            elif action == 'editpost':
                 with self.sessions() as db:
                     item = db.get(Artifact, record_id)
-                    if item is None or item.kind not in {'channel_text','video_script','content_distribution'}:
+                    if (item is None or item.kind != 'channel_text' or
+                            item.status not in {ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED}):
+                        raise LookupError('Пост недоступен для доработки')
+                    current = json.loads(item.content)
+                    if not current.get('body'):
+                        raise LookupError('Текст поста отсутствует')
+                self.topic_product = self.metrics_article = self.plan_product = self.post_target = None
+                self.post_edit_target = record_id
+                await self.bot._send(
+                    chat,
+                    'Напиши, что именно изменить в посте. Например: '
+                    '«Убери общие фразы, добавь конкретный пример и сократи вступление». '
+                    'ИИ сохранит старую версию, а новую отправит на проверку.'
+                )
+            elif action == 'history':
+                with self.sessions() as db:
+                    versions = post_history(db, record_id)
+                    buttons = []
+                    for pos, version in enumerate(versions, 1):
+                        label = f'Версия {pos} · {version.title[:36]} · {version.status.value}'
+                        buttons.append([{
+                            'text': label,
+                            'callback_data': f'content:asset:{version.id}',
+                        }])
+                await self.bot._send(
+                    chat,
+                    f'📚 История текста — {len(versions)} верс.\n'
+                    'Старые варианты доступны для просмотра, но не редактируются поверх оригинала.',
+                    reply_markup={'inline_keyboard': buttons},
+                )
+            elif action == 'approvebrief':
+                with self.sessions() as db:
+                    brief = db.scalar(select(Artifact).where(
+                        Artifact.id == record_id, Artifact.kind == 'creative_brief',
+                    ).with_for_update())
+                    if brief is None:
+                        raise LookupError('Бриф не найден')
+                    if brief.status == ArtifactStatus.AWAITING_APPROVAL:
+                        brief.status = ArtifactStatus.APPROVED
+                        brief.version += 1
+                        db.commit()
+                        result = '✅ Бриф согласован. Медиафайл и публикация не создавались.'
+                    else:
+                        result = 'Бриф уже проверен или недоступен для согласования.'
+                await self.bot._send(chat, result)
+            elif action == 'approvepost':
+                with self.sessions() as db:
+                    item = db.scalar(select(Artifact).where(
+                        Artifact.id == record_id, Artifact.kind == 'channel_text'
+                    ).with_for_update())
+                    if item is None or not json.loads(item.content).get('body'):
+                        raise LookupError('Пост недоступен')
+                    if item.status == ArtifactStatus.AWAITING_APPROVAL:
+                        pending = db.scalar(select(Task).where(
+                            Task.product_id == item.product_id,
+                            Task.assigned_agent == 'content_editor',
+                            Task.title == 'EDIT: ' + str(item.id),
+                            Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING]),
+                        ))
+                        if pending is not None:
+                            response = 'Пост сейчас дорабатывается. Проверь новую версию перед утверждением.'
+                        else:
+                            item.status = ArtifactStatus.APPROVED
+                            item.version += 1
+                            db.commit()
+                            response = '✅ Текст утверждён. Публикация пока только вручную.'
+                    elif item.status == ArtifactStatus.APPROVED:
+                        response = 'Этот текст уже утверждён. Публикация не запускалась.'
+                    else:
+                        response = 'Пост нельзя утвердить из текущего состояния.'
+                await self.bot._send(chat, response)
+            elif action == 'asset':
+                reply_markup = None
+                with self.sessions() as db:
+                    item = db.get(Artifact, record_id)
+                    if item is None or item.kind not in {'channel_text','video_script','content_distribution','creative_brief'}:
                         raise LookupError('Материал не найден')
                     value = json.loads(item.content)
                     if item.kind == 'channel_text':
-                        text = '# ' + value['title'] + '\n\n' + value['body']
+                        status_label = {
+                            ArtifactStatus.AWAITING_APPROVAL: 'Ожидает проверки',
+                            ArtifactStatus.APPROVED: 'Утверждено',
+                        }.get(item.status, getattr(item.status, "value", str(item.status)))
+                        text = '# ' + value['title'] + '\n\n' + value['body'] + '\n\nСтатус: ' + status_label
+                        warnings = value.get('quality_warnings') or []
+                        if warnings:
+                            text += '\n\nПеред публикацией проверь:\n• ' + '\n• '.join(warnings[:6])
+                        if item.status in {ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED}:
+                            buttons = []
+                            if (value.get('body') and item.status == ArtifactStatus.AWAITING_APPROVAL):
+                                buttons.append([{
+                                    'text':'✅ Утвердить текст',
+                                    'callback_data':f'content:approvepost:{item.id}',
+                                }])
+                            buttons.append([{
+                                'text':'✏️ Попросить доработку',
+                                'callback_data':f'content:editpost:{item.id}',
+                            }])
+                            reply_markup = {'inline_keyboard': buttons}
+                        if (value.get('channel') == 'telegram' and
+                                item.status == ArtifactStatus.APPROVED):
+                            if reply_markup is None:
+                                reply_markup = {'inline_keyboard': []}
+                            reply_markup['inline_keyboard'].append([{
+                                'text':'📣 Запланировать в Telegram',
+                                'callback_data':f'content:schedulechannels:{item.id}',
+                            }])
+                            reply_markup['inline_keyboard'].append([{
+                                'text':'📅 По контент-плану',
+                                'callback_data':f'content:planpost:{item.id}',
+                            }])
+                        if value.get('origin') in {'quick_post', 'owner_revision'}:
+                            if reply_markup is None:
+                                reply_markup = {'inline_keyboard': []}
+                            reply_markup['inline_keyboard'].append([{
+                                'text': '📚 История версий',
+                                'callback_data': f'content:history:{item.id}',
+                            }])
+                    elif item.kind == 'creative_brief':
+                        text = value.get('preview_text') or 'Сценарий ещё не подготовлен'
+                        text += '\n\nСтатус: ' + getattr(item.status, "value", str(item.status))
+                        if item.status == ArtifactStatus.AWAITING_APPROVAL:
+                            reply_markup = {'inline_keyboard': [[{
+                                'text':'✅ Утвердить бриф',
+                                'callback_data':f'content:approvebrief:{item.id}',
+                            }]]}
                     elif item.kind == 'video_script':
                         brief = value['production_brief']
                         text = ('🎬 ' + item.title
@@ -260,7 +785,7 @@ class TelegramContent:
                         text = ('📈 Публикация и измерение\n\nПлощадки: сайт, Дзен, TenChat, vc.ru, Telegram, Shorts, VK Клипы, Reels.'
                                 + '\nПосле проверки размести материал вручную и сохрани ссылку. Отмечай просмотры, переходы, обращения, демо/регистрации/записи и клиентов.'
                                 + '\nАвтоматические публикации и получение статистики ещё не подключены.')
-                await self.bot._send(chat, text)
+                await self.bot._send(chat, text, reply_markup=reply_markup)
             elif action == 'video':
                 with self.sessions() as db:
                     item = db.get(Artifact, record_id)
@@ -270,6 +795,7 @@ class TelegramContent:
                     path = asset_path(self.settings().products_root, item.product_id, UUID(value['script_id']), 'video.mp4')
                 await self.bot.api.upload(chat, 'sendVideo', 'video', 'video.mp4', path.read_bytes())
             elif action == 'metrics':
+                self.post_target = None
                 self.metrics_article = record_id
                 await self.bot._send(chat, 'Пришли показатели опубликованного материала. Например:\n{"channel":"dzen","url":"https://...","views":120,"clicks":5,"leads":1}\nНеизвестные показатели не указывай. Это снимок на текущую дату, не прибавление к предыдущим числам.')
             return True

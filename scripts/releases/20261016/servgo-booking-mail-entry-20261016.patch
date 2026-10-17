@@ -1,0 +1,193 @@
+--- a/web/frontend/src/components/OwnerMailEntry.tsx
++++ b/web/frontend/src/components/OwnerMailEntry.tsx
+@@ -1,59 +1,16 @@
+-import { useEffect, useState } from 'react'
+ import { Mail } from 'lucide-react'
+-import { useLocation } from 'react-router-dom'
++import { useNavigate } from 'react-router-dom'
+ 
+-/** Server-confirmed platform-owner navigation. Never trust userRole/localStorage for privileges. */
++/** Visible to everyone; the server still decides who may open the mailbox (POST /owner-mail/entry). */
+ export function OwnerMailEntry() {
+-  const [allowed, setAllowed] = useState(false)
+-  const [busy, setBusy] = useState(false)
+-  const { pathname } = useLocation()
+-
+-  useEffect(() => {
+-    const token = localStorage.getItem('token')
+-    if (!token) return
+-    let active = true
+-    fetch('/api/owner-mail/permission', {
+-      headers: { Authorization: 'Bearer ' + token },
+-      cache: 'no-store',
+-    }).then(response => {
+-      if (active) setAllowed(response.ok)
+-    }).catch(() => {
+-      if (active) setAllowed(false)
+-    })
+-    return () => { active = false }
+-  }, [pathname])
+-
+-  const open = async () => {
+-    const token = localStorage.getItem('token')
+-    if (!token || busy) return
+-    setBusy(true)
+-    try {
+-      const result = await fetch('/api/owner-mail/entry', {
+-        method: 'POST',
+-        cache: 'no-store',
+-        headers: { Authorization: 'Bearer ' + token },
+-      })
+-      if (!result.ok) throw new Error('Доступ к почте не подтверждён')
+-      const data: { url?: string } = await result.json()
+-      if (!data.url || !data.url.startsWith('https://mail.servgo.ru/claim?ticket=')) {
+-        throw new Error('Неожиданный адрес почтового кабинета')
+-      }
+-      window.location.assign(data.url)
+-    } catch {
+-      alert('Не удалось открыть почту. Попробуй снова после входа в ServGo.')
+-      setBusy(false)
+-    }
+-  }
+-
+-  if (!allowed) return null
++  const navigate = useNavigate()
+   return (
+     <button
+       type="button"
+-      onClick={open}
+-      disabled={busy}
++      onClick={() => navigate('/mail')}
+       className="ds-icon-btn bordered"
+       style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 10px', width: 'auto' }}
+-      title="Личная почта ServGo"
++      title="Почта ServGo"
+       aria-label="Почта"
+     >
+       <Mail size={18} /> <span style={{ fontSize: 12, fontWeight: 700 }}>Почта</span>
+--- a/web/frontend/src/components/Layout.tsx
++++ b/web/frontend/src/components/Layout.tsx
+@@ -147,7 +147,7 @@
+                 </>
+               )}
+ 
+-              <OwnerMailEntry />
++              {isAdmin && <OwnerMailEntry />}
+               {isLoggedIn ? (
+                 <div className="flex items-center gap-2 ml-2">
+                   {isAdminUser && !isAdmin && (
+@@ -179,6 +179,7 @@
+ 
+             {/* Mobile: admin exit + client login */}
+             <div className="md:hidden flex items-center gap-2">
++              {isAdmin && <OwnerMailEntry />}
+               {isAdmin && isAdminUser && (
+                 <Link
+                   to="/"
+--- a/web/frontend/src/App.tsx
++++ b/web/frontend/src/App.tsx
+@@ -9,6 +9,7 @@
+ import { MyBookingsPage } from './pages/client/MyBookingsPage'
+ import { SubscriptionsPage } from './pages/client/SubscriptionsPage'
+ import { LoginPage } from './pages/client/LoginPage'
++import { MailEntryPage } from './pages/client/MailEntryPage'
+ import { AccountPage } from './pages/client/AccountPage'
+ import { PrepaymentsPage } from './pages/admin/PrepaymentsPage'
+ import { AdminPaymentAttention } from './components/AdminPaymentAttention'
+@@ -122,6 +123,7 @@
+         <Route path="/chat" element={<ChatPage />} />
+         <Route path="/legal/:docType/:businessId" element={<LegalPage />} />
+         <Route path="/login" element={<LoginPage />} />
++        <Route path="/mail" element={<MailEntryPage />} />
+         <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
+         <Route path="/admin/prepayments" element={<AdminRoute><PrepaymentsPage /></AdminRoute>} />
+ 
+--- a/web/api/routes/owner_mail.py
++++ b/web/api/routes/owner_mail.py
+@@ -24,7 +24,7 @@
+ 
+ import httpx
+ from fastapi import APIRouter, Depends, HTTPException, Request
+-from fastapi.responses import FileResponse, RedirectResponse
++from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+ from jose import JWTError, jwt
+ from pydantic import BaseModel, Field
+ from sqlalchemy import select
+@@ -162,8 +162,26 @@
+     return response
+ 
+ 
++LOGIN_PAGE = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
++<meta name="viewport" content="width=device-width,initial-scale=1"><title>Почта ServGo</title>
++<style>body{margin:0;font-family:system-ui,sans-serif;background:#f5f5f7;color:#1d1d1f;display:flex;
++min-height:100vh;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
++main{background:#fff;border-radius:16px;padding:24px;max-width:360px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
++h1{font-size:20px;margin:0 0 8px}p{margin:0 0 16px;line-height:1.4}
++a{display:inline-block;background:#0071e3;color:#fff;text-decoration:none;padding:10px 18px;border-radius:999px;font-weight:600}
++</style></head><body><main><h1>Почта ServGo</h1>
++<p>Вход в почту выполняется через аккаунт ServGo.</p>
++<a href="https://servgo.ru/mail">Войти через ServGo</a></main></body></html>"""
++
++
+ @router.get("/app")
+-def app_page(_: User = Depends(mail_owner)):
++async def app_page(request: Request, session: AsyncSession = Depends(get_db)):
++    try:
++        await mail_owner(request, session)
++    except HTTPException as exc:
++        if exc.status_code != 401:
++            raise
++        return HTMLResponse(LOGIN_PAGE, status_code=401, headers={"Cache-Control": "no-store"})
+     path = Path(__file__).resolve().parent / "mail_campaign_dashboard.html"
+     return FileResponse(path, media_type="text/html", headers={
+         "Cache-Control": "no-store",
+--- /dev/null
++++ b/web/frontend/src/pages/client/MailEntryPage.tsx
+@@ -0,0 +1,47 @@
++import { useEffect, useState } from 'react'
++import { Link } from 'react-router-dom'
++import { ClientShell } from '../../components/ClientShell'
++
++type State = 'checking' | 'login' | 'denied' | 'error'
++
++/** Exchanges the ServGo login for a one-time mail.servgo.ru ticket. */
++export function MailEntryPage() {
++  const [state, setState] = useState<State>('checking')
++
++  useEffect(() => {
++    const token = localStorage.getItem('token')
++    if (!token) { setState('login'); return }
++    let active = true
++    fetch('/api/owner-mail/entry', {
++      method: 'POST',
++      cache: 'no-store',
++      headers: { Authorization: 'Bearer ' + token },
++    }).then(async response => {
++      if (!active) return
++      if (response.status === 401) { setState('login'); return }
++      if (response.status === 403) { setState('denied'); return }
++      if (!response.ok) { setState('error'); return }
++      const data: { url?: string } = await response.json()
++      if (!data.url || !data.url.startsWith('https://mail.servgo.ru/claim?ticket=')) { setState('error'); return }
++      window.location.assign(data.url)
++    }).catch(() => { if (active) setState('error') })
++    return () => { active = false }
++  }, [])
++
++  return (
++    <ClientShell title="Почта" backTo="/admin">
++    <div className="ds-form-narrow" style={{ paddingTop: 20 }}>
++      <div className="ds-card" style={{ padding: 16 }}>
++        <h2 className="ds-h3">Почта ServGo</h2>
++        {state === 'checking' && <p role="status">Открываем почту…</p>}
++        {state === 'login' && <>
++          <p>Войдите в ServGo своим логином и паролем, затем снова нажмите «Почта».</p>
++          <Link to="/login" className="ds-btn" style={{ display: 'inline-block', marginTop: 12 }}>Войти</Link>
++        </>}
++        {state === 'denied' && <p>У этого аккаунта пока нет доступа к почте.</p>}
++        {state === 'error' && <p>Не удалось открыть почту. Попробуйте ещё раз через минуту.</p>}
++      </div>
++    </div>
++    </ClientShell>
++  )
++}

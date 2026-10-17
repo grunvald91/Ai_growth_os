@@ -1,4 +1,5 @@
 """Typed contracts for the bounded Research Department and external evidence bundles."""
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -17,6 +18,8 @@ class ResearchSource(Contract):
     excerpt: str = Field(min_length=1, max_length=4000)
     rating: float | None = Field(default=None, ge=0, le=5)
     observed_at: str | None = Field(default=None, max_length=80)
+    published_at: datetime | None = None
+    source_type: Literal["review", "pricing", "website", "social", "marketplace"] = "review"
 
 
 class ResearchSourceBundle(Contract):
@@ -118,3 +121,4 @@ class ResearchDepartmentReport(ResearchSynthesisDraft):
     worker_task_ids: list[UUID] = Field(min_length=4, max_length=4)
     worker_artifact_ids: list[UUID] = Field(min_length=3, max_length=4)
     lead_run_id: UUID
+    competitive_intelligence_artifact_id: UUID | None = None

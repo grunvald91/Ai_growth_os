@@ -288,9 +288,9 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
         "human_editor": 8000,
         "marketing_editor": 8000,
         "repurposing_editor": 8000,
-        "video_director": 5500,
-        "story_director": 4500,
-        "visual_designer": 4000,
+        "video_director": 4200,
+        "story_director": 4000,
+        "visual_designer": 3200,
     }
     writer_request = next(r for r in provider.requests if r.metadata["team_role"] == "article_writer")
     assert "claims" not in writer_request.response_schema["properties"]
@@ -319,7 +319,21 @@ async def test_long_form_distinct_variants_measurement_and_audit(db, product, tm
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'fake_claim', 'external_link', 'extra', 'wrong_kind', 'source_copy'])
+async def test_copied_derivative_hook_is_repaired_before_persistence(db, product, tmp_path):
+    outputs = valid_outputs()
+    source_hook = outputs[1]['hook']
+    outputs[6]['derivatives'][0]['hook'] = source_hook
+    workflow, _, request = setup(db, product, tmp_path, outputs)
+    result = await workflow.run(request)
+    assert result.status == 'completed', result.error
+    derivative = db.scalar(select(Artifact).where(Artifact.task_id == result.task_id, Artifact.kind == 'dzen_brief'))
+    assert derivative is not None
+    assert json.loads(derivative.content)['hook'] != source_hook
+    assert not list(db.scalars(select(Publication)))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mutation', ['malformed', 'short', 'missing_cta', 'missing_measurement', 'external_link', 'wrong_kind'])
 async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, tmp_path, mutation):
     outputs = valid_outputs()
     if mutation == 'malformed': outputs[0] = 'not json'
@@ -329,7 +343,6 @@ async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, 
     elif mutation == 'fake_claim': outputs[2]['claims'] = [dict(claim='Guaranteed growth', quote='Guaranteed growth', source_id='invented')]
     elif mutation == 'external_link': outputs[3]['landing_page']['destination'] = 'https://unverified.example/demo'
     elif mutation == 'extra': outputs[0]['verified_revenue'] = 1000000
-    elif mutation == 'source_copy': outputs[6]['derivatives'][0]['hook'] = outputs[1]['hook']
     elif mutation == 'wrong_kind': outputs[6]['derivatives'][0]['kind'] = 'telegram'
     workflow, _, request = setup(db, product, tmp_path, outputs)
     result = await workflow.run(request)
@@ -488,6 +501,31 @@ def test_product_facts_prefers_canonical_verified_facts_over_product_identity():
     assert "ServGo" not in facts.values()
 
 
+@pytest.mark.asyncio
+async def test_copied_derivative_hook_is_adapted_without_discarding_the_brief(db, product, tmp_path):
+    outputs = valid_outputs()
+    outputs[6]['derivatives'][0]['hook'] = outputs[1]['hook']
+    original = json.loads(json.dumps(outputs[6]['derivatives'][0]))
+    workflow, _, request = setup(db, product, tmp_path, outputs)
+    result = await workflow.run(request)
+    assert result.status == 'completed', result.error
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    brief = next(d for d in article.conversion.derivatives if d.kind == original['kind'])
+    assert brief.hook != article.seo.hook
+    for field in ('audience', 'cta', 'outline', 'adaptation_notes'):
+        assert getattr(brief, field) == original[field]
+
+
+@pytest.mark.parametrize('boundary', [3, 5])
+def test_ready_video_normalizer_rejects_overlaps_and_gaps(boundary):
+    from app.workflows.article_contracts import ShortVideoDerivativeDraft
+    from app.workflows.article_production import _normalize_ready_video_timeline
+    raw = valid_outputs()[7]
+    raw['production_brief']['shots'][1]['start_second'] = boundary
+    with pytest.raises(ValueError, match='overlapping or incomplete'):
+        _normalize_ready_video_timeline(ShortVideoDerivativeDraft.model_validate(raw))
+
+
 def test_ready_video_timeline_is_normalized_to_30_seconds_and_strips_internal_notes():
     from app.content.contracts import VideoVariants
     from app.workflows.article_contracts import ShortVideoDerivativeDraft
@@ -512,11 +550,38 @@ def test_ready_video_timeline_is_normalized_to_30_seconds_and_strips_internal_no
         for a, b in zip(parsed.production_brief.shots, parsed.production_brief.shots[1:])
     )
     assert "Avoid:" not in parsed.production_brief.shots[0].spoken_text
+    assert "служебная инструкция" in parsed.production_brief.shots[0].avoid_in_generation
+    assert raw['production_brief']['duration_seconds'] == 38
 
     other = parsed.model_copy(deep=True)
     other.production_brief.target_platform = "instagram_reels"
     other.hook = "Другой Reels-хук"
     VideoVariants(videos=[parsed, other])
+
+
+def test_ready_video_normalizer_recovers_on_screen_text_glued_into_spoken_text():
+    from app.workflows.article_contracts import ShortVideoDerivativeDraft
+    from app.workflows.article_production import _normalize_ready_video_timeline
+
+    raw = json.loads(json.dumps(valid_outputs()[7], ensure_ascii=False))
+    raw["production_brief"]["shots"][0]["spoken_text"] = "Лайки есть, записей нет.','on_screen_text':'Лайки ≠ записи"
+    raw["production_brief"]["shots"][0]["on_screen_text"] = None
+    parsed = _normalize_ready_video_timeline(ShortVideoDerivativeDraft.model_validate(raw))
+
+    shot = parsed.production_brief.shots[0]
+    assert shot.spoken_text == "Лайки есть, записей нет."
+    assert shot.on_screen_text == "Лайки ≠ записи"
+
+
+def test_ready_video_normalizer_rejects_scenes_without_visible_copy():
+    from app.workflows.article_contracts import ShortVideoDerivativeDraft
+    from app.workflows.article_production import _normalize_ready_video_timeline
+
+    raw = json.loads(json.dumps(valid_outputs()[7], ensure_ascii=False))
+    raw["production_brief"]["shots"][1]["spoken_text"] = "Текст озвучки.','on_screen_text':"
+    raw["production_brief"]["shots"][1]["on_screen_text"] = None
+    with pytest.raises(ValueError, match="visible copy"):
+        _normalize_ready_video_timeline(ShortVideoDerivativeDraft.model_validate(raw))
 
 
 def test_platform_writer_accepts_alias_wrapper():
@@ -594,6 +659,65 @@ async def test_ready_assets_complete_when_video_visual_and_platform_use_fallback
     assert checkpoints["instagram_reels_director"]["fallback_used"] is False
 
 
+@pytest.mark.asyncio
+async def test_ready_video_without_visible_copy_uses_fallback_instead_of_failing_package(db, product, tmp_path):
+    outputs = valid_outputs()
+    youtube = json.loads(json.dumps(outputs[7], ensure_ascii=False))
+    youtube["production_brief"]["target_platform"] = "youtube_shorts"
+    youtube["production_brief"]["duration_seconds"] = 30
+    youtube["production_brief"]["shots"][2]["end_second"] = 30
+    for shot in youtube["production_brief"]["shots"]:
+        shot["on_screen_text"] = None
+    reels = json.loads(json.dumps(outputs[7], ensure_ascii=False))
+    reels["production_brief"]["target_platform"] = "instagram_reels"
+    reels["production_brief"]["duration_seconds"] = 30
+    reels["production_brief"]["shots"][2]["end_second"] = 30
+    reels["hook"] = "Запись в директе: сколько ручных шагов осталось?"
+    outputs.extend([{}, youtube, reels])
+    workflow, _, request = setup(db, product, tmp_path, outputs, produce_ready_assets=True)
+
+    result = await workflow.run(request)
+
+    assert result.status == "completed", result.error
+    checkpoints = {
+        json.loads(a.content)["stage"]: json.loads(a.content)
+        for a in db.scalars(select(Artifact).where(
+            Artifact.task_id == result.task_id,
+            Artifact.kind == "content_stage_output",
+        ))
+    }
+    assert checkpoints["youtube_shorts_director"]["fallback_used"] is True
+    assert checkpoints["instagram_reels_director"]["fallback_used"] is False
+
+
+@pytest.mark.asyncio
+async def test_package_assembly_failure_is_recorded_on_last_run(db, product, tmp_path, monkeypatch):
+    from app.content import contracts
+
+    outputs = valid_outputs()
+    youtube = json.loads(json.dumps(outputs[7], ensure_ascii=False))
+    youtube["production_brief"]["target_platform"] = "youtube_shorts"
+    youtube["production_brief"]["duration_seconds"] = 30
+    youtube["production_brief"]["shots"][2]["end_second"] = 30
+    reels = json.loads(json.dumps(youtube, ensure_ascii=False))
+    reels["production_brief"]["target_platform"] = "instagram_reels"
+    reels["hook"] = "Запись в директе: сколько ручных шагов осталось?"
+    outputs.extend([{}, youtube, reels])
+    workflow, _, request = setup(db, product, tmp_path, outputs, produce_ready_assets=True)
+
+    def broken(*args, **kwargs):
+        raise ValueError("assembly broke")
+    monkeypatch.setattr(contracts, "VideoVariants", broken)
+
+    result = await workflow.run(request)
+
+    assert result.status == "failed"
+    runs = [db.get(AgentRun, run_id) for run_id in result.run_ids]
+    assert all(run.status == "completed" for run in runs)
+    assert runs[-1].error.startswith("assembly_failed:")
+    assert runs[-1].error.endswith(":ValueError")
+
+
 def test_platform_writer_safe_fallback_builds_six_publishable_texts():
     from app.content.contracts import ReadyTextSet
     from app.workflows.article_production import _platform_text_fallback_payload
@@ -621,7 +745,8 @@ def test_platform_writer_safe_fallback_builds_six_publishable_texts():
     assert len(parsed.texts) == 6
     assert all(len(item.body) >= 500 for item in parsed.texts)
     assert all(len(item.body) >= 2000 for item in parsed.texts if item.channel in {"dzen", "vc_ru"})
-    assert any("CRM" in item.body or "квест" in item.body for item in parsed.texts)
+    assert all("Требуется проверка" in " ".join(item.editorial_checks) for item in parsed.texts)
+    assert all("CRM" not in item.body for item in parsed.texts)  # No invented brand-specific filler.
 
 
 @pytest.mark.asyncio
@@ -821,12 +946,13 @@ async def test_editor_prompts_are_commercially_useful_without_weakening_groundin
 
     assert result.status == 'completed', result.error
     by_role = {r.metadata['team_role']: r for r in provider.requests}
-    assert 'grounded audience_pains' in by_role['content_strategist'].system_prompt
-    assert 'commercially useful' in by_role['seo_editor'].system_prompt
-    assert 'concrete recognizable situation' in by_role['human_editor'].system_prompt
+    assert 'подтверждённых audience_pains' in by_role['content_strategist'].system_prompt
+    assert 'полезный и для поиска, и для продаж' in by_role['seo_editor'].system_prompt
+    assert 'конкретной узнаваемой ситуации' in by_role['human_editor'].system_prompt
     assert 'Пиши, сокращай' in by_role['human_editor'].system_prompt
-    assert 'SCENE -> PAIN -> COST/FRICTION' in by_role['marketing_editor'].system_prompt
-    assert 'MUST include at least one light situational humor beat' in by_role['marketing_editor'].system_prompt
+    assert 'СЦЕНА → БОЛЬ → ЦЕНА ПРОБЛЕМЫ' in by_role['marketing_editor'].system_prompt
+    assert 'Юмор — только к месту' in by_role['marketing_editor'].system_prompt
+    assert 'без шуток' in by_role['marketing_editor'].system_prompt
     assert 'third-party cases' in by_role['marketing_editor'].system_prompt
     assert 'Write marketing, not an academic paper' in by_role['marketing_editor'].system_prompt
     assert '30-45 seconds' in by_role['video_director'].system_prompt
@@ -902,3 +1028,72 @@ async def test_repeated_truncation_fails_atomically_without_third_attempt(db, pr
     assert result.status == 'failed' and len(provider.requests) == 2
     assert not result.artifact_ids and not list(db.scalars(select(Artifact)))
     assert len(list(db.scalars(select(CostRecord)))) == 2
+
+
+def test_servgo_specific_fallbacks_cannot_leak_into_another_business():
+    from app.workflows.article_production import (
+        _creative_fallback_payload, _platform_text_fallback_payload,
+    )
+    other_company = {
+        'company_slug': 'flower-shop',
+        'company_name': 'Цветочная мастерская',
+        'request': {'topic': 'Уход за букетом'},
+        'prior_stage_outputs': {},
+    }
+    with pytest.raises(ValueError, match='validated long-form'):
+        _platform_text_fallback_payload(other_company)
+    with pytest.raises(ValueError, match='not safe for this company'):
+        _creative_fallback_payload('visual_designer', other_company)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mutation', ['fake_claim', 'extra'])
+async def test_unknown_model_fields_are_dropped_not_fatal(db, product, tmp_path, mutation):
+    outputs = valid_outputs()
+    if mutation == 'fake_claim':
+        outputs[2]['claims'] = [dict(claim='Guaranteed growth', quote='Guaranteed growth', source_id='invented')]
+    else:
+        outputs[0]['verified_revenue'] = 1000000
+    workflow, _, request = setup(db, product, tmp_path, outputs)
+    result = await workflow.run(request)
+    assert result.status == 'completed', result.error
+    stored = ' '.join(a.content for a in db.scalars(select(Artifact).where(Artifact.task_id == result.task_id)))
+    assert 'Guaranteed growth' not in stored and 'verified_revenue' not in stored
+
+
+@pytest.mark.asyncio
+async def test_required_stage_gets_one_repair_attempt_with_the_problem(db, product, tmp_path):
+    outputs = valid_outputs()
+    outputs.insert(0, {"wrong": "shape"})  # first strategist answer is invalid
+    workflow, provider, request = setup(db, product, tmp_path, outputs)
+    result = await workflow.run(request)
+    assert result.status == 'completed', result.error
+    strategist = [r for r in provider.requests if r.metadata['team_role'] == 'content_strategist']
+    assert len(strategist) == 2
+    assert 'rejected by validation' in strategist[1].system_prompt
+
+
+def test_platform_writer_telegram_follows_quick_post_structure():
+    from app.prompts import text as prompt_text
+    rule = prompt_text('article.rules.platform_writer')
+    for required in ('сначала польза', 'TELEGRAM', 'нумерованным списком', '800–1500',
+                     'ровно один призыв', 'без оговорок', 'TOP-LEVEL FORMAT IS MANDATORY'):
+        assert required in rule
+
+
+def test_article_text_chain_rules_are_value_first_and_keep_hard_constraints():
+    from app.prompts import text as prompt_text
+    rules = {name: prompt_text(f'article.rules.{name}') for name in (
+        'content_strategist', 'seo_editor', 'article_writer', 'conversion_editor',
+        'human_editor', 'marketing_editor', 'repurposing_editor')}
+    assert '3–5 приёмов' in rules['content_strategist']
+    assert 'конкретное действие' in rules['seo_editor']
+    assert 'не меньше 2000 символов' in rules['article_writer']
+    assert 'kind=advice' in rules['article_writer']
+    assert 'ровно один призыв' in rules['conversion_editor']
+    assert 'ровно по одному' in rules['human_editor']
+    assert 'Сохрани все конкретные' in rules['marketing_editor']
+    assert 'ровно один fact_rendering' in rules['marketing_editor']
+    assert 'ровно шесть' in rules['repurposing_editor']
+    for name in ('human_editor', 'marketing_editor'):
+        assert 'Не придумывай' in rules[name] or 'не как уже работающую' in rules[name]

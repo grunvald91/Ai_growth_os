@@ -19,6 +19,7 @@ from app.company_profile import (
 from app.intake.contracts import IntakeError, IntakeExtraction, IntakeSource
 from app.intake.questions import missing_questions
 from app.intake.sources import make_source, parse_file, clean_text, PublicWebsiteFetcher
+from app.llm.audit import critic_cost_details, persist_critic_audit
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import (
     AgentRun, Artifact, ArtifactStatus, CostRecord, Product, Task, TaskStatus,
@@ -268,7 +269,7 @@ class CompanyIntakeService:
                         provider=self.provider_name, amount=0, currency="USD",
                         input_tokens=max(0, response.usage.input_tokens),
                         output_tokens=max(0, response.usage.output_tokens), incurred_at=datetime.now(timezone.utc),
-                        details={"cost_known": False}))
+                        details=critic_cost_details(response)))
                 run.model = response.model
                 task = self._task(product_id, session_id, actor, active=True)
                 self.db.refresh(task)
@@ -279,7 +280,7 @@ class CompanyIntakeService:
                 for claim in extraction.claims:
                     source = sources.get(claim.source_id)
                     if source is None or source.source_type == "existing_profile" or (
-                        claim.evidence_excerpt not in source.text or claim.field_path not in LEAF_PATHS):
+                        claim.evidence_excerpt not in source.text):
                         raise IntakeError("Unsupported provenance")
                     # Missing fields are derived deterministically from readiness, never invented by the LLM.
                     # Website/registry/file evidence may support facts, but must not inject speculative
@@ -288,6 +289,8 @@ class CompanyIntakeService:
                         continue
                     if claim.kind == "hypothesis" and source.source_type != "owner_message":
                         continue
+                    if claim.field_path not in LEAF_PATHS:
+                        raise IntakeError("Unsupported field path")
                     filtered_claims.append(claim)
                     if claim.kind == "candidate":
                         if claim.field_path in {"proof.approved_facts", "proof.approved_numbers"} and isinstance(claim.proposed_value, list):
@@ -299,6 +302,8 @@ class CompanyIntakeService:
                         parse_company_profile(sample)
                 run.status = "completed"
                 run.finished_at = datetime.now(timezone.utc)
+                persist_critic_audit(self.db, product_id=product_id,
+                                     task_id=task.id, run_id=run.id, response=response)
             except (Exception, asyncio.CancelledError) as exc:
                 self.db.rollback()
                 failed = self.db.get(AgentRun, run.id)
@@ -309,7 +314,9 @@ class CompanyIntakeService:
                         provider=self.provider_name, amount=0, currency="USD",
                         input_tokens=max(0, response.usage.input_tokens),
                         output_tokens=max(0, response.usage.output_tokens), incurred_at=datetime.now(timezone.utc),
-                        details={"cost_known": False}))
+                        details=critic_cost_details(response)))
+                persist_critic_audit(self.db, product_id=product_id,
+                                     task_id=task.id, run_id=run.id, response=response)
                 self.db.commit()
                 if isinstance(exc, asyncio.CancelledError):
                     raise

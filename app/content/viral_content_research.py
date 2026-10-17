@@ -32,6 +32,7 @@ from app.content.viral_research import (
     build_search_queries,
     parse_youtube_search_page,
 )
+from app.llm.audit import critic_cost_details, persist_critic_audit
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
 from app.models.domain import AgentRun, Artifact, CostRecord, Task
@@ -818,7 +819,7 @@ async def run_viral_content_research(
                         raise ValueError("pain referenced unknown product fact")
 
             async def generate_and_validate(active_llm, request):
-                generated = await asyncio.wait_for(active_llm.generate(request), timeout=180)
+                generated = await asyncio.wait_for(active_llm.generate(request), timeout=180 + getattr(active_llm, 'extra_timeout_seconds', 0))
                 analysis_responses.append(generated)
                 parsed = ViralContentAnalysisDraft.model_validate_json(generated.content)
                 validate_integrity(parsed)
@@ -985,12 +986,13 @@ async def run_viral_content_research(
                     input_tokens=max(0, generated.usage.input_tokens),
                     output_tokens=max(0, generated.usage.output_tokens),
                     incurred_at=datetime.now(timezone.utc),
-                    details={
-                        "cost_known": False,
-                        "task_type": "viral_content_research",
-                        "model": generated.model,
-                    },
+                    details=critic_cost_details(generated,
+                        task_type="viral_content_research", model=generated.model),
                 ))
+            persist_critic_audit(
+                db, product_id=task.product_id, task_id=task.id,
+                run_id=run_id, response=generated,
+            )
         db.commit()
         return artifact
     except asyncio.CancelledError:

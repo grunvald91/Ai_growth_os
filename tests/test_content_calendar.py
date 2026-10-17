@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from app.content.calendar import (EditorialPlan, _expand_anchor_slots, approve_plan, pause_plan, plan_record, planning_context,
-    queue_plan, record_publication, render_calendar, run_planner_once, save_preferences, tick_calendar)
+    queue_plan, record_publication, render_calendar, run_planner_once, save_preferences, tick_calendar, reschedule_slot)
 from app.core.config import Settings
 from app.llm.fake import FakeLLMProvider
 from app.llm.schemas import LLMResponse, LLMUsage
@@ -335,3 +335,309 @@ async def test_invented_evidence_is_repaired_with_exact_allowed_ids(db,tmp_path)
     assert schema['$defs']['ChannelChoice']['properties']['evidence_refs']['items']['enum']==allowed
     assert schema['$defs']['Slot']['properties']['evidence_refs']['items']['enum']==allowed
     assert db.scalar(select(Artifact).where(Artifact.kind=='editorial_plan')) is not None
+
+
+def test_reschedule_one_slot_preserves_package_and_rejects_collisions(db):
+    company = Product(name='Кафе', slug='cafe-calendar-move')
+    db.add(company)
+    db.flush()
+    original = datetime(2026, 10, 15, 12, tzinfo=timezone(timedelta(hours=3)))
+    base = {
+        'generated_at':'2026-10-11T00:00:00+03:00',
+        'approval_state':'active', 'timezone':'Europe/Moscow', 'horizon_days':14,
+        'slots':[
+            {
+                'slot_id':'1', 'package_key':'campaign-1', 'platform':'telegram',
+                'topic':'Сезонное меню', 'publish_at':original.isoformat(),
+                'prepare_at':(original-timedelta(hours=24)).isoformat(),
+                'day_offset':3, 'hour':12, 'minute':0, 'prepare_lead_hours':24,
+                'state':'ready_for_review', 'task_id':None,
+            },
+            {
+                'slot_id':'2', 'package_key':'campaign-2', 'platform':'telegram',
+                'topic':'Кофе', 'publish_at':(original+timedelta(days=2)).isoformat(),
+                'prepare_at':(original+timedelta(days=1)).isoformat(),
+                'day_offset':5, 'hour':12, 'minute':0, 'prepare_lead_hours':24,
+                'state':'planned', 'task_id':None,
+            },
+        ],
+    }
+    row = Artifact(product_id=company.id, kind='editorial_plan', title='План',
+                   content=json.dumps(base), status='approved')
+    db.add(row)
+    db.commit()
+    fixed_now = datetime(2026, 10, 11, 8, tzinfo=timezone.utc)
+    dest = datetime(2026, 10, 16, 15, tzinfo=timezone(timedelta(hours=3)))
+    moved = reschedule_slot(db, row.id, '1', dest, now=fixed_now)
+    assert moved['publish_at'] == dest.isoformat()
+    assert moved['day_offset'] == 4
+    assert moved['hour'] == 15
+    assert moved['prepare_at'] == (dest-timedelta(hours=24)).isoformat()
+    assert moved['topic'] == 'Сезонное меню'
+    assert moved['state'] == 'ready_for_review'
+    assert json.loads(row.content)['slots'][1]['topic'] == 'Кофе'
+    with pytest.raises(ValueError, match='уже есть материал'):
+        reschedule_slot(
+            db, row.id, '1', original+timedelta(days=2), now=fixed_now,
+        )
+    with pytest.raises(ValueError, match='периода этого плана'):
+        reschedule_slot(
+            db, row.id, '1', original+timedelta(days=20), now=fixed_now,
+        )
+    with pytest.raises(ValueError, match='в будущем'):
+        reschedule_slot(
+            db, row.id, '1', original-timedelta(days=5), now=fixed_now,
+        )
+
+
+def test_planning_context_knows_verified_telegram_channels_without_credentials(db, tmp_path):
+    company = Product(name='Пекарня', slug='bakery-channels')
+    db.add(company)
+    db.flush()
+    db.add(Artifact(
+        product_id=company.id, kind='telegram_channel_connection',
+        title='Новости пекарни', status='approved',
+        content=json.dumps({
+            'chat_id': '-1001234567890', 'title': 'Новости пекарни',
+            'verified_at': '2026-10-11T00:00:00+00:00',
+        }, ensure_ascii=False),
+    ))
+    db.commit()
+    context, digest = planning_context(
+        db, Settings(products_root=tmp_path), company.id,
+    )
+    assert context['verified_telegram_channels'][0]['name'] == 'Новости пекарни'
+    assert context['verified_telegram_channels'][0]['scheduled_publication_requires_owner_approval'] is True
+    assert 'chat_id' not in context['verified_telegram_channels'][0]
+    assert isinstance(digest, str) and len(digest) == 64
+
+
+@pytest.mark.asyncio
+async def test_planner_critic_keeps_advisory_findings_and_unknown_tokens(db, tmp_path):
+    product, settings = setup(db, tmp_path)
+    settings.agent_critic_enabled = True
+    task = db.scalar(select(Task).where(
+        Task.assigned_agent == 'editorial_planner',
+        Task.status == TaskStatus.QUEUED,
+    ))
+
+    class PlannerWithCritic:
+        def __init__(self):
+            self.requests = []
+        async def generate(self, request):
+            self.requests.append(request)
+            if request.metadata.get('task_type') == 'quality_review':
+                payload = {'findings': [{
+                    'id': 'important1', 'severity': 'major',
+                    'problem': 'The proposed calendar omits a necessary editorial constraint',
+                    'evidence_in_draft': 'No restriction on the requested channel',
+                    'proposed_fix': 'Keep the company-required channel restriction',
+                    'link_to_original_goal': 'Original owner request requires a restricted channel',
+                }]}
+                # Intentionally no usage despite successful response.
+                return LLMResponse(content=json.dumps(payload), model='critic-no-usage',
+                                   usage=None, stop_reason='end_turn')
+            return LLMResponse(content=json.dumps(draft(), ensure_ascii=False),
+                               model='planner', usage=LLMUsage(input_tokens=24, output_tokens=34),
+                               stop_reason='end_turn')
+
+    provider = PlannerWithCritic()
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
+                     critic_enabled=True)
+    assert await run_planner_once(lambda: Borrow(db), settings, llm) == 1
+    assert len(provider.requests) == 2
+    assert db.get(Task, task.id).status == TaskStatus.COMPLETED
+    plan = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == 'editorial_plan',
+    ))
+    assert plan is not None
+    reviews = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == 'agent_quality_review',
+    )))
+    assert len(reviews) == 1
+    review = json.loads(reviews[0].content)
+    assert review['status'] == 'advisory_only_no_domain_validator'
+    assert review['findings'][0]['id'] == 'important1'
+    assert review['extra_usage_by_model'][0]['input_tokens'] is None
+    run = db.scalar(select(AgentRun).where(AgentRun.task_id == task.id))
+    assert {'kind': 'artifact', 'id': str(reviews[0].id)} in run.output_references
+    costs = list(db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)))
+    assert len(costs) == 2
+    author = next(c for c in costs if c.details.get("llm_stage") == "author")
+    critic = next(c for c in costs if c.details.get("llm_stage") == "critic")
+    assert author.input_tokens == 24
+    assert critic.input_tokens is None
+    assert critic.details["usage_incomplete"] is True
+
+@pytest.mark.asyncio
+async def test_planner_timeout_keeps_attempt_audit_with_null_not_zero_tokens(db, tmp_path):
+    product, settings = setup(db, tmp_path)
+    settings.agent_critic_enabled = True
+    task = db.scalar(select(Task).where(
+        Task.assigned_agent == 'editorial_planner',
+        Task.status == TaskStatus.QUEUED,
+    ))
+
+    class TimedOutProvider:
+        def __init__(self):
+            self.calls = 0
+        async def generate(self, request):
+            self.calls += 1
+            raise TimeoutError('Simulated provider timeout')
+
+    provider = TimedOutProvider()
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
+                     critic_enabled=True)
+    assert await run_planner_once(lambda: Borrow(db), settings, llm) == 1
+    assert provider.calls == 1
+    assert db.get(Task, task.id).status == TaskStatus.FAILED
+    events = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == 'agent_quality_review',
+    )))
+    assert len(events) == 1
+    audit = json.loads(events[0].content)
+    assert audit['status'] == 'provider_timeout'
+    assert audit['usage_known'] is False
+    run = db.scalar(select(AgentRun).where(AgentRun.task_id == task.id))
+    assert {'kind': 'artifact', 'id': str(events[0].id)} in run.output_references
+    records = list(db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)))
+    assert len(records) == 1
+    assert records[0].input_tokens is None and records[0].output_tokens is None
+    assert records[0].details['usage_incomplete'] is True
+
+
+@pytest.mark.asyncio
+async def test_cancelled_second_planner_attempt_preserves_first_critic_audit_and_cost(db, tmp_path):
+    """Regression: cancellation after reviewer major finding must not discard paid calls."""
+    import asyncio
+
+    product, settings = setup(db, tmp_path)
+    settings.agent_critic_enabled = True
+    task = db.scalar(select(Task).where(
+        Task.assigned_agent == 'editorial_planner',
+        Task.status == TaskStatus.QUEUED,
+    ))
+
+    invalid_plan = draft()
+    invalid_plan['slots'][0]['day_offset'] = 14  # Must be < horizon_days (14).
+    finding = {
+        'findings': [{
+            'id': 'calendar-14', 'severity': 'major',
+            'problem': 'Scheduled content falls outside the requested planning horizon',
+            'evidence_in_draft': 'day_offset=14 with a 14-day horizon',
+            'proposed_fix': 'Move the slot inside the 14-day horizon',
+            'link_to_original_goal': 'The approved plan must stay within fourteen days',
+        }],
+    }
+
+    class CancelDuringRetry:
+        def __init__(self):
+            self.requests = []
+
+        async def generate(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                assert request.metadata['task_type'] == 'content_calendar'
+                return LLMResponse(
+                    content=json.dumps(invalid_plan, ensure_ascii=False),
+                    model='planner', usage=LLMUsage(input_tokens=24, output_tokens=34),
+                    stop_reason='end_turn',
+                )
+            if len(self.requests) == 2:
+                assert request.metadata['task_type'] == 'quality_review'
+                return LLMResponse(
+                    content=json.dumps(finding), model='critic',
+                    usage=LLMUsage(input_tokens=6, output_tokens=8),
+                    stop_reason='end_turn',
+                )
+            assert len(self.requests) == 3
+            assert request.metadata['task_type'] == 'content_calendar'
+            raise asyncio.CancelledError()
+
+    provider = CancelDuringRetry()
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
+                     critic_enabled=True)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_planner_once(lambda: Borrow(db), settings, llm)
+
+    assert len(provider.requests) == 3
+    assert 'validation_errors' in provider.requests[2].messages[-1].content
+    db.refresh(task)
+    assert task.status == TaskStatus.FAILED
+    assert db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == 'editorial_plan',
+    )) is None
+
+    run = db.scalar(select(AgentRun).where(AgentRun.task_id == task.id))
+    assert run is not None and run.status == 'failed'
+    assert run.finished_at is not None
+
+    audit_artifacts = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == 'agent_quality_review',
+    )))
+    assert len(audit_artifacts) == 2
+    audits = [json.loads(row.content) for row in audit_artifacts]
+    review = next(a for a in audits if a['status'] == 'advisory_only_no_domain_validator')
+    cancelled = next(a for a in audits if a['status'] == 'provider_cancelled')
+    assert review['findings'][0]['id'] == 'calendar-14'
+    assert review['extra_usage_by_model'][0]['model'] == 'critic'
+    assert cancelled['attempt'] == 2 and cancelled['usage_known'] is False
+    assert all({'kind': 'artifact', 'id': str(a.id)} in run.output_references
+               for a in audit_artifacts)
+
+    costs = list(db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)))
+    assert len(costs) == 3
+    author = next(r for r in costs if r.details.get("llm_stage") == "author")
+    critic = next(r for r in costs if r.details.get("llm_stage") == "critic")
+    pending = next(r for r in costs if r.details.get("review_status") == "provider_cancelled")
+    assert author.input_tokens == 24 and author.output_tokens == 34
+    assert critic.input_tokens == 6 and critic.output_tokens == 8
+    assert pending.input_tokens is None and pending.output_tokens is None
+    assert pending.details["usage_incomplete"] is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_critic_keeps_already_completed_author_usage(db, tmp_path):
+    import asyncio
+    product, settings = setup(db, tmp_path)
+    settings.agent_critic_enabled = True
+    task = db.scalar(select(Task).where(
+        Task.assigned_agent == "editorial_planner", Task.status == TaskStatus.QUEUED))
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+        async def generate(self, request):
+            self.calls.append(request)
+            if request.metadata.get("task_type") == "quality_review":
+                raise asyncio.CancelledError()
+            return LLMResponse(
+                content=json.dumps(draft(), ensure_ascii=False),
+                model="planner", usage=LLMUsage(input_tokens=24, output_tokens=34),
+                stop_reason="end_turn")
+
+    provider = Provider()
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=provider,
+                     critic_enabled=True)
+    with pytest.raises(asyncio.CancelledError):
+        await run_planner_once(lambda: Borrow(db), settings, llm)
+
+    assert len(provider.calls) == 2
+    run = db.scalar(select(AgentRun).where(AgentRun.task_id == task.id))
+    assert run.status == "failed"
+    rows = list(db.scalars(select(CostRecord).where(CostRecord.agent_run_id == run.id)))
+    observed = [r for r in rows if r.details.get("llm_stage") == "author"]
+    assert len(observed) == 1
+    assert (observed[0].input_tokens, observed[0].output_tokens) == (24, 34)
+    unknown = [r for r in rows if r.details.get("review_status") == "provider_cancelled"]
+    assert len(unknown) == 1
+    assert unknown[0].input_tokens is None
+    assert unknown[0].details["usage_incomplete"] is True
+
+
+def test_calendar_topics_are_reader_value_first_and_hard_rules_stay():
+    from app.prompts import REGISTRY
+    prompt = REGISTRY["calendar.plan"].default
+    assert "КАЧЕСТВО ТЕМ" in prompt and "{evidence_refs}" in prompt
+    assert prompt.index("КАЧЕСТВО ТЕМ") < prompt.index("HARD CALENDAR RULES")

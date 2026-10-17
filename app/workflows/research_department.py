@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.agents import AgentRole
+from app.llm.audit import critic_cost_details, persist_critic_audit
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, TaskStatus
@@ -27,6 +28,7 @@ from app.workflows.research_contracts import (
     SegmentResearchReport,
 )
 from app.workflows.team_contracts import TeamTaskResult
+from app.workflows.research_sources import load_source_bundles
 
 
 WORKERS = (
@@ -50,6 +52,7 @@ class ResearchDepartment:
         products_root: Path,
         provider_name: str,
         model: str,
+        intelligence=None,
     ):
         self.db = db
         self.llm = llm
@@ -57,6 +60,7 @@ class ResearchDepartment:
         self.products_root = products_root
         self.provider_name = provider_name
         self.model = model
+        self.intelligence = intelligence
 
     async def run(self, product: Product, parent: Task, brief: Artifact, brief_data: dict) -> TeamTaskResult:
         claimed = self.db.execute(
@@ -102,6 +106,15 @@ class ResearchDepartment:
 
         context = load_context(self.db, product, self.products_root)
         source_bundles = self._load_source_bundles(product.id)
+        intelligence_report = None
+        intelligence_report_id = None
+        if self.intelligence is not None and source_bundles:
+            try:
+                intelligence_report, intelligence_report_id, source_bundles = await self._competitive_context(
+                    product, parent, source_bundles)
+            except Exception:
+                # An optional extension must not strand the existing department task.
+                self.db.rollback()
         base_payload = self._sanitize_tree({
             "parent_task": {
                 "id": str(parent.id),
@@ -118,6 +131,8 @@ class ResearchDepartment:
                 row for row in context["records"].get("artifact", [])
                 if row.get("kind") in {"research_report", "measurement_spec", "article_brief"}
             ][:6],
+            "competitive_intelligence_report": intelligence_report,
+            "competitive_intelligence_report_id": intelligence_report_id,
         })
 
         worker_outputs: list[tuple[AgentRole, BaseModel, UUID, UUID]] = []
@@ -191,7 +206,7 @@ class ResearchDepartment:
                             },
                         )
                     ),
-                    timeout=WORKER_TIMEOUT_SECONDS,
+                    timeout=WORKER_TIMEOUT_SECONDS + self.llm.extra_timeout_seconds,
                 )
                 if len(response.content) > 80_000 or response.stop_reason not in (
                     None, "end_turn", "stop_sequence"
@@ -226,7 +241,7 @@ class ResearchDepartment:
                                 },
                             )
                         ),
-                        timeout=WORKER_TIMEOUT_SECONDS,
+                        timeout=WORKER_TIMEOUT_SECONDS + self.llm.extra_timeout_seconds,
                     )
                     if len(repair.content) > 80_000 or repair.stop_reason not in (
                         None, "end_turn", "stop_sequence"
@@ -298,6 +313,8 @@ class ResearchDepartment:
                                         "description": parent.description,
                                     },
                                     "worker_results": synthesis_payload,
+                                    "competitive_intelligence_report": intelligence_report,
+                                    "competitive_intelligence_report_id": intelligence_report_id,
                                 })),
                             )
                         ],
@@ -311,7 +328,7 @@ class ResearchDepartment:
                         },
                     )
                 ),
-                timeout=LEAD_TIMEOUT_SECONDS,
+                timeout=LEAD_TIMEOUT_SECONDS + self.llm.extra_timeout_seconds,
             )
             if len(lead_response.content) > 100_000 or lead_response.stop_reason not in (
                 None, "end_turn", "stop_sequence"
@@ -346,7 +363,7 @@ class ResearchDepartment:
                             },
                         )
                     ),
-                    timeout=LEAD_TIMEOUT_SECONDS,
+                    timeout=LEAD_TIMEOUT_SECONDS + self.llm.extra_timeout_seconds,
                 )
                 if len(repair.content) > 100_000 or repair.stop_reason not in (
                     None, "end_turn", "stop_sequence"
@@ -375,6 +392,7 @@ class ResearchDepartment:
                 worker_task_ids=worker_task_ids,
                 worker_artifact_ids=worker_artifact_ids,
                 lead_run_id=lead_run_id,
+                competitive_intelligence_artifact_id=intelligence_report_id,
             )
             artifact = ArtifactService(self.db).create(
                 product_id=product.id,
@@ -452,33 +470,30 @@ class ResearchDepartment:
         return None
 
     def _load_source_bundles(self, product_id: UUID) -> list[ResearchSourceBundle]:
-        rows = list(self.db.scalars(
-            select(Artifact)
-            .where(
-                Artifact.product_id == product_id,
-                Artifact.kind == "research_source_bundle",
-            )
-            .order_by(Artifact.created_at.desc(), Artifact.id.desc())
-            .limit(10)
-        ))
-        bundles: list[ResearchSourceBundle] = []
-        source_count = 0
-        for row in rows:
-            try:
-                bundle = ResearchSourceBundle.model_validate_json(row.content)
-            except Exception:
-                continue
-            remaining = 50 - source_count
-            if remaining <= 0:
-                break
-            if len(bundle.sources) > remaining:
-                bundle = ResearchSourceBundle(
-                    label=bundle.label,
-                    sources=bundle.sources[:remaining],
-                )
-            bundles.append(bundle)
-            source_count += len(bundle.sources)
-        return bundles
+        return load_source_bundles(self.db, product_id)
+
+    async def _competitive_context(self, product, parent, source_bundles):
+        from app.competitive_intelligence.contracts import RunInput
+        research = self.intelligence.start(RunInput(product_id=product.id,
+            brief=("Исследование: " + (parent.description or parent.title))[:3000], mode="weaknesses"),
+            parent_id=parent.id, frozen_bundles=source_bundles)
+        run_id = UUID(research["id"])
+        await self.intelligence.execute(run_id)
+        state = self.intelligence.get(run_id)
+        if not state["report_artifact_id"]:
+            return None, None, source_bundles
+        report = self.intelligence.report(run_id)
+        retained = [row for row in self.intelligence.evidence(run_id)
+                    if row["disposition"] == "retained" and row["source_type"] == "review"]
+        filtered = [ResearchSourceBundle.model_validate({
+            "label": "Отобранные отзывы бизнес-разведки", "sources": [{
+                "url": row["source_url"], "title": row["competitor"], "platform": row["platform"],
+                "competitor": row["competitor"], "excerpt": row["excerpt"], "rating": row["rating"],
+                "observed_at": row["observed_at"], "published_at": row["published_at"],
+                "source_type": row["source_type"],
+            } for row in retained],
+        })] if retained else []
+        return report, state["report_artifact_id"], filtered
 
     def _persist_worker_result(
         self,
@@ -541,8 +556,15 @@ class ResearchDepartment:
     @staticmethod
     def _merge_usage(first, second):
         if first.usage is not None and second.usage is not None:
-            second.usage.input_tokens += first.usage.input_tokens
-            second.usage.output_tokens += first.usage.output_tokens
+            second.usage = second.usage.model_copy(update={
+                "input_tokens": second.usage.input_tokens + first.usage.input_tokens,
+                "output_tokens": second.usage.output_tokens + first.usage.output_tokens,
+            })
+            # Both retry calls must be priced; otherwise monetary estimate unknown.
+            if first.estimated_cost_usd is not None and second.estimated_cost_usd is not None:
+                second.estimated_cost_usd += first.estimated_cost_usd
+            else:
+                second.estimated_cost_usd = None
         return second
 
     @staticmethod
@@ -624,7 +646,13 @@ class ResearchDepartment:
         return value
 
     def _record_usage(self, product_id: UUID, run_id: UUID, response) -> None:
-        if response is None or response.usage is None:
+        if response is None:
+            return
+        run = self.db.get(AgentRun, run_id)
+        if run is not None:
+            persist_critic_audit(self.db, product_id=product_id, task_id=run.task_id,
+                                 run_id=run_id, response=response)
+        if response.usage is None:
             return
         self.db.add(CostRecord(
             product_id=product_id,
@@ -636,8 +664,6 @@ class ResearchDepartment:
             input_tokens=max(0, response.usage.input_tokens),
             output_tokens=max(0, response.usage.output_tokens),
             incurred_at=datetime.now(timezone.utc),
-            details={
-                "cost_known": False,
-                "note": "Usage recorded; monetary price unavailable, zero is not a free-cost claim.",
-            },
+            details=critic_cost_details(response,
+                note="Usage recorded; monetary price unavailable, zero is not a free-cost claim."),
         ))

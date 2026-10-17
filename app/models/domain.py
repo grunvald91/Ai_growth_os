@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
@@ -263,6 +263,7 @@ class CostRecord(UUIDMixin, TimestampMixin, Base):
 
 class Publication(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "publications"
+    __table_args__ = (Index("ix_publication_due", "channel", "status", "scheduled_at"),)
 
     product_id: Mapped[UUID] = mapped_column(ForeignKey("products.id"), index=True, nullable=False)
     artifact_id: Mapped[UUID] = mapped_column(ForeignKey("artifacts.id"), index=True, nullable=False)
@@ -272,3 +273,5 @@ class Publication(UUIDMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False)
     external_reference: Mapped[str | None] = mapped_column(String(500))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sending_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

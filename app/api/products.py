@@ -1,5 +1,5 @@
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -41,8 +41,12 @@ def create_product(body: ProductCreate, db: Session = Depends(get_db)):
     return product
 
 @router.get('/products', response_model=list[ProductRead])
-def products(db: Session = Depends(get_db), limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
-    return list(db.scalars(select(Product).order_by(Product.created_at.desc(), Product.id).limit(limit).offset(offset)))
+def products(request: Request, db: Session = Depends(get_db), limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
+    query = select(Product)
+    allowed = getattr(request.state, "studio_product_ids", None)
+    if allowed is not None:
+        query = query.where(Product.id.in_([UUID(value) for value in allowed]))
+    return list(db.scalars(query.order_by(Product.created_at.desc(), Product.id).limit(limit).offset(offset)))
 
 @router.get('/products/{product_id}', response_model=ProductRead)
 def product(product_id: UUID, db: Session = Depends(get_db)):
