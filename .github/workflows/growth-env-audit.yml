@@ -1,0 +1,36 @@
+name: Growth env audit (read-only)
+
+# Разовая проверка только на чтение: какие переменные есть в текущем .env и
+# где на сервере лежат прежние копии с настройками whiteboard. Печатаются
+# только ИМЕНА переменных, пути и даты — никаких значений. Удалить после запуска.
+
+on:
+  push:
+    branches: [ccr-545c5158-rcd05z]
+    paths: ['.github/workflows/growth-env-audit.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Audit
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@155.212.162.47 'bash -s' <<'REMOTE'
+          names() { grep -oE '^[A-Z_][A-Z0-9_]*=' "$1" 2>/dev/null | tr -d '=' | sort | tr '\n' ' '; echo; }
+          echo "== current /opt/ai_growth_os/.env ($(stat -c %y /opt/ai_growth_os/.env | cut -c1-19))"; names /opt/ai_growth_os/.env
+          echo "== candidate copies containing whiteboard/openrouter settings"
+          grep -rlsI --exclude-dir=releases --exclude-dir=node_modules --exclude-dir=.git -e '^WHITEBOARD_IMAGE_MODEL=' -e '^OPENROUTER_API_KEY=' /opt /root /var/backups /etc 2>/dev/null | head -20 | while read f; do
+            echo "-- $f ($(stat -c '%y %s' "$f" | cut -c1-19))"; names "$f"
+          done
+          echo "== env of any growth container still holding OPENROUTER key (names only)"
+          for c in $(docker ps -a --format '{{.Names}}' | grep -i growth); do
+            if docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" | grep -q '^OPENROUTER_API_KEY=.\+'; then echo "  $c has non-empty OPENROUTER_API_KEY"; else echo "  $c: empty/absent"; fi
+          done
+          REMOTE
