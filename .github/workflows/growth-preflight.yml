@@ -1,0 +1,51 @@
+name: Growth deploy preflight (read-only)
+
+# Read-only check before the first push-based deploy: server fingerprint and
+# whether DEPLOY_SSH_KEY is authorized with the restricted forced command.
+on:
+  push:
+    branches: [ops/growth-preflight]
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST || vars.SERVER_HOST || '155.212.162.47' }}
+    steps:
+      - name: Secrets present (values never printed)
+        run: |
+          echo "DEPLOY_SSH_KEY set: $([ -n "$DEPLOY_SSH_KEY" ] && echo yes || echo no)"
+          echo "DEPLOY_KNOWN_HOSTS set: $([ -n "$DEPLOY_KNOWN_HOSTS" ] && echo yes || echo no)"
+          echo "host: $DEPLOY_HOST"
+          [ -n "$DEPLOY_SSH_KEY" ] || { echo "::error::DEPLOY_SSH_KEY is missing"; exit 1; }
+      - name: Server fingerprint
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$DEPLOY_HOST" 2>/dev/null | sort > scanned
+          ssh-keygen -lf scanned
+          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else cp scanned ~/.ssh/known_hosts; fi
+      - name: Key access (no-op command)
+        run: |
+          set -uo pipefail
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          ssh-keygen -y -f ~/.ssh/deploy >/dev/null 2>&1 && echo "key format: ok" || echo "key format: unreadable (passphrase or wrong format)"
+          # 'preflight' is not an allowed forced command, so a correctly restricted key
+          # gets "allowed: deploy <sha> | rollback" and nothing runs on the server.
+          out=$(timeout 30 ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes -o BatchMode=yes \
+                -o ConnectTimeout=15 "root@$DEPLOY_HOST" preflight 2>&1); code=$?
+          echo "exit=$code"
+          echo "$out" | head -5
+          case "$code:$out" in
+            *"allowed: deploy"*) echo "RESULT: restricted deploy key installed on the server" ;;
+            255:*) echo "RESULT: key not accepted by the server (not in authorized_keys)" ;;
+            *) echo "RESULT: key accepted but NOT restricted to the deploy command" ;;
+          esac
