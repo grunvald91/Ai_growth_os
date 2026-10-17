@@ -133,4 +133,3 @@ async def run_content_once(session_factory, settings):
             if isinstance(exc, asyncio.CancelledError):
                 raise
     return 1
-

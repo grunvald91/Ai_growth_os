@@ -389,4 +389,3 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
         if cancelled:
             raise
         return False
-

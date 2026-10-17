@@ -802,4 +802,3 @@ class TelegramContent:
         except (ValueError, LookupError, OSError) as exc:
             await self.bot._send(chat, str(exc) if action in {'planapprove','planpause','preferences'} and isinstance(exc, (ValueError, LookupError)) else 'Материал недоступен. Открой «Контент» заново.')
             return True
-

@@ -273,4 +273,3 @@ async def test_pipeline_disallows_unapproved_paid_execution(tmp_path):
     with pytest.raises(PermissionError):
         await pipeline.produce(request(request_generation=True), tmp_path / "no.mp4")
     assert planner.calls == 0
-

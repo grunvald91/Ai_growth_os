@@ -175,4 +175,3 @@ def require_studio_csrf(
             or received.username or received.password):
         _reject_origin(request, 403, "Cross-origin action rejected", configured)
     return None
-

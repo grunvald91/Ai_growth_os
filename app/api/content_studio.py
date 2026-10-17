@@ -2387,4 +2387,3 @@ async def studio_generate_plan(product_id: UUID, request: Request, db: Session =
     except (ValueError, LookupError) as exc:
         raise HTTPException(409, str(exc)) from None
     return RedirectResponse(f"/studio/products/{product_id}/plan", status_code=303)
-

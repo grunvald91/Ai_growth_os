@@ -277,4 +277,3 @@ async def test_stale_scheduled_post_is_marked_missed_instead_of_sent(db):
     second = schedule_post(db, post.id, conn.id,
                            now+timedelta(days=1), now=now)
     assert second.status == "scheduled"
-

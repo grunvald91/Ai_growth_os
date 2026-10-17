@@ -179,4 +179,3 @@ def test_long_narration_is_not_truncated_or_sped_up(tmp_path, tone):
     with pytest.raises(ValueError, match="exceeds 30 seconds"):
         renderer.render_sync((assets(long_audio),) * 3, tmp_path / "long.mp4", req())
     assert list(tmp_path.iterdir()) == []
-

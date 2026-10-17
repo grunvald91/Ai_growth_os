@@ -393,4 +393,3 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
         if isinstance(exc, asyncio.CancelledError):
             raise
         return False
-

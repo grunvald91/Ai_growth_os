@@ -93,4 +93,3 @@ def generic_text_fallback(stage_inputs: dict) -> dict:
     ]}
     # This validates lengths, supported channels and cross-channel similarity.
     return ReadyTextSet.model_validate(payload).model_dump(mode="json")
-

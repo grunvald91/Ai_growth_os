@@ -1,0 +1,2 @@
+# Release patches keep diff context whitespace verbatim.
+*.patch -whitespace

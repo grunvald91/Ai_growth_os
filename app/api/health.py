@@ -12,4 +12,3 @@ def health() -> dict[str, str]:
 def version() -> dict[str, str]:
     from app.core.config import get_settings
     return {"release": get_settings().release_sha}
-

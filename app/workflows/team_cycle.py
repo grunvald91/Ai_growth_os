@@ -392,4 +392,3 @@ class TeamCycle:
         if isinstance(value, dict):
             return {key: self._sanitize_tree(item) for key, item in value.items()}
         return value
-

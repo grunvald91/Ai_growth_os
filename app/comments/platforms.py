@@ -125,4 +125,3 @@ for _platform, _guide in CONNECTION_GUIDES.items():
 
 def reply_limit(platform, configured):
     return min(configured, PLATFORMS[platform].get("max_length", configured))
-

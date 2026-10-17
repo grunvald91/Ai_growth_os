@@ -445,4 +445,3 @@ async def run_due_telegram_post_once(session_factory, settings, *, api=None, now
                 db.get(Publication, pub_id).status = "delivery_unknown"
         db.commit()
         return 1
-

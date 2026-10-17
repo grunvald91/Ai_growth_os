@@ -100,7 +100,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
             for index, step in enumerate(item["steps"]):
                 links = ''.join(f'<a href="{esc(url)}" target="_blank" rel="noopener noreferrer">{esc(label)} ↗</a>'
                     for label, url in item.get("links", {}).get(index, []))
-                steps += f'<li>{esc(step)}<div class="c-step-links">{links}</div></li>' if links else f'<li>{esc(step)}</li>' 
+                steps += f'<li>{esc(step)}<div class="c-step-links">{links}</div></li>' if links else f'<li>{esc(step)}</li>'
             docs = f'<a class="c-docs" href="{esc(item["docs"])}" target="_blank" rel="noopener noreferrer">Официальная документация ↗</a>' if item["docs"] else ''
             help_text = esc(item.get("help", ""))
             if item["live"]:
@@ -265,4 +265,3 @@ async def comment_action(product_id: UUID, comment_id: UUID, action: str, reques
         raise LookupError("Действие не найдено")
     except (ValueError, LookupError) as exc:
         raise error(exc)
-

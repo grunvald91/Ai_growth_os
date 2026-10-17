@@ -161,4 +161,3 @@ for path, model, schema in [('goals', Goal, GoalRead), ('tasks', Task, TaskRead)
     ('experiments', Experiment, ExperimentRead), ('artifacts', Artifact, ArtifactRead),
     ('decisions', Decision, DecisionRead), ('approvals', Approval, ApprovalRead)]:
     register_list(path, model, schema)
-

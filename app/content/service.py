@@ -71,4 +71,3 @@ def queue_render(db, article_id: UUID):
         content=json.dumps({'article_id': str(article.id), 'script_ids': [str(s.id) for s in scripts]}))
     db.commit()
     return task
-

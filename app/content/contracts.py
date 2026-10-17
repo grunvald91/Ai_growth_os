@@ -50,4 +50,3 @@ class VideoVariants(Contract):
         if len({v.hook.casefold() for v in self.videos}) != 2:
             raise ValueError('Platform video hooks must be distinct')
         return self
-

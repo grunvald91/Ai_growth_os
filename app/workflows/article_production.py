@@ -1274,4 +1274,3 @@ class ArticleProduction:
         if isinstance(value, dict):
             return {key: self._sanitize(item) for key, item in value.items()}
         return value
-

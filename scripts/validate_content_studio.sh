@@ -31,4 +31,3 @@ python -m pytest -q \
 if [[ "${FULL_TESTS:-0}" == "1" ]]; then
   python -m pytest -q
 fi
-

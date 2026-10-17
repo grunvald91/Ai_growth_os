@@ -275,4 +275,3 @@ class Publication(UUIDMixin, TimestampMixin, Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sending_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-

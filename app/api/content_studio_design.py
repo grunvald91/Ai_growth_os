@@ -517,4 +517,3 @@ STUDIO_CSS += "\n" + STUDIO_TYPOGRAPHY_CSS
 from app.api.content_studio_work_ui import CSS as STUDIO_WORK_CSS, JS as STUDIO_WORK_JS
 STUDIO_CSS += "\n" + STUDIO_WORK_CSS
 STUDIO_JS += "\n" + STUDIO_WORK_JS
-

@@ -55,4 +55,3 @@ def factual_claim_warnings(text: str, facts: dict | None = None) -> list[str]:
     if unsupported:
         return ["Нет подтверждения в профиле: " + "; ".join(dict.fromkeys(unsupported))[:350] + ". Проверьте числа, цены и результаты перед утверждением."]
     return []
-
