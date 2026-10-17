@@ -14,6 +14,8 @@ jobs:
     if: github.actor == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Deploy secrets may be environment secrets of "production".
+    environment: production
     env:
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
       DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
