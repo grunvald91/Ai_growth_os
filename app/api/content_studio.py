@@ -27,6 +27,7 @@ from app.content.render import asset_path
 from app.api.content_studio_activity import (work_items, notice_items, notice_html,
     activity_html, activity_overview, task_detail_html, RESULT_KINDS)
 from app.api.content_studio_ui import create_content_html, review_html, channels_html
+from app.api.content_studio_home import quick_topic_html, topic_suggestions
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.content.calendar import (PLATFORMS, approve_plan, pause_plan,
     reschedule_slot, queue_plan, save_preferences)
@@ -934,9 +935,10 @@ def product_dashboard(db: Session, product: Product) -> str:
         Все этапы и результаты можно посмотреть в разделе «В работе».</p>
       </div>
       <div class="sg-hero-actions">
-        <a class="btn primary" href="/studio/products/{product.id}/create">＋ Создать материал</a>
+        <a class="btn secondary" href="/studio/products/{product.id}/create">Другие форматы →</a>
         <a class="btn secondary" href="/studio/products/{product.id}/work">Мои задания →</a>
       </div>
+      {quick_topic_html(product.id, topic_suggestions(db, product.id, plan))}
     </section>
     """
     overview_extra = f"""
