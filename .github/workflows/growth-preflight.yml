@@ -1,7 +1,7 @@
 name: Growth deploy preflight (read-only)
 
-# Read-only check before the first push-based deploy: server fingerprint and
-# whether DEPLOY_SSH_KEY is authorized with the restricted forced command.
+# Read-only look at the production server before the first deploy of the
+# Growth release path: nothing is written, restarted or printed from .env.
 on:
   push:
     branches: [ops/growth-preflight]
@@ -14,40 +14,39 @@ jobs:
     if: github.actor == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Deploy secrets may be environment secrets of "production".
-    environment: production
     env:
-      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-      DEPLOY_HOST: ${{ vars.DEPLOY_HOST || vars.SERVER_HOST || '155.212.162.47' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
     steps:
-      - name: Secrets present (values never printed)
+      - name: Secret present (value never printed)
         run: |
-          echo "DEPLOY_SSH_KEY set: $([ -n "$DEPLOY_SSH_KEY" ] && echo yes || echo no)"
-          echo "DEPLOY_KNOWN_HOSTS set: $([ -n "$DEPLOY_KNOWN_HOSTS" ] && echo yes || echo no)"
-          echo "host: $DEPLOY_HOST"
-          [ -n "$DEPLOY_SSH_KEY" ] || { echo "::error::DEPLOY_SSH_KEY is missing"; exit 1; }
+          echo "SERVER_SSH_PASSWORD set: $([ -n "$SSHPASS" ] && echo yes || echo no)"
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is missing"; exit 1; }
       - name: Server fingerprint
         run: |
           set -euo pipefail
           install -m 700 -d ~/.ssh
-          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$DEPLOY_HOST" 2>/dev/null | sort > scanned
-          ssh-keygen -lf scanned
-          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          else cp scanned ~/.ssh/known_hosts; fi
-      - name: Key access (no-op command)
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null | sort > ~/.ssh/known_hosts
+          ssh-keygen -lf ~/.ssh/known_hosts
+      - name: Read-only server state
         run: |
-          set -uo pipefail
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
-          ssh-keygen -y -f ~/.ssh/deploy >/dev/null 2>&1 && echo "key format: ok" || echo "key format: unreadable (passphrase or wrong format)"
-          # 'preflight' is not an allowed forced command, so a correctly restricted key
-          # gets "allowed: deploy <sha> | rollback" and nothing runs on the server.
-          out=$(timeout 30 ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes -o BatchMode=yes \
-                -o ConnectTimeout=15 "root@$DEPLOY_HOST" preflight 2>&1); code=$?
-          echo "exit=$code"
-          echo "$out" | head -5
-          case "$code:$out" in
-            *"allowed: deploy"*) echo "RESULT: restricted deploy key installed on the server" ;;
-            255:*) echo "RESULT: key not accepted by the server (not in authorized_keys)" ;;
-            *) echo "RESULT: key accepted but NOT restricted to the deploy command" ;;
-          esac
+          set -euo pipefail
+          sudo apt-get install -y -qq sshpass >/dev/null
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "root@$HOST" 'bash -s' <<'REMOTE'
+          set -u
+          D=/opt/ai_growth_os/deploy
+          echo "--- deploy script"
+          if [ -f $D/deploy_growth.py ]; then sha256sum $D/deploy_growth.py | cut -d" " -f1; else echo "missing"; fi
+          echo "expected 6aedfb771590e19d425d7995f9461345d327103ad1ed2e2c951d797bfd27987c"
+          echo "entry script: $([ -x $D/ssh-deploy-entry.sh ] && echo present || echo missing)"
+          echo "--- deploy.json"
+          if [ -f $D/deploy.json ]; then python3 -c 'import json;d=json.load(open("/opt/ai_growth_os/deploy/deploy.json"));print("base_image:",d.get("base_image"));print("overlay keys:",sorted((d.get("overlay_env") or {}).keys()))'; else echo "missing"; fi
+          echo "--- restricted deploy key in authorized_keys: $(grep -c ssh-deploy-entry /root/.ssh/authorized_keys 2>/dev/null || echo 0)"
+          echo "--- active release: $(readlink -f /opt/ai_growth_os/current 2>/dev/null || echo none)"
+          echo "--- containers"
+          docker ps --filter label=com.docker.compose.project=ai-growth-os --format '{{.Names}} {{.Image}} {{.Status}}'
+          echo "--- base images"
+          docker images --format '{{.Repository}}:{{.Tag}} {{.CreatedSince}}' | grep -Ei 'growth|servgo' | head -10
+          echo "--- critic flag in runtime env: $(grep -c '^AGENT_CRITIC_ENABLED=true' /opt/ai_growth_os/.env 2>/dev/null || echo 0)"
+          echo "--- disk"; df -h / | tail -1
+          REMOTE
