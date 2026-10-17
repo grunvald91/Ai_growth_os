@@ -515,3 +515,6 @@ from app.api.content_studio_work_ui import CSS as STUDIO_WORK_CSS, JS as STUDIO_
 STUDIO_CSS += "\n" + STUDIO_WORK_CSS
 STUDIO_JS += "\n" + STUDIO_WORK_JS
 
+from app.api.content_studio_home import CSS as STUDIO_HOME_CSS, JS as STUDIO_HOME_JS
+STUDIO_CSS += "\n" + STUDIO_HOME_CSS
+STUDIO_JS += "\n" + STUDIO_HOME_JS
