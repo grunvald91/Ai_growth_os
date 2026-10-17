@@ -146,7 +146,9 @@ RESUME_ACTION = 'whiteboard_resume'
 
 def can_resume(task_status, value, payload) -> bool:
     return (task_status == TaskStatus.FAILED and value.get('error') in RESUMABLE_ERRORS
-            and payload.visual_repair_from is None and value.get('calls', 0) < payload.max_api_calls)
+            and payload.visual_repair_from is None
+            # Rendering is local: a job stopped there needs no further paid calls.
+            and (value.get('calls', 0) < payload.max_api_calls or value.get('failed_stage') == 'rendering'))
 
 
 def resume_job(db, product_id, task_id, *, confirmed, decided_by):

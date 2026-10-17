@@ -176,6 +176,12 @@ def test_overlap_and_corrupt_audio_fail_without_publishing(tmp_path, tone):
 def test_long_narration_is_not_truncated_or_sped_up(tmp_path, tone):
     long_audio = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=24000", "-t", "6", "-c:a", "libmp3lame", "-f", "mp3", "pipe:1"], capture_output=True, check=True).stdout
     renderer = MarkerSweepRenderer(width=180, height=320, fps=5)
-    with pytest.raises(ValueError, match="exceeds 30 seconds"):
-        renderer.render_sync((assets(long_audio),) * 3, tmp_path / "long.mp4", req())
-    assert list(tmp_path.iterdir()) == []
+    # 6 beats x 6 s = 36 s of speech: the video grows to fit, nothing is cut.
+    duration = renderer.render_sync((assets(long_audio),) * 3, tmp_path / "long.mp4", req())
+    assert abs(duration - 37) < 0.1
+    manifest = json.loads((tmp_path / "long.json").read_text())
+    assert manifest["narration_seconds"] > 35.5 and manifest["beats"][-1]["end"] > 35.5
+    too_long = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=24000", "-t", "11", "-c:a", "libmp3lame", "-f", "mp3", "pipe:1"], capture_output=True, check=True).stdout
+    with pytest.raises(ValueError, match="exceeds 60 seconds"):
+        renderer.render_sync((assets(too_long),) * 3, tmp_path / "too-long.mp4", req())
+    assert not (tmp_path / "too-long.mp4").exists()
