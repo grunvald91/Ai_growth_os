@@ -26,7 +26,8 @@ from app.api.content_studio_article import render_article
 from app.content.render import asset_path
 from app.api.content_studio_activity import (work_items, notice_items, notice_html,
     activity_html, activity_overview, task_detail_html, RESULT_KINDS)
-from app.api.content_studio_ui import create_content_html, review_html, channels_html
+from app.api.content_studio_ui import create_content_html, review_html, channels_html, speed_html
+from app.content.durations import call_speed, duration_notice, task_durations
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.content.calendar import (PLATFORMS, approve_plan, pause_plan,
     reschedule_slot, queue_plan, save_preferences)
@@ -1012,7 +1013,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>Growth Studio · {esc(product.name)}</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=10">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=11">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1150,7 +1151,7 @@ def studio_page_shell(
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>{esc(title)} · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=10">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=11">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1275,6 +1276,7 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
         <label class="sg-field"><span>Пожелания к следующему плану <em>· необязательно</em></span>
           <textarea name="requirements" maxlength="6000" rows="3" placeholder="Например: 4 поста в Telegram в неделю, короткие ролики для тёплой аудитории, акцент на преимуществах"></textarea>
         </label><button class="btn secondary" type="submit">✦ Подготовить новый контент-план</button>
+        <small class="sg-duration-note">{esc(duration_notice(task_durations(db), "plan"))}</small>
       </form>
     </section>
     <section class="panel" id="unknowns">
@@ -1744,7 +1746,7 @@ def product_selector(products: list[Product], *, can_add: bool = False) -> str:
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=10"></head>
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=11"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
@@ -2027,7 +2029,7 @@ async def studio_manual_edit(product_id: UUID, artifact_id: UUID, request: Reque
 @router.get("/studio/products/{product_id}/create", response_class=HTMLResponse)
 def studio_create_page(product_id: UUID, created: bool = False, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
-    html_body = create_content_html(product.id, created=created)
+    html_body = create_content_html(product.id, created=created, durations=task_durations(db))
     # Tasks have a dedicated persistent workspace; never duplicate a raw
     # technical job log below the creative form.
     html_body += ('<p class="sg-create-work-link"><a href="/studio/products/'
@@ -2066,9 +2068,22 @@ async def studio_create_submit(product_id: UUID, request: Request, db: Session =
         db.rollback()
         return HTMLResponse(studio_page_shell(
             product, active="create", title="Создать материал", subtitle="Проверьте поля задания.",
-            body=create_content_html(product.id, fields=fields, error="Проверьте формат, площадку и длину полей: тема 3–300, аудитория до 300, требования до 3500 символов."),
+            body=create_content_html(product.id, fields=fields, durations=task_durations(db), error="Проверьте формат, площадку и длину полей: тема 3–300, аудитория до 300, требования до 3500 символов."),
         ), status_code=422, headers={"Cache-Control": "no-store"})
     return RedirectResponse(f"/studio/products/{product.id}/tasks/{task.id}", status_code=303)
+
+
+@router.get("/studio/products/{product_id}/speed", response_class=HTMLResponse)
+def studio_speed_page(product_id: UUID, days: int = 7, db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    days = days if days in {7, 30} else 7
+    response = HTMLResponse(studio_page_shell(
+        product, active="work", title="Скорость ИИ-моделей",
+        subtitle="Сколько фактически длятся вызовов моделей. По этим данным решаем, менять ли площадку.",
+        body=speed_html(product.id, call_speed(db, days=days), task_durations(db), days=days),
+    ))
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @router.get("/studio/products/{product_id}/work", response_class=HTMLResponse)

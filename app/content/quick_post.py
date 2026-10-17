@@ -24,6 +24,7 @@ from app.services.artifacts import ArtifactService
 from app.services.tasks import TaskService
 from app.workflows.article_production import product_facts
 from app.workflows.context import load_context
+from app.llm.timeouts import CALL_WAIT_SECONDS, PROVIDER_TIMEOUT_SECONDS
 
 
 CHANNEL_GUIDANCE = {
@@ -296,12 +297,12 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                     max_tokens=2800 if name == "post_strategist" else 5500,
                     metadata={
                         "team_role": name, "task_type": "quick_post",
-                        "reasoning_effort": "low", "provider_timeout_seconds": 90,
+                        "reasoning_effort": "low", "provider_timeout_seconds": PROVIDER_TIMEOUT_SECONDS,
                     },
                 ), validate_revision=validate_candidate,
                 on_observed=record_model_call,
                 on_review_progress=record_review_progress),
-                timeout=180 + llm.extra_timeout_seconds,
+                timeout=CALL_WAIT_SECONDS + llm.extra_timeout_seconds,
             )
             persist_critic_audit(
                 db, product_id=product.id, task_id=task.id, run_id=run.id,
@@ -323,8 +324,8 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                     model=settings.llm_model, response_schema=schema.model_json_schema(),
                     max_tokens=2800 if name == "post_strategist" else 5500,
                     metadata={"team_role": name, "task_type": "quick_post", "reasoning_effort": "low",
-                              "provider_timeout_seconds": 90},
-                ), on_observed=record_model_call), timeout=180)
+                              "provider_timeout_seconds": PROVIDER_TIMEOUT_SECONDS},
+                ), on_observed=record_model_call), timeout=CALL_WAIT_SECONDS)
                 if reply.stop_reason not in (None, "end_turn", "stop_sequence"):
                     raise ValueError("AI answer was interrupted") from exc
                 output = validate_candidate(_decode(schema, reply.content).model_dump(mode="json"))

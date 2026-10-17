@@ -25,6 +25,7 @@ from app.services.artifacts import ArtifactService
 from app.services.tasks import TaskService
 from app.workflows.article_production import product_facts
 from app.workflows.context import load_context
+from app.llm.timeouts import CALL_WAIT_SECONDS, PROVIDER_TIMEOUT_SECONDS
 
 
 
@@ -225,7 +226,7 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
         system = prompt_text("quick_post.common") + prompt_text("revision.post")
         metadata = {
             "team_role": "post_rewriter", "task_type": "quick_post",
-            "reasoning_effort": "low", "provider_timeout_seconds": 100,
+            "reasoning_effort": "low", "provider_timeout_seconds": PROVIDER_TIMEOUT_SECONDS,
         }
 
         def validate_candidate(data):
@@ -261,7 +262,7 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
                 model=settings.llm_model, max_tokens=7500, metadata=metadata,
             ), validate_revision=validate_candidate,
                 on_observed=record_model_call, on_review_progress=record_review_progress),
-            timeout=210 + llm.extra_timeout_seconds,
+            timeout=CALL_WAIT_SECONDS + llm.extra_timeout_seconds,
         )
         persist_critic_audit(db, product_id=product.id, task_id=task.id, run_id=run_id, response=reply)
         db.commit()
@@ -279,7 +280,7 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
                 messages=[LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False))],
                 response_schema=RevisedPost.model_json_schema(),
                 model=settings.llm_model, max_tokens=7500, metadata=metadata,
-            ), on_observed=record_model_call), timeout=210)
+            ), on_observed=record_model_call), timeout=CALL_WAIT_SECONDS)
             if reply.stop_reason not in (None, "end_turn", "stop_sequence"):
                 raise ValueError("Incomplete revision output") from exc
             draft = validate_candidate(_decode(RevisedPost, reply.content).model_dump(mode="json"))

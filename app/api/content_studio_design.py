@@ -517,3 +517,12 @@ STUDIO_CSS += "\n" + STUDIO_TYPOGRAPHY_CSS
 from app.api.content_studio_work_ui import CSS as STUDIO_WORK_CSS, JS as STUDIO_WORK_JS
 STUDIO_CSS += "\n" + STUDIO_WORK_CSS
 STUDIO_JS += "\n" + STUDIO_WORK_JS
+STUDIO_CSS += """
+.sg-duration-note{display:flex;gap:8px;max-width:none;color:#526176}
+.sg-duration-note ul{margin:4px 0;padding-left:18px}
+.sg-duration-note a{white-space:nowrap}
+.sg-table-wrap{overflow-x:auto;margin-top:12px}
+.sg-table{width:100%;border-collapse:collapse;font-size:14px}
+.sg-table th,.sg-table td{padding:8px 10px;border-bottom:1px solid #e3e8ee;text-align:left;white-space:nowrap}
+.sg-table th{font-size:12px;color:#526176;font-weight:700}
+"""
