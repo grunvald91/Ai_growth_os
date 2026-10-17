@@ -1,0 +1,103 @@
+name: Growth deploy (whiteboard image timeout + admin back links)
+
+# One-off production deploy of 9fec1b3 (on top of running 13a1894) through the server's own
+# deploy_growth.py (health check + automatic rollback). Refuses to deploy if the
+# running code contains anything that is not in this branch's history.
+on:
+  push:
+    branches: [ccr-545c5158-rcd05z]
+    paths: ['.github/workflows/growth-deploy-once.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: growth-production
+  cancel-in-progress: false
+
+env:
+  DEPLOY_SHA: 9fec1b33f8fa92e1dc2e19b414f3737513346575
+  HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+
+jobs:
+  test:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install media tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-dejavu-core poppler-utils tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng
+      - run: python -m pip install -e '.[test]'
+      - run: python -m pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: SSH setup
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is missing"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null | sort > ~/.ssh/known_hosts
+          ssh-keygen -lf ~/.ssh/known_hosts
+      - name: Drift check (running code must come from this branch's history)
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes "root@$HOST" \
+            "docker exec ai-growth-os-api-1 sh -c 'cd /app && find app products -type f \( -name \"*.py\" -o -name \"*.json\" -o -name \"*.md\" -o -name \"*.html\" -o -name \"*.css\" -o -name \"*.js\" \) ! -path \"*/__pycache__/*\" -exec sha256sum {} +'" > running.txt
+          echo "files in running container: $(wc -l < running.txt)"
+          python3 - "$DEPLOY_SHA" <<'PY'
+          import hashlib, subprocess, sys
+          sha = sys.argv[1]
+          def blob(rev, path):
+              r = subprocess.run(["git", "show", f"{rev}:{path}"], capture_output=True)
+              return hashlib.sha256(r.stdout).hexdigest() if r.returncode == 0 else None
+          running = {}
+          for line in open("running.txt"):
+              digest, path = line.split(None, 1)
+              running[path.strip()] = digest
+          newer, unknown = [], []
+          for path, digest in sorted(running.items()):
+              if blob(sha, path) == digest:
+                  continue
+              revs = subprocess.run(["git", "log", "--format=%H", "-n", "300", sha, "--", path],
+                                    capture_output=True, text=True).stdout.split()
+              if any(blob(rev, path) == digest for rev in revs):
+                  newer.append(path)
+              else:
+                  unknown.append(path)
+          print(f"identical: {len(running) - len(newer) - len(unknown)}, older version in branch history: {len(newer)}, unknown: {len(unknown)}")
+          for path in newer:
+              print("  will update:", path)
+          for path in unknown:
+              print("  NOT IN BRANCH HISTORY:", path)
+          if unknown:
+              print("::error::Running code contains files that are not in this branch's history; not deploying.")
+              sys.exit(1)
+          PY
+      - name: Deploy through deploy_growth.py
+        run: |
+          set -euo pipefail
+          git archive --format=tar.gz "$DEPLOY_SHA" app alembic/versions pyproject.toml products \
+            | sshpass -e ssh -o StrictHostKeyChecking=yes "root@$HOST" \
+              "python3 /opt/ai_growth_os/deploy/deploy_growth.py deploy $DEPLOY_SHA"
+      - name: State after deploy
+        if: always()
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=yes "root@$HOST" \
+            "docker ps --filter label=com.docker.compose.project=ai-growth-os --format '{{.Names}} {{.Image}} {{.Status}}'; curl -s -o /dev/null -w 'health %{http_code}\n' http://127.0.0.1:8091/health"
