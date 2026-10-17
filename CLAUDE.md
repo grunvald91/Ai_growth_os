@@ -134,3 +134,9 @@ Read `ARCHITECTURE.md` and `IMPLEMENTATION_PLAN.md` before coding.
 ## GitHub Actions budget policy (mandatory)
 
 Before planning or executing any CI, deployment or GitHub Actions operation, read and follow [AGENTS.md](AGENTS.md). Its cost, safety, diagnostics, limits and reporting rules apply equally to Claude Code and any delegated agent. Do not bypass them through issue comments or other automation triggers.
+
+## Code review
+
+Review rules for this repository are in [REVIEW.md](REVIEW.md). Before opening a PR, verify the work (`python -m pytest -q`, migration checks when models change) and, where available, run `/code-review` and `/security-review` locally.
+
+The `AI Review` workflow (`.github/workflows/ai-review.yml`) reviews a PR when it is opened or marked ready, and again when the `ai-review` label is added. It intentionally does not run on every push, to respect the Actions budget policy above. If the reviewer repeats the same finding, fix the cause in REVIEW.md, CLAUDE.md or a test instead of re-running it.

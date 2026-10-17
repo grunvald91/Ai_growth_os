@@ -1,0 +1,14 @@
+# Рискованные пути. Владелец автоматически назначается ревьюером.
+# Не включай "Require review from Code Owners": автор PR не может одобрить свой же PR,
+# и работа заблокируется. Здесь CODEOWNERS нужен как карта рисков и автоназначение.
+*                           @grunvald91
+/.github/                   @grunvald91
+/alembic/                   @grunvald91
+/app/policies/              @grunvald91
+/app/privacy/               @grunvald91
+/app/llm/                   @grunvald91
+/app/tools/                 @grunvald91
+/app/communications/        @grunvald91
+/Dockerfile                 @grunvald91
+/docker-compose*.yml        @grunvald91
+/pyproject.toml             @grunvald91

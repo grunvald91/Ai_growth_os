@@ -1,0 +1,102 @@
+name: AI Review
+
+# Claude-ревью pull request: проход по багам + отдельный проход по безопасности.
+# Экономия Actions (см. AGENTS.md): запуск только при открытии / reopen / ready_for_review
+# и по лейблу `ai-review` (повторный раунд). НЕ запускается на каждый push.
+# Не запускается для форков и черновиков; docs-only изменения пропускаются.
+# Результаты ревью: inline-комментарии + один итоговый комментарий.
+# Рекомендуется в настройках ветки main включить "Require conversation resolution before merging".
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, labeled]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Claude review + security pass
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor == 'grunvald91' &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ai-review')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    env:
+      ANTHROPIC_BASE_URL: https://api.claudehub.fun
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Verify API secret
+        env:
+          CLAUDEHUB_API_KEY: ${{ secrets.API }}
+        run: |
+          if [ -z "$CLAUDEHUB_API_KEY" ]; then
+            echo "::error::Repository Actions secret 'API' is missing or unavailable."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Claude review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.API }}
+          github_token: ${{ github.token }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Ты ревьюер этого pull request. Отвечай по-русски. Ничего не меняй в коде и не коммить:
+            ты только читаешь и комментируешь.
+
+            Контекст: сначала прочитай CLAUDE.md и REVIEW.md в корне репозитория. Следуй REVIEW.md.
+            Дифф получи через `gh pr diff ${{ github.event.pull_request.number }}`,
+            описание и прошлые комментарии через `gh pr view ${{ github.event.pull_request.number }} --comments`.
+
+            Проход 1 — баги и корректность:
+            - решает ли изменение заявленную задачу (в багфиксах ищи первопричину), ломает ли соседний код;
+            - бизнес-правила и риски из REVIEW.md;
+            - есть ли тест на багфикс и поведение, которое менялось.
+
+            Проход 2 — безопасность (отдельно, внимательно):
+            - секреты, токены, пароли, ПДн клиентов в коде, логах, комментариях;
+            - инъекции, обход авторизации, небезопасная десериализация, опасные shell/SQL вызовы;
+            - деплой и workflows: лишние права, новые триггеры платных Actions, широкие деплои без отката.
+
+            Правила вывода:
+            - Каждое замечание — inline-комментарий на конкретную строку (файл:строка), с тем, что именно сломается.
+              Не гадай по названию: сначала прочитай код. Метка в начале: Important, Nit или Pre-existing
+              (Pre-existing — баг не из этого PR, чтобы он не выглядел виной автора).
+            - Не более 3 Nit. Не пиши про стиль, форматирование и очистку кода, если это не ошибка.
+            - Не повторяй замечания, уже оставленные в этом PR.
+            - Если в `gh pr view --comments` уже есть 3 и более итоговых комментария ревью с заголовком
+              «AI Review», не ищи новые мелочи: напиши автору остановиться и пересмотреть подход
+              (классы ошибок, а не отдельные строки).
+            - Повторный раунд: смотри только изменения после предыдущего ревью.
+            - В конце один итоговый комментарий через `gh pr comment`. Первая строка:
+              «AI Review: найдено N (Important X, Nit Y)» или «AI Review: замечаний нет».
+              Дальше — коротко, что проверено и что человеку стоит посмотреть самому.
+              Если замечаний нет, так и скажи без выдумывания.
+          claude_args: |
+            --model claude-opus-5-5
+            --max-turns 20
+            --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+
+      - name: Remove re-review label
+        if: always() && github.event.action == 'labeled'
+        run: gh pr edit "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" --remove-label ai-review || true
