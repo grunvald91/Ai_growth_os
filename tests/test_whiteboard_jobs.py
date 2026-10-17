@@ -421,3 +421,41 @@ async def test_readiness_and_media_use_the_explicit_proxy_with_tls_validation(en
         proxy_url=settings.whiteboard_proxy_url).synthesize('Пример короткой фразы', language='ru', voice='Kore')
     assert audio.startswith(b'ID3') and len(client_options) == 2
     assert all(options['trust_env'] is False and options['follow_redirects'] is False for options in client_options)
+
+
+@pytest.mark.asyncio
+async def test_owner_resumes_failed_job_without_paying_for_completed_stages(environment, monkeypatch):
+    factory, settings, product_id, _ = environment
+    task_id = new_job(environment, maximum=19); approve(environment, task_id)
+    attempts = []
+    def flaky_factory(settings, payload, store):
+        pipeline = fake_factory(settings, payload, store)
+        working = pipeline.images
+        class Images:
+            async def generate(self, *args, **kwargs):
+                attempts.append(1)
+                if len(attempts) == 2:
+                    request = httpx.Request('POST', 'https://api.claudehub.fun/v1/images/generations')
+                    raise httpx.HTTPStatusError('bad gateway', request=request,
+                                                response=httpx.Response(502, request=request, json={'error': {'type': 'api_error'}}))
+                return await working.generate(*args, **kwargs)
+        pipeline.images = Images(); return pipeline
+    await run_whiteboard_once(factory, settings, factory=flaky_factory, readiness=ready)
+    url = f'/studio/products/{product_id}/whiteboard/{task_id}'
+    with client() as browser:
+        page = browser.get(url)
+        assert 'HTTP 5xx' in page.text and 'Продолжить с места остановки' in page.text
+        assert browser.post(url + '/resume', data={'confirmed': 'no'}, follow_redirects=False).status_code == 409
+        assert browser.post(url + '/resume', data={'confirmed': 'yes'}, follow_redirects=False).status_code == 303
+        # A second click while queued is rejected: one confirmation, one continuation.
+        assert browser.post(url + '/resume', data={'confirmed': 'yes'}, follow_redirects=False).status_code == 409
+    assert await run_whiteboard_once(factory, settings, factory=flaky_factory, readiness=ready) == 1
+    with factory() as db:
+        assert db.get(Task, task_id).status == TaskStatus.COMPLETED
+        runs = [r.agent_name for r in db.scalars(select(AgentRun).where(AgentRun.task_id == task_id))]
+        assert runs.count('whiteboard_storyboard') == 1
+        assert runs.count('whiteboard_image') == 4  # one ready image reused, failed one called again
+        resumes = list(db.scalars(select(Approval).where(Approval.action_type == 'whiteboard_resume')))
+        assert len(resumes) == 1 and resumes[0].status == 'approved'
+        state = json.loads(records(db, owner_task(db, product_id, task_id))[1].content)
+        assert 'resume_requested' not in state and state['resumes'] == 1

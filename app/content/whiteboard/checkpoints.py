@@ -108,6 +108,17 @@ class CheckpointStore:
             raise CheckpointError('Cached stage integrity check failed')
         return data
 
+    def reset_unfinished(self) -> list[str]:
+        """Forget failed/interrupted stages; only on an owner-confirmed resume."""
+        with self._lock():
+            state = self._read_manifest()
+            names = [name for name, stage in state['stages'].items() if stage.get('status') != 'complete']
+            for name in names:
+                del state['stages'][name]
+            if names:
+                self._write_manifest(state)
+            return names
+
     def load(self, name: str, *, limit: int = 12_000_000) -> bytes:
         self._validate_name(name)
         with self._lock():

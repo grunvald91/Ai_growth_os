@@ -15,7 +15,8 @@ from pydantic import ValidationError
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.content_studio import _owner_product, _studio_form, esc, studio_page_shell
 from app.content.whiteboard.contracts import Contract, WhiteboardRequest
-from app.content.whiteboard.jobs import AGENT, approve_job, cancel_job, digest, job_directory, owner_task, queue_job, records
+from app.content.whiteboard.jobs import (AGENT, approve_job, can_resume, cancel_job, digest, job_directory, owner_task,
+                                         queue_job, records, resume_job)
 from app.content.whiteboard.runtime import MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings
 from app.content.whiteboard.checkpoints import CheckpointError
 from app.content.durations import duration_notice, task_durations
@@ -52,6 +53,7 @@ def job_state(db, product_id, task_id):
             'visual_repair_from': str(payload.visual_repair_from) if payload.visual_repair_from else None,
             'inherited_calls': payload.inherited_calls,
             'request_digest': digest(source.content), 'approval_status': approval.status,
+            'resumable': can_resume(task.status, json.loads(state.content), payload),
             **json.loads(state.content)}
 
 
@@ -176,6 +178,14 @@ def job_html(state, product_id, *, error=None):
         body += f'<p>Ошибка на этапе: {esc(stages[state["failed_stage"]])}</p>'
     if warning:
         body += f'<p class="sg-warning" role="alert">{esc(warning)}</p>'
+    if state.get('resumable'):
+        left = state['max_api_calls'] - state['calls']
+        body += (f'<form method="post" action="{base}/resume" class="sg-form">'
+                 '<p>Готовые этапы (сценарий, готовые рисунки и озвучка) сохранены и повторно не оплачиваются. '
+                 'Заново будет вызван только остановившийся этап и следующие за ним.</p>'
+                 f'<label class="sg-field"><span><input type="checkbox" name="confirmed" value="yes" required> '
+                 f'Разрешаю продолжить платную генерацию: осталось не более {left} API-вызовов из подтверждённого лимита</span></label>'
+                 '<button class="btn primary" type="submit">Продолжить с места остановки</button></form>')
     if state.get('visual_review_enabled'):
         body += '<p>Один проход визуального критика. Автор выбирает существенные исправления; каждая выбранная сцена перерисовывается максимум один раз.</p>'
     if state.get('image_provider') == 'claudehub':
@@ -386,6 +396,20 @@ async def studio_approve(product_id: UUID, task_id: UUID, request: Request, db: 
 def studio_cancel(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
     _load(db, product_id, task_id)
     cancel_job(db, product_id, task_id)
+    return RedirectResponse(f'/studio/products/{product_id}/whiteboard/{task_id}', status_code=303)
+
+
+@router.post('/studio/products/{product_id}/whiteboard/{task_id}/resume')
+async def studio_resume(product_id: UUID, task_id: UUID, request: Request, db: Session = Depends(get_db),
+                        actor=Depends(require_studio_auth)):
+    state = _load(db, product_id, task_id)
+    fields = await _studio_form(request)
+    try:
+        resume_job(db, product_id, task_id, confirmed=fields.get('confirmed') == 'yes', decided_by=actor or 'local-owner')
+    except ReadinessError:
+        db.rollback()
+        return page(_owner_product(db, product_id), 'Генерация видео',
+                    job_html(state, product_id, error=MESSAGES['approval_invalid']), status=409)
     return RedirectResponse(f'/studio/products/{product_id}/whiteboard/{task_id}', status_code=303)
 
 

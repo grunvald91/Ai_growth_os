@@ -110,6 +110,7 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                 if approval.status != 'approved' or source.status != ArtifactStatus.APPROVED:
                     raise ReadinessError('approval_invalid')
                 value = json.loads(state.content); value.update(stage='preflight', error=None)
+                resuming = bool(value.pop('resume_requested', False))
                 state.content = json.dumps(value); db.commit()
             # The immutable approved request owns this job's model/voice choice.
             # Copy only these public fields; never alter shared settings or .env.
@@ -118,6 +119,9 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
             store = CheckpointStore(directory / 'stages', payload.request, models=payload.models.model_dump(),
                                     visual_review=payload.visual_review,
                                     image_provider='claudehub' if payload.image_provider == 'claudehub' else None)
+            if resuming:
+                # The owner confirmed a paid continuation of the failed stage.
+                store.reset_unfinished()
             if payload.visual_repair_from is not None:
                 from .repair import prime_visual_repair
                 try:
