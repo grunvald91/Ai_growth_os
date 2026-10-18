@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.intake.contracts import IntakeError
+from app.intake.registry import registry_from_settings
 from app.intake.service import CompanyIntakeService
 from app.intake.sources import make_source, parse_file_async, MAX_FILE_BYTES
 
@@ -44,7 +45,8 @@ class ApplyInput(BaseModel):
 def get_intake(db: Session = Depends(get_db)):
     settings = get_settings()
     return CompanyIntakeService(db, products_root=settings.products_root, model=settings.llm_model,
-                                provider_name=settings.llm_provider)
+                                provider_name=settings.llm_provider,
+                                registry_lookup=registry_from_settings(settings))
 
 
 def intake_error(exc):

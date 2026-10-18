@@ -1042,7 +1042,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>Growth Studio · {esc(product.name)}</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=13">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=14">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1180,7 +1180,7 @@ def studio_page_shell(
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>{esc(title)} · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=13">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=14">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1775,7 +1775,7 @@ def product_selector(products: list[Product], *, can_add: bool = False) -> str:
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=13"></head>
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=14"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
