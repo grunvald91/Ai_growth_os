@@ -75,13 +75,18 @@ jobs:
           [ -n "$SSHPASS" ] || { echo "::error::Set DEPLOY_SSH_KEY + DEPLOY_KNOWN_HOSTS, or SERVER_SSH_PASSWORD"; exit 1; }
           sudo apt-get install -y -qq sshpass >/dev/null
           # Trust only the pinned host key.
-          ssh-keyscan -T 15 "$HOST" 2>/dev/null > /tmp/scanned
+          # Few unauthenticated connections: the server's SSH protection blocked a
+          # runner after a full keyscan plus three separate logins (run 39144465115).
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
           while read -r line; do
             printf '%s\n' "$line" > /tmp/one
             ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
           done < /tmp/scanned
           [ -s ~/.ssh/known_hosts ] || { echo "::error::Server host key does not match the pinned fingerprint"; exit 1; }
-          run() { sshpass -e ssh -o StrictHostKeyChecking=yes "root@$HOST" "$@"; }
+          # One authenticated connection shared by every command below.
+          SSH_OPTS=(-o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ControlMaster=auto
+                    -o ControlPath=/tmp/ssh-growth-%C -o ControlPersist=600)
+          run() { sshpass -e ssh "${SSH_OPTS[@]}" "root@$HOST" "$@"; }
           # Drift check: refuse if the running code has files not in this commit's history.
           run "docker exec ai-growth-os-api-1 sh -c 'cd /app && find app products -type f \( -name \"*.py\" -o -name \"*.json\" -o -name \"*.md\" -o -name \"*.html\" -o -name \"*.css\" -o -name \"*.js\" \) ! -path \"*/__pycache__/*\" -exec sha256sum {} +'" > running.txt
           python3 - "$SHA" <<'PY2'
