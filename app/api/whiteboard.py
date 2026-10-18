@@ -15,8 +15,8 @@ from pydantic import ValidationError
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.content_studio import _owner_product, _studio_form, esc, studio_page_shell
 from app.content.whiteboard.contracts import Contract, WhiteboardRequest
-from app.content.whiteboard.jobs import (AGENT, approve_job, can_resume, cancel_job, digest, job_directory, owner_task,
-                                         queue_job, records, resume_job)
+from app.content.whiteboard.jobs import (AGENT, TOP_UP_STEP, approve_job, call_limit, can_resume, can_top_up, cancel_job,
+                                         digest, job_directory, owner_task, queue_job, records, resume_job)
 from app.content.whiteboard.runtime import MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings
 from app.content.whiteboard.checkpoints import CheckpointError
 from app.content.durations import duration_notice, task_durations
@@ -54,6 +54,8 @@ def job_state(db, product_id, task_id):
             'inherited_calls': payload.inherited_calls,
             'request_digest': digest(source.content), 'approval_status': approval.status,
             'resumable': can_resume(task.status, json.loads(state.content), payload),
+            'top_up': can_top_up(task.status, json.loads(state.content), payload),
+            'call_limit_total': call_limit(json.loads(state.content), payload),
             **json.loads(state.content)}
 
 
@@ -156,13 +158,14 @@ def job_html(state, product_id, *, error=None):
               'image_revision': 'Перерисовка выбранной сцены',
               'audio_reuse': 'Использование исходной озвучки без генерации',
               'preflight': 'Проверка доступа к моделям', 'queued': 'Очередь',
-              'rendering': 'Сборка MP4 из рисунков и озвучки', 'completed': 'Видео собрано'}
+              'rendering': 'Сборка MP4 из рисунков и озвучки', 'completed': 'Видео собрано',
+              'retry_wait': 'Пауза перед автоматическим продолжением'}
     code = state.get('error')
     warning = error or MESSAGES.get(code)
     body = (f'<section class="sg-surface"><h2>{esc(state["request"]["topic"])}</h2>'
             f'<p role="status">{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p>'
             f'<p>{esc(stages.get(state.get("stage"), "Подготовка задания"))} · '
-            f'API-вызовы: {state["calls"]} из {state["max_api_calls"]}</p>')
+            f'API-вызовы: {state["calls"]} из {state.get("call_limit_total", state["max_api_calls"])}</p>')
     scene = state.get('scene_index')
     beat = state.get('beat_index')
     if isinstance(scene, int) and 0 <= scene < 3:
@@ -178,14 +181,42 @@ def job_html(state, product_id, *, error=None):
         body += f'<p>Ошибка на этапе: {esc(stages[state["failed_stage"]])}</p>'
     if warning:
         body += f'<p class="sg-warning" role="alert">{esc(warning)}</p>'
-    if state.get('resumable'):
-        left = state['max_api_calls'] - state['calls']
+    if state['status'] == 'queued' and state.get('retry_at'):
+        reason = MESSAGES.get(state.get('last_error'), 'временный сбой')
+        body += (f'<p class="sg-warning" role="status">Автоматическое продолжение {state.get("auto_resumes", 1)} '
+                 f'из {state.get("auto_resume_limit", state.get("auto_resumes", 1))}. Причина остановки: {esc(reason)} '
+                 f'Запуск не раньше {esc(state["retry_at"][:16].replace("T", " "))} UTC. '
+                 'Готовые этапы повторно не оплачиваются; вызовы расходуются только из подтверждённого лимита.</p>')
+    elif state['status'] == 'failed' and state.get('auto_resumes') and not state.get('top_up'):
+        body += (f'<p>Автоматических продолжений было: {state["auto_resumes"]}. '
+                 'Сбой повторяется; ошибки сохранены в журнале ниже для разбора.</p>')
+    if state.get('top_up'):
+        body += (f'<form method="post" action="{base}/resume" class="sg-form">'
+                 '<p>Подтверждённые API-вызовы закончились, видео не доделано. Готовые этапы сохранены и повторно не оплачиваются.</p>'
+                 '<label class="sg-field"><span>Добавить вызовов</span><select name="extra_calls">'
+                 + ''.join(f'<option value="{n}"{" selected" if n == 5 else ""}>{n}</option>' for n in (3, 5, TOP_UP_STEP))
+                 + '</select></label>'
+                 '<label class="sg-field"><span><input type="checkbox" name="confirmed" value="yes" required> '
+                 'Разрешаю дополнительные платные вызовы, чтобы доделать это видео</span></label>'
+                 '<button class="btn primary" type="submit">Добавить вызовы и доделать видео</button></form>')
+    elif state.get('resumable'):
+        left = state.get('call_limit_total', state['max_api_calls']) - state['calls']
         body += (f'<form method="post" action="{base}/resume" class="sg-form">'
                  '<p>Готовые этапы (сценарий, готовые рисунки и озвучка) сохранены и повторно не оплачиваются. '
                  'Заново будет вызван только остановившийся этап и следующие за ним.</p>'
                  f'<label class="sg-field"><span><input type="checkbox" name="confirmed" value="yes" required> '
                  f'Разрешаю продолжить платную генерацию: осталось не более {left} API-вызовов из подтверждённого лимита</span></label>'
                  '<button class="btn primary" type="submit">Продолжить с места остановки</button></form>')
+    errors = state.get('errors') or []
+    if errors:
+        body += f'<details><summary>Журнал ошибок ({len(errors)})</summary><ol>'
+        for entry in reversed(errors[-20:]):
+            stage = stages.get(entry.get('stage'), entry.get('stage') or '—')
+            extra = ', '.join(f'{k}: {entry[k]}' for k in ('exception_type', 'http_status') if entry.get(k))
+            body += (f'<li>{esc(str(entry.get("at", ""))[:19].replace("T", " "))} UTC · {esc(stage)} · '
+                     f'{esc(entry.get("code", ""))} · вызовов {esc(str(entry.get("calls", "")))}'
+                     + (f' · {esc(extra)}' if extra else '') + '</li>')
+        body += '</ol></details>'
     if state.get('visual_review_enabled'):
         body += '<p>Один проход визуального критика. Автор выбирает существенные исправления; каждая выбранная сцена перерисовывается максимум один раз.</p>'
     if state.get('image_provider') == 'claudehub':
@@ -214,7 +245,8 @@ def job_html(state, product_id, *, error=None):
         body += (f'<details><summary>Модели и голос</summary><p>{model_names}</p>'
                  f'<p>Голос: {esc(state["request"]["voice"])}</p></details>'
                  '<p>Генерация платная. Точная стоимость в долларах пока неизвестна. '
-                 'Лимит ниже ограничивает число вызовов, а не сумму списаний. Автоматического повтора нет.</p>'
+                 'Лимит ниже ограничивает число вызовов, а не сумму списаний. После временных сбоев '
+                 'генерация продолжается автоматически, но только в пределах этого лимита.</p>'
                  f'<form method="post" action="{base}/approve" class="sg-form">'
                  f'<input type="hidden" name="request_digest" value="{state["request_digest"]}">'
                  f'<label class="sg-field"><span><input type="checkbox" name="confirmed" value="yes" required> '
@@ -405,8 +437,10 @@ async def studio_resume(product_id: UUID, task_id: UUID, request: Request, db: S
     state = _load(db, product_id, task_id)
     fields = await _studio_form(request)
     try:
-        resume_job(db, product_id, task_id, confirmed=fields.get('confirmed') == 'yes', decided_by=actor or 'local-owner')
-    except ReadinessError:
+        extra = int(fields.get('extra_calls') or 0)
+        resume_job(db, product_id, task_id, confirmed=fields.get('confirmed') == 'yes', decided_by=actor or 'local-owner',
+                   extra_calls=extra)
+    except (ReadinessError, ValueError):
         db.rollback()
         return page(_owner_product(db, product_id), 'Генерация видео',
                     job_html(state, product_id, error=MESSAGES['approval_invalid']), status=409)

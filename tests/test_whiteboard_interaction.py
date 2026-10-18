@@ -112,5 +112,5 @@ def test_failure_identifies_stage_without_downloads_or_automatic_paid_retry(envi
         'error': 'generation_failed', 'calls': 13, 'max_api_calls': 13,
         'progress_done': 13, 'progress_total': 14}, product_id)
     assert 'Ошибка на этапе: Сборка MP4' in body
-    assert 'Автоматического повтора нет' in body
+    assert 'Можно продолжить с места остановки' in body
     assert 'Скачать MP4' not in body and '<video' not in body

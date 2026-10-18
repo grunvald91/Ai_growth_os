@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID
 from typing import Literal
@@ -140,36 +140,109 @@ def approve_job(db, product_id, task_id, *, request_digest, confirmed, decided_b
     return task
 
 
-RESUMABLE_ERRORS = frozenset({'generation_failed', 'interrupted', 'provider_server_error'})
+# Transient failures: a later attempt can succeed without changing the request.
+RESUMABLE_ERRORS = frozenset({'generation_failed', 'interrupted', 'provider_server_error',
+                              'openrouter_unavailable', 'storyboard_empty', 'storyboard_truncated'})
 RESUME_ACTION = 'whiteboard_resume'
+AUTO_RESUME_ACTION = 'whiteboard_auto_resume'
+# Pause before each automatic continuation: 1, 5, 15, 30, 60 minutes.
+AUTO_RESUME_DELAYS = (60, 300, 900, 1800, 3600)
+ERROR_HISTORY_LIMIT = 50
+TOP_UP_STEP = 10       # extra calls one owner confirmation may add
+TOP_UP_TOTAL = 25      # extra calls a job may receive in total
+
+
+def call_limit(value, payload) -> int:
+    """Approved limit plus owner-confirmed top-ups; never anything automatic."""
+    return payload.max_api_calls + int(value.get('extra_calls', 0))
 
 
 def can_resume(task_status, value, payload) -> bool:
-    return (task_status == TaskStatus.FAILED and value.get('error') in RESUMABLE_ERRORS
+    return (task_status == TaskStatus.FAILED and value.get('error') in RESUMABLE_ERRORS | {'call_limit'}
             and payload.visual_repair_from is None
             # Rendering is local: a job stopped there needs no further paid calls.
-            and (value.get('calls', 0) < payload.max_api_calls or value.get('failed_stage') == 'rendering'))
+            and (value.get('calls', 0) < call_limit(value, payload) or value.get('failed_stage') == 'rendering'))
 
 
-def resume_job(db, product_id, task_id, *, confirmed, decided_by):
-    """Owner-confirmed continuation of a failed job inside its original call limit.
+def can_top_up(task_status, value, payload) -> bool:
+    """The approved calls are spent: only the owner may add more to finish the video."""
+    return (task_status == TaskStatus.FAILED and value.get('error') in RESUMABLE_ERRORS | {'call_limit'}
+            and payload.visual_repair_from is None and value.get('failed_stage') != 'rendering'
+            and value.get('calls', 0) >= call_limit(value, payload)
+            and int(value.get('extra_calls', 0)) < TOP_UP_TOTAL)
+
+
+def record_error(value, code, *, details=None, at=None) -> dict:
+    """Append one failure to the job's bounded error history for later analysis."""
+    entry = {'at': (at or datetime.now(timezone.utc)).isoformat(), 'stage': value.get('failed_stage'),
+             'code': code, 'calls': value.get('calls', 0), **(details or {})}
+    value['errors'] = (value.get('errors') or [])[-(ERROR_HISTORY_LIMIT - 1):] + [entry]
+    return entry
+
+
+def schedule_auto_resume(db, task, source, value, payload, code, *, attempts, now=None) -> bool:
+    """Requeue a transient failure after a growing pause, inside the approved call limit.
+
+    No extra money is approved here: continuation spends only calls the owner
+    already confirmed, completed stages are reused, and every automatic attempt
+    is recorded as its own policy Approval row.
+    """
+    used = int(value.get('auto_resumes', 0))
+    limit = min(attempts, len(AUTO_RESUME_DELAYS))
+    if (code not in RESUMABLE_ERRORS or used >= limit or payload.visual_repair_from is not None
+            or not (value.get('calls', 0) < call_limit(value, payload) or value.get('failed_stage') == 'rendering')):
+        return False
+    now = now or datetime.now(timezone.utc)
+    delay = AUTO_RESUME_DELAYS[used]
+    db.add(Approval(product_id=task.product_id, artifact_id=source.id, action_type=AUTO_RESUME_ACTION,
+                    risk_level='YELLOW', status='approved', requested_by='policy', decided_by='policy:auto_resume',
+                    decided_at=now, reason=f'auto resume {used + 1}/{limit} after {code} at {value.get("failed_stage")}; '
+                                           f'calls {value.get("calls", 0)}/{call_limit(value, payload)}; delay {delay}s'))
+    value.update(stage='retry_wait', error=None, last_error=code, resume_requested=True,
+                 auto_resumes=used + 1, auto_resume_limit=limit,
+                 retry_at=(now + timedelta(seconds=delay)).isoformat())
+    task.status = TaskStatus.QUEUED
+    return True
+
+
+def retry_due(value, now=None) -> bool:
+    at = value.get('retry_at')
+    if not at:
+        return True
+    try:
+        return datetime.fromisoformat(at) <= (now or datetime.now(timezone.utc))
+    except (TypeError, ValueError):
+        return True
+
+
+def resume_job(db, product_id, task_id, *, confirmed, decided_by, extra_calls=0):
+    """Owner-confirmed continuation of a failed job.
 
     Completed checkpoints are reused; only the failed and remaining stages are
-    called again. Never automatic: every resume is a separate audited approval.
+    called again. When the approved calls are spent the owner may add up to
+    TOP_UP_STEP more in the same audited confirmation.
     """
     db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     task = owner_task(db, product_id, task_id, lock=True)
     source, state, approval, payload = records(db, task, lock=True)
     value = json.loads(state.content)
-    if not confirmed or approval.status != 'approved' or not can_resume(task.status, value, payload):
+    extra = int(extra_calls or 0)
+    if extra and (not 0 < extra <= TOP_UP_STEP or int(value.get('extra_calls', 0)) + extra > TOP_UP_TOTAL
+                  or not can_top_up(task.status, value, payload)):
+        raise ReadinessError('approval_invalid')
+    proposed = {**value, 'extra_calls': int(value.get('extra_calls', 0)) + extra}
+    if not confirmed or approval.status != 'approved' or not can_resume(task.status, proposed, payload):
         raise ReadinessError('approval_invalid')
     db.add(Approval(product_id=product_id, artifact_id=source.id, action_type=RESUME_ACTION, risk_level='YELLOW',
                     status='approved', requested_by='owner', decided_by=decided_by,
                     decided_at=datetime.now(timezone.utc),
-                    reason=f'resume after {value["error"]} at {value.get("failed_stage")}; calls {value["calls"]}/{payload.max_api_calls}'))
-    value.update(stage='queued', error=None, failed_stage=None, diagnostic=None,
-                 resume_requested=True, resumes=value.get('resumes', 0) + 1)
-    state.content = json.dumps(value)
+                    reason=f'resume after {value["error"]} at {value.get("failed_stage")}; '
+                           f'calls {value["calls"]}/{payload.max_api_calls}' + (f'; +{extra} calls' if extra else '')))
+    proposed.update(stage='queued', error=None, failed_stage=None, diagnostic=None, retry_at=None,
+                    resume_requested=True, resumes=value.get('resumes', 0) + 1,
+                    # A fresh owner decision gives a fresh series of automatic attempts.
+                    auto_resumes=0)
+    state.content = json.dumps(proposed)
     task.status = TaskStatus.QUEUED
     db.commit()
     return task
@@ -211,7 +284,7 @@ class CallLedger:
             if task.status != TaskStatus.RUNNING or approval.status != 'approved' or source.status != ArtifactStatus.APPROVED:
                 raise ReadinessError('approval_invalid')
             value = json.loads(state.content)
-            if value['calls'] >= payload.max_api_calls:
+            if value['calls'] >= call_limit(value, payload):
                 raise ReadinessError('call_limit')
             model_stage = {'visual_review': 'regions', 'visual_decision': 'storyboard', 'image_revision': 'image'}.get(stage, stage)
             run = AgentRun(task_id=task.id, agent_name='whiteboard_' + stage,
