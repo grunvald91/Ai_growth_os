@@ -51,18 +51,62 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.test.outputs.sha }}
-      - name: Deploy over the restricted key
+          fetch-depth: 0  # the drift check compares against the commit's history
+      - name: Deploy (restricted key, or SERVER_SSH_PASSWORD when no key is set)
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+          # SHA256 fingerprint of the server host key, pinned like the booking_bot workflows.
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
           SHA: ${{ needs.test.outputs.sha }}
         run: |
           set -euo pipefail
-          [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_KNOWN_HOSTS" ] && [ -n "$DEPLOY_HOST" ] || {
-            echo "::error::Set secrets DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS and variable DEPLOY_HOST"; exit 1; }
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          if [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            # Preferred: the key's forced command only allows "deploy <sha>" or "rollback".
+            printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+            git archive --format=tar.gz "$SHA" app alembic/versions pyproject.toml products \
+              | ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes -o BatchMode=yes "root@$HOST" "deploy $SHA"
+            exit 0
+          fi
+          [ -n "$SSHPASS" ] || { echo "::error::Set DEPLOY_SSH_KEY + DEPLOY_KNOWN_HOSTS, or SERVER_SSH_PASSWORD"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          # Trust only the pinned host key.
+          ssh-keyscan -T 15 "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Server host key does not match the pinned fingerprint"; exit 1; }
+          run() { sshpass -e ssh -o StrictHostKeyChecking=yes "root@$HOST" "$@"; }
+          # Drift check: refuse if the running code has files not in this commit's history.
+          run "docker exec ai-growth-os-api-1 sh -c 'cd /app && find app products -type f \( -name \"*.py\" -o -name \"*.json\" -o -name \"*.md\" -o -name \"*.html\" -o -name \"*.css\" -o -name \"*.js\" \) ! -path \"*/__pycache__/*\" -exec sha256sum {} +'" > running.txt
+          python3 - "$SHA" <<'PY2'
+          import hashlib, subprocess, sys
+          sha = sys.argv[1]
+          def blob(rev, path):
+              r = subprocess.run(["git", "show", f"{rev}:{path}"], capture_output=True)
+              return hashlib.sha256(r.stdout).hexdigest() if r.returncode == 0 else None
+          unknown = []
+          for line in open("running.txt"):
+              digest, path = line.split(None, 1)
+              path = path.strip()
+              if blob(sha, path) == digest:
+                  continue
+              revs = subprocess.run(["git", "log", "--format=%H", "-n", "300", sha, "--", path],
+                                    capture_output=True, text=True).stdout.split()
+              if not any(blob(rev, path) == digest for rev in revs):
+                  unknown.append(path)
+          for path in unknown:
+              print("  NOT IN HISTORY:", path)
+          if unknown:
+              print("::error::Running code contains files that are not in this commit's history; not deploying.")
+              sys.exit(1)
+          print("drift check: ok")
+          PY2
           git archive --format=tar.gz "$SHA" app alembic/versions pyproject.toml products \
-            | ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes -o BatchMode=yes "root@$DEPLOY_HOST" "deploy $SHA"
+            | run "python3 /opt/ai_growth_os/deploy/deploy_growth.py deploy $SHA"
+          run "docker ps --filter label=com.docker.compose.project=ai-growth-os --format '{{.Names}} {{.Image}} {{.Status}}'; curl -s -o /dev/null -w 'health %{http_code}\n' http://127.0.0.1:8091/health"

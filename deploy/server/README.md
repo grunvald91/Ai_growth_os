@@ -35,6 +35,11 @@ command="/opt/ai_growth_os/deploy/ssh-deploy-entry.sh",no-port-forwarding,no-X11
 - Variable `DEPLOY_HOST`: the server address.
 - Environment `production` with the owner as required reviewer.
 
+Until the key is set up, the workflow falls back to the existing `SERVER_SSH_PASSWORD` secret
+(host `vars.DEPLOY_HOST`, default `155.212.162.47`). It then trusts only the pinned server host key
+and refuses to deploy if the running container has files that are not in the commit's history.
+The key remains the preferred setup: it can only deploy or roll back.
+
 ## By hand
 
 ```sh
