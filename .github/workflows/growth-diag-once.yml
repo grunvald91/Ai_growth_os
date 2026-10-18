@@ -1,0 +1,46 @@
+name: ServGo mail service diagnostics (read-only)
+
+# One-off read-only diagnostics: prints only stage names, error codes,
+# exception types, HTTP statuses and call durations. No content, env or keys.
+on:
+  push:
+    branches: [ccr-545c5158-rcd05z]
+    paths: ['.github/workflows/growth-diag-once.yml']
+
+permissions:
+  contents: read
+
+env:
+  HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+
+jobs:
+  diag:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: SSH setup
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is missing"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null | sort > ~/.ssh/known_hosts
+          ssh-keygen -lf ~/.ssh/known_hosts
+      - name: Which service serves servgo.ru/mail (names only)
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=yes "root@$HOST" 'bash -s' <<'SH'
+          echo "== nginx locations for /mail and mail host"
+          grep -rnE "location[^{]*/mail|server_name[^;]*mail" /etc/nginx/ 2>/dev/null | head
+          for f in $(grep -rlE "location[^{]*/mail" /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null); do echo "-- $f"; awk '/location[^{]*\/mail/{p=1} p&&/proxy_pass|alias|root /{print NR": "$0} p&&/}/{p=0}' "$f"; done
+          echo "== systemd units mentioning owner mail settings"
+          grep -rlE "SERVGO_MAIL|owner_mail|servgo-owner-mail" /etc/systemd/system/ 2>/dev/null
+          for u in $(grep -rlE "SERVGO_MAIL" /etc/systemd/system/ 2>/dev/null); do echo "-- $u"; grep -oE "(SERVGO_MAIL_[A-Z_]+)=|EnvironmentFile=[^ ]+|ExecStart=.{0,80}" "$u" | sed -E 's/=.*/=/;s/^EnvironmentFile=/EnvironmentFile /'; done
+          echo "== env files with SERVGO_MAIL names"
+          grep -rlE "^SERVGO_MAIL_" /opt/booking_bot /etc/servgo* /etc/default 2>/dev/null | grep -v node_modules | head
+          for f in $(grep -rlE "^SERVGO_MAIL_" /opt/booking_bot /etc/servgo* /etc/default 2>/dev/null | grep -v node_modules | head -5); do echo "-- $f"; grep -oE "^SERVGO_MAIL_[A-Z_]+" "$f"; done
+          echo "== processes listening and their units"
+          ss -ltnp | grep -E ":(8000|8001|8010|8080|8090|8095)\b" | awk '{print $4, $6}' | sed -E 's/pid=[0-9]+,//g'
+          SH
