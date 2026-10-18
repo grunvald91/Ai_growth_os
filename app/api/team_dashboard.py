@@ -209,19 +209,19 @@ def _secure_response(content: str, media_type: str) -> Response:
     return response
 
 
-@router.get("/studio/team")
+@router.get("/studio/team", dependencies=[Depends(require_studio_auth)])
 def team_page():
     page = Path(__file__).parent / "team_dashboard_assets" / "index.html"
     return _secure_response(page.read_text(encoding="utf-8"), "text/html")
 
 
-@router.get("/studio/team/assets/team.css")
+@router.get("/studio/team/assets/team.css", dependencies=[Depends(require_studio_auth)])
 def team_css():
     css = Path(__file__).parent / "team_dashboard_assets" / "team.css"
     return _secure_response(css.read_text(encoding="utf-8"), "text/css")
 
 
-@router.get("/studio/team/assets/team.js")
+@router.get("/studio/team/assets/team.js", dependencies=[Depends(require_studio_auth)])
 def team_js():
     script = Path(__file__).parent / "team_dashboard_assets" / "team.js"
     return _secure_response(script.read_text(encoding="utf-8"), "application/javascript")

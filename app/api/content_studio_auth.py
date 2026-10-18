@@ -7,7 +7,6 @@ also require the explicitly configured HTTPS origin.
 from __future__ import annotations
 
 import secrets
-import hashlib
 import json
 import logging
 from uuid import uuid4
@@ -63,36 +62,28 @@ def require_studio_auth(
     password = settings.studio_admin_password
     production = settings.app_env.casefold() in {"production", "prod"}
 
-    users = {}
-    if settings.studio_users_file:
-        try:
-            users = json.loads(settings.studio_users_file.read_text(encoding="utf-8"))
-            if not isinstance(users, dict):
-                raise ValueError("Invalid accounts")
-        except (OSError, ValueError):
-            raise HTTPException(503, "Studio accounts are not configured correctly") from None
+    from app.core.studio_accounts import account_scope, load_accounts, verify_password
+    try:
+        users = load_accounts(settings)
+    except (OSError, ValueError):
+        raise HTTPException(503, "Studio accounts are not configured correctly") from None
     if credentials and credentials.username in users:
         account = users[credentials.username]
         try:
-            scheme, rounds, salt, expected = account["password_hash"].split("$")
-            if scheme != "pbkdf2_sha256" or not 600000 <= int(rounds) <= 2000000:
-                raise ValueError("Invalid password hash")
-            computed = hashlib.pbkdf2_hmac("sha256", credentials.password.encode(), bytes.fromhex(salt), int(rounds)).hex()
-            valid = secrets.compare_digest(computed, expected)
-            allowed = account["product_ids"]
-            if not isinstance(allowed, list) or not all(isinstance(v, str) for v in allowed):
-                raise ValueError("Invalid company membership")
-            from uuid import UUID
-            allowed = [str(UUID(value)) for value in allowed]
+            valid = verify_password(credentials.username, credentials.password, account["password_hash"])
+            allowed = account_scope(account)
         except (KeyError, ValueError, TypeError):
             raise HTTPException(503, "Studio account is not configured correctly") from None
         if not valid:
             raise HTTPException(401, "Incorrect credentials", headers={"WWW-Authenticate": "Basic"})
         request.state.studio_product_ids = allowed
+        request.state.studio_account_role = "admin" if allowed is None else "company"
+        if allowed is None:
+            return credentials.username
         product_id = request.path_params.get("product_id")
         if product_id is not None and str(product_id) not in allowed:
             raise HTTPException(404, "Компания не найдена")
-        if request.url.path.startswith(("/intelligence", "/competitive-intelligence")):
+        if request.url.path.startswith(("/intelligence", "/competitive-intelligence", "/studio/accounts")):
             raise HTTPException(403, "Administrator account required")
         if request.url.path == "/control/status" or (request.url.path == "/products" and request.method != "GET"):
             raise HTTPException(403, "Administrator account required")

@@ -22,6 +22,10 @@ CSS = r"""
   border:1px solid #E0E6EF;border-radius:15px;padding:17px;
   box-shadow:0 18px 35px rgba(13,27,42,.15)}
 .sg-notify-popover>strong{display:block;font-size:15px;font-weight:700;margin:0 0 12px}
+.sg-notify-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px}
+.sg-notify-head strong{font-size:15px;font-weight:700}
+.sg-notify-read{border:0;background:#EAF0FF;color:#244DCE;border-radius:9px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer}
+.sg-notify-read[hidden]{display:none}
 .sg-notify-entry{display:block;line-height:1.45;padding:11px 5px;color:#253B54;
   border-top:1px solid #EBEEF3;font-size:13px;text-decoration:none}
 .sg-notify-entry:hover{background:#F4F7FD;color:#1F4ED1}
@@ -159,6 +163,8 @@ JS = r"""
  const showWork=document.querySelector('[data-sg-work-overview]');
  const workList=document.querySelector('.sg-work-list');
  let lastSignature=null;
+ let shown=[];
+ const readAll=widget.querySelector('[data-sg-read-all]');
  let ongoing=false;
  const anchor=(item)=>{
    const a=document.createElement('a');
@@ -179,6 +185,8 @@ JS = r"""
      if(!res.ok||!(res.headers.get('content-type')||'').includes('application/json'))return;
      const data=await res.json();
      const notes=Array.isArray(data.notices)?data.notices:[];
+     shown=notes.map(x=>x.id);
+     if(readAll)readAll.hidden=!notes.length;
      count.hidden=!notes.length;
      count.textContent=String(notes.length);
      const sig=notes.map(x=>x.id+':'+x.kind).join(',');
@@ -211,6 +219,15 @@ JS = r"""
    }catch(_){/* intermittent network errors do not mean work has stopped */ }
    finally{ongoing=false;}
  }
+ if(readAll)readAll.addEventListener('click',async()=>{
+   if(!shown.length)return;
+   readAll.disabled=true;
+   try{
+     const res=await fetch(readAll.dataset.readUrl,{method:'POST',credentials:'same-origin',
+       headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({ids:shown})});
+     if(res.ok){lastSignature=null;await poll();}
+   }finally{readAll.disabled=false;}
+ });
  poll();
  window.setInterval(poll,20000);
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});

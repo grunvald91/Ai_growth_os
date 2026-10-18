@@ -525,4 +525,8 @@ STUDIO_CSS += """
 .sg-table{width:100%;border-collapse:collapse;font-size:14px}
 .sg-table th,.sg-table td{padding:8px 10px;border-bottom:1px solid #e3e8ee;text-align:left;white-space:nowrap}
 .sg-table th{font-size:12px;color:#526176;font-weight:700}
+.sg-inline-actions{display:inline-block;margin:0 6px 4px 0}
+.sg-check{display:flex;gap:8px;align-items:center;padding:4px 0;font-size:14px}
+.sg-secret{font-size:16px;padding:3px 8px;background:#F0F4FF;border-radius:6px;user-select:all}
+.btn.danger{background:#FFF1F1;color:#A73E45;border-color:#F3D3D3}
 """
