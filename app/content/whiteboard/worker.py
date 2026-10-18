@@ -71,6 +71,9 @@ def _failure(session_factory, product_id, task_id, code, *, exception=None, dire
                     details['validation_types'] = sorted({e['type'] for e in exception.errors(include_input=False)})
                 if isinstance(exception, httpx.HTTPStatusError):
                     details['http_status'] = exception.response.status_code
+                if type(exception) in (ValueError, CheckpointError):
+                    # Our own fixed messages; never provider responses or validation input.
+                    details['reason'] = str(exception)[:200]
                 value['diagnostic'] = details
             entry = record_error(value, code, details=details)
             value.update(stage='failed', error=code)

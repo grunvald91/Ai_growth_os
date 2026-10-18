@@ -104,6 +104,7 @@ class WhiteboardPipeline:
 
         reviewed_images = {}
         visual_audit = None
+        layout_repairs = []
         if self.visual_review:
             from .review import VisualReview, VisualDecision, IssueDecision, REVIEW_POLICY
             from .runtime import ReadinessError
@@ -194,13 +195,16 @@ class WhiteboardPipeline:
                 )
             else:
                 regions = await self.regions.detect(scene, image)
-            regions.check_for(scene)
+            # Unusable plans are repaired or replaced offline; see layout.fallback_regions.
             from .layout import complete_diagram_regions
             regions, layout_repair = complete_diagram_regions(scene, image, regions)
             if layout_repair is not None and visual_audit is not None:
                 visual_audit.setdefault('region_layout', []).append({'scene_index':scene_index, **layout_repair})
                 if self.progress:
                     self.progress({'visual_review_result':visual_audit})
+            elif layout_repair is not None and self.progress:
+                layout_repairs.append({'scene_index': scene_index, **layout_repair})
+                self.progress({'region_layout': layout_repairs})
             completed += 1
             # Separate beat clips: exact drawing windows can later be measured
             # with ffprobe instead of guessing from pauses or character count.

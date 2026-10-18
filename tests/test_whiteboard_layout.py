@@ -39,9 +39,20 @@ def test_valid_complete_plan_is_preserved():
     assert complete_diagram_regions(scene,png,plan)==(plan,None)
 
 
-def test_connected_artwork_is_not_silently_split_across_beats():
-    _,png=diagram(connected=True)
+def test_connected_artwork_falls_back_to_disjoint_split_flagged_for_review():
+    # Previously a ValueError that no resume could get past: the cached regions failed identically every time.
+    _,png=diagram(connected=True);scene=storyboard().scenes[0]
     plan=WhiteboardRegionPlan(regions=[WhiteboardRegion(beat_index=0,box=(0,0,800,1000)),
         WhiteboardRegion(beat_index=1,box=(600,0,1000,1000))])
-    with pytest.raises(ValueError,match='blank diagram separator'):
-        complete_diagram_regions(storyboard().scenes[0],png,plan)
+    result,audit=complete_diagram_regions(scene,png,plan)
+    assert audit['operation']=='offline_fallback_region_split' and audit['human_review_required']
+    assert audit['reason']=='overlap' and audit['provider_calls']==0 and audit['method']=='blank_row'
+    _validate_regions(WhiteboardSceneAssets(scene,png,(b'one',b'two'),result))
+
+
+def test_beat_without_region_gets_fallback_instead_of_failing():
+    _,png=diagram();scene=storyboard().scenes[0]
+    plan=WhiteboardRegionPlan(regions=[WhiteboardRegion(beat_index=0,box=(0,0,1000,1000))])
+    result,audit=complete_diagram_regions(scene,png,plan)
+    assert audit['reason']=='beat_without_region' and {r.beat_index for r in result.regions}=={0,1}
+    _validate_regions(WhiteboardSceneAssets(scene,png,(b'one',b'two'),result))
