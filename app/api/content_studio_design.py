@@ -530,3 +530,46 @@ STUDIO_CSS += """
 .sg-secret{font-size:16px;padding:3px 8px;background:#F0F4FF;border-radius:6px;user-select:all}
 .btn.danger{background:#FFF1F1;color:#A73E45;border-color:#F3D3D3}
 """
+
+# Mobile-first navigation: tabs at the bottom within thumb reach, every other
+# section in "Ещё". Appended last so it wins over earlier sticky-top rules.
+STUDIO_CSS += """
+.m-more{display:none}
+@media(max-width:920px){
+ .mobile-nav{grid-template-columns:repeat(5,minmax(0,1fr))!important;position:fixed!important;
+   top:auto!important;bottom:0!important;left:0!important;right:0!important;z-index:60;gap:2px;
+   padding:5px 6px max(6px,env(safe-area-inset-bottom))!important;min-height:0;
+   border-top:1px solid #E5EAF2!important;border-bottom:0!important;backdrop-filter:none!important;
+   background:#fff!important;box-shadow:0 -8px 24px rgba(31,75,128,.07)!important}
+ .mobile-nav>a,.m-more>summary{display:flex;flex-direction:column!important;align-items:center;justify-content:center;
+   gap:3px!important;min-height:52px;padding:5px 2px!important;border-radius:12px;font-size:11px!important;
+   font-weight:650;color:#5A6A7F;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;list-style:none;cursor:pointer}
+ .m-more>summary::-webkit-details-marker{display:none}
+ .mobile-nav>a.active,.m-more>summary.active,.m-more[open]>summary{color:#2F5BEB;background:#EDF2FF}
+ .mobile-nav .m-ico{font-size:19px!important;line-height:1}
+ .m-more{display:block;min-width:0}
+ .m-more[open]::before{content:"";position:fixed;inset:0;background:rgba(14,32,52,.38);z-index:-1}
+ .m-more-sheet{position:fixed;left:0;right:0;bottom:calc(64px + env(safe-area-inset-bottom));max-height:72vh;
+   overflow:auto;background:#fff;border-radius:22px 22px 0 0;padding:14px 12px 10px;
+   box-shadow:0 -14px 40px rgba(13,41,75,.14)}
+ .m-more-head{padding:2px 10px 10px;font-size:18px;color:#1A2939}
+ .m-more-list{display:flex;flex-direction:column;gap:2px}
+ .mobile-nav .m-more-list a{display:flex;flex-direction:row!important;align-items:center;justify-content:flex-start!important;
+   gap:12px!important;min-height:48px;padding:0 10px!important;border-radius:12px;background:none;
+   color:#1A2939!important;font-size:15px!important;font-weight:500!important;text-decoration:none;white-space:normal!important}
+ .m-more-list a .m-ico{width:24px;text-align:center;color:#5A6A7F;font-size:17px!important}
+ .mobile-nav .m-more-list a.active,.mobile-nav .m-more-list a:hover{background:#F0F4FF;color:#2F5BEB!important}
+ .main,.route-main{padding-bottom:calc(96px + env(safe-area-inset-bottom))!important}
+ .sg-route-utility{display:none!important}
+}
+"""
+STUDIO_JS += r"""
+(function(){
+  // Tapping the dimmed area (the details element itself) closes "Ещё".
+  document.addEventListener('click', function(event){
+    document.querySelectorAll('[data-m-more][open]').forEach(function(menu){
+      if (event.target === menu) menu.removeAttribute('open');
+    });
+  });
+})();
+"""

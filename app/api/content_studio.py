@@ -367,18 +367,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
       <details class="sg-side-extras">
         <summary>Настройки маркетинга и другое</summary>
         <nav class="nav" aria-label="Дополнительные инструменты">
-          {item("review", base + "/review", "✓", "На согласовании")}
-          {item("plan", base + "/plan", "☷", "Контент-план")}
-          {item("calendar", base + "/calendar", "▦", "Календарь")}
-          {item("channels", base + "/channels", "↗", "Публикации")}
-          {item("analytics", base + "/analytics", "⌁", "Результаты")}
-          {item("comments", base + "/comments", "☷", "Комментарии")}
-          {item("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка")}
-          {item("profile", base + "/profile", "▣", "Профиль компании")}
-          {item("team", "/studio/team", "♧", "ИИ-команда")}
-          {item("tune", "/studio/tune", "⚙", "Настройка агентов")}
-          {item("accounts", base + "/accounts", "☺", "Аккаунты")}
-          <a href="/studio?choose=1"><span class="nav-ico" aria-hidden="true">⇄</span>Другой проект</a>
+          {"".join(item(*link) for link in more_links(product_id) if link[0] not in {"mail", "servgo"})}
         </nav>
       </details>
       <div class="sidebar-spacer"></div>
@@ -387,17 +376,55 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
     """
 
 
+def more_links(product_id: UUID) -> list[tuple[str, str, str, str]]:
+    """Every secondary destination; the desktop sidebar and mobile "Ещё" share it."""
+    base = f"/studio/products/{product_id}"
+    return [
+        ("review", base + "/review", "✓", "На согласовании"),
+        ("plan", base + "/plan", "☷", "Контент-план"),
+        ("calendar", base + "/calendar", "▦", "Календарь"),
+        ("whiteboard", base + "/whiteboard", "✎", "Рисованное видео"),
+        ("channels", base + "/channels", "↗", "Публикации"),
+        ("analytics", base + "/analytics", "⌁", "Результаты"),
+        ("comments", base + "/comments", "☰", "Комментарии"),
+        ("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка"),
+        ("profile", base + "/profile", "▣", "Профиль компании"),
+        ("speed", base + "/speed", "⏱", "Скорость ИИ-моделей"),
+        ("team", "/studio/team", "♧", "ИИ-команда"),
+        ("tune", "/studio/tune", "⚙", "Настройка агентов"),
+        ("accounts", base + "/accounts", "☺", "Аккаунты"),
+        ("mail", "https://servgo.ru/mail", "✉", "Почта"),
+        ("switch", "/studio?choose=1", "⇄", "Другая компания"),
+        ("servgo", "https://servgo.ru/admin", "←", "В админку ServGo"),
+    ]
+
+
 def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
+    """Bottom navigation on phones: four everyday tabs and "Ещё" with the rest."""
     base = f"/studio/products/{product_id}"
     def item(name: str, href: str, icon: str, label: str) -> str:
         current = ' class="active" aria-current="page"' if active == name else ""
         return f'<a{current} href="{href}"><span class="m-ico" aria-hidden="true">{icon}</span>{label}</a>'
+    extras = more_links(product_id)
+    more_active = " active" if any(name == active for name, *_ in extras) else ""
+    current = ' class="active" aria-current="page"'
+    sheet = "".join(
+        f'<a{current if name == active else ""} href="{href}">'
+        f'<span class="m-ico" aria-hidden="true">{icon}</span><span>{label}</span></a>'
+        for name, href, icon, label in extras)
     return f"""
     <nav class="mobile-nav" aria-label="Быстрая навигация">
       {item("overview", base, "⌂", "Главная")}
       {item("create", base + "/create", "＋", "Создать")}
       {item("work", base + "/work", "◴", "В работе")}
       {item("materials", base + "/materials", "▤", "Готово")}
+      <details class="m-more" data-m-more>
+        <summary class="m-more-tab{more_active}"><span class="m-ico" aria-hidden="true">⋯</span>Ещё</summary>
+        <div class="m-more-sheet" role="dialog" aria-label="Все разделы">
+          <div class="m-more-head"><strong>Все разделы</strong></div>
+          <div class="m-more-list">{sheet}</div>
+        </div>
+      </details>
     </nav>
     """
 
@@ -1015,7 +1042,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>Growth Studio · {esc(product.name)}</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=12">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=13">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1083,7 +1110,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=12"></script>
+<script src="/studio/assets/studio.js?v=13"></script>
 </body></html>"""
 
 
@@ -1153,7 +1180,7 @@ def studio_page_shell(
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>{esc(title)} · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=12">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=13">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1195,7 +1222,7 @@ def studio_page_shell(
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=12"></script>
+<script src="/studio/assets/studio.js?v=13"></script>
 </body></html>"""
 
 
@@ -1748,7 +1775,7 @@ def product_selector(products: list[Product], *, can_add: bool = False) -> str:
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=12"></head>
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=13"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
