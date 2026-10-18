@@ -178,3 +178,55 @@ def test_atomic_config_save_cannot_be_overwritten_by_stale_version(tmp_path):
     with pytest.raises(RouterConflict):
         save_state(settings, RouterUpdate(expected_revision=0, config=config))
     assert (tmp_path / ".model-router-config.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_page_api_works_with_studio_login_without_owner_token(tmp_path):
+    # Regression: the page called /api/admin/team, where browsers do not resend
+    # the Studio login cached for /studio/; production has no owner token, so
+    # loading failed with 503 and every button then hit an empty state.
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    db = Session(engine, expire_on_commit=False)
+    settings = Settings(
+        _env_file=None, app_env="production", products_root=tmp_path,
+        studio_admin_username="owner", studio_admin_password="studio-secret",
+        studio_public_origin="https://growth.servgo.ru",
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_db] = lambda: db
+    login = ("owner", "studio-secret")
+    origin = {"Origin": "https://growth.servgo.ru"}
+    try:
+        with TestClient(app) as client:
+            anonymous = client.get("/studio/team/api")
+            assert anonymous.status_code == 401
+            assert anonymous.headers["www-authenticate"] == "Basic"
+
+            loaded = client.get("/studio/team/api", auth=login)
+            assert loaded.status_code == 200, loaded.text
+            data = loaded.json()
+            assert data["config"]["profiles"] and data["revision"] == 0
+
+            preview = client.post("/studio/team/api/preview", auth=login, headers=origin, json=data["config"])
+            assert preview.status_code == 200 and "issues" in preview.json()
+            saved = client.put("/studio/team/api", auth=login, headers=origin,
+                               json={"expected_revision": 0, "config": data["config"]})
+            assert saved.status_code == 200 and saved.json()["revision"] == 1
+            assert client.put("/studio/team/api", auth=login, json={
+                "expected_revision": 1, "config": data["config"]}).status_code == 403  # no Origin
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+        engine.dispose()
+
+
+def test_page_script_calls_the_studio_scoped_api():
+    from pathlib import Path
+    script = (Path(__file__).parents[1] / "app/api/team_dashboard_assets/team.js").read_text(encoding="utf-8")
+    assert "var API='/studio/team/api';" in script
+    assert "/api/admin/" not in script
+    # A failed load must keep the buttons off instead of reading an empty state.
+    assert "setReady(false)" in script and "retryButton" in script

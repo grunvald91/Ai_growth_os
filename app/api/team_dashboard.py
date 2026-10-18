@@ -175,6 +175,10 @@ def preview_configuration(config: RouterConfig) -> dict:
             "live_web_search_available": False}
 
 
+# The dashboard page uses this prefix; /api/admin/team stays for bearer-token clients.
+STUDIO_API = "/studio/team/api"
+
+
 def require_owner(
     request: Request,
     credentials: HTTPBasicCredentials | None = Depends(HTTPBasic(auto_error=False)),
@@ -187,6 +191,10 @@ def require_owner(
             raise HTTPException(403, "Administrator account required")
         require_studio_csrf(request, settings)
         return
+    if request.url.path.startswith(STUDIO_API) and not authorization:
+        # The page calls this prefix: browsers resend the Studio login only
+        # under /studio/, so ask for it instead of failing on the token.
+        raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": "Basic"})
     token = settings.model_router_admin_token or ""
     if len(token) < 32:
         raise HTTPException(503, "Owner team dashboard token is not configured")
@@ -228,6 +236,7 @@ def team_js():
 
 
 @router.get("/api/admin/team", dependencies=[Depends(require_owner)])
+@router.get("/studio/team/api", dependencies=[Depends(require_owner)])
 def team_data(settings: Settings = Depends(get_settings), db: Session = Depends(get_db)):
     try:
         state = read_state(settings)
@@ -245,6 +254,7 @@ def team_data(settings: Settings = Depends(get_settings), db: Session = Depends(
 
 
 @router.post("/api/admin/team/preview", dependencies=[Depends(require_owner)])
+@router.post("/studio/team/api/preview", dependencies=[Depends(require_owner)])
 def team_preview(config: RouterConfig):
     try:
         return preview_configuration(config)
@@ -253,6 +263,7 @@ def team_preview(config: RouterConfig):
 
 
 @router.put("/api/admin/team", dependencies=[Depends(require_owner)])
+@router.put("/studio/team/api", dependencies=[Depends(require_owner)])
 def team_update(body: RouterUpdate, settings: Settings = Depends(get_settings)):
     try:
         preview = preview_configuration(body.config)
@@ -274,6 +285,7 @@ def team_update(body: RouterUpdate, settings: Settings = Depends(get_settings)):
 
 
 @router.get("/api/admin/team/catalog", dependencies=[Depends(require_owner)])
+@router.get("/studio/team/api/catalog", dependencies=[Depends(require_owner)])
 async def team_catalog(settings: Settings = Depends(get_settings)):
     try:
         state = read_state(settings)
@@ -294,6 +306,7 @@ async def team_catalog(settings: Settings = Depends(get_settings)):
 
 
 @router.get("/api/admin/team/usage", dependencies=[Depends(require_owner)])
+@router.get("/studio/team/api/usage", dependencies=[Depends(require_owner)])
 def team_usage(product_id: UUID, db: Session = Depends(get_db)):
     try:
         return report_product_usage(db, product_id, limit=2000)
