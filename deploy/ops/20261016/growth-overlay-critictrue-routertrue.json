@@ -1,0 +1,40 @@
+{
+  "services": {
+    "api": {
+      "image": "servgo-growth-release:20261016",
+      "environment": {
+        "AGENT_CRITIC_ENABLED": "true",
+        "MODEL_ROUTER_ENABLED": "true",
+        "RELEASE_SHA": "release-20261016",
+        "AGENT_CRITIC_MAX_CONTEXT_CHARS": "200000",
+        "AGENT_CRITIC_REVIEW_TIMEOUT_SECONDS": "240",
+        "AGENT_CRITIC_REVISION_TIMEOUT_SECONDS": "300",
+        "STUDIO_TUNE_USERNAMES": "artur"
+      }
+    },
+    "worker": {
+      "image": "servgo-growth-release:20261016",
+      "environment": {
+        "AGENT_CRITIC_ENABLED": "true",
+        "MODEL_ROUTER_ENABLED": "true",
+        "RELEASE_SHA": "release-20261016",
+        "AGENT_CRITIC_MAX_CONTEXT_CHARS": "200000",
+        "AGENT_CRITIC_REVIEW_TIMEOUT_SECONDS": "240",
+        "AGENT_CRITIC_REVISION_TIMEOUT_SECONDS": "300",
+        "STUDIO_TUNE_USERNAMES": "artur"
+      }
+    },
+    "telegram": {
+      "image": "servgo-growth-release:20261016",
+      "environment": {
+        "AGENT_CRITIC_ENABLED": "true",
+        "MODEL_ROUTER_ENABLED": "true",
+        "RELEASE_SHA": "release-20261016",
+        "AGENT_CRITIC_MAX_CONTEXT_CHARS": "200000",
+        "AGENT_CRITIC_REVIEW_TIMEOUT_SECONDS": "240",
+        "AGENT_CRITIC_REVISION_TIMEOUT_SECONDS": "300",
+        "STUDIO_TUNE_USERNAMES": "artur"
+      }
+    }
+  }
+}

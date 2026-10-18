@@ -1,0 +1,11 @@
+{
+  "base_image": "servgo-growth-release:20261016",
+  "overlay_env": {
+    "AGENT_CRITIC_ENABLED": "true",
+    "MODEL_ROUTER_ENABLED": "true",
+    "AGENT_CRITIC_MAX_CONTEXT_CHARS": "200000",
+    "AGENT_CRITIC_REVIEW_TIMEOUT_SECONDS": "240",
+    "AGENT_CRITIC_REVISION_TIMEOUT_SECONDS": "300",
+    "STUDIO_TUNE_USERNAMES": "artur"
+  }
+}
