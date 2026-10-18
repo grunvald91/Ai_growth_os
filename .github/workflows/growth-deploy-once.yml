@@ -1,0 +1,154 @@
+name: Growth deploy (accounts, app-only login)
+
+# One-off production deploy of PR #129 head through the server's own
+# deploy_growth.py (health check + automatic rollback). Refuses to deploy if the
+# running code contains anything that is not in this branch's history.
+on:
+  push:
+    branches: [ccr-545c5158-rcd05z]
+    paths: ['.github/workflows/growth-deploy-once.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: growth-production
+  cancel-in-progress: false
+
+env:
+  DEPLOY_SHA: 97e0809c33f4875af3bc55b51ded6c5b38893075
+  HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+
+jobs:
+  test:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install media tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-dejavu-core poppler-utils tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng
+      - run: python -m pip install -e '.[test]'
+      - run: python -m pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: SSH setup
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is missing"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null | sort > ~/.ssh/known_hosts
+          ssh-keygen -lf ~/.ssh/known_hosts
+      - name: Drift check (running code must come from this branch's history)
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes "root@$HOST" \
+            "docker exec ai-growth-os-api-1 sh -c 'cd /app && find app products -type f \( -name \"*.py\" -o -name \"*.json\" -o -name \"*.md\" -o -name \"*.html\" -o -name \"*.css\" -o -name \"*.js\" \) ! -path \"*/__pycache__/*\" -exec sha256sum {} +'" > running.txt
+          echo "files in running container: $(wc -l < running.txt)"
+          python3 - "$DEPLOY_SHA" <<'PY'
+          import hashlib, subprocess, sys
+          sha = sys.argv[1]
+          def blob(rev, path):
+              r = subprocess.run(["git", "show", f"{rev}:{path}"], capture_output=True)
+              return hashlib.sha256(r.stdout).hexdigest() if r.returncode == 0 else None
+          running = {}
+          for line in open("running.txt"):
+              digest, path = line.split(None, 1)
+              running[path.strip()] = digest
+          newer, unknown = [], []
+          for path, digest in sorted(running.items()):
+              if blob(sha, path) == digest:
+                  continue
+              revs = subprocess.run(["git", "log", "--format=%H", "-n", "300", sha, "--", path],
+                                    capture_output=True, text=True).stdout.split()
+              if any(blob(rev, path) == digest for rev in revs):
+                  newer.append(path)
+              else:
+                  unknown.append(path)
+          print(f"identical: {len(running) - len(newer) - len(unknown)}, older version in branch history: {len(newer)}, unknown: {len(unknown)}")
+          for path in newer:
+              print("  will update:", path)
+          for path in unknown:
+              print("  NOT IN BRANCH HISTORY:", path)
+          if unknown:
+              print("::error::Running code contains files that are not in this branch's history; not deploying.")
+              sys.exit(1)
+          PY
+      - name: Deploy through deploy_growth.py
+        run: |
+          set -euo pipefail
+          git archive --format=tar.gz "$DEPLOY_SHA" app alembic/versions pyproject.toml products \
+            | sshpass -e ssh -o StrictHostKeyChecking=yes "root@$HOST" \
+              "python3 /opt/ai_growth_os/deploy/deploy_growth.py deploy $DEPLOY_SHA"
+      - name: State after deploy
+        if: always()
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=yes "root@$HOST" \
+            "docker ps --filter label=com.docker.compose.project=ai-growth-os --format '{{.Names}} {{.Image}} {{.Status}}'; curl -s -o /dev/null -w 'health %{http_code}\n' http://127.0.0.1:8091/health"
+      - name: Nginx stops checking passwords (backup, verify, automatic restore)
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=yes "root@$HOST" 'bash -s' <<'SH'
+          set -euo pipefail
+          f=/etc/nginx/sites-available/growth-servgo
+          b=/root/nginx-backup-growth-$(date +%Y%m%d-%H%M%S)
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8091/studio)
+          if [ "$code" != 401 ]; then echo "::error::app does not require login on /studio ($code); nginx untouched"; exit 1; fi
+          cp -a "$f" "$b"; echo "backup: $b"
+          sed -i -E '/^\s*auth_basic(_user_file)?\s/d' "$f"
+          restore() { cp -a "$b" "$f"; nginx -t >/dev/null 2>&1 && systemctl reload nginx; echo "::error::$1; nginx config restored"; exit 1; }
+          nginx -t >/tmp/nginx-test.log 2>&1 || { tail -3 /tmp/nginx-test.log; restore "nginx -t failed"; }
+          systemctl reload nginx; sleep 2
+          for path in /studio /studio/team /competitive-intelligence/runs; do
+            headers=$(curl -s -D - -o /dev/null --resolve growth.servgo.ru:443:127.0.0.1 "https://growth.servgo.ru$path")
+            status=$(printf '%s' "$headers" | head -1 | awk '{print $2}')
+            realm=$(printf '%s' "$headers" | grep -ci 'realm="AI Growth OS"' || true)
+            echo "$path -> $status (nginx realm: $realm)"
+            [ "$status" = 401 ] && [ "$realm" = 0 ] || restore "unexpected answer on $path"
+          done
+          echo "nginx: passwords are now checked only by the app"
+          SH
+      - name: ServGo mail check (read-only, names and statuses only)
+        if: always()
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=yes "root@$HOST" 'bash -s' <<'SH'
+          echo "== nginx mail.servgo.ru"
+          grep -rlE "mail\.servgo\.ru" /etc/nginx/sites-enabled/ 2>/dev/null | while read f; do echo "-- $f"; grep -nE "server_name|proxy_pass|location|root " "$f"; done
+          echo "== prod mail files vs GitHub main"
+          cd /opt/booking_bot
+          for pair in "web/api/routes/owner_mail_ui.html 593587d30e997432cedee78da4543fa54e434e655f54e38cf425f911dbc2b97d" "web/api/routes/owner_mail.py d5010cc02bdbcd9f8d8445a5802749209f92e76e93b768bf958a98eee9437d5f"; do
+            set -- $pair; [ -f "$1" ] && { [ "$(sha256sum "$1" | cut -d' ' -f1)" = "$2" ] && echo "$1 same" || echo "$1 DIFFERS"; } || echo "$1 missing"; done
+          grep -rln "compose-dialog\|direct-send" /opt/booking_bot/web 2>/dev/null | grep -v node_modules | head
+          echo "== mail env names"
+          for n in SERVGO_MAIL_FROM SERVGO_MAIL_IMAP_USER SERVGO_MAIL_IMAP_PASSWORD SERVGO_MAIL_SESSION_SECRET; do
+            if systemctl show -p Environment booking-web-api | grep -q "$n=" || grep -qs "^$n=" /opt/booking_bot/.env; then echo "$n=set"; else echo "$n=missing"; fi; done
+          echo "== SMTP listener"
+          ss -ltn | awk '$4 ~ /:25$/ {print "listening", $4}'
+          echo "== outgoing statuses"
+          python3 - <<'PY'
+          import sqlite3
+          db = sqlite3.connect("file:/var/lib/servgo-owner-mail/mail.sqlite?mode=ro", uri=True)
+          for table in ("direct_mail", "deliveries"):
+              try:
+                  print(table, db.execute(f"select status, count(*) from {table} group by status").fetchall())
+              except sqlite3.Error as exc:
+                  print(table, "unavailable", type(exc).__name__)
+          PY
+          echo "== recent mail API errors (status codes only)"
+          journalctl -u booking-web-api --since "-3 days" --no-pager 2>/dev/null | grep -oE '"(POST|GET) /(mail/)?api/(direct-send|direct-draft|send/[0-9]+|outbox)[^"]*" [0-9]{3}' | sed -E 's#/send/[0-9]+#/send/N#' | sort | uniq -c | tail -20
+          SH
