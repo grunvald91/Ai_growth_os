@@ -191,6 +191,7 @@ async def test_all_three_redraws_are_bounded_and_charged_once(environment):
 @pytest.mark.asyncio
 async def test_failed_critic_stops_before_speech_and_is_not_retried(environment):
     factory,settings,product,_=environment;task=reviewed_job(environment);approve(environment,task);seen=[]
+    settings=settings.model_copy(update={'whiteboard_auto_resume_attempts':0})
     build=pipeline_factory(seen,review(),fail=True)
     await run_whiteboard_once(factory,settings,factory=build,readiness=ready)
     assert await run_whiteboard_once(factory,settings,factory=build,readiness=ready)==0
@@ -310,6 +311,7 @@ async def test_cancel_during_critic_prevents_primary_decision_and_redraw(environ
 @pytest.mark.asyncio
 async def test_adversarial_author_cannot_expand_scope_into_stylistic_redraws(environment):
     factory,settings,product,_=environment;task=reviewed_job(environment);approve(environment,task);seen=[]
+    settings=settings.model_copy(update={'whiteboard_auto_resume_attempts':0})
     report=review(issue(),issue(1,category='style'))
     base=pipeline_factory(seen,report)
     def build(settings,payload,store):

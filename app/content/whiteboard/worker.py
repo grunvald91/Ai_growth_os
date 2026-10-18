@@ -14,7 +14,8 @@ from app.llm.service import LLMService
 from app.privacy import PrivacyGateway
 from .adapters import LLMStoryboardProvider, ClaudeHubGeminiImageProvider, OpenRouterRegionProvider, OpenRouterSpeechProvider
 from .checkpoints import CheckpointStore, CheckpointError, _Lock
-from .jobs import AGENT, CallLedger, GuardedStage, job_directory, owner_task, records
+from .jobs import (AGENT, CallLedger, GuardedStage, job_directory, owner_task, record_error, records, retry_due,
+                   schedule_auto_resume)
 from .pipeline import WhiteboardPipeline
 from .render import MarkerSweepRenderer
 from .review import OpenRouterVisualCritic, LLMVisualAuthor
@@ -38,7 +39,18 @@ def build_pipeline(settings, payload, store):
         visual_author=LLMVisualAuthor(service, model=payload.models.storyboard) if payload.visual_review else None)
 
 
-def _failure(session_factory, product_id, task_id, code, *, exception=None):
+def _append_error_log(directory, entry):
+    """Durable per-job JSON lines next to the checkpoints; never secrets or provider text."""
+    if directory is None:
+        return
+    try:
+        with open(directory / 'errors.jsonl', 'a', encoding='utf-8') as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    except OSError:
+        logging.getLogger(__name__).warning('whiteboard_error_log_failed')
+
+
+def _failure(session_factory, product_id, task_id, code, *, exception=None, directory=None, auto_resume_attempts=0):
     with session_factory() as db:
         task = owner_task(db, product_id, task_id, lock=True)
         if task.status == TaskStatus.CANCELLED:
@@ -50,6 +62,7 @@ def _failure(session_factory, product_id, task_id, code, *, exception=None):
         if state:
             value = json.loads(state.content)
             value['failed_stage'] = value.get('stage')
+            details = {}
             if exception is not None:
                 details = {'exception_type': type(exception).__name__}
                 from pydantic import ValidationError
@@ -58,10 +71,25 @@ def _failure(session_factory, product_id, task_id, code, *, exception=None):
                     details['validation_types'] = sorted({e['type'] for e in exception.errors(include_input=False)})
                 if isinstance(exception, httpx.HTTPStatusError):
                     details['http_status'] = exception.response.status_code
+                if type(exception) in (ValueError, CheckpointError):
+                    # Our own fixed messages; never provider responses or validation input.
+                    details['reason'] = str(exception)[:200]
                 value['diagnostic'] = details
-                logging.getLogger(__name__).warning('whiteboard_failed %s', json.dumps({
-                    'task_id': str(task_id), 'stage': value['failed_stage'], 'code': code, **details}))
+            entry = record_error(value, code, details=details)
             value.update(stage='failed', error=code)
+            retried = False
+            if code != 'cancelled' and auto_resume_attempts:
+                try:
+                    source, _, approval, payload = records(db, task, lock=True)
+                except ReadinessError:
+                    approval = None
+                if approval is not None and approval.status == 'approved':
+                    retried = schedule_auto_resume(db, task, source, value, payload, code,
+                                                   attempts=auto_resume_attempts)
+            entry['auto_resume'] = value.get('retry_at') if retried else None
+            logging.getLogger(__name__).warning('whiteboard_failed %s', json.dumps({
+                'task_id': str(task_id), **entry}))
+            _append_error_log(directory, {'task_id': str(task_id), **entry})
             state.content = json.dumps(value)
         db.execute(update(AgentRun).where(AgentRun.task_id == task_id, AgentRun.status == 'running')
                    .values(status='failed', error=code, finished_at=datetime.now(timezone.utc)))
@@ -81,7 +109,8 @@ def recover_interrupted_jobs(session_factory, settings):
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         try:
             with _Lock(directory / 'job.lock'):
-                _failure(session_factory, product_id, task_id, 'interrupted')
+                _failure(session_factory, product_id, task_id, 'interrupted', directory=directory,
+                         auto_resume_attempts=settings.whiteboard_auto_resume_attempts)
         except CheckpointError:
             continue
 
@@ -89,8 +118,16 @@ def recover_interrupted_jobs(session_factory, settings):
 async def run_whiteboard_once(session_factory, settings, *, factory=None, readiness=None):
     recover_interrupted_jobs(session_factory, settings)
     with session_factory() as db:
-        task = db.scalar(select(Task).where(Task.assigned_agent == AGENT, Task.status == TaskStatus.QUEUED)
-                         .order_by(Task.priority.desc(), Task.created_at, Task.id).limit(1))
+        queued = list(db.scalars(select(Task).where(Task.assigned_agent == AGENT, Task.status == TaskStatus.QUEUED)
+                                 .order_by(Task.priority.desc(), Task.created_at, Task.id).limit(20)))
+        task = None
+        for candidate in queued:
+            # A job waiting out its automatic-retry pause stays queued until the pause ends.
+            saved = db.scalar(select(Artifact.content).where(Artifact.task_id == candidate.id,
+                                                             Artifact.kind == 'whiteboard_job_state'))
+            if saved is None or retry_due(json.loads(saved)):
+                task = candidate
+                break
         if task is None:
             return 0
         task_id, product_id = task.id, task.product_id
@@ -99,6 +136,7 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
         if claimed.rowcount != 1:
             db.rollback(); return 0
         db.commit()
+    directory = None
     try:
         directory = job_directory(settings.products_root, product_id, task_id)
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -110,6 +148,8 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                 if approval.status != 'approved' or source.status != ArtifactStatus.APPROVED:
                     raise ReadinessError('approval_invalid')
                 value = json.loads(state.content); value.update(stage='preflight', error=None)
+                for key in ('retry_at', 'failed_stage', 'diagnostic'):
+                    value.pop(key, None)
                 resuming = bool(value.pop('resume_requested', False))
                 state.content = json.dumps(value); db.commit()
             # The immutable approved request owns this job's model/voice choice.
@@ -174,7 +214,8 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                 task.status = TaskStatus.COMPLETED
                 db.commit()
     except asyncio.CancelledError:
-        _failure(session_factory, product_id, task_id, 'interrupted')
+        _failure(session_factory, product_id, task_id, 'interrupted', directory=directory,
+                 auto_resume_attempts=settings.whiteboard_auto_resume_attempts)
         raise
     except Exception as exc:
         import httpx
@@ -184,5 +225,6 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                     exc.response, name='provider-error')
             except Exception:
                 logging.getLogger(__name__).warning('whiteboard_diagnostic_capture_failed task_id=%s', task_id)
-        _failure(session_factory, product_id, task_id, safe_error(exc), exception=exc)
+        _failure(session_factory, product_id, task_id, safe_error(exc), exception=exc, directory=directory,
+                 auto_resume_attempts=settings.whiteboard_auto_resume_attempts)
     return 1

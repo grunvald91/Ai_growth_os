@@ -108,3 +108,23 @@ concurrent execution and key-safe diagnostics were checked. The full project
 suite, Python 3.12, production host capacity and live models were not checked.
 
 No paid models or Actions were needed for these tests.
+
+## Автоматическое продолжение после сбоев и журнал ошибок
+
+- После временного сбоя (`generation_failed`, `interrupted`, `provider_server_error`,
+  `openrouter_unavailable`, `storyboard_empty`, `storyboard_truncated`) задание само
+  возвращается в очередь после паузы 1, 5, 15, 30, 60 минут. Число попыток задаёт
+  `WHITEBOARD_AUTO_RESUME_ATTEMPTS` (0–5, по умолчанию 5, 0 выключает).
+- Готовые этапы берутся из чекпоинтов и повторно не оплачиваются. Автоповтор тратит
+  только вызовы из лимита, подтверждённого владельцем; каждая попытка записывается
+  отдельной строкой `Approval` с `action_type='whiteboard_auto_resume'`.
+- Если подтверждённые вызовы закончились, видео доделывается только после явного
+  подтверждения владельца на странице задания: «Добавить вызовы и доделать видео»
+  (до 10 за раз, до 25 сверх исходного лимита). Это тоже строка `Approval`.
+- Ошибки ни в каком случае не теряются:
+  - `errors` в состоянии задания (последние 50; видно на странице как «Журнал ошибок»
+    и в `GET /products/{id}/whiteboard/jobs/{task_id}`);
+  - `products/_whiteboard/<product>/<task>/errors.jsonl` рядом с чекпоинтами;
+  - строка `whiteboard_failed {...}` в логе worker.
+  В записях только этап, код, число вызовов, тип исключения и HTTP-статус; текст
+  ответа провайдера и ключи туда не попадают.

@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     whiteboard_regions_model: str = ""
     whiteboard_voice: str = "Kore"
     whiteboard_proxy_url: str | None = None
+    # Automatic continuations after a transient failure (0 disables), inside the approved call limit.
+    whiteboard_auto_resume_attempts: int = Field(default=5, ge=0, le=5)
     # Jeff is an optional OpenAI-compatible decision endpoint, never a search adapter.
     jeff_api_key: str | None = None
     jeff_base_url: str | None = None

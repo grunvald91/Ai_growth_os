@@ -17,7 +17,7 @@ from sqlalchemy.orm import sessionmaker
 from app.api import whiteboard as api
 from app.content.whiteboard.contracts import WhiteboardRequest
 from app.content.whiteboard.jobs import (CallLedger, approve_job, cancel_job, digest,
-    job_directory, owner_task, queue_job, records)
+    job_directory, owner_task, queue_job, records, resume_job)
 from app.content.whiteboard.pipeline import WhiteboardPipeline
 from app.content.whiteboard.render import MarkerSweepRenderer
 from app.content.whiteboard.runtime import ReadinessError, SingleCallStoryboardLLM, configured_models, preflight
@@ -232,8 +232,9 @@ async def test_full_owner_interface_worker_and_real_mp4(environment, tmp_path, m
 
 
 @pytest.mark.asyncio
-async def test_failed_paid_stage_is_not_retried_by_worker(environment):
+async def test_failed_paid_stage_is_not_retried_when_auto_resume_disabled(environment):
     factory, settings, product_id, _ = environment
+    settings = settings.model_copy(update={'whiteboard_auto_resume_attempts': 0})
     task_id = new_job(environment); approve(environment, task_id)
     calls = []
     def broken_factory(settings, payload, store):
@@ -265,8 +266,9 @@ def test_call_ledger_caps_requests_and_cancellation_blocks_next_call(environment
     with pytest.raises(ReadinessError, match='cancelled'): ledger.begin('image')
 
 
-def test_crashed_running_job_is_failed_without_requeue(environment):
+def test_crashed_running_job_is_failed_without_requeue_when_auto_resume_disabled(environment):
     factory, settings, product_id, _ = environment
+    settings = settings.model_copy(update={'whiteboard_auto_resume_attempts': 0})
     task_id = new_job(environment); approve(environment, task_id)
     with factory() as db:
         task = db.get(Task, task_id); task.status = TaskStatus.RUNNING
@@ -426,6 +428,7 @@ async def test_readiness_and_media_use_the_explicit_proxy_with_tls_validation(en
 @pytest.mark.asyncio
 async def test_owner_resumes_failed_job_without_paying_for_completed_stages(environment, monkeypatch):
     factory, settings, product_id, _ = environment
+    settings = settings.model_copy(update={'whiteboard_auto_resume_attempts': 0})
     task_id = new_job(environment, maximum=19); approve(environment, task_id)
     attempts = []
     def flaky_factory(settings, payload, store):
@@ -459,3 +462,128 @@ async def test_owner_resumes_failed_job_without_paying_for_completed_stages(envi
         assert len(resumes) == 1 and resumes[0].status == 'approved'
         state = json.loads(records(db, owner_task(db, product_id, task_id))[1].content)
         assert 'resume_requested' not in state and state['resumes'] == 1
+
+
+def _state(factory, product_id, task_id):
+    with factory() as db:
+        task = owner_task(db, product_id, task_id)
+        return task.status, json.loads(records(db, task)[1].content)
+
+
+def _expire_pause(factory, product_id, task_id):
+    with factory() as db:
+        _, saved, _, _ = records(db, owner_task(db, product_id, task_id))
+        value = json.loads(saved.content)
+        value['retry_at'] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        saved.content = json.dumps(value); db.commit()
+
+
+@pytest.mark.asyncio
+async def test_transient_failure_resumes_automatically_after_pause_and_finishes(environment):
+    factory, settings, product_id, _ = environment
+    task_id = new_job(environment, maximum=19); approve(environment, task_id)
+    attempts = []
+    def flaky_factory(settings, payload, store):
+        pipeline = fake_factory(settings, payload, store)
+        working = pipeline.speech
+        class Speech:
+            async def synthesize(self, *args, **kwargs):
+                attempts.append(1)
+                if len(attempts) == 1:
+                    raise TimeoutError('private provider error must not be stored')
+                return await working.synthesize(*args, **kwargs)
+        pipeline.speech = Speech(); return pipeline
+    await run_whiteboard_once(factory, settings, factory=flaky_factory, readiness=ready)
+    status, state = _state(factory, product_id, task_id)
+    assert status == TaskStatus.QUEUED and state['stage'] == 'retry_wait' and state['auto_resumes'] == 1
+    assert state['last_error'] == 'generation_failed' and state['errors'][0]['stage'] == 'speech'
+    assert state['errors'][0]['exception_type'] == 'TimeoutError'
+    assert 'private provider error' not in json.dumps(state)
+    log = job_directory(settings.products_root, product_id, task_id) / 'errors.jsonl'
+    entry = json.loads(log.read_text().splitlines()[0])
+    assert entry['code'] == 'generation_failed' and entry['auto_resume']
+    url = f'/studio/products/{product_id}/whiteboard/{task_id}'
+    with client() as browser:
+        page = browser.get(url).text
+        assert 'Автоматическое продолжение 1 из 5' in page and 'Журнал ошибок (1)' in page
+    # The pause is respected: nothing runs before retry_at.
+    assert await run_whiteboard_once(factory, settings, factory=flaky_factory, readiness=ready) == 0
+    assert len(attempts) == 1
+    _expire_pause(factory, product_id, task_id)
+    assert await run_whiteboard_once(factory, settings, factory=flaky_factory, readiness=ready) == 1
+    status, state = _state(factory, product_id, task_id)
+    assert status == TaskStatus.COMPLETED and len(state['errors']) == 1 and 'retry_at' not in state
+    with factory() as db:
+        runs = [r.agent_name for r in db.scalars(select(AgentRun).where(AgentRun.task_id == task_id))]
+        assert runs.count('whiteboard_storyboard') == 1  # completed stages are reused, not paid again
+        audit = list(db.scalars(select(Approval).where(Approval.action_type == 'whiteboard_auto_resume')))
+        assert len(audit) == 1 and audit[0].decided_by == 'policy:auto_resume'
+
+
+@pytest.mark.asyncio
+async def test_auto_resume_stops_after_attempt_limit_and_keeps_every_error(environment):
+    factory, settings, product_id, _ = environment
+    settings = settings.model_copy(update={'whiteboard_auto_resume_attempts': 2})
+    task_id = new_job(environment, maximum=25); approve(environment, task_id)
+    def broken_factory(settings, payload, store):
+        pipeline = fake_factory(settings, payload, store)
+        class Speech:
+            async def synthesize(self, *args, **kwargs):
+                raise TimeoutError('provider timeout')
+        pipeline.speech = Speech(); return pipeline
+    for _ in range(3):
+        _expire_pause(factory, product_id, task_id)
+        assert await run_whiteboard_once(factory, settings, factory=broken_factory, readiness=ready) == 1
+    status, state = _state(factory, product_id, task_id)
+    assert status == TaskStatus.FAILED and state['auto_resumes'] == 2 and len(state['errors']) == 3
+    assert state['error'] == 'generation_failed' and state['calls'] == 6
+    lines = (job_directory(settings.products_root, product_id, task_id) / 'errors.jsonl').read_text().splitlines()
+    assert len(lines) == 3 and json.loads(lines[-1])['auto_resume'] is None
+    # The owner can still continue manually, which starts a fresh automatic series.
+    with factory() as db:
+        resume_job(db, product_id, task_id, confirmed=True, decided_by='owner')
+    status, state = _state(factory, product_id, task_id)
+    assert status == TaskStatus.QUEUED and state['auto_resumes'] == 0
+
+
+@pytest.mark.asyncio
+async def test_spent_calls_need_owner_top_up_and_then_video_finishes(environment):
+    factory, settings, product_id, _ = environment
+    task_id = new_job(environment, maximum=13); approve(environment, task_id)
+    with factory() as db:
+        db.get(Task, task_id).status = TaskStatus.RUNNING; db.commit()
+    ledger = CallLedger(factory, product_id, task_id)
+    for _ in range(13): ledger.finish(ledger.begin('speech'))
+    with factory() as db:
+        task = owner_task(db, product_id, task_id); task.status = TaskStatus.FAILED
+        _, saved, _, _ = records(db, task)
+        value = json.loads(saved.content); value.update(stage='failed', error='call_limit', failed_stage='speech')
+        saved.content = json.dumps(value); db.commit()
+    url = f'/studio/products/{product_id}/whiteboard/{task_id}'
+    with client() as browser:
+        page = browser.get(url).text
+        assert 'Добавить вызовы и доделать видео' in page and 'Продолжить с места остановки' not in page
+        assert browser.post(url + '/resume', data={'confirmed': 'yes', 'extra_calls': '99'},
+                            follow_redirects=False).status_code == 409
+        assert browser.post(url + '/resume', data={'confirmed': 'yes', 'extra_calls': '10'},
+                            follow_redirects=False).status_code == 303
+    status, state = _state(factory, product_id, task_id)
+    assert status == TaskStatus.QUEUED and state['extra_calls'] == 10
+    with factory() as db:
+        reasons = [a.reason for a in db.scalars(select(Approval).where(Approval.action_type == 'whiteboard_resume'))]
+        assert reasons and reasons[0].endswith('+10 calls')
+    with factory() as db:
+        db.get(Task, task_id).status = TaskStatus.RUNNING; db.commit()
+    for _ in range(10): ledger.finish(ledger.begin('speech'))
+    with pytest.raises(ReadinessError, match='call_limit'): ledger.begin('speech')
+
+
+def test_crashed_running_job_is_requeued_after_pause(environment):
+    factory, settings, product_id, _ = environment
+    task_id = new_job(environment); approve(environment, task_id)
+    with factory() as db:
+        task = db.get(Task, task_id); task.status = TaskStatus.RUNNING
+        task.updated_at = datetime.now(timezone.utc) - timedelta(minutes=3); db.commit()
+    recover_interrupted_jobs(factory, settings)
+    status, state = _state(factory, product_id, task_id)
+    assert status == TaskStatus.QUEUED and state['last_error'] == 'interrupted' and state['errors'][0]['code'] == 'interrupted'

@@ -131,9 +131,9 @@ Implement `daily_growth_review`:
 
 Read `ARCHITECTURE.md` and `IMPLEMENTATION_PLAN.md` before coding.
 
-## GitHub Actions budget policy (mandatory)
+## GitHub Actions policy (mandatory)
 
-Before planning or executing any CI, deployment or GitHub Actions operation, read and follow [AGENTS.md](AGENTS.md). Its cost, safety, diagnostics, limits and reporting rules apply equally to Claude Code and any delegated agent. Do not bypass them through issue comments or other automation triggers.
+Before planning or executing any CI, deployment or GitHub Actions operation, read and follow [AGENTS.md](AGENTS.md). The repository is public: GitHub Actions minutes on standard runners are free and unlimited, so use Actions whenever it is faster or more reliable. Because logs and history are public, its secret- and data-safety rules apply equally to Claude Code and any delegated agent. Do not bypass them through issue comments or other automation triggers.
 
 ## Design system (mandatory)
 
