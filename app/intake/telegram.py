@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.company_profile import load_company_profile, profile_snapshot
 from app.intake.contracts import IntakeError
+from app.intake.registry import registry_from_settings
 from app.intake.service import CompanyIntakeService
 from app.intake.sources import make_source, MAX_FILE_BYTES, clean_text, FILE_HELP, parse_file_async
 from app.models.domain import Artifact, Product, Task, TaskStatus
@@ -100,7 +101,8 @@ class TelegramCompanyIntake:
     def service(self, db):
         settings = self.settings_factory()
         return CompanyIntakeService(db, products_root=settings.products_root,
-                                    model=settings.llm_model, provider_name=settings.llm_provider)
+                                    model=settings.llm_model, provider_name=settings.llm_provider,
+                                    registry_lookup=registry_from_settings(settings))
 
     def active(self, db):
         if self.selected:
@@ -217,8 +219,14 @@ class TelegramCompanyIntake:
                     notice = "Первый из показанных вопросов оставлен неизвестным. Данные не придуманы."
                 elif text:
                     if self.mode == "identifier":
-                        await service.add_identifier(product_id, session_id, text, actor=self.actor)
-                        notice = "Идентификатор принят. Проверка по реестру пока недоступна."
+                        state = await service.add_identifier(product_id, session_id, text, actor=self.actor)
+                        registry = [s for s in state["sources"] if s["source_type"] == "official_registry"]
+                        if registry and registry[-1]["status"] == "read":
+                            notice = "Компания найдена в реестре, сведения добавлены."
+                        elif registry:
+                            notice = "Идентификатор принят. " + (registry[-1]["note"] or "Реестр не подтвердил данные.")
+                        else:
+                            notice = "Идентификатор принят. Проверка по реестру пока недоступна."
                     else:
                         service.add_text(product_id, session_id, text, actor=self.actor, reference=reference)
                         links = re.findall(r"https?://[^\s,]+", text)
@@ -227,12 +235,20 @@ class TelegramCompanyIntake:
                         if not links:
                             links = ["https://" + domain for domain in re.findall(
                                 r"\b(?:[a-zA-Z0-9-]+\.)+(?:ru|com|net|org|site)\b", text)]
-                        issues = []
+                        issues, before = [], None
                         for link in links[:3]:
                             link = link.rstrip(".;)")
+                            if before is None:
+                                before = {s["id"] for s in service.get(product_id, session_id, actor=self.actor)["sources"]}
                             state = await service.add_link(product_id, session_id, link, actor=self.actor)
-                            issues.extend(s["note"] for s in state["sources"] if s["reference"] == clean_text(link)[:500] and s["status"] != "read")
+                            issues.extend(s["note"] for s in state["sources"]
+                                          if s["source_type"] == "owned_website" and s["id"] not in before
+                                          and s["status"] != "read" and s["note"])
+                        pages = [s for s in (state["sources"] if before is not None else [])
+                                 if s["source_type"] == "owned_website" and s["id"] not in before and s["status"] != "unavailable"]
                         notice = "Материалы добавлены. Можно прислать ещё или проверить профиль."
+                        if len(pages) > 1:
+                            notice = f"Прочитано страниц сайта: {len(pages)}. " + notice
                         if issues:
                             notice += "\n" + "\n".join(dict.fromkeys(issues))
                 elif message.get("voice") or message.get("audio"):

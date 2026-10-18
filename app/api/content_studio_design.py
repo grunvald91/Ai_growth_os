@@ -573,3 +573,29 @@ STUDIO_JS += r"""
   });
 })();
 """
+
+# Company intake: materials list, owner questions and upload forms (mobile-first).
+STUDIO_CSS += """
+.sg-intake-form{display:grid;gap:16px}
+.sg-company-form.sg-intake-form{padding:22px}
+.sg-intake-section{display:grid;gap:12px}
+.sg-intake-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.sg-intake-notice{padding:14px 16px;border-radius:12px;background:#ecf6ef;color:#1f5d36;font-size:14px;line-height:1.5}
+.sg-intake-sources{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.sg-intake-source{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 10px;padding:10px 12px;border:1px solid #E6E9EF;border-radius:11px;font-size:14px}
+.sg-intake-source b{font-weight:650;white-space:nowrap}
+.sg-intake-source span{overflow-wrap:anywhere;color:#324b68}
+.sg-intake-source small{grid-column:1/-1;color:#9a6228;line-height:1.45}
+.sg-intake-unavailable,.sg-intake-unsupported{background:#fffaf4}
+.sg-intake-review{white-space:pre-wrap;line-height:1.55;overflow-wrap:anywhere}
+.sg-intake-question{border:1px solid #E6E9EF;border-radius:12px;padding:12px 14px;margin:0;display:grid;gap:8px;min-width:0}
+.sg-intake-question legend{font-weight:650;padding:0 4px;line-height:1.4}
+.sg-intake-form input[type=file]{min-height:auto;padding:10px;background:#f7f9fc}
+.sg-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media(max-width:640px){
+ .sg-company-form.sg-intake-form{padding:16px}
+ .sg-intake-actions{flex-direction:column;align-items:stretch}
+ .sg-intake-actions .btn{width:100%;min-height:48px}
+ .sg-intake-actions a{text-align:center;padding:6px 0}
+}
+"""

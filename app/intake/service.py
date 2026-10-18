@@ -36,6 +36,11 @@ LEAF_PATHS = {
 }
 
 
+MAX_SOURCES = 30
+MAX_SOURCE_TEXT = 90_000
+WEBSITE_TEXT_SHARE = 48_000
+
+
 def _digest(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -162,7 +167,7 @@ class CompanyIntakeService:
         # Same evidence is deduplicated; distinct sources remain traceable.
         if any(row["id"] == source.id for row in state["sources"]):
             return self.get(product_id, session_id, actor=actor)
-        if len(state["sources"]) >= 20 or sum(len(s["text"]) for s in state["sources"]) + len(source.text) > 60_000:
+        if len(state["sources"]) >= MAX_SOURCES or self._used_text(state) + len(source.text) > MAX_SOURCE_TEXT:
             raise IntakeError("Слишком много материалов в одном сборе. Сначала проверьте текущие данные.")
         state["sources"].append(source.model_dump())
         state["revision"] += 1
@@ -177,10 +182,61 @@ class CompanyIntakeService:
         return self.add_source(product_id, session_id,
                                make_source("owner_message", reference, text), actor=actor)
 
+    @staticmethod
+    def _used_text(state) -> int:
+        return sum(len(s["text"]) for s in state["sources"])
+
     async def add_link(self, product_id, session_id, url, *, actor):
-        self._task(product_id, session_id, actor, active=True)
-        source = await self.website_fetcher.fetch(url)
-        return self.add_source(product_id, session_id, source, actor=actor)
+        task = self._task(product_id, session_id, actor, active=True)
+        crawl = getattr(self.website_fetcher, "crawl", None)
+        if crawl is None:
+            source = await self.website_fetcher.fetch(url)
+            return self.add_source(product_id, session_id, source, actor=actor)
+        state = self._state(task.id)
+        free_sources = MAX_SOURCES - len(state["sources"])
+        budget = min(WEBSITE_TEXT_SHARE, MAX_SOURCE_TEXT - self._used_text(state))
+        if free_sources <= 0 or budget < 1000:
+            raise IntakeError("Слишком много материалов в одном сборе. Сначала проверьте текущие данные.")
+        # The owner's site is read as several pages; each one stays a separate, citable source.
+        pages = await crawl(url, max_pages=min(free_sources, 8), text_budget=budget)
+        return self.add_sources(product_id, session_id, pages, actor=actor)
+
+    def add_sources(self, product_id, session_id, sources: list[IntakeSource], *, actor):
+        """Add a batch (one crawl) under a single revision, skipping what no longer fits."""
+        task = self._task(product_id, session_id, actor, active=True)
+        state = self._state(task.id)
+        known = {row["id"] for row in state["sources"]}
+        added = 0
+        for source in sources:
+            if source.id in known:
+                continue
+            if len(state["sources"]) >= MAX_SOURCES or self._used_text(state) + len(source.text) > MAX_SOURCE_TEXT:
+                break
+            state["sources"].append(source.model_dump())
+            known.add(source.id)
+            added += 1
+        if added:
+            state["revision"] += 1
+            self._save_state(task.id, product_id, state)
+            task.status = TaskStatus.QUEUED
+            self.db.commit()
+        return self.get(product_id, session_id, actor=actor)
+
+    def answer_question(self, product_id, session_id, field_path, answer, *, actor):
+        """An owner's answer is evidence for one asked question; the question text keeps it in context."""
+        task = self._task(product_id, session_id, actor, active=True)
+        review = self._artifact(task.id, "company_profile_review")
+        questions = {item["field_path"]: item["text"]
+                     for item in (json.loads(review.content)["questions"] if review else [])}
+        if field_path not in questions:
+            raise IntakeError("Вопрос уже изменился; откройте актуальные вопросы.")
+        answer = answer.strip()
+        if not answer:
+            raise IntakeError("Напишите ответ или отметьте «Не знаю».")
+        text = f"Вопрос: {questions[field_path]}\nОтвет владельца: {answer}"
+        return self.add_source(product_id, session_id,
+                               make_source("owner_message", f"ответ владельца: {questions[field_path]}", text),
+                               actor=actor)
 
     async def add_identifier(self, product_id, session_id, identifier, *, actor):
         if not identifier.strip():

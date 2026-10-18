@@ -1,8 +1,9 @@
 """Add a company from Growth Studio and confirm its profile.
 
 Reuses the company intake service (the same flow as the Telegram «Новая компания» button):
-the owner's text and site become intake sources, the intake model drafts a profile, and
-nothing reaches the canonical profile until the owner confirms it.
+the owner's text, site pages, registry record, files and answers become intake sources,
+the intake model drafts a profile, and nothing reaches the canonical profile until the
+owner confirms it.
 """
 from __future__ import annotations
 
@@ -20,12 +21,25 @@ from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.intake.contracts import IntakeError
+from app.intake.registry import registry_from_settings
 from app.intake.service import CompanyIntakeService
+from app.intake.sources import FILE_HELP, MAX_FILE_BYTES, parse_file_async
 from app.intake.telegram import render_review
 from app.models.domain import Product
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ACTOR = "local_owner"  # Same actor as the JSON intake API, so sessions are shared.
+MAX_UPLOAD_FILES = 5
+MAX_UPLOAD_BYTES = 25_000_000
+FILE_ACCEPT = ".txt,.md,.json,.csv,.docx,.pdf,.xlsx,.xls,.jpg,.jpeg,.png,.webp,.tif,.tiff,.bmp"
+SOURCE_LABELS = {
+    "owner_message": "Ваши сведения",
+    "owner_file": "Файл",
+    "owned_website": "Сайт",
+    "official_registry": "Реестр",
+    "public_third_party": "Внешний источник",
+    "existing_profile": "Текущий профиль",
+}
 
 
 def _require_operator(request: Request) -> None:
@@ -37,111 +51,245 @@ def _require_operator(request: Request) -> None:
 def _service(db: Session) -> CompanyIntakeService:
     settings = get_settings()
     return CompanyIntakeService(db, products_root=settings.products_root, model=settings.llm_model,
-                                provider_name=settings.llm_provider)
+                                provider_name=settings.llm_provider,
+                                registry_lookup=registry_from_settings(settings))
 
 
-def _new_company_page(fields: dict | None = None, error: str | None = None) -> str:
+async def _read_form(request: Request) -> tuple[dict[str, str], list[tuple[str, bytes]]]:
+    """Plain forms keep the strict urlencoded parser; file forms are bounded multipart."""
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type != "multipart/form-data":
+        return await _studio_form(request), []
+    try:
+        declared = int(request.headers.get("content-length", "0"))
+    except ValueError:
+        declared = 0
+    if declared > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "Файлы слишком большие: до 25 МБ за раз.")
+    form = await request.form(max_files=MAX_UPLOAD_FILES, max_fields=80)
+    fields, files, total = {}, [], 0
+    for key, value in form.multi_items():
+        if isinstance(value, str):
+            fields[key] = value.strip()
+            continue
+        if not value.filename:
+            continue
+        data = await value.read(MAX_FILE_BYTES + 1)
+        total += len(data)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "Файлы слишком большие: до 25 МБ за раз.")
+        files.append((value.filename, data))
+    return fields, files
+
+
+def _file_field(label: str = "Файлы <em>· необязательно</em>") -> str:
+    return f"""<label class="sg-field"><span>{label}</span>
+  <input name="files" type="file" multiple accept="{FILE_ACCEPT}">
+  <small>Прайс, меню, презентация, скриншоты. До {MAX_UPLOAD_FILES} файлов за раз. {esc(FILE_HELP)}</small></label>"""
+
+
+def _identifier_hint(service: CompanyIntakeService) -> str:
+    return ("Проверим компанию в официальном реестре." if service.registry_lookup
+            else "Сохраним в профиль; проверка в реестре пока не подключена.")
+
+
+def _new_company_page(fields: dict | None = None, error: str | None = None, *, registry_hint: str = "") -> str:
     fields = fields or {}
     notice = f'<div class="sg-warning" role="alert">{esc(error)}</div>' if error else ""
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Новая компания · Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-<link rel="stylesheet" href="/studio/assets/studio.css?v=13"></head>
+<link rel="stylesheet" href="/studio/assets/studio.css?v=14"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<h1>Новая компания</h1>
-<p class="subtitle">Опишите бизнес своими словами. Агенты соберут профиль компании, а вы проверите его перед работой.</p></section>
+<p class="subtitle">Опишите бизнес своими словами и дайте всё, что уже есть: сайт, ИНН, прайс. Агенты соберут профиль компании, а вы проверите его перед работой.</p></section>
 {notice}
-<form class="panel sg-company-form" method="post" action="/studio/new" style="display:grid;gap:14px;padding:22px">
-  <label>Название компании<input name="name" required minlength="2" maxlength="200" value="{esc(fields.get('name', ''))}"></label>
-  <label>Сайт (если есть)<input name="website" type="url" maxlength="500" placeholder="https://" value="{esc(fields.get('website', ''))}"></label>
-  <label>О компании
-    <textarea name="about" required minlength="30" maxlength="12000" rows="10"
+<form class="panel sg-company-form sg-intake-form" method="post" action="/studio/new" enctype="multipart/form-data">
+  <label class="sg-field"><span>Название компании</span>
+    <input name="name" required minlength="2" maxlength="200" value="{esc(fields.get('name', ''))}"></label>
+  <label class="sg-field"><span>Сайт <em>· если есть</em></span>
+    <input name="website" type="url" maxlength="500" placeholder="https://" value="{esc(fields.get('website', ''))}">
+    <small>Прочитаем главную и до 7 страниц: услуги, цены, о компании, контакты, отзывы.</small></label>
+  <label class="sg-field"><span>ИНН или ОГРН <em>· если есть</em></span>
+    <input name="identifier" inputmode="numeric" maxlength="40" placeholder="10 или 12 цифр" value="{esc(fields.get('identifier', ''))}">
+    <small>{esc(registry_hint)}</small></label>
+  <label class="sg-field"><span>О компании</span>
+    <textarea name="about" required minlength="30" maxlength="12000" rows="8"
       placeholder="Чем занимается, какие услуги и цены, для кого, город, чем отличается, чего нельзя обещать.">{esc(fields.get('about', ''))}</textarea></label>
-  <button class="btn primary" type="submit">Добавить компанию</button>
-  <a href="/studio?choose=1">← К списку проектов</a>
+  {_file_field()}
+  <div class="sg-intake-actions"><button class="btn primary" type="submit">Добавить компанию</button>
+  <a href="/studio?choose=1">← К списку проектов</a></div>
 </form></main></body></html>"""
 
 
 @router.get("/studio/new", response_class=HTMLResponse)
-def new_company_form(request: Request):
+def new_company_form(request: Request, db: Session = Depends(get_db)):
     _require_operator(request)
-    return HTMLResponse(_new_company_page(), headers={"Cache-Control": "no-store"})
+    return HTMLResponse(_new_company_page(registry_hint=_identifier_hint(_service(db))),
+                        headers={"Cache-Control": "no-store"})
+
+
+async def _add_materials(service: CompanyIntakeService, product_id: UUID, session_id: UUID,
+                         fields: dict, files: list[tuple[str, bytes]], *, text_reference: str) -> list[str]:
+    """Add every kind of material the owner gave; one failed source never discards the others."""
+    notes: list[str] = []
+    if fields.get("text", "").strip():
+        service.add_text(product_id, session_id, fields["text"].strip(), actor=ACTOR, reference=text_reference)
+    identifier = fields.get("identifier", "").strip()
+    if identifier:
+        state = await service.add_identifier(product_id, session_id, identifier, actor=ACTOR)
+        registry = [s for s in state["sources"] if s["source_type"] == "official_registry"]
+        if registry and registry[-1]["status"] == "read":
+            notes.append("Компания найдена в реестре.")
+        elif registry and registry[-1]["note"]:
+            notes.append(registry[-1]["note"])
+    website = fields.get("link", "").strip() or fields.get("website", "").strip()
+    if website:
+        before = {s["id"] for s in service.get(product_id, session_id, actor=ACTOR)["sources"]}
+        try:
+            state = await service.add_link(product_id, session_id, website, actor=ACTOR)
+        except IntakeError as exc:
+            notes.append(str(exc))
+        else:
+            pages = [s for s in state["sources"] if s["source_type"] == "owned_website" and s["id"] not in before]
+            readable = [s for s in pages if s["status"] != "unavailable"]
+            if readable:
+                notes.append(f"Прочитано страниц сайта: {len(readable)}.")
+            notes.extend(dict.fromkeys(s["note"] for s in pages if s["note"] and s["status"] != "read"))
+    for filename, data in files:
+        source = await parse_file_async(filename, data, f"growth studio: файл {filename}"[:500])
+        try:
+            service.add_source(product_id, session_id, source, actor=ACTOR)
+        except IntakeError as exc:
+            notes.append(str(exc))
+            break
+        if source.status != "read" and source.note:
+            notes.append(f"{filename}: {source.note}")
+    return list(dict.fromkeys(notes))
 
 
 @router.post("/studio/new")
 async def new_company_submit(request: Request, db: Session = Depends(get_db)):
     _require_operator(request)
-    fields = await _studio_form(request)
+    fields, files = await _read_form(request)
     name = " ".join(fields.get("name", "").split())
     about = fields.get("about", "").strip()
     website = fields.get("website", "").strip()
-    if not 2 <= len(name) <= 200 or not 30 <= len(about) <= 12000 or len(website) > 500:
-        return HTMLResponse(_new_company_page(fields, "Укажите название (2–200 символов) и описание компании (от 30 символов)."),
+    service = _service(db)
+    if (not 2 <= len(name) <= 200 or not 30 <= len(about) <= 12000 or len(website) > 500
+            or len(fields.get("identifier", "")) > 40):
+        return HTMLResponse(_new_company_page(fields, "Укажите название (2–200 символов) и описание компании (от 30 символов).",
+                                              registry_hint=_identifier_hint(service)),
                             status_code=422, headers={"Cache-Control": "no-store"})
     product = Product(name=name, slug="company-" + uuid4().hex[:12], description=about[:10000])
     db.add(product)
     db.commit()
-    service = _service(db)
     try:
         session = service.start(product.id, actor=ACTOR)
         session_id = UUID(session["session_id"])
         service.add_text(product.id, session_id, about, actor=ACTOR, reference="growth studio: описание владельца")
-        if website:
-            try:
-                await service.add_link(product.id, session_id, website, actor=ACTOR)
-            except IntakeError:
-                pass  # The company exists; the owner can add the site again from the profile page.
+        # The company exists now; a failing site, registry or file is reported, not fatal.
+        notes = await _add_materials(service, product.id, session_id,
+                                     {"website": website, "identifier": fields.get("identifier", "")}, files,
+                                     text_reference="growth studio: сведения владельца")
     except IntakeError as exc:
         db.rollback()
         return RedirectResponse(f"/studio/products/{product.id}/profile?error={quote(str(exc)[:200])}", status_code=303)
-    return RedirectResponse(f"/studio/products/{product.id}/profile", status_code=303)
+    suffix = f"?notice={quote(' '.join(notes)[:400])}" if notes else ""
+    return RedirectResponse(f"/studio/products/{product.id}/profile{suffix}", status_code=303)
 
 
-def _profile_body(product: Product, state: dict | None, error: str | None) -> str:
+def _source_line(source: dict) -> str:
+    label = SOURCE_LABELS.get(source.get("source_type"), "Материал")
+    name = source.get("filename") or source.get("reference") or ""
+    if name == "company identifier":
+        name = "ИНН или название"
+    status = source.get("status")
+    mark = {"read": "", "truncated": " · прочитан частично", "unavailable": " · не прочитан",
+            "unsupported": " · формат не читается"}.get(status, "")
+    note = f'<small>{esc(source["note"])}</small>' if source.get("note") else ""
+    return (f'<li class="sg-intake-source sg-intake-{esc(status or "read")}"><b>{esc(label)}</b>'
+            f'<span>{esc(name)}{esc(mark)}</span>{note}</li>')
+
+
+def _questions_html(base: str, review: dict | None) -> str:
+    questions = (review or {}).get("questions") or []
+    if not questions:
+        return ""
+    items = []
+    for index, question in enumerate(questions):
+        items.append(f"""<fieldset class="sg-intake-question">
+  <legend>{esc(question['text'])}</legend>
+  <input type="hidden" name="q{index}_field" value="{esc(question['field_path'])}">
+  <label class="sg-field"><span class="sg-visually-hidden">Ваш ответ</span>
+    <textarea name="q{index}_answer" rows="2" maxlength="4000" placeholder="Ответьте своими словами"></textarea></label>
+  <label class="sg-check"><input type="checkbox" name="q{index}_unknown" value="1"> Не знаю — оставить пустым</label>
+</fieldset>""")
+    return f"""<section class="sg-surface sg-intake-section"><h2>Чего не хватает</h2>
+<p class="sg-muted">Ответьте, что знаете. Агенты не будут придумывать недостающее.</p>
+<form method="post" action="{base}/profile/answers" class="sg-intake-form">{''.join(items)}
+  <div class="sg-intake-actions"><button class="btn primary">Ответить и пересобрать профиль</button></div></form></section>"""
+
+
+def _profile_body(product: Product, state: dict | None, error: str | None, notice: str | None,
+                  registry_hint: str) -> str:
     base = f"/studio/products/{product.id}"
     parts = []
     if error:
         parts.append(f'<div class="sg-warning" role="alert">{esc(error)}</div>')
+    if notice:
+        parts.append(f'<div class="sg-intake-notice" role="status">{esc(notice)}</div>')
     if state is None:
         parts.append(f"""<section class="sg-surface"><h2>Сбор данных о компании</h2>
 <p>Чтобы агенты писали точно про этот бизнес, соберите и подтвердите его профиль.</p>
 <form method="post" action="{base}/profile/start"><button class="btn primary">Начать сбор данных</button></form></section>""")
         return "".join(parts)
-    sources = "".join(
-        f"<li>{esc(s.get('filename') or s.get('reference') or s.get('source_type'))}"
-        f"{' — ' + esc(s.get('note')) if s.get('note') else ''}</li>"
-        for s in state["sources"])
-    parts.append(f"""<section class="sg-surface"><h2>Материалы</h2><ul>{sources or '<li>Пока ничего не добавлено.</li>'}</ul>
-<form method="post" action="{base}/profile/source" style="display:grid;gap:10px">
-  <label>Добавить сведения своими словами<textarea name="text" rows="4" maxlength="12000"></textarea></label>
-  <label>или ссылку на сайт / страницу<input name="link" type="url" maxlength="500" placeholder="https://"></label>
-  <button class="btn">Добавить</button></form></section>""")
+    sources = "".join(_source_line(s) for s in state["sources"])
+    parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Материалы · {len(state['sources'])}</h2>
+<ul class="sg-intake-sources">{sources or '<li>Пока ничего не добавлено.</li>'}</ul></section>""")
     review = state.get("review")
-    if review and state.get("review_current"):
-        parts.append(f"""<section class="sg-surface"><h2>Черновик профиля</h2>
-<div style="white-space:pre-wrap;line-height:1.5">{esc(render_review(review))}</div>
-<form method="post" action="{base}/profile/approve"><input type="hidden" name="review_id" value="{esc(review['review_id'])}">
+    current = bool(review and state.get("review_current"))
+    if current:
+        parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Черновик профиля</h2>
+<div class="sg-intake-review">{esc(render_review(review))}</div>
+<form method="post" action="{base}/profile/approve" class="sg-intake-actions"><input type="hidden" name="review_id" value="{esc(review['review_id'])}">
 <button class="btn primary">Подтвердить профиль</button></form></section>""")
     else:
-        parts.append(f"""<section class="sg-surface"><h2>Черновик профиля</h2>
-<p>Агент изучит материалы и подготовит профиль. Это занимает 1–3 минуты.</p>
-<form method="post" action="{base}/profile/build"><button class="btn primary">Собрать профиль</button></form></section>""")
+        stale = ("Материалы изменились после прошлого черновика — соберите профиль заново."
+                 if review else "Агент изучит материалы и подготовит профиль.")
+        parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Черновик профиля</h2>
+<p>{stale} Это занимает 1–3 минуты.</p>
+<form method="post" action="{base}/profile/build" class="sg-intake-actions"><button class="btn primary">Собрать профиль</button></form></section>""")
+    # Questions come from the latest draft; answering adds evidence and rebuilds.
+    parts.append(_questions_html(base, review))
+    parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Добавить материалы</h2>
+<form method="post" action="{base}/profile/source" enctype="multipart/form-data" class="sg-intake-form">
+  <label class="sg-field"><span>Сведения своими словами</span><textarea name="text" rows="4" maxlength="12000"></textarea></label>
+  <label class="sg-field"><span>Сайт или страница</span><input name="link" type="url" maxlength="500" placeholder="https://">
+    <small>С главной прочитаем и внутренние страницы: услуги, цены, контакты.</small></label>
+  <label class="sg-field"><span>ИНН или ОГРН</span><input name="identifier" inputmode="numeric" maxlength="40" placeholder="10 или 12 цифр">
+    <small>{esc(registry_hint)}</small></label>
+  {_file_field("Файлы")}
+  <div class="sg-intake-actions"><button class="btn">Добавить</button></div></form></section>""")
     return "".join(parts)
 
 
-def _render_profile(product: Product, db: Session, error: str | None = None, status_code: int = 200):
+def _render_profile(product: Product, db: Session, error: str | None = None, status_code: int = 200,
+                    notice: str | None = None):
     service = _service(db)
     active = service.active(product.id, ACTOR)
     state = service.get(product.id, active.id, actor=ACTOR) if active else None
     page = studio_page_shell(product, active="profile", title="Профиль компании",
                              subtitle="Подтверждённые сведения, на которые опираются все агенты.",
-                             body=_profile_body(product, state, error))
+                             body=_profile_body(product, state, error, notice, _identifier_hint(service)))
     return HTMLResponse(page, status_code=status_code, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/studio/products/{product_id}/profile", response_class=HTMLResponse)
-def company_profile(product_id: UUID, error: str | None = None, db: Session = Depends(get_db)):
-    return _render_profile(_owner_product(db, product_id), db, error[:300] if error else None)
+def company_profile(product_id: UUID, error: str | None = None, notice: str | None = None,
+                    db: Session = Depends(get_db)):
+    return _render_profile(_owner_product(db, product_id), db, error[:300] if error else None,
+                           notice=notice[:400] if notice else None)
 
 
 def _session_id(service: CompanyIntakeService, product: Product) -> UUID:
@@ -151,21 +299,45 @@ def _session_id(service: CompanyIntakeService, product: Product) -> UUID:
     return active.id
 
 
+async def _apply_answers(service: CompanyIntakeService, product: Product, session_id: UUID, fields: dict) -> bool:
+    answered = False
+    for index in range(10):
+        field_path = fields.get(f"q{index}_field")
+        if not field_path:
+            continue
+        if fields.get(f"q{index}_unknown"):
+            service.answer_unknown(product.id, session_id, field_path, actor=ACTOR)
+            answered = True
+        elif fields.get(f"q{index}_answer", "").strip():
+            service.answer_question(product.id, session_id, field_path, fields[f"q{index}_answer"], actor=ACTOR)
+            answered = True
+    return answered
+
+
 @router.post("/studio/products/{product_id}/profile/{action}")
 async def company_profile_action(product_id: UUID, action: str, request: Request, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
-    fields = await _studio_form(request)
+    fields, files = await _read_form(request)
     service = _service(db)
+    notes: list[str] = []
     try:
         if action == "start":
             service.start(product.id, actor=ACTOR)
         elif action == "source":
             session_id = _session_id(service, product)
-            if fields.get("text", "").strip():
-                service.add_text(product.id, session_id, fields["text"].strip(), actor=ACTOR,
-                                 reference="growth studio: сведения владельца")
-            if fields.get("link", "").strip():
-                await service.add_link(product.id, session_id, fields["link"].strip(), actor=ACTOR)
+            notes = await _add_materials(service, product.id, session_id, fields, files,
+                                         text_reference="growth studio: сведения владельца")
+        elif action == "answers":
+            session_id = _session_id(service, product)
+            if not await _apply_answers(service, product, session_id, fields):
+                raise IntakeError("Ответьте хотя бы на один вопрос или отметьте «Не знаю».")
+            from app.core.composition import build_intake
+            try:
+                await build_intake(db, get_settings()).build(product.id, session_id, actor=ACTOR)
+            except IntakeError as exc:
+                # Answers are already saved; only the rebuild failed.
+                db.rollback()
+                return _render_profile(product, db, f"Ответы сохранены. {exc}", status_code=409)
         elif action == "build":
             from app.core.composition import build_intake
             session_id = _session_id(service, product)
@@ -182,4 +354,5 @@ async def company_profile_action(product_id: UUID, action: str, request: Request
     except ValueError:
         db.rollback()
         return _render_profile(product, db, "Не удалось подготовить профиль. Материалы сохранены.", status_code=503)
-    return RedirectResponse(f"/studio/products/{product.id}/profile", status_code=303)
+    suffix = f"?notice={quote(' '.join(notes)[:400])}" if notes else ""
+    return RedirectResponse(f"/studio/products/{product.id}/profile{suffix}", status_code=303)
