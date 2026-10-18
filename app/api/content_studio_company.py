@@ -46,7 +46,7 @@ def _new_company_page(fields: dict | None = None, error: str | None = None) -> s
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Новая компания · Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-<link rel="stylesheet" href="/studio/assets/studio.css?v=11"></head>
+<link rel="stylesheet" href="/studio/assets/studio.css?v=12"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<h1>Новая компания</h1>
 <p class="subtitle">Опишите бизнес своими словами. Агенты соберут профиль компании, а вы проверите его перед работой.</p></section>

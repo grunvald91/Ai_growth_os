@@ -28,6 +28,7 @@ from app.api.content_studio_activity import (work_items, notice_items, notice_ht
     activity_html, activity_overview, task_detail_html, RESULT_KINDS)
 from app.api.content_studio_ui import create_content_html, review_html, channels_html, speed_html
 from app.content.durations import call_speed, duration_notice, task_durations
+from app.content.notice_reads import mark_read, read_ids
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.content.calendar import (PLATFORMS, approve_plan, pause_plan,
     reschedule_slot, queue_plan, save_preferences)
@@ -376,6 +377,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
           {item("profile", base + "/profile", "▣", "Профиль компании")}
           {item("team", "/studio/team", "♧", "ИИ-команда")}
           {item("tune", "/studio/tune", "⚙", "Настройка агентов")}
+          {item("accounts", base + "/accounts", "☺", "Аккаунты")}
           <a href="/studio?choose=1"><span class="nav-ico" aria-hidden="true">⇄</span>Другой проект</a>
         </nav>
       </details>
@@ -1013,7 +1015,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>Growth Studio · {esc(product.name)}</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=11">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=12">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1081,7 +1083,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=11"></script>
+<script src="/studio/assets/studio.js?v=12"></script>
 </body></html>"""
 
 
@@ -1151,7 +1153,7 @@ def studio_page_shell(
   <meta name="servgo-studio-build" content="20261013-unified10">
   <title>{esc(title)} · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=11">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=12">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1193,7 +1195,7 @@ def studio_page_shell(
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=11"></script>
+<script src="/studio/assets/studio.js?v=12"></script>
 </body></html>"""
 
 
@@ -1746,7 +1748,7 @@ def product_selector(products: list[Product], *, can_add: bool = False) -> str:
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=11"></head>
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=12"></head>
 <body><main class="product-home">
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
@@ -2101,10 +2103,11 @@ def studio_work_page(product_id: UUID, tab: str = "all", db: Session = Depends(g
 
 
 @router.get("/studio/products/{product_id}/activity.json")
-def studio_activity_json(product_id: UUID, db: Session = Depends(get_db)):
+def studio_activity_json(product_id: UUID, db: Session = Depends(get_db), settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     jobs = work_items(db, product.id, limit=45)
-    notes = notice_items(db, product.id, limit=10)
+    read = read_ids(settings, product.id)
+    notes = [note for note in notice_items(db, product.id, limit=40) if note["id"] not in read][:10]
     response = JSONResponse({
         "jobs": jobs,
         "notices": notes,
@@ -2113,6 +2116,20 @@ def studio_activity_json(product_id: UUID, db: Session = Depends(get_db)):
     })
     response.headers["Cache-Control"] = "private, no-store"
     return response
+
+
+@router.post("/studio/products/{product_id}/notifications/read-all")
+async def studio_notifications_read_all(product_id: UUID, request: Request, db: Session = Depends(get_db),
+                                        settings=Depends(get_settings)):
+    product = _owner_product(db, product_id)
+    try:
+        payload = json.loads((await request.body())[:20000] or b"{}")
+        ids = payload.get("ids", []) if isinstance(payload, dict) else []
+    except ValueError:
+        raise HTTPException(422, "Ожидается JSON") from None
+    if not isinstance(ids, list):
+        raise HTTPException(422, "Ожидается список уведомлений")
+    return {"marked": mark_read(settings, product.id, ids)}
 
 
 @router.get("/studio/products/{product_id}/tasks/{task_id}", response_class=HTMLResponse)

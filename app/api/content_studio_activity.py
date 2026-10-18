@@ -304,7 +304,9 @@ def notice_html(product_id: UUID) -> str:
         <span class="sg-notify-count" data-sg-count hidden>0</span>
       </summary>
       <div class="sg-notify-popover">
-        <strong>Требует внимания</strong>
+        <div class="sg-notify-head"><strong>Требует внимания</strong>
+          <button type="button" class="sg-notify-read" data-sg-read-all
+                  data-read-url="/studio/products/{product_id}/notifications/read-all" hidden>Прочитать все</button></div>
         <div data-sg-notify-list role="status" aria-live="polite">Загрузка уведомлений…</div>
         <a class="sg-notify-all" href="/studio/products/{product_id}/work">Все задания →</a>
       </div>
