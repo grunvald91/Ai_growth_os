@@ -131,3 +131,15 @@ def test_read_all_hides_current_notifications_only(studio):
     db.add(second); db.commit()
     assert [n["id"] for n in c.get(feed, auth=OWNER).json()["notices"]] == [str(second.id)]
     assert db.get(Artifact, first.id).status == ArtifactStatus.AWAITING_APPROVAL
+
+
+def test_every_desktop_section_is_reachable_on_mobile(studio):
+    # Mobile is the primary view: every sidebar link must also be in the bottom nav or "Ещё".
+    import re
+    page = studio.client.get(f"/studio/products/{studio.mine.id}/create", auth=OWNER).text
+    sidebar = page.split('<aside class="sidebar">', 1)[1].split("</aside>", 1)[0]
+    mobile = page.split('<nav class="mobile-nav"', 1)[1].split("</nav>", 1)[0]
+    desktop_links = set(re.findall(r'href="([^"]+)"', sidebar))
+    mobile_links = set(re.findall(r'href="([^"]+)"', mobile))
+    assert desktop_links - mobile_links == set()
+    assert "/accounts" in " ".join(mobile_links) and "Ещё" in mobile
