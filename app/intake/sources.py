@@ -146,22 +146,177 @@ async def parse_file_async(filename: str, data: bytes, reference: str) -> Intake
 
 
 class _VisibleHTML(HTMLParser):
+    """Visible text plus the parts of a page that describe the business to machines.
+
+    Links, JSON-LD and meta descriptions are collected so a crawl can find service,
+    price and contact pages and still learn something from script-rendered sites.
+    """
+
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.hidden = 0
         self.parts = []
+        self.links: list[tuple[str, str]] = []
+        self.meta: list[str] = []
+        self.json_ld: list[str] = []
+        self.title = ""
+        self._in_title = False
+        self._in_json_ld = False
+        self._json_buffer: list[str] = []
+        self._link_href: str | None = None
+        self._link_text: list[str] = []
+        self.script_count = 0
 
     def handle_starttag(self, tag, attrs):
-        if tag in {"script", "style", "noscript"}:
+        values = {key.casefold(): (value or "") for key, value in attrs}
+        if tag == "script":
+            self.script_count += 1
+            if values.get("type", "").casefold() == "application/ld+json":
+                self._in_json_ld = True
+                self._json_buffer = []
+        if tag in {"script", "style", "noscript", "template"}:
             self.hidden += 1
+        elif tag == "title":
+            self._in_title = True
+        elif tag == "meta":
+            key = (values.get("name") or values.get("property") or "").casefold()
+            if key in {"description", "og:title", "og:description", "og:site_name", "keywords"} and values.get("content"):
+                self.meta.append(values["content"].strip())
+        elif tag == "a" and values.get("href"):
+            self._link_href, self._link_text = values["href"], []
 
     def handle_endtag(self, tag):
-        if tag in {"script", "style", "noscript"} and self.hidden:
+        if tag == "script" and self._in_json_ld:
+            self._in_json_ld = False
+            self.json_ld.append("".join(self._json_buffer))
+        if tag in {"script", "style", "noscript", "template"} and self.hidden:
             self.hidden -= 1
+        elif tag == "title":
+            self._in_title = False
+        elif tag == "a" and self._link_href is not None:
+            self.links.append((self._link_href, " ".join("".join(self._link_text).split())))
+            self._link_href = None
 
     def handle_data(self, text):
+        if self._in_json_ld:
+            self._json_buffer.append(text)
+            return
+        if self._in_title:
+            self.title += text
         if not self.hidden:
             self.parts.append(text)
+            if self._link_href is not None:
+                self._link_text.append(text)
+
+    def visible_text(self) -> str:
+        return " ".join(" ".join(self.parts).split())
+
+
+# Values worth keeping from schema.org markup; everything else is noise for a profile.
+_JSON_LD_KEYS = {"@type", "name", "legalName", "alternateName", "description", "slogan", "telephone",
+                 "email", "address", "streetAddress", "addressLocality", "addressRegion", "addressCountry",
+                 "areaServed", "priceRange", "openingHours", "openingHoursSpecification", "dayOfWeek",
+                 "opens", "closes", "makesOffer", "hasOfferCatalog", "itemListElement", "itemOffered",
+                 "offers", "price", "priceCurrency", "aggregateRating", "ratingValue", "reviewCount",
+                 "foundingDate", "knowsLanguage", "serviceType", "category", "brand"}
+
+
+def _json_ld_lines(raw_blocks: list[str], limit: int = 3000) -> list[str]:
+    lines: list[str] = []
+
+    def walk(value, prefix=""):
+        if sum(len(line) for line in lines) > limit:
+            return
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in _JSON_LD_KEYS:
+                    walk(item, f"{prefix}{key}." if isinstance(item, (dict, list)) else f"{prefix}{key}")
+        elif isinstance(value, list):
+            for item in value[:30]:
+                walk(item, prefix)
+        elif isinstance(value, (str, int, float)) and str(value).strip():
+            lines.append(f"{prefix.rstrip('.')}: {' '.join(str(value).split())[:300]}")
+
+    for block in raw_blocks[:10]:
+        try:
+            walk(json.loads(block))
+        except (ValueError, RecursionError):
+            continue
+    return lines
+
+
+_SKIP_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico", ".pdf", ".zip", ".rar", ".doc",
+                  ".docx", ".xls", ".xlsx", ".mp4", ".mov", ".mp3", ".css", ".js", ".xml", ".json")
+# A page that names services, prices, the company, contacts or reviews tells the profile the most.
+_PRIORITY_WORDS = (
+    ("услуг", 5), ("service", 5), ("прайс", 6), ("price", 6), ("цен", 6), ("стоимост", 6), ("тариф", 5),
+    ("каталог", 4), ("catalog", 4), ("меню", 4), ("menu", 3), ("о-нас", 4), ("о нас", 4), ("about", 4),
+    ("компани", 3), ("company", 3), ("контакт", 4), ("contact", 4), ("отзыв", 4), ("review", 4),
+    ("доставк", 3), ("delivery", 3), ("оплат", 2), ("команд", 2), ("team", 2), ("мастер", 2),
+    ("faq", 2), ("вопрос", 2), ("акци", 2), ("portfolio", 2), ("портфолио", 2), ("работы", 2),
+)
+_NEGATIVE_WORDS = ("login", "signin", "logout", "cart", "корзин", "basket", "account", "lk", "policy",
+                   "privacy", "политик", "соглашени", "cookie", "oferta", "оферт", "tag", "page=", "sort=",
+                   "?", "blog/", "news/", "новост")
+
+
+def _site_key(host: str) -> str:
+    host = host.casefold().rstrip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
+def rank_internal_links(base_url: str, links: list[tuple[str, str]]) -> list[str]:
+    """Same-site page links, most informative first, without assets or account pages."""
+    base = urlsplit(base_url)
+    site = _site_key(base.hostname or "")
+    scored: dict[str, tuple[int, int]] = {}
+    for order, (href, text) in enumerate(links):
+        href = href.strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:", "whatsapp:", "viber:", "tg:")):
+            continue
+        absolute = urljoin(base_url, href)
+        parsed = urlsplit(absolute)
+        if parsed.scheme not in {"http", "https"} or _site_key(parsed.hostname or "") != site:
+            continue
+        path = parsed.path or "/"
+        if path.casefold().endswith(_SKIP_SUFFIXES):
+            continue
+        # Fragments and queries usually point at the same page; keep the canonical path only.
+        canonical = f"{parsed.scheme}://{parsed.netloc}{path}"
+        if canonical.rstrip("/") == f"{base.scheme}://{base.netloc}{base.path or '/'}".rstrip("/"):
+            continue
+        haystack = (path + " " + text).casefold()
+        score = sum(weight for word, weight in _PRIORITY_WORDS if word in haystack)
+        if any(word in (path + "?" * bool(parsed.query)).casefold() for word in _NEGATIVE_WORDS):
+            score -= 5
+        if score < 0:
+            continue
+        previous = scored.get(canonical)
+        if previous is None or score > previous[0]:
+            scored[canonical] = (score, order if previous is None else previous[1])
+    ranked = sorted(scored.items(), key=lambda item: (-item[1][0], item[1][1]))
+    return [url for url, _ in ranked]
+
+
+def page_text(parser: _VisibleHTML) -> str:
+    sections = []
+    title = " ".join(parser.title.split())
+    if title:
+        sections.append("Заголовок страницы: " + title)
+    meta = list(dict.fromkeys(item for item in parser.meta if item))
+    if meta:
+        sections.append("Описание страницы: " + " | ".join(meta)[:1500])
+    structured = _json_ld_lines(parser.json_ld)
+    if structured:
+        sections.append("Структурированные данные страницы:\n" + "\n".join(structured))
+    visible = parser.visible_text()
+    if visible:
+        sections.append("Текст страницы:\n" + visible)
+    return "\n\n".join(sections)
+
+
+def looks_script_rendered(parser: _VisibleHTML) -> bool:
+    return len(parser.visible_text()) < 300 and parser.script_count >= 3
 
 
 def public_target(url: str):
@@ -189,58 +344,122 @@ class _PinnedTLS(http.client.HTTPSConnection):
 
 
 class PublicWebsiteFetcher:
+    MAX_PAGES = 8
+    CRAWL_SECONDS = 75
+    JS_NOTE = ("Сайт показывает текст через скрипты, поэтому без браузера виден только минимум. "
+               "Пришлите текст нужных страниц сообщением или прайс файлом.")
+
     async def fetch(self, url: str) -> IntakeSource:
         return await asyncio.to_thread(self._fetch, url)
 
-    def _fetch(self, url: str) -> IntakeSource:
-        original_url = url
-        current_url = url
+    async def crawl(self, url: str, *, max_pages: int | None = None, text_budget: int = 48_000) -> list[IntakeSource]:
+        """Read the start page and the most informative same-site pages.
+
+        Every page is a separate source so evidence stays traceable to its URL.
+        """
+        return await asyncio.to_thread(self._crawl, url, max_pages or self.MAX_PAGES, text_budget)
+
+    def _crawl(self, url: str, max_pages: int, text_budget: int) -> list[IntakeSource]:
+        import time
+        deadline = time.monotonic() + self.CRAWL_SECONDS
         try:
-            for _ in range(6):
-                connection = None
-                try:
-                    parsed, port, address = public_target(current_url)
-                    connection = (_PinnedTLS(parsed.hostname, port, address) if parsed.scheme == "https"
-                                  else http.client.HTTPConnection(address, port, timeout=15))
-                    path = (parsed.path or "/") + ("?" + parsed.query if parsed.query else "")
-                    connection.request("GET", path, headers={"Host": parsed.hostname,
-                                       "User-Agent": "Mozilla/5.0 (compatible; AI-Growth-OS-Company-Intake/1.0)",
-                                       "Accept": "text/html,text/plain;q=0.9,*/*;q=0.1",
-                                       "Accept-Encoding": "identity"})
-                    response = connection.getresponse()
-                    if response.status in {301, 302, 303, 307, 308}:
-                        location = response.getheader("Location")
-                        if not location:
-                            raise IntakeError("Страница вернула перенаправление без адреса.")
-                        current_url = urljoin(current_url, location)
-                        # The next loop calls public_target again, so every redirect target
-                        # is independently DNS-resolved and rejected if it is private/local.
-                        continue
-                    if response.status != 200:
-                        raise IntakeError(f"Страница недоступна (HTTP {response.status}).")
-                    content_type = response.getheader("Content-Type", "").casefold()
-                    if not any(item in content_type for item in ("text/html", "text/plain")):
-                        raise IntakeError("Тип страницы не поддерживается.")
-                    raw = response.read(MAX_WEB_BYTES + 1)
-                    if len(raw) > MAX_WEB_BYTES:
-                        raise IntakeError("Страница слишком большая.")
-                    charset_match = re.search("charset=([A-Za-z0-9._-]+)", content_type)
-                    charset = charset_match.group(1) if charset_match else "utf-8"
-                    try:
-                        text = raw.decode(charset, errors="replace")
-                    except LookupError:
-                        text = raw.decode("utf-8", errors="replace")
-                    if "text/html" in content_type:
-                        parser = _VisibleHTML()
-                        parser.feed(text)
-                        text = " ".join(parser.parts)
-                    if not text.strip():
-                        raise IntakeError("На странице не найден читаемый текст.")
-                    return make_source("owned_website", original_url, text)
-                finally:
-                    if connection is not None:
-                        connection.close()
-            raise IntakeError("Слишком много перенаправлений.")
+            final_url, parser = self._get_page(url)
         except (OSError, ValueError, http.client.HTTPException):
-            return make_source("owned_website", original_url, status="unavailable",
+            return [make_source("owned_website", url, status="unavailable",
+                                note="Не удалось безопасно прочитать страницу. Можно прислать её текст.")]
+        sources = [self._page_source(url, parser, text_budget)]
+        seen_texts = {hashlib.sha256(parser.visible_text().encode()).hexdigest()}
+        used = len(sources[0].text)
+        candidates = rank_internal_links(final_url, parser.links)
+        for candidate in candidates:
+            if len(sources) >= max_pages or text_budget - used < 300 or time.monotonic() > deadline:
+                break
+            try:
+                _, page = self._get_page(candidate)
+            except (OSError, ValueError, http.client.HTTPException):
+                continue  # One broken subpage must not hide the rest of the site.
+            digest = hashlib.sha256(page.visible_text().encode()).hexdigest()
+            if digest in seen_texts or len(page.visible_text()) < 40:
+                continue
+            seen_texts.add(digest)
+            source = self._page_source(candidate, page, min(MAX_TEXT, text_budget - used))
+            sources.append(source)
+            used += len(source.text)
+        return sources
+
+    def _page_source(self, reference: str, parser: _VisibleHTML, budget: int) -> IntakeSource:
+        text = page_text(parser)
+        note = self.JS_NOTE if looks_script_rendered(parser) else ""
+        limit = max(1, min(MAX_TEXT, budget))
+        if len(text) > limit:
+            note = (note + " Страница длинная: прочитаны первые " + f"{limit:,}".replace(",", " ")
+                    + " символов.").strip()
+            return make_source("owned_website", reference, text[:limit], status="truncated", note=note)
+        if not text.strip():
+            return make_source("owned_website", reference, status="unavailable",
+                               note=note or "На странице не найден читаемый текст.")
+        return make_source("owned_website", reference, text, note=note)
+
+    def _fetch(self, url: str) -> IntakeSource:
+        try:
+            _, parser = self._get_page(url)
+        except (OSError, ValueError, http.client.HTTPException):
+            return make_source("owned_website", url, status="unavailable",
                                note="Не удалось безопасно прочитать страницу. Можно прислать её текст.")
+        return self._page_source(url, parser, MAX_TEXT)
+
+    def _get_page(self, url: str) -> tuple[str, _VisibleHTML]:
+        final_url, content_type, text = self._get(url)
+        parser = _VisibleHTML()
+        if "text/html" in content_type:
+            parser.feed(text)
+        else:
+            parser.parts.append(text)
+        if not parser.visible_text() and not parser.meta and not parser.json_ld:
+            if parser.script_count >= 3:
+                return final_url, parser  # Script-rendered page: the caller explains the gap.
+            raise IntakeError("На странице не найден читаемый текст.")
+        return final_url, parser
+
+    def _get(self, url: str) -> tuple[str, str, str]:
+        current_url = url
+        for _ in range(6):
+            connection = None
+            try:
+                parsed, port, address = public_target(current_url)
+                connection = (_PinnedTLS(parsed.hostname, port, address) if parsed.scheme == "https"
+                              else http.client.HTTPConnection(address, port, timeout=15))
+                path = (parsed.path or "/") + ("?" + parsed.query if parsed.query else "")
+                connection.request("GET", path, headers={"Host": parsed.hostname,
+                                   "User-Agent": "Mozilla/5.0 (compatible; AI-Growth-OS-Company-Intake/1.1)",
+                                   "Accept": "text/html,text/plain;q=0.9,*/*;q=0.1",
+                                   "Accept-Language": "ru,en;q=0.8",
+                                   "Accept-Encoding": "identity"})
+                response = connection.getresponse()
+                if response.status in {301, 302, 303, 307, 308}:
+                    location = response.getheader("Location")
+                    if not location:
+                        raise IntakeError("Страница вернула перенаправление без адреса.")
+                    current_url = urljoin(current_url, location)
+                    # The next loop calls public_target again, so every redirect target
+                    # is independently DNS-resolved and rejected if it is private/local.
+                    continue
+                if response.status != 200:
+                    raise IntakeError(f"Страница недоступна (HTTP {response.status}).")
+                content_type = response.getheader("Content-Type", "").casefold()
+                if not any(item in content_type for item in ("text/html", "text/plain")):
+                    raise IntakeError("Тип страницы не поддерживается.")
+                raw = response.read(MAX_WEB_BYTES + 1)
+                if len(raw) > MAX_WEB_BYTES:
+                    raise IntakeError("Страница слишком большая.")
+                charset_match = re.search("charset=([A-Za-z0-9._-]+)", content_type)
+                charset = charset_match.group(1) if charset_match else "utf-8"
+                try:
+                    text = raw.decode(charset, errors="replace")
+                except LookupError:
+                    text = raw.decode("utf-8", errors="replace")
+                return current_url, content_type, text
+            finally:
+                if connection is not None:
+                    connection.close()
+        raise IntakeError("Слишком много перенаправлений.")

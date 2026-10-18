@@ -20,12 +20,14 @@ SAFE_LLM_METADATA_FIELDS = {"reasoning_effort", "team_role", "task_type", "conve
 
 
 def build_intake(db: Session, settings: Settings, provider: LLMProvider | None = None):
+    from app.intake.registry import registry_from_settings
     from app.intake.service import CompanyIntakeService
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     return CompanyIntakeService(
         db, products_root=settings.products_root,
         llm=LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings), critic_enabled=settings.agent_critic_enabled),
         model=settings.llm_model, provider_name=settings.llm_provider,
+        registry_lookup=registry_from_settings(settings),
     )
 
 
