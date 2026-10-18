@@ -18,6 +18,8 @@ button,input,select{font:inherit}button{cursor:pointer}a{text-decoration:none;co
 h1{font-size:clamp(27px,3vw,36px);margin:0;letter-spacing:-1.3px;color:#11264e}.sparkle{color:#0a85ff}
 .subtitle{margin:9px 0 0;color:#7f90a9;font-size:14px;line-height:1.6}.top-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
 .button{border:0;border-radius:11px;padding:12px 17px;font-size:13px;font-weight:800;white-space:nowrap}
+.button:disabled,.button[disabled]{opacity:.45;cursor:not-allowed}
+#retryButton{margin:-6px 0 18px}
 .primary{color:#fff;background:linear-gradient(120deg,#1188fc,#0869e4);box-shadow:0 7px 17px #0d75e329}
 .light{background:#fff;border:1px solid #dee8f5;color:#3a608e}.light:hover{border-color:#70b5ff}
 .dirty{font-size:12px;color:#e48f31;font-weight:800}

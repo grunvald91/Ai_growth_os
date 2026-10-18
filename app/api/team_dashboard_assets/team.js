@@ -1,6 +1,10 @@
 (function(){
 'use strict';
+// Same prefix as the page: the browser resends the Studio login only under /studio/.
+var API='/studio/team/api';
 var token='', state=null, preview=null, dirty=false, available={};
+// Controls that change or read the loaded configuration.
+var CONTROLS=['previewButton','saveButton','enableRouter','budget','addModel','catalogButton','usageButton'];
 var $=function(id){return document.getElementById(id);};
 var asText=function(node,value){node.textContent=String(value);return node;};
 function element(tag,cls,text){
@@ -170,12 +174,22 @@ function renderAll(){
   opt.value=product.id;opt.selected=product.id===selected;products.appendChild(opt);
  });
 }
+function setReady(ready){
+ CONTROLS.forEach(function(id){$(id).disabled=!ready;});
+ $('retryButton').hidden=ready;
+}
 async function load(){
- var result=await api('/api/admin/team');
+ var result=await api(API);
  state={revision:result.revision,config:result.config,products:result.products};
- preview=result.preview;dirty=false;available={};renderAll();
+ preview=result.preview;dirty=false;available={};renderAll();setReady(true);
  $('authOverlay').hidden=true;$('error').hidden=true;
 }
+function loadFailed(error){
+ state=null;setReady(false);errorMessage(error);
+ if(!$('authOverlay').hidden)return;
+ alertMessage('Не удалось загрузить настройки: '+(error.message||'ошибка запроса')+'. Нажмите «Повторить».',true);
+}
+function reload(){setReady(false);load().catch(loadFailed);}
 $('authForm').addEventListener('submit',async function(ev){
  ev.preventDefault();token=$('ownerToken').value;
  try{await load();$('ownerToken').value='';$('authError').textContent='';}
@@ -207,7 +221,7 @@ $('addModel').addEventListener('click',function(){
 });
 async function previewChanges(){
  try{
-  var result=await api('/api/admin/team/preview','POST',state.config);
+  var result=await api(API+'/preview','POST',state.config);
   preview=result;renderRoles();renderOverview();
   alertMessage(result.ready?'Основные маршруты настроены. Это не проверка генерации.':
    'Не готовы маршруты: '+result.issues.length+'. Детали показаны в карточках.',!result.ready);
@@ -221,7 +235,7 @@ $('saveButton').addEventListener('click',async function(){
   alertMessage('Нельзя включить роутер с незавершёнными маршрутами.',true);return;
  }
  try{
-  var saved=await api('/api/admin/team','PUT',{
+  var saved=await api(API,'PUT',{
    expected_revision:state.revision,config:state.config
   });
   state.revision=saved.revision;state.config=saved.config;preview=saved.preview;
@@ -232,7 +246,7 @@ $('saveButton').addEventListener('click',async function(){
 $('catalogButton').addEventListener('click',async function(){
  $('catalogButton').disabled=true;
  try{
-  var result=await api('/api/admin/team/catalog');
+  var result=await api(API+'/catalog');
   available={};result.models.forEach(function(m){available[m.model]=m.listed_by_gateway;});
   renderModels();$('catalogResult').textContent=
    'Моделей в ответе API: '+result.listed_count+
@@ -245,7 +259,7 @@ $('usageButton').addEventListener('click',async function(){
  var id=$('productSelect').value;
  if(!id){alertMessage('Нет выбранного проекта.',true);return;}
  try{
-  var data=await api('/api/admin/team/usage?product_id='+encodeURIComponent(id));
+  var data=await api(API+'/usage?product_id='+encodeURIComponent(id));
   var amount=Number(data.estimated_usd);
   $('totalUsd').textContent=Number.isFinite(amount)?'$'+amount.toFixed(6):'—';
   $('totalCalls').textContent=data.total_calls;
@@ -264,5 +278,6 @@ $('usageButton').addEventListener('click',async function(){
   }
  }catch(error){errorMessage(error);}
 });
-load().catch(errorMessage);
+$('retryButton').addEventListener('click',reload);
+reload();
 })();
