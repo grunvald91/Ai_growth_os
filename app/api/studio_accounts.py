@@ -40,10 +40,9 @@ def accounts_html(product_id, accounts, products, operators, *, actor=None, noti
     names = {str(p.id): p.name for p in products}
     base = f"/studio/products/{product_id}/accounts"
     body = ""
-    if error:
-        body += f'<p class="sg-warning" role="alert">{esc(error)}</p>'
+    result = ""
     if notice:
-        body += (f'<section class="sg-surface sg-notice" role="status"><h2>{esc(notice[0])}</h2>'
+        result = (f'<section class="sg-surface sg-notice" role="status"><h2>{esc(notice[0])}</h2>'
                  f'<p>Логин: <b>{esc(notice[1])}</b><br>Пароль: <code class="sg-secret">{esc(notice[2])}</code></p>'
                  '<p>Скопируйте пароль сейчас: он показывается один раз и нигде не хранится в открытом виде. '
                  'Вход — на странице <b>growth.servgo.ru/studio/login</b>. Логин можно вводить с любой буквы.</p></section>')
@@ -57,7 +56,7 @@ def accounts_html(product_id, accounts, products, operators, *, actor=None, noti
         else:
             role = "Компания"
             scope = ", ".join(names.get(pid, "удалённая компания") for pid in account.get("product_ids", []))
-        actions = (f'<form method="post" action="{base}/{esc(name)}/password" class="sg-inline-actions">'
+        actions = (f'<form method="post" action="{base}/{esc(name)}/password#account-result" class="sg-inline-actions">'
                    '<button class="btn secondary">Новый пароль</button></form>')
         if name != actor:
             actions += (f'<form method="post" action="{base}/{esc(name)}/delete" class="sg-inline-actions" '
@@ -71,11 +70,17 @@ def accounts_html(product_id, accounts, products, operators, *, actor=None, noti
              '<div class="sg-table-wrap"><table class="sg-table"><thead><tr><th>Логин</th><th>Роль</th><th>Доступ</th>'
              f'<th></th></tr></thead><tbody>{rows}</tbody></table></div></section>')
     role = fields.get("role", "company")
+    # The company being viewed is ticked by default: an account without a company is rejected.
+    submitted = "username" in fields  # After a POST keep exactly what the owner chose.
     checks = "".join(
         f'<label class="sg-check"><input type="checkbox" name="company_{p.id}" value="on"'
-        f'{" checked" if fields.get(f"company_{p.id}") == "on" else ""}> {esc(p.name)}</label>'
+        f'{" checked" if fields.get(f"company_{p.id}") == "on" or (not submitted and str(p.id) == str(product_id)) else ""}> {esc(p.name)}</label>'
         for p in products)
-    body += (f'<section class="sg-surface"><h2>Новый аккаунт</h2><form method="post" action="{base}" class="sg-form">'
+    # The error sits next to the form and the page scrolls there: on a phone the top is off screen.
+    alert = f'<p class="sg-warning sg-form-error" role="alert">{esc(error)}</p>' if error else ""
+    # The result (new password) and the form share one anchor, so the page lands on them after a POST.
+    body += (f'<div id="account-result">{result}<section class="sg-surface"><h2>Новый аккаунт</h2>{alert}'
+             f'<form method="post" action="{base}#account-result" class="sg-form">'
              '<label class="sg-field"><span>Логин</span><input name="username" required minlength="3" maxlength="40" '
              f'pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{{2,39}}" autocomplete="off" value="{esc(fields.get("username", ""))}" '
              'placeholder="например, marketing"><small>Латиница, цифры, точка, дефис, подчёркивание</small></label>'
@@ -87,7 +92,7 @@ def accounts_html(product_id, accounts, products, operators, *, actor=None, noti
              f'<option value="admin"{" selected" if role == "admin" else ""}>Администратор — все компании и аккаунты</option>'
              '</select></label>'
              f'<fieldset class="sg-field"><legend>Компании (для роли «Компания»)</legend>{checks}</fieldset>'
-             '<button class="btn primary">Создать аккаунт</button></form></section>')
+             '<button class="btn primary">Создать аккаунт</button></form></section></div>')
     return body
 
 

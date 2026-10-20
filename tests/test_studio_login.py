@@ -154,3 +154,21 @@ def test_every_studio_page_offers_logout_on_mobile_and_desktop(studio):
     mobile = page.split('<nav class="mobile-nav"', 1)[1].split("</nav>", 1)[0]
     sidebar = page.split('<aside class="sidebar">', 1)[1].split("</aside>", 1)[0]
     assert "/studio/logout" in mobile and "/studio/logout" in sidebar
+
+
+def test_account_form_ticks_the_current_company_and_shows_errors_at_the_form(studio):
+    c = studio.client
+    url = f"/studio/products/{studio.mine.id}/accounts"
+    page = c.get(url, auth=OWNER).text
+    assert f'name="company_{studio.mine.id}" value="on" checked' in page
+    assert f'name="company_{studio.other.id}" value="on" checked' not in page
+    assert f'action="{url}#account-result"' in page
+    bad = c.post(url, auth=OWNER, data={"username": "manager", "role": "company"})
+    assert bad.status_code == 422
+    form_area = bad.text.split('id="account-result"', 1)[1]
+    assert "Выберите хотя бы одну компанию" in form_area.split("<form", 1)[0]
+    # The rejected form keeps what was chosen (nothing), not the default tick.
+    assert f'name="company_{studio.mine.id}" value="on" checked' not in bad.text
+    ok = c.post(url, auth=OWNER, data={"username": "manager", "role": "company", f"company_{studio.mine.id}": "on"})
+    area = ok.text.split('id="account-result"', 1)[1]
+    assert "Аккаунт создан" in area and "studio/login" in area

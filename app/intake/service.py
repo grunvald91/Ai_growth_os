@@ -51,6 +51,46 @@ def _comparable(text: str) -> str:
     return " ".join(str(text).translate(_QUOTES).split()).casefold()
 
 
+def _parse_extraction(text: str) -> tuple[IntakeExtraction, int]:
+    """Parse the model reply leniently: one malformed claim must not void the others.
+
+    Unknown keys are dropped; each claim is validated on its own. A reply that is not
+    a JSON object with a claims list is still a hard failure.
+    """
+    from app.intake.contracts import ExtractedClaim
+    from app.llm.lenient import relax
+    body = text.strip()
+    if body.startswith("```"):
+        body = body.strip("`")
+        body = body[body.find("{"):] if "{" in body else body
+    start, end = body.find("{"), body.rfind("}")
+    try:
+        data = json.loads(body[start:end + 1] if start >= 0 and end > start else body)
+    except ValueError:
+        raise IntakeError("invalid_json") from None
+    if not isinstance(data, dict) or not isinstance(data.get("claims", []), list):
+        raise IntakeError("invalid_shape")
+    claims, malformed = [], 0
+    for item in data.get("claims", [])[:100]:
+        try:
+            if isinstance(item, dict) and isinstance(item.get("evidence_excerpt"), str):
+                item = {**item, "evidence_excerpt": item["evidence_excerpt"][:1000]}
+            claims.append(ExtractedClaim.model_validate(relax(ExtractedClaim, item)))
+        except ValueError:
+            malformed += 1
+    return IntakeExtraction(claims=claims), malformed
+
+
+def _failure_reason(exc: BaseException) -> str:
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return "timeout"
+    if isinstance(exc, asyncio.CancelledError):
+        return "cancelled"
+    if isinstance(exc, IntakeError) and re.fullmatch(r"[a-z_]{3,40}", str(exc)):
+        return str(exc)
+    return type(exc).__name__[:40]
+
+
 def _digest(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -328,8 +368,8 @@ class CompanyIntakeService:
                     metadata={"team_role": ROLE, "reasoning_effort": "low"},
                 )), timeout=EXTRACTION_TIMEOUT_SECONDS)
                 if response.stop_reason not in {None, "end_turn", "stop_sequence"} or len(response.content) > 120_000:
-                    raise IntakeError("Incomplete extraction")
-                extraction = IntakeExtraction.model_validate_json(clean_text(response.content))
+                    raise IntakeError("incomplete_reply")
+                extraction, malformed = _parse_extraction(clean_text(response.content))
                 if response.usage:
                     self.db.add(CostRecord(product_id=product_id, agent_run_id=run.id, category="llm",
                         provider=self.provider_name, amount=0, currency="USD",
@@ -341,8 +381,8 @@ class CompanyIntakeService:
                 self.db.refresh(task)
                 if self._state(task.id)["revision"] != state["revision"] or task.status not in {
                     TaskStatus.QUEUED, TaskStatus.WAITING_APPROVAL}:
-                    raise IntakeError("Sources changed during extraction")
-                filtered_claims, rejected = [], []
+                    raise IntakeError("sources_changed")
+                filtered_claims, rejected = [], [(None, "malformed")] * malformed
                 comparable = {source_id: _comparable(source.text) for source_id, source in sources.items()}
                 for claim in extraction.claims:
                     source = sources.get(claim.source_id)
@@ -377,9 +417,9 @@ class CompanyIntakeService:
                             rejected.append((claim, "wrong_type"))
                             continue
                     filtered_claims.append(claim)
-                if extraction.claims and not filtered_claims and len(rejected) == len(extraction.claims):
+                if rejected and not filtered_claims and len(rejected) == len(extraction.claims) + malformed:
                     # Nothing at all could be verified: the reply is unusable, not a partial draft.
-                    raise IntakeError("No verifiable claims")
+                    raise IntakeError("no_verifiable_claims")
                 run.status = "completed"
                 run.finished_at = datetime.now(timezone.utc)
                 persist_critic_audit(self.db, product_id=product_id,
@@ -387,7 +427,8 @@ class CompanyIntakeService:
             except (Exception, asyncio.CancelledError) as exc:
                 self.db.rollback()
                 failed = self.db.get(AgentRun, run.id)
-                failed.status, failed.error = "failed", "company_intake_extraction_failed"
+                # A short reason code (never model text or company data) for diagnostics.
+                failed.status, failed.error = "failed", "company_intake_extraction_failed:" + _failure_reason(exc)
                 failed.finished_at = datetime.now(timezone.utc)
                 if response is not None and response.usage:
                     self.db.add(CostRecord(product_id=product_id, agent_run_id=failed.id, category="llm",
@@ -404,7 +445,8 @@ class CompanyIntakeService:
         extraction = IntakeExtraction(claims=filtered_claims) if eligible else extraction
         review, draft = self._review(state, sources, extraction)
         dropped = rejected if eligible else []
-        review["rejected_claims"] = [{"field_path": claim.field_path, "reason": reason} for claim, reason in dropped]
+        review["rejected_claims"] = [{"field_path": claim.field_path if claim else None, "reason": reason}
+                                     for claim, reason in dropped]
         draft_row = self._save(task, "company_profile_draft", draft, version=state["revision"] + 1)
         review["draft_id"] = str(draft_row.id)
         review_row = self._save(task, "company_profile_review", review, version=state["revision"] + 1,

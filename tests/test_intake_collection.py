@@ -389,3 +389,31 @@ def test_profile_extraction_skips_the_critic_even_when_enabled(tmp_path):
     settings = Settings(_env_file=None, agent_critic_enabled=True, products_root=tmp_path)
     service = build_intake(None, settings, provider=FakeLLMProvider(LLMResponse(content="{}", model="m")))
     assert service.llm._critic_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_extra_keys_fences_and_long_quotes_do_not_void_the_reply(db, tmp_path):
+    product, session, service = _service(db, tmp_path)
+    source = service.add_text(product.id, session, "Студия Ноготок в Сочи.", actor="owner")["sources"][-1]
+    reply = {"claims": [
+        {"source_id": source["id"], "field_path": "identity.name", "proposed_value": "Ноготок",
+         "evidence_excerpt": "Студия Ноготок", "kind": "candidate", "confidence": 0.9},
+        {"source_id": source["id"], "field_path": "identity.one_liner", "proposed_value": "x"},
+        "not a claim",
+    ], "notes": "extra"}
+    service.llm._provider.response = LLMResponse(content="```json\n" + json.dumps(reply, ensure_ascii=False) + "\n```",
+                                                 model="kimi-2.7")
+    review = await service.build(product.id, session, actor="owner")
+    assert [row["field_path"] for row in review["supported"]] == ["identity.name"]
+    assert [row["reason"] for row in review["rejected_claims"]] == ["malformed", "malformed"]
+
+
+@pytest.mark.asyncio
+async def test_failed_extraction_records_a_reason_code(db, tmp_path):
+    from app.models.domain import AgentRun
+    product, session, service = _service(db, tmp_path)
+    service.add_text(product.id, session, "Студия Ноготок в Сочи.", actor="owner")
+    service.llm._provider.response = LLMResponse(content="sorry, no json", model="kimi-2.7")
+    with pytest.raises(IntakeError):
+        await service.build(product.id, session, actor="owner")
+    assert db.scalar(select(AgentRun)).error == "company_intake_extraction_failed:invalid_json"
