@@ -5,7 +5,9 @@ W=ai-growth-os-worker-1
 echo "== saved storyboard error responses: shape only"
 docker exec -i $W python - <<'PY'
 import json, glob, re, os
-files = sorted(glob.glob("/**/storyboard-response-*.json", recursive=True), key=os.path.getmtime)[-12:]
+from app.core.config import get_settings
+root = str(get_settings().products_root)
+files = sorted(glob.glob(root + "/**/storyboard-response-*.json", recursive=True), key=os.path.getmtime)[-12:]
 print("files:", len(files))
 for path in files:
     d = json.load(open(path))
@@ -30,7 +32,7 @@ cases = [("ceiling 400", {"max_completion_tokens":400}),
 for name, extra in cases:
     t = time.time()
     try:
-        r = httpx.post(url, headers={"Authorization":"Bearer "+s.xai_api_key}, json={"model":model,"messages":msgs,**extra}, timeout=120)
+        r = httpx.post(url, headers={"Authorization":"Bearer "+s.xai_api_key}, json={"model":model,"messages":msgs,**extra}, timeout=90)
         info = ""
         if r.status_code == 200:
             c = r.json()["choices"][0]
