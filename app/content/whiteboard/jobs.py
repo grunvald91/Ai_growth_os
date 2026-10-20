@@ -182,6 +182,25 @@ def record_error(value, code, *, details=None, at=None) -> dict:
     return entry
 
 
+# The provider never answered these (it errored on its side or was unreachable): nothing was
+# produced or billed, so the call does not use up the owner's confirmed limit.
+UNANSWERED_STATUSES = frozenset({429, 500, 502, 503})
+UNANSWERED_EXCEPTIONS = frozenset({'ConnectError', 'ConnectTimeout'})
+
+
+def refund_unanswered(value) -> int:
+    """Give back the calls the provider did not answer; each failure is refunded once."""
+    refunded = 0
+    for entry in value.get('errors') or []:
+        unanswered = (entry.get('http_status') in UNANSWERED_STATUSES
+                      or entry.get('exception_type') in UNANSWERED_EXCEPTIONS)
+        if unanswered and not entry.get('refunded') and value.get('calls', 0) > 0:
+            entry['refunded'] = True
+            value['calls'] -= 1
+            refunded += 1
+    return refunded
+
+
 def schedule_auto_resume(db, task, source, value, payload, code, *, attempts, now=None) -> bool:
     """Requeue a transient failure after a growing pause, inside the approved call limit.
 
@@ -228,6 +247,7 @@ def resume_job(db, product_id, task_id, *, confirmed, decided_by, extra_calls=0)
     task = owner_task(db, product_id, task_id, lock=True)
     source, state, approval, payload = records(db, task, lock=True)
     value = json.loads(state.content)
+    refund_unanswered(value)
     extra = int(extra_calls or 0)
     if extra and (not 0 < extra <= TOP_UP_STEP or int(value.get('extra_calls', 0)) + extra > TOP_UP_TOTAL
                   or not can_top_up(task.status, value, payload)):

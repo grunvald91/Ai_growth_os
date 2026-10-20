@@ -82,6 +82,10 @@ MESSAGES = {
 }
 
 
+# The provider did not answer; nothing was produced, so another model may take over.
+TRANSIENT_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+
 def safe_error(exc) -> str:
     if isinstance(exc, ReadinessError):
         return exc.code
@@ -158,7 +162,11 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
 
 
 class SingleCallStoryboardLLM:
-    """Configured ClaudeHub-compatible provider, exactly one POST and no fallbacks."""
+    """Configured ClaudeHub-compatible provider.
+
+    One POST per model. When the chosen model does not answer at all (provider 5xx/429, no
+    connection) the next configured model is tried, so a provider outage does not stop the job.
+    A model that answered (even with a bad result) is never retried or replaced here."""
     def __init__(self, settings, *, client=None, diagnostic_directory=None):
         self.settings, self.client = settings, client
         self.diagnostic_directory = diagnostic_directory
@@ -185,16 +193,22 @@ class SingleCallStoryboardLLM:
         with os.fdopen(descriptor, 'w') as stream:
             json.dump({'http_status': response.status_code, 'body': body}, stream, ensure_ascii=False)
 
+    def fallback_models(self, model):
+        raw = getattr(self.settings, 'whiteboard_storyboard_fallback_models', '') or ''
+        chain = [name.strip() for name in raw.split(',') if name.strip()]
+        return [name for index, name in enumerate(chain) if name != model and name not in chain[:index]]
+
     async def generate(self, request):
         settings = self.settings
         if not settings.xai_api_key:
             raise ReadinessError('configuration_missing')
         messages = ([{'role': 'system', 'content': request.system_prompt}] if request.system_prompt else [])
         messages += [m.model_dump() for m in request.messages]
-        payload = {'model': request.model, 'messages': messages, 'max_completion_tokens': output_ceiling(request.max_tokens),
-                   'response_format': {'type': 'json_schema', 'json_schema': {
-                       'name': 'whiteboard_storyboard', 'strict': True, 'schema': request.response_schema}}}
-        async def send(connection):
+
+        async def send(connection, model):
+            payload = {'model': model, 'messages': messages, 'max_completion_tokens': output_ceiling(request.max_tokens),
+                       'response_format': {'type': 'json_schema', 'json_schema': {
+                           'name': 'whiteboard_storyboard', 'strict': True, 'schema': request.response_schema}}}
             response = await connection.post('chat/completions', json=payload,
                                              headers={'Authorization': 'Bearer ' + settings.xai_api_key})
             self.record_response(response)
@@ -212,6 +226,7 @@ class SingleCallStoryboardLLM:
             content = choice['message'].get('content')
             reason = choice.get('finish_reason')
             logging.getLogger(__name__).warning('whiteboard_storyboard_response %s', json.dumps({
+                'model': model,
                 'http_status': response.status_code,
                 'finish_reason': reason if reason in {'stop', 'length', 'content_filter', 'tool_calls'} else 'unknown',
                 'content_chars': len(content) if isinstance(content, str) else 0,
@@ -221,13 +236,35 @@ class SingleCallStoryboardLLM:
                 raise ReadinessError('storyboard_truncated')
             if not isinstance(content, str) or not content.strip():
                 raise ReadinessError('storyboard_empty')
-            return LLMResponse(model=str(data.get('model') or request.model),
+            return LLMResponse(model=str(data.get('model') or model),
                                content=content,
                                usage=LLMUsage(input_tokens=usage.get('prompt_tokens', 0), output_tokens=usage.get('completion_tokens', 0)))
+
+        async def with_fallbacks(connection):
+            candidates = [request.model, *self.fallback_models(request.model)]
+            first_error = None
+            for index, model in enumerate(candidates):
+                try:
+                    return await send(connection, model)
+                except httpx.HTTPStatusError as exc:
+                    status = exc.response.status_code
+                    # The chosen model: only "provider did not answer" moves on. A replacement that is
+                    # unknown or refuses this request format is skipped as well.
+                    if index == 0 and status not in TRANSIENT_STATUSES:
+                        raise
+                    first_error = first_error or exc
+                except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                    first_error = first_error or exc
+                if index + 1 < len(candidates):
+                    logging.getLogger(__name__).warning('whiteboard_storyboard_fallback %s', json.dumps({
+                        'from': model, 'to': candidates[index + 1],
+                        'http_status': getattr(getattr(first_error, 'response', None), 'status_code', None)}))
+            raise first_error
+
         if self.client is not None:
-            return await send(self.client)
+            return await with_fallbacks(self.client)
         # A full storyboard at ClaudeHub takes ~2 min typically and up to ~7 min;
         # a client ReadTimeout drops a call that may already be billed.
         async with httpx.AsyncClient(base_url=settings.xai_base_url.rstrip('/') + '/',
                                      timeout=httpx.Timeout(600.0, connect=15.0), follow_redirects=False) as connection:
-            return await send(connection)
+            return await with_fallbacks(connection)
