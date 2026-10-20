@@ -3,7 +3,7 @@
 set -uo pipefail
 W=ai-growth-os-worker-1
 echo "== proxy settings seen by the worker (booleans / host names only)"
-docker exec $W python - <<'PY'
+docker exec -i $W python - <<'PY'
 import os
 from urllib.parse import urlsplit
 from app.core.config import get_settings
@@ -15,7 +15,7 @@ print("XAI_BASE_URL host:", urlsplit(s.xai_base_url).hostname)
 print("storyboard_model:", s.whiteboard_storyboard_model or "(default)")
 PY
 echo "== ClaudeHub reachability from the worker (GET /models, status only)"
-docker exec $W python - <<'PY'
+docker exec -i $W python - <<'PY'
 import time, httpx
 from app.core.config import get_settings
 s = get_settings()
@@ -30,7 +30,7 @@ for attempt in range(3):
         print("attempt", attempt + 1, "error", type(exc).__name__, "seconds", round(time.time() - t, 1))
 PY
 echo "== latest whiteboard jobs: state and error history (codes only)"
-docker exec $W python - <<'PY'
+docker exec -i $W python - <<'PY'
 import json
 from sqlalchemy import select
 from app.db.session import SessionLocal
