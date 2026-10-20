@@ -80,7 +80,9 @@ async def test_xai_provider_maps_request_and_usage(monkeypatch):
     assert sent["headers"]["Authorization"] == "Bearer xai-test-secret"
     assert sent["headers"]["x-grok-conv-id"] == "servgo-review"
     assert sent["json"]["model"] == "grok-4.7"
-    assert sent["json"]["max_completion_tokens"] == 123
+    # The caller's 123 is an expected size; the provider gets a generous ceiling so a reasoning
+    # model is never cut off mid-answer (it is billed for tokens written, not the ceiling).
+    assert sent["json"]["max_completion_tokens"] == 16000
     assert sent["json"]["reasoning_effort"] == "medium"
     assert sent["json"]["messages"][0] == {"role": "system", "content": "Return JSON"}
     assert sent["json"]["response_format"]["type"] == "json_schema"
@@ -319,3 +321,33 @@ async def test_xai_missing_or_partial_usage_is_unknown(monkeypatch, usage):
         assert response.usage is None
     finally:
         FakeAsyncClient.response_payload = original_payload
+
+
+@pytest.mark.asyncio
+async def test_xai_provider_falls_back_to_callers_limit_when_model_rejects_the_ceiling(monkeypatch):
+    sent = []
+
+    class Recording(SequenceAsyncClient):
+        async def post(self, path, *, headers, json):
+            sent.append(json["max_completion_tokens"])
+            return await super().post(path, headers=headers, json=json)
+
+    SequenceAsyncClient.calls = 0
+    SequenceAsyncClient.responses = [
+        _http_response(400, {"error": {"message": "max_completion_tokens is too large: 16000 > 8192"}}),
+        _http_response(200, {"model": "small", "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}),
+    ]
+    monkeypatch.setattr("app.llm.xai.httpx.AsyncClient", Recording)
+    response = await XAIProvider(api_key="secret").generate(
+        LLMRequest(messages=[LLMMessage(role="user", content="hello")], max_tokens=2200))
+    assert response.content == "ok"
+    assert sent == [16000, 2200]
+
+
+def test_output_ceiling_never_lowers_a_larger_request():
+    from app.llm.limits import OUTPUT_TOKEN_FLOOR, output_ceiling, rejects_ceiling
+    assert output_ceiling(2200) == OUTPUT_TOKEN_FLOOR == 16000
+    assert output_ceiling(20000) == 20000
+    assert rejects_ceiling(400, "max_tokens: 16000 > 8192, which is the maximum allowed")
+    assert not rejects_ceiling(400, "invalid api key")
+    assert not rejects_ceiling(500, "max_tokens too large")

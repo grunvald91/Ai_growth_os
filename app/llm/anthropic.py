@@ -1,5 +1,6 @@
 import json
 
+from app.llm.limits import output_ceiling
 from app.llm.schemas import LLMRequest, LLMResponse, LLMUsage
 
 
@@ -17,7 +18,7 @@ class AnthropicProvider:
         client = AsyncAnthropic(api_key=self._api_key, base_url=self._base_url)
         parameters = {
             "model": request.model or self._model,
-            "max_tokens": request.max_tokens,
+            "max_tokens": output_ceiling(request.max_tokens),
             "messages": [message.model_dump() for message in request.messages],
         }
         if request.system_prompt is not None:

@@ -62,3 +62,23 @@ def test_private_capture_redacts_credentials_and_rejects_symlink(tmp_path):
     provider.diagnostic_directory = link
     with pytest.raises(ValueError, match='Symlink'):
         provider.record_response(httpx.Response(200, text='{}'))
+
+
+def test_storyboard_gets_a_generous_ceiling_and_truncation_is_not_auto_resumed(tmp_path):
+    from app.content.whiteboard.jobs import RESUMABLE_ERRORS
+    sent = []
+    def respond(request):
+        sent.append(json.loads(request.content)['max_completion_tokens'])
+        return httpx.Response(200, json={'model': 'test', 'choices': [
+            {'finish_reason': 'stop', 'message': {'content': '{}'}}]})
+    async def run():
+        async with httpx.AsyncClient(base_url='https://provider.example/v1/',
+                                    transport=httpx.MockTransport(respond)) as client:
+            provider = SingleCallStoryboardLLM(settings(), client=client, diagnostic_directory=tmp_path)
+            await provider.generate(LLMRequest(model='test', messages=[LLMMessage(role='user', content='t')],
+                                               response_schema={'type': 'object'}, max_tokens=2200))
+    asyncio.run(run())
+    # 2200 cut a normal storyboard off at 2198 tokens (the model reasons before answering).
+    assert sent == [16000]
+    # A reply that still overruns 16 000 tokens is a genuine failure: do not bill it five more times.
+    assert 'storyboard_truncated' not in RESUMABLE_ERRORS and 'storyboard_empty' in RESUMABLE_ERRORS

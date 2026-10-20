@@ -141,8 +141,10 @@ def approve_job(db, product_id, task_id, *, request_digest, confirmed, decided_b
 
 
 # Transient failures: a later attempt can succeed without changing the request.
+# A storyboard cut off at the (now generous) output ceiling is a runaway reply: repeating the
+# same request five times only bills the same failure again, so it is not resumed automatically.
 RESUMABLE_ERRORS = frozenset({'generation_failed', 'interrupted', 'provider_server_error',
-                              'openrouter_unavailable', 'storyboard_empty', 'storyboard_truncated'})
+                              'openrouter_unavailable', 'storyboard_empty'})
 RESUME_ACTION = 'whiteboard_resume'
 AUTO_RESUME_ACTION = 'whiteboard_auto_resume'
 # Pause before each automatic continuation: 1, 5, 15, 30, 60 minutes.

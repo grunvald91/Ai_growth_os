@@ -1,6 +1,7 @@
 """One advisory visual review, one author decision, at most one redraw per scene."""
 from __future__ import annotations
 
+from app.llm.limits import output_ceiling
 import base64
 import json
 from typing import Literal
@@ -129,7 +130,7 @@ class OpenRouterVisualCritic(OpenRouterBase):
         for index, image in enumerate(images):
             content.extend([{'type': 'text', 'text': f'Scene {index}'},
                 {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + base64.b64encode(image).decode('ascii')}}])
-        response = await self.post('chat/completions', {'model': self.model, 'max_tokens': 5000,
+        response = await self.post('chat/completions', {'model': self.model, 'max_tokens': output_ceiling(5000),
             'messages': [{'role': 'user', 'content': content}], 'response_format': {'type': 'json_object'}})
         try:
             review = VisualReview.model_validate_json(response.json()['choices'][0]['message']['content'])
