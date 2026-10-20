@@ -132,4 +132,3 @@ def logout(settings: Settings = Depends(get_settings)):
     response = RedirectResponse("/studio/login?logged_out=1", status_code=303)
     response.delete_cookie(COOKIE, path="/", httponly=True, samesite="lax", secure=_secure_cookie(settings))
     return response
-
