@@ -114,3 +114,15 @@ def test_failure_identifies_stage_without_downloads_or_automatic_paid_retry(envi
     assert 'Ошибка на этапе: Сборка MP4' in body
     assert 'Можно продолжить с места остановки' in body
     assert 'Скачать MP4' not in body and '<video' not in body
+
+
+def test_whiteboard_page_polls_a_path_nginx_forwards():
+    # nginx forwards only /studio/* (and a few API prefixes) to the app; /products/:id/whiteboard/jobs is 404 there.
+    from app.main import app
+    paths = set(app.openapi()["paths"])
+    assert "/studio/products/{product_id}/whiteboard/jobs.json" in paths
+    import inspect
+    import app.api.whiteboard as whiteboard
+    source = inspect.getsource(whiteboard)
+    assert "f'/products/{product_id}/whiteboard/jobs') + '''" not in source
+    assert "/studio/products/{product_id}/whiteboard/jobs.json" in source

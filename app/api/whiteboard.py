@@ -117,6 +117,8 @@ def api_create(product_id: UUID, body: CreateJob, db: Session = Depends(get_db),
 
 
 @router.get('/products/{product_id}/whiteboard/jobs')
+# The Studio page polls this alias: nginx only forwards /studio/* to the app.
+@router.get('/studio/products/{product_id}/whiteboard/jobs.json')
 def api_list(product_id: UUID, db: Session = Depends(get_db)):
     _owner_product(db, product_id)
     tasks = db.scalars(select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT)
@@ -323,7 +325,7 @@ def history_html(states, product_id):
     (() => {
       const root = document.getElementById('whiteboard-jobs');
       const base = ''' + json.dumps(base) + ''';
-      const endpoint = ''' + json.dumps(f'/products/{product_id}/whiteboard/jobs') + ''';
+      const endpoint = ''' + json.dumps(f'/studio/products/{product_id}/whiteboard/jobs.json') + ''';
       const names = ''' + json.dumps(STATUS_NAMES, ensure_ascii=False) + ''';
       async function refresh() {
         if (document.hidden) return;

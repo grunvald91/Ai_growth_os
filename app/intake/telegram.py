@@ -67,6 +67,10 @@ def render_review(review):
             references = ", ".join(item["source_reference"] for item in alternative["evidence"])
             lines.append(f"  {value_text(alternative['proposed_value'])} — {references}")
         lines.append("  Предлагается подтвердить: " + value_text(conflict["proposed_value"]))
+    dropped = review.get("rejected_claims") or []
+    if dropped:
+        lines.append(f"• Отброшено сведений без точной цитаты в источнике: {len(dropped)}. "
+                     "Если чего-то не хватает, добавьте это своими словами.")
     lines += ["", "❓ Неизвестное и гипотезы"]
     lines.extend("• " + item["question"] for item in review["unknowns"])
     lines.extend("• Гипотеза: " + item["statement"] for item in review["profile_preview"].get("hypotheses", []))
