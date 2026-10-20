@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
-# Read-only: whiteboard storyboard responses (status, finish reason, sizes, token counts only).
+# Read-only: whiteboard jobs state and storyboard responses (codes, counts, token numbers only).
 set -uo pipefail
-echo "== storyboard model settings (names only)"
-docker exec ai-growth-os-worker-1 python -c "
-from app.core.config import get_settings
-s = get_settings()
-print('storyboard_model:', s.whiteboard_storyboard_model or '(default)')
-print('xai_reasoning_effort:', s.xai_reasoning_effort)
-"
-echo "== storyboard responses, last 3 days (all containers)"
-for c in ai-growth-os-worker-1 ai-growth-os-api-1; do
-  docker logs --since 72h "$c" 2>&1 | grep -o 'whiteboard_storyboard_response {[^}]*}' | sed "s/^/$c /" | tail -40
-done
-echo "== whiteboard job errors, last 3 days (codes only)"
-docker logs --since 72h ai-growth-os-worker-1 2>&1 | grep -oE "storyboard_(truncated|empty)|whiteboard_[a-z_]+ (failed|resum)[a-z_]*" | sort | uniq -c | head -20
+echo "== storyboard responses, last 6 hours"
+docker logs --since 6h ai-growth-os-worker-1 2>&1 | grep -o 'whiteboard_storyboard_response {[^}]*}' | tail -20
+echo "== whiteboard jobs updated in the last day (stage, error code, auto resumes)"
+docker exec -i ai-growth-os-worker-1 python - <<'PY'
+import json
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import select
+from app.db.session import SessionLocal
+from app.models.domain import Artifact, Task
+db = SessionLocal()
+since = datetime.now(timezone.utc) - timedelta(days=1)
+for task in db.scalars(select(Task).where(Task.assigned_agent.like('%whiteboard%'), Task.updated_at > since)):
+    row = db.scalar(select(Artifact).where(Artifact.task_id == task.id, Artifact.kind.like('%state%')).order_by(Artifact.version.desc()).limit(1))
+    state = json.loads(row.content) if row else {}
+    print(task.status.value, "stage=" + str(state.get("stage")), "error=" + str(state.get("error")),
+          "auto_resumes=" + str(state.get("auto_resumes")), "updated=" + task.updated_at.strftime("%H:%M UTC"))
+PY
 echo DIAG_OK
