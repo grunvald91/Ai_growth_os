@@ -5,6 +5,7 @@ the caller's worker configuration, never in artifacts or frontend payloads.
 """
 from __future__ import annotations
 
+from app.llm.limits import output_ceiling
 import base64
 import json
 import re
@@ -297,7 +298,7 @@ class OpenRouterRegionProvider(OpenRouterBase):
         )
         payload = {
             "model": self.model,
-            "max_tokens": 1400,
+            "max_tokens": output_ceiling(1400),
             "messages": [{
                 "role": "user", "content": [
                     {"type": "text", "text": prompt},

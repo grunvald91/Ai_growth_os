@@ -4,6 +4,7 @@ from typing import Literal
 
 import httpx
 
+from app.llm.limits import output_ceiling, rejects_ceiling
 from app.llm.schemas import LLMRequest, LLMResponse, LLMUsage
 from app.llm.timeouts import PROVIDER_TIMEOUT_SECONDS
 
@@ -47,7 +48,7 @@ class XAIProvider:
         payload: dict[str, object] = {
             "model": selected_model,
             "messages": messages,
-            "max_completion_tokens": request.max_tokens,
+            "max_completion_tokens": output_ceiling(request.max_tokens),
         }
         if selected_model.lower().startswith("grok-"):
             payload["reasoning_effort"] = reasoning_effort
@@ -91,6 +92,11 @@ class XAIProvider:
                     response.raise_for_status()
                     break
                 except httpx.HTTPStatusError as exc:
+                    if (payload["max_completion_tokens"] != request.max_tokens
+                            and rejects_ceiling(exc.response.status_code, exc.response.text)):
+                        # This model has a smaller output limit: use the caller's own value.
+                        payload["max_completion_tokens"] = request.max_tokens
+                        continue
                     if (
                         exc.response.status_code not in _RETRYABLE_STATUS_CODES
                         or attempt >= len(_RETRY_DELAYS_SECONDS)

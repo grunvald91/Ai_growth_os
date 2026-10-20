@@ -1,6 +1,7 @@
 """Explicit model configuration and read-only provider readiness; no generation retries."""
 from __future__ import annotations
 
+from app.llm.limits import output_ceiling, rejects_ceiling
 import re
 import json
 import logging
@@ -70,7 +71,7 @@ MESSAGES = {
     'generation_failed': 'Генерация остановлена. Завершённые этапы сохранены; стоимость незавершённого вызова может быть неизвестна. Можно продолжить с места остановки.',
     'provider_server_error': 'Сервис модели вернул ошибку на своей стороне (HTTP 5xx) — это сбой провайдера, а не задания. Готовые этапы сохранены; можно продолжить с места остановки.',
     'storyboard_empty': 'Модель сценария вернула пустой ответ. Генерация остановлена до создания изображений.',
-    'storyboard_truncated': 'Модель сценария исчерпала лимит токенов до завершения ответа. Генерация остановлена до создания изображений.',
+    'storyboard_truncated': 'Модель сценария писала больше 16 000 токенов и так и не закончила ответ — это сбой модели, а не нехватка лимита. Генерация остановлена до создания изображений; попробуйте ещё раз или переформулируйте тему.',
     'interrupted': 'Worker был остановлен. Готовые этапы сохранены; можно продолжить с места остановки.',
     'cancelled': 'Задание остановлено. Начатый API-вызов мог завершиться и быть оплачен; следующие вызовы запрещены.',
     'review_budget': 'В сценарии больше реплик, чем предусмотрено лимитом проверки рисунков. Генерация остановлена до изображений; автоматического повтора нет.',
@@ -190,13 +191,20 @@ class SingleCallStoryboardLLM:
             raise ReadinessError('configuration_missing')
         messages = ([{'role': 'system', 'content': request.system_prompt}] if request.system_prompt else [])
         messages += [m.model_dump() for m in request.messages]
-        payload = {'model': request.model, 'messages': messages, 'max_completion_tokens': request.max_tokens,
+        payload = {'model': request.model, 'messages': messages, 'max_completion_tokens': output_ceiling(request.max_tokens),
                    'response_format': {'type': 'json_schema', 'json_schema': {
                        'name': 'whiteboard_storyboard', 'strict': True, 'schema': request.response_schema}}}
         async def send(connection):
             response = await connection.post('chat/completions', json=payload,
                                              headers={'Authorization': 'Bearer ' + settings.xai_api_key})
             self.record_response(response)
+            if (payload['max_completion_tokens'] != request.max_tokens
+                    and rejects_ceiling(response.status_code, response.text)):
+                # This model has a smaller output limit: retry once with the caller's value.
+                payload['max_completion_tokens'] = request.max_tokens
+                response = await connection.post('chat/completions', json=payload,
+                                                 headers={'Authorization': 'Bearer ' + settings.xai_api_key})
+                self.record_response(response)
             response.raise_for_status()
             data = response.json()
             usage = data.get('usage') or {}
