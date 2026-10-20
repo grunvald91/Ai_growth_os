@@ -1,0 +1,34 @@
+name: Growth login and company diagnostics (read-only)
+
+# One-off, read-only. Push to this branch only; delete after use.
+on:
+  push:
+    branches: [ops/login-intake-diagnose]
+    paths: [.github/login-diagnose/**, .github/workflows/login-diagnose.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Diagnose
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::host key mismatch"; exit 1; }
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'bash -s' < .github/login-diagnose/diagnose.sh
