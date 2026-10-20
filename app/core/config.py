@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     # Optional: company registry lookup by ИНН/ОГРН during company intake.
     dadata_api_key: str | None = None
     whiteboard_storyboard_model: str = ""
+    # Tried in this order when the storyboard model gets no answer from the provider.
+    whiteboard_storyboard_fallback_models: str = "kimi-k3,grok-4.7,claude-sonnet-5-5"
     whiteboard_image_model: str = ""
     whiteboard_speech_model: str = ""
     whiteboard_regions_model: str = ""

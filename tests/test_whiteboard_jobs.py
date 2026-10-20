@@ -339,16 +339,17 @@ async def test_preflight_security_policy_sends_only_one_get(environment):
 
 
 @pytest.mark.asyncio
-async def test_storyboard_provider_never_retries_failed_post(environment):
+async def test_storyboard_provider_never_repeats_a_post_to_the_same_model(environment):
     _, settings, _, _ = environment
     calls = []
     def handler(request):
-        calls.append(request); return httpx.Response(500, json={'error': 'temporary'})
+        calls.append(json.loads(request.content)['model']); return httpx.Response(500, json={'error': 'temporary'})
     async with httpx.AsyncClient(base_url='https://api.claudehub.fun/v1/', transport=httpx.MockTransport(handler)) as connection:
         provider = SingleCallStoryboardLLM(settings, client=connection)
         with pytest.raises(httpx.HTTPStatusError):
             await provider.generate(LLMRequest(model='kimi-2.7', messages=[LLMMessage(role='user', content='test')], response_schema={}))
-    assert len(calls) == 1
+    # One POST per model: the chosen one, then each configured replacement once.
+    assert calls == ['kimi-2.7', 'kimi-k3', 'grok-4.7', 'claude-sonnet-5-5']
 
 
 def test_customer_account_is_limited_to_its_company(environment, tmp_path):
@@ -587,3 +588,36 @@ def test_crashed_running_job_is_requeued_after_pause(environment):
     recover_interrupted_jobs(factory, settings)
     status, state = _state(factory, product_id, task_id)
     assert status == TaskStatus.QUEUED and state['last_error'] == 'interrupted' and state['errors'][0]['code'] == 'interrupted'
+
+
+@pytest.mark.asyncio
+async def test_calls_the_provider_never_answered_do_not_use_up_the_confirmed_limit(environment):
+    import httpx
+    factory, settings, product_id, _ = environment
+    task_id = new_job(environment, maximum=19); approve(environment, task_id)
+    def outage_factory(settings, payload, store):
+        pipeline = fake_factory(settings, payload, store)
+        class Speech:
+            async def synthesize(self, *args, **kwargs):
+                request = httpx.Request('POST', 'https://provider.example/v1/chat/completions')
+                raise httpx.HTTPStatusError('bad gateway', request=request, response=httpx.Response(502, request=request))
+        pipeline.speech = Speech(); return pipeline
+    await run_whiteboard_once(factory, settings, factory=outage_factory, readiness=ready)
+    _, first = _state(factory, product_id, task_id)
+    assert first['errors'][0]['http_status'] == 502 and first['errors'][0]['refunded'] is True
+    before = first['calls']
+    _expire_pause(factory, product_id, task_id)
+    await run_whiteboard_once(factory, settings, factory=outage_factory, readiness=ready)
+    _, second = _state(factory, product_id, task_id)
+    # Every outage attempt gives its call back: the counter does not creep up with each one.
+    assert second['calls'] == before and [e['refunded'] for e in second['errors']] == [True, True]
+
+
+def test_refund_is_applied_once_to_old_failures_and_never_to_billable_ones():
+    from app.content.whiteboard.jobs import refund_unanswered
+    value = {'calls': 5, 'errors': [
+        {'http_status': 502}, {'code': 'storyboard_truncated'}, {'http_status': 502}, {'http_status': 504},
+        {'exception_type': 'ReadTimeout'}, {'exception_type': 'ConnectError'}]}
+    assert refund_unanswered(value) == 3 and value['calls'] == 2
+    assert refund_unanswered(value) == 0 and value['calls'] == 2
+    assert refund_unanswered({'calls': 0, 'errors': [{'http_status': 502}]}) == 0

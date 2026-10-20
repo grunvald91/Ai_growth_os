@@ -14,8 +14,8 @@ from app.llm.service import LLMService
 from app.privacy import PrivacyGateway
 from .adapters import LLMStoryboardProvider, ClaudeHubGeminiImageProvider, OpenRouterRegionProvider, OpenRouterSpeechProvider
 from .checkpoints import CheckpointStore, CheckpointError, _Lock
-from .jobs import (AGENT, CallLedger, GuardedStage, job_directory, owner_task, record_error, records, retry_due,
-                   schedule_auto_resume)
+from .jobs import (AGENT, CallLedger, GuardedStage, job_directory, owner_task, record_error, records, refund_unanswered,
+                   retry_due, schedule_auto_resume)
 from .pipeline import WhiteboardPipeline
 from .render import MarkerSweepRenderer
 from .review import OpenRouterVisualCritic, LLMVisualAuthor
@@ -76,6 +76,7 @@ def _failure(session_factory, product_id, task_id, code, *, exception=None, dire
                     details['reason'] = str(exception)[:200]
                 value['diagnostic'] = details
             entry = record_error(value, code, details=details)
+            refund_unanswered(value)
             value.update(stage='failed', error=code)
             retried = False
             if code != 'cancelled' and auto_resume_attempts:
@@ -151,6 +152,7 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                 for key in ('retry_at', 'failed_stage', 'diagnostic'):
                     value.pop(key, None)
                 resuming = bool(value.pop('resume_requested', False))
+                refund_unanswered(value)
                 state.content = json.dumps(value); db.commit()
             # The immutable approved request owns this job's model/voice choice.
             # Copy only these public fields; never alter shared settings or .env.
