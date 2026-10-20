@@ -396,6 +396,7 @@ def more_links(product_id: UUID) -> list[tuple[str, str, str, str]]:
         ("mail", "https://servgo.ru/mail", "✉", "Почта"),
         ("switch", "/studio?choose=1", "⇄", "Другая компания"),
         ("servgo", "https://servgo.ru/admin", "←", "В админку ServGo"),
+        ("logout", "/studio/logout", "⎋", "Выйти"),
     ]
 
 
@@ -1780,6 +1781,7 @@ def product_selector(products: list[Product], *, can_add: bool = False) -> str:
 <section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
 <h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
 <div class="product-list">{cards or '<div class="empty">Проекты ещё не добавлены.</div>'}{add_card}</div>
+<p class="sg-selector-foot"><a href="/studio/logout">Выйти · войти под другим логином</a></p>
 </main></body></html>"""
 
 

@@ -46,7 +46,7 @@ def accounts_html(product_id, accounts, products, operators, *, actor=None, noti
         body += (f'<section class="sg-surface sg-notice" role="status"><h2>{esc(notice[0])}</h2>'
                  f'<p>Логин: <b>{esc(notice[1])}</b><br>Пароль: <code class="sg-secret">{esc(notice[2])}</code></p>'
                  '<p>Скопируйте пароль сейчас: он показывается один раз и нигде не хранится в открытом виде. '
-                 'Вход — на этой же странице, браузер спросит логин и пароль.</p></section>')
+                 'Вход — на странице <b>growth.servgo.ru/studio/login</b>. Логин можно вводить с любой буквы.</p></section>')
     rows = ""
     for name in sorted(operators):
         rows += (f'<tr><td><b>{esc(name)}</b></td><td>Владелец (основной вход)</td><td>Все компании</td>'

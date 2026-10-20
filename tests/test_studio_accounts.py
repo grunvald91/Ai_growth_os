@@ -89,7 +89,8 @@ def test_owner_creates_company_and_admin_accounts(studio):
                   headers={"Origin": "https://evil.example"}).status_code == 403
 
 
-PUBLIC = {"/health", "/health/version"}
+# The sign-in page must be reachable without a login; logout only clears the cookie.
+PUBLIC = {"/health", "/health/version", "/studio/login", "/studio/logout"}
 
 
 def test_every_private_route_requires_studio_login(studio):

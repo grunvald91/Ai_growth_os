@@ -11,7 +11,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
+from app.api.content_studio_auth import _basic, require_studio_auth, require_studio_csrf
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -181,11 +181,13 @@ STUDIO_API = "/studio/team/api"
 
 def require_owner(
     request: Request,
-    credentials: HTTPBasicCredentials | None = Depends(HTTPBasic(auto_error=False)),
+    credentials: HTTPBasicCredentials | None = Depends(_basic),
     authorization: str = Header(default=""),
     settings: Settings = Depends(get_settings),
 ) -> None:
-    if credentials is not None:
+    from app.core.studio_sessions import COOKIE
+    if credentials is not None or request.cookies.get(COOKIE):
+        # Basic credentials or a Studio login session (the page's own fetches send the cookie).
         require_studio_auth(request, credentials, settings)
         if getattr(request.state, "studio_product_ids", None) is not None:
             raise HTTPException(403, "Administrator account required")

@@ -7,10 +7,12 @@ owner confirms it.
 """
 from __future__ import annotations
 
-from urllib.parse import quote
+import logging
+import time
+from urllib.parse import quote, urlsplit
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -29,6 +31,11 @@ from app.models.domain import Product
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ACTOR = "local_owner"  # Same actor as the JSON intake API, so sessions are shared.
+_logger = logging.getLogger(__name__)
+# Reading a site and drafting a profile take minutes; nginx cuts a request at 300 s.
+# Slow work runs after the response, and the profile page polls this state.
+_JOBS: dict[str, dict] = {}
+JOB_STALE_SECONDS = 20 * 60
 MAX_UPLOAD_FILES = 5
 MAX_UPLOAD_BYTES = 25_000_000
 FILE_ACCEPT = ".txt,.md,.json,.csv,.docx,.pdf,.xlsx,.xls,.jpg,.jpeg,.png,.webp,.tif,.tiff,.bmp"
@@ -104,11 +111,11 @@ def _new_company_page(fields: dict | None = None, error: str | None = None, *, r
 <section class="panel hero">{brand_html()}<h1>Новая компания</h1>
 <p class="subtitle">Опишите бизнес своими словами и дайте всё, что уже есть: сайт, ИНН, прайс. Агенты соберут профиль компании, а вы проверите его перед работой.</p></section>
 {notice}
-<form class="panel sg-company-form sg-intake-form" method="post" action="/studio/new" enctype="multipart/form-data">
+<form class="panel sg-company-form sg-intake-form" method="post" action="/studio/new" enctype="multipart/form-data" data-once>
   <label class="sg-field"><span>Название компании</span>
     <input name="name" required minlength="2" maxlength="200" value="{esc(fields.get('name', ''))}"></label>
   <label class="sg-field"><span>Сайт <em>· если есть</em></span>
-    <input name="website" type="url" maxlength="500" placeholder="https://" value="{esc(fields.get('website', ''))}">
+    <input name="website" type="text" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="500" placeholder="nogotok.ru" value="{esc(fields.get('website', ''))}">
     <small>Прочитаем главную и до 7 страниц: услуги, цены, о компании, контакты, отзывы.</small></label>
   <label class="sg-field"><span>ИНН или ОГРН <em>· если есть</em></span>
     <input name="identifier" inputmode="numeric" maxlength="40" placeholder="10 или 12 цифр" value="{esc(fields.get('identifier', ''))}">
@@ -119,7 +126,73 @@ def _new_company_page(fields: dict | None = None, error: str | None = None, *, r
   {_file_field()}
   <div class="sg-intake-actions"><button class="btn primary" type="submit">Добавить компанию</button>
   <a href="/studio?choose=1">← К списку проектов</a></div>
-</form></main></body></html>"""
+</form>{ONCE_SCRIPT}</main></body></html>"""
+
+ONCE_SCRIPT = """<script>document.querySelectorAll('form[data-once]').forEach(function(f){f.addEventListener('submit',function(){
+var b=f.querySelector('button[type=submit],button:not([type])');if(b){setTimeout(function(){b.disabled=true;b.textContent='Отправляю…';},0);}});});</script>"""
+
+
+def normalize_site(value: str) -> str:
+    """Owners type «nogotok.ru» or «www.nogotok.ru/prices»; the crawler needs a full address."""
+    value = (value or "").strip()
+    if value and not urlsplit(value).scheme:
+        value = "https://" + value.lstrip("/")
+    return value
+
+
+def _background_session():
+    from app.db.session import SessionLocal
+    return SessionLocal()
+
+
+def _job(session_id) -> dict | None:
+    job = _JOBS.get(str(session_id))
+    if job and job.get("running") and time.time() - job["started"] > JOB_STALE_SECONDS:
+        job.update(running=False, error="Работа прервалась. Материалы сохранены; запустите сборку ещё раз.")
+    return job
+
+
+def _job_running(session_id) -> bool:
+    job = _job(session_id)
+    return bool(job and job.get("running"))
+
+
+def _start_job(background: BackgroundTasks, product_id: UUID, session_id: UUID, *, website: str = "",
+               identifier: str = "", build: bool = False, notes: list[str] | None = None) -> None:
+    if _job_running(session_id):
+        raise IntakeError("Уже работаю над этой компанией. Подождите, страница обновится сама.")
+    stage = "Читаю сайт" if website else "Проверяю в реестре" if identifier else "Собираю профиль"
+    _JOBS[str(session_id)] = {"running": True, "started": time.time(), "stage": stage,
+                              "notes": list(notes or []), "error": None}
+    background.add_task(_run_job, product_id, session_id, website, identifier, build)
+
+
+async def _run_job(product_id: UUID, session_id: UUID, website: str, identifier: str, build: bool) -> None:
+    job = _JOBS[str(session_id)]
+    db = _background_session()
+    try:
+        service = _service(db)
+        if website or identifier:
+            job["notes"] += await _add_materials(service, product_id, session_id,
+                                                 {"website": website, "identifier": identifier}, [],
+                                                 text_reference="")
+        if build:
+            job["stage"] = "Собираю профиль"
+            from app.core.composition import build_intake
+            await build_intake(db, get_settings()).build(product_id, session_id, actor=ACTOR)
+    except IntakeError as exc:
+        db.rollback()
+        job["error"] = str(exc)
+    except ValueError:
+        db.rollback()
+        job["error"] = "Модель для разбора данных не настроена. Материалы сохранены."
+    except Exception as exc:  # noqa: BLE001 - the owner must see a message, never a silent spinner.
+        db.rollback()
+        _logger.warning("company_intake_job_failed %s", type(exc).__name__)
+        job["error"] = "Не удалось подготовить профиль. Материалы сохранены; попробуйте ещё раз."
+    finally:
+        job["running"] = False
+        db.close()
 
 
 @router.get("/studio/new", response_class=HTMLResponse)
@@ -169,15 +242,15 @@ async def _add_materials(service: CompanyIntakeService, product_id: UUID, sessio
 
 
 @router.post("/studio/new")
-async def new_company_submit(request: Request, db: Session = Depends(get_db)):
+async def new_company_submit(request: Request, background: BackgroundTasks, db: Session = Depends(get_db)):
     _require_operator(request)
     fields, files = await _read_form(request)
     name = " ".join(fields.get("name", "").split())
     about = fields.get("about", "").strip()
-    website = fields.get("website", "").strip()
+    website = normalize_site(fields.get("website", ""))
+    identifier = fields.get("identifier", "").strip()
     service = _service(db)
-    if (not 2 <= len(name) <= 200 or not 30 <= len(about) <= 12000 or len(website) > 500
-            or len(fields.get("identifier", "")) > 40):
+    if not 2 <= len(name) <= 200 or not 30 <= len(about) <= 12000 or len(website) > 500 or len(identifier) > 40:
         return HTMLResponse(_new_company_page(fields, "Укажите название (2–200 символов) и описание компании (от 30 символов).",
                                               registry_hint=_identifier_hint(service)),
                             status_code=422, headers={"Cache-Control": "no-store"})
@@ -188,15 +261,14 @@ async def new_company_submit(request: Request, db: Session = Depends(get_db)):
         session = service.start(product.id, actor=ACTOR)
         session_id = UUID(session["session_id"])
         service.add_text(product.id, session_id, about, actor=ACTOR, reference="growth studio: описание владельца")
-        # The company exists now; a failing site, registry or file is reported, not fatal.
-        notes = await _add_materials(service, product.id, session_id,
-                                     {"website": website, "identifier": fields.get("identifier", "")}, files,
-                                     text_reference="growth studio: сведения владельца")
+        # Uploaded files are already here; the site, registry and draft follow in the background.
+        notes = await _add_materials(service, product.id, session_id, {}, files, text_reference="")
+        _start_job(background, product.id, session_id, website=website, identifier=identifier, build=True,
+                   notes=notes)
     except IntakeError as exc:
         db.rollback()
         return RedirectResponse(f"/studio/products/{product.id}/profile?error={quote(str(exc)[:200])}", status_code=303)
-    suffix = f"?notice={quote(' '.join(notes)[:400])}" if notes else ""
-    return RedirectResponse(f"/studio/products/{product.id}/profile{suffix}", status_code=303)
+    return RedirectResponse(f"/studio/products/{product.id}/profile", status_code=303)
 
 
 def _source_line(source: dict) -> str:
@@ -227,14 +299,24 @@ def _questions_html(base: str, review: dict | None) -> str:
 </fieldset>""")
     return f"""<section class="sg-surface sg-intake-section"><h2>Чего не хватает</h2>
 <p class="sg-muted">Ответьте, что знаете. Агенты не будут придумывать недостающее.</p>
-<form method="post" action="{base}/profile/answers" class="sg-intake-form">{''.join(items)}
+<form method="post" action="{base}/profile/answers" class="sg-intake-form" data-once>{''.join(items)}
   <div class="sg-intake-actions"><button class="btn primary">Ответить и пересобрать профиль</button></div></form></section>"""
 
 
+def _working_html(job: dict) -> str:
+    seconds = int(time.time() - job["started"])
+    return f"""<section class="sg-surface sg-intake-section sg-intake-working" role="status" aria-live="polite">
+<meta http-equiv="refresh" content="5">
+<h2><span class="sg-intake-spinner" aria-hidden="true"></span>{esc(job['stage'])}…</h2>
+<p>Обычно это 1–3 минуты. Страница обновится сама — её можно закрыть и вернуться позже.</p>
+<p class="sg-muted">Идёт {seconds // 60} мин {seconds % 60:02d} с.</p></section>"""
+
+
 def _profile_body(product: Product, state: dict | None, error: str | None, notice: str | None,
-                  registry_hint: str) -> str:
+                  registry_hint: str, job: dict | None = None) -> str:
     base = f"/studio/products/{product.id}"
     parts = []
+    running = bool(job and job.get("running"))
     if error:
         parts.append(f'<div class="sg-warning" role="alert">{esc(error)}</div>')
     if notice:
@@ -245,8 +327,12 @@ def _profile_body(product: Product, state: dict | None, error: str | None, notic
 <form method="post" action="{base}/profile/start"><button class="btn primary">Начать сбор данных</button></form></section>""")
         return "".join(parts)
     sources = "".join(_source_line(s) for s in state["sources"])
+    if running:
+        parts.append(_working_html(job))
     parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Материалы · {len(state['sources'])}</h2>
 <ul class="sg-intake-sources">{sources or '<li>Пока ничего не добавлено.</li>'}</ul></section>""")
+    if running:
+        return "".join(parts)  # No new material or rebuild while the current work is in progress.
     review = state.get("review")
     current = bool(review and state.get("review_current"))
     if current:
@@ -259,18 +345,19 @@ def _profile_body(product: Product, state: dict | None, error: str | None, notic
                  if review else "Агент изучит материалы и подготовит профиль.")
         parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Черновик профиля</h2>
 <p>{stale} Это занимает 1–3 минуты.</p>
-<form method="post" action="{base}/profile/build" class="sg-intake-actions"><button class="btn primary">Собрать профиль</button></form></section>""")
+<form method="post" action="{base}/profile/build" class="sg-intake-actions" data-once><button class="btn primary">Собрать профиль</button></form></section>""")
     # Questions come from the latest draft; answering adds evidence and rebuilds.
     parts.append(_questions_html(base, review))
     parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Добавить материалы</h2>
-<form method="post" action="{base}/profile/source" enctype="multipart/form-data" class="sg-intake-form">
+<form method="post" action="{base}/profile/source" enctype="multipart/form-data" class="sg-intake-form" data-once>
   <label class="sg-field"><span>Сведения своими словами</span><textarea name="text" rows="4" maxlength="12000"></textarea></label>
-  <label class="sg-field"><span>Сайт или страница</span><input name="link" type="url" maxlength="500" placeholder="https://">
+  <label class="sg-field"><span>Сайт или страница</span><input name="link" type="text" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="500" placeholder="nogotok.ru">
     <small>С главной прочитаем и внутренние страницы: услуги, цены, контакты.</small></label>
   <label class="sg-field"><span>ИНН или ОГРН</span><input name="identifier" inputmode="numeric" maxlength="40" placeholder="10 или 12 цифр">
     <small>{esc(registry_hint)}</small></label>
   {_file_field("Файлы")}
   <div class="sg-intake-actions"><button class="btn">Добавить</button></div></form></section>""")
+    parts.append(ONCE_SCRIPT)
     return "".join(parts)
 
 
@@ -279,9 +366,17 @@ def _render_profile(product: Product, db: Session, error: str | None = None, sta
     service = _service(db)
     active = service.active(product.id, ACTOR)
     state = service.get(product.id, active.id, actor=ACTOR) if active else None
+    job = _job(active.id) if active else None
+    if job and not job.get("running"):
+        # Show what the finished background work found or why it failed, once.
+        _JOBS.pop(str(active.id), None)
+        if job.get("error"):
+            error = " ".join(filter(None, [error, job["error"]]))
+        if job.get("notes"):
+            notice = " ".join(filter(None, [notice, " ".join(dict.fromkeys(job["notes"]))]))[:600]
     page = studio_page_shell(product, active="profile", title="Профиль компании",
                              subtitle="Подтверждённые сведения, на которые опираются все агенты.",
-                             body=_profile_body(product, state, error, notice, _identifier_hint(service)))
+                             body=_profile_body(product, state, error, notice, _identifier_hint(service), job))
     return HTMLResponse(page, status_code=status_code, headers={"Cache-Control": "no-store"})
 
 
@@ -315,7 +410,8 @@ async def _apply_answers(service: CompanyIntakeService, product: Product, sessio
 
 
 @router.post("/studio/products/{product_id}/profile/{action}")
-async def company_profile_action(product_id: UUID, action: str, request: Request, db: Session = Depends(get_db)):
+async def company_profile_action(product_id: UUID, action: str, request: Request, background: BackgroundTasks,
+                                 db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
     fields, files = await _read_form(request)
     service = _service(db)
@@ -325,23 +421,25 @@ async def company_profile_action(product_id: UUID, action: str, request: Request
             service.start(product.id, actor=ACTOR)
         elif action == "source":
             session_id = _session_id(service, product)
-            notes = await _add_materials(service, product.id, session_id, fields, files,
+            if _job_running(session_id):
+                raise IntakeError("Уже работаю над этой компанией. Подождите, страница обновится сама.")
+            notes = await _add_materials(service, product.id, session_id,
+                                         {"text": fields.get("text", "")}, files,
                                          text_reference="growth studio: сведения владельца")
+            website, identifier = normalize_site(fields.get("link", "")), fields.get("identifier", "").strip()
+            if website or identifier:
+                _start_job(background, product.id, session_id, website=website, identifier=identifier, notes=notes)
+                notes = []
         elif action == "answers":
             session_id = _session_id(service, product)
+            if _job_running(session_id):
+                raise IntakeError("Уже работаю над этой компанией. Подождите, страница обновится сама.")
             if not await _apply_answers(service, product, session_id, fields):
                 raise IntakeError("Ответьте хотя бы на один вопрос или отметьте «Не знаю».")
-            from app.core.composition import build_intake
-            try:
-                await build_intake(db, get_settings()).build(product.id, session_id, actor=ACTOR)
-            except IntakeError as exc:
-                # Answers are already saved; only the rebuild failed.
-                db.rollback()
-                return _render_profile(product, db, f"Ответы сохранены. {exc}", status_code=409)
+            _start_job(background, product.id, session_id, build=True)
         elif action == "build":
-            from app.core.composition import build_intake
             session_id = _session_id(service, product)
-            await build_intake(db, get_settings()).build(product.id, session_id, actor=ACTOR)
+            _start_job(background, product.id, session_id, build=True)
         elif action == "approve":
             session_id = _session_id(service, product)
             service.approve(product.id, session_id, UUID(fields.get("review_id", "")), actor=ACTOR, confirmed=True)

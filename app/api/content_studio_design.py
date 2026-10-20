@@ -599,3 +599,15 @@ STUDIO_CSS += """
  .sg-intake-actions a{text-align:center;padding:6px 0}
 }
 """
+STUDIO_CSS += """
+.sg-selector-foot{text-align:center;margin:20px 0 8px;font-size:14px}
+.sg-selector-foot a{color:#526176}
+"""
+STUDIO_CSS += """
+.sg-intake-working{border-color:#C9D6FF;background:#F5F8FF}
+.sg-intake-working h2{display:flex;align-items:center;gap:10px}
+.sg-intake-spinner{width:18px;height:18px;border-radius:50%;border:3px solid #C9D6FF;border-top-color:#2F5BEB;
+ animation:sg-spin 1s linear infinite;flex:none}
+@keyframes sg-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.sg-intake-spinner{animation:none}}
+"""

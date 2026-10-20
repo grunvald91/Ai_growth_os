@@ -25,7 +25,10 @@ def build_intake(db: Session, settings: Settings, provider: LLMProvider | None =
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     return CompanyIntakeService(
         db, products_root=settings.products_root,
-        llm=LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings), critic_enabled=settings.agent_critic_enabled),
+        # No critic here: every extracted value is already checked against a verbatim quote
+        # from its source, and the extra review/revision rounds pushed a draft past the
+        # web server's 300-second limit.
+        llm=LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings), critic_enabled=False),
         model=settings.llm_model, provider_name=settings.llm_provider,
         registry_lookup=registry_from_settings(settings),
     )

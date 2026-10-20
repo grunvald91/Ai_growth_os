@@ -1,14 +1,19 @@
 """Operator login and company-scoped customer accounts shared by Studio and API.
 
 Customer passwords use PBKDF2 hashes in a private operator-managed account file.
-Production always fails closed without configured credentials. Browser writes
-also require the explicitly configured HTTPS origin.
+Browsers sign in through the Studio login form (signed session cookie); HTTP Basic
+stays for API clients and browsers that already remember it. Production always
+fails closed without configured credentials. Browser writes also require the
+explicitly configured HTTPS origin.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import secrets
 import json
 import logging
+from urllib.parse import quote
 from uuid import uuid4
 from urllib.parse import urlsplit
 
@@ -16,10 +21,9 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.core.config import Settings, get_settings
+from app.core.studio_sessions import fingerprint, normalize_login
 
-_basic = HTTPBasic(auto_error=False)
 _logger = logging.getLogger(__name__)
-
 
 class StudioOriginError(HTTPException):
     """A denied command; presentation must never turn it into an accepted write."""
@@ -53,82 +57,183 @@ def _reject_origin(request: Request, status: int, detail: str, configured: str |
     raise StudioOriginError(status, detail)
 
 
+class _Utf8Basic(HTTPBasic):
+    """Browsers send UTF-8 for non-ASCII passwords; FastAPI only accepts ASCII."""
+
+    async def __call__(self, request: Request) -> HTTPBasicCredentials | None:
+        header = request.headers.get("Authorization", "")
+        scheme, _, param = header.partition(" ")
+        if scheme.lower() != "basic" or not param:
+            return None
+        try:
+            raw = base64.b64decode(param.strip(), validate=True)
+        except (ValueError, binascii.Error):
+            raise HTTPException(401, "Invalid authentication credentials",
+                                headers={"WWW-Authenticate": "Basic"}) from None
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = raw.decode("latin-1")  # Older browsers send Latin-1.
+        username, separator, password = text.partition(":")
+        if not separator:
+            raise HTTPException(401, "Invalid authentication credentials", headers={"WWW-Authenticate": "Basic"})
+        return HTTPBasicCredentials(username=username, password=password)
+
+
+_basic = _Utf8Basic(auto_error=False)
+
+
+def _production(settings) -> bool:
+    return settings.app_env.casefold() in {"production", "prod"}
+
+
+def _load_users(settings) -> dict:
+    from app.core.studio_accounts import load_accounts
+    try:
+        return load_accounts(settings)
+    except (OSError, ValueError):
+        raise HTTPException(503, "Studio accounts are not configured correctly") from None
+
+
+def _htpasswd(settings) -> dict[str, str]:
+    try:
+        hashes = dict(line.split(":", 1) for line in settings.studio_htpasswd_file.read_text().splitlines()
+                      if line and not line.startswith("#"))
+        if not hashes or any(not value.startswith("$apr1$") for value in hashes.values()):
+            raise ValueError("Unsupported operator hash")
+    except (OSError, ValueError):
+        raise HTTPException(503, "Studio operator hashes are not configured correctly") from None
+    return hashes
+
+
+def _operator_name(names, login: str) -> str | None:
+    """Exact operator login first, then case-insensitive (phones capitalize)."""
+    if login in names:
+        return login
+    folded = normalize_login(login)
+    return next((name for name in names if name.casefold() == folded), None)
+
+
+def credential_fingerprint(settings, users: dict, login: str) -> tuple[str, list[str] | None] | None:
+    """Current (fingerprint, scope) for a login, or None when it no longer exists."""
+    from app.core.studio_accounts import account_scope
+    if login in users:
+        account = users[login]
+        try:
+            return fingerprint(account["password_hash"]), account_scope(account)
+        except (KeyError, ValueError, TypeError):
+            raise HTTPException(503, "Studio account is not configured correctly") from None
+    if settings.studio_htpasswd_file:
+        hashes = _htpasswd(settings)
+        return (fingerprint(hashes[login]), None) if login in hashes else None
+    if settings.studio_admin_username and settings.studio_admin_password and login == settings.studio_admin_username:
+        return fingerprint(settings.studio_admin_username + "\0" + settings.studio_admin_password), None
+    return None
+
+
+def check_credentials(settings, users: dict, login: str, password: str) -> tuple[str, list[str] | None] | None:
+    """(canonical login, scope) for valid credentials; None when wrong.
+
+    Raises 503 when the account configuration itself is broken.
+    """
+    from app.core.studio_accounts import account_scope, verify_password
+    key = normalize_login(login)
+    if key in users:
+        account = users[key]
+        try:
+            valid = verify_password(key, password, account["password_hash"])
+            scope = account_scope(account)
+        except (KeyError, ValueError, TypeError):
+            raise HTTPException(503, "Studio account is not configured correctly") from None
+        return (key, scope) if valid else None
+    if settings.studio_htpasswd_file:
+        # Reuse the current Nginx operator hashes; never replace credentials.
+        from passlib.hash import apr_md5_crypt
+        hashes = _htpasswd(settings)
+        name = _operator_name(hashes, login.strip())
+        try:
+            valid = bool(name) and apr_md5_crypt.verify(password, hashes[name])
+        except ValueError:
+            raise HTTPException(503, "Invalid operator password hash") from None
+        return (name, None) if valid else None
+    username, configured = settings.studio_admin_username, settings.studio_admin_password
+    if username and configured:
+        name = _operator_name({username}, login.strip())
+        valid_password = secrets.compare_digest(password.encode(), configured.encode())
+        return (username, None) if name and valid_password else None
+    return None
+
+
+def _auth_configured(settings, users: dict) -> bool:
+    username, password = settings.studio_admin_username, settings.studio_admin_password
+    if users or settings.studio_htpasswd_file or (username and password):
+        return True
+    if _production(settings) or username or password:
+        # Fail closed on misconfigured production AND partial configuration.
+        raise HTTPException(503, "Growth Studio owner login is not configured")
+    return False
+
+
+def _session_login(request: Request, settings, users: dict) -> tuple[str, list[str] | None] | None:
+    from app.core.studio_sessions import COOKIE, read
+    session = read(settings, request.cookies.get(COOKIE))
+    if session is None:
+        return None
+    login, credential = session
+    current = credential_fingerprint(settings, users, login)
+    if current is None or not secrets.compare_digest(current[0], credential):
+        return None  # Password changed or account deleted: the cookie is no longer valid.
+    return login, current[1]
+
+
+def _wants_login_page(request: Request) -> bool:
+    return (request.method in {"GET", "HEAD"} and request.url.path.startswith("/studio")
+            and "text/html" in request.headers.get("accept", ""))
+
+
+def _login_required(request: Request):
+    if _wants_login_page(request):
+        target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        raise HTTPException(303, "Login required", headers={"Location": "/studio/login?next=" + quote(target, safe="")})
+    raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": "Basic"})
+
+
+def _apply_scope(request: Request, login: str, allowed: list[str] | None) -> str:
+    request.state.studio_product_ids = allowed
+    request.state.studio_account_role = "admin" if allowed is None else "company"
+    request.state.studio_login = login
+    if allowed is None:
+        return login
+    product_id = request.path_params.get("product_id")
+    if product_id is not None and str(product_id) not in allowed:
+        raise HTTPException(404, "Компания не найдена")
+    if request.url.path.startswith(("/intelligence", "/competitive-intelligence", "/studio/accounts")):
+        raise HTTPException(403, "Administrator account required")
+    if request.url.path == "/control/status" or (request.url.path == "/products" and request.method != "GET"):
+        raise HTTPException(403, "Administrator account required")
+    return login
+
+
 def require_studio_auth(
     request: Request,
     credentials: HTTPBasicCredentials | None = Depends(_basic),
     settings: Settings = Depends(get_settings),
 ):
-    username = settings.studio_admin_username
-    password = settings.studio_admin_password
-    production = settings.app_env.casefold() in {"production", "prod"}
-
-    from app.core.studio_accounts import account_scope, load_accounts, verify_password
-    try:
-        users = load_accounts(settings)
-    except (OSError, ValueError):
-        raise HTTPException(503, "Studio accounts are not configured correctly") from None
-    if credentials and credentials.username in users:
-        account = users[credentials.username]
-        try:
-            valid = verify_password(credentials.username, credentials.password, account["password_hash"])
-            allowed = account_scope(account)
-        except (KeyError, ValueError, TypeError):
-            raise HTTPException(503, "Studio account is not configured correctly") from None
-        if not valid:
-            raise HTTPException(401, "Incorrect credentials", headers={"WWW-Authenticate": "Basic"})
-        request.state.studio_product_ids = allowed
-        request.state.studio_account_role = "admin" if allowed is None else "company"
-        if allowed is None:
-            return credentials.username
-        product_id = request.path_params.get("product_id")
-        if product_id is not None and str(product_id) not in allowed:
-            raise HTTPException(404, "Компания не найдена")
-        if request.url.path.startswith(("/intelligence", "/competitive-intelligence", "/studio/accounts")):
-            raise HTTPException(403, "Administrator account required")
-        if request.url.path == "/control/status" or (request.url.path == "/products" and request.method != "GET"):
-            raise HTTPException(403, "Administrator account required")
-        return credentials.username
-    if settings.studio_htpasswd_file:
-        # Reuse the current Nginx operator hashes; never replace credentials.
-        from passlib.hash import apr_md5_crypt
-        try:
-            hashes = dict(line.split(":", 1) for line in settings.studio_htpasswd_file.read_text().splitlines() if line and not line.startswith("#"))
-            if not hashes or any(not value.startswith("$apr1$") for value in hashes.values()):
-                raise ValueError("Unsupported operator hash")
-        except (OSError, ValueError):
-            raise HTTPException(503, "Studio operator hashes are not configured correctly") from None
-        if not credentials:
-            raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": "Basic"})
-        encoded = hashes.get(credentials.username)
-        try:
-            valid = bool(encoded) and apr_md5_crypt.verify(credentials.password, encoded)
-        except ValueError:
-            raise HTTPException(503, "Invalid operator password hash") from None
-        if not valid:
-            raise HTTPException(401, "Incorrect credentials", headers={"WWW-Authenticate": "Basic"})
-        request.state.studio_product_ids = None
-        return credentials.username
-    if not username or not password:
-        if users and credentials:
-            raise HTTPException(401, "Incorrect credentials", headers={"WWW-Authenticate": "Basic"})
-        if users:
-            raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": "Basic"})
-        if production or username or password:
-            # Fail closed on misconfigured production AND partial configuration.
-            raise HTTPException(503, "Growth Studio owner login is not configured")
+    users = _load_users(settings)
+    if not _auth_configured(settings, users):
         request.state.studio_product_ids = None
         return None  # Developer loopback only; never a production exemption.
-
+    # A signed login session wins over credentials the browser remembers for Basic auth,
+    # so signing in with another account through the form really switches the user.
+    session = _session_login(request, settings, users)
+    if session is not None:
+        return _apply_scope(request, *session)
     if not credentials:
-        raise HTTPException(401, "Authentication required",
-                            headers={"WWW-Authenticate": "Basic"})
-    valid_user = secrets.compare_digest(credentials.username.encode(), username.encode())
-    valid_password = secrets.compare_digest(credentials.password.encode(), password.encode())
-    if not valid_user or not valid_password:
-        raise HTTPException(401, "Incorrect credentials",
-                            headers={"WWW-Authenticate": "Basic"})
-    request.state.studio_product_ids = None  # Explicit operator account.
-    return username
+        _login_required(request)
+    result = check_credentials(settings, users, credentials.username, credentials.password)
+    if result is None:
+        raise HTTPException(401, "Incorrect credentials", headers={"WWW-Authenticate": "Basic"})
+    return _apply_scope(request, *result)
 
 
 def require_studio_csrf(

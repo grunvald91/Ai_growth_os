@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     studio_public_origin: str | None = None
     studio_htpasswd_file: Path | None = None
     studio_users_file: Path | None = None
+    # Optional; without it a private key file is created next to the accounts file.
+    studio_session_secret: str | None = None
     # Comma-separated Studio logins allowed to open /studio/tune (agent prompts and settings).
     studio_tune_usernames: str = ""
     telegram_bot_token: str | None = None

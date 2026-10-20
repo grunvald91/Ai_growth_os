@@ -50,6 +50,8 @@ def fake_site(monkeypatch):
 
     def get(self, url):
         requested.append(url)
+        if url.count("/") == 2:
+            url += "/"  # A real server answers the bare domain with its home page.
         if url not in PAGES:
             raise IntakeError("Страница недоступна (HTTP 404).")
         return url, "text/html; charset=utf-8", PAGES[url]
@@ -226,7 +228,27 @@ def studio(tmp_path, monkeypatch):
         def override():
             yield db
         app.dependency_overrides[get_db] = override
+
+        class Shared:
+            """Background jobs use the test database; closing it is the fixture's job."""
+            def __getattr__(self, name):
+                return getattr(db, name)
+
+            def close(self):
+                pass
+
+        import app.api.content_studio_company as company
+        monkeypatch.setattr(company, "_background_session", lambda: Shared())
+        company._JOBS.clear()
+        provider = FakeLLMProvider(LLMResponse(content='{"claims":[]}', model="kimi-2.7"))
+
+        def build_intake(session, settings, provider_override=None):
+            return CompanyIntakeService(session, products_root=Path(tmp_path),
+                                        llm=LLMService(privacy_gateway=PrivacyGateway(), provider=provider))
+
+        monkeypatch.setattr("app.core.composition.build_intake", build_intake)
         with TestClient(app) as client:
+            client.provider = provider
             yield client, db
         app.dependency_overrides.clear()
     Base.metadata.drop_all(engine)
@@ -251,30 +273,26 @@ def test_new_company_with_site_and_price_file_collects_every_material(studio, fa
                            files=[("files", ("price.csv", "Услуга;Цена\nМаникюр;1500\n".encode(), "text/csv"))],
                            follow_redirects=False)
     assert response.status_code == 303
-    assert "notice=" in response.headers["location"]
     product = db.scalar(select(Product).where(Product.name == "Ноготок"))
+    # Site, registry and the first draft ran in the background right after the redirect.
     page = client.get(response.headers["location"]).text
     assert "Прочитано страниц сайта: 3." in page
+    assert "Черновик профиля" in page and "Подтвердить профиль" in page
+    assert len(client.provider.requests) == 1
+    again = client.get(response.headers["location"]).text
+    assert "Прочитано страниц сайта" not in again  # Job messages are shown once.
     assert "price.csv" in page and "https://nogotok.example/kontakty" in page
     assert "Материалы · " in page
     task = db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == "company_intake"))
     assert task is not None
 
 
-def test_profile_shows_questions_and_answers_rebuild_the_draft(studio, monkeypatch):
+def test_profile_shows_questions_and_answers_rebuild_the_draft(studio):
     client, db = studio
-    provider = FakeLLMProvider(LLMResponse(content='{"claims":[]}', model="kimi-2.7"))
-
-    def build_intake(db, settings, provider_override=None):
-        from app.core.config import get_settings
-        return CompanyIntakeService(db, products_root=get_settings().products_root,
-                                    llm=LLMService(privacy_gateway=PrivacyGateway(), provider=provider))
-
-    monkeypatch.setattr("app.core.composition.build_intake", build_intake)
+    provider = client.provider
     response = client.post("/studio/new", data={"name": "Ноготок", "about": ABOUT}, follow_redirects=False)
     base = response.headers["location"]
-    assert client.post(base + "/build", data={"go": "1"}, follow_redirects=False).status_code == 303
-    page = client.get(base).text
+    page = client.get(base).text  # The first draft was built automatically after creation.
     assert "Чего не хватает" in page and "Ответить и пересобрать профиль" in page
     assert 'name="q0_field"' in page
     field = page.split('name="q0_field" value="')[1].split('"')[0]
@@ -291,9 +309,83 @@ def test_profile_shows_questions_and_answers_rebuild_the_draft(studio, monkeypat
     assert empty.status_code == 409
 
 
+def test_site_without_https_is_accepted_and_normalized(studio, fake_site):
+    client, db = studio
+    page = client.get("/studio/new").text
+    assert 'name="website" type="text" inputmode="url"' in page  # No browser block on «nogotok.ru».
+    response = client.post("/studio/new", data={"name": "Ноготок", "about": ABOUT, "website": "nogotok.example"},
+                           follow_redirects=False)
+    assert "Прочитано страниц сайта: 3." in client.get(response.headers["location"]).text
+
+
+def test_running_job_shows_progress_and_blocks_a_second_build(studio):
+    import time
+    import app.api.content_studio_company as company
+    client, db = studio
+    response = client.post("/studio/new", data={"name": "Ноготок", "about": ABOUT}, follow_redirects=False)
+    base = response.headers["location"]
+    client.get(base)
+    product = db.scalar(select(Product).where(Product.name == "Ноготок"))
+    task = db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == "company_intake"))
+    company._JOBS[str(task.id)] = {"running": True, "started": time.time(), "stage": "Собираю профиль",
+                                   "notes": [], "error": None}
+    page = client.get(base).text
+    assert "Собираю профиль…" in page and 'http-equiv="refresh"' in page
+    assert "Добавить материалы" not in page
+    blocked = client.post(base + "/build", data={"go": "1"}, follow_redirects=False)
+    assert blocked.status_code == 409 and "Уже работаю" in blocked.text
+    company._JOBS[str(task.id)]["started"] -= company.JOB_STALE_SECONDS + 1
+    stale = client.get(base).text
+    assert "Работа прервалась" in stale and 'http-equiv="refresh"' not in stale
+    assert "Добавить материалы" in stale  # The owner can act again.
+
+
+def test_failed_background_build_is_explained_on_the_page(studio):
+    client, db = studio
+    client.provider.response = LLMResponse(content="not json", model="kimi-2.7")
+    response = client.post("/studio/new", data={"name": "Ноготок", "about": ABOUT}, follow_redirects=False)
+    page = client.get(response.headers["location"]).text
+    assert "Не удалось проверить извлечённые данные" in page
+    assert "Собрать профиль" in page
+
+
 def test_oversized_upload_is_rejected_before_parsing(studio):
     client, _ = studio
     response = client.post("/studio/new", data={"name": "Ноготок", "about": ABOUT},
                            files=[("files", ("big.txt", b"x" * 10, "text/plain"))],
                            headers={"content-length": str(30_000_000)})
     assert response.status_code in {400, 413}
+
+
+@pytest.mark.asyncio
+async def test_one_unverifiable_claim_is_dropped_without_losing_the_verified_ones(db, tmp_path):
+    product, session, service = _service(db, tmp_path)
+    source = service.add_text(product.id, session, "Студия «Ноготок».\nРаботаем   в Сочи для женщин.",
+                              actor="owner")["sources"][-1]
+    claims = [
+        # Re-flowed whitespace, straight quotes and another case still match the source words.
+        {"source_id": source["id"], "field_path": "identity.name", "proposed_value": "Ноготок",
+         "evidence_excerpt": 'студия "Ноготок". Работаем в Сочи', "kind": "candidate"},
+        {"source_id": source["id"], "field_path": "identity.service_geography", "proposed_value": ["Москва"],
+         "evidence_excerpt": "Работаем в Москве", "kind": "candidate"},
+        {"source_id": source["id"], "field_path": "identity.languages", "proposed_value": 42,
+         "evidence_excerpt": "для женщин", "kind": "candidate"},
+        {"source_id": "invented", "field_path": "identity.one_liner", "proposed_value": "x",
+         "evidence_excerpt": "для женщин", "kind": "candidate"},
+    ]
+    service.llm._provider.response = LLMResponse(content=json.dumps({"claims": claims}), model="kimi-2.7")
+    review = await service.build(product.id, session, actor="owner")
+    assert [row["field_path"] for row in review["supported"]] == ["identity.name"]
+    assert sorted(row["reason"] for row in review["rejected_claims"]) == ["quote_not_found", "unknown_source", "wrong_type"]
+    assert review["profile_preview"]["identity"]["name"] == "Ноготок"
+    assert "Москва" not in json.dumps(review["profile_preview"], ensure_ascii=False)
+    from app.intake.telegram import render_review
+    assert "Отброшено сведений без точной цитаты в источнике: 3" in render_review(review)
+
+
+def test_profile_extraction_skips_the_critic_even_when_enabled(tmp_path):
+    from app.core.composition import build_intake
+    from app.core.config import Settings
+    settings = Settings(_env_file=None, agent_critic_enabled=True, products_root=tmp_path)
+    service = build_intake(None, settings, provider=FakeLLMProvider(LLMResponse(content="{}", model="m")))
+    assert service.llm._critic_enabled is False
