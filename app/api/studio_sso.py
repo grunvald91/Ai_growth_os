@@ -54,9 +54,27 @@ EXPIRED = ("Ссылка устарела", "Ссылка из ServGo дейст
            "Вернитесь в админку ServGo и нажмите «Маркетинг» ещё раз.", 400)
 
 
-def _cookie_redirect(settings: Settings, claims: tickets.Claims, role: str, product_id, target: str) -> RedirectResponse:
+def _password_session_covers(request: Request, settings: Settings, product_id) -> bool | None:
+    """None: no password sign-in in this browser. True: it already opens this company (the owner)."""
+    from app.api.content_studio_auth import _load_users, _session_login
+    try:
+        session = _session_login(request, settings, _load_users(settings))
+    except Exception:  # noqa: BLE001 - a broken accounts file must not block the ServGo sign-in.
+        return None
+    if session is None:
+        return None
+    allowed = session[1]
+    return allowed is None or str(product_id) in allowed
+
+
+def _cookie_redirect(settings: Settings, claims: tickets.Claims, role: str, product_id, target: str,
+                     request: Request | None = None) -> RedirectResponse:
     session = tickets.Claims(claims.user_id, claims.business_id, role, claims.name, claims.jti, claims.expires)
     response = RedirectResponse(target, status_code=303, headers=HEADERS)
+    if request is not None and _password_session_covers(request, settings, product_id) is False:
+        # A password sign-in for other companies would hide this one; the person chose ServGo now.
+        from app.core.studio_sessions import COOKIE as PASSWORD_COOKIE
+        response.delete_cookie(PASSWORD_COOKIE, path="/", httponly=True, samesite="lax", secure=_secure(settings))
     response.set_cookie(tickets.COOKIE, tickets.issue_session(settings, session, str(product_id)),
                         max_age=tickets.MAX_AGE, path="/", httponly=True, samesite="lax", secure=_secure(settings))
     return response
@@ -113,7 +131,7 @@ def _first_visit(request: Request, background: BackgroundTasks, db: Session, set
         link = _link_for(db, claims.business_id)
         if link is None or not _use_ticket(db, claims, link.product_id):
             return _message(*EXPIRED, action=("Войти по логину", "/studio/login"))
-        return _cookie_redirect(settings, claims, role, link.product_id, f"/studio/products/{link.product_id}")
+        return _cookie_redirect(settings, claims, role, link.product_id, f"/studio/products/{link.product_id}", request)
     target = f"/studio/products/{product.id}/profile"
     try:
         service = _service(db)
@@ -124,7 +142,7 @@ def _first_visit(request: Request, background: BackgroundTasks, db: Session, set
         _start_job(background, product.id, session_id, build=True)
     except IntakeError:
         db.rollback()  # The company exists; the owner continues from the profile page.
-    return _cookie_redirect(settings, claims, role, product.id, target)
+    return _cookie_redirect(settings, claims, role, product.id, target, request)
 
 
 @router.get("/studio/sso", response_class=HTMLResponse)
@@ -149,4 +167,4 @@ def sso_landing(request: Request, background: BackgroundTasks, t: str | None = N
         return _first_visit(request, background, db, settings, claims, role)
     if not _use_ticket(db, claims, link.product_id):
         return _message(*EXPIRED, action=("Войти по логину", "/studio/login"))
-    return _cookie_redirect(settings, claims, role, link.product_id, f"/studio/products/{link.product_id}")
+    return _cookie_redirect(settings, claims, role, link.product_id, f"/studio/products/{link.product_id}", request)

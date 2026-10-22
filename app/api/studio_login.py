@@ -125,7 +125,7 @@ async def login_submit(request: Request, settings: Settings = Depends(get_settin
     response = RedirectResponse(next_url, status_code=303)
     response.set_cookie(COOKIE, issue(settings, name, credential), max_age=MAX_AGE, path="/",
                         httponly=True, samesite="lax", secure=_secure_cookie(settings))
-    # A sign-in from the ServGo admin must not shadow the login the person has just chosen.
+    # The password sign-in takes priority anyway; drop the ServGo one so nothing stale remains.
     response.delete_cookie(SSO_COOKIE, path="/", httponly=True, samesite="lax", secure=_secure_cookie(settings))
     return response
 

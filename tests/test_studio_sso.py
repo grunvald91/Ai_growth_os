@@ -469,3 +469,58 @@ def test_after_disconnecting_the_next_visit_starts_a_new_company(env):
     response = browser().get("/studio/sso", params={"t": make_ticket(jti="d" * 16)})
     assert response.status_code == 303 and response.headers["location"].endswith("/profile")
     assert db.scalar(select(Product).where(Product.name == "Салон Лотос")) is not None
+
+
+def test_disconnecting_ends_existing_sessions_at_once(env):
+    db, settings, salon, *_ = env
+    client = signed_in(env)
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+    link = db.scalar(select(StudioBusinessLink))
+    browser().post(f"/studio/products/{salon.id}/connections/{link.id}/delete", auth=OWNER, headers={"origin": ORIGIN})
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+
+
+def test_relinking_to_another_company_ends_the_old_session(env):
+    db, settings, salon, other, _ = env
+    client = signed_in(env)
+    browser().post(f"/studio/products/{salon.id}/connections", auth=OWNER, headers={"origin": ORIGIN},
+                   data={"servgo_business_id": "12", "product_id": str(other.id)})
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+    assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 401
+
+
+def test_a_link_from_someone_else_cannot_push_the_owner_out(env):
+    """The studio owner signed in with a password; a ServGo link for another business must not replace that."""
+    db, settings, salon, other, servgo = env
+    client = browser()
+    assert client.post("/studio/login", data={"username": "owner", "password": "correct-secret", "next": "/studio"},
+                       headers={"origin": ORIGIN}).status_code == 303
+    response = client.get("/studio/sso", params={"t": make_ticket(jti="o" * 16)})
+    assert response.status_code == 303
+    assert not any(c.lower().startswith("sg_session=") for c in response.headers.get_list("set-cookie"))
+    # Still the owner: sees every company and the accounts page.
+    assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 200
+    assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 200
+
+
+def test_a_company_password_session_for_other_companies_is_replaced(env, monkeypatch):
+    db, settings, salon, other, servgo = env
+    from app.core import studio_sessions
+    from app.api import content_studio_auth
+    monkeypatch.setattr(content_studio_auth, "_load_users", lambda s: {"x": {"password_hash": "h", "product_ids": [str(other.id)]}})
+    monkeypatch.setattr(content_studio_auth, "credential_fingerprint", lambda s, u, login: ("f", [str(other.id)]))
+    client = browser()
+    client.cookies.set(studio_sessions.COOKIE, studio_sessions.issue(settings, "x", "f"), domain="studio.test")
+    response = client.get("/studio/sso", params={"t": make_ticket(jti="p" * 16)})
+    assert response.status_code == 303
+    cookies = [c.lower() for c in response.headers.get_list("set-cookie")]
+    assert any(c.startswith("sg_session=") and "max-age=0" in c for c in cookies)   # dropped
+    assert any(c.startswith("sg_sso=") and "max-age=0" not in c for c in cookies)    # ServGo session set
+
+
+def test_about_text_describes_rental_halls_and_per_person_prices():
+    from app.sso.company import about_text
+    text = about_text({"name": "Лофт", "services": [{"name": "Аренда", "price": 1500, "per_person": True}],
+                       "resources": [{"name": "Зал Лофт", "capacity": 20, "area_sqm": 80, "description": "Окна в пол"}]})
+    assert "Аренда — 1 500 ₽ с человека" in text
+    assert "- Зал Лофт — до 20 человек, 80 м². Окна в пол" in text

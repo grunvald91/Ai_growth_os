@@ -216,10 +216,26 @@ def provision_sso_secrets(env_file: Path = ENV_FILE, handoff: Path = SSO_HANDOFF
         # Short or empty placeholders (KEY=) are replaced, not duplicated.
         kept = [line for line in text.splitlines() if line.partition("=")[0].strip() not in created]
         body = "\n".join(kept) + ("\n" if kept else "")
-        mode = env_file.stat().st_mode & 0o777 if env_file.exists() else 0o600
-        descriptor = os.open(env_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-        with os.fdopen(descriptor, "w") as stream:
-            stream.write(body + addition)
+        # Written to a temporary file and swapped in at once: a failure half-way must never
+        # leave production with a truncated .env (it holds every other secret too).
+        stat = env_file.stat() if env_file.exists() else None
+        temporary = env_file.with_name(env_file.name + ".sso-tmp")
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.st_mode & 0o777 if stat else 0o600)
+        try:
+            with os.fdopen(descriptor, "w") as stream:
+                stream.write(body + addition)
+                stream.flush()
+                os.fsync(stream.fileno())
+            if stat:
+                os.chmod(temporary, stat.st_mode & 0o777)
+                try:
+                    os.chown(temporary, stat.st_uid, stat.st_gid)
+                except PermissionError:
+                    pass  # Not root (tests); production runs as root and keeps the owner.
+            os.replace(temporary, env_file)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
     handoff.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(handoff, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w") as stream:

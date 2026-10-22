@@ -114,3 +114,13 @@ def test_sso_provisioning_works_without_an_env_file_and_does_not_print(tmp_path,
     assert oct(env_file.stat().st_mode & 0o777) == "0o600"
     secret = dict(line.split("=", 1) for line in env_file.read_text().splitlines())["SERVGO_SSO_SECRET"]
     assert secret not in capsys.readouterr().out
+
+
+def test_sso_provisioning_leaves_the_env_file_whole_if_writing_fails(tmp_path, monkeypatch):
+    env_file, handoff = tmp_path / ".env", tmp_path / "servgo_sso.env"
+    env_file.write_text("ANTHROPIC_API_KEY=keep-me\n")
+    monkeypatch.setattr(deploy_growth.os, "replace", lambda *a: (_ for _ in ()).throw(OSError("disk full")))
+    with pytest.raises(OSError):
+        deploy_growth.provision_sso_secrets(env_file, handoff)
+    assert env_file.read_text() == "ANTHROPIC_API_KEY=keep-me\n"
+    assert not (tmp_path / ".env.sso-tmp").exists()
