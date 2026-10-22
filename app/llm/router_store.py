@@ -14,10 +14,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from app.core.config import Settings
-from app.llm.model_router import ModelRouter, RoutingError
+from app.llm.model_router import MAX_PROFILES, ModelRouter, RoutingError
 
 
 class RouterStoreError(ValueError):
@@ -31,9 +31,18 @@ class RouterConflict(RouterStoreError):
 class RouterConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     enabled: StrictBool = False
-    profiles: list[dict] = Field(min_length=1, max_length=40)
+    profiles: list[dict] = Field(min_length=1, max_length=MAX_PROFILES)
     overrides: dict[str, list[str]] = Field(default_factory=dict)
     max_call_usd: str | None = None
+
+    @field_validator("profiles")
+    @classmethod
+    def _explicit_defaults(cls, profiles):
+        # The router treats a missing "enabled" as on. The team page must see the same thing,
+        # so every profile always carries its full set of fields.
+        defaults = {"enabled": True, "input_usd_per_million": None, "output_usd_per_million": None,
+                    "web_search_verified": False, "priority": 100}
+        return [{**defaults, **item} for item in profiles]
 
 
 class RouterState(BaseModel):
@@ -136,6 +145,23 @@ def effective_router_settings(settings: Settings) -> Settings:
         "model_router_overrides": json.dumps(config.overrides),
         "model_router_max_call_usd": config.max_call_usd,
     })
+
+
+def role_override(settings: Settings, role: str) -> list[str]:
+    """The owner's chosen model chain for a role (main first), or [] when none is set.
+
+    Read fresh from the shared file so a change on the team page reaches the next job
+    without a restart. A broken file never blocks work: it simply yields no override.
+    """
+    try:
+        effective = effective_router_settings(settings)
+        if not effective.model_router_enabled:
+            return []  # Router switched off on the team page: choices are not applied anywhere.
+        data = json.loads(effective.model_router_overrides or "{}")
+    except (RouterStoreError, ValueError, OSError, AttributeError, TypeError):
+        return []
+    chain = data.get(role) if isinstance(data, dict) else None
+    return [m for m in chain if isinstance(m, str) and m] if isinstance(chain, list) else []
 
 
 def save_state(settings: Settings, update: RouterUpdate) -> RouterState:

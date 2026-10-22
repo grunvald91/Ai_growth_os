@@ -2,7 +2,7 @@
 'use strict';
 // Same prefix as the page: the browser resends the Studio login only under /studio/.
 var API='/studio/team/api';
-var token='', state=null, preview=null, dirty=false, available={};
+var token='', state=null, preview=null, dirty=false, available={}, catalog=null;
 // Controls that change or read the loaded configuration.
 var CONTROLS=['previewButton','saveButton','enableRouter','budget','addModel','catalogButton','usageButton'];
 var $=function(id){return document.getElementById(id);};
@@ -17,6 +17,8 @@ function alertMessage(message,error){
  $('notice').hidden=!!error;$('error').hidden=!error;
  asText($(error?'error':'notice'),message);
 }
+$('notice').addEventListener('click',function(){this.hidden=true;});
+$('error').addEventListener('click',function(){this.hidden=true;});
 function errorMessage(error){
  if(error&&error.status===401){token='';$('authOverlay').hidden=false;}
  alertMessage(error.message||'Ошибка запроса',true);
@@ -38,9 +40,16 @@ async function api(path,method,body){
 }
 function dropdown(value,rows,handler){
  var select=element('select');
- rows.forEach(function(row){
+ function add(parent,row){
   var option=element('option','',row[1]);option.value=row[0];
-  option.selected=row[0]===value;select.appendChild(option);
+  option.selected=row[0]===value;parent.appendChild(option);
+ }
+ rows.forEach(function(row){
+  if(row.group){
+   var group=element('optgroup');group.label=row.group;
+   row.rows.forEach(function(item){add(group,item);});
+   if(row.rows.length)select.appendChild(group);
+  }else add(select,row);
  });
  select.addEventListener('change',function(){handler(select.value);});
  return select;
@@ -52,24 +61,57 @@ function field(label,node,className){
 function markDirty(){
  dirty=true;$('dirty').hidden=false;$('statIssues').textContent='Проверить';
  $('statEnabled').textContent=state.config.enabled?'Включён*':'Выключен';
- $('notice').hidden=true;
 }
-function enabledModels(){return state.config.profiles.filter(function(item){return item.enabled;});}
+// A profile without the field is enabled, exactly as the router reads it.
+function isEnabled(item){return item.enabled!==false;}
+function enabledModels(){return state.config.profiles.filter(isEnabled);}
+function roleName(key){
+ var id=key.replace(/:critic$/,''),found=((preview&&preview.roles)||[]).filter(function(r){return r.id===id;})[0];
+ return (found?found.name:id)+(/:critic$/.test(key)?' (критик)':'');
+}
+var openReserves={};
+var TIER_NAMES={economy:'Эконом',balanced:'Баланс',premium:'Премиум'};
+function profileFor(id){return state.config.profiles.filter(function(p){return p.model===id;})[0];}
+// Every model the gateway lists can be chosen: one that is not in the team's catalog yet is
+// added (enabled, with a suggested class) the moment it is picked.
 function possibleModels(current,defaultLabel){
- var values=[['',defaultLabel]];
- enabledModels().forEach(function(model){values.push([model.model,model.model]);});
- if(current&&!values.some(function(row){return row[0]===current;})){
-  values.push([current,current+' (отключена)']);
+ var rows=[['',defaultLabel]],mine=[],others=[],rest=[],seen={};
+ enabledModels().forEach(function(model){mine.push([model.model,model.model]);seen[model.model]=1;});
+ if(current&&!seen[current]){
+  var known=profileFor(current);
+  mine.push([current,current+(known?' (отключена)':' (нет в каталоге)')]);seen[current]=1;
  }
- return values;
+ ((catalog&&catalog.gateway_models)||[]).forEach(function(m){
+  if(seen[m.model])return;
+  (m.text?others:rest).push([m.model,m.model+(profileFor(m.model)?' (отключена)':'')]);seen[m.model]=1;
+ });
+ rows.push({group:'В каталоге команды',rows:mine});
+ rows.push({group:'Доступны в ClaudeHub — добавятся при выборе',rows:others});
+ rows.push({group:'Прочие модели ClaudeHub (картинки, голос и др.)',rows:rest});
+ return rows;
 }
-function setOverride(role,phase,main,fallback){
- var key=phase==='critic'?role+':critic':role;
- var values=main?[main]:[];
- if(phase==='main'&&main&&fallback&&fallback!==main)values.push(fallback);
- if(values.length)state.config.overrides[key]=values;
- else delete state.config.overrides[key];
- markDirty();
+function ensureProfile(id){
+ if(!id)return;
+ var known=profileFor(id);
+ if(known){
+  if(!isEnabled(known)){known.enabled=true;alertMessage('Модель '+id+' включена. Проверьте тариф на вкладке «Модели и тарифы».',false);}
+  return;
+ }
+ if(state.config.profiles.length>=100){alertMessage('Достигнут предел в 100 моделей каталога команды.',true);return;}
+ var info=((catalog&&catalog.gateway_models)||[]).filter(function(m){return m.model===id;})[0];
+ var tier=info?info.suggested_tier:'balanced';
+ var odd=info&&info.text===false?' Похоже, это не текстовая модель (картинки, голос и др.): для текстовой роли она, скорее всего, не подойдёт.':'';
+ state.config.profiles.push({model:id,tier:tier,enabled:true,input_usd_per_million:null,
+  output_usd_per_million:null,web_search_verified:false,priority:100});
+ alertMessage('Модель '+id+' добавлена в каталог команды (класс: '+TIER_NAMES[tier]+
+  ', тариф неизвестен). Изменить можно на вкладке «Модели и тарифы».'+odd,!!odd);
+}
+// One role has up to three models in order: the main one and two reserves.
+function setChain(key,chain){
+ var values=[];
+ chain.forEach(function(id){if(id&&values.indexOf(id)<0&&values.length<3)values.push(id);});
+ if(values.length)state.config.overrides[key]=values;else delete state.config.overrides[key];
+ markDirty();schedulePreview();
 }
 function roleCard(role){
  var bad=role.main.status!=='ready'||role.critic.status!=='ready';
@@ -78,25 +120,36 @@ function roleCard(role){
  title.appendChild(element('h3','',role.name));
  title.appendChild(element('small','',role.description));
  head.appendChild(title);
- var labels={economy:'Эконом',balanced:'Баланс',premium:'Премиум'};
- head.appendChild(element('span','badge '+role.main.tier,labels[role.main.tier]));
+ head.appendChild(element('span','badge '+role.main.tier,TIER_NAMES[role.main.tier]));
  card.appendChild(head);
- var own=state.config.overrides[role.id]||[],review=state.config.overrides[role.id+':critic']||[];
- var main=own[0]||'',fallback=own[1]||'',critic=review[0]||'';
+ var mainKey=role.id,criticKey=role.id+':critic';
+ var mainChain=(state.config.overrides[mainKey]||[]).slice(),criticChain=(state.config.overrides[criticKey]||[]).slice();
+ function picker(label,chain,index,key,defaultLabel,className){
+  var current=chain[index]||'';
+  var node=dropdown(current,possibleModels(current,defaultLabel),function(value){
+   ensureProfile(value);
+   chain[index]=value;
+   // "Automatically" in the first slot hands the whole chain back to the router.
+   if(index===0&&!value)chain.length=0;
+   setChain(key,chain.filter(Boolean));renderRoles();renderModels();
+  });
+  if(index>0&&!chain[0])node.disabled=true;
+  return field(label,node,className);
+ }
  var grid=element('div','card-grid');
- grid.appendChild(field('Основная модель',dropdown(main,possibleModels(main,'Автоматически'),function(value){
-  main=value;if(!main)fallback='';
-  setOverride(role.id,'main',main,fallback);renderRoles();
- })));
- var back=dropdown(fallback,possibleModels(fallback,'Без резервной'),function(value){
-  fallback=value;setOverride(role.id,'main',main,fallback);
- });
- back.disabled=!main;
- grid.appendChild(field('Резервная модель',back));
- grid.appendChild(field('Модель критика',dropdown(critic,possibleModels(critic,'Автоматически'),function(value){
-  critic=value;setOverride(role.id,'critic',critic,'');
- }),'critic'));
+ grid.appendChild(picker('Основная модель',mainChain,0,mainKey,'Автоматически'));
+ grid.appendChild(picker('Модель критика',criticChain,0,criticKey,'Автоматически'));
  card.appendChild(grid);
+ var reserve=element('details','reserve');
+ reserve.open=!!openReserves[role.id]||mainChain.length>1||criticChain.length>1;
+ reserve.addEventListener('toggle',function(){openReserves[role.id]=reserve.open;});
+ reserve.appendChild(element('summary','','Резервные модели (если основная не отвечает)'));
+ var reserveGrid=element('div','card-grid');
+ reserveGrid.appendChild(picker('Резервная 1 — основная',mainChain,1,mainKey,'Без резервной'));
+ reserveGrid.appendChild(picker('Резервная 1 — критик',criticChain,1,criticKey,'Без резервной'));
+ reserveGrid.appendChild(picker('Резервная 2 — основная',mainChain,2,mainKey,'Без резервной'));
+ reserveGrid.appendChild(picker('Резервная 2 — критик',criticChain,2,criticKey,'Без резервной'));
+ reserve.appendChild(reserveGrid);card.appendChild(reserve);
  var note=element('div','card-summary');
  var mainText=role.main.status==='ready'?role.main.models.join(' → '):role.main.reason;
  var criticText=role.critic.status==='ready'?role.critic.models.join(' → '):role.critic.reason;
@@ -136,11 +189,11 @@ function renderModels(){
   identity.appendChild(element('div','model-meta',status));row.appendChild(identity);
   row.appendChild(field('Класс',dropdown(model.tier,[
    ['economy','Эконом'],['balanced','Баланс'],['premium','Премиум']
-  ],function(v){model.tier=v;markDirty();})));
+  ],function(v){model.tier=v;markDirty();schedulePreview();})));
   var priority=element('input');priority.type='number';priority.min='1';priority.max='999';priority.step='1';
   priority.value=String(model.priority||100);
   priority.addEventListener('change',function(){var v=parseInt(priority.value,10);
-   model.priority=(v>=1&&v<=999)?v:100;priority.value=String(model.priority);markDirty();});
+   model.priority=(v>=1&&v<=999)?v:100;priority.value=String(model.priority);markDirty();schedulePreview();});
   row.appendChild(field('Приоритет (1 — первая)',priority));
   ['input_usd_per_million','output_usd_per_million'].forEach(function(key,index){
    var input=element('input');input.type='text';input.inputMode='decimal';
@@ -148,13 +201,71 @@ function renderModels(){
    input.addEventListener('change',function(){model[key]=input.value.trim()||null;markDirty();});
    row.appendChild(field(index?'Выход / 1 млн токенов, USD':'Вход / 1 млн токенов, USD',input));
   });
-  var checkbox=element('input');checkbox.type='checkbox';checkbox.checked=!!model.enabled;
-  checkbox.addEventListener('change',function(){model.enabled=checkbox.checked;markDirty();renderModels();});
+  var checkbox=element('input');checkbox.type='checkbox';checkbox.checked=isEnabled(model);
+  checkbox.addEventListener('change',function(){
+   model.enabled=checkbox.checked;
+   if(!model.enabled){
+    // A switched-off model cannot stay in any role's chain: take it out and say where it was.
+    var roles=[];
+    Object.keys(state.config.overrides).forEach(function(key){
+     var chain=state.config.overrides[key];
+     if(chain.indexOf(model.model)<0)return;
+     roles.push(roleName(key));
+     var rest=chain.filter(function(id){return id!==model.model;});
+     if(rest.length)state.config.overrides[key]=rest;else delete state.config.overrides[key];
+    });
+    if(roles.length)alertMessage('Модель '+model.model+' выключена и убрана из: '+roles.join(', ')+'. Там снова автоматический выбор.',false);
+   }
+   markDirty();renderModels();renderRoles();schedulePreview();
+  });
   var label=element('label','model-enable');
   label.appendChild(checkbox);label.appendChild(element('span','','Разрешена'));
   row.appendChild(label);$('modelRows').appendChild(row);
  });
  $('statModels').textContent=enabledModels().length;
+ renderCatalogAdd();
+}
+function applyCatalog(result){
+ catalog=result;available={};
+ result.models.forEach(function(m){available[m.model]=m.listed_by_gateway;});
+}
+function renderCatalogAdd(){
+ var box=$('catalogAdd');box.replaceChildren();
+ if(!catalog){box.appendChild(element('p','empty','Каталог ClaudeHub не загружен. Нажмите «Проверить ClaudeHub».'));return;}
+ var fresh=catalog.gateway_models.filter(function(m){return !profileFor(m.model);});
+ var text=fresh.filter(function(m){return m.text;});
+ box.appendChild(element('p','catalog-result','В ClaudeHub '+catalog.listed_count+' моделей, в каталоге команды '+
+  state.config.profiles.length+'. Не добавлено: '+fresh.length+' (текстовых: '+text.length+').'));
+ if(!fresh.length)return;
+ var all=element('button','button light','+ Добавить все текстовые ('+text.length+')');all.type='button';
+ all.disabled=!text.length;
+ all.addEventListener('click',function(){text.forEach(function(m){ensureProfile(m.model);});markDirty();renderModels();renderRoles();schedulePreview();});
+ box.appendChild(all);
+ var list=element('div','fresh-list');
+ fresh.forEach(function(m){
+  var item=element('button','chip'+(m.text?'':' other'),'+ '+m.model);item.type='button';
+  item.title=m.text?'Добавить в каталог команды':'Не похоже на текстовую модель, но добавить можно';
+  item.addEventListener('click',function(){ensureProfile(m.model);markDirty();renderModels();renderRoles();schedulePreview();});
+  list.appendChild(item);
+ });
+ box.appendChild(list);
+}
+async function loadCatalog(manual){
+ $('catalogButton').disabled=true;
+ try{
+  applyCatalog(await api(API+'/catalog'));
+  renderModels();renderRoles();
+  $('catalogResult').textContent='Живой поиск не проверен, платная генерация не запускалась.';
+  if(manual)alertMessage('Каталог ClaudeHub обновлён: '+catalog.listed_count+' моделей.',false);
+ }catch(error){
+  if(manual)errorMessage(error);
+  else $('catalogResult').textContent='Каталог ClaudeHub сейчас недоступен: в списках только модели каталога команды.';
+ }finally{$('catalogButton').disabled=false;}
+}
+var previewTimer=null;
+function schedulePreview(){
+ clearTimeout(previewTimer);
+ previewTimer=setTimeout(function(){previewChanges(true);},350);
 }
 function renderOverview(){
  $('statRoles').textContent=preview.roles.length;
@@ -183,6 +294,7 @@ async function load(){
  state={revision:result.revision,config:result.config,products:result.products};
  preview=result.preview;dirty=false;available={};renderAll();setReady(true);
  $('authOverlay').hidden=true;$('error').hidden=true;
+ loadCatalog(false);
 }
 function loadFailed(error){
  state=null;setReady(false);errorMessage(error);
@@ -216,21 +328,23 @@ $('addModel').addEventListener('click',function(){
  if(state.config.profiles.length>=40){alertMessage('Достигнут предел в 40 моделей.',true);return;}
  state.config.profiles.push({model:id,tier:$('newTier').value,enabled:false,
   input_usd_per_million:null,output_usd_per_million:null,web_search_verified:false,priority:100});
- $('newModel').value='';markDirty();renderModels();
- alertMessage('Модель добавлена выключенной; проверьте доступность и тариф.',false);
+ $('newModel').value='';markDirty();renderModels();renderRoles();schedulePreview();
+ alertMessage('Модель добавлена выключенной; включите её и проверьте тариф.',false);
 });
-async function previewChanges(){
+async function previewChanges(silent){
  try{
   var result=await api(API+'/preview','POST',state.config);
   preview=result;renderRoles();renderOverview();
-  alertMessage(result.ready?'Основные маршруты настроены. Это не проверка генерации.':
-   'Не готовы маршруты: '+result.issues.length+'. Детали показаны в карточках.',!result.ready);
+  if(!silent||!result.ready){
+   alertMessage(result.ready?'Основные маршруты настроены. Это не проверка генерации.':
+    'Не готовы маршруты: '+result.issues.length+'. Детали показаны в карточках.',!result.ready);
+  }
   return result;
  }catch(error){errorMessage(error);return null;}
 }
-$('previewButton').addEventListener('click',previewChanges);
+$('previewButton').addEventListener('click',function(){previewChanges(false);});
 $('saveButton').addEventListener('click',async function(){
- var result=await previewChanges();if(!result)return;
+ var result=await previewChanges(false);if(!result)return;
  if(state.config.enabled&&!result.ready){
   alertMessage('Нельзя включить роутер с незавершёнными маршрутами.',true);return;
  }
@@ -243,18 +357,7 @@ $('saveButton').addEventListener('click',async function(){
   alertMessage('Сохранено: будущие вызовы получат новую конфигурацию.',false);
  }catch(error){errorMessage(error);}
 });
-$('catalogButton').addEventListener('click',async function(){
- $('catalogButton').disabled=true;
- try{
-  var result=await api(API+'/catalog');
-  available={};result.models.forEach(function(m){available[m.model]=m.listed_by_gateway;});
-  renderModels();$('catalogResult').textContent=
-   'Моделей в ответе API: '+result.listed_count+
-   '. Новые ID (до 100): '+(result.unconfigured_ids.join(', ')||'нет')+
-   '. Живой поиск не проверен, платная генерация не запускалась.';
- }catch(error){errorMessage(error);}
- finally{$('catalogButton').disabled=false;}
-});
+$('catalogButton').addEventListener('click',function(){loadCatalog(true);});
 $('usageButton').addEventListener('click',async function(){
  var id=$('productSelect').value;
  if(!id){alertMessage('Нет выбранного проекта.',true);return;}

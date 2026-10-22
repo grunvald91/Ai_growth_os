@@ -21,7 +21,7 @@
  <div id="error" class="alert error" role="alert" hidden></div><button class="button light" id="retryButton" type="button" hidden>Повторить</button><div id="notice" class="alert success" role="status" hidden></div>
  <div class="stats">
   <div class="stat"><span>Сотрудников и этапов</span><strong id="statRoles">—</strong><small>Логические роли платформы</small></div>
-  <div class="stat"><span>Доступных моделей</span><strong id="statModels">—</strong><small>Из настроенного каталога</small></div>
+  <div class="stat"><span>Доступных моделей</span><strong id="statModels">—</strong><small>Включённых в каталоге команды</small></div>
   <div class="stat"><span>Не готовых маршрутов</span><strong id="statIssues">—</strong><small>Основная модель и критик</small></div>
   <div class="stat"><span>Работа роутера</span><strong id="statEnabled">—</strong><small>Влияет на будущие вызовы</small></div>
  </div>
@@ -36,13 +36,14 @@
   <button class="tab" data-tab="expenses" type="button">▥ Расходы</button>
  </div>
  <section id="teamPanel" class="panel">
-  <div class="section-head"><div><h2>Распределение моделей</h2><p>Для каждого сотрудника можно выбрать основную, резервную модель и отдельную модель критика.</p></div><label class="search-label"><input id="roleSearch" type="search" placeholder="Поиск должности…" autocomplete="off"></label></div>
+  <div class="section-head"><div><h2>Распределение моделей</h2><p>Для каждого сотрудника можно выбрать любую модель ClaudeHub: основную, до двух резервных и отдельную модель критика (тоже с резервными).</p></div><label class="search-label"><input id="roleSearch" type="search" placeholder="Поиск должности…" autocomplete="off"></label></div>
   <div class="explain"><span class="badge economy">Эконом</span> Простые задачи <span class="badge balanced">Баланс</span> Средняя сложность <span class="badge premium">Премиум</span> Стратегия</div>
   <div id="roleGroups"></div>
  </section>
  <section id="modelsPanel" class="panel" hidden>
   <div class="section-head"><div><h2>Каталог моделей</h2><p>Тарифы вводятся вручную. Присутствие модели в каталоге ещё не означает наличие веб-поиска.</p></div><button class="button light" id="catalogButton" type="button">Проверить ClaudeHub</button></div>
   <div class="tip">⚑ Проверка каталога не запускает платную генерацию. Поиск в российских источниках и работа поисковых инструментов требуют отдельного тестирования.</div>
+  <div id="catalogAdd" class="catalog-add"></div>
   <div id="modelRows" class="model-rows"></div>
   <div class="model-add"><input id="newModel" placeholder="ID новой модели у провайдера" maxlength="120"><select id="newTier"><option value="economy">Эконом</option><option value="balanced">Баланс</option><option value="premium">Премиум</option></select><button id="addModel" class="button light" type="button">+ Добавить</button></div>
   <div id="catalogResult" class="catalog-result"></div>

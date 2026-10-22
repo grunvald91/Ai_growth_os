@@ -59,3 +59,23 @@ def test_listed_model_does_not_claim_web_search():
         "model": "kimi-k3", "enabled": False,
         "listed_by_gateway": True, "web_search": "unverified", "prices": "unknown",
     }]
+
+
+def test_every_gateway_model_is_offered_with_a_starting_class():
+    from app.llm.model_catalog import gateway_models, is_text_model, suggest_tier
+    profile = ModelProfile(model="kimi-k3", tier="balanced")
+    ids = ("claude-opus-5-5", "claude-haiku-4.5", "gemini-3.1-flash-image", "grok-4.7", "kimi-k3")
+    rows = {row["model"]: row for row in gateway_models(ids, (profile,))}
+    assert set(rows) == set(ids)  # nothing is hidden, image models included
+    assert rows["kimi-k3"]["configured"] and rows["kimi-k3"]["enabled"] and not rows["grok-4.7"]["configured"]
+    assert suggest_tier("claude-opus-5-5") == "premium" and suggest_tier("claude-haiku-4.5") == "economy"
+    assert suggest_tier("grok-4.7") == "balanced"
+    assert rows["gemini-3.1-flash-image"]["text"] is False and is_text_model("claude-sonnet-5-5")
+
+
+def test_tier_guess_uses_whole_words():
+    from app.llm.model_catalog import suggest_tier
+    assert suggest_tier("gemini-3.5") == "balanced"          # "gemini" is not "mini"
+    assert suggest_tier("gemini-flash-3.8") == "economy"
+    assert suggest_tier("gpt-6-sol") == "premium" and suggest_tier("kimi-2.7") == "economy"
+    assert suggest_tier("claude-sonnet-5-5") == "balanced"

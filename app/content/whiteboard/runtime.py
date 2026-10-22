@@ -43,13 +43,25 @@ def scoped_settings(settings, models: WhiteboardModels, voice: str):
     })
 
 
+STORYBOARD_ROLE = 'whiteboard_storyboard'
+
+
+def storyboard_model(settings) -> str:
+    """New jobs use the model chosen on the team page; otherwise the configured default."""
+    from app.llm.router_store import role_override
+    chosen = role_override(settings, STORYBOARD_ROLE)
+    return chosen[0] if chosen else settings.whiteboard_storyboard_model
+
+
 def generation_profile(settings, profile: str):
     if profile == 'gemini_ru':
-        return WhiteboardModels(storyboard=settings.whiteboard_storyboard_model,
+        return WhiteboardModels(storyboard=storyboard_model(settings),
             image='gemini-3.1-flash-image', speech='x-ai/grok-voice-tts-1.0',
             regions='qwen/qwen3-vl-30b-a3b-instruct'), 'eve'
     if profile == 'configured':
-        return configured_models(settings).model_copy(update={'image':'gemini-3.1-flash-image'}), settings.whiteboard_voice
+        return (configured_models(settings).model_copy(update={'image': 'gemini-3.1-flash-image',
+                                                              'storyboard': storyboard_model(settings)}),
+                settings.whiteboard_voice)
     raise ValueError('Unknown generation profile')
 
 
@@ -194,8 +206,11 @@ class SingleCallStoryboardLLM:
             json.dump({'http_status': response.status_code, 'body': body}, stream, ensure_ascii=False)
 
     def fallback_models(self, model):
+        from app.llm.router_store import role_override
         raw = getattr(self.settings, 'whiteboard_storyboard_fallback_models', '') or ''
-        chain = [name.strip() for name in raw.split(',') if name.strip()]
+        # The owner's reserve models (team page) go first, then the built-in chain.
+        chosen = role_override(self.settings, STORYBOARD_ROLE)
+        chain = chosen + [name.strip() for name in raw.split(',') if name.strip()]
         return [name for index, name in enumerate(chain) if name != model and name not in chain[:index]]
 
     async def generate(self, request):
