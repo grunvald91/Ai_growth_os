@@ -28,12 +28,14 @@ _BALANCED_ROLES = {
     "cro", "channel_researcher", "problem_researcher", "viral_content_researcher",
     "youtube_shorts_director", "instagram_reels_director", "sales_agent", "comment_sales",
     "competitive_intelligence", "intelligence", "research_synthesis",
+    "post_strategist", "post_writer_editor", "creative_strategist", "editorial_planner",
+    "whiteboard_storyboard",
 }
 _ECONOMY_ROLES = {
     "distribution", "analytics", "article_writer", "video_producer",
     "story_director", "community_manager", "segment_researcher",
     "competitor_voc_researcher", "viral_video_researcher",
-    "repurposing_editor", "platform_writer", "comment_agent",
+    "repurposing_editor", "platform_writer", "comment_agent", "post_rewriter",
 }
 
 
@@ -50,6 +52,8 @@ class BudgetExceeded(RoutingError):
 
 
 DEFAULT_PRIORITY = 100
+# The ClaudeHub catalog is larger than the original 40; every text model must be selectable.
+MAX_PROFILES = 100
 
 
 @dataclass(frozen=True)
@@ -81,8 +85,8 @@ def _parse_profiles(raw: str) -> tuple[ModelProfile, ...]:
         data = json.loads(raw)
     except (ValueError, TypeError) as exc:
         raise RoutingError("MODEL_ROUTER_PROFILES is not valid JSON") from exc
-    if not isinstance(data, list) or not 1 <= len(data) <= 40:
-        raise RoutingError("MODEL_ROUTER_PROFILES must be a list of 1 to 40 models")
+    if not isinstance(data, list) or not 1 <= len(data) <= MAX_PROFILES:
+        raise RoutingError(f"MODEL_ROUTER_PROFILES must be a list of 1 to {MAX_PROFILES} models")
     profiles: list[ModelProfile] = []
     seen: set[str] = set()
     for item in data:
@@ -171,10 +175,11 @@ class ModelRouter:
             target_role, separator, target_phase = role.partition(":")
             if separator and target_phase != "critic":
                 raise RoutingError("Only role:critic overrides are supported")
-            required = self._tier_for(target_role, target_phase if separator else "main")
             for model in models:
+                # The owner's explicit choice wins over the tier defaults; only an unknown or
+                # disabled model is refused.
                 profile = self._catalog.get(model)
-                if not profile or not profile.enabled or _TIERS[profile.tier] < _TIERS[required]:
+                if not profile or not profile.enabled:
                     raise RoutingError(f"Unsafe/unavailable override for role {role}")
 
     @staticmethod
@@ -235,8 +240,6 @@ class ModelRouter:
         ]
         if preferred is not None:
             ordered = [self._catalog[name] for name in preferred]
-            if any(_TIERS[p.tier] < _TIERS[required] for p in ordered):
-                raise RoutingError("Override is below the task's quality floor")
             if needs_search and not all(p.web_search_verified for p in ordered):
                 raise WebSearchUnavailable("Override does not have validated web search")
         else:

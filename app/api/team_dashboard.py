@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.agents import AGENT_CONFIGS, AgentRole
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
-from app.llm.model_catalog import CatalogUnavailable, catalog_comparison, list_gateway_models
+from app.llm.model_catalog import CatalogUnavailable, catalog_comparison, gateway_models, list_gateway_models
 from app.llm.model_router import ModelRouter, RoutingError
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.router_store import (
@@ -38,13 +38,14 @@ _GROUPS = {
     "Руководство": ("cmo", "research_lead"),
     "Изучение бизнеса": ("company_intake", "research_pmm", "segment_researcher", "channel_researcher",
                         "problem_researcher", "competitor_voc_researcher", "viral_video_researcher",
-                        "viral_content_researcher"),
+                        "viral_content_researcher", "competitive_intelligence"),
     "Контент и SEO": ("content_seo", "content_strategist", "seo_editor", "article_writer",
                      "human_editor", "marketing_editor", "conversion_editor",
-                     "repurposing_editor", "platform_writer"),
+                     "repurposing_editor", "platform_writer", "editorial_planner",
+                     "post_strategist", "post_writer_editor", "post_rewriter"),
     "Видео и дизайн": ("scriptwriter", "creative_director", "video_producer", "video_director",
                       "story_director", "visual_designer", "youtube_shorts_director",
-                      "instagram_reels_director"),
+                      "instagram_reels_director", "creative_strategist", "whiteboard_storyboard"),
     "Продвижение и аналитика": ("distribution", "community_manager", "analytics", "cro", "comment_sales"),
 }
 _NAMES = {
@@ -80,6 +81,13 @@ _NAMES = {
     "community_manager": "Сообщества и комментарии",
     "analytics": "Аналитик",
     "cro": "Оптимизация конверсии",
+    "competitive_intelligence": "Разведка конкурентов",
+    "editorial_planner": "Редактор контент-плана",
+    "post_strategist": "Стратег поста",
+    "post_writer_editor": "Автор и редактор поста",
+    "post_rewriter": "Редактор правок поста",
+    "creative_strategist": "Креативный стратег",
+    "whiteboard_storyboard": "Сценарий рисованного видео",
 }
 
 
@@ -115,6 +123,13 @@ _DESCRIPTIONS = {
     "community_manager": "Подготавливает работу с сообществами и коммуникациями.",
     "analytics": "Структурирует фактические показатели маркетинговой воронки.",
     "cro": "Предлагает эксперименты по повышению конверсии.",
+    "competitive_intelligence": "Собирает и сопоставляет сведения о конкурентах.",
+    "editorial_planner": "Составляет контент-план на период.",
+    "post_strategist": "Придумывает идею и структуру короткого поста.",
+    "post_writer_editor": "Пишет и редактирует текст поста.",
+    "post_rewriter": "Вносит правки в готовый пост по замечаниям.",
+    "creative_strategist": "Изучает тему и аудиторию перед созданием материала.",
+    "whiteboard_storyboard": "Пишет сценарий рисованного видео. Модель берётся для НОВЫХ заданий; резервные включаются, если основная не отвечает.",
 }
 
 
@@ -122,6 +137,8 @@ def role_descriptors() -> list[dict]:
     roles = {role.value for role in AgentRole} | {
         "repurposing_editor", "platform_writer",
         "youtube_shorts_director", "instagram_reels_director",
+        "competitive_intelligence", "editorial_planner", "post_strategist", "post_writer_editor",
+        "post_rewriter", "creative_strategist", "whiteboard_storyboard",
     }
     listed = []
     for department, identifiers in _GROUPS.items():
@@ -300,8 +317,9 @@ async def team_catalog(settings: Settings = Depends(get_settings)):
         raise HTTPException(503, "Model catalog unavailable; no paid inference attempted") from exc
     return {
         "models": catalog_comparison(ids, policy.profiles),
+        "gateway_models": gateway_models(ids, policy.profiles),
         "listed_count": len(ids),
-        "unconfigured_ids": [mid for mid in ids if mid not in {p.model for p in policy.profiles}][:100],
+        "unconfigured_ids": [mid for mid in ids if mid not in {p.model for p in policy.profiles}],
         "web_search_verified": False,
         "paid_inference_requests": 0,
     }

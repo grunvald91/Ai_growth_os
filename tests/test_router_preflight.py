@@ -4,11 +4,11 @@ from app.llm.router_preflight import offline_router_report
 from app.llm.router_store import RouterUpdate, read_state, save_state
 
 
-def test_offline_preflight_reconciles_27_roles_and_4_stages(tmp_path):
+def test_offline_preflight_reconciles_every_role_and_stage(tmp_path):
     settings = Settings(_env_file=None, products_root=tmp_path,
                         model_router_admin_token="secret-for-tests-only-" + "x" * 40)
     report = offline_router_report(settings)
-    assert report["role_count"] == report["route_count"] == 32
+    assert report["role_count"] == report["route_count"] == 39
     assert report["network_calls"] == report["paid_calls"] == 0
     assert not any("Unclassified" in issue or "Dashboard role mismatch" in issue
                    for issue in report["issues"])
@@ -30,8 +30,8 @@ def test_preflight_recognizes_premium_model_without_provider_ping(tmp_path):
     save_state(settings, RouterUpdate(expected_revision=0, config=config))
     report = offline_router_report(settings)
     assert report["status"] == "ready"
-    assert report["main_ready"] == 32
-    assert report["critics_ready"] == 32
+    assert report["main_ready"] == 39
+    assert report["critics_ready"] == 39
     assert report["network_calls"] == 0
 
 

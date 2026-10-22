@@ -71,6 +71,38 @@ def catalog_comparison(remote_ids: tuple[str, ...], configured_profiles) -> list
     ]
 
 
+_NOT_TEXT = ("image", "imagen", "dall", "flux", "sora", "veo", "video", "tts", "speech", "voice",
+             "whisper", "audio", "embed", "rerank", "moderation", "vision-only")
+_PREMIUM = ("opus", "fable", "mythos", "-pro", "sol", "o3", "ultra")
+_ECONOMY = ("haiku", "flash", "mini", "lite", "nano", "kimi-2", "deepseek", "small", "instant")
+
+
+def is_text_model(model: str) -> bool:
+    """Name-based guess used only to sort the picker; every catalog model stays selectable."""
+    name = model.lower()
+    return not any(word in name for word in _NOT_TEXT)
+
+
+def suggest_tier(model: str) -> str:
+    """Starting class for a newly added model; the owner changes it on the models tab."""
+    name = model.lower()
+    if any(word in name for word in _PREMIUM):
+        return "premium"
+    if any(word in name for word in _ECONOMY):
+        return "economy"
+    return "balanced"
+
+
+def gateway_models(remote_ids: tuple[str, ...], configured_profiles) -> list[dict]:
+    """Every model the gateway lists, with whether it is already in the team's catalog."""
+    configured = {profile.model: profile for profile in configured_profiles}
+    return [
+        {"model": model, "text": is_text_model(model), "suggested_tier": suggest_tier(model),
+         "configured": model in configured, "enabled": bool(model in configured and configured[model].enabled)}
+        for model in remote_ids
+    ]
+
+
 async def _cli() -> int:
     from app.core.config import get_settings
     from app.llm.model_router import ModelRouter

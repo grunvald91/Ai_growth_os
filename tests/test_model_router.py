@@ -56,8 +56,8 @@ def test_critic_is_at_least_balanced_and_strategy_critic_is_premium():
 def test_manual_override_and_disabled_models():
     policy = router(overrides_json='{"company_intake":["best", "mid"]}')
     assert policy.select(req("company_intake")).candidates == ("best", "mid")
-    with pytest.raises(RoutingError):
-        router(overrides_json='{"cmo":["small"]}')
+    # The owner may put any enabled model on any role, a small one on the CMO included.
+    assert router(overrides_json='{"cmo":["small"]}').select(req("cmo")).candidates == ("small",)
     with pytest.raises(RoutingError):
         router(overrides_json='{"cmo":["unknown"]}')
 
@@ -176,12 +176,11 @@ async def test_search_rejection_never_contacts_provider():
     assert not fake.requests
 
 
-def test_high_complexity_never_downgrades_writer_and_overrides():
+def test_high_complexity_raises_the_automatic_floor_but_owner_overrides_win():
     assert router().select(req("article_writer", routing_complexity="high")).candidates == ("best",)
-    with pytest.raises(RoutingError, match="quality floor"):
-        router(overrides_json='{"article_writer":["small"]}').select(
-            req("article_writer", routing_complexity="high")
-        )
+    # An explicit owner choice is respected even for high-complexity work.
+    assert router(overrides_json='{"article_writer":["small"]}').select(
+        req("article_writer", routing_complexity="high")).candidates == ("small",)
     with pytest.raises(RoutingError, match="routing_complexity"):
         router().select(req("article_writer", routing_complexity="fake"))
 

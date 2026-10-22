@@ -86,3 +86,19 @@ input:focus,select:focus{border-color:#2994fd;box-shadow:0 0 0 3px #1e98ff16}
 .cards{grid-template-columns:1fr}.card{padding:16px}.section-head{display:block}.search-label input{width:100%;margin-top:15px}
 .model-row{grid-template-columns:1fr 1fr}.model-row .identity{grid-column:1/-1}.model-row .model-enable{grid-column:1/-1}.model-add{flex-wrap:wrap}.model-add input{flex-basis:100%}
 .expense-totals{grid-template-columns:1fr}.footer{display:block;line-height:2}.expense-row{flex-wrap:wrap}}
+.reserve{margin-top:12px;border-top:1px dashed #e3ebf5;padding-top:10px}
+.reserve summary{cursor:pointer;font-size:12px;font-weight:800;color:#3a739f;min-height:36px;display:flex;align-items:center}
+.catalog-add{margin:6px 0 16px}.catalog-add>button{margin:2px 0 12px}
+.fresh-list{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid #cfe2f7;background:#f3f9ff;color:#2c6aa6;border-radius:99px;padding:9px 13px;font-size:12px;font-weight:750;min-height:40px;overflow-wrap:anywhere;text-align:left}
+.chip.other{background:#f7f8fa;border-color:#e2e6ec;color:#7a8799}
+@media(max-width:700px){
+ .main{padding-bottom:104px}
+ .top-actions{position:fixed;left:0;right:0;bottom:0;z-index:50;margin:0;padding:10px 13px calc(10px + env(safe-area-inset-bottom));background:#fffffff2;border-top:1px solid #dfe7f3;box-shadow:0 -6px 22px #1f3a5f14;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+ .top-actions .dirty{grid-column:1/-1;text-align:center}
+ .top-actions .button{min-height:48px;width:100%}
+ .reserve .card-grid{grid-template-columns:1fr}
+ select,input{min-height:44px}
+}
+.toggle-line{position:relative}.toggle-line input{width:1px;height:1px;padding:0;min-height:0}
+html,body{overflow-x:hidden}

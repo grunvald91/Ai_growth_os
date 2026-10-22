@@ -74,7 +74,7 @@ def test_owner_can_preview_and_save_safe_policy_with_revision(dashboard):
     assert response.status_code == 200
     data = response.json()
     assert data["revision"] == 0
-    assert len(data["preview"]["roles"]) == 32
+    assert len(data["preview"]["roles"]) == 39
     assert not data["preview"]["ready"]  # CMO premium model disabled initially.
     assert data["config"]["enabled"] is False
     assert "xai_api_key" not in response.text
@@ -113,16 +113,16 @@ def test_owner_can_preview_and_save_safe_policy_with_revision(dashboard):
     assert stale.status_code == 409
 
 
-def test_dashboard_refuses_unsafe_role_override(dashboard):
+def test_dashboard_accepts_any_enabled_model_for_any_role_but_not_an_unknown_one(dashboard):
     client, settings, _ = dashboard
     data = client.get("/api/admin/team", headers=auth(settings)).json()
     config = data["config"]
-    config["overrides"] = {"cmo": ["kimi-2.7"]}
-    response = client.put("/api/admin/team", json={
-        "expected_revision": 0, "config": config,
-    }, headers=auth(settings))
-    assert response.status_code == 422
-    assert not (settings.products_root / ".model-router-config.json").exists()
+    config["overrides"] = {"cmo": ["kimi-2.7"], "cmo:critic": ["kimi-2.7", "grok-4.7"]}
+    ok = client.put("/api/admin/team", json={"expected_revision": 0, "config": config}, headers=auth(settings))
+    assert ok.status_code == 200 and ok.json()["config"]["overrides"]["cmo"] == ["kimi-2.7"]
+    config["overrides"] = {"cmo": ["not-in-the-catalog"]}
+    bad = client.put("/api/admin/team", json={"expected_revision": 1, "config": config}, headers=auth(settings))
+    assert bad.status_code == 422
 
 
 def test_dashboard_refuses_to_enable_no_premium_model(dashboard):
@@ -230,3 +230,57 @@ def test_page_script_calls_the_studio_scoped_api():
     assert "/api/admin/" not in script
     # A failed load must keep the buttons off instead of reading an empty state.
     assert "setReady(false)" in script and "retryButton" in script
+
+
+def test_catalog_lists_every_gateway_model_for_selection(dashboard, monkeypatch):
+    client, settings, _ = dashboard
+    async def fake(**_):
+        return tuple(f"model-{i}" for i in range(60)) + ("kimi-k3", "gemini-3.1-flash-image")
+    monkeypatch.setattr("app.api.team_dashboard.list_gateway_models", fake)
+    data = client.get("/api/admin/team/catalog", headers=auth(settings)).json()
+    assert data["listed_count"] == 62 and len(data["gateway_models"]) == 62
+    assert len(data["unconfigured_ids"]) >= 60  # no 100-item cut-off any more
+    kinds = {row["model"]: row for row in data["gateway_models"]}
+    assert kinds["kimi-k3"]["configured"] and kinds["gemini-3.1-flash-image"]["text"] is False
+
+
+def test_catalog_can_hold_more_than_forty_models_and_roles_cover_the_real_workflows(dashboard):
+    client, settings, _ = dashboard
+    config = client.get("/api/admin/team", headers=auth(settings)).json()["config"]
+    config["profiles"] += [{"model": f"extra-{i}", "tier": "balanced", "enabled": True} for i in range(70)]
+    config["overrides"] = {"post_rewriter": ["extra-1", "extra-2", "extra-3"],
+                           "whiteboard_storyboard": ["extra-4", "extra-5"],
+                           "post_rewriter:critic": ["extra-6"]}
+    saved = client.put("/api/admin/team", json={"expected_revision": 0, "config": config}, headers=auth(settings))
+    assert saved.status_code == 200, saved.text
+    ids = {role["id"] for role in saved.json()["preview"]["roles"]}
+    assert {"post_strategist", "post_writer_editor", "post_rewriter", "creative_strategist", "editorial_planner",
+            "competitive_intelligence", "whiteboard_storyboard"} <= ids
+    from app.content.whiteboard.runtime import generation_profile, SingleCallStoryboardLLM
+    # A new whiteboard job takes the model chosen on the team page; reserves follow it.
+    wb = settings.model_copy(update={"whiteboard_storyboard_model": "kimi-2.7", "whiteboard_voice": "eve",
+                                     "whiteboard_image_model": "x", "whiteboard_speech_model": "x",
+                                     "whiteboard_regions_model": "x"})
+    assert generation_profile(wb, "gemini_ru")[0].storyboard == "extra-4"
+    assert generation_profile(wb, "configured")[0].storyboard == "extra-4"
+    assert SingleCallStoryboardLLM(wb).fallback_models("extra-4")[0] == "extra-5"
+
+
+def test_page_offers_catalog_models_reserves_and_a_bottom_save_bar_on_phones():
+    from pathlib import Path
+    base = Path("app/api/team_dashboard_assets")
+    script, css, page = (base / "team.js").read_text(), (base / "team.css").read_text(), (base / "index.html").read_text()
+    assert "gateway_models" in script and "ensureProfile" in script and "Резервная 2" in script
+    assert "catalogAdd" in page and "position:fixed" in css.split("@media(max-width:700px){")[-1]
+
+
+def test_profiles_without_an_enabled_field_are_shown_as_enabled_with_full_fields(dashboard):
+    client, settings, _ = dashboard
+    # The built-in default catalog omits "enabled" for models that are on; the page must see them as on.
+    data = client.get("/api/admin/team", headers=auth(settings)).json()
+    by_model = {p["model"]: p for p in data["config"]["profiles"]}
+    assert by_model["kimi-2.7"]["enabled"] is True and by_model["kimi-k3"]["enabled"] is False
+    assert all({"enabled", "priority", "web_search_verified", "input_usd_per_million"} <= set(p) for p in by_model.values())
+    config = {"enabled": False, "profiles": [{"model": "a-model", "tier": "premium"}], "overrides": {}}
+    pre = client.post("/api/admin/team/preview", json=config, headers=auth(settings))
+    assert pre.status_code == 200
