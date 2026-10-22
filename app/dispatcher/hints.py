@@ -14,6 +14,7 @@ from app.dispatcher.blocks import Chip
 from app.dispatcher.readers import attention, plans
 from app.dispatcher.registry import CAPABILITIES
 from app.models.domain import Product
+from app.schedule.source import linked_business_ids
 
 
 def topic_ideas(products_root: Path, slug: str) -> list[Chip]:
@@ -54,6 +55,11 @@ def compute_hints(db: Session, product: Product, products_root: Path) -> list[Ch
         chips.append(Chip(label="Показать контент-план", capability="show_plan"))
     if active is None and draft is None:
         chips.append(Chip(label="Составить контент-план", capability="make_plan"))
+    if linked_business_ids(db, product.id):
+        chips.append(Chip(label="Записи на сегодня", capability="show_schedule",
+                          params={"view": "bookings", "period": "today"}))
+        chips.append(Chip(label="Свободные окна на неделю", capability="show_schedule",
+                          params={"view": "free", "period": "week"}))
     chips.extend(topic_ideas(products_root, product.slug))
     seen, unique = set(), []
     for chip in chips:

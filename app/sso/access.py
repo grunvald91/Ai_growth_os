@@ -17,6 +17,11 @@ _CACHE: dict[tuple[int, int], tuple[float, str]] = {}
 _transport: httpx.BaseTransport | None = None  # Tests replace it; production uses the network.
 
 
+def http_client(timeout: float) -> httpx.Client:
+    """A client for calls to ServGo; tests swap the transport, production uses the network."""
+    return httpx.Client(timeout=timeout, transport=_transport)
+
+
 def _fetch(settings, user_id: int, business_id: int) -> str | None:
     key = settings.servgo_internal_key or ""
     if len(key) < 32:

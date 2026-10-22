@@ -72,6 +72,12 @@ class CancelVideoParams(_Params):
     task_id: str | None = Field(default=None, max_length=64)
 
 
+class ScheduleParams(_Params):
+    # bookings — список записей; free — свободные окна; load — загрузка мастеров; next — кто следующий.
+    view: Literal["bookings", "free", "load", "next"] = "bookings"
+    period: Literal["today", "tomorrow", "week"] = "today"
+
+
 class RestrictedParams(_Params):
     kind: Literal["budget", "pricing", "access", "delete", "credentials", "billing"]
 
@@ -115,8 +121,10 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                "target — один из: " + ", ".join(PAGES) + ".",
                ToolOperation.ANALYTICS, Cost.NONE, GoToParams),
     Capability("show_schedule", "Расписание записей",
-               "Записи клиентов, свободные окна, загрузка мастеров, кто на смене.",
-               ToolOperation.ANALYTICS, Cost.NONE, NoParams),
+               "Записи клиентов онлайн-записи, свободные окна, загрузка мастеров, кто следующий клиент. "
+               "view — bookings (список записей), free (свободные окна), load (загрузка), next (кто следующий); "
+               "period — today, tomorrow или week (ближайшие 7 дней).",
+               ToolOperation.ANALYTICS, Cost.NONE, ScheduleParams),
     Capability("create_post", "Создать пост",
                "Поставить в работу один пост на тему для площадки (по умолчанию Telegram). "
                "Нужна тема; площадка — telegram, vk, dzen, vc_ru или tenchat; аудитория необязательна.",
