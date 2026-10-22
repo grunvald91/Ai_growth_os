@@ -168,11 +168,20 @@ async def test_a_model_decision_to_approve_still_gets_a_card(db, product):
 
 # ---- reworking --------------------------------------------------------------------------
 
+async def yes(db, product, answer):
+    card_ = blocks(answer, "confirm")[0]
+    return (await service.confirm(db, ctx(db, product), card_["confirmation_id"], accept=True))["messages"][1]
+
+
 @pytest.mark.asyncio
-async def test_rework_queues_an_edit_task_with_the_feedback(db, product):
+async def test_rework_asks_first_then_queues_an_edit_task_with_the_feedback(db, product):
     row = material(db, product)
     answer = await chip(db, product, "revise_material", {"feedback": "Сделай короче и добавь призыв записаться"})
-    assert "дорабатываю" in answer["text"]
+    details = " ".join(blocks(answer, "confirm")[0]["details"])
+    assert "Сделай короче" in details
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_editor")) is None
+    done = await yes(db, product, answer)
+    assert "дорабатываю" in done["text"]
     task = db.scalar(select(Task).where(Task.assigned_agent == "content_editor"))
     assert task is not None and task.title == "EDIT: " + str(row.id)
 
@@ -181,16 +190,27 @@ async def test_rework_queues_an_edit_task_with_the_feedback(db, product):
 async def test_rework_without_feedback_asks_what_to_change(db, product):
     material(db, product)
     answer = await chip(db, product, "revise_material", {})
-    assert "что поправить" in answer["text"]
+    assert "что поправить" in answer["text"] and blocks(answer, "confirm") == []
     assert db.scalar(select(Task).where(Task.assigned_agent == "content_editor")) is None
 
 
 @pytest.mark.asyncio
 async def test_rework_of_the_same_post_twice_is_refused_by_the_page_rule(db, product):
     material(db, product)
-    await chip(db, product, "revise_material", {"feedback": "Сделай короче и добавь призыв"}, key="a")
-    answer = await chip(db, product, "revise_material", {"feedback": "Ещё раз то же самое"}, key="b")
-    assert "уже отправлен на доработку" in answer["text"]
+    await yes(db, product, await chip(db, product, "revise_material", {"feedback": "Сделай короче и добавь призыв"}, key="a"))
+    done = await yes(db, product, await chip(db, product, "revise_material", {"feedback": "Ещё раз то же самое"}, key="b"))
+    assert "уже отправлен на доработку" in done["text"]
+
+
+@pytest.mark.asyncio
+async def test_approved_elsewhere_meanwhile_is_not_recorded_as_this_decision(db, product):
+    row = material(db, product)
+    answer = await chip(db, product, "approve_material")
+    row.status = ArtifactStatus.APPROVED  # the owner approved it on the page in the meantime
+    db.commit()
+    done = await yes(db, product, answer)
+    assert "уже утверждён" in done["text"]
+    assert db.scalar(select(Approval)) is None
 
 
 # ---- scheduling -------------------------------------------------------------------------
@@ -209,7 +229,8 @@ async def test_scheduling_asks_first_then_creates_a_scheduled_publication(db, pr
     publication = db.scalar(select(Publication))
     assert (publication.artifact_id, publication.status, publication.channel) == (post.id, "scheduled", "telegram")
     assert "Запланировал" in done["messages"][1]["text"]
-    assert db.scalar(select(Approval).where(Approval.action_type == "dispatcher:schedule_post")) is not None
+    approval = db.scalar(select(Approval).where(Approval.action_type == "dispatcher:schedule_post"))
+    assert approval is not None and publication.approval_id == approval.id
     assert str(connection.id) in db.scalars(select(Artifact.content).where(Artifact.kind == "telegram_publish_intent")).first()
 
 
@@ -362,3 +383,17 @@ async def test_check_what_is_ready_shows_the_newest_card_with_its_button(db, pro
     answer = await chip(db, product, "show_review")
     assert blocks(answer, "material")[0]["artifact_id"] == str(row.id)
     assert blocks(answer, "chips")[0]["items"][0]["capability"] == "approve_material"
+
+
+
+@pytest.mark.asyncio
+async def test_result_of_an_earlier_topic_arrives_in_the_new_one(db, product):
+    task = await started_post(db, product)
+    service.open_conversation(db, product.id, "owner", fresh=True)  # «Новая тема»
+    task.status = TaskStatus.FAILED
+    db.commit()
+    added = updates(db, product)
+    assert len(added) == 1
+    current = service.open_conversation(db, product.id, "owner")
+    assert added[0].conversation_id == current.id
+    assert updates(db, product) == []

@@ -51,25 +51,37 @@ def _completed(ctx: Context, task: Task, title: str, href: str) -> tuple[str, li
     return text, blocks
 
 
-def collect_updates(db: Session, ctx: Context, conversation: DispatcherConversation) -> list[DispatcherMessage]:
-    """Add one message per newly finished task of this conversation and return the new messages."""
-    from app.dispatcher.service import _add_committed
-    db.scalar(select(DispatcherConversation).where(DispatcherConversation.id == conversation.id).with_for_update())
+def _pending(db: Session, ctx: Context, conversation: DispatcherConversation):
+    """Finished tasks started from this account's conversations with the company (an earlier topic too)
+    that have not been reported with this outcome yet."""
+    threads = select(DispatcherConversation.id).where(DispatcherConversation.product_id == ctx.product.id,
+                                                      DispatcherConversation.account == conversation.account)
     reported = {(row.task_id, (row.params or {}).get("status")) for row in db.scalars(select(DispatcherMessage).where(
-        DispatcherMessage.conversation_id == conversation.id, DispatcherMessage.capability == RESULT_CAPABILITY))}
-    pending = db.execute(select(DispatcherMessage, Task).join(Task, Task.id == DispatcherMessage.task_id).where(
-        DispatcherMessage.conversation_id == conversation.id, DispatcherMessage.role == "assistant",
+        DispatcherMessage.conversation_id.in_(threads), DispatcherMessage.capability == RESULT_CAPABILITY))}
+    rows = db.execute(select(DispatcherMessage, Task).join(Task, Task.id == DispatcherMessage.task_id).where(
+        DispatcherMessage.conversation_id.in_(threads), DispatcherMessage.role == "assistant",
         or_(DispatcherMessage.capability.is_(None), DispatcherMessage.capability != RESULT_CAPABILITY),
-        Task.status.in_([TaskStatus.COMPLETED, TaskStatus.FAILED]),
-    ).order_by(DispatcherMessage.seq)).all()
+        Task.product_id == ctx.product.id, Task.status.in_([TaskStatus.COMPLETED, TaskStatus.FAILED]),
+    ).order_by(DispatcherMessage.created_at, DispatcherMessage.seq)).all()
+    result, seen = [], set()
+    for message, task in rows:
+        key = (task.id, task.status.value)
+        if key not in reported and key not in seen:
+            seen.add(key)
+            result.append((message, task))
+    return result
+
+
+def collect_updates(db: Session, ctx: Context, conversation: DispatcherConversation) -> list[DispatcherMessage]:
+    """Add one message per newly finished task to the current conversation and return the new messages."""
+    from app.dispatcher.blocks import clean_blocks
+    from app.dispatcher.service import _add_committed
+    if not _pending(db, ctx, conversation):
+        return []  # the usual case: nothing finished, no lock taken
+    db.scalar(select(DispatcherConversation).where(DispatcherConversation.id == conversation.id).with_for_update())
     added: list[DispatcherMessage] = []
-    seen: set = set()
-    for message, task in pending:
+    for message, task in _pending(db, ctx, conversation):  # re-read under the lock: another tab may have reported
         status = task.status.value
-        key = (task.id, status)
-        if key in reported or key in seen:
-            continue
-        seen.add(key)
         block = _task_block(message, task)
         title = (block or {}).get("title") or task.title.split(": ", 1)[-1]
         href = (block or {}).get("href") or f"/studio/products/{ctx.product.id}/tasks/{task.id}"
@@ -78,9 +90,9 @@ def collect_updates(db: Session, ctx: Context, conversation: DispatcherConversat
         else:
             text = f"Не получилось: {title}. Подробности на странице задания."
             blocks = [{"type": "links", "items": [{"label": "Открыть задание", "href": href}]}]
-        from app.dispatcher.blocks import clean_blocks
         added.append(_add_committed(
             db, conversation, role="assistant", input_mode="text", text=text, spoken=text,
             blocks=clean_blocks([{"type": "text", "text": text}, *blocks]), intent="answer",
             capability=RESULT_CAPABILITY, params={"status": status}, task_id=task.id))
+    db.commit()  # release the lock when nothing was added
     return added

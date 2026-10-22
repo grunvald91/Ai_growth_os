@@ -121,6 +121,8 @@ class Capability:
     params: type[_Params]
     # Shown on the card and spoken before a confirmation.
     consequence: str = ""
+    # Ask first even when risk and cost alone would allow running at once (owner's table, plan section 3.1).
+    always_confirm: bool = False
 
 
 CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
@@ -165,7 +167,9 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
     Capability("revise_material", "Доработать пост",
                "Отправить готовый пост на доработку. feedback — что именно изменить (от 8 символов). "
                "Без material_id — самый свежий пост на проверке.",
-               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, ReviseParams),
+               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, ReviseParams,
+               consequence="Команда перепишет пост по вашей правке. Новая версия снова придёт вам на проверку.",
+               always_confirm=True),
     Capability("schedule_post", "Запланировать публикацию",
                "Запланировать утверждённый пост в подключённый Telegram-канал. when — московское время "
                "«ГГГГ-ММ-ДД ЧЧ:ММ» (сегодняшняя дата есть в контексте). Без post_id — последний утверждённый пост.",

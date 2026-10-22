@@ -29,12 +29,14 @@ EXCERPT_CARD = 600
 EXCERPT_CONFIRM = 240
 
 
-def _record_approval(ctx: Context, row: Artifact, action: str, via: str) -> None:
+def _record_approval(ctx: Context, row: Artifact, action: str, via: str) -> Approval:
     """The owner's yes, kept next to the change it allowed."""
-    ctx.db.add(Approval(product_id=ctx.product.id, artifact_id=row.id, action_type=action, risk_level="YELLOW",
+    approval = Approval(product_id=ctx.product.id, artifact_id=row.id, action_type=action, risk_level="YELLOW",
                         status="approved", requested_by=ctx.account, decided_by=ctx.account,
-                        decided_at=datetime.now(timezone.utc), reason=f"via={via}"))
+                        decided_at=datetime.now(timezone.utc), reason=f"via={via}")
+    ctx.db.add(approval)
     ctx.db.commit()
+    return approval
 
 
 def _status(row: Artifact) -> str:
@@ -101,7 +103,7 @@ async def show_material(ctx: Context, params: MaterialParams) -> Outcome:
     else:
         text = f"{kind} «{row.title[:80]}»: {STATUS_LABELS.get(_status(row), _status(row)).lower()}."
     blocks.append({"type": "links", "items": [{"label": "Открыть полностью", "href": _page(ctx, row)}]})
-    return Outcome(text, f"{kind} ждёт вашего решения. Он на экране." if _status(row) == "awaiting_approval" else text,
+    return Outcome(text, "Готовый материал ждёт вашего решения, он на экране." if _status(row) == "awaiting_approval" else text,
                    blocks)
 
 
@@ -137,11 +139,14 @@ async def confirm_approve_material(ctx: Context, stored: dict, via: str) -> Outc
     if row.version != stored.get("version") and _status(row) != "approved":
         return Outcome("Материал изменился, пока вы думали. Откройте его и проверьте новую версию.",
                        "Материал изменился. Откройте его и проверьте.", [card(ctx, row)], ok=False)
+    already = _status(row) == "approved"
     try:
         row = approve_material(ctx.db, ctx.settings.products_root, ctx.product.id, row.id)
     except ReviewError as exc:
         ctx.db.rollback()
         return Outcome(exc.message, exc.message, ok=False)
+    if already:  # approved elsewhere in the meantime: nothing was decided here
+        return Outcome("Этот материал уже утверждён.", "Этот материал уже утверждён.", [card(ctx, row)])
     _record_approval(ctx, row, "dispatcher:approve_material", via)
     blocks: list[dict] = [card(ctx, row)]
     text = "Утвердил."
@@ -152,13 +157,28 @@ async def confirm_approve_material(ctx: Context, stored: dict, via: str) -> Outc
     return Outcome(text, "Утвердил.", blocks)
 
 
-async def revise_material(ctx: Context, params: ReviseParams) -> Outcome:
+async def describe_revise_material(ctx: Context, params: ReviseParams) -> Outcome | Confirmation:
     row = find_material(ctx, params.material_id, kinds=("channel_text",))
     if row is None:
         return Outcome("Не нашёл пост на проверке, который можно доработать.",
                        "Не нашёл пост для доработки.", [links_block(ctx, "review")], ok=False)
+    return Confirmation(title="Доработать пост?",
+                        details=[row.title[:120], f"Что поправить: {params.feedback}",
+                                 "Команда перепишет пост по вашей правке. Новая версия снова придёт вам на проверку."],
+                        params={"material_id": str(row.id), "version": row.version, "feedback": params.feedback},
+                        confirm_label="Доработать")
+
+
+async def confirm_revise_material(ctx: Context, stored: dict, via: str) -> Outcome:
+    material_id = _uuid(stored.get("material_id"))
+    row = ctx.db.get(Artifact, material_id) if material_id else None
+    if row is None or row.product_id != ctx.product.id or row.kind != "channel_text":
+        return not_found()
+    if row.version != stored.get("version"):
+        return Outcome("Пост изменился, пока вы думали. Откройте его и проверьте новую версию.",
+                       "Пост изменился. Проверьте его.", [card(ctx, row)], ok=False)
     try:
-        task = queue_post_edit(ctx.db, row.id, params.feedback)
+        task = queue_post_edit(ctx.db, row.id, str(stored.get("feedback") or ""))
     except (ValueError, LookupError) as exc:
         ctx.db.rollback()
         return Outcome(str(exc), str(exc), ok=False)
@@ -254,17 +274,21 @@ async def confirm_schedule_post(ctx: Context, stored: dict, via: str) -> Outcome
         return Outcome("Пост изменился, пока вы думали. Откройте его и проверьте новую версию.",
                        "Пост изменился. Проверьте его.", [card(ctx, post)], ok=False)
     try:
-        schedule_owner_post(ctx.db, ctx.product.id, post_id, connection_id, when)
+        publication = schedule_owner_post(ctx.db, ctx.product.id, post_id, connection_id, when)
     except (ValueError, LookupError) as exc:
         ctx.db.rollback()
         return Outcome(str(exc), str(exc), ok=False)
-    _record_approval(ctx, post, "dispatcher:schedule_post", via)
+    approval = _record_approval(ctx, post, "dispatcher:schedule_post", via)
+    publication.approval_id = approval.id  # the publication points at the owner's yes
+    ctx.db.commit()
     local = when.astimezone(MOSCOW).strftime("%d.%m %H:%M")
     suffix = "" if ctx.settings.content_telegram_autopost_enabled else " Автоотправка выключена, поэтому сам пост не уйдёт."
     return Outcome(f"Запланировал на {local} (Москва).{suffix}", f"Запланировал на {local}.",
                    [links_block(ctx, "channels")])
 
 
-EXECUTORS = {"show_material": show_material, "revise_material": revise_material}
-DESCRIBERS = {"approve_material": describe_approve_material, "schedule_post": describe_schedule_post}
-CONFIRMERS = {"approve_material": confirm_approve_material, "schedule_post": confirm_schedule_post}
+EXECUTORS = {"show_material": show_material}
+DESCRIBERS = {"approve_material": describe_approve_material, "schedule_post": describe_schedule_post,
+              "revise_material": describe_revise_material}
+CONFIRMERS = {"approve_material": confirm_approve_material, "schedule_post": confirm_schedule_post,
+              "revise_material": confirm_revise_material}
