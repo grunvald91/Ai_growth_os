@@ -170,7 +170,8 @@ def _valid_chips(raw: list) -> list[dict]:
 
 def _missing(error: ValidationError) -> str:
     names = {"topic": "тему", "channel": "площадку", "target": "раздел", "kind": "что именно",
-             "feedback": "что поправить (хотя бы несколько слов)", "when": "дату и время"}
+             "feedback": "что поправить (хотя бы несколько слов)", "when": "дату и время",
+             "length": "длину видео: 30 секунд или минута", "call_to_action": "призыв в конце (от 6 символов)"}
     fields = []
     for item in error.errors():
         name = str(item["loc"][0]) if item["loc"] else ""
