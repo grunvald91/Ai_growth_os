@@ -71,3 +71,11 @@ def test_every_gateway_model_is_offered_with_a_starting_class():
     assert suggest_tier("claude-opus-5-5") == "premium" and suggest_tier("claude-haiku-4.5") == "economy"
     assert suggest_tier("grok-4.7") == "balanced"
     assert rows["gemini-3.1-flash-image"]["text"] is False and is_text_model("claude-sonnet-5-5")
+
+
+def test_tier_guess_uses_whole_words():
+    from app.llm.model_catalog import suggest_tier
+    assert suggest_tier("gemini-3.5") == "balanced"          # "gemini" is not "mini"
+    assert suggest_tier("gemini-flash-3.8") == "economy"
+    assert suggest_tier("gpt-6-sol") == "premium" and suggest_tier("kimi-2.7") == "economy"
+    assert suggest_tier("claude-sonnet-5-5") == "balanced"

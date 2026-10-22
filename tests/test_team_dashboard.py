@@ -74,7 +74,8 @@ def test_owner_can_preview_and_save_safe_policy_with_revision(dashboard):
     assert response.status_code == 200
     data = response.json()
     assert data["revision"] == 0
-    assert len(data["preview"]["roles"]) == 39
+    from app.api.team_dashboard import role_descriptors
+    assert len(data["preview"]["roles"]) == len(role_descriptors()) >= 39
     assert not data["preview"]["ready"]  # CMO premium model disabled initially.
     assert data["config"]["enabled"] is False
     assert "xai_api_key" not in response.text
@@ -253,6 +254,7 @@ def test_catalog_can_hold_more_than_forty_models_and_roles_cover_the_real_workfl
                            "post_rewriter:critic": ["extra-6"]}
     saved = client.put("/api/admin/team", json={"expected_revision": 0, "config": config}, headers=auth(settings))
     assert saved.status_code == 200, saved.text
+    from app.llm.router_store import RouterConfig, RouterUpdate, read_state, save_state
     ids = {role["id"] for role in saved.json()["preview"]["roles"]}
     assert {"post_strategist", "post_writer_editor", "post_rewriter", "creative_strategist", "editorial_planner",
             "competitive_intelligence", "whiteboard_storyboard"} <= ids
@@ -261,8 +263,15 @@ def test_catalog_can_hold_more_than_forty_models_and_roles_cover_the_real_workfl
     wb = settings.model_copy(update={"whiteboard_storyboard_model": "kimi-2.7", "whiteboard_voice": "eve",
                                      "whiteboard_image_model": "x", "whiteboard_speech_model": "x",
                                      "whiteboard_regions_model": "x"})
+    # While the router is switched off the choice is not applied (as for every other role).
+    assert generation_profile(wb, "gemini_ru")[0].storyboard == "kimi-2.7"
+    state = read_state(settings)
+    on = RouterConfig(**{**state.config.model_dump(), "enabled": True})
+    save_state(settings, RouterUpdate(expected_revision=state.revision, config=on))
     assert generation_profile(wb, "gemini_ru")[0].storyboard == "extra-4"
     assert generation_profile(wb, "configured")[0].storyboard == "extra-4"
+    # An older job on another model still gets every model of the chain as a reserve.
+    assert SingleCallStoryboardLLM(wb).fallback_models("kimi-2.7")[:2] == ["extra-4", "extra-5"]
     assert SingleCallStoryboardLLM(wb).fallback_models("extra-4")[0] == "extra-5"
 
 
@@ -284,3 +293,23 @@ def test_profiles_without_an_enabled_field_are_shown_as_enabled_with_full_fields
     config = {"enabled": False, "profiles": [{"model": "a-model", "tier": "premium"}], "overrides": {}}
     pre = client.post("/api/admin/team/preview", json=config, headers=auth(settings))
     assert pre.status_code == 200
+
+
+def test_switching_off_a_used_model_is_explained_in_russian(dashboard):
+    client, settings, _ = dashboard
+    config = client.get("/api/admin/team", headers=auth(settings)).json()["config"]
+    config["overrides"] = {"cmo": ["kimi-2.7"]}
+    for profile in config["profiles"]:
+        if profile["model"] == "kimi-2.7":
+            profile["enabled"] = False
+    bad = client.put("/api/admin/team", json={"expected_revision": 0, "config": config}, headers=auth(settings))
+    assert bad.status_code == 422
+    assert "kimi-2.7" in bad.text and "cmo" in bad.text and "выключена" in bad.text
+
+
+def test_page_removes_a_switched_off_model_from_roles_and_keeps_notices_visible():
+    from pathlib import Path
+    base = Path("app/api/team_dashboard_assets")
+    script, css = (base / "team.js").read_text(), (base / "team.css").read_text()
+    assert "убрана из" in script and "openReserves" in script and "не текстовая модель" in script
+    assert "overflow-x:hidden" not in css and "#notice,#error{position:fixed" in css

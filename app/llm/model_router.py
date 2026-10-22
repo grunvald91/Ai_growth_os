@@ -180,7 +180,9 @@ class ModelRouter:
                 # disabled model is refused.
                 profile = self._catalog.get(model)
                 if not profile or not profile.enabled:
-                    raise RoutingError(f"Unsafe/unavailable override for role {role}")
+                    raise RoutingError(
+                        f"Модель {model} назначена роли «{role}», но выключена или отсутствует в каталоге команды. "
+                        "Включите её или выберите для этой роли другую модель.")
 
     @staticmethod
     def _tier_for(role: str, phase: str) -> Tier:

@@ -99,6 +99,7 @@ input:focus,select:focus{border-color:#2994fd;box-shadow:0 0 0 3px #1e98ff16}
  .top-actions .button{min-height:48px;width:100%}
  .reserve .card-grid{grid-template-columns:1fr}
  select,input{min-height:44px}
+ /* Results of Save/Check stay visible above the bottom bar; a tap dismisses them. */
+ #notice,#error{position:fixed;left:13px;right:13px;bottom:calc(118px + env(safe-area-inset-bottom));z-index:60;margin:0;box-shadow:0 8px 24px #1f3a5f2e}
 }
 .toggle-line{position:relative}.toggle-line input{width:1px;height:1px;padding:0;min-height:0}
-html,body{overflow-x:hidden}

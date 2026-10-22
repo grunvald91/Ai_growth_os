@@ -17,6 +17,8 @@ function alertMessage(message,error){
  $('notice').hidden=!!error;$('error').hidden=!error;
  asText($(error?'error':'notice'),message);
 }
+$('notice').addEventListener('click',function(){this.hidden=true;});
+$('error').addEventListener('click',function(){this.hidden=true;});
 function errorMessage(error){
  if(error&&error.status===401){token='';$('authOverlay').hidden=false;}
  alertMessage(error.message||'Ошибка запроса',true);
@@ -59,11 +61,15 @@ function field(label,node,className){
 function markDirty(){
  dirty=true;$('dirty').hidden=false;$('statIssues').textContent='Проверить';
  $('statEnabled').textContent=state.config.enabled?'Включён*':'Выключен';
- $('notice').hidden=true;
 }
 // A profile without the field is enabled, exactly as the router reads it.
 function isEnabled(item){return item.enabled!==false;}
 function enabledModels(){return state.config.profiles.filter(isEnabled);}
+function roleName(key){
+ var id=key.replace(/:critic$/,''),found=((preview&&preview.roles)||[]).filter(function(r){return r.id===id;})[0];
+ return (found?found.name:id)+(/:critic$/.test(key)?' (критик)':'');
+}
+var openReserves={};
 var TIER_NAMES={economy:'Эконом',balanced:'Баланс',premium:'Премиум'};
 function profileFor(id){return state.config.profiles.filter(function(p){return p.model===id;})[0];}
 // Every model the gateway lists can be chosen: one that is not in the team's catalog yet is
@@ -94,10 +100,11 @@ function ensureProfile(id){
  if(state.config.profiles.length>=100){alertMessage('Достигнут предел в 100 моделей каталога команды.',true);return;}
  var info=((catalog&&catalog.gateway_models)||[]).filter(function(m){return m.model===id;})[0];
  var tier=info?info.suggested_tier:'balanced';
+ var odd=info&&info.text===false?' Похоже, это не текстовая модель (картинки, голос и др.): для текстовой роли она, скорее всего, не подойдёт.':'';
  state.config.profiles.push({model:id,tier:tier,enabled:true,input_usd_per_million:null,
   output_usd_per_million:null,web_search_verified:false,priority:100});
  alertMessage('Модель '+id+' добавлена в каталог команды (класс: '+TIER_NAMES[tier]+
-  ', тариф неизвестен). Изменить можно на вкладке «Модели и тарифы».',false);
+  ', тариф неизвестен). Изменить можно на вкладке «Модели и тарифы».'+odd,!!odd);
 }
 // One role has up to three models in order: the main one and two reserves.
 function setChain(key,chain){
@@ -134,7 +141,8 @@ function roleCard(role){
  grid.appendChild(picker('Модель критика',criticChain,0,criticKey,'Автоматически'));
  card.appendChild(grid);
  var reserve=element('details','reserve');
- reserve.open=mainChain.length>1||criticChain.length>1;
+ reserve.open=!!openReserves[role.id]||mainChain.length>1||criticChain.length>1;
+ reserve.addEventListener('toggle',function(){openReserves[role.id]=reserve.open;});
  reserve.appendChild(element('summary','','Резервные модели (если основная не отвечает)'));
  var reserveGrid=element('div','card-grid');
  reserveGrid.appendChild(picker('Резервная 1 — основная',mainChain,1,mainKey,'Без резервной'));
@@ -194,7 +202,22 @@ function renderModels(){
    row.appendChild(field(index?'Выход / 1 млн токенов, USD':'Вход / 1 млн токенов, USD',input));
   });
   var checkbox=element('input');checkbox.type='checkbox';checkbox.checked=isEnabled(model);
-  checkbox.addEventListener('change',function(){model.enabled=checkbox.checked;markDirty();renderModels();renderRoles();schedulePreview();});
+  checkbox.addEventListener('change',function(){
+   model.enabled=checkbox.checked;
+   if(!model.enabled){
+    // A switched-off model cannot stay in any role's chain: take it out and say where it was.
+    var roles=[];
+    Object.keys(state.config.overrides).forEach(function(key){
+     var chain=state.config.overrides[key];
+     if(chain.indexOf(model.model)<0)return;
+     roles.push(roleName(key));
+     var rest=chain.filter(function(id){return id!==model.model;});
+     if(rest.length)state.config.overrides[key]=rest;else delete state.config.overrides[key];
+    });
+    if(roles.length)alertMessage('Модель '+model.model+' выключена и убрана из: '+roles.join(', ')+'. Там снова автоматический выбор.',false);
+   }
+   markDirty();renderModels();renderRoles();schedulePreview();
+  });
   var label=element('label','model-enable');
   label.appendChild(checkbox);label.appendChild(element('span','','Разрешена'));
   row.appendChild(label);$('modelRows').appendChild(row);

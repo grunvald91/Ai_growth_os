@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 from urllib.parse import urlsplit
 
 import httpx
@@ -73,8 +74,13 @@ def catalog_comparison(remote_ids: tuple[str, ...], configured_profiles) -> list
 
 _NOT_TEXT = ("image", "imagen", "dall", "flux", "sora", "veo", "video", "tts", "speech", "voice",
              "whisper", "audio", "embed", "rerank", "moderation", "vision-only")
-_PREMIUM = ("opus", "fable", "mythos", "-pro", "sol", "o3", "ultra")
-_ECONOMY = ("haiku", "flash", "mini", "lite", "nano", "kimi-2", "deepseek", "small", "instant")
+_PREMIUM = frozenset({"opus", "fable", "mythos", "pro", "sol", "o3", "ultra"})
+_ECONOMY = frozenset({"haiku", "flash", "mini", "lite", "nano", "small", "instant", "deepseek"})
+
+
+def _tokens(model: str) -> set[str]:
+    # Whole words only: "gemini" must not count as "mini".
+    return {part for part in re.split(r"[^a-z0-9.]+", model.lower()) if part}
 
 
 def is_text_model(model: str) -> bool:
@@ -85,10 +91,10 @@ def is_text_model(model: str) -> bool:
 
 def suggest_tier(model: str) -> str:
     """Starting class for a newly added model; the owner changes it on the models tab."""
-    name = model.lower()
-    if any(word in name for word in _PREMIUM):
+    words = _tokens(model)
+    if words & _PREMIUM:
         return "premium"
-    if any(word in name for word in _ECONOMY):
+    if words & _ECONOMY or model.lower().startswith("kimi-2"):
         return "economy"
     return "balanced"
 

@@ -209,7 +209,7 @@ class SingleCallStoryboardLLM:
         from app.llm.router_store import role_override
         raw = getattr(self.settings, 'whiteboard_storyboard_fallback_models', '') or ''
         # The owner's reserve models (team page) go first, then the built-in chain.
-        chosen = role_override(self.settings, STORYBOARD_ROLE)[1:]
+        chosen = role_override(self.settings, STORYBOARD_ROLE)
         chain = chosen + [name.strip() for name in raw.split(',') if name.strip()]
         return [name for index, name in enumerate(chain) if name != model and name not in chain[:index]]
 

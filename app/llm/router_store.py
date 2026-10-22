@@ -154,8 +154,10 @@ def role_override(settings: Settings, role: str) -> list[str]:
     without a restart. A broken file never blocks work: it simply yields no override.
     """
     try:
-        raw = effective_router_settings(settings).model_router_overrides
-        data = json.loads(raw or "{}")
+        effective = effective_router_settings(settings)
+        if not effective.model_router_enabled:
+            return []  # Router switched off on the team page: choices are not applied anywhere.
+        data = json.loads(effective.model_router_overrides or "{}")
     except (RouterStoreError, ValueError, OSError, AttributeError, TypeError):
         return []
     chain = data.get(role) if isinstance(data, dict) else None
