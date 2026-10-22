@@ -194,8 +194,8 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                 pipeline.visual_author = GuardedStage(pipeline.visual_author, 'visual_decision', ledger)
             output_dir = directory / 'output'
             output_dir.mkdir(exist_ok=True, mode=0o700)
-            # Up to ~19 sequential provider calls of several minutes each.
-            async with asyncio.timeout(3600):
+            # Up to ~19 sequential provider calls of several minutes each (twice as many for the one-minute video).
+            async with asyncio.timeout(3600 if payload.request.scenes == 3 else 7200):
                 output = await pipeline.produce(payload.request, output_dir / 'video.mp4', approval_verified=True)
             with session_factory() as db:
                 task = owner_task(db, product_id, task_id, lock=True)

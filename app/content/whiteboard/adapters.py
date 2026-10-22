@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 
 from app.content.whiteboard.contracts import (
+    DEFAULT_CALL_TO_ACTION, DEFAULT_CALL_TO_ACTION_VISUAL, WhiteboardBeat,
     WhiteboardRegionPlan, WhiteboardRequest, WhiteboardScene, WhiteboardStoryboard,
 )
 from app.llm.schemas import LLMMessage, LLMRequest
@@ -71,6 +72,50 @@ def parse_storyboard(content: str) -> WhiteboardStoryboard:
     return WhiteboardStoryboard.model_validate({'scenes': scenes})
 
 
+def closing_beat(request: WhiteboardRequest) -> WhiteboardBeat:
+    """The last beat of every video: the owner's call to action, or subscribe + like."""
+    text = request.call_to_action
+    if text:
+        return WhiteboardBeat(
+            label='Призыв', narration=text,
+            visual=f'Простая иконка к призыву: речевое облачко со стрелкой, по смыслу «{text[:150]}»')
+    return WhiteboardBeat(label='Подписка и лайк', narration=DEFAULT_CALL_TO_ACTION,
+                          visual=DEFAULT_CALL_TO_ACTION_VISUAL)
+
+
+def with_call_to_action(storyboard: WhiteboardStoryboard, request: WhiteboardRequest) -> WhiteboardStoryboard:
+    """Append the closing call to action to the last scene; the story itself is not changed.
+
+    This is plain code, not another model call: the call is spoken exactly as the owner wrote it.
+    """
+    last = storyboard.scenes[-1]
+    beats = [*last.beats[:5], closing_beat(request)]  # a scene holds at most six beats
+    return WhiteboardStoryboard(scenes=[*storyboard.scenes[:-1],
+                                        WhiteboardScene(title=last.title, beats=beats)])
+
+
+def storyboard_schema(scenes: int) -> dict:
+    """JSON schema of the storyboard with the exact number of scenes this video needs."""
+    schema = WhiteboardStoryboard.model_json_schema()
+    schema['properties']['scenes'].update(minItems=scenes, maxItems=scenes)
+    return schema
+
+
+# What differs between the two video lengths: how many scenes and how much is said.
+STORYBOARD_LENGTHS = {
+    3: ('Output precisely three scenes, each with exactly two short sequential beats. '
+        'Use this arc: a question, curiosity gap, visual explanation, and a final insight. '
+        'The final insight must not invent an unsupported surprising fact. '
+        'At most 50 spoken words across all scenes. Aim for approximately 20 seconds of narration. ', 2200),
+    6: ('Output precisely six scenes, each with exactly two short sequential beats: a longer, deeper explanation. '
+        'Use this arc: a gripping question; why it matters or what people get wrong; the underlying mechanism '
+        'explained step by step across the middle scenes, each scene adding one new idea that builds on the previous; '
+        'a concrete everyday example; and a final insight. '
+        'The final insight must not invent an unsupported surprising fact. '
+        'At most 120 spoken words across all scenes. Aim for approximately 50 seconds of narration. ', 4500),
+}
+
+
 class LLMStoryboardProvider:
     """Reuse Growth OS's PrivacyGateway -> LLMService provider boundary."""
 
@@ -78,27 +123,27 @@ class LLMStoryboardProvider:
         self.service, self.model = service, model
 
     async def plan(self, request: WhiteboardRequest) -> WhiteboardStoryboard:
+        length_rules, max_tokens = STORYBOARD_LENGTHS[request.scenes]
         prompt = (
             'Return exactly one JSON object: {"scenes":[{"title":"...","beats":[{"label":"...","narration":"...","visual":"..."}]}]}. '
             "Use these exact keys; no headings, prose or Markdown outside the JSON. "
             "Write a natural Russian-language whiteboard explainer. "
-            "Output precisely three scenes, each with 2-6 short sequential beats. "
+            + length_rules +
             "Each beat requires a short label, one spoken sentence (narration), "
             "and a precise description of one clean educational diagram (visual). "
             "Specify essential attachment points, orientation, relative position and motion direction for technical objects. "
             "Simplify shapes, never the underlying mechanism. Describe visible evidence, not abstract labels alone. "
-            "Use this arc: a question, curiosity gap, visual explanation, and a final insight. The final insight must not invent an unsupported surprising fact. "
-            "Use exactly two beats per scene, at most 60 spoken words across all scenes. "
-            "Aim for approximately 25 seconds of narration, leaving a final hold. Avoid unsupported factual claims, "
+            "Do not write a call to action, a goodbye or a request to subscribe or like: the closing call is added separately after your last scene. "
+            "Avoid unsupported factual claims, "
             "personal data, URLs, and promises. Do not add markdown."
         )
         response = await self.service.generate(LLMRequest(
             model=self.model, system_prompt=prompt,
             messages=[LLMMessage(role="user", content=request.topic)],
-            max_tokens=2200,
-            response_schema=WhiteboardStoryboard.model_json_schema(),
+            max_tokens=max_tokens,
+            response_schema=storyboard_schema(request.scenes),
         ))
-        return parse_storyboard(response.content)
+        return with_call_to_action(parse_storyboard(response.content), request)
 
 
 class OpenRouterBase:
@@ -147,6 +192,11 @@ class OpenRouterImageProvider(OpenRouterBase):
             prompt += (' Title in the top 15% of the canvas. Below it, place the complete first diagram '
                        'in the left half and the complete second diagram in the right half, with a clear '
                        'white gutter. Keep every part, arrow and label inside its own diagram area.')
+        elif len(scene.beats) == 3:
+            prompt += (' Title in the top 12% of the canvas. Below it, three separate full-width horizontal '
+                       'bands stacked top to bottom in narration order, each about a third of the remaining '
+                       'height, with clear white gutters between them. Keep every part, arrow and label '
+                       'inside its own band; the last band is the closing call to action.')
         if corrections:
             prompt += ('\nThe primary author accepted ONLY these necessary corrections. Redraw this same scene, '
                        'preserving topic, labels, diagram order and other correct elements: ' +

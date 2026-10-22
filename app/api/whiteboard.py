@@ -14,16 +14,16 @@ from pydantic import ValidationError
 
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.content_studio import _owner_product, _studio_form, esc, studio_page_shell
-from app.content.whiteboard.contracts import Contract, WhiteboardRequest
-from app.content.whiteboard.jobs import (AGENT, TOP_UP_STEP, approve_job, call_limit, can_resume, can_top_up, cancel_job,
-                                         digest, job_directory, owner_task, queue_job, records, resume_job)
+from app.content.whiteboard.contracts import SCENES_FOR_SECONDS, Contract, WhiteboardRequest
+from app.content.whiteboard.jobs import (AGENT, MAX_API_CALLS, TOP_UP_STEP, approve_job, call_limit, can_resume, can_top_up, cancel_job,
+                                         digest, job_directory, owner_task, queue_job, records, required_calls, resume_job)
 from app.content.whiteboard.runtime import MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings
 from app.content.whiteboard.checkpoints import CheckpointError
 from app.content.durations import duration_notice, task_durations
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import Task, TaskStatus
-from pydantic import Field
+from pydantic import Field, model_validator
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 
@@ -33,9 +33,20 @@ STATUS_NAMES = {'waiting_approval': 'Ожидает подтверждения',
 
 class CreateJob(Contract):
     topic: str = Field(min_length=8, max_length=400)
-    max_api_calls: int = Field(default=13, ge=13, le=25)
+    # About 30 seconds (3 scenes) or about a minute (6 scenes).
+    duration_seconds: Literal[30, 60] = 30
+    # What the video ends with. Empty: a call to subscribe to the channel and like.
+    call_to_action: str = Field(default='', max_length=200)
+    # Empty: exactly as many calls as this video needs.
+    max_api_calls: int | None = Field(default=None, ge=13, le=MAX_API_CALLS)
     profile: Literal['configured', 'gemini_ru'] = 'configured'
     visual_review: bool = False
+
+    @model_validator(mode='after')
+    def call_to_action_not_tiny(self):
+        if self.call_to_action and len(self.call_to_action) < 6:
+            raise ValueError('The call to action is too short')
+        return self
 
 
 class ApproveJob(Contract):
@@ -74,12 +85,17 @@ def _queue(db, product, body, settings):
         models, voice = generation_profile(settings, body.profile)
     except ValueError:
         raise HTTPException(503, MESSAGES['configuration_missing']) from None
-    request = WhiteboardRequest(product_id=product.id, topic=body.topic, voice=voice)
+    request = WhiteboardRequest(product_id=product.id, topic=body.topic, voice=voice,
+                                duration_seconds=body.duration_seconds, scenes=SCENES_FOR_SECONDS[body.duration_seconds],
+                                call_to_action=body.call_to_action)
+    needed = required_calls(request, visual_review=body.visual_review)
+    if body.max_api_calls is not None and body.max_api_calls < needed:
+        raise HTTPException(422, f'Для этого видео нужно не меньше {needed} вызовов. Выберите лимит {needed} или больше, либо «Столько, сколько нужно».')
     try:
-        return queue_job(db, request, models, max_api_calls=body.max_api_calls, visual_review=body.visual_review,
-                         image_provider='claudehub')
+        return queue_job(db, request, models, max_api_calls=body.max_api_calls or needed,
+                         visual_review=body.visual_review, image_provider='claudehub')
     except ValueError:
-        raise HTTPException(422, 'Проверьте тему и лимит: с проверкой рисунков выберите 19 или 25 вызовов. Ключи и персональные данные нельзя включать в видео.') from None
+        raise HTTPException(422, 'Проверьте тему, призыв и лимит вызовов. Ключи и персональные данные нельзя включать в видео.') from None
 
 
 async def _approve(db, product_id, task_id, body, actor, settings):
@@ -150,7 +166,7 @@ def page(product, title, body, *, status=200, refresh=False):
     if refresh:
         headers['Refresh'] = '8'
     return HTMLResponse(studio_page_shell(product, active='create', title=title,
-        subtitle='Рисованное объяснение с русской озвучкой · 30 секунд · 9:16', body=body), status_code=status, headers=headers)
+        subtitle='Рисованное объяснение с русской озвучкой · 30 секунд или минута · 9:16', body=body), status_code=status, headers=headers)
 
 
 def job_html(state, product_id, *, error=None):
@@ -170,8 +186,12 @@ def job_html(state, product_id, *, error=None):
             f'API-вызовы: {state["calls"]} из {state.get("call_limit_total", state["max_api_calls"])}</p>')
     scene = state.get('scene_index')
     beat = state.get('beat_index')
-    if isinstance(scene, int) and 0 <= scene < 3:
-        body += f'<p>Сцена {scene + 1} из 3'
+    scene_total = state['request'].get('scenes', 3)
+    custom_call = state['request'].get('call_to_action')
+    body += ('<p>' + ('Около минуты, 6 сцен' if scene_total == 6 else 'Около 30 секунд, 3 сцены')
+             + (' · призыв в конце: ' + esc(custom_call) if custom_call else '') + '</p>')
+    if isinstance(scene, int) and 0 <= scene < scene_total:
+        body += f'<p>Сцена {scene + 1} из {scene_total}'
         if isinstance(beat, int) and 0 <= beat < 6:
             body += f' · реплика {beat + 1}'
         body += '</p>'
@@ -280,15 +300,23 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
     fields = fields or {}
     base = f'/studio/products/{product_id}/whiteboard'
     profile = fields.get('profile', 'gemini_ru')
-    maximum = str(fields.get('max_api_calls', '19'))
+    maximum = str(fields.get('max_api_calls') or 'auto')
     visual_review = fields.get('visual_review', 'once')
-    body = '<section class="sg-surface"><h2>Создать анимацию с озвучкой</h2><p>Вертикальное видео на 30 секунд: три сцены, русская озвучка, MP4, обложка и субтитры. Перед запуском вы подтвердите платную генерацию. Доступ к моделям проверяется перед платным запуском.</p>'
+    length = str(fields.get('duration_seconds', '30'))
+    body = '<section class="sg-surface"><h2>Создать анимацию с озвучкой</h2><p>Вертикальное видео на 30 секунд или на минуту: русская озвучка, MP4, обложка и субтитры. В конце видео зовёт подписаться, поставить лайк или сделать то, что вы напишете. Перед запуском вы подтвердите платную генерацию. Доступ к моделям проверяется перед платным запуском.</p>'
     body += f'<p class="sg-notice sg-duration-note" role="note">⏱ {esc(duration_notice(durations or {}, "whiteboard"))}</p>'
     if error:
         body += f'<p class="sg-warning" role="alert">{esc(error)}</p>'
     body += (f'<form method="post" action="{base}" class="sg-form">'
              '<label class="sg-field"><span>Что объяснить в видео?</span><textarea name="topic" minlength="8" maxlength="400" rows="3" required '
              f'placeholder="Например: почему пилот добавляет тягу при посадке на авианосец">{esc(fields.get("topic", ""))}</textarea></label>'
+             '<label class="sg-field"><span>Длина видео</span><select name="duration_seconds">' + ''.join(
+                 f'<option value="{value}"' + (' selected' if length == str(value) else '') + f'>{label}</option>'
+                 for value, label in [(30, 'Около 30 секунд — 3 сцены'), (60, 'Около минуты — 6 сцен, объяснение подробнее')]) +
+             '</select><small>Минутное видео делается дольше и требует примерно вдвое больше платных вызовов.</small></label>'
+             '<label class="sg-field"><span>Призыв в конце видео</span><input type="text" name="call_to_action" maxlength="200" '
+             'placeholder="Пусто — призыв подписаться на канал и поставить лайк" '
+             f'value="{esc(fields.get("call_to_action", ""))}"><small>Это прозвучит последней репликой. Например: «Напишите в комментариях, что объяснить дальше».</small></label>'
              '<details><summary>Настройки генерации</summary>'
              '<label class="sg-field"><span>Вариант генерации</span><select name="profile">' + ''.join(
                  f'<option value="{value}"' + (' selected' if profile == value else '') + f'>{label}</option>'
@@ -297,11 +325,12 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
              '<label class="sg-field"><span>Проверка рисунков</span><select name="visual_review">' + ''.join(
                  f'<option value="{value}"' + (' selected' if visual_review == value else '') + f'>{label}</option>'
                  for value, label in [('once', 'Критик один раз, автор выбирает исправления'), ('off', 'Без критика')]) +
-             '</select><small>Проверяются механика, расположение деталей, соответствие озвучке и читаемость. Для трёх сцен по две реплики: до 18 вызовов с исправлениями; выберите лимит 19 или 25.</small></label>'
+             '</select><small>Проверяются механика, расположение деталей, соответствие озвучке и читаемость. Если каждую сцену придётся перерисовать, нужно больше вызовов: для 30 секунд 19, для минуты 34.</small></label>'
              '<label class="sg-field"><span>Максимум платных API-вызовов</span><select name="max_api_calls">' + ''.join(
                  f'<option value="{value}"' + (' selected' if maximum == str(value) else '') + f'>{label}</option>'
-                 for value, label in [(13, '13 — без проверки рисунков'), (19, '19 — с проверкой рисунков'), (25, '25')]) +
-             '</select><small>Это лимит обращений к моделям; точная сумма списаний неизвестна.</small></label></details>'
+                 for value, label in [('auto', 'Столько, сколько нужно для выбранных настроек'),
+                                      (19, '19'), (25, '25'), (34, '34'), (45, '45')]) +
+             '</select><small>Это лимит обращений к моделям; точная сумма списаний неизвестна. Для видео на 30 секунд без проверки рисунков нужно 14 вызовов, с проверкой 19; для минуты 26 и 34.</small></label></details>'
              '<button class="btn primary">Сохранить и перейти к подтверждению</button></form></section>')
     return body
 
@@ -389,11 +418,14 @@ async def studio_create(product_id: UUID, request: Request, db: Session = Depend
     product = _owner_product(db, product_id)
     fields = await _studio_form(request)
     try:
-        body = CreateJob(topic=fields.get('topic', ''), max_api_calls=fields.get('max_api_calls', '13'),
+        limit = fields.get('max_api_calls', 'auto')
+        body = CreateJob(topic=fields.get('topic', ''), max_api_calls=None if limit in ('', 'auto') else limit,
+                         duration_seconds=int(fields.get('duration_seconds') or 30),
+                         call_to_action=(fields.get('call_to_action') or '').strip(),
                          profile=fields.get('profile', 'configured'), visual_review=fields.get('visual_review') == 'once')
     except ValueError:
         return page(product, 'Создать анимацию', creation_form(product_id, fields=fields, durations=task_durations(db),
-                    error='Тема: 8–400 символов. Лимит: 13–25 вызовов. Выберите вариант генерации.'), status=422)
+                    error='Тема: 8–400 символов. Призыв: не короче 6 и не длиннее 200 символов, либо пусто. Выберите длину видео и вариант генерации.'), status=422)
     try:
         task = _queue(db, product, body, settings)
     except HTTPException as exc:

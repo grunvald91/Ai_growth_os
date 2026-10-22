@@ -6,11 +6,19 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 
 class Contract(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+# Video length presets: about 30 seconds = 3 scenes, about a minute = twice as many scenes.
+SCENES_FOR_SECONDS = {30: 3, 60: 6}
+
+# Spoken when the owner leaves the call-to-action field empty.
+DEFAULT_CALL_TO_ACTION = 'Подпишитесь на канал и поставьте лайк, если было интересно!'
+DEFAULT_CALL_TO_ACTION_VISUAL = ('Крупная кнопка «Подписаться» с колокольчиком и рядом большой палец вверх (лайк)')
 
 
 class WhiteboardRequest(Contract):
@@ -18,12 +26,29 @@ class WhiteboardRequest(Contract):
     topic: str = Field(min_length=8, max_length=400)
     language: Literal["ru"] = "ru"
     aspect_ratio: Literal["9:16"] = "9:16"
-    duration_seconds: Literal[30] = 30
-    scenes: Literal[3] = 3
+    duration_seconds: Literal[30, 60] = 30
+    scenes: Literal[3, 6] = 3
     visual_style: Literal["whiteboard_marker"] = "whiteboard_marker"
     voice: str = Field(default="default", min_length=1, max_length=80)
+    # What the closing beat asks the viewer to do. Empty: subscribe to the channel and like.
+    call_to_action: str = Field(default="", max_length=200)
     # API execution must be manually approved. This is NOT a spending cap.
     request_generation: bool = False
+
+    @model_validator(mode="after")
+    def length_matches_scenes(self):
+        if SCENES_FOR_SECONDS[self.duration_seconds] != self.scenes:
+            raise ValueError("30 seconds means 3 scenes, a minute means 6 scenes")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _keep_legacy_form(self, handler):
+        # An empty call to action is omitted, so requests, digests and checkpoints
+        # created before this field existed keep exactly the same serialization.
+        data = handler(self)
+        if not data.get("call_to_action"):
+            data.pop("call_to_action", None)
+        return data
 
 
 class WhiteboardBeat(Contract):
@@ -38,7 +63,7 @@ class WhiteboardScene(Contract):
 
 
 class WhiteboardStoryboard(Contract):
-    scenes: list[WhiteboardScene] = Field(min_length=3, max_length=3)
+    scenes: list[WhiteboardScene] = Field(min_length=3, max_length=6)
 
 
 class WhiteboardRegion(Contract):

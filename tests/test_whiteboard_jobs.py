@@ -63,7 +63,7 @@ def client():
     return browser
 
 
-def new_job(environment, *, maximum=13):
+def new_job(environment, *, maximum=14):
     factory, settings, product_id, _ = environment
     with factory() as db:
         task = queue_job(db, WhiteboardRequest(product_id=product_id, topic='Как работает онлайн-запись', voice='Kore'),
@@ -185,7 +185,7 @@ async def test_full_owner_interface_worker_and_real_mp4(environment, tmp_path, m
         index = browser.get(f'/studio/products/{product_id}/whiteboard')
         assert index.status_code == 200 and 'Сохранить и перейти' in index.text
         response = browser.post(f'/studio/products/{product_id}/whiteboard',
-                                data={'topic': 'Как работает онлайн-запись', 'max_api_calls': '13'}, follow_redirects=False)
+                                data={'topic': 'Как работает онлайн-запись', 'max_api_calls': '14'}, follow_redirects=False)
         assert response.status_code == 303
         url = response.headers['location']; task_id = UUID(url.split('/')[-1])
         review = browser.get(url)
@@ -200,7 +200,7 @@ async def test_full_owner_interface_worker_and_real_mp4(environment, tmp_path, m
         assert await run_whiteboard_once(factory, settings, factory=real_factory, readiness=ready) == 0
         page = browser.get(url)
         assert page.status_code == 200 and '<video controls' in page.text
-        assert '13 из 13' in page.text and 'Скачать MP4' in page.text
+        assert '13 из 14' in page.text and 'Скачать MP4' in page.text
         assert 'Завершено этапов: 14 из 14' in page.text
         assert '/files/video.vtt' in page.text
         download = browser.get(url + '/files/video.mp4')
@@ -260,7 +260,7 @@ def test_call_ledger_caps_requests_and_cancellation_blocks_next_call(environment
     with factory() as db:
         db.get(Task, task_id).status = TaskStatus.RUNNING; db.commit()
     ledger = CallLedger(factory, product_id, task_id)
-    for _ in range(13): ledger.finish(ledger.begin('speech'))
+    for _ in range(14): ledger.finish(ledger.begin('speech'))
     with pytest.raises(ReadinessError, match='call_limit'): ledger.begin('speech')
     with factory() as db: cancel_job(db, product_id, task_id)
     with pytest.raises(ReadinessError, match='cancelled'): ledger.begin('image')
@@ -550,11 +550,11 @@ async def test_auto_resume_stops_after_attempt_limit_and_keeps_every_error(envir
 @pytest.mark.asyncio
 async def test_spent_calls_need_owner_top_up_and_then_video_finishes(environment):
     factory, settings, product_id, _ = environment
-    task_id = new_job(environment, maximum=13); approve(environment, task_id)
+    task_id = new_job(environment, maximum=14); approve(environment, task_id)
     with factory() as db:
         db.get(Task, task_id).status = TaskStatus.RUNNING; db.commit()
     ledger = CallLedger(factory, product_id, task_id)
-    for _ in range(13): ledger.finish(ledger.begin('speech'))
+    for _ in range(14): ledger.finish(ledger.begin('speech'))
     with factory() as db:
         task = owner_task(db, product_id, task_id); task.status = TaskStatus.FAILED
         _, saved, _, _ = records(db, task)

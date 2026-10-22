@@ -19,24 +19,38 @@ from pydantic import Field, model_validator
 
 AGENT = 'whiteboard_renderer'
 ACTION = 'paid_whiteboard_video_generation'
+# The most API calls one video job may be approved for (the one-minute video needs more).
+MAX_API_CALLS = 60
+
+
+def required_calls(request: WhiteboardRequest, *, visual_review: bool = False) -> int:
+    """Calls a video needs when nothing fails: script, a picture and region plan per scene,
+    one speech call per beat (every scene has two beats, the last one a third: the closing
+    call to action). With the picture review: the critic, the author's decision and,
+    at worst, one redrawn picture per scene."""
+    beats = 2 * request.scenes + 1
+    calls = 1 + 2 * request.scenes + beats
+    return calls + (2 + request.scenes if visual_review else 0)
 
 
 class JobRequest(Contract):
     schema_version: int = 1
     request: WhiteboardRequest
     models: WhiteboardModels
-    max_api_calls: int = Field(default=25, ge=13, le=25)
+    max_api_calls: int = Field(default=25, ge=13, le=MAX_API_CALLS)
     visual_review: bool = False
     image_provider: Literal['openrouter', 'claudehub'] = 'openrouter'
     visual_repair_from: UUID | None = None
     repair_source_digest: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     repair_manifest_sha256: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
-    inherited_calls: int = Field(default=0, ge=0, le=25)
+    inherited_calls: int = Field(default=0, ge=0, le=MAX_API_CALLS)
 
     @model_validator(mode='after')
     def review_budget(self):
         if self.visual_review and self.max_api_calls < 18:
             raise ValueError('One visual review and up to three redraws require at least 18 calls')
+        if self.request.scenes > 3 and self.max_api_calls < required_calls(self.request, visual_review=self.visual_review):
+            raise ValueError('The one-minute video needs more calls than this limit')
         if self.image_provider == 'claudehub' and self.models.image != 'gemini-3.1-flash-image':
             raise ValueError('ClaudeHub image generation must use Gemini 3.1 Flash Image')
         if self.visual_repair_from is not None:
@@ -77,8 +91,11 @@ def records(db, task, *, lock=False):
 
 
 def queue_job(db, request: WhiteboardRequest, models: WhiteboardModels, *, max_api_calls=25, visual_review=False, image_provider='openrouter'):
-    if PrivacyGateway().sanitize_text(request.topic) != request.topic:
+    gateway = PrivacyGateway()
+    if gateway.sanitize_text(request.topic) != request.topic or gateway.sanitize_text(request.call_to_action) != request.call_to_action:
         raise ValueError('Sensitive text is not allowed')
+    if max_api_calls < required_calls(request, visual_review=visual_review):
+        raise ValueError('The call limit is below what this video needs')
     product = db.scalar(select(Product).where(Product.id == request.product_id).with_for_update())
     if product is None:
         raise LookupError('Product not found')

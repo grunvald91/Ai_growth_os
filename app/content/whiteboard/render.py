@@ -26,6 +26,12 @@ SAMPLE_RATE = 24000
 MAX_IMAGE_BYTES = 12_000_000
 # Speech models do not obey a time budget; longer narration lengthens the video.
 MAX_VIDEO_SECONDS = 60
+# The same rule for the one-minute video: it may run to twice its target.
+MAX_LONG_VIDEO_SECONDS = 120
+
+
+def max_video_seconds(request) -> int:
+    return MAX_VIDEO_SECONDS if request.duration_seconds <= 30 else MAX_LONG_VIDEO_SECONDS
 
 
 def _run(args: list[str], *, timeout: int = 30) -> bytes:
@@ -122,6 +128,7 @@ class MarkerSweepRenderer:
             raise ValueError("Scene count mismatch")
         if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
             raise RuntimeError("FFmpeg and FFprobe are required")
+        limit_seconds = max_video_seconds(request)
         images = []
         for assets in scenes:
             assets.validate()
@@ -148,15 +155,15 @@ class MarkerSweepRenderer:
                         raise ValueError("Audio exceeds size limit")
                     source = root / f"{scene_index}-{beat_index}.mp3"
                     source.write_bytes(encoded)
-                    pcm = _run(["ffmpeg", "-v", "error", "-i", str(source), "-t", str(MAX_VIDEO_SECONDS + 1), "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "pipe:1"])
+                    pcm = _run(["ffmpeg", "-v", "error", "-i", str(source), "-t", str(limit_seconds + 1), "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "pipe:1"])
                     samples = len(pcm) // 2
                     if not samples or len(pcm) % 2:
                         raise ValueError("Decoded audio is empty or malformed")
                     start = total_samples / SAMPLE_RATE
                     total_samples += samples
                     end = total_samples / SAMPLE_RATE
-                    if end > MAX_VIDEO_SECONDS:
-                        raise ValueError(f"Narration exceeds {MAX_VIDEO_SECONDS} seconds; shorten the script")
+                    if end > limit_seconds:
+                        raise ValueError(f"Narration exceeds {limit_seconds} seconds; shorten the script")
                     subtitles.append(f"{len(subtitles) + 1}\n{_timestamp(start)} --> {_timestamp(end)}\n{beat.narration}\n")
                     timeline.append({"scene": scene_index, "beat": beat_index, "start": start, "end": end})
                     scene_durations.append(samples / SAMPLE_RATE)
@@ -164,7 +171,7 @@ class MarkerSweepRenderer:
                 durations.append(tuple(scene_durations))
                 ends.append(total_samples / SAMPLE_RATE)
             narration = total_samples / SAMPLE_RATE
-            seconds = max(request.duration_seconds, min(MAX_VIDEO_SECONDS, math.ceil(narration + 0.5)))
+            seconds = max(request.duration_seconds, min(limit_seconds, math.ceil(narration + 0.5)))
             pcm_path = root / "narration.pcm"
             pcm_path.write_bytes(b"".join(chunks) + b"\0\0" * (seconds * SAMPLE_RATE - total_samples))
             rendered = root / "video.mp4"
