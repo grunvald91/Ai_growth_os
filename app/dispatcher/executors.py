@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -91,9 +92,14 @@ async def show_plan(ctx: Context, params) -> Outcome:
     if active is not None:
         slots = upcoming_slots(active[1])
         from app.api.content_studio import platform_label
+        # The plan carries its own time zone (Moscow by default); the server clock may be UTC.
+        try:
+            zone = ZoneInfo(str(active[1].get("timezone") or "Europe/Moscow"))
+        except (ValueError, KeyError):  # ZoneInfoNotFoundError is a KeyError
+            zone = ZoneInfo("Europe/Moscow")
         if slots:
             blocks.append({"type": "table", "columns": ["Когда", "Площадка", "Тема"],
-                           "rows": [[slot["_when"].astimezone().strftime("%d.%m %H:%M"),
+                           "rows": [[slot["_when"].astimezone(zone).strftime("%d.%m %H:%M"),
                                      platform_label(slot.get("platform")), str(slot.get("topic", ""))]
                                     for slot in slots[:8]]})
         text = f"План утверждён. Впереди публикаций: {len(slots)}." + (" Показаны ближайшие." if len(slots) > 8 else "")

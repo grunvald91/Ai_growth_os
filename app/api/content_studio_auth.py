@@ -21,6 +21,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.core.config import Settings, get_settings
+from app.db.session import get_db
 from app.core.studio_sessions import fingerprint, normalize_login
 
 _logger = logging.getLogger(__name__)
@@ -186,6 +187,30 @@ def _session_login(request: Request, settings, users: dict) -> tuple[str, list[s
     return login, current[1]
 
 
+def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str]] | None:
+    """Sign-in that started from the ServGo admin. ServGo is asked on every request, so removing
+    someone there (or switching the administrators' access off) closes the studio at once."""
+    from app.sso import access, tickets
+    session = tickets.read_session(settings, request.cookies.get(tickets.COOKIE))
+    if session is None or not tickets.configured(settings):
+        return None
+    if db is None or not _sso_link_current(db, session):
+        return None  # The studio owner disconnected or re-linked this business: the old session ends.
+    role = access.servgo_role(settings, session.user_id, session.business_id)
+    if role is None:
+        return None
+    request.state.studio_sso_role = role
+    return f"servgo:{session.user_id}", [session.product_id]
+
+
+def _sso_link_current(db, session) -> bool:
+    from sqlalchemy import select
+    from app.sso.models import StudioBusinessLink
+    linked = db.scalar(select(StudioBusinessLink.product_id).where(
+        StudioBusinessLink.servgo_business_id == session.business_id))
+    return linked is not None and str(linked) == session.product_id
+
+
 def _wants_login_page(request: Request) -> bool:
     return (request.method in {"GET", "HEAD"} and request.url.path.startswith("/studio")
             and "text/html" in request.headers.get("accept", ""))
@@ -218,6 +243,7 @@ def require_studio_auth(
     request: Request,
     credentials: HTTPBasicCredentials | None = Depends(_basic),
     settings: Settings = Depends(get_settings),
+    db=Depends(get_db),
 ):
     users = _load_users(settings)
     if not _auth_configured(settings, users):
@@ -225,9 +251,14 @@ def require_studio_auth(
         return None  # Developer loopback only; never a production exemption.
     # A signed login session wins over credentials the browser remembers for Basic auth,
     # so signing in with another account through the form really switches the user.
+    # It also wins over a ServGo sign-in: a link someone else sent can never push the
+    # studio owner out of their own account (the landing page drops a narrower session instead).
     session = _session_login(request, settings, users)
     if session is not None:
         return _apply_scope(request, *session)
+    sso = _sso_login(request, settings, db)
+    if sso is not None:
+        return _apply_scope(request, *sso)
     if not credentials:
         _login_required(request)
     result = check_credentials(settings, users, credentials.username, credentials.password)

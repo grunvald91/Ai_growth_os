@@ -220,10 +220,15 @@ def test_deletion_respects_foreign_keys_and_spares_other_companies(tmp_path):
 
     Base.metadata.create_all(engine)
 
+    counter = iter(range(1000, 100000))
+
     def fill(connection, table, ids, product_id):
         row = {}
         for column in table.columns:
-            if column.foreign_keys:
+            if column.unique and not column.foreign_keys and not column.primary_key:
+                # A unique column must differ between the two companies' rows.
+                row[column.name] = next(counter) if column.type.python_type is int else uuid.uuid4().hex
+            elif column.foreign_keys:
                 target = next(iter(column.foreign_keys)).column.table.name
                 row[column.name] = product_id if target == "products" else ids.get(target)
             elif column.primary_key:

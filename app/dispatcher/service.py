@@ -35,6 +35,9 @@ _logger = logging.getLogger(__name__)
 
 # The owner should not stare at a spinner: after this the dispatcher answers with hints and links.
 DECISION_TIMEOUT_SECONDS = 45
+# The model sees only the latest messages of the thread (owner's decision, 22.10.2026); the whole
+# thread stays stored and visible on the page.
+HISTORY_FOR_MODEL = 20
 
 FALLBACK_TEXT = ("Не получилось разобрать просьбу — попробуйте сказать иначе или выберите готовый вариант ниже.")
 
@@ -80,6 +83,25 @@ def _add(db: Session, conversation: DispatcherConversation, **values) -> Dispatc
     return message
 
 
+def _add_committed(db: Session, conversation: DispatcherConversation, **values) -> DispatcherMessage:
+    """Store and commit one message. Two tabs or phones writing at once can pick the same number;
+    the loser takes the next one instead of failing (the work it reports is already done)."""
+    for attempt in range(5):
+        try:
+            message = _add(db, conversation, **values)
+            db.commit()
+            return message
+        except IntegrityError:
+            db.rollback()
+            if values.get("client_key") and db.scalar(select(DispatcherMessage.id).where(
+                    DispatcherMessage.conversation_id == conversation.id,
+                    DispatcherMessage.client_key == values["client_key"])):
+                raise  # A real repeat of the same message, not a numbering clash.
+            if attempt == 4:
+                raise
+    raise RuntimeError("unreachable")
+
+
 # ---- model ------------------------------------------------------------------------------
 
 def record_llm_cost(db: Session, product_id: UUID, response, provider: str) -> None:
@@ -98,7 +120,9 @@ def record_llm_cost(db: Session, product_id: UUID, response, provider: str) -> N
 async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, history: list[DispatcherMessage],
                     text: str) -> tuple[DispatcherDecision | None, str | None]:
     """(decision, model name). A model failure or unreadable answer gives (None, ...)."""
-    turns = [LLMMessage(role=m.role, content=m.text) for m in history if m.text]
+    turns = [LLMMessage(role=m.role, content=m.text) for m in history if m.text][-HISTORY_FOR_MODEL:]
+    while turns and turns[0].role != "user":
+        turns.pop(0)  # Start the shortened thread with the owner's message, as models expect.
     request = LLMRequest(
         system_prompt=SYSTEM_PROMPT,
         messages=[*turns, LLMMessage(role="user", content=build_user_message(snapshot(ctx.db, ctx.product), text))],
@@ -213,11 +237,9 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
     history = messages(db, conversation)
     label = (chip or {}).get("label") or text
     try:
-        user = _add(db, conversation, role="user", input_mode=mode, text=label, client_key=client_key,
-                    capability=(chip or {}).get("capability"), params=(chip or {}).get("params") or {})
-        db.commit()
+        user = _add_committed(db, conversation, role="user", input_mode=mode, text=label, client_key=client_key,
+                              capability=(chip or {}).get("capability"), params=(chip or {}).get("params") or {})
     except IntegrityError:
-        db.rollback()
         return {"messages": [], "replayed": True}
 
     decision: DispatcherDecision | None = None
@@ -267,14 +289,14 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         blocks.append(_confirm_block(confirmation, confirmation_id))
     elif chips:
         blocks.append({"type": "chips", "items": chips})
-    answer = _add(db, conversation, role="assistant", input_mode="text", text=reply_text, spoken=spoken,
-                  blocks=clean_blocks(blocks), intent=intent, capability=capability_id or (decision.capability if decision else None),
-                  params=(decision.params if decision else {}), confidence=(decision.confidence if decision else None),
-                  task_id=outcome.task_id if outcome else None, model=model_name,
-                  confirmation_id=confirmation_id, confirmation_state="pending" if confirmation else None)
-    if confirmation is not None:
-        answer.params = {**confirmation.params, "_capability": capability_id}
-    db.commit()
+    params = {**confirmation.params, "_capability": capability_id} if confirmation is not None else \
+        (decision.params if decision else {})
+    answer = _add_committed(db, conversation, role="assistant", input_mode="text", text=reply_text, spoken=spoken,
+                            blocks=clean_blocks(blocks),
+                            intent=intent, capability=capability_id or (decision.capability if decision else None),
+                            params=params, confidence=(decision.confidence if decision else None),
+                            task_id=outcome.task_id if outcome else None, model=model_name,
+                            confirmation_id=confirmation_id, confirmation_state="pending" if confirmation else None)
     return {"messages": [to_dict(user), to_dict(answer)], "replayed": False}
 
 
@@ -311,11 +333,12 @@ async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bo
         _record_tool_call(db, ctx, capability_id, stored, outcome)
     else:
         outcome = await _decline(ctx, capability_id, stored)
-    reply = _add(db, conversation, role="assistant", input_mode="confirm", text=outcome.text, spoken=outcome.spoken,
-                 blocks=clean_blocks([{"type": "text", "text": outcome.text}, *outcome.blocks,
-                                      {"type": "chips", "items": FOLLOW_UP}]),
-                 intent="answer", capability=capability_id, task_id=outcome.task_id)
-    db.commit()
+    db.commit()  # The card's answer is final before the reply is numbered.
+    reply = _add_committed(db, conversation, role="assistant", input_mode="confirm", text=outcome.text,
+                           spoken=outcome.spoken,
+                           blocks=clean_blocks([{"type": "text", "text": outcome.text}, *outcome.blocks,
+                                                {"type": "chips", "items": FOLLOW_UP}]),
+                           intent="answer", capability=capability_id, task_id=outcome.task_id)
     return {"messages": [to_dict(card), to_dict(reply)], "replayed": False}
 
 

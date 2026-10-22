@@ -203,11 +203,12 @@ def require_owner(
     credentials: HTTPBasicCredentials | None = Depends(_basic),
     authorization: str = Header(default=""),
     settings: Settings = Depends(get_settings),
+    db=Depends(get_db),
 ) -> None:
     from app.core.studio_sessions import COOKIE
     if credentials is not None or request.cookies.get(COOKIE):
         # Basic credentials or a Studio login session (the page's own fetches send the cookie).
-        require_studio_auth(request, credentials, settings)
+        require_studio_auth(request, credentials, settings, db)
         if getattr(request.state, "studio_product_ids", None) is not None:
             raise HTTPException(403, "Administrator account required")
         require_studio_csrf(request, settings)

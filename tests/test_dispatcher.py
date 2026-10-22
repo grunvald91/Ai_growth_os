@@ -402,3 +402,56 @@ async def test_new_topic_starts_a_fresh_conversation(db, product):
     fresh = service.open_conversation(db, product.id, "owner", fresh=True)
     assert fresh.id != old.id and service.messages(db, fresh) == []
     assert service.open_conversation(db, product.id, "owner").id == fresh.id
+
+
+@pytest.mark.asyncio
+async def test_two_devices_writing_at_once_do_not_break_the_thread(db, product, monkeypatch):
+    """Another phone took the next number between our read and our write: we take the following one."""
+    from app.dispatcher import service as dispatcher_service
+    from app.dispatcher.models import DispatcherMessage
+    await send(db, product, chip={"label": "Что в работе", "capability": "show_work", "params": {}}, key="a")
+    real = dispatcher_service._next_seq
+    clashes = {"left": 1}
+
+    def stale(db_, conversation):
+        if clashes["left"]:
+            clashes["left"] -= 1
+            return 1  # already taken
+        return real(db_, conversation)
+    monkeypatch.setattr(dispatcher_service, "_next_seq", stale)
+    result = await send(db, product, chip={"label": "Что в работе", "capability": "show_work", "params": {}}, key="b")
+    assert [m["role"] for m in result["messages"]] == ["user", "assistant"]
+    seqs = [m.seq for m in db.scalars(select(DispatcherMessage).order_by(DispatcherMessage.seq))]
+    assert seqs == [1, 2, 3, 4]
+
+
+@pytest.mark.asyncio
+async def test_plan_times_are_shown_in_the_plans_time_zone(db, product, monkeypatch):
+    from datetime import datetime, timedelta, timezone as tz
+    from app.dispatcher import executors
+    when = (datetime.now(tz.utc) + timedelta(days=1)).replace(hour=7, minute=0, second=0, microsecond=0)
+    plan = {"approval_state": "active", "timezone": "Europe/Moscow",
+            "slots": [{"publish_at": when.isoformat(), "platform": "telegram", "topic": "Тема", "state": "planned"}]}
+    monkeypatch.setattr(executors, "plans", lambda db_, pid: ((None, plan), None))
+    outcome = await executors.show_plan(context(db, product), None)
+    table = next(b for b in outcome.blocks if b["type"] == "table")
+    assert table["rows"][0][0].endswith("10:00")  # 07:00 UTC is 10:00 in Moscow
+    plan["timezone"] = "Nowhere/Invalid"
+    outcome = await executors.show_plan(context(db, product), None)
+    assert next(b for b in outcome.blocks if b["type"] == "table")["rows"][0][0].endswith("10:00")
+
+
+@pytest.mark.asyncio
+async def test_model_sees_only_the_latest_twenty_messages(db, product):
+    from app.dispatcher import service as dispatcher_service
+    for index in range(15):  # 30 stored messages
+        await send(db, product, chip={"label": f"Что в работе {index}", "capability": "show_work", "params": {}},
+                   key=f"c{index}")
+    model, provider = llm({"intent": "answer", "confidence": 0.9, "reply_text": "Ок"})
+    await send(db, product, text="что нового?", key="t", model=model)
+    sent = provider.requests[-1].messages
+    history = sent[:-1]  # the last one is the current request with the company snapshot
+    assert len(history) <= dispatcher_service.HISTORY_FOR_MODEL and history[0].role == "user"
+    assert "Что в работе 14" in [m.content for m in history] and "Что в работе 0" not in [m.content for m in history]
+    stored = await send(db, product, text="", chip={"label": "Что в работе", "capability": "show_work", "params": {}}, key="z")
+    assert len(dispatcher_service.messages(db, dispatcher_service.open_conversation(db, product.id, "owner"))) == 34

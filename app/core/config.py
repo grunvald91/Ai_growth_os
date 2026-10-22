@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     studio_users_file: Path | None = None
     # Optional; without it a private key file is created next to the accounts file.
     studio_session_secret: str | None = None
+    # Sign-in from the ServGo admin. Both secrets must match the ServGo server (>= 32 characters);
+    # without them the one-time-link sign-in stays switched off.
+    servgo_sso_secret: str | None = None
+    servgo_internal_key: str | None = None
+    servgo_api_url: str = "https://servgo.ru/api"
     # Comma-separated Studio logins allowed to open /studio/tune (agent prompts and settings).
     studio_tune_usernames: str = ""
     telegram_bot_token: str | None = None
