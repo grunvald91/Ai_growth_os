@@ -6,7 +6,6 @@ keep their duplicate protection, owner approvals and audit records. Nothing here
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -17,46 +16,12 @@ from sqlalchemy.orm import Session
 from app.dispatcher.readers import ACTIVE, attention, latest_active_video, plans, upcoming_slots, work_rows
 from app.dispatcher.registry import (CAPABILITIES, CHANNEL_LABELS, CancelVideoParams, GoToParams,
                                      PostParams, ScheduleParams, VideoParams, page_href, page_label)
+from app.dispatcher.outcome import Confirmation, Context, Outcome, links_block, task_block  # noqa: F401
 from app.models.domain import Approval, Product, Task
 
 
-@dataclass
-class Context:
-    db: Session
-    product: Product
-    settings: object
-    account: str
-
-
-@dataclass
-class Confirmation:
-    """A card asking before something with consequences. `params` come back when it is confirmed."""
-    title: str
-    details: list[str]
-    params: dict
-    paid: bool = False
-    confirm_label: str = "Подтвердить"
-
-
-@dataclass
-class Outcome:
-    text: str
-    spoken: str | None = None
-    blocks: list[dict] = field(default_factory=list)
-    task_id: UUID | None = None
-    confirmation: Confirmation | None = None
-    ok: bool = True
-    # Nothing was done because something is missing (for example no data yet).
-    no_data: bool = False
-
-
-def _task_block(ctx: Context, task: Task, title: str, href: str) -> dict:
-    return {"type": "task", "task_id": str(task.id), "title": title,
-            "status": getattr(task.status, "value", str(task.status)), "href": href}
-
-
-def _links(ctx: Context, *keys: str) -> dict:
-    return {"type": "links", "items": [{"label": page_label(k), "href": page_href(k, ctx.product.id)} for k in keys]}
+_task_block = task_block
+_links = links_block
 
 
 # ---- reading -----------------------------------------------------------------------------
@@ -81,7 +46,13 @@ async def show_review(ctx: Context, params) -> Outcome:
     if not notes:
         return Outcome("Ничего не ждёт вашего решения.", "Ничего не ждёт вашего решения.", [_links(ctx, "review")])
     links = {"type": "links", "items": [{"label": note["text"][:80], "href": note["url"]} for note in notes]}
-    return Outcome(f"Требует внимания: {len(notes)}.", f"Требует внимания: {len(notes)}. Они на экране.", [links])
+    blocks = [links]
+    newest = materials.find_material(ctx, None)
+    if newest is not None:  # the freshest ready material right here, with its «Утвердить» button
+        blocks = [materials.card(ctx, newest),
+                  {"type": "chips", "items": [{"label": "Утвердить", "capability": "approve_material",
+                                               "params": {"material_id": str(newest.id)}}]}, links]
+    return Outcome(f"Требует внимания: {len(notes)}.", f"Требует внимания: {len(notes)}. Они на экране.", blocks)
 
 
 async def show_plan(ctx: Context, params) -> Outcome:
@@ -297,3 +268,10 @@ EXECUTORS = {
 # Abilities that always ask first: describe what will happen, run it only after a confirmation.
 DESCRIBERS = {"approve_plan": describe_approve_plan}
 CONFIRMERS = {"approve_plan": confirm_approve_plan, "whiteboard_video": confirm_whiteboard_video}
+
+# Materials and publication live in their own module; it imports the shared types from `outcome`, not from here.
+from app.dispatcher import materials  # noqa: E402
+
+EXECUTORS.update(materials.EXECUTORS)
+DESCRIBERS.update(materials.DESCRIBERS)
+CONFIRMERS.update(materials.CONFIRMERS)

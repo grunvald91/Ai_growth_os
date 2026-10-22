@@ -78,6 +78,23 @@ class ScheduleParams(_Params):
     period: Literal["today", "tomorrow", "week"] = "today"
 
 
+class MaterialParams(_Params):
+    # Без material_id берётся самый свежий материал, который ждёт решения.
+    material_id: str | None = Field(default=None, max_length=64)
+
+
+class ReviseParams(_Params):
+    material_id: str | None = Field(default=None, max_length=64)
+    feedback: str = Field(min_length=8, max_length=1800)
+
+
+class SchedulePostParams(_Params):
+    post_id: str | None = Field(default=None, max_length=64)
+    # Московское время: «ГГГГ-ММ-ДД ЧЧ:ММ».
+    when: str = Field(min_length=10, max_length=25)
+    channel_id: str | None = Field(default=None, max_length=64)
+
+
 class RestrictedParams(_Params):
     kind: Literal["budget", "pricing", "access", "delete", "credentials", "billing"]
 
@@ -104,6 +121,8 @@ class Capability:
     params: type[_Params]
     # Shown on the card and spoken before a confirmation.
     consequence: str = ""
+    # Ask first even when risk and cost alone would allow running at once (owner's table, plan section 3.1).
+    always_confirm: bool = False
 
 
 CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
@@ -136,6 +155,26 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                "Утвердить готовый черновик плана, чтобы команда начала готовить материалы по нему.",
                ToolOperation.PUBLISH, Cost.NONE, NoParams,
                consequence="После утверждения команда начнёт готовить материалы по плану."),
+    Capability("show_material", "Показать готовый материал",
+               "Показать готовый пост, статью или видео, которые ждут решения владельца, с кнопкой «Утвердить». "
+               "Без material_id — самый свежий.",
+               ToolOperation.ANALYTICS, Cost.NONE, MaterialParams),
+    Capability("approve_material", "Утвердить материал",
+               "Утвердить готовый материал, который ждёт решения. Сам он нигде не публикуется. "
+               "Без material_id — самый свежий.",
+               ToolOperation.PUBLISH, Cost.NONE, MaterialParams,
+               consequence="После утверждения материал можно планировать к публикации. Сам он нигде не публикуется."),
+    Capability("revise_material", "Доработать пост",
+               "Отправить готовый пост на доработку. feedback — что именно изменить (от 8 символов). "
+               "Без material_id — самый свежий пост на проверке.",
+               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, ReviseParams,
+               consequence="Команда перепишет пост по вашей правке. Новая версия снова придёт вам на проверку.",
+               always_confirm=True),
+    Capability("schedule_post", "Запланировать публикацию",
+               "Запланировать утверждённый пост в подключённый Telegram-канал. when — московское время "
+               "«ГГГГ-ММ-ДД ЧЧ:ММ» (сегодняшняя дата есть в контексте). Без post_id — последний утверждённый пост.",
+               ToolOperation.PUBLISH, Cost.NONE, SchedulePostParams,
+               consequence="Пост уйдёт в канал в назначенное время."),
     Capability("whiteboard_video", "Рисованное видео",
                "Подготовить задание на рисованное видео по теме. Платная генерация начнётся только после подтверждения.",
                ToolOperation.GENERATE_DRAFT, Cost.PAID_LATER, VideoParams),

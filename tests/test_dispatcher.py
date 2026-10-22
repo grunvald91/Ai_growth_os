@@ -74,7 +74,7 @@ def test_policy_follows_risk_and_cost():
 def test_every_capability_has_a_way_to_run():
     for capability in CAPABILITIES.values():
         decision = verdict(capability.operation, capability.cost)
-        if decision == Verdict.CONFIRM_FIRST:
+        if decision == Verdict.CONFIRM_FIRST or (capability.always_confirm and decision == Verdict.RUN):
             assert capability.id in executors.DESCRIBERS and capability.id in executors.CONFIRMERS
         else:
             assert capability.id in executors.EXECUTORS

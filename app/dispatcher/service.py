@@ -169,7 +169,8 @@ def _valid_chips(raw: list) -> list[dict]:
 
 
 def _missing(error: ValidationError) -> str:
-    names = {"topic": "тему", "channel": "площадку", "target": "раздел", "kind": "что именно"}
+    names = {"topic": "тему", "channel": "площадку", "target": "раздел", "kind": "что именно",
+             "feedback": "что поправить (хотя бы несколько слов)", "when": "дату и время"}
     fields = []
     for item in error.errors():
         name = str(item["loc"][0]) if item["loc"] else ""
@@ -203,6 +204,8 @@ async def act(ctx: Context, capability_id: str, raw_params: dict) -> tuple[Outco
     decision = verdict(capability.operation, capability.cost)
     if capability_id == "restricted_action":
         decision = Verdict.REFUSE
+    if capability.always_confirm and decision == Verdict.RUN:
+        decision = Verdict.CONFIRM_FIRST
     if decision == Verdict.REFUSE:
         outcome = await executors.restricted_action(ctx, params) if capability_id == "restricted_action" else \
             Outcome("Это действие я сам не выполняю.", ok=False)

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -61,6 +62,7 @@ def snapshot(db: Session, product: Product) -> dict:
     active, draft = plans(db, product.id)
     return {
         "company": product.name,
+        "today": datetime.now(ZoneInfo("Europe/Moscow")).strftime("%Y-%m-%d, %A, %H:%M (Москва)"),
         "in_work": sum(1 for row in rows if row["state"] in ACTIVE),
         "awaiting_owner": sum(1 for note in notes if note["kind"] == "review"),
         "failed_recently": sum(1 for note in notes if note["kind"] == "error"),

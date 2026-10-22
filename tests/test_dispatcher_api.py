@@ -194,3 +194,21 @@ def test_static_assets_are_served(env):
     assert "text/css" in css.headers["content-type"] and "javascript" in js.headers["content-type"]
     # The script must never put model text into markup.
     assert "innerHTML" not in js.text and "insertAdjacentHTML" not in js.text and "document.write" not in js.text
+
+
+def test_finished_work_comes_back_over_http_once(env):
+    from app.models.domain import TaskStatus
+    db, settings, servgo, other, _ = env
+    client = TestClient(app)
+    client.post(f"/studio/products/{servgo.id}/dispatch/messages", json={
+        "mode": "chip", "client_key": "u1", "chip": {"label": "Пост", "capability": "create_post",
+                                                    "params": {"topic": "Как снизить неявки"}}})
+    assert client.get(f"/studio/products/{servgo.id}/dispatch/updates").json()["messages"] == []
+    task = db.scalar(select(Task).where(Task.assigned_agent == "content_factory"))
+    task.status = TaskStatus.FAILED
+    db.commit()
+    first = client.get(f"/studio/products/{servgo.id}/dispatch/updates").json()
+    assert len(first["messages"]) == 1 and first["messages"][0]["text"].startswith("Не получилось")
+    assert client.get(f"/studio/products/{servgo.id}/dispatch/updates").json()["messages"] == []
+    # another company's page never shows it
+    assert client.get(f"/studio/products/{other.id}/dispatch/updates").json()["messages"] == []
