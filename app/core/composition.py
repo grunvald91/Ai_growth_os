@@ -21,8 +21,19 @@ SAFE_LLM_METADATA_FIELDS = {"reasoning_effort", "team_role", "task_type", "conve
 
 def build_intake(db: Session, settings: Settings, provider: LLMProvider | None = None):
     from app.intake.registry import registry_from_settings
-    from app.intake.service import CompanyIntakeService
+    from app.intake.service import CompanyIntakeService, intake_model_order
+    from app.llm.router_store import role_override
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
+    factory, models = None, ()
+    if provider is None and settings.llm_provider == "xai" and settings.xai_api_key:
+        def factory(model: str) -> LLMService:
+            # A fixed model per attempt, bypassing the router: each retry deliberately goes to another provider.
+            return LLMService(privacy_gateway=privacy, critic_enabled=False, provider=XAIProvider(
+                api_key=settings.xai_api_key, model=model, base_url=settings.xai_base_url,
+                reasoning_effort=settings.xai_reasoning_effort, timeout_seconds=settings.xai_timeout_seconds))
+        models = intake_model_order(role_override(settings, "company_intake"),
+                                    [m.strip() for m in settings.intake_models.split(",") if m.strip()],
+                                    settings.intake_max_attempts)
     return CompanyIntakeService(
         db, products_root=settings.products_root,
         # No critic here: every extracted value is already checked against a verbatim quote
@@ -31,6 +42,7 @@ def build_intake(db: Session, settings: Settings, provider: LLMProvider | None =
         llm=LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings), critic_enabled=False),
         model=settings.llm_model, provider_name=settings.llm_provider,
         registry_lookup=registry_from_settings(settings),
+        llm_factory=factory, models=models,
     )
 
 

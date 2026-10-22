@@ -417,3 +417,118 @@ async def test_failed_extraction_records_a_reason_code(db, tmp_path):
     with pytest.raises(IntakeError):
         await service.build(product.id, session, actor="owner")
     assert db.scalar(select(AgentRun)).error == "company_intake_extraction_failed:invalid_json"
+
+
+class _Scripted:
+    """Provider answering from a list: an Exception is raised, an LLMResponse is returned."""
+
+    def __init__(self, *steps):
+        self.steps = list(steps)
+        self.calls = 0
+
+    async def generate(self, request):
+        self.calls += 1
+        step = self.steps.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return step
+
+
+def _chain_service(db, tmp_path, factory, models=("deepseek-v4.1-flash", "kimi-2.7", "grok-4.7")):
+    product = Product(name="Ноготок", slug="nogotok")
+    db.add(product)
+    db.commit()
+    service = CompanyIntakeService(
+        db, products_root=tmp_path, model="kimi-2.7",
+        llm_factory=lambda name: LLMService(
+            privacy_gateway=PrivacyGateway(), provider=factory(name), critic_enabled=False),
+        models=models)
+    session = UUID(service.start(product.id, actor="owner")["session_id"])
+    source = service.add_text(product.id, session, "Студия Ноготок в Сочи.", actor="owner")["sources"][-1]
+    return product, session, service, source
+
+
+def _good_reply(source_id, model):
+    claim = {"source_id": source_id, "field_path": "identity.name", "proposed_value": "Ноготок",
+             "evidence_excerpt": "Студия Ноготок", "kind": "candidate"}
+    return LLMResponse(content=json.dumps({"claims": [claim]}), model=model)
+
+
+def test_model_order_puts_owner_picks_first_and_one_model_per_provider():
+    from app.intake.service import intake_model_order
+    defaults = ["deepseek-v4.1-flash", "kimi-2.7", "grok-4.7", "claude-sonnet-5-5"]
+    assert intake_model_order([], defaults) == ("deepseek-v4.1-flash", "kimi-2.7", "grok-4.7")
+    assert intake_model_order(["kimi-k3"], defaults) == ("kimi-k3", "deepseek-v4.1-flash", "grok-4.7")
+    # The owner's own picks are kept as chosen, even two of one provider.
+    assert intake_model_order(["kimi-k3", "kimi-2.7"], defaults) == ("kimi-k3", "kimi-2.7", "deepseek-v4.1-flash")
+    assert intake_model_order([], defaults, max_attempts=1) == ("deepseek-v4.1-flash",)
+
+
+def test_intake_uses_the_team_page_choice_for_company_intake(tmp_path, monkeypatch):
+    from app.core import composition
+    from app.core.config import Settings
+    monkeypatch.setattr("app.llm.router_store.role_override",
+                        lambda settings, role: ["grok-4.7"] if role == "company_intake" else [])
+    monkeypatch.setattr(composition, "build_llm_provider", lambda settings: FakeLLMProvider())
+    settings = Settings(_env_file=None, llm_provider="xai", xai_api_key="test-key", products_root=tmp_path)
+    service = composition.build_intake(None, settings)
+    assert service.models == ("grok-4.7", "deepseek-v4.1-flash", "kimi-2.7")
+    assert Settings(_env_file=None).intake_models.split(",")[0] == "deepseek-v4.1-flash"
+
+
+@pytest.mark.asyncio
+async def test_failed_model_is_replaced_by_one_from_another_provider(db, tmp_path):
+    from app.models.domain import AgentRun
+    called = []
+
+    def factory(name):
+        def step():
+            called.append(name)
+            if name.startswith("deepseek"):
+                raise RuntimeError("502 upstream")
+            if name.startswith("kimi"):
+                return LLMResponse(content="sorry, no json", model=name)
+            return _good_reply(source["id"], name)
+        provider = _Scripted()
+        async def generate(request):
+            return step()
+        provider.generate = generate
+        return provider
+
+    source = {}
+    product, session, service, src = _chain_service(db, tmp_path, factory)
+    source.update(src)
+    review = await service.build(product.id, session, actor="owner")
+    assert called == ["deepseek-v4.1-flash", "kimi-2.7", "grok-4.7"]
+    assert review["extraction_model"] == "grok-4.7"
+    assert review["profile_preview"]["identity"]["name"] == "Ноготок"
+    runs = db.scalars(select(AgentRun).order_by(AgentRun.started_at)).all()
+    assert [(r.model, r.status) for r in runs] == [
+        ("deepseek-v4.1-flash", "failed"), ("kimi-2.7", "failed"), ("grok-4.7", "completed")]
+
+
+@pytest.mark.asyncio
+async def test_all_attempts_failing_gives_an_error_after_the_last_model(db, tmp_path):
+    from app.models.domain import AgentRun
+    product, session, service, _ = _chain_service(db, tmp_path, lambda name: _Scripted(RuntimeError("down")))
+    with pytest.raises(IntakeError):
+        await service.build(product.id, session, actor="owner")
+    runs = db.scalars(select(AgentRun)).all()
+    assert len(runs) == 3 and all(r.status == "failed" for r in runs)
+
+
+@pytest.mark.asyncio
+async def test_working_first_model_never_calls_the_others(db, tmp_path):
+    made = {}
+
+    def factory(name):
+        made[name] = _Scripted(_good_reply(holder["id"], name)) if name.startswith("deepseek") else _Scripted()
+        return made[name]
+
+    holder = {"id": None}
+    product, session, service, source = _chain_service(db, tmp_path, factory)
+    holder["id"] = source["id"]
+    review = await service.build(product.id, session, actor="owner")
+    assert review["extraction_model"] == "deepseek-v4.1-flash"
+    assert made["deepseek-v4.1-flash"].calls == 1
+    assert all(p.calls == 0 for name, p in made.items() if name != "deepseek-v4.1-flash")
