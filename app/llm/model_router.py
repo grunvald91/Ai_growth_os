@@ -32,7 +32,7 @@ _BALANCED_ROLES = {
     "whiteboard_storyboard",
 }
 _ECONOMY_ROLES = {
-    "distribution", "analytics", "article_writer", "video_producer",
+    "dispatcher", "distribution", "analytics", "article_writer", "video_producer",
     "story_director", "community_manager", "segment_researcher",
     "competitor_voc_researcher", "viral_video_researcher",
     "repurposing_editor", "platform_writer", "comment_agent", "post_rewriter",

@@ -14,9 +14,10 @@ from app.models.domain import (
     ToolCall,
 )
 from app.comments.models import BusinessComment, CommentChannel
+from app.dispatcher.models import DispatcherConversation, DispatcherMessage
 
 __all__ = [
     "Product", "Goal", "Task", "AgentRun", "Artifact", "Decision",
     "Experiment", "Prospect", "Metric", "Approval", "ToolCall", "CostRecord", "Publication",
-    "BusinessComment", "CommentChannel",
+    "BusinessComment", "CommentChannel", "DispatcherConversation", "DispatcherMessage",
 ]

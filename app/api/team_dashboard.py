@@ -35,7 +35,7 @@ router = APIRouter()
 # The base set matches app.agents.AgentRole. Extra production stages are
 # included here because they appear in the actual content workflow.
 _GROUPS = {
-    "Руководство": ("cmo", "research_lead"),
+    "Руководство": ("cmo", "research_lead", "dispatcher"),
     "Изучение бизнеса": ("company_intake", "research_pmm", "segment_researcher", "channel_researcher",
                         "problem_researcher", "competitor_voc_researcher", "viral_video_researcher",
                         "viral_content_researcher", "competitive_intelligence"),
@@ -49,6 +49,7 @@ _GROUPS = {
     "Продвижение и аналитика": ("distribution", "community_manager", "analytics", "cro", "comment_sales"),
 }
 _NAMES = {
+    "dispatcher": "Диспетчер главной страницы",
     "comment_sales": "Продавец в комментариях",
     "cmo": "Маркетинговый директор",
     "research_lead": "Руководитель исследований",
@@ -129,6 +130,7 @@ _DESCRIPTIONS = {
     "post_writer_editor": "Пишет и редактирует текст поста.",
     "post_rewriter": "Вносит правки в готовый пост по замечаниям.",
     "creative_strategist": "Изучает тему и аудиторию перед созданием материала.",
+    "dispatcher": "Понимает просьбы владельца на главной странице и решает, куда их направить. Быстрая модель: ответ нужен сразу.",
     "whiteboard_storyboard": "Пишет сценарий рисованного видео. Работает при включённом Model Router. Модель берётся для НОВЫХ заданий; остальные из цепочки включаются, если выбранная не отвечает.",
 }
 
@@ -138,7 +140,7 @@ def role_descriptors() -> list[dict]:
         "repurposing_editor", "platform_writer",
         "youtube_shorts_director", "instagram_reels_director",
         "competitive_intelligence", "editorial_planner", "post_strategist", "post_writer_editor",
-        "post_rewriter", "creative_strategist", "whiteboard_storyboard",
+        "post_rewriter", "creative_strategist", "whiteboard_storyboard", "dispatcher",
     }
     listed = []
     for department, identifiers in _GROUPS.items():

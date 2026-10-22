@@ -1823,7 +1823,21 @@ def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)
 
 
 @router.get("/studio/products/{product_id}", response_class=HTMLResponse)
-def studio_product(product_id: UUID, db: Session = Depends(get_db)):
+def studio_product(product_id: UUID, request: Request, db: Session = Depends(get_db),
+                   settings=Depends(get_settings)):
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(404, "Product not found")
+    # Companies with the dispatcher switched on get the one-line home; the earlier overview stays at /classic.
+    from app.api.dispatcher import enabled_for, home_html
+    page = home_html(db, product, settings, request) if enabled_for(settings, product) else product_dashboard(db, product)
+    response = HTMLResponse(page)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.get("/studio/products/{product_id}/classic", response_class=HTMLResponse)
+def studio_product_classic(product_id: UUID, db: Session = Depends(get_db)):
     product = db.get(Product, product_id)
     if product is None:
         raise HTTPException(404, "Product not found")
