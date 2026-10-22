@@ -2250,51 +2250,16 @@ def studio_review_page(product_id: UUID, kind: str = "all", db: Session = Depend
 
 @router.post("/studio/products/{product_id}/review/{artifact_id}/approve")
 async def studio_material_approve(product_id: UUID, artifact_id: UUID, request: Request, db: Session = Depends(get_db)):
+    from app.content.review import ReviewError, approve_material, needs_fact_check
     _owner_product(db, product_id)
-    db.scalar(select(Product).where(Product.id == product_id).with_for_update())
-    row = db.scalar(select(Artifact).where(
-        Artifact.id == artifact_id, Artifact.product_id == product_id,
-        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script", "video_render"])
-    ).with_for_update().execution_options(populate_existing=True))
-    if row is None:
-        raise HTTPException(404, "Материал не найден")
-    if row.status == ArtifactStatus.APPROVED:
-        return RedirectResponse(f"/studio/products/{product_id}/materials/{artifact_id}", status_code=303)
-    if row.status != ArtifactStatus.AWAITING_APPROVAL:
-        raise HTTPException(409, "Согласовать эту версию уже нельзя")
-    if parse_json(row).get("fact_check_required"):
-        fields = await _studio_form(request)
-        if fields.get("facts_confirmed") != "yes":
-            raise HTTPException(422, "Сначала проверьте числа, цены и результаты в полном просмотре материала")
-    if row.kind == "video_render":
-        metadata = parse_json(row)
-        try:
-            script_id = UUID(str(metadata["script_id"]))
-            video_file = asset_path(get_settings().products_root, product_id, script_id, "video.mp4")
-        except (ValueError, KeyError, TypeError):
-            raise HTTPException(409, "У видео нет корректных исходных данных") from None
-        if not video_file.is_file():
-            raise HTTPException(409, "Видеофайл ещё не создан или недоступен")
-    if row.kind == "channel_text":
-        source = parse_json(row)
-        if not source.get("body"):
-            raise HTTPException(409, "Текст материала отсутствует")
-        if source.get("channel") == "telegram":
-            try:
-                validate_telegram_text(source["body"])
-            except ValueError as exc:
-                raise HTTPException(422, str(exc)) from None
-        pending = db.scalar(select(Task.id).where(
-            Task.product_id == product_id,
-            Task.assigned_agent == "content_editor",
-            Task.title == "EDIT: " + str(row.id),
-            Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING])
-        ).limit(1))
-        if pending:
-            raise HTTPException(409, "Доработка ещё выполняется — подтвердите новую версию")
-    row.status = ArtifactStatus.APPROVED
-    row.version += 1
-    db.commit()
+    current = db.get(Artifact, artifact_id)
+    facts_confirmed = False
+    if current is not None and current.product_id == product_id and needs_fact_check(current):
+        facts_confirmed = (await _studio_form(request)).get("facts_confirmed") == "yes"
+    try:
+        approve_material(db, get_settings().products_root, product_id, artifact_id, facts_confirmed=facts_confirmed)
+    except ReviewError as exc:
+        raise HTTPException(exc.status, exc.message) from None
     return RedirectResponse(f"/studio/products/{product_id}/materials/{artifact_id}", status_code=303)
 
 
@@ -2384,19 +2349,8 @@ async def studio_schedule_post(product_id: UUID, request: Request, db: Session =
         if local.tzinfo is not None:
             raise ValueError("Выберите местное время Москвы, без смещения")
         when = local.replace(tzinfo=ZoneInfo("Europe/Moscow"))
-        post = db.get(Artifact, post_id)
-        if post is None or post.product_id != product_id:
-            raise LookupError("Пост другой компании")
-        plan_id, slot_id = None, None
-        plan_row, plan = latest_plan(db, product_id)
-        if plan_row and plan and plan.get("approval_state") == "active":
-            matches = [slot for slot in plan.get("slots", []) if
-                       slot.get("task_id") == str(post.task_id) and slot.get("platform") == "telegram"
-                       and not slot.get("telegram_publication_id") and not slot.get("publication_url")
-                       and parse_dt(slot.get("publish_at")) == when]
-            if len(matches) == 1:
-                plan_id, slot_id = plan_row.id, str(matches[0]["slot_id"])
-        schedule_post(db, post_id, connection_id, when, plan_id=plan_id, slot_id=slot_id)
+        from app.content.review import schedule_owner_post
+        schedule_owner_post(db, product_id, post_id, connection_id, when)
     except (ValueError, LookupError) as exc:
         raise HTTPException(422, str(exc)) from None
     return RedirectResponse(f"/studio/products/{product_id}/channels?scheduled=1", status_code=303)

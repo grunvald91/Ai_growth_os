@@ -90,6 +90,21 @@
     return card;
   }
 
+  // A ready material: kind and status on top, a short text, a link to the full view. Its buttons come as chips.
+  function renderMaterial(block) {
+    var card = el('div', 'dp-material');
+    var top = el('div', 'dp-material-top');
+    top.appendChild(el('span', 'dp-material-kind', block.kind));
+    top.appendChild(el('span', 'dp-material-status', block.status));
+    card.appendChild(top);
+    card.appendChild(el('strong', 'dp-material-title', block.title));
+    if (block.excerpt) card.appendChild(el('p', 'dp-material-text', block.excerpt));
+    var open = el('a', 'dp-link', 'Открыть полностью');
+    open.href = block.href;
+    card.appendChild(open);
+    return card;
+  }
+
   function statusWord(status) {
     return ({
       queued: 'В очереди', running: 'Готовится', waiting_approval: 'Ждёт подтверждения',
@@ -138,6 +153,7 @@
       else if (block.type === 'links') bubble.appendChild(renderLinks(block.items));
       else if (block.type === 'table') bubble.appendChild(renderTable(block));
       else if (block.type === 'task') bubble.appendChild(renderTask(block));
+      else if (block.type === 'material') bubble.appendChild(renderMaterial(block));
       else if (block.type === 'confirm') bubble.appendChild(renderConfirm(block));
     });
     return bubble;
@@ -233,6 +249,17 @@
       state.hints = data.hints || []; renderHints(); input.focus();
     }).catch(function (error) { notify(error.message); });
   });
+
+  // Finished work comes back into the conversation by itself: ask now and then while the page is open.
+  function checkUpdates() {
+    if (document.hidden || busy) return;
+    fetch(api + '/updates', { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (data) { if (data && data.messages && data.messages.length) applyResult(data); })
+      .catch(function () {});
+  }
+  setInterval(checkUpdates, 8000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) checkUpdates(); });
 
   (state.messages || []).forEach(upsert);
   root.classList.toggle('has-feed', feed.children.length > 0);

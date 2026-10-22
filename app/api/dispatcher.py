@@ -29,7 +29,7 @@ from app.privacy import PrivacyGateway
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ASSETS = Path(__file__).parent / "dispatcher_assets"
-ASSET_VERSION = "3"
+ASSET_VERSION = "5"
 MAX_BODY_BYTES = 1_000_000  # same guard as the Studio forms
 
 
@@ -195,6 +195,21 @@ async def dispatch_confirm(product_id: UUID, request: Request, db: Session = Dep
         raise HTTPException(409, str(exc)) from None
     result["hints"] = _hints(db, product, settings)
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/studio/products/{product_id}/dispatch/updates")
+def dispatch_updates(product_id: UUID, request: Request, db: Session = Depends(get_db),
+                     settings: Settings = Depends(get_settings)):
+    """Results of tasks started from this conversation that have finished since the page was last updated."""
+    from app.dispatcher.updates import collect_updates
+    product = _owner_product(db, product_id)
+    ctx = _context(db, product, settings, request)
+    conversation = service.open_conversation(db, product.id, ctx.account)
+    added = collect_updates(db, ctx, conversation)
+    body: dict = {"messages": [service.to_dict(m) for m in added]}
+    if added:
+        body["hints"] = _hints(db, product, settings)
+    return JSONResponse(body, headers={"Cache-Control": "no-store"})
 
 
 @router.post("/studio/products/{product_id}/dispatch/new")

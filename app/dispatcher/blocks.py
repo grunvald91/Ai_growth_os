@@ -79,6 +79,21 @@ class TaskBlock(_Block):
             raise ValueError("Link target is not allowed")
 
 
+class MaterialBlock(_Block):
+    """A ready material shown as a card. Its buttons are ordinary chips and links next to it."""
+    type: Literal["material"] = "material"
+    artifact_id: str
+    kind: str = Field(max_length=40)
+    title: str = Field(max_length=300)
+    status: str = Field(max_length=40)
+    excerpt: str = Field(default="", max_length=800)
+    href: str
+
+    def model_post_init(self, __context) -> None:
+        if not safe_href(self.href):
+            raise ValueError("Link target is not allowed")
+
+
 class ConfirmBlock(_Block):
     """Asks before an action with consequences. Voice 'yes' answers only the latest open card."""
     type: Literal["confirm"] = "confirm"
@@ -93,7 +108,7 @@ class ConfirmBlock(_Block):
 
 
 Block = Annotated[
-    TextBlock | ChipsBlock | LinksBlock | TableBlock | TaskBlock | ConfirmBlock,
+    TextBlock | ChipsBlock | LinksBlock | TableBlock | TaskBlock | MaterialBlock | ConfirmBlock,
     Field(discriminator="type"),
 ]
 _adapter: TypeAdapter[Block] = TypeAdapter(Block)
