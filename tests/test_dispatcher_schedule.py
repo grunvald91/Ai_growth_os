@@ -185,6 +185,22 @@ async def test_load_is_booked_time_over_working_time(db, linked, platform):
 
 
 @pytest.mark.asyncio
+async def test_add_ons_do_not_count_as_booked_time(db, linked, platform):
+    extra = booking(TODAY, "11:00", minutes=0, service_name="Укладка-доп", id=2)
+    extra["occupies_resource"] = False
+    platform.bookings = [booking(TODAY, "10:00", minutes=90, id=1), extra]
+    rows = {row[0]: row for row in tables(await ask(db, linked, view="load"))[0]["rows"]}
+    assert rows["Мария"][1:] == ["1", "1 ч 30 мин", "50%"]
+
+
+@pytest.mark.asyncio
+async def test_unexpected_status_is_shown_not_hidden(db, linked, platform):
+    platform.bookings = [booking(TODAY, "10:00", status="no_show")]
+    table = tables(await ask(db, linked))[0]
+    assert table["rows"][0][4] == "no_show"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["down", "error", "garbage"])
 async def test_platform_trouble_is_said_plainly_and_nothing_is_invented(db, linked, platform, mode):
     platform.mode = mode
@@ -212,12 +228,14 @@ async def test_other_company_does_not_see_this_schedule(db, linked, platform):
 
 
 def test_schedule_hints_appear_only_for_a_linked_company(db, product, tmp_path):
-    labels = [chip.label for chip in compute_hints(db, product, tmp_path)]
+    labels = [chip.label for chip in compute_hints(db, product, tmp_path, schedule_ready=True)]
     assert "Записи на сегодня" not in labels
     db.add(StudioBusinessLink(servgo_business_id=12, product_id=product.id))
     db.commit()
-    labels = [chip.label for chip in compute_hints(db, product, tmp_path)]
+    labels = [chip.label for chip in compute_hints(db, product, tmp_path, schedule_ready=True)]
     assert "Записи на сегодня" in labels and "Свободные окна на неделю" in labels
+    # without the key the platform cannot be asked, so the chips would only lead to "не вижу"
+    assert "Записи на сегодня" not in [c.label for c in compute_hints(db, product, tmp_path)]
 
 
 @pytest.mark.asyncio

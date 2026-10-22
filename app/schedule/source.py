@@ -39,6 +39,8 @@ class Booking(_Row):
     client_phone: str | None = None
     client_email: str | None = None
     price: int | None = None
+    # Add-ons booked with a main service do not take the master's or hall's time.
+    occupies_resource: bool = True
 
 
 class Resource(_Row):

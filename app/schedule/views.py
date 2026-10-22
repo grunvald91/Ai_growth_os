@@ -54,10 +54,6 @@ def _count(number: int, one: str, few: str, many: str) -> str:
     return {1: one, 2: few, 3: few, 4: few}.get(number % 10, many)
 
 
-def _records(number: int) -> str:
-    return f"{number} {_count(number, 'запись', 'записи', 'записей')}"
-
-
 def _minutes(hours: str | None) -> int | None:
     """Length of a 'HH:MM–HH:MM' interval in minutes."""
     try:
@@ -74,7 +70,7 @@ def _suffix(label: str | None) -> str:
 
 
 def bookings_view(schedule: Schedule, period: str, first: date, last: date, label: str | None = None) -> View:
-    counted = sorted((b for b in schedule.bookings if b.status in COUNTED), key=lambda b: (b.date, b.time, b.id))
+    counted = sorted((b for b in schedule.bookings if b.status != "cancelled"), key=lambda b: (b.date, b.time, b.id))
     cancelled = sum(1 for b in schedule.bookings if b.status == "cancelled")
     when = PERIOD_LABELS[period]
     if not counted:
@@ -131,7 +127,7 @@ def load_view(schedule: Schedule, period: str, first: date, last: date, label: s
                     "Часы работы не заданы, загрузку не посчитать.")
     day_minutes = work - (_minutes(schedule.break_hours) or 0)
     days = (last - first).days + 1
-    counted = [b for b in schedule.bookings if b.status in COUNTED]
+    counted = [b for b in schedule.bookings if b.status in COUNTED and b.occupies_resource]
     names = [r.name for r in schedule.resources]
     if not names:
         groups = [("Все записи", counted, day_minutes * days)]

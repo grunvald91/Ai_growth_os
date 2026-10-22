@@ -38,7 +38,7 @@ def topic_ideas(products_root: Path, slug: str) -> list[Chip]:
     return chips
 
 
-def compute_hints(db: Session, product: Product, products_root: Path) -> list[Chip]:
+def compute_hints(db: Session, product: Product, products_root: Path, *, schedule_ready: bool = False) -> list[Chip]:
     chips: list[Chip] = []
     notes = attention(db, product.id)
     active, draft = plans(db, product.id)
@@ -55,7 +55,7 @@ def compute_hints(db: Session, product: Product, products_root: Path) -> list[Ch
         chips.append(Chip(label="Показать контент-план", capability="show_plan"))
     if active is None and draft is None:
         chips.append(Chip(label="Составить контент-план", capability="make_plan"))
-    if linked_business_ids(db, product.id):
+    if schedule_ready and linked_business_ids(db, product.id):
         chips.append(Chip(label="Записи на сегодня", capability="show_schedule",
                           params={"view": "bookings", "period": "today"}))
         chips.append(Chip(label="Свободные окна на неделю", capability="show_schedule",
