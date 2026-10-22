@@ -19,6 +19,10 @@ def _blank_column(ink, x, y0=0):
     return ink.crop((column, y0 * height // 1000, column + 1, height)).getbbox() is None
 
 
+def _overlap(a, b):
+    return max(a[0], b[0]) < min(a[2], b[2]) and max(a[1], b[1]) < min(a[3], b[3])
+
+
 def fallback_regions(scene, ink, reason, coverage=None):
     """Disjoint regions covering the whole image when the plan cannot be used or repaired.
 
@@ -39,7 +43,15 @@ def fallback_regions(scene, ink, reason, coverage=None):
         else:
             boxes = [(0, 0, 1000, 500), (0, 500, 1000, 1000)]
     else:
+        # The image prompt asks for stacked horizontal bands. Move each cut to the
+        # nearest blank row so a band boundary does not slice through a drawing.
         edges = [round(i * 1000 / count) for i in range(count + 1)]
+        reach = 500 // count
+        for i in range(1, count):
+            blank = [y for y in range(max(edges[i - 1] + 1, edges[i] - reach), min(999, edges[i] + reach) + 1)
+                     if _blank_row(ink, y)]
+            if blank:
+                edges[i] = min(blank, key=lambda y: abs(y - edges[i])); method = 'blank_rows'
         boxes = [(0, edges[i], 1000, edges[i + 1]) for i in range(count)]
     result = WhiteboardRegionPlan(regions=[WhiteboardRegion(beat_index=i, box=box) for i, box in enumerate(boxes)])
     result.check_for(scene)
@@ -59,6 +71,11 @@ def complete_diagram_regions(scene, image_png, plan):
     except ValueError:
         return fallback_regions(scene, ink, 'beat_without_region')
     if len(scene.beats) != 2:
+        # E.g. the last scene with the closing call to action. Overlapping regions of
+        # different beats would stop the renderer after every paid call was made.
+        if any(first.beat_index != second.beat_index and _overlap(first.box, second.box)
+               for index, first in enumerate(plan.regions) for second in plan.regions[index + 1:]):
+            return fallback_regions(scene, ink, 'overlap')
         return plan, None
     width, height = ink.size
     covered = Image.new('L', ink.size, 0)

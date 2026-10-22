@@ -39,6 +39,9 @@ class WhiteboardRequest(Contract):
     def length_matches_scenes(self):
         if SCENES_FOR_SECONDS[self.duration_seconds] != self.scenes:
             raise ValueError("30 seconds means 3 scenes, a minute means 6 scenes")
+        # It becomes a spoken beat, which needs at least 6 characters (WhiteboardBeat.narration).
+        if self.call_to_action and len(self.call_to_action) < 6:
+            raise ValueError("The call to action is too short")
         return self
 
     @model_serializer(mode="wrap")

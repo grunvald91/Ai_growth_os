@@ -314,3 +314,57 @@ async def test_worker_finishes_inside_the_calculated_limit(environment, seconds,
         assert task.status == TaskStatus.COMPLETED, state
         assert state['calls'] == limit == payload.max_api_calls
     assert heard[-1] == DEFAULT_CALL_TO_ACTION and len(heard) == 2 * scenes + 1
+
+
+# --- review fixes ------------------------------------------------------------
+
+def three_beat_scene():
+    return WhiteboardScene(title='Итоговая сцена', beats=[WhiteboardBeat(
+        label=f'Бит {i}', narration=f'Реплика номер {i}.', visual='Нарисованный значок') for i in range(3)])
+
+
+def banded_png(gaps=(330, 660)):
+    from PIL import Image, ImageDraw
+    import io
+    image = Image.new('RGB', (180, 320), 'white'); draw = ImageDraw.Draw(image)
+    edges = [0, *[g * 320 // 1000 for g in gaps], 320]
+    for top, bottom in zip(edges, edges[1:]):
+        draw.rectangle((20, top + 12, 160, bottom - 12), outline='black', width=3)
+    output = io.BytesIO(); image.save(output, format='PNG'); return output.getvalue()
+
+
+def test_overlapping_regions_in_the_call_to_action_scene_are_repaired_offline():
+    from app.content.whiteboard.contracts import WhiteboardSceneAssets
+    from app.content.whiteboard.layout import complete_diagram_regions
+    from app.content.whiteboard.render import _validate_regions
+    scene, image = three_beat_scene(), banded_png()
+    plan = WhiteboardRegionPlan(regions=[WhiteboardRegion(beat_index=0, box=(0, 0, 1000, 500)),
+                                         WhiteboardRegion(beat_index=1, box=(0, 400, 1000, 800)),
+                                         WhiteboardRegion(beat_index=2, box=(0, 700, 1000, 1000))])
+    fixed, repair = complete_diagram_regions(scene, image, plan)
+    assert repair['reason'] == 'overlap' and repair['provider_calls'] == 0 and repair['human_review_required']
+    _validate_regions(WhiteboardSceneAssets(scene, image, (b'ID3-audio',) * 3, fixed))
+    boxes = [r.box for r in sorted(fixed.regions, key=lambda r: r.beat_index)]
+    assert boxes[0][1] == 0 and boxes[-1][3] == 1000
+    assert all(a[3] == b[1] for a, b in zip(boxes, boxes[1:]))
+
+
+def test_band_cuts_move_to_blank_rows_between_drawings():
+    from app.content.whiteboard.layout import complete_diagram_regions
+    plan = WhiteboardRegionPlan(regions=[WhiteboardRegion(beat_index=i, box=(0, 0, 1000, 1000)) for i in range(3)])
+    fixed, repair = complete_diagram_regions(three_beat_scene(), banded_png(gaps=(400, 700)), plan)
+    cuts = [r.box[1] for r in sorted(fixed.regions, key=lambda r: r.beat_index)][1:]
+    assert repair['method'] == 'blank_rows'
+    assert abs(cuts[0] - 400) <= 40 and abs(cuts[1] - 700) <= 40
+
+
+def test_valid_three_beat_plan_is_kept_unchanged():
+    from app.content.whiteboard.layout import complete_diagram_regions
+    plan = WhiteboardRegionPlan(regions=[WhiteboardRegion(beat_index=i, box=(0, i * 333, 1000, (i + 1) * 333))
+                                         for i in range(3)])
+    assert complete_diagram_regions(three_beat_scene(), banded_png(), plan) == (plan, None)
+
+
+def test_too_short_call_to_action_is_refused_before_any_paid_call():
+    with pytest.raises(ValidationError):
+        long_request(call_to_action='Да')
