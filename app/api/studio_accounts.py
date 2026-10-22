@@ -4,7 +4,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from app.core.studio_accounts import (AccountError, create_account, delete_accou
                                       reset_password)
 from app.db.session import get_db
 from app.models.domain import Product
+from app.sso import links as sso_links
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 
@@ -96,14 +97,44 @@ def accounts_html(product_id, accounts, products, operators, *, actor=None, noti
     return body
 
 
+def connections_html(product_id, links, products, *, error=None, fields=None):
+    """ServGo businesses that open a studio company through the «Маркетинг» button in the ServGo admin."""
+    fields = fields or {}
+    names = {str(p.id): p.name for p in products}
+    base = f"/studio/products/{product_id}/connections"
+    rows = "".join(
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;'
+        'border-top:1px solid var(--line,#edf2f8)"><div style="min-width:0"><b>№' + str(link.servgo_business_id) + '</b>'
+        f'<div style="overflow-wrap:anywhere">{esc(names.get(str(link.product_id), "удалённая компания"))}</div></div>'
+        f'<form method="post" action="{base}/{link.id}/delete" class="sg-inline-actions" '
+        f'onsubmit="return confirm(\'Отключить заведение №{link.servgo_business_id}? Вход из ServGo перестанет работать.\')">'
+        '<button class="btn danger">Отключить</button></form></div>' for link in links)
+    table = rows or '<p>Пока ничего не подключено.</p>'
+    options = "".join(f'<option value="{p.id}"{" selected" if fields.get("product_id") == str(p.id) else ""}>{esc(p.name)}</option>'
+                      for p in products)
+    alert = f'<p class="sg-warning sg-form-error" role="alert">{esc(error)}</p>' if error else ""
+    return ('<section class="sg-surface" id="connections"><div class="sg-section-head"><div><span class="sg-overline">ВХОД ИЗ SERVGO</span>'
+            '<h2>Заведения ServGo</h2><p>Кнопка «Маркетинг» в админке ServGo откроет эту компанию без пароля. '
+            'Номер заведения владелец видит в ServGo: Настройки → Маркетинг. Доступ проверяется в ServGo при каждом открытии страницы.</p></div></div>'
+            f'{table}{alert}<form method="post" action="{base}" class="sg-form">'
+            '<label class="sg-field"><span>Номер заведения в ServGo</span><input name="servgo_business_id" required inputmode="numeric" '
+            f'pattern="[0-9]+" maxlength="9" autocomplete="off" value="{esc(fields.get("servgo_business_id", ""))}"></label>'
+            f'<label class="sg-field"><span>Компания в студии</span><select name="product_id">{options}</select></label>'
+            '<button class="btn primary">Подключить</button></form></section>')
+
+
 def _render(request, db, product, settings, *, status=200, **kwargs):
     products = list(db.scalars(select(Product).order_by(Product.name).limit(200)))
     try:
         accounts = load_accounts(settings)
     except (OSError, ValueError):
         raise HTTPException(503, "Studio accounts are not configured correctly") from None
+    connection_error = kwargs.pop("connection_error", None)
+    connection_fields = kwargs.pop("connection_fields", None)
     body = accounts_html(product.id, accounts, products, _operator_logins(settings),
                          actor=getattr(request.state, "studio_actor", None), **kwargs)
+    body += connections_html(product.id, sso_links.list_links(db), products, error=connection_error,
+                             fields=connection_fields)
     return HTMLResponse(studio_page_shell(product, active="accounts", title="Аккаунты",
                         subtitle="Кто и к каким компаниям имеет доступ в Growth.", body=body),
                         status_code=status, headers={"Cache-Control": "no-store"})
@@ -162,3 +193,30 @@ def accounts_delete(product_id: UUID, username: str, request: Request, db: Sessi
     except AccountError as exc:
         return _render(request, db, product, settings, status=409, error=str(exc))
     return _render(request, db, product, settings)
+
+
+@router.post("/studio/products/{product_id}/connections", response_class=HTMLResponse)
+async def connections_create(product_id: UUID, request: Request, db: Session = Depends(get_db),
+                             settings=Depends(get_settings), actor=Depends(require_studio_auth)):
+    _require_admin(request)
+    request.state.studio_actor = actor
+    product = _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    try:
+        sso_links.connect(db, fields.get("servgo_business_id", ""), fields.get("product_id", ""))
+    except sso_links.LinkError as exc:
+        return _render(request, db, product, settings, status=422, connection_error=str(exc), connection_fields=fields)
+    return RedirectResponse(f"/studio/products/{product.id}/accounts#connections", status_code=303)
+
+
+@router.post("/studio/products/{product_id}/connections/{link_id}/delete", response_class=HTMLResponse)
+def connections_delete(product_id: UUID, link_id: str, request: Request, db: Session = Depends(get_db),
+                       settings=Depends(get_settings), actor=Depends(require_studio_auth)):
+    _require_admin(request)
+    request.state.studio_actor = actor
+    product = _owner_product(db, product_id)
+    try:
+        sso_links.disconnect(db, link_id)
+    except sso_links.LinkError as exc:
+        return _render(request, db, product, settings, status=404, connection_error=str(exc))
+    return RedirectResponse(f"/studio/products/{product.id}/accounts#connections", status_code=303)

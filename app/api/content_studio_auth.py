@@ -186,6 +186,20 @@ def _session_login(request: Request, settings, users: dict) -> tuple[str, list[s
     return login, current[1]
 
 
+def _sso_login(request: Request, settings) -> tuple[str, list[str]] | None:
+    """Sign-in that started from the ServGo admin. ServGo is asked on every request, so removing
+    someone there (or switching the administrators' access off) closes the studio at once."""
+    from app.sso import access, tickets
+    session = tickets.read_session(settings, request.cookies.get(tickets.COOKIE))
+    if session is None or not tickets.configured(settings):
+        return None
+    role = access.servgo_role(settings, session.user_id, session.business_id)
+    if role is None:
+        return None
+    request.state.studio_sso_role = role
+    return f"servgo:{session.user_id}", [session.product_id]
+
+
 def _wants_login_page(request: Request) -> bool:
     return (request.method in {"GET", "HEAD"} and request.url.path.startswith("/studio")
             and "text/html" in request.headers.get("accept", ""))
@@ -223,6 +237,9 @@ def require_studio_auth(
     if not _auth_configured(settings, users):
         request.state.studio_product_ids = None
         return None  # Developer loopback only; never a production exemption.
+    sso = _sso_login(request, settings)
+    if sso is not None:
+        return _apply_scope(request, *sso)
     # A signed login session wins over credentials the browser remembers for Basic auth,
     # so signing in with another account through the form really switches the user.
     session = _session_login(request, settings, users)

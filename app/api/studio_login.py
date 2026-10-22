@@ -17,6 +17,7 @@ from app.api.content_studio_auth import (
 )
 from app.api.content_studio_brand import SERVGO_FAVICON_SVG
 from app.core.config import Settings, get_settings
+from app.sso.tickets import COOKIE as SSO_COOKIE
 from app.core.studio_sessions import (
     COOKIE, MAX_AGE, clear_failures, issue, normalize_login, record_failure, too_many_failures,
 )
@@ -124,6 +125,8 @@ async def login_submit(request: Request, settings: Settings = Depends(get_settin
     response = RedirectResponse(next_url, status_code=303)
     response.set_cookie(COOKIE, issue(settings, name, credential), max_age=MAX_AGE, path="/",
                         httponly=True, samesite="lax", secure=_secure_cookie(settings))
+    # A sign-in from the ServGo admin must not shadow the login the person has just chosen.
+    response.delete_cookie(SSO_COOKIE, path="/", httponly=True, samesite="lax", secure=_secure_cookie(settings))
     return response
 
 
@@ -131,4 +134,5 @@ async def login_submit(request: Request, settings: Settings = Depends(get_settin
 def logout(settings: Settings = Depends(get_settings)):
     response = RedirectResponse("/studio/login?logged_out=1", status_code=303)
     response.delete_cookie(COOKIE, path="/", httponly=True, samesite="lax", secure=_secure_cookie(settings))
+    response.delete_cookie(SSO_COOKIE, path="/", httponly=True, samesite="lax", secure=_secure_cookie(settings))
     return response

@@ -31,6 +31,8 @@ app.include_router(company_intake_router, dependencies=[Depends(require_studio_a
 # Public sign-in page; registered before the protected Studio routes.
 from app.api.studio_login import router as studio_login_router
 app.include_router(studio_login_router)
+from app.api.studio_sso import router as studio_sso_router
+app.include_router(studio_sso_router)
 from app.api.content_studio import router as content_studio_router
 app.include_router(content_studio_router)
 from app.api.content_studio_company import router as content_studio_company_router
