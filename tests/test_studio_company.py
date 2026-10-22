@@ -192,3 +192,68 @@ def test_deleting_a_repository_company_keeps_its_profile_folder(studio, tmp_path
         assert (tmp_path / product.slug / "company-profile.json").exists()
     finally:
         get_settings.cache_clear()
+
+
+def test_direct_edit_does_not_hide_an_old_text_description(owned):
+    client, db, product, root = owned
+    _cancel_collection(client, product)
+    legacy = root / product.slug / ".claude"
+    legacy.mkdir(parents=True)
+    (legacy / "product-marketing-context.md").write_text("Старое описание компании")
+    response = client.post(f"/studio/products/{product.id}/profile/edit", data={"f_identity.name": "Ноготок"})
+    assert response.status_code == 409 and "старое текстовое описание" in response.text
+    assert not (root / product.slug / "company-profile.json").exists()
+
+
+def test_deletion_respects_foreign_keys_and_spares_other_companies(tmp_path):
+    """SQLite ignores foreign keys by default; switch them on so the delete order is really checked."""
+    import datetime
+    import uuid
+    from sqlalchemy import event, func, insert
+    from app.intake.company_admin import delete_company
+
+    engine = create_engine("sqlite://")
+
+    @event.listens_for(engine, "connect")
+    def _fk(connection, _):
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    Base.metadata.create_all(engine)
+
+    def fill(connection, table, ids, product_id):
+        row = {}
+        for column in table.columns:
+            if column.foreign_keys:
+                target = next(iter(column.foreign_keys)).column.table.name
+                row[column.name] = product_id if target == "products" else ids.get(target)
+            elif column.primary_key:
+                row[column.name] = uuid.uuid4()
+            elif not (column.nullable or column.default is not None or column.server_default is not None):
+                if getattr(column.type, "enums", None):
+                    row[column.name] = column.type.enums[0]
+                elif type(column.type).__name__ in {"Numeric", "Float"}:
+                    row[column.name] = 1.0
+                else:
+                    try:
+                        kind = column.type.python_type
+                    except NotImplementedError:
+                        kind = str
+                    row[column.name] = {int: 1, bool: False, dict: {}, list: [], uuid.UUID: uuid.uuid4(),
+                                        datetime.datetime: datetime.datetime.now(datetime.timezone.utc)}.get(kind, "x")
+        connection.execute(insert(table).values(**row))
+        ids[table.name] = row.get("id")
+
+    with Session(engine) as db:
+        products = [Product(name=name, slug=f"company-{name}") for name in ("a", "b")]
+        db.add_all(products)
+        db.commit()
+        for product in products:
+            ids = {}
+            for table in Base.metadata.sorted_tables:
+                if table.name != "products":
+                    fill(db.connection(), table, ids, product.id)
+            db.commit()
+        delete_company(db, tmp_path, products[0].id)
+        for table in Base.metadata.sorted_tables:
+            assert db.execute(select(func.count()).select_from(table)).scalar() == 1, table.name
+    engine.dispose()

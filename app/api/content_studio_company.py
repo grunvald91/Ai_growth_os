@@ -275,13 +275,16 @@ async def new_company_submit(request: Request, background: BackgroundTasks, db: 
 
 def _editable_fields() -> list[tuple[str, str, str]]:
     """Profile fields the owner can type in directly: plain text and lists of lines."""
+    from typing import get_args, get_origin
     rows = []
     for path, label in LABELS.items():
         section, name = path.split(".")
-        annotation = str(getattr(CompanyProfile.model_fields[section].default_factory.model_fields[name], "annotation", ""))
-        if annotation in {"str | None", "<class 'str'>"}:
+        annotation = CompanyProfile.model_fields[section].default_factory.model_fields[name].annotation
+        options = [item for item in (get_args(annotation) if get_origin(annotation) is not list else (annotation,))
+                   if item is not type(None)] or [annotation]
+        if options == [str]:
             rows.append((path, label, "text"))
-        elif annotation in {"list[str]", "list[str] | None"}:
+        elif len(options) == 1 and get_origin(options[0]) is list and get_args(options[0]) == (str,):
             rows.append((path, label, "lines"))
     return rows
 
@@ -491,6 +494,8 @@ def _form_page(product: Product, *, title: str, subtitle: str, body: str, status
 
 
 def _edit_page(product: Product, db: Session, error: str | None = None, status_code: int = 200) -> HTMLResponse:
+    if error is None and _service(db).active(product.id, ACTOR):
+        error = "Сейчас открыт сбор данных. Подтвердите или отмените его на странице профиля, затем правьте поля."
     return _form_page(product, title="Изменить данные компании",
                       subtitle="Правки сохраняются сразу и попадают в историю.",
                       body=_edit_page_body(product, _confirmed_profile(get_settings(), product), error),

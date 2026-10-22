@@ -598,51 +598,58 @@ class CompanyIntakeService:
         """The owner types new values straight into the confirmed profile (no model involved).
 
         Every value is validated by the same contract and privacy filter as an approved draft,
-        and the previous file is kept in history before it is replaced.
+        and the previous file is kept in history before it is replaced. The file is read and
+        written under the same lock as an approval, so two saves never overwrite each other.
         """
         product = self._product(product_id)
         if self.active(product_id, actor):
             raise IntakeError("Сначала подтвердите или отмените текущий сбор данных.")
-        path, old, result = self._canonical(product)
-        data = sanitized_profile(result.profile) if result.profile else {"schema_version": "1.0"}
-        for field_path, value in values.items():
-            if field_path not in LEAF_PATHS:
-                raise IntakeError("Это поле нельзя править напрямую.")
-            _set(data, field_path, value)
-        try:
-            profile = parse_company_profile(data)
-        except ValueError:
-            raise IntakeError("Не удалось сохранить: проверьте заполненные поля.") from None
-        safe = sanitized_profile(profile)
-        encoded = (_json(safe) + "\n").encode()
-        if len(encoded) > MAX_PROFILE_BYTES:
-            raise IntakeError("Профиль слишком большой.")
-        if encoded == old:
-            return {"status": "unchanged", "readiness": evaluate_readiness(profile)}
-        task = Task(product_id=product_id, assigned_agent=ROLE, title="Правка профиля владельцем",
-                    status=TaskStatus.COMPLETED)
-        self.db.add(task)
-        self.db.flush()
-        self._save(task, "company_profile_previous", {
-            "previous_bytes_base64": base64.b64encode(old).decode(), "sha256": _digest(old),
-            "actor": actor, "observed_at": datetime.now(timezone.utc).isoformat(), "reason": "manual_edit"})
-        self._save(task, "company_profile_manual_edit", {"actor": actor, "fields": sorted(values),
-                                                         "profile": safe}, status=ArtifactStatus.APPROVED)
-        self.db.commit()  # History is durable before the file is replaced.
+        if any(path not in LEAF_PATHS for path in values):
+            raise IntakeError("Это поле нельзя править напрямую.")
+        path = self.products_root.resolve() / product.slug / "company-profile.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         import fcntl
         descriptor = os.open(path.parent / ".profile.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         temporary = None
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX)
-            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as output:
-                temporary = output.name
-                output.write(encoded)
-                output.flush()
-                os.fsync(output.fileno())
-            os.replace(temporary, path)
-        except OSError:
-            raise IntakeError("Не удалось сохранить профиль; предыдущая версия сохранена в истории.") from None
+            path, old, result = self._canonical(product)
+            if result.profile is None and result.legacy_text:
+                # A JSON profile would hide the older text description from every agent.
+                raise IntakeError("У компании старое текстовое описание. Сначала соберите профиль через "
+                                  "«Добавить материалы» — описание войдёт в него, потом правьте поля здесь.")
+            data = sanitized_profile(result.profile) if result.profile else {"schema_version": "1.0"}
+            for field_path, value in values.items():
+                _set(data, field_path, value)
+            try:
+                profile = parse_company_profile(data)
+            except ValueError:
+                raise IntakeError("Не удалось сохранить: проверьте заполненные поля.") from None
+            safe = sanitized_profile(profile)
+            encoded = (_json(safe) + "\n").encode()
+            if len(encoded) > MAX_PROFILE_BYTES:
+                raise IntakeError("Профиль слишком большой.")
+            if encoded == old:
+                return {"status": "unchanged", "readiness": evaluate_readiness(profile)}
+            task = Task(product_id=product_id, assigned_agent=ROLE, title="Правка профиля владельцем",
+                        status=TaskStatus.COMPLETED)
+            self.db.add(task)
+            self.db.flush()
+            self._save(task, "company_profile_previous", {
+                "previous_bytes_base64": base64.b64encode(old).decode(), "sha256": _digest(old),
+                "actor": actor, "observed_at": datetime.now(timezone.utc).isoformat(), "reason": "manual_edit"})
+            self._save(task, "company_profile_manual_edit", {"actor": actor, "fields": sorted(values),
+                                                             "profile": safe}, status=ArtifactStatus.APPROVED)
+            self.db.commit()  # History is durable before the file is replaced.
+            try:
+                with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as output:
+                    temporary = output.name
+                    output.write(encoded)
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.replace(temporary, path)
+            except OSError:
+                raise IntakeError("Не удалось сохранить профиль; предыдущая версия сохранена в истории.") from None
         finally:
             if temporary and os.path.exists(temporary):
                 os.unlink(temporary)
