@@ -86,7 +86,7 @@ def render_checkpoint(directory: Path, destination: Path, *, width=720, height=1
         metadata = destination.with_suffix('.json')
         value = json.loads(metadata.read_text())
         value['visual_review'] = {'policy': policy, 'critic_passes': 1, 'review': review.model_dump(),
-            'author_decision': decision.model_dump(), 'redrawn_scenes': [i for i in range(3) if decision.accepted(review, i)],
+            'author_decision': decision.model_dump(), 'redrawn_scenes': [i for i in range(len(storyboard.scenes)) if decision.accepted(review, i)],
             'revised_images_reviewed_again': False, 'human_review_required': True, 'images': image_hashes}
         if layout_repairs:
             value['visual_review']['region_layout'] = layout_repairs

@@ -455,3 +455,53 @@ async def test_model_sees_only_the_latest_twenty_messages(db, product):
     assert "Что в работе 14" in [m.content for m in history] and "Что в работе 0" not in [m.content for m in history]
     stored = await send(db, product, text="", chip={"label": "Что в работе", "capability": "show_work", "params": {}}, key="z")
     assert len(dispatcher_service.messages(db, dispatcher_service.open_conversation(db, product.id, "owner"))) == 34
+
+
+# ---- video length and closing call to action ---------------------------------------------
+
+def _video_request(db):
+    from app.content.whiteboard.jobs import records
+    job = tasks(db, "whiteboard_renderer")[0]
+    return job, records(db, job)[3]
+
+
+@pytest.mark.asyncio
+async def test_voice_request_for_a_minute_video_with_own_call(db, product):
+    model, provider = llm({"intent": "execute", "capability": "whiteboard_video", "confidence": 0.9,
+                           "params": {"topic": "Почему кошки видят в темноте", "length": "60",
+                                      "call_to_action": "Напишите, про каких животных рассказать"},
+                           "reply_text": "Готовлю видео.", "spoken": "Готовлю видео."})
+    result = await send(db, product, text="Сделай минутное видео про кошачье зрение, в конце попроси "
+                                          "написать, про каких животных рассказать", model=model)
+    catalog = provider.requests[0].messages[-1].content
+    assert '"length"' in catalog and '"call_to_action"' in catalog
+    job, payload = _video_request(db)
+    assert job.status == TaskStatus.WAITING_APPROVAL
+    assert payload.request.scenes == 6 and payload.request.duration_seconds == 60
+    assert payload.request.call_to_action == "Напишите, про каких животных рассказать"
+    assert payload.max_api_calls == 26
+    card = [b for b in result["messages"][1]["blocks"] if b["type"] == "confirm"][0]
+    assert "Длина: около минуты, 6 сцен." in card["details"]
+    assert any("Напишите, про каких животных" in line for line in card["details"])
+    assert any("до 26 обращений" in line for line in card["details"])
+
+
+@pytest.mark.asyncio
+async def test_video_chip_defaults_to_thirty_seconds_and_subscribe_call(db, product):
+    chip = {"label": "Видео: тема", "capability": "whiteboard_video", "params": {"topic": "Как работает онлайн-запись"}}
+    result = await send(db, product, chip=chip)
+    _, payload = _video_request(db)
+    assert payload.request.scenes == 3 and payload.request.call_to_action == "" and payload.max_api_calls == 14
+    card = [b for b in result["messages"][1]["blocks"] if b["type"] == "confirm"][0]
+    assert "Длина: около 30 секунд, 3 сцены." in card["details"]
+    assert "Призыв в конце: подписаться на канал и поставить лайк." in card["details"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("params", [{"length": "45"}, {"call_to_action": "Да"}])
+async def test_bad_video_length_or_call_asks_to_clarify_and_creates_nothing(db, product, params):
+    chip = {"label": "Видео", "capability": "whiteboard_video",
+            "params": {"topic": "Как работает онлайн-запись", **params}}
+    result = await send(db, product, chip=chip)
+    assert result["messages"][1]["blocks"][0]["text"].startswith("Уточните")
+    assert tasks(db, "whiteboard_renderer") == []

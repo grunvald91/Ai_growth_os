@@ -187,7 +187,9 @@ async def confirm_approve_plan(ctx: Context, stored: dict, via: str) -> Outcome:
 async def whiteboard_video(ctx: Context, params: VideoParams) -> Outcome:
     from app.api.whiteboard import CreateJob, _queue, job_state
     try:
-        task = _queue(ctx.db, ctx.product, CreateJob(topic=params.topic), ctx.settings)
+        body = CreateJob(topic=params.topic, duration_seconds=int(params.length),
+                         call_to_action=params.call_to_action or "")
+        task = _queue(ctx.db, ctx.product, body, ctx.settings)
         state = job_state(ctx.db, ctx.product.id, task.id)
     except HTTPException as exc:
         ctx.db.rollback()
@@ -199,6 +201,9 @@ async def whiteboard_video(ctx: Context, params: VideoParams) -> Outcome:
     confirmation = Confirmation(
         title="Запустить рисованное видео?",
         details=[f"Тема: {params.topic}.",
+                 "Длина: около минуты, 6 сцен." if params.length == "60" else "Длина: около 30 секунд, 3 сцены.",
+                 f"Призыв в конце: {params.call_to_action}." if params.call_to_action
+                 else "Призыв в конце: подписаться на канал и поставить лайк.",
                  f"Это платная генерация: до {state['max_api_calls']} обращений к ИИ.",
                  "Пока вы не подтвердите, ничего не списывается."],
         params={"task_id": str(task.id), "request_digest": state["request_digest"]},

@@ -105,7 +105,7 @@ def create_content_html(product_id, *, created=False, fields=None, error=None, d
       </section>
       <aside class="sg-aside-stack">
         <section class="sg-surface sg-guide"><h3>Рисованное видео с озвучкой</h3>
-          <p>Готовый вертикальный MP4: три сцены, русская озвучка, рисование и субтитры. Платные модели запускаются после отдельного подтверждения.</p>
+          <p>Готовый вертикальный MP4 на 30 секунд или минуту: русская озвучка, рисование, субтитры и призыв в конце. Платные модели запускаются после отдельного подтверждения.</p>
           <a class="btn secondary" href="{base}/whiteboard">Создать рисованное видео →</a>
         </section>
         <section class="sg-surface sg-guide"><div class="sg-guide-icon">✦</div>

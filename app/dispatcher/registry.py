@@ -62,6 +62,13 @@ class PostParams(_Params):
 
 class VideoParams(_Params):
     topic: str = Field(min_length=8, max_length=400)
+    length: Literal["30", "60"] = Field(
+        default="30", description="Длина видео: \"30\" — около 30 секунд (по умолчанию); \"60\" — около минуты, "
+                                  "если владелец просит минутное, длинное или более подробное видео.")
+    call_to_action: str | None = Field(
+        default=None, min_length=6, max_length=200,
+        description="Призыв в конце видео, только если владелец сам его назвал, его словами. "
+                    "Не назвал — не указывай: видео позовёт подписаться на канал и поставить лайк.")
 
 
 class GoToParams(_Params):
@@ -176,7 +183,8 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                ToolOperation.PUBLISH, Cost.NONE, SchedulePostParams,
                consequence="Пост уйдёт в канал в назначенное время."),
     Capability("whiteboard_video", "Рисованное видео",
-               "Подготовить задание на рисованное видео по теме. Платная генерация начнётся только после подтверждения.",
+               "Подготовить задание на рисованное видео по теме: около 30 секунд или около минуты, с призывом в конце. "
+               "Платная генерация начнётся только после подтверждения.",
                ToolOperation.GENERATE_DRAFT, Cost.PAID_LATER, VideoParams),
     Capability("cancel_video", "Отменить рисованное видео",
                "Отменить задание на рисованное видео, которое ещё не завершено. Без task_id — самое последнее.",

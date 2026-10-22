@@ -179,7 +179,7 @@ async def test_author_can_reject_major_advice_without_redrawing(environment):
 
 @pytest.mark.asyncio
 async def test_all_three_redraws_are_bounded_and_charged_once(environment):
-    factory,settings,product,_=environment;task=reviewed_job(environment,maximum=18);approve(environment,task);seen=[]
+    factory,settings,product,_=environment;task=reviewed_job(environment,maximum=19);approve(environment,task);seen=[]
     await run_whiteboard_once(factory,settings,factory=pipeline_factory(seen,review(*(issue(i) for i in range(3)))),readiness=ready)
     assert seen.count('critic')==1 and seen.count('author')==1
     assert len([x for x in seen if isinstance(x,tuple) and x[0]=='revise'])==3
@@ -205,7 +205,7 @@ def test_review_is_immutable_and_insufficient_budget_is_rejected_before_queue(en
     factory,settings,product,_=environment
     with client() as browser:
         index=browser.get(f'/studio/products/{product}/whiteboard')
-        assert 'value="once" selected' in index.text and 'value="19" selected' in index.text
+        assert 'value="once" selected' in index.text and 'value="auto" selected' in index.text
         rejected=browser.post(f'/products/{product}/whiteboard/jobs',json={'topic':'Почему самолёт садится на авианосец','max_api_calls':13,'visual_review':True})
         assert rejected.status_code==422
     with factory() as db:assert list(db.scalars(select(Task)))==[]
