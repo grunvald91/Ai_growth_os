@@ -5,6 +5,7 @@ keep their duplicate protection, owner approvals and audit records. Nothing here
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import UUID
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.dispatcher.readers import ACTIVE, attention, latest_active_video, plans, upcoming_slots, work_rows
 from app.dispatcher.registry import (CAPABILITIES, CHANNEL_LABELS, CancelVideoParams, GoToParams,
-                                     PostParams, VideoParams, page_href, page_label)
+                                     PostParams, ScheduleParams, VideoParams, page_href, page_label)
 from app.models.domain import Approval, Product, Task
 
 
@@ -117,12 +118,33 @@ async def go_to(ctx: Context, params: GoToParams) -> Outcome:
                    [{"type": "links", "items": [{"label": label, "href": page_href(params.target, ctx.product.id)}]}])
 
 
-async def show_schedule(ctx: Context, params) -> Outcome:
-    # Honest absence: the booking platform is not connected to the Studio yet.
-    return Outcome("Расписание записей я пока не вижу — связь с онлайн-записью ещё не подключена. "
-                   "Открыть его можно в админке ServGo.",
-                   "Расписание записей я пока не вижу. Оно доступно в админке ServGo.",
-                   [_links(ctx, "schedule")], no_data=True)
+async def show_schedule(ctx: Context, params: ScheduleParams) -> Outcome:
+    """Bookings, free times, load or the next client. Read-only; numbers and names come from the booking platform."""
+    from app.schedule import views
+    from app.schedule.source import source_for
+    source = source_for(ctx.db, ctx.settings, ctx.product, ctx.account)
+    if source is None:
+        return Outcome("Расписание записей я пока не вижу: заведение не связано с этой компанией. "
+                       "Открыть его можно в админке ServGo.",
+                       "Расписание записей я пока не вижу: заведение не связано с компанией.",
+                       [_links(ctx, "schedule")], no_data=True)
+    now = datetime.now(ZoneInfo(views.SCHEDULE_TZ)).replace(tzinfo=None)
+    period = "week" if params.view == "next" else params.period
+    first, last = views.period_dates(period, now.date())
+    schedule = await asyncio.to_thread(source.fetch, first, last, with_slots=params.view == "free")
+    if schedule is None:
+        return Outcome("Сейчас не вижу расписание: онлайн-запись не отвечает. Остальное работает.",
+                       "Сейчас не вижу расписание, онлайн-запись не отвечает.", [_links(ctx, "schedule")], no_data=True)
+    label = source.business_label
+    if params.view == "free":
+        view = views.free_view(schedule, period, label)
+    elif params.view == "load":
+        view = views.load_view(schedule, period, first, last, label)
+    elif params.view == "next":
+        view = views.next_view(schedule, now, label)
+    else:
+        view = views.bookings_view(schedule, period, first, last, label)
+    return Outcome(view.text, view.spoken, [*view.blocks, _links(ctx, "schedule")])
 
 
 # ---- creating work -----------------------------------------------------------------------

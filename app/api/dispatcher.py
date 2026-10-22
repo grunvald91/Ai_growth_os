@@ -92,7 +92,9 @@ async def _json(request: Request, model):
 
 
 def _hints(db: Session, product: Product, settings: Settings) -> list[dict]:
-    return [chip.model_dump() for chip in compute_hints(db, product, settings.products_root)]
+    # Schedule chips only when the booking platform can really be asked, like the «Маркетинг» entry in ServGo.
+    ready = len(settings.servgo_internal_key or "") >= 32
+    return [chip.model_dump() for chip in compute_hints(db, product, settings.products_root, schedule_ready=ready)]
 
 
 def _state(db: Session, product: Product, settings: Settings, request: Request) -> dict:

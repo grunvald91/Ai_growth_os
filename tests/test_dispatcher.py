@@ -232,7 +232,7 @@ async def test_model_chips_are_kept_only_when_complete_and_known(db, product):
 
 
 @pytest.mark.asyncio
-async def test_schedule_is_reported_as_not_connected(db, product):
+async def test_schedule_without_a_linked_business_is_said_plainly(db, product):
     result = await send(db, product, chip={"label": "Записи на сегодня", "capability": "show_schedule", "params": {}})
     answer = result["messages"][1]
     assert "не вижу" in answer["text"]
