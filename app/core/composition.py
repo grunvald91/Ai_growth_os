@@ -23,6 +23,13 @@ def build_intake(db: Session, settings: Settings, provider: LLMProvider | None =
     from app.intake.registry import registry_from_settings
     from app.intake.service import CompanyIntakeService
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
+    factory = None
+    if provider is None and settings.llm_provider == "xai" and settings.xai_api_key:
+        def factory(model: str) -> LLMService:
+            # A fixed model, bypassing the router: this is a deliberate switch to another provider.
+            return LLMService(privacy_gateway=privacy, critic_enabled=False, provider=XAIProvider(
+                api_key=settings.xai_api_key, model=model, base_url=settings.xai_base_url,
+                reasoning_effort=settings.xai_reasoning_effort, timeout_seconds=settings.xai_timeout_seconds))
     return CompanyIntakeService(
         db, products_root=settings.products_root,
         # No critic here: every extracted value is already checked against a verbatim quote
@@ -31,6 +38,9 @@ def build_intake(db: Session, settings: Settings, provider: LLMProvider | None =
         llm=LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings), critic_enabled=False),
         model=settings.llm_model, provider_name=settings.llm_provider,
         registry_lookup=registry_from_settings(settings),
+        fallback_llm_factory=factory,
+        fallback_models=tuple(m.strip() for m in settings.intake_fallback_models.split(",") if m.strip()),
+        max_attempts=settings.intake_max_attempts,
     )
 
 

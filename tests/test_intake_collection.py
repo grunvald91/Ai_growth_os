@@ -417,3 +417,110 @@ async def test_failed_extraction_records_a_reason_code(db, tmp_path):
     with pytest.raises(IntakeError):
         await service.build(product.id, session, actor="owner")
     assert db.scalar(select(AgentRun)).error == "company_intake_extraction_failed:invalid_json"
+
+
+class _Scripted:
+    """Provider answering from a list: an Exception is raised, an LLMResponse is returned."""
+
+    def __init__(self, *steps):
+        self.steps = list(steps)
+        self.calls = 0
+
+    async def generate(self, request):
+        self.calls += 1
+        step = self.steps.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return step
+
+
+def _chain_service(db, tmp_path, primary, factory, **kwargs):
+    product = Product(name="Ноготок", slug="nogotok")
+    db.add(product)
+    db.commit()
+    service = CompanyIntakeService(
+        db, products_root=tmp_path, model="kimi-2.7",
+        llm=LLMService(privacy_gateway=PrivacyGateway(), provider=primary, critic_enabled=False),
+        fallback_llm_factory=lambda name: LLMService(
+            privacy_gateway=PrivacyGateway(), provider=factory(name), critic_enabled=False),
+        fallback_models=("kimi-k3", "deepseek-v4.1-flash", "grok-4.7", "claude-sonnet-5-5"), **kwargs)
+    session = UUID(service.start(product.id, actor="owner")["session_id"])
+    source = service.add_text(product.id, session, "Студия Ноготок в Сочи.", actor="owner")["sources"][-1]
+    return product, session, service, source
+
+
+def _good_reply(source_id, model):
+    claim = {"source_id": source_id, "field_path": "identity.name", "proposed_value": "Ноготок",
+             "evidence_excerpt": "Студия Ноготок", "kind": "candidate"}
+    return LLMResponse(content=json.dumps({"claims": [claim]}), model=model)
+
+
+@pytest.mark.asyncio
+async def test_failed_model_is_replaced_by_one_from_another_provider(db, tmp_path):
+    from app.models.domain import AgentRun
+    providers = {}
+    primary = _Scripted(RuntimeError("502 upstream"))
+
+    def factory(name):
+        providers[name] = _Scripted(LLMResponse(content="sorry, no json", model=name)
+                                    if name.startswith("deepseek") else _good_reply(source_id, name))
+        return providers[name]
+
+    # kimi-k3 shares a family with the primary kimi-2.7, so it must be skipped.
+    source_id = "placeholder"
+    product, session, service, source = _chain_service(db, tmp_path, primary, factory)
+    source_id = source["id"]
+    review = await service.build(product.id, session, actor="owner")
+    assert list(providers) == ["deepseek-v4.1-flash", "grok-4.7"]
+    assert review["extraction_model"] == "grok-4.7"
+    assert review["profile_preview"]["identity"]["name"] == "Ноготок"
+    runs = db.scalars(select(AgentRun).order_by(AgentRun.started_at)).all()
+    assert [(r.model, r.status) for r in runs] == [
+        ("kimi-2.7", "failed"), ("deepseek-v4.1-flash", "failed"), ("grok-4.7", "completed")]
+
+
+@pytest.mark.asyncio
+async def test_all_attempts_failing_stops_after_three_models(db, tmp_path):
+    from app.models.domain import AgentRun
+    made = []
+
+    def factory(name):
+        made.append(name)
+        return _Scripted(RuntimeError("down"))
+
+    product, session, service, _ = _chain_service(db, tmp_path, _Scripted(RuntimeError("down")), factory)
+    with pytest.raises(IntakeError):
+        await service.build(product.id, session, actor="owner")
+    assert made == ["deepseek-v4.1-flash", "grok-4.7"]
+    runs = db.scalars(select(AgentRun)).all()
+    assert len(runs) == 3 and all(r.status == "failed" for r in runs)
+
+
+@pytest.mark.asyncio
+async def test_max_attempts_limits_the_chain(db, tmp_path):
+    made = []
+
+    def factory(name):
+        made.append(name)
+        return _Scripted()
+
+    product, session, service, _ = _chain_service(
+        db, tmp_path, _Scripted(RuntimeError("down")), factory, max_attempts=1)
+    with pytest.raises(IntakeError):
+        await service.build(product.id, session, actor="owner")
+    assert made == []
+
+
+@pytest.mark.asyncio
+async def test_working_primary_model_never_calls_the_fallbacks(db, tmp_path):
+    made = []
+
+    def factory(name):
+        made.append(_Scripted())
+        return made[-1]
+
+    primary = _Scripted()
+    product, session, service, source = _chain_service(db, tmp_path, primary, factory)
+    primary.steps.append(_good_reply(source["id"], "kimi-2.7"))
+    review = await service.build(product.id, session, actor="owner")
+    assert all(p.calls == 0 for p in made) and review["extraction_model"] == "kimi-2.7"
