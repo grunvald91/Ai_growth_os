@@ -611,3 +611,13 @@ STUDIO_CSS += """
 @keyframes sg-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.sg-intake-spinner{animation:none}}
 """
+
+# Company profile page: confirmed values, material removal, danger zone.
+STUDIO_CSS += """
+.sg-profile-list{display:grid;gap:10px;margin:0}
+.sg-profile-list dt{font-size:13px;color:#526176;font-weight:650}
+.sg-profile-list dd{margin:0;overflow-wrap:anywhere;line-height:1.5}
+.sg-intake-source .sg-inline-form{grid-column:1/-1;justify-self:start;margin-top:4px}
+.sg-danger-zone{border-color:#F3D3D3}
+@media(max-width:640px){.sg-intake-source .sg-inline-form{justify-self:stretch}.sg-intake-source .sg-inline-form .btn{width:100%;min-height:44px}}
+"""

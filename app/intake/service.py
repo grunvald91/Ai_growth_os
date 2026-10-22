@@ -579,6 +579,84 @@ class CompanyIntakeService:
             "notice": "Это черновик. Все извлечённые значения требуют подтверждения владельцем.",
         }, draft
 
+    def remove_source(self, product_id, session_id, source_id: str, *, actor):
+        """Drop one material from the current collection; the draft must be rebuilt afterwards."""
+        task = self._task(product_id, session_id, actor, active=True)
+        state = self._state(task.id)
+        kept = [row for row in state["sources"]
+                if not (row["id"] == source_id and row["source_type"] != "existing_profile")]
+        if len(kept) == len(state["sources"]):
+            raise IntakeError("Этот материал уже удалён или его нельзя убрать.")
+        state["sources"] = kept
+        state["revision"] += 1
+        self._save_state(task.id, product_id, state)
+        task.status = TaskStatus.QUEUED
+        self.db.commit()
+        return self.get(product_id, session_id, actor=actor)
+
+    def edit_profile(self, product_id: UUID, values: dict, *, actor: str) -> dict:
+        """The owner types new values straight into the confirmed profile (no model involved).
+
+        Every value is validated by the same contract and privacy filter as an approved draft,
+        and the previous file is kept in history before it is replaced. The file is read and
+        written under the same lock as an approval, so two saves never overwrite each other.
+        """
+        product = self._product(product_id)
+        if self.active(product_id, actor):
+            raise IntakeError("Сначала подтвердите или отмените текущий сбор данных.")
+        if any(path not in LEAF_PATHS for path in values):
+            raise IntakeError("Это поле нельзя править напрямую.")
+        path = self.products_root.resolve() / product.slug / "company-profile.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        import fcntl
+        descriptor = os.open(path.parent / ".profile.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        temporary = None
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            path, old, result = self._canonical(product)
+            if result.profile is None and result.legacy_text:
+                # A JSON profile would hide the older text description from every agent.
+                raise IntakeError("У компании старое текстовое описание. Сначала соберите профиль через "
+                                  "«Добавить материалы» — описание войдёт в него, потом правьте поля здесь.")
+            data = sanitized_profile(result.profile) if result.profile else {"schema_version": "1.0"}
+            for field_path, value in values.items():
+                _set(data, field_path, value)
+            try:
+                profile = parse_company_profile(data)
+            except ValueError:
+                raise IntakeError("Не удалось сохранить: проверьте заполненные поля.") from None
+            safe = sanitized_profile(profile)
+            encoded = (_json(safe) + "\n").encode()
+            if len(encoded) > MAX_PROFILE_BYTES:
+                raise IntakeError("Профиль слишком большой.")
+            if encoded == old:
+                return {"status": "unchanged", "readiness": evaluate_readiness(profile)}
+            task = Task(product_id=product_id, assigned_agent=ROLE, title="Правка профиля владельцем",
+                        status=TaskStatus.COMPLETED)
+            self.db.add(task)
+            self.db.flush()
+            self._save(task, "company_profile_previous", {
+                "previous_bytes_base64": base64.b64encode(old).decode(), "sha256": _digest(old),
+                "actor": actor, "observed_at": datetime.now(timezone.utc).isoformat(), "reason": "manual_edit"})
+            self._save(task, "company_profile_manual_edit", {"actor": actor, "fields": sorted(values),
+                                                             "profile": safe}, status=ArtifactStatus.APPROVED)
+            self.db.commit()  # History is durable before the file is replaced.
+            try:
+                with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as output:
+                    temporary = output.name
+                    output.write(encoded)
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.replace(temporary, path)
+            except OSError:
+                raise IntakeError("Не удалось сохранить профиль; предыдущая версия сохранена в истории.") from None
+        finally:
+            if temporary and os.path.exists(temporary):
+                os.unlink(temporary)
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+        return {"status": "saved", "profile": safe, "readiness": evaluate_readiness(profile)}
+
     def cancel(self, product_id, session_id, *, actor):
         task = self._task(product_id, session_id, actor, active=True)
         task.status = TaskStatus.CANCELLED
