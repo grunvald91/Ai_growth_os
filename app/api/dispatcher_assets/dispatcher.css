@@ -1,0 +1,131 @@
+/* Studio home: one input line, hint chips, answers. ServGo Air tokens; phone first. */
+.dp-main{
+  --dp-bg:#fff; --dp-soft:#f6f9fd; --dp-light:#eef5fc; --dp-text:#1b2d42; --dp-text2:#3d536b;
+  --dp-muted:#62778b; --dp-accent:#3478d6; --dp-line:#edf2f8; --dp-ok:#26886b; --dp-warn:#bf8450; --dp-bad:#c36262;
+  --dp-grad:linear-gradient(110deg,#3174d4,#578fef); --dp-shadow:0 4px 16px rgba(57,118,212,.15);
+  --dp-head:52px; --dp-nav:72px;
+  color:var(--dp-text);background:#fff;
+}
+.dp-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---- phone: information on top, controls at the bottom within thumb reach ---- */
+.dp-main{padding:8px 14px 0!important}
+.dp-home{
+  position:relative;display:grid;grid-template-columns:minmax(0,1fr);
+  grid-template-rows:auto minmax(0,1fr) auto auto;
+  grid-template-areas:"hello" "feed" "chips" "form";
+  gap:10px;
+  height:calc(100dvh - var(--dp-head) - var(--dp-nav) - env(safe-area-inset-bottom) - 8px);
+  max-width:760px;margin:0 auto;
+}
+.dp-hello h1{margin:0;font-size:22px;line-height:1.15;letter-spacing:-.03em;font-weight:700}
+.dp-hello p{margin:4px 0 0;font-size:13px;color:var(--dp-muted);letter-spacing:-.01em}
+.dp-hello{grid-area:hello;padding-right:96px}
+.dp-new{
+  position:absolute;top:2px;right:0;min-height:40px;padding:0 12px;border:0;border-radius:999px;
+  background:var(--dp-soft);color:var(--dp-muted);font:inherit;font-size:13px;font-weight:600;cursor:pointer;
+}
+.dp-new:hover{background:var(--dp-light);color:var(--dp-accent)}
+
+.dp-feed{grid-area:feed;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  display:flex;flex-direction:column;gap:10px;padding:12px 0 6px;-webkit-overflow-scrolling:touch;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 14px);mask-image:linear-gradient(to bottom,transparent 0,#000 14px)}
+.dp-home:not(.has-feed) .dp-feed{display:none}
+.dp-msg{max-width:92%;border-radius:18px;padding:11px 14px;font-size:15px;line-height:1.4;letter-spacing:-.01em;
+  animation:dp-rise .2s ease-out both}
+.dp-msg.user{align-self:flex-end;background:var(--dp-light);color:var(--dp-text);border-bottom-right-radius:6px}
+.dp-msg.bot{align-self:flex-start;background:var(--dp-soft);border-bottom-left-radius:6px;
+  display:flex;flex-direction:column;gap:10px;min-width:0;max-width:100%}
+.dp-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.dp-typing{color:var(--dp-muted)}
+.dp-error{background:#fbeeee;color:#8c3a3a}
+
+.dp-chips{grid-area:chips;min-width:0}
+.dp-home.has-feed .dp-hello p{display:none}
+/* Empty phone screen: two rows of hints that scroll sideways, close to the thumb. */
+.dp-home:not(.has-feed) .dp-chiprow{display:grid;grid-auto-flow:column;grid-template-rows:repeat(2,auto);
+  grid-auto-columns:max-content;overflow-x:auto;padding-bottom:6px}
+.dp-chiprow{display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.dp-chiprow::-webkit-scrollbar{display:none}
+.dp-chip{flex:0 0 auto;min-height:40px;padding:0 14px;border:0;border-radius:999px;background:var(--dp-soft);
+  color:var(--dp-text2);font:inherit;font-size:14px;font-weight:600;letter-spacing:-.01em;cursor:pointer;white-space:nowrap}
+.dp-chiprow .dp-chip{justify-self:start;max-width:min(80vw,360px);overflow:hidden;text-overflow:ellipsis}
+.dp-chip:hover{background:var(--dp-light);color:var(--dp-accent)}
+.dp-chip:active{transform:scale(.98)}
+.dp-msg .dp-chiprow{flex-wrap:wrap;overflow:visible}
+.dp-msg .dp-chip{background:#fff}
+
+.dp-form{grid-area:form;display:flex;align-items:flex-end;gap:8px;padding:6px 6px 6px 16px;border-radius:26px;
+  background:var(--dp-soft);margin-bottom:6px;transition:background .15s}
+.dp-form:focus-within{background:var(--dp-light);box-shadow:0 0 0 2px var(--dp-accent)}
+.dp-input{flex:1;min-width:0;border:0;outline:0;background:transparent;resize:none;font:inherit;font-size:16px;
+  line-height:1.35;color:var(--dp-text);padding:10px 0;max-height:160px}
+.dp-input:focus-visible{outline:none}
+.dp-input::placeholder{color:var(--dp-muted)}
+.dp-send{flex:0 0 auto;width:44px;height:44px;border:0;border-radius:50%;background:var(--dp-grad);color:#fff;
+  box-shadow:var(--dp-shadow);display:grid;place-items:center;cursor:pointer}
+.dp-send:disabled{opacity:.5;cursor:default}
+
+.dp-links{display:flex;flex-direction:column;gap:6px}
+.dp-link{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px;padding:0 14px;
+  border-radius:14px;background:#fff;color:var(--dp-accent);font-weight:600;font-size:14px;text-decoration:none}
+.dp-link::after{content:"→";color:var(--dp-muted)}
+.dp-link:hover{background:var(--dp-light)}
+
+.dp-task{display:flex;flex-direction:column;gap:2px;padding:10px 14px;border-radius:14px;background:#fff;
+  color:var(--dp-text);text-decoration:none}
+.dp-task-title{font-weight:600;font-size:14px;overflow-wrap:anywhere}
+.dp-task-status{font-size:12px;color:var(--dp-warn);font-weight:600}
+
+.dp-tablewrap{overflow-x:auto;border-radius:14px;background:#fff}
+.dp-table{width:100%;border-collapse:collapse;font-size:14px}
+.dp-table th{text-align:left;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--dp-muted);
+  padding:8px 12px;font-weight:600}
+.dp-table td{padding:9px 12px;border-top:1px solid var(--dp-line);vertical-align:top;overflow-wrap:anywhere}
+.dp-table td:last-child{white-space:nowrap}
+
+.dp-confirm{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:16px;background:#fff}
+.dp-confirm.paid{box-shadow:inset 0 0 0 1.5px #ecc08e}
+.dp-confirm-title{font-size:15px}
+.dp-badge{align-self:flex-start;font-size:11px;font-weight:700;color:var(--dp-warn);background:#fbf1e6;
+  padding:3px 8px;border-radius:999px}
+.dp-confirm-list{margin:0;padding-left:18px;font-size:14px;color:var(--dp-text2);display:flex;flex-direction:column;gap:3px}
+.dp-confirm-actions{display:flex;gap:8px;margin-top:2px}
+.dp-btn{flex:1;min-height:46px;border:0;border-radius:13px;font:inherit;font-size:15px;font-weight:650;cursor:pointer}
+.dp-btn.primary{background:var(--dp-grad);color:#fff;box-shadow:var(--dp-shadow)}
+.dp-btn.ghost{background:var(--dp-soft);color:var(--dp-text2)}
+.dp-btn:disabled{opacity:.5;cursor:default}
+.dp-confirm-state{font-size:13px;color:var(--dp-ok);font-weight:600}
+
+.dp-chip:focus-visible,.dp-btn:focus-visible,.dp-new:focus-visible,.dp-send:focus-visible,.dp-link:focus-visible,
+.dp-task:focus-visible{outline:2px solid var(--dp-accent);outline-offset:2px}
+
+@keyframes dp-rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.dp-msg{animation:none}.dp-chip:active{transform:none}}
+
+/* ---- desktop: Google-like. Greeting, input line, hints, then the answers below ---- */
+@media(min-width:921px){
+  .dp-main{padding:24px 26px 0!important}
+  .dp-home{
+    height:calc(100vh - 48px);
+    grid-template-rows:auto auto auto minmax(0,1fr);
+    grid-template-areas:"hello" "form" "chips" "feed";
+    gap:14px;
+  }
+  .dp-hello{padding-right:0;text-align:center;margin-top:16vh;transition:margin .2s}
+  .dp-hello h1{font-size:34px}
+  .dp-hello p{font-size:15px}
+  .dp-home.has-feed .dp-hello{margin-top:0;text-align:left;padding-right:110px}
+  .dp-home.has-feed .dp-hello h1{font-size:22px}
+  .dp-home.has-feed .dp-hello p{display:none}
+  .dp-new{top:0}
+  .dp-form{margin-bottom:0;padding:8px 8px 8px 22px;border-radius:30px}
+  .dp-input{font-size:17px}
+  .dp-chiprow,.dp-home:not(.has-feed) .dp-chiprow{display:flex;grid-template-rows:none;flex-wrap:wrap;overflow:hidden;
+    max-height:92px;justify-content:center}
+  .dp-home.has-feed .dp-chiprow{justify-content:flex-start}
+  .dp-feed{padding-top:6px}
+  .dp-msg{max-width:78%}
+  .dp-msg.bot{max-width:92%}
+  .dp-home:not(.has-feed) .dp-feed{display:none}
+}

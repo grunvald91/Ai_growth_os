@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     model_router_max_call_usd: str | None = None
     skills_root: Path = Path("skills")
     products_root: Path = Path("products")
+    # Companies (slugs, comma-separated) whose Studio home is the dispatcher. The previous home stays at /classic.
+    dispatcher_enabled_slugs: str = "servgo"
     review_skill: str | None = None
     studio_admin_username: str | None = None
     studio_admin_password: str | None = None

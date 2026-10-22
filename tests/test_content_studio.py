@@ -69,7 +69,7 @@ def test_studio_lists_products_and_renders_calendar(studio_db):
     client=client_for(db)
     try:
         assert client.get("/studio").status_code==200
-        response=client.get(f"/studio/products/{product.id}")
+        response=client.get(f"/studio/products/{product.id}/classic")
         assert response.status_code==200
         assert "Growth Studio" in response.text
         assert "Контент-календарь" in response.text
@@ -109,7 +109,7 @@ def test_studio_renders_storyboard_only_video_brief(studio_db):
     db.add_all([plan,video]);db.commit()
     client=client_for(db)
     try:
-        response=client.get(f"/studio/products/{product.id}")
+        response=client.get(f"/studio/products/{product.id}/classic")
         assert response.status_code==200
         assert "Промпт" in response.text
         assert "Vertical realistic presenter shot" in response.text
@@ -162,7 +162,7 @@ def test_studio_library_includes_content_outside_current_plan(studio_db):
     db.add(article);db.commit()
     client=client_for(db)
     try:
-        response=client.get(f"/studio/products/{product.id}")
+        response=client.get(f"/studio/products/{product.id}/classic")
         assert response.status_code==200
         assert "Подготовленные материалы" in response.text
         assert "Внеплановая статья" in response.text
@@ -224,7 +224,7 @@ def test_studio_all_navigation_targets_are_real_pages(studio_db):
     client=client_for(db)
     try:
         base=f"/studio/products/{product.id}"
-        overview=client.get(base)
+        overview=client.get(base+"/classic")
         assert overview.status_code==200
         assert f'href="{base}/plan"' in overview.text
         assert f'href="{base}/calendar"' in overview.text
