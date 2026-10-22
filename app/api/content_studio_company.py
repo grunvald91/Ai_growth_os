@@ -20,13 +20,15 @@ from app.api.content_studio import (
     _owner_product, _studio_form, brand_html, esc, studio_page_shell,
 )
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
+from app.company_profile import CompanyProfile, evaluate_readiness, load_company_profile
 from app.core.config import get_settings
 from app.db.session import get_db
+from app.intake.company_admin import delete_company, rename_company
 from app.intake.contracts import IntakeError
 from app.intake.registry import registry_from_settings
 from app.intake.service import CompanyIntakeService
 from app.intake.sources import FILE_HELP, MAX_FILE_BYTES, parse_file_async
-from app.intake.telegram import render_review
+from app.intake.telegram import GATES, LABELS, render_review, value_text
 from app.models.domain import Product
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -271,7 +273,84 @@ async def new_company_submit(request: Request, background: BackgroundTasks, db: 
     return RedirectResponse(f"/studio/products/{product.id}/profile", status_code=303)
 
 
-def _source_line(source: dict) -> str:
+def _editable_fields() -> list[tuple[str, str, str]]:
+    """Profile fields the owner can type in directly: plain text and lists of lines."""
+    rows = []
+    for path, label in LABELS.items():
+        section, name = path.split(".")
+        annotation = str(getattr(CompanyProfile.model_fields[section].default_factory.model_fields[name], "annotation", ""))
+        if annotation in {"str | None", "<class 'str'>"}:
+            rows.append((path, label, "text"))
+        elif annotation in {"list[str]", "list[str] | None"}:
+            rows.append((path, label, "lines"))
+    return rows
+
+
+EDITABLE_FIELDS = _editable_fields()
+
+
+def _current_value(data: dict, path: str):
+    section, name = path.split(".")
+    return (data.get(section) or {}).get(name)
+
+
+def _confirmed_profile(settings, product: Product):
+    result = load_company_profile(settings.products_root, product.slug)
+    return result.profile if not result.validation_errors else None
+
+
+def _profile_summary_html(base: str, profile: CompanyProfile | None) -> str:
+    if profile is None:
+        return f"""<section class="sg-surface sg-intake-section"><h2>Профиль компании</h2>
+<p>Подтверждённого профиля пока нет. Соберите его из материалов или заполните вручную.</p>
+<div class="sg-intake-actions"><a class="btn" href="{base}/profile/edit">Заполнить вручную</a></div></section>"""
+    data = profile.model_dump(mode="json")
+    rows = []
+    for path, label in LABELS.items():
+        value = _current_value(data, path)
+        if value in (None, [], ""):
+            continue
+        rows.append(f"<dt>{esc(label)}</dt><dd>{esc(value_text(value))}</dd>")
+    readiness = evaluate_readiness(profile)
+    gates = " · ".join(f"{GATES[g]}: {'готово' if readiness[g]['ready'] else 'не хватает данных'}" for g in GATES)
+    return f"""<section class="sg-surface sg-intake-section"><h2>Профиль компании</h2>
+<dl class="sg-profile-list">{''.join(rows) or '<dt>Пока пусто</dt><dd>Заполните вручную или соберите из материалов.</dd>'}</dl>
+<p class="sg-muted">{esc(gates)}</p>
+<div class="sg-intake-actions"><a class="btn primary" href="{base}/profile/edit">Изменить данные</a></div></section>"""
+
+
+def _company_settings_html(product: Product, *, can_delete: bool) -> str:
+    base = f"/studio/products/{product.id}"
+    delete_link = (f'<a class="btn danger" href="{base}/profile/delete">Удалить компанию</a>' if can_delete else "")
+    return f"""<section class="sg-surface sg-intake-section"><h2>Компания</h2>
+<form method="post" action="{base}/profile/rename" class="sg-intake-form" data-once>
+  <label class="sg-field"><span>Название</span><input name="name" required minlength="2" maxlength="200" value="{esc(product.name)}"></label>
+  <label class="sg-field"><span>Краткое описание</span><textarea name="description" rows="3" maxlength="10000">{esc(product.description or '')}</textarea></label>
+  <div class="sg-intake-actions"><button class="btn">Сохранить название</button>{delete_link}</div></form></section>"""
+
+
+def _edit_page_body(product: Product, profile: CompanyProfile | None, error: str | None) -> str:
+    base = f"/studio/products/{product.id}"
+    data = profile.model_dump(mode="json") if profile else {}
+    fields = []
+    for path, label, kind in EDITABLE_FIELDS:
+        value = _current_value(data, path)
+        if kind == "lines":
+            text, hint = "\n".join(value or []), "<small>Каждый пункт с новой строки.</small>"
+            control = f'<textarea name="f_{path}" rows="{max(2, min(8, len(value or []) + 1))}" maxlength="4000">{esc(text)}</textarea>'
+        else:
+            hint = ""
+            control = f'<input name="f_{path}" maxlength="1000" value="{esc(value or "")}">'
+        fields.append(f'<label class="sg-field"><span>{esc(label)}</span>{control}{hint}</label>')
+    notice = f'<div class="sg-warning" role="alert">{esc(error)}</div>' if error else ""
+    return f"""{notice}<form method="post" action="{base}/profile/edit" class="sg-surface sg-intake-section sg-intake-form" data-once>
+<p class="sg-muted">Меняйте только нужное: пустое поле очищает значение. Услуги, цены и подтверждённые факты добавляйте через «Добавить материалы» на странице профиля.</p>
+{''.join(fields)}
+<div class="sg-intake-actions"><button class="btn primary" type="submit">Сохранить</button>
+<a href="{base}/profile">Отмена</a></div></form>{ONCE_SCRIPT}"""
+
+
+def _source_line(source: dict, base: str = "", removable: bool = False) -> str:
     label = SOURCE_LABELS.get(source.get("source_type"), "Материал")
     name = source.get("filename") or source.get("reference") or ""
     if name == "company identifier":
@@ -280,8 +359,13 @@ def _source_line(source: dict) -> str:
     mark = {"read": "", "truncated": " · прочитан частично", "unavailable": " · не прочитан",
             "unsupported": " · формат не читается"}.get(status, "")
     note = f'<small>{esc(source["note"])}</small>' if source.get("note") else ""
+    remove = ""
+    if removable and source.get("source_type") != "existing_profile":
+        remove = (f'<form method="post" action="{base}/profile/remove" class="sg-inline-form">'
+                  f'<input type="hidden" name="source_id" value="{esc(source.get("id", ""))}">'
+                  f'<button class="btn small" aria-label="Убрать материал">Убрать</button></form>')
     return (f'<li class="sg-intake-source sg-intake-{esc(status or "read")}"><b>{esc(label)}</b>'
-            f'<span>{esc(name)}{esc(mark)}</span>{note}</li>')
+            f'<span>{esc(name)}{esc(mark)}</span>{note}{remove}</li>')
 
 
 def _questions_html(base: str, review: dict | None) -> str:
@@ -313,7 +397,8 @@ def _working_html(job: dict) -> str:
 
 
 def _profile_body(product: Product, state: dict | None, error: str | None, notice: str | None,
-                  registry_hint: str, job: dict | None = None) -> str:
+                  registry_hint: str, job: dict | None = None, profile: CompanyProfile | None = None,
+                  can_delete: bool = False) -> str:
     base = f"/studio/products/{product.id}"
     parts = []
     running = bool(job and job.get("running"))
@@ -322,11 +407,13 @@ def _profile_body(product: Product, state: dict | None, error: str | None, notic
     if notice:
         parts.append(f'<div class="sg-intake-notice" role="status">{esc(notice)}</div>')
     if state is None:
-        parts.append(f"""<section class="sg-surface"><h2>Сбор данных о компании</h2>
-<p>Чтобы агенты писали точно про этот бизнес, соберите и подтвердите его профиль.</p>
-<form method="post" action="{base}/profile/start"><button class="btn primary">Начать сбор данных</button></form></section>""")
+        parts.append(_profile_summary_html(base, profile))
+        parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Дополнить из материалов</h2>
+<p>Добавьте сайт, ИНН, файлы или сведения своими словами: агент предложит изменения, а вы проверите их.</p>
+<form method="post" action="{base}/profile/start" class="sg-intake-actions"><button class="btn">Добавить материалы</button></form></section>""")
+        parts.append(_company_settings_html(product, can_delete=can_delete))
         return "".join(parts)
-    sources = "".join(_source_line(s) for s in state["sources"])
+    sources = "".join(_source_line(s, base, removable=not running) for s in state["sources"])
     if running:
         parts.append(_working_html(job))
     parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Материалы · {len(state['sources'])}</h2>
@@ -357,12 +444,20 @@ def _profile_body(product: Product, state: dict | None, error: str | None, notic
     <small>{esc(registry_hint)}</small></label>
   {_file_field("Файлы")}
   <div class="sg-intake-actions"><button class="btn">Добавить</button></div></form></section>""")
+    parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Передумали?</h2>
+<p class="sg-muted">Отмена закроет текущий сбор. Подтверждённый профиль останется как есть.</p>
+<form method="post" action="{base}/profile/cancel" class="sg-intake-actions"><button class="btn">Отменить сбор данных</button></form></section>""")
+    parts.append(_company_settings_html(product, can_delete=can_delete))
     parts.append(ONCE_SCRIPT)
     return "".join(parts)
 
 
+def running_job(job: dict | None) -> bool:
+    return bool(job and job.get("running"))
+
+
 def _render_profile(product: Product, db: Session, error: str | None = None, status_code: int = 200,
-                    notice: str | None = None):
+                    notice: str | None = None, request: Request | None = None):
     service = _service(db)
     active = service.active(product.id, ACTOR)
     state = service.get(product.id, active.id, actor=ACTOR) if active else None
@@ -376,15 +471,55 @@ def _render_profile(product: Product, db: Session, error: str | None = None, sta
             notice = " ".join(filter(None, [notice, " ".join(dict.fromkeys(job["notes"]))]))[:600]
     page = studio_page_shell(product, active="profile", title="Профиль компании",
                              subtitle="Подтверждённые сведения, на которые опираются все агенты.",
-                             body=_profile_body(product, state, error, notice, _identifier_hint(service), job))
+                             body=_profile_body(product, state, error, notice, _identifier_hint(service), job,
+                                                profile=_confirmed_profile(get_settings(), product),
+                                                can_delete=not running_job(job) and (
+                                                    request is None or getattr(request.state, "studio_product_ids", None) is None)))
     return HTMLResponse(page, status_code=status_code, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/studio/products/{product_id}/profile", response_class=HTMLResponse)
-def company_profile(product_id: UUID, error: str | None = None, notice: str | None = None,
+def company_profile(product_id: UUID, request: Request, error: str | None = None, notice: str | None = None,
                     db: Session = Depends(get_db)):
     return _render_profile(_owner_product(db, product_id), db, error[:300] if error else None,
-                           notice=notice[:400] if notice else None)
+                           notice=notice[:400] if notice else None, request=request)
+
+
+def _form_page(product: Product, *, title: str, subtitle: str, body: str, status_code: int = 200) -> HTMLResponse:
+    page = studio_page_shell(product, active="profile", title=title, subtitle=subtitle, body=body)
+    return HTMLResponse(page, status_code=status_code, headers={"Cache-Control": "no-store"})
+
+
+def _edit_page(product: Product, db: Session, error: str | None = None, status_code: int = 200) -> HTMLResponse:
+    return _form_page(product, title="Изменить данные компании",
+                      subtitle="Правки сохраняются сразу и попадают в историю.",
+                      body=_edit_page_body(product, _confirmed_profile(get_settings(), product), error),
+                      status_code=status_code)
+
+
+@router.get("/studio/products/{product_id}/profile/edit", response_class=HTMLResponse)
+def company_profile_edit(product_id: UUID, db: Session = Depends(get_db)):
+    return _edit_page(_owner_product(db, product_id), db)
+
+
+def _delete_page(product: Product, error: str | None = None, status_code: int = 200) -> HTMLResponse:
+    base = f"/studio/products/{product.id}"
+    notice = f'<div class="sg-warning" role="alert">{esc(error)}</div>' if error else ""
+    body = f"""{notice}<form method="post" action="{base}/profile/delete" class="sg-surface sg-intake-section sg-intake-form sg-danger-zone" data-once>
+<p>Будут безвозвратно удалены профиль, материалы, черновики, задачи, комментарии и готовые файлы компании «{esc(product.name)}».
+Если по ней уже что-то опубликовано, публикации на площадках останутся — удалятся только записи о них здесь.</p>
+<label class="sg-field"><span>Чтобы подтвердить, введите название компании</span>
+<input name="confirm_name" required autocomplete="off" placeholder="{esc(product.name)}"></label>
+<div class="sg-intake-actions"><button class="btn danger" type="submit">Удалить компанию навсегда</button>
+<a href="{base}/profile">Не удалять</a></div></form>{ONCE_SCRIPT}"""
+    return _form_page(product, title="Удалить компанию", subtitle="Это действие нельзя отменить.",
+                      body=body, status_code=status_code)
+
+
+@router.get("/studio/products/{product_id}/profile/delete", response_class=HTMLResponse)
+def company_delete_page(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+    _require_operator(request)
+    return _delete_page(_owner_product(db, product_id))
 
 
 def _session_id(service: CompanyIntakeService, product: Product) -> UUID:
@@ -443,6 +578,34 @@ async def company_profile_action(product_id: UUID, action: str, request: Request
         elif action == "approve":
             session_id = _session_id(service, product)
             service.approve(product.id, session_id, UUID(fields.get("review_id", "")), actor=ACTOR, confirmed=True)
+        elif action == "remove":
+            session_id = _session_id(service, product)
+            if _job_running(session_id):
+                raise IntakeError("Уже работаю над этой компанией. Подождите, страница обновится сама.")
+            service.remove_source(product.id, session_id, fields.get("source_id", ""), actor=ACTOR)
+            notes = ["Материал убран. Пересоберите профиль."]
+        elif action == "cancel":
+            session_id = _session_id(service, product)
+            if _job_running(session_id):
+                raise IntakeError("Уже работаю над этой компанией. Подождите, страница обновится сама.")
+            service.cancel(product.id, session_id, actor=ACTOR)
+            notes = ["Сбор данных отменён."]
+        elif action == "rename":
+            rename_company(db, product, name=fields.get("name", ""), description=fields.get("description", ""))
+            notes = ["Название и описание сохранены."]
+        elif action == "edit":
+            return _save_profile_edit(product, service, db, fields)
+        elif action == "delete":
+            _require_operator(request)
+            active = service.active(product.id, ACTOR)
+            if active and _job_running(active.id):
+                raise IntakeError("Идёт сбор данных. Дождитесь окончания и повторите.")
+            if " ".join(fields.get("confirm_name", "").split()).casefold() != product.name.casefold():
+                return _delete_page(product, "Название не совпало. Введите его точно так, как оно написано выше.", 422)
+            if active:
+                _JOBS.pop(str(active.id), None)
+            delete_company(db, get_settings().products_root, product.id)
+            return RedirectResponse("/studio?choose=1", status_code=303)
         else:
             raise HTTPException(404, "Неизвестное действие")
     except (IntakeError, LookupError) as exc:
@@ -454,3 +617,31 @@ async def company_profile_action(product_id: UUID, action: str, request: Request
         return _render_profile(product, db, "Не удалось подготовить профиль. Материалы сохранены.", status_code=503)
     suffix = f"?notice={quote(' '.join(notes)[:400])}" if notes else ""
     return RedirectResponse(f"/studio/products/{product.id}/profile{suffix}", status_code=303)
+
+
+def _save_profile_edit(product: Product, service: CompanyIntakeService, db: Session, fields: dict):
+    profile = _confirmed_profile(get_settings(), product)
+    current = profile.model_dump(mode="json") if profile else {}
+    changes = {}
+    for path, _label, kind in EDITABLE_FIELDS:
+        if f"f_{path}" not in fields:
+            continue
+        raw = fields[f"f_{path}"]
+        if kind == "lines":
+            new = [line.strip() for line in raw.splitlines() if line.strip()]
+            old = _current_value(current, path)
+            if new != (old or []):
+                changes[path] = new if new or old is not None else old
+        else:
+            new = raw.strip() or None
+            if new != (_current_value(current, path) or None):
+                changes[path] = new
+    if not changes:
+        return RedirectResponse(f"/studio/products/{product.id}/profile?notice={quote('Ничего не изменилось.')}", status_code=303)
+    try:
+        service.edit_profile(product.id, changes, actor=ACTOR)
+    except IntakeError as exc:
+        db.rollback()
+        return _edit_page(product, db, str(exc), 409)
+    return RedirectResponse(f"/studio/products/{product.id}/profile?notice={quote('Данные компании сохранены.')}",
+                            status_code=303)
