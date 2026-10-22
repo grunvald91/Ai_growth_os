@@ -35,6 +35,9 @@ _logger = logging.getLogger(__name__)
 
 # The owner should not stare at a spinner: after this the dispatcher answers with hints and links.
 DECISION_TIMEOUT_SECONDS = 45
+# The model sees only the latest messages of the thread (owner's decision, 22.10.2026); the whole
+# thread stays stored and visible on the page.
+HISTORY_FOR_MODEL = 20
 
 FALLBACK_TEXT = ("Не получилось разобрать просьбу — попробуйте сказать иначе или выберите готовый вариант ниже.")
 
@@ -117,7 +120,9 @@ def record_llm_cost(db: Session, product_id: UUID, response, provider: str) -> N
 async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, history: list[DispatcherMessage],
                     text: str) -> tuple[DispatcherDecision | None, str | None]:
     """(decision, model name). A model failure or unreadable answer gives (None, ...)."""
-    turns = [LLMMessage(role=m.role, content=m.text) for m in history if m.text]
+    turns = [LLMMessage(role=m.role, content=m.text) for m in history if m.text][-HISTORY_FOR_MODEL:]
+    while turns and turns[0].role != "user":
+        turns.pop(0)  # Start the shortened thread with the owner's message, as models expect.
     request = LLMRequest(
         system_prompt=SYSTEM_PROMPT,
         messages=[*turns, LLMMessage(role="user", content=build_user_message(snapshot(ctx.db, ctx.product), text))],

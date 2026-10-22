@@ -439,3 +439,19 @@ async def test_plan_times_are_shown_in_the_plans_time_zone(db, product, monkeypa
     plan["timezone"] = "Nowhere/Invalid"
     outcome = await executors.show_plan(context(db, product), None)
     assert next(b for b in outcome.blocks if b["type"] == "table")["rows"][0][0].endswith("10:00")
+
+
+@pytest.mark.asyncio
+async def test_model_sees_only_the_latest_twenty_messages(db, product):
+    from app.dispatcher import service as dispatcher_service
+    for index in range(15):  # 30 stored messages
+        await send(db, product, chip={"label": f"Что в работе {index}", "capability": "show_work", "params": {}},
+                   key=f"c{index}")
+    model, provider = llm({"intent": "answer", "confidence": 0.9, "reply_text": "Ок"})
+    await send(db, product, text="что нового?", key="t", model=model)
+    sent = provider.requests[-1].messages
+    history = sent[:-1]  # the last one is the current request with the company snapshot
+    assert len(history) <= dispatcher_service.HISTORY_FOR_MODEL and history[0].role == "user"
+    assert "Что в работе 14" in [m.content for m in history] and "Что в работе 0" not in [m.content for m in history]
+    stored = await send(db, product, text="", chip={"label": "Что в работе", "capability": "show_work", "params": {}}, key="z")
+    assert len(dispatcher_service.messages(db, dispatcher_service.open_conversation(db, product.id, "owner"))) == 34
