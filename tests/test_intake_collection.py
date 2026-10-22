@@ -434,16 +434,15 @@ class _Scripted:
         return step
 
 
-def _chain_service(db, tmp_path, primary, factory, **kwargs):
+def _chain_service(db, tmp_path, factory, models=("deepseek-v4.1-flash", "kimi-2.7", "grok-4.7")):
     product = Product(name="Ноготок", slug="nogotok")
     db.add(product)
     db.commit()
     service = CompanyIntakeService(
         db, products_root=tmp_path, model="kimi-2.7",
-        llm=LLMService(privacy_gateway=PrivacyGateway(), provider=primary, critic_enabled=False),
-        fallback_llm_factory=lambda name: LLMService(
+        llm_factory=lambda name: LLMService(
             privacy_gateway=PrivacyGateway(), provider=factory(name), critic_enabled=False),
-        fallback_models=("kimi-k3", "deepseek-v4.1-flash", "grok-4.7", "claude-sonnet-5-5"), **kwargs)
+        models=models)
     session = UUID(service.start(product.id, actor="owner")["session_id"])
     source = service.add_text(product.id, session, "Студия Ноготок в Сочи.", actor="owner")["sources"][-1]
     return product, session, service, source
@@ -455,72 +454,81 @@ def _good_reply(source_id, model):
     return LLMResponse(content=json.dumps({"claims": [claim]}), model=model)
 
 
+def test_model_order_puts_owner_picks_first_and_one_model_per_provider():
+    from app.intake.service import intake_model_order
+    defaults = ["deepseek-v4.1-flash", "kimi-2.7", "grok-4.7", "claude-sonnet-5-5"]
+    assert intake_model_order([], defaults) == ("deepseek-v4.1-flash", "kimi-2.7", "grok-4.7")
+    assert intake_model_order(["kimi-k3"], defaults) == ("kimi-k3", "deepseek-v4.1-flash", "grok-4.7")
+    # The owner's own picks are kept as chosen, even two of one provider.
+    assert intake_model_order(["kimi-k3", "kimi-2.7"], defaults) == ("kimi-k3", "kimi-2.7", "deepseek-v4.1-flash")
+    assert intake_model_order([], defaults, max_attempts=1) == ("deepseek-v4.1-flash",)
+
+
+def test_intake_uses_the_team_page_choice_for_company_intake(tmp_path, monkeypatch):
+    from app.core import composition
+    from app.core.config import Settings
+    monkeypatch.setattr("app.llm.router_store.role_override",
+                        lambda settings, role: ["grok-4.7"] if role == "company_intake" else [])
+    monkeypatch.setattr(composition, "build_llm_provider", lambda settings: FakeLLMProvider())
+    settings = Settings(_env_file=None, llm_provider="xai", xai_api_key="test-key", products_root=tmp_path)
+    service = composition.build_intake(None, settings)
+    assert service.models == ("grok-4.7", "deepseek-v4.1-flash", "kimi-2.7")
+    assert Settings(_env_file=None).intake_models.split(",")[0] == "deepseek-v4.1-flash"
+
+
 @pytest.mark.asyncio
 async def test_failed_model_is_replaced_by_one_from_another_provider(db, tmp_path):
     from app.models.domain import AgentRun
-    providers = {}
-    primary = _Scripted(RuntimeError("502 upstream"))
+    called = []
 
     def factory(name):
-        providers[name] = _Scripted(LLMResponse(content="sorry, no json", model=name)
-                                    if name.startswith("deepseek") else _good_reply(source_id, name))
-        return providers[name]
+        def step():
+            called.append(name)
+            if name.startswith("deepseek"):
+                raise RuntimeError("502 upstream")
+            if name.startswith("kimi"):
+                return LLMResponse(content="sorry, no json", model=name)
+            return _good_reply(source["id"], name)
+        provider = _Scripted()
+        async def generate(request):
+            return step()
+        provider.generate = generate
+        return provider
 
-    # kimi-k3 shares a family with the primary kimi-2.7, so it must be skipped.
-    source_id = "placeholder"
-    product, session, service, source = _chain_service(db, tmp_path, primary, factory)
-    source_id = source["id"]
+    source = {}
+    product, session, service, src = _chain_service(db, tmp_path, factory)
+    source.update(src)
     review = await service.build(product.id, session, actor="owner")
-    assert list(providers) == ["deepseek-v4.1-flash", "grok-4.7"]
+    assert called == ["deepseek-v4.1-flash", "kimi-2.7", "grok-4.7"]
     assert review["extraction_model"] == "grok-4.7"
     assert review["profile_preview"]["identity"]["name"] == "Ноготок"
     runs = db.scalars(select(AgentRun).order_by(AgentRun.started_at)).all()
     assert [(r.model, r.status) for r in runs] == [
-        ("kimi-2.7", "failed"), ("deepseek-v4.1-flash", "failed"), ("grok-4.7", "completed")]
+        ("deepseek-v4.1-flash", "failed"), ("kimi-2.7", "failed"), ("grok-4.7", "completed")]
 
 
 @pytest.mark.asyncio
-async def test_all_attempts_failing_stops_after_three_models(db, tmp_path):
+async def test_all_attempts_failing_gives_an_error_after_the_last_model(db, tmp_path):
     from app.models.domain import AgentRun
-    made = []
-
-    def factory(name):
-        made.append(name)
-        return _Scripted(RuntimeError("down"))
-
-    product, session, service, _ = _chain_service(db, tmp_path, _Scripted(RuntimeError("down")), factory)
+    product, session, service, _ = _chain_service(db, tmp_path, lambda name: _Scripted(RuntimeError("down")))
     with pytest.raises(IntakeError):
         await service.build(product.id, session, actor="owner")
-    assert made == ["deepseek-v4.1-flash", "grok-4.7"]
     runs = db.scalars(select(AgentRun)).all()
     assert len(runs) == 3 and all(r.status == "failed" for r in runs)
 
 
 @pytest.mark.asyncio
-async def test_max_attempts_limits_the_chain(db, tmp_path):
-    made = []
+async def test_working_first_model_never_calls_the_others(db, tmp_path):
+    made = {}
 
     def factory(name):
-        made.append(name)
-        return _Scripted()
+        made[name] = _Scripted(_good_reply(holder["id"], name)) if name.startswith("deepseek") else _Scripted()
+        return made[name]
 
-    product, session, service, _ = _chain_service(
-        db, tmp_path, _Scripted(RuntimeError("down")), factory, max_attempts=1)
-    with pytest.raises(IntakeError):
-        await service.build(product.id, session, actor="owner")
-    assert made == []
-
-
-@pytest.mark.asyncio
-async def test_working_primary_model_never_calls_the_fallbacks(db, tmp_path):
-    made = []
-
-    def factory(name):
-        made.append(_Scripted())
-        return made[-1]
-
-    primary = _Scripted()
-    product, session, service, source = _chain_service(db, tmp_path, primary, factory)
-    primary.steps.append(_good_reply(source["id"], "kimi-2.7"))
+    holder = {"id": None}
+    product, session, service, source = _chain_service(db, tmp_path, factory)
+    holder["id"] = source["id"]
     review = await service.build(product.id, session, actor="owner")
-    assert all(p.calls == 0 for p in made) and review["extraction_model"] == "kimi-2.7"
+    assert review["extraction_model"] == "deepseek-v4.1-flash"
+    assert made["deepseek-v4.1-flash"].calls == 1
+    assert all(p.calls == 0 for name, p in made.items() if name != "deepseek-v4.1-flash")

@@ -117,31 +117,37 @@ def _old_value(profile, path):
     return profile.get(section, {}).get(field)
 
 
+def intake_model_order(chosen, defaults, max_attempts: int = 3) -> tuple[str, ...]:
+    """Models to try in turn: the owner's picks from the team page as-is, then the built-in
+    order, skipping any provider already in the list, so each retry goes to someone else."""
+    order, families = [], set()
+    for name in chosen:
+        if name not in order:
+            order.append(name)
+            families.add(_family(name))
+    for name in defaults:
+        if _family(name) not in families:
+            order.append(name)
+            families.add(_family(name))
+    return tuple(order[:max(1, int(max_attempts))])
+
+
 class CompanyIntakeService:
     def __init__(self, db, *, products_root: Path, llm=None, model: str = "kimi-2.7",
                  provider_name: str = "xai", website_fetcher=None, registry_lookup=None,
-                 fallback_llm_factory=None, fallback_models: tuple[str, ...] = (), max_attempts: int = 3):
+                 llm_factory=None, models: tuple[str, ...] = ()):
         self.db, self.products_root, self.llm = db, Path(products_root), llm
-        # When an attempt gives no usable result, the next one runs on a model from another provider.
-        self.fallback_llm_factory, self.fallback_models = fallback_llm_factory, tuple(fallback_models)
-        self.max_attempts = max(1, int(max_attempts))
+        # With a factory, each model in `models` is tried in turn until one gives a usable result.
+        self.llm_factory, self.models = llm_factory, tuple(models)
         self.model, self.provider_name = model, provider_name
         self.website_fetcher = website_fetcher or PublicWebsiteFetcher()
         self.registry_lookup = registry_lookup
 
     def _model_chain(self):
-        chain = [(self.model, self.llm, EXTRACTION_TIMEOUT_SECONDS)]
-        if self.fallback_llm_factory is None:
-            return chain
-        tried = {_family(self.model)}
-        for name in self.fallback_models:
-            if len(chain) >= self.max_attempts:
-                break
-            if _family(name) in tried:
-                continue
-            tried.add(_family(name))
-            chain.append((name, self.fallback_llm_factory(name), FALLBACK_TIMEOUT_SECONDS))
-        return chain
+        if self.llm_factory is None or not self.models:
+            return [(self.model, self.llm, EXTRACTION_TIMEOUT_SECONDS)]
+        return [(name, self.llm_factory(name), EXTRACTION_TIMEOUT_SECONDS if index == 0 else FALLBACK_TIMEOUT_SECONDS)
+                for index, name in enumerate(self.models)]
 
     def _product(self, product_id):
         product = self.db.get(Product, product_id)
@@ -362,10 +368,10 @@ class CompanyIntakeService:
         extraction = IntakeExtraction()
         run = None
         if eligible:
-            if self.llm is None:
-                raise IntakeError("Модель для разбора данных не настроена.")
             models = self._model_chain()
-            used_model = self.model
+            if models[0][1] is None:
+                raise IntakeError("Модель для разбора данных не настроена.")
+            used_model = models[0][0]
             for attempt, (model, llm, timeout) in enumerate(models):
                 run = AgentRun(task_id=task.id, agent_name=ROLE, provider=self.provider_name,
                                model=model, status="running", started_at=datetime.now(timezone.utc))

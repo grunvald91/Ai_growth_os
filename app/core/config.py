@@ -26,7 +26,9 @@ class Settings(BaseSettings):
     whiteboard_storyboard_model: str = ""
     # Company data collection: if an attempt gives no usable result, models of OTHER providers are
     # tried in this order, up to the attempt limit (the first attempt is the normal model).
-    intake_fallback_models: str = "deepseek-v4.1-flash,grok-4.7,kimi-k3,claude-sonnet-5-5"
+    # Company intake tries these in turn (one per provider) until one gives a usable result;
+    # models chosen for "company_intake" on the team page go first.
+    intake_models: str = "deepseek-v4.1-flash,kimi-2.7,grok-4.7,claude-sonnet-5-5"
     intake_max_attempts: int = Field(default=3, ge=1, le=5)
     # Tried in this order when the storyboard model gets no answer from the provider.
     whiteboard_storyboard_fallback_models: str = "kimi-k3,grok-4.7,claude-sonnet-5-5"
