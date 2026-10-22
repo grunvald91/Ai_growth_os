@@ -58,3 +58,26 @@ def forget(user_id: int | None = None, business_id: int | None = None) -> None:
         _CACHE.clear()
     else:
         _CACHE.pop((user_id, business_id), None)
+
+
+def servgo_business(settings, user_id: int, business_id: int) -> dict | None:
+    """What the business shows publicly (name, address, hours, services with prices), or None.
+
+    ServGo answers only to an owner of that business. Used once, when a company is created in the studio.
+    """
+    key = settings.servgo_internal_key or ""
+    if len(key) < 32:
+        return None
+    url = settings.servgo_api_url.rstrip("/") + "/internal/studio/business"
+    try:
+        with httpx.Client(timeout=10.0, transport=_transport) as client:
+            response = client.get(url, params={"user_id": user_id, "business_id": business_id},
+                                  headers={"X-Studio-Key": key})
+        if response.status_code != 200:
+            _logger.warning("studio_sso_business_failed status=%s", response.status_code)
+            return None
+        data = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        _logger.warning("studio_sso_business_failed %s", type(exc).__name__)
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get("name"), str) else None

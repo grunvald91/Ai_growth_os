@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -183,6 +185,49 @@ def compose_up(files: list[str], cwd: str) -> None:
     run(command + ["up", "-d", "--no-deps", "--no-build"] + SERVICES, cwd=cwd)
 
 
+ENV_FILE = Path("/opt/ai_growth_os/.env")
+SSO_HANDOFF = HOME / "servgo_sso.env"   # the same two values under ServGo's names, for ServGo's own deploy
+SSO_KEYS = ("SERVGO_SSO_SECRET", "SERVGO_INTERNAL_KEY")
+SSO_SERVGO_NAMES = {"SERVGO_SSO_SECRET": "STUDIO_SSO_SECRET", "SERVGO_INTERNAL_KEY": "STUDIO_INTERNAL_KEY"}
+SSO_MIN_LENGTH = 32
+
+
+def provision_sso_secrets(env_file: Path = ENV_FILE, handoff: Path = SSO_HANDOFF) -> list[str]:
+    """Make sure the sign-in secrets for the ServGo admin exist; create missing ones, never print them.
+
+    Both secrets are random, live only in the server's .env (mode kept) and in a root-only handoff file
+    that ServGo's own deploy copies into its environment. Existing values are never changed, so a
+    repeated deploy does not log anyone out. Returns what was created (names only).
+    """
+    text = env_file.read_text() if env_file.exists() else ""
+    values = {}
+    for line in text.splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() in SSO_KEYS:
+            values[key.strip()] = value.strip().strip("\"'")
+    created = []
+    addition = ""
+    for key in SSO_KEYS:
+        if len(values.get(key, "")) < SSO_MIN_LENGTH:
+            values[key] = secrets.token_hex(32)
+            addition += f"{key}={values[key]}\n"
+            created.append(key)
+    if addition:
+        # Short or empty placeholders (KEY=) are replaced, not duplicated.
+        kept = [line for line in text.splitlines() if line.partition("=")[0].strip() not in created]
+        body = "\n".join(kept) + ("\n" if kept else "")
+        mode = env_file.stat().st_mode & 0o777 if env_file.exists() else 0o600
+        descriptor = os.open(env_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with os.fdopen(descriptor, "w") as stream:
+            stream.write(body + addition)
+    handoff.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(handoff, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w") as stream:
+        stream.write("".join(f"{SSO_SERVGO_NAMES[key]}={values[key]}\n" for key in SSO_KEYS))
+    os.chmod(handoff, 0o600)
+    return created
+
+
 def deploy(sha: str, payload: bytes) -> None:
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise SystemExit("commit sha must be 40 lowercase hex characters")
@@ -215,6 +260,8 @@ def deploy(sha: str, payload: bytes) -> None:
     overlay.write_text(json.dumps({"services": {s: {"image": image, "environment": {
         **settings["overlay_env"], "RELEASE_SHA": sha}} for s in SERVICES}}, indent=2))
     LAST_GOOD.write_text(json.dumps(previous))
+    created = provision_sso_secrets()
+    log("ServGo sign-in secrets: " + (("created " + ", ".join(created)) if created else "already present"))
     try:
         compose_up(base_files + [str(overlay)], previous["cwd"])
         wait_healthy()

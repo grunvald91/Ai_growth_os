@@ -51,9 +51,27 @@ class FakeServGo:
         self.allowed: dict[tuple[int, int], str] = {(7, 12): "owner"}
         self.calls: list[httpx.Request] = []
         self.mode = "normal"
+        self.business_mode = "normal"
+        self.businesses = {12: {"name": "Салон Лотос", "business_type": "salon", "description": "Маникюр и стрижки",
+                                "address": "Сочи, Навагинская 1", "phone": "+7 862 000-00-00",
+                                "working_hours": "09:00–21:00", "break_hours": None, "prepayment_percent": 30,
+                                "services": [{"name": "Маникюр", "description": None, "tariff": None,
+                                              "duration_minutes": 90, "price": 2500}]}}
+
+    def business_answer(self, request: httpx.Request) -> httpx.Response:
+        if self.business_mode == "error":
+            return httpx.Response(500, json={})
+        if request.headers.get("x-studio-key") != KEY:
+            return httpx.Response(403, json={})
+        pair = (int(request.url.params["user_id"]), int(request.url.params["business_id"]))
+        if self.allowed.get(pair) not in ("owner", "co_owner") or pair[1] not in self.businesses:
+            return httpx.Response(403, json={})
+        return httpx.Response(200, json=self.businesses[pair[1]])
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.calls.append(request)
+        if request.url.path.endswith("/internal/studio/business"):
+            return self.business_answer(request)
         if self.mode == "down":
             raise httpx.ConnectTimeout("timeout")
         if self.mode == "error":
@@ -184,13 +202,6 @@ def test_link_fails_closed_when_servgo_is_unreachable(env, mode):
     assert response.status_code == 403 and "set-cookie" not in response.headers
 
 
-def test_unconnected_business_is_told_to_ask_the_owner(env):
-    _, _, _, _, servgo = env
-    servgo.allowed[(7, 55)] = "owner"
-    response = browser().get("/studio/sso", params={"t": make_ticket(biz=55, name="Новая баня", jti="n" * 16)})
-    assert response.status_code == 404 and "Новая баня" in response.text and "set-cookie" not in response.headers
-
-
 def test_unconfigured_studio_does_not_open(env, tmp_path):
     app.dependency_overrides[get_settings] = lambda: make_settings(tmp_path, servgo_internal_key=None)
     response = browser().get("/studio/sso", params={"t": make_ticket()})
@@ -199,9 +210,103 @@ def test_unconfigured_studio_does_not_open(env, tmp_path):
 
 def test_user_text_in_the_business_name_is_escaped(env):
     _, _, _, _, servgo = env
-    servgo.allowed[(7, 77)] = "owner"
-    response = browser().get("/studio/sso", params={"t": make_ticket(biz=77, name="<script>alert(1)</script>", jti="x" * 16)})
+    servgo.allowed[(7, 77)] = "administrator"
+    response = browser().get("/studio/sso", params={"t": make_ticket(biz=77, role="administrator",
+                                                                    name="<script>alert(1)</script>", jti="x" * 16)})
+    assert response.status_code == 403
     assert "<script>alert" not in response.text and "&lt;script&gt;" in response.text
+
+
+# ---- first visit: the company is created from ServGo data ------------------------------------
+
+def first_visit(env, **ticket):
+    _, _, _, _, servgo = env
+    servgo.allowed[(7, 31)] = ticket.get("role", "owner")
+    servgo.businesses[31] = {**servgo.businesses[12], "name": "Баня Парная"}
+    client = browser()
+    response = client.get("/studio/sso", params={"t": make_ticket(biz=31, jti=ticket.pop("jti", "f" * 16), **ticket)})
+    return client, response
+
+
+def test_first_visit_creates_the_company_and_starts_collecting_data(env):
+    from app.models.domain import Task
+    db, settings, salon, other, servgo = env
+    client, response = first_visit(env)
+    assert response.status_code == 303
+    product = db.scalar(select(Product).where(Product.name == "Баня Парная"))
+    assert product is not None and product.slug.startswith("company-")
+    assert response.headers["location"] == f"/studio/products/{product.id}/profile"
+    link = db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31))
+    assert link.product_id == product.id
+    assert db.scalar(select(StudioSsoTicket).where(StudioSsoTicket.servgo_business_id == 31)).product_id == product.id
+    assert db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == "company_intake")) is not None
+    page = client.get(response.headers["location"])
+    assert page.status_code == 200 and "ServGo: данные заведения" in page.text
+    # The new session opens only this company.
+    assert client.get(f"/studio/products/{product.id}/dispatch/state").status_code == 200
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 404
+    assert any(call.url.path.endswith("/internal/studio/business") and call.headers["x-studio-key"] == KEY
+               for call in servgo.calls)
+
+
+def test_second_visit_opens_the_same_company_and_does_not_create_another(env):
+    db, *_ = env
+    first_visit(env)
+    count = len(list(db.scalars(select(Product))))
+    client = browser()
+    response = client.get("/studio/sso", params={"t": make_ticket(biz=31, jti="g" * 16)})
+    product = db.scalar(select(Product).where(Product.name == "Баня Парная"))
+    assert response.status_code == 303 and response.headers["location"] == f"/studio/products/{product.id}"
+    assert len(list(db.scalars(select(Product)))) == count
+
+
+def test_the_first_visit_link_also_works_only_once(env):
+    db, *_ = env
+    first_visit(env, jti="h" * 16)
+    count = len(list(db.scalars(select(Product))))
+    again = browser().get("/studio/sso", params={"t": make_ticket(biz=31, jti="h" * 16)})
+    assert again.status_code == 400 and "set-cookie" not in again.headers
+    assert len(list(db.scalars(select(Product)))) == count
+
+
+def test_administrator_cannot_create_the_company(env):
+    db, *_ = env
+    count = len(list(db.scalars(select(Product))))
+    client, response = first_visit(env, role="administrator")
+    assert response.status_code == 403 and "Сначала откроет владелец" in response.text
+    assert "set-cookie" not in response.headers
+    assert len(list(db.scalars(select(Product)))) == count
+
+
+def test_nothing_is_created_when_servgo_cannot_give_the_data(env):
+    db, _, _, _, servgo = env
+    servgo.business_mode = "error"
+    count = len(list(db.scalars(select(Product))))
+    client, response = first_visit(env)
+    assert response.status_code == 502 and "set-cookie" not in response.headers
+    assert len(list(db.scalars(select(Product)))) == count
+    assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
+
+
+def test_the_description_comes_only_from_what_servgo_sent(env):
+    from app.sso.company import about_text
+    db, _, _, _, servgo = env
+    first_visit(env)
+    product = db.scalar(select(Product).where(Product.name == "Баня Парная"))
+    assert "Маникюр — 2 500 ₽, 90 мин" in product.description
+    assert "Навагинская" in product.description and "09:00–21:00" in product.description
+    assert "предоплатой 30%" in product.description
+    assert product.description == about_text(servgo.businesses[31])[:10000]
+
+
+def test_about_text_handles_empty_and_huge_data():
+    from app.sso.company import MAX_ABOUT, about_text
+    assert about_text({"name": "Лотос", "services": []}).startswith("Лотос — заведение на платформе")
+    huge = about_text({"name": "Х", "services": [{"name": f"Услуга {i}", "price": 100 + i, "duration_minutes": 30}
+                                                  for i in range(2000)]})
+    assert len(huge) <= MAX_ABOUT and huge.endswith("30 мин")
+    odd = about_text({"name": "Х", "services": [{"name": "А", "price": None}, {"price": 5}, "мусор"]})
+    assert "- А" in odd and "мусор" not in odd
 
 
 # ---- the studio session ----------------------------------------------------------------------
@@ -357,9 +462,10 @@ def test_bad_connection_input_is_rejected(env, business_id, product):
     assert len(list(db.scalars(select(StudioBusinessLink)))) == 1
 
 
-def test_disconnecting_stops_new_sign_ins(env):
+def test_after_disconnecting_the_next_visit_starts_a_new_company(env):
     db, settings, salon, *_ = env
     link = db.scalar(select(StudioBusinessLink))
     browser().post(f"/studio/products/{salon.id}/connections/{link.id}/delete", auth=OWNER, headers={"origin": ORIGIN})
     response = browser().get("/studio/sso", params={"t": make_ticket(jti="d" * 16)})
-    assert response.status_code == 404
+    assert response.status_code == 303 and response.headers["location"].endswith("/profile")
+    assert db.scalar(select(Product).where(Product.name == "Салон Лотос")) is not None

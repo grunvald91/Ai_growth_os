@@ -10,8 +10,10 @@ import html
 import time
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from uuid import UUID, uuid4
+
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -19,7 +21,10 @@ from sqlalchemy.orm import Session
 from app.api.studio_login import LOGO, STYLE
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
+from app.intake.contracts import IntakeError
+from app.models.domain import Product
 from app.sso import access, tickets
+from app.sso.company import MIN_ABOUT, about_text
 from app.sso.models import StudioBusinessLink, StudioSsoTicket
 
 router = APIRouter()
@@ -49,9 +54,82 @@ EXPIRED = ("Ссылка устарела", "Ссылка из ServGo дейст
            "Вернитесь в админку ServGo и нажмите «Маркетинг» ещё раз.", 400)
 
 
+def _cookie_redirect(settings: Settings, claims: tickets.Claims, role: str, product_id, target: str) -> RedirectResponse:
+    session = tickets.Claims(claims.user_id, claims.business_id, role, claims.name, claims.jti, claims.expires)
+    response = RedirectResponse(target, status_code=303, headers=HEADERS)
+    response.set_cookie(tickets.COOKIE, tickets.issue_session(settings, session, str(product_id)),
+                        max_age=tickets.MAX_AGE, path="/", httponly=True, samesite="lax", secure=_secure(settings))
+    return response
+
+
+def _ticket_row(claims: tickets.Claims, product_id: UUID) -> StudioSsoTicket:
+    return StudioSsoTicket(jti=claims.jti, product_id=product_id, servgo_user_id=claims.user_id,
+                           servgo_business_id=claims.business_id,
+                           expires_at=datetime.fromtimestamp(claims.expires, timezone.utc))
+
+
+def _link_for(db: Session, business_id: int) -> StudioBusinessLink | None:
+    return db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == business_id))
+
+
+def _use_ticket(db: Session, claims: tickets.Claims, product_id: UUID) -> bool:
+    """Record the link as used. False when it was already used (a second try)."""
+    now = datetime.now(timezone.utc)
+    try:
+        db.execute(delete(StudioSsoTicket).where(StudioSsoTicket.expires_at < now - timedelta(hours=1)))
+        db.add(_ticket_row(claims, product_id))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return False
+    return True
+
+
+def _first_visit(request: Request, background: BackgroundTasks, db: Session, settings: Settings,
+                 claims: tickets.Claims, role: str):
+    """First time this business opens the studio: create its company, fill it from ServGo, start the intake."""
+    from app.api.content_studio_company import ACTOR, _service, _start_job
+    if role not in ("owner", "co_owner"):
+        name = f"{claims.name} (№{claims.business_id})" if claims.name else f"№{claims.business_id}"
+        return _message("Сначала откроет владелец", f"Для «{name}» в студии ещё нет компании. Её создаёт владелец "
+                        "при первом входе из ServGo — попросите его открыть «Маркетинг» один раз.", 403)
+    data = access.servgo_business(settings, claims.user_id, claims.business_id)
+    if data is None:
+        return _message("Не удалось получить данные заведения", "ServGo не ответил. Подождите минуту и откройте "
+                        "«Маркетинг» из админки ещё раз.", 502)
+    about = about_text(data)
+    if len(about) < MIN_ABOUT:
+        about = (about + " Подробности уточним у владельца.").strip().ljust(MIN_ABOUT, ".")
+    product = Product(name=" ".join(str(data["name"]).split())[:200] or f"Заведение {claims.business_id}",
+                      slug="company-" + uuid4().hex[:12], description=about[:10000])
+    try:
+        db.add(product)
+        db.flush()
+        db.add(StudioBusinessLink(servgo_business_id=claims.business_id, product_id=product.id))
+        db.add(_ticket_row(claims, product.id))
+        db.commit()
+    except IntegrityError:
+        db.rollback()  # Another tab created the company first, or this link was already used.
+        link = _link_for(db, claims.business_id)
+        if link is None or not _use_ticket(db, claims, link.product_id):
+            return _message(*EXPIRED, action=("Войти по логину", "/studio/login"))
+        return _cookie_redirect(settings, claims, role, link.product_id, f"/studio/products/{link.product_id}")
+    target = f"/studio/products/{product.id}/profile"
+    try:
+        service = _service(db)
+        session = service.start(product.id, actor=ACTOR)
+        session_id = UUID(session["session_id"])
+        service.add_text(product.id, session_id, about, actor=ACTOR, reference="ServGo: данные заведения")
+        # The profile draft is built in the background; the page shows progress and asks for what is missing.
+        _start_job(background, product.id, session_id, build=True)
+    except IntakeError:
+        db.rollback()  # The company exists; the owner continues from the profile page.
+    return _cookie_redirect(settings, claims, role, product.id, target)
+
+
 @router.get("/studio/sso", response_class=HTMLResponse)
-def sso_landing(request: Request, t: str | None = None, db: Session = Depends(get_db),
-                settings: Settings = Depends(get_settings)):
+def sso_landing(request: Request, background: BackgroundTasks, t: str | None = None,
+                db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
     if not tickets.configured(settings):
         return _message("Вход из ServGo не настроен", "Откройте студию через обычный вход.", 503,
                         action=("Войти по логину", "/studio/login"))
@@ -66,23 +144,9 @@ def sso_landing(request: Request, t: str | None = None, db: Session = Depends(ge
         return _message("Нет доступа", "ServGo не подтвердил доступ к маркетингу для этого заведения. "
                         "Владелец может открыть его в настройках заведения.", 403,
                         action=("Войти по логину", "/studio/login"))
-    link = db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == claims.business_id))
+    link = _link_for(db, claims.business_id)
     if link is None:
-        name = f"{claims.name} (№{claims.business_id})" if claims.name else f"№{claims.business_id}"
-        return _message("Заведение ещё не подключено", f"«{name}» пока не привязано к компании в студии. "
-                        "Попросите владельца студии подключить его в разделе «Аккаунты».", 404)
-    now = datetime.now(timezone.utc)
-    try:
-        db.execute(delete(StudioSsoTicket).where(StudioSsoTicket.expires_at < now - timedelta(hours=1)))
-        db.add(StudioSsoTicket(jti=claims.jti, product_id=link.product_id, servgo_user_id=claims.user_id,
-                               servgo_business_id=claims.business_id,
-                               expires_at=datetime.fromtimestamp(claims.expires, timezone.utc)))
-        db.commit()
-    except IntegrityError:
-        db.rollback()  # The same link a second time.
+        return _first_visit(request, background, db, settings, claims, role)
+    if not _use_ticket(db, claims, link.product_id):
         return _message(*EXPIRED, action=("Войти по логину", "/studio/login"))
-    claims = tickets.Claims(claims.user_id, claims.business_id, role, claims.name, claims.jti, claims.expires)
-    response = RedirectResponse(f"/studio/products/{link.product_id}", status_code=303, headers=HEADERS)
-    response.set_cookie(tickets.COOKIE, tickets.issue_session(settings, claims, str(link.product_id)),
-                        max_age=tickets.MAX_AGE, path="/", httponly=True, samesite="lax", secure=_secure(settings))
-    return response
+    return _cookie_redirect(settings, claims, role, link.product_id, f"/studio/products/{link.product_id}")

@@ -84,3 +84,33 @@ def test_deploy_rejects_bad_input_before_touching_the_server():
         deploy_growth.deploy("HEAD", b"x")
     with pytest.raises(SystemExit, match="no source archive"):
         deploy_growth.deploy("a" * 40, b"")
+
+
+def test_sso_secrets_are_created_once_and_never_changed(tmp_path):
+    env_file, handoff = tmp_path / ".env", tmp_path / "deploy" / "servgo_sso.env"
+    env_file.write_text("ANTHROPIC_API_KEY=keep-me\nSERVGO_INTERNAL_KEY=\n")
+    env_file.chmod(0o640)
+    created = deploy_growth.provision_sso_secrets(env_file, handoff)
+    assert created == ["SERVGO_SSO_SECRET", "SERVGO_INTERNAL_KEY"]
+    values = dict(line.split("=", 1) for line in env_file.read_text().splitlines())
+    assert values["ANTHROPIC_API_KEY"] == "keep-me"
+    assert len(values["SERVGO_SSO_SECRET"]) == len(values["SERVGO_INTERNAL_KEY"]) == 64
+    assert values["SERVGO_SSO_SECRET"] != values["SERVGO_INTERNAL_KEY"]
+    assert env_file.read_text().count("SERVGO_INTERNAL_KEY") == 1          # the empty placeholder was replaced
+    assert oct(env_file.stat().st_mode & 0o777) == "0o640"                 # the file's mode is kept
+    # ServGo gets the same values under its own names, in a root-only file.
+    given = dict(line.split("=", 1) for line in handoff.read_text().splitlines())
+    assert given == {"STUDIO_SSO_SECRET": values["SERVGO_SSO_SECRET"], "STUDIO_INTERNAL_KEY": values["SERVGO_INTERNAL_KEY"]}
+    assert oct(handoff.stat().st_mode & 0o777) == "0o600"
+    # A second deploy changes nothing.
+    before = env_file.read_text()
+    assert deploy_growth.provision_sso_secrets(env_file, handoff) == []
+    assert env_file.read_text() == before
+
+
+def test_sso_provisioning_works_without_an_env_file_and_does_not_print(tmp_path, capsys):
+    env_file, handoff = tmp_path / ".env", tmp_path / "servgo_sso.env"
+    deploy_growth.provision_sso_secrets(env_file, handoff)
+    assert oct(env_file.stat().st_mode & 0o777) == "0o600"
+    secret = dict(line.split("=", 1) for line in env_file.read_text().splitlines())["SERVGO_SSO_SECRET"]
+    assert secret not in capsys.readouterr().out
