@@ -10,7 +10,7 @@ import html
 import time
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from uuid import UUID, uuid4
 
@@ -105,12 +105,68 @@ def _use_ticket(db: Session, claims: tickets.Claims, product_id: UUID) -> bool:
 
 def _first_visit(request: Request, background: BackgroundTasks, db: Session, settings: Settings,
                  claims: tickets.Claims, role: str):
-    """First time this business opens the studio: create its company, fill it from ServGo, start the intake."""
-    from app.api.content_studio_company import ACTOR, _service, _start_job
+    """First time this business opens the studio: the owner is asked whether to create its company."""
     if role not in ("owner", "co_owner"):
         name = f"{claims.name} (№{claims.business_id})" if claims.name else f"№{claims.business_id}"
         return _message("Сначала откроет владелец", f"Для «{name}» в студии ещё нет компании. Её создаёт владелец "
                         "при первом входе из ServGo — попросите его открыть «Маркетинг» один раз.", 403)
+    return _ask_to_create(settings, claims)
+
+
+ADMIN_URL = "https://servgo.ru/admin"
+
+
+def _ask_to_create(settings: Settings, claims: tickets.Claims) -> HTMLResponse:
+    name = html.escape(claims.name or f"№{claims.business_id}")
+    token = html.escape(tickets.issue_intent(settings, claims), quote=True)
+    body = f"""<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer"><meta name="theme-color" content="#F4F6FA">
+<title>Создать компанию · Growth Studio</title><link rel="icon" href="{LOGO}"><style>{STYLE}
+.ask-actions form{{margin-top:0}}.ask-actions{{display:grid;gap:10px;margin-top:20px}}
+.ask-later{{background:transparent;color:var(--blue);box-shadow:inset 0 0 0 1px currentColor}}
+.ask-later:active{{background:transparent}}</style></head>
+<body><main><section>
+  <div class="brand"><img src="{LOGO}" width="40" height="40" alt=""><b>Serv<span>Go</span></b></div>
+  <h1>Создать компанию «{name}»?</h1>
+  <p class="lead">В студии ещё нет компании для этого заведения. Я возьму название, адрес и описание из ServGo
+  и подготовлю профиль: останется ответить на несколько вопросов. Ничего не публикуется и не запускается.</p>
+</section>
+<div class="ask-actions">
+<form method="post" action="/studio/sso/create" onsubmit="this.querySelector('button').disabled=true">
+  <input type="hidden" name="c" value="{token}"><button type="submit">Создать компанию</button></form>
+<form method="get" action="{ADMIN_URL}"><button type="submit" class="ask-later">Не сейчас</button></form>
+</div></main></body></html>"""
+    return HTMLResponse(body, headers=HEADERS)
+
+
+@router.post("/studio/sso/create", response_class=HTMLResponse)
+def sso_create(request: Request, background: BackgroundTasks, c: str = Form(""),
+               db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    """The owner said yes. ServGo is asked again, so the answer is only as good as the access right now."""
+    try:
+        claims = tickets.read_intent(settings, c)
+    except tickets.SsoError:
+        return _message(*EXPIRED, action=("Войти по логину", "/studio/login"))
+    access.forget(claims.user_id, claims.business_id)
+    role = access.servgo_role(settings, claims.user_id, claims.business_id)
+    if role not in ("owner", "co_owner"):
+        return _message("Нет доступа", "ServGo не подтвердил, что вы владелец этого заведения.", 403,
+                        action=("Войти по логину", "/studio/login"))
+    link = _link_for(db, claims.business_id)
+    if link is not None:  # Another tab created it meanwhile: just go there.
+        if not _use_ticket(db, claims, link.product_id):  # this very answer was already used (a second press)
+            return _message("Компания уже создана", "Откройте «Маркетинг» в админке ServGo ещё раз — "
+                            "студия откроется сразу.", 409, action=("Вернуться в ServGo", ADMIN_URL))
+        return _cookie_redirect(settings, claims, role, link.product_id, f"/studio/products/{link.product_id}", request)
+    return _create_company(request, background, db, settings, claims, role)
+
+
+def _create_company(request: Request, background: BackgroundTasks, db: Session, settings: Settings,
+                    claims: tickets.Claims, role: str):
+    """Create the company, fill it from ServGo, start the intake."""
+    from app.api.content_studio_company import ACTOR, _service, _start_job
     data = access.servgo_business(settings, claims.user_id, claims.business_id)
     if data is None:
         return _message("Не удалось получить данные заведения", "ServGo не ответил. Подождите минуту и откройте "
