@@ -4,6 +4,9 @@ name: Server inventory (read-only)
 # Не печатает переменные окружения, аргументы процессов, содержимое файлов. После использования удалить.
 on:
   workflow_dispatch:
+  push:
+    branches: [ops/server-inventory]
+    paths: ['.github/workflows/server-inventory.yml']
 
 permissions:
   contents: read
