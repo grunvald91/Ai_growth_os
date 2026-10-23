@@ -7,7 +7,7 @@ never a guess.
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Protocol
 
 import httpx
@@ -39,6 +39,9 @@ class Booking(_Row):
     client_phone: str | None = None
     client_email: str | None = None
     price: int | None = None
+    # Who booked and when the booking was made. Older platform versions do not send them.
+    client_id: int | None = None
+    created_at: datetime | None = None
     # Add-ons booked with a main service do not take the master's or hall's time.
     occupies_resource: bool = True
 

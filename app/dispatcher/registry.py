@@ -85,6 +85,17 @@ class ScheduleParams(_Params):
     period: Literal["today", "tomorrow", "week"] = "today"
 
 
+class InsightsParams(_Params):
+    days: int | None = Field(
+        default=None, ge=7, le=365,
+        description="За сколько последних дней смотреть. Не указывай, если владелец не просил другой срок: "
+                    "возьмётся сохранённая глубина (по умолчанию 30 дней).")
+
+
+class DepthParams(_Params):
+    days: int = Field(ge=7, le=365, description="Сколько последних дней анализировать: 30 — месяц, 90 — квартал, 7 — неделя.")
+
+
 class MaterialParams(_Params):
     # Без material_id берётся самый свежий материал, который ждёт решения.
     material_id: str | None = Field(default=None, max_length=64)
@@ -151,6 +162,21 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                "view — bookings (список записей), free (свободные окна), load (загрузка), next (кто следующий); "
                "period — today, tomorrow или week (ближайшие 7 дней).",
                ToolOperation.ANALYTICS, Cost.NONE, ScheduleParams),
+    Capability("show_insights", "Итоги бизнеса по записям",
+               "Глубокий разбор бизнеса по записям клиентов за период: сколько записей и отмен, средний чек, "
+               "вернувшиеся клиенты, самые слабые дни и время, за сколько дней записываются, чем чаще берут, "
+               "сколько уже записано вперёд. Подходит для вопросов «как дела в бизнесе», «почему мало клиентов», "
+               "«как увеличить число клиентов», «что улучшить», «сколько заработали», «какие дни пустые», "
+               "«как часто возвращаются клиенты». days — за сколько дней, если владелец назвал срок.",
+               ToolOperation.ANALYTICS, Cost.NONE, InsightsParams),
+    Capability("set_insights_depth", "Глубина анализа",
+               "Изменить, за сколько последних дней смотреть записи при разборе бизнеса (от 7 до 365 дней). "
+               "Например: «смотри за квартал» — 90, «за полгода» — 180.",
+               ToolOperation.ANALYTICS, Cost.NONE, DepthParams),
+    Capability("send_to_team", "Передать данные команде",
+               "Передать цифры бизнеса по записям маркетинг-команде на разбор: она вернёт решения, что оставить, "
+               "остановить, усилить и проверить, со ссылками на цифры. Ничего не публикует и не тратит на рекламу.",
+               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, NoParams),
     Capability("create_post", "Создать пост",
                "Поставить в работу один пост на тему для площадки (по умолчанию Telegram). "
                "Нужна тема; площадка — telegram, vk, dzen, vc_ru или tenchat; аудитория необязательна.",

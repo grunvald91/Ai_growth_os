@@ -243,3 +243,19 @@ def test_agent_progress_signature_changes_when_step_finishes(owner_studio):
     after=work_items(db,company.id)[0]["stage_signature"]
     assert before!=after
     assert "completed" in after
+
+
+def test_business_review_task_opens_its_own_page_not_an_empty_material_page(owner_studio):
+    client, db, company, other = owner_studio
+    task = Task(product_id=company.id, title="Маркетинг: разбор данных бизнеса", assigned_agent="business_insights",
+                status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    db.add(Artifact(product_id=company.id, task_id=task.id, kind="business_review", title="Разбор",
+                    content=json.dumps({"summary": "Вечер пустой", "decision_ids": [], "task_ids": []},
+                                       ensure_ascii=False)))
+    db.commit()
+    page = client.get(f"/studio/products/{company.id}/tasks/{task.id}")
+    assert page.status_code == 200
+    assert "Вечер пустой" in page.text and "готовый материал пока не найден" not in page.text
+    assert client.get(f"/studio/products/{other.id}/tasks/{task.id}").status_code == 404

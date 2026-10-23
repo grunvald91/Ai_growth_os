@@ -11,6 +11,8 @@ from app.company_profile import load_company_profile, profile_snapshot, render_c
 from app.models.domain import Approval, Artifact, Decision, Experiment, Goal, Metric, Product, Task, TaskStatus
 
 ROW_LIMIT = 20
+# Business facts from the booking platform come as one metric per fact, so metrics get a longer list.
+KIND_LIMITS = {'metric': 45}
 TEXT_LIMIT = 1500
 CONTEXT_LIMIT = 150_000
 FIELDS = {
@@ -99,12 +101,13 @@ def load_context(db: Session, product: Product, products_root: Path) -> dict:
             query = query.order_by(Experiment.status.in_(['active', 'running']).desc())
         if model is Metric:
             query = query.order_by(Metric.observed_at.desc())
-        rows = list(db.scalars(query.order_by(model.created_at.desc(), model.id).limit(ROW_LIMIT + 1)))
-        if len(rows) > ROW_LIMIT:
+        limit = KIND_LIMITS.get(kind, ROW_LIMIT)
+        rows = list(db.scalars(query.order_by(model.created_at.desc(), model.id).limit(limit + 1)))
+        if len(rows) > limit:
             context['limits']['truncated_kinds'].append(kind)
         context['records'][kind] = [dict(id=str(row.id), **{
             field: str(getattr(row, field))[:TEXT_LIMIT] if getattr(row, field) is not None else None
-            for field in fields}) for row in rows[:ROW_LIMIT]]
+            for field in fields}) for row in rows[:limit]]
     active_intake = db.scalar(select(Task.id).where(
         Task.product_id == product.id, Task.assigned_agent == 'company_intake',
         Task.status.in_([TaskStatus.QUEUED, TaskStatus.WAITING_APPROVAL, TaskStatus.RUNNING])

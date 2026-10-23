@@ -35,7 +35,7 @@ class DailyGrowthReview:
         self.provider_name, self.model, self.review_skill = provider_name, model, review_skill
         self.policy = PolicyEvaluator()
 
-    async def run(self, product_id: UUID) -> ReviewResult:
+    async def run(self, product_id: UUID, *, focus: str | None = None) -> ReviewResult:
         """Owns commits: callers must use a dedicated, clean session.
 
         Audit rows commit before inference. All strategy rows share a transaction;
@@ -94,6 +94,7 @@ class DailyGrowthReview:
                 'If any of those prerequisites are missing, delegate only the missing preparation work. '
                 'No tools are executed. SCALE means organic effort, not ad spend. '
                 '\nSchema: ' + json.dumps(CMOReview.model_json_schema()) + '\nSelected skill: ' + skill
+                + (('\nFocus of this review: ' + focus) if focus else '')
             )
             error_code = 'provider_request_failed'
             response = await asyncio.wait_for(self.llm.generate(LLMRequest(
