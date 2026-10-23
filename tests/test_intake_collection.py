@@ -576,3 +576,21 @@ async def test_menu_and_footer_repeated_on_every_page_are_kept_once(monkeypatch)
     assert len(found) == 2
     assert "Каталог яхт и катеров" in found[0].text
     assert "Каталог яхт и катеров" not in found[1].text and "Azimut 39 — 15000" in found[1].text
+
+
+@pytest.mark.asyncio
+async def test_a_big_site_is_read_in_full_many_pages(monkeypatch):
+    base = "https://big.example"
+    pages = {f"{base}/": "<html><body><p>Главная: каталог.</p>" + "".join(
+        f"<a href='/prices-{i}'>Цены {i}</a>" for i in range(1, 21)) + "</body></html>"}
+    for i in range(1, 21):
+        pages[f"{base}/prices-{i}"] = f"<html><body><h1>Цены {i}</h1><p>{'Яхта номер ' + str(i) + ' — аренда по часам. ' * 400}</p></body></html>"
+
+    def get(self, url):
+        url = url if url in pages else url + "/"
+        return url, "text/html; charset=utf-8", pages[url]
+
+    monkeypatch.setattr(PublicWebsiteFetcher, "_get", get)
+    found = await PublicWebsiteFetcher().crawl(f"{base}/")
+    assert len(found) >= 15  # not stopped after eight pages
+    assert all(page.status == "read" for page in found)  # each is ~14 000 characters, none is cut

@@ -22,16 +22,18 @@ from app.privacy.gateway import PrivacyGateway
 
 MAX_FILE_BYTES = 20_000_000
 FILE_HELP = "TXT, MD, JSON, CSV, DOCX, PDF, XLSX, XLS, JPG, PNG, WEBP, TIFF и BMP — до 20 МБ. PDF-сканы и изображения: распознавание русского и английского текста."
-MAX_TEXT = 12_000
+MAX_TEXT = 100_000  # one file or one page; the whole collection is bounded by MAX_SOURCE_TEXT in service.py
 MAX_WEB_BYTES = 1024 * 1024
 REPEAT_MIN_CHARS = 15  # shorter pieces ("Цены", "Войти") are not worth tracking across pages
-WEB_PAGE_BUDGET = 48_000  # one page read on its own gets the whole website share of the model input
+WEB_PAGE_BUDGET = 200_000  # one page read on its own gets the whole website share of the model input
 
 
 def clean_text(text: str) -> str:
     safe = PrivacyGateway().sanitize_text(text)
     safe = re.sub(r"https?://[^/\s:@]+:[^/\s@]+@", "https://[REDACTED]@", safe)
-    safe = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[CONTACT_EMAIL]", safe)
+    # The lookbehind makes a match start only at the beginning of a word: same result, but not quadratic on a very
+    # long unbroken string (a 100 000 character blob took twenty seconds).
+    safe = re.sub(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[CONTACT_EMAIL]", safe)
     safe = re.sub(r"(?<!\w)(?:\+7|8)[\s(.-]*\d{3}[\s).-]*\d{3}[\s.-]*\d{2}[\s.-]*\d{2}(?!\d)",
                   "[CONTACT_PHONE]", safe)
     return safe
@@ -359,8 +361,8 @@ class _PinnedTLS(http.client.HTTPSConnection):
 
 
 class PublicWebsiteFetcher:
-    MAX_PAGES = 8
-    CRAWL_SECONDS = 75
+    MAX_PAGES = 30
+    CRAWL_SECONDS = 180
     JS_NOTE = ("Сайт показывает текст через скрипты, поэтому без браузера виден только минимум. "
                "Пришлите текст нужных страниц сообщением или прайс файлом.")
 

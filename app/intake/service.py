@@ -38,8 +38,8 @@ LEAF_PATHS = {
 
 
 MAX_SOURCES = 30
-MAX_SOURCE_TEXT = 90_000
-WEBSITE_TEXT_SHARE = 48_000
+MAX_SOURCE_TEXT = 240_000
+WEBSITE_TEXT_SHARE = 200_000
 
 
 EXTRACTION_TIMEOUT_SECONDS = 480
@@ -280,7 +280,7 @@ class CompanyIntakeService:
         if free_sources <= 0 or budget < 1000:
             raise IntakeError("Слишком много материалов в одном сборе. Сначала проверьте текущие данные.")
         # The owner's site is read as several pages; each one stays a separate, citable source.
-        pages = await crawl(url, max_pages=min(free_sources, 8), text_budget=budget)
+        pages = await crawl(url, max_pages=min(free_sources, 30), text_budget=budget)
         return self.add_sources(product_id, session_id, pages, actor=actor)
 
     def add_sources(self, product_id, session_id, sources: list[IntakeSource], *, actor):
