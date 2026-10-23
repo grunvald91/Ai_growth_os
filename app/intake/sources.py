@@ -24,6 +24,7 @@ MAX_FILE_BYTES = 20_000_000
 FILE_HELP = "TXT, MD, JSON, CSV, DOCX, PDF, XLSX, XLS, JPG, PNG, WEBP, TIFF и BMP — до 20 МБ. PDF-сканы и изображения: распознавание русского и английского текста."
 MAX_TEXT = 12_000
 MAX_WEB_BYTES = 1024 * 1024
+WEB_PAGE_BUDGET = 48_000  # one page read on its own gets the whole website share of the model input
 
 
 def clean_text(text: str) -> str:
@@ -35,16 +36,17 @@ def clean_text(text: str) -> str:
     return safe
 
 
-def make_source(kind, reference, text="", **values) -> IntakeSource:
+def make_source(kind, reference, text="", *, limit: int = MAX_TEXT, **values) -> IntakeSource:
     safe = clean_text(text)
     status = values.pop("status", "read")
-    if len(safe) > MAX_TEXT:
+    if len(safe) > limit:
         status = "truncated"
-        values["note"] = (values.get("note", "") + " Материал прочитан частично: сохранены первые 12 000 символов. Пришлите нужный раздел отдельно.").strip()
+        values["note"] = (values.get("note", "") + f" Материал прочитан частично: сохранены первые {limit:,}".replace(",", " ")
+                          + " символов. Пришлите нужный раздел отдельно.").strip()
     reference = clean_text(str(reference))[:500]
     digest = hashlib.sha256((kind + reference + safe).encode()).hexdigest()
     return IntakeSource(id=digest[:24], source_type=kind, reference=reference,
-                        text=safe[:MAX_TEXT], status=status, **values)
+                        text=safe[:limit], status=status, **values)
 
 
 def parse_file(filename: str, data: bytes, reference: str) -> IntakeSource:
@@ -352,7 +354,7 @@ class PublicWebsiteFetcher:
     async def fetch(self, url: str) -> IntakeSource:
         return await asyncio.to_thread(self._fetch, url)
 
-    async def crawl(self, url: str, *, max_pages: int | None = None, text_budget: int = 48_000) -> list[IntakeSource]:
+    async def crawl(self, url: str, *, max_pages: int | None = None, text_budget: int = WEB_PAGE_BUDGET) -> list[IntakeSource]:
         """Read the start page and the most informative same-site pages.
 
         Every page is a separate source so evidence stays traceable to its URL.
@@ -382,7 +384,7 @@ class PublicWebsiteFetcher:
             if digest in seen_texts or len(page.visible_text()) < 40:
                 continue
             seen_texts.add(digest)
-            source = self._page_source(candidate, page, min(MAX_TEXT, text_budget - used))
+            source = self._page_source(candidate, page, text_budget - used)
             sources.append(source)
             used += len(source.text)
         return sources
@@ -390,15 +392,16 @@ class PublicWebsiteFetcher:
     def _page_source(self, reference: str, parser: _VisibleHTML, budget: int) -> IntakeSource:
         text = page_text(parser)
         note = self.JS_NOTE if looks_script_rendered(parser) else ""
-        limit = max(1, min(MAX_TEXT, budget))
+        # A website page is cut only when the whole site budget runs out, not at a fixed per-page size.
+        limit = max(1, budget)
         if len(text) > limit:
             note = (note + " Страница длинная: прочитаны первые " + f"{limit:,}".replace(",", " ")
                     + " символов.").strip()
-            return make_source("owned_website", reference, text[:limit], status="truncated", note=note)
+            return make_source("owned_website", reference, text[:limit], status="truncated", note=note, limit=limit)
         if not text.strip():
             return make_source("owned_website", reference, status="unavailable",
                                note=note or "На странице не найден читаемый текст.")
-        return make_source("owned_website", reference, text, note=note)
+        return make_source("owned_website", reference, text, note=note, limit=limit)
 
     def _fetch(self, url: str) -> IntakeSource:
         try:
@@ -406,7 +409,7 @@ class PublicWebsiteFetcher:
         except (OSError, ValueError, http.client.HTTPException):
             return make_source("owned_website", url, status="unavailable",
                                note="Не удалось безопасно прочитать страницу. Можно прислать её текст.")
-        return self._page_source(url, parser, MAX_TEXT)
+        return self._page_source(url, parser, WEB_PAGE_BUDGET)
 
     def _get_page(self, url: str) -> tuple[str, _VisibleHTML]:
         final_url, content_type, text = self._get(url)
