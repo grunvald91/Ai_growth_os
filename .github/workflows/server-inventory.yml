@@ -1,0 +1,54 @@
+name: Server inventory (read-only)
+
+# Разовая диагностика: только чтение. Печатает память, диск, контейнеры, службы и имена процессов.
+# Не печатает переменные окружения, аргументы процессов, содержимое файлов. После использования удалить.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-inventory
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Inventory
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is not set"; exit 1; }
+          install -m 700 -d ~/.ssh
+          sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Host key does not match the pinned fingerprint"; exit 1; }
+          cat > /tmp/inv.sh <<'REMOTE'
+          echo "== host =="; uname -sr; nproc | sed 's/^/cpu cores: /'; uptime | sed 's/.*load/load/'
+          echo "== memory (MB) =="; free -m
+          echo "== disk =="; df -h / /var/lib/docker 2>/dev/null | awk '!seen[$0]++'
+          echo "== docker disk =="; docker system df 2>/dev/null
+          echo "== containers: name image status mem cpu =="
+          docker stats --no-stream --format '{{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}' 2>/dev/null
+          docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}' 2>/dev/null
+          echo "== images =="; docker images --format '{{.Repository}}:{{.Tag}}\t{{.Size}}' 2>/dev/null
+          echo "== systemd services running =="; systemctl list-units --type=service --state=running --no-legend --no-pager 2>/dev/null | awk '{print $1}'
+          echo "== listening ports (process name only) =="; ss -ltnpH 2>/dev/null | awk '{print $4, $6}' | sed 's/users:((\"\([^"]*\)".*/\1/' | sort -u
+          echo "== top 25 processes by memory (name, MB) =="; ps -eo comm,rss --sort=-rss | head -26 | awk 'NR==1{print;next}{printf "%s %d MB\n",$1,$2/1024}'
+          echo "== nginx sites enabled =="; ls /etc/nginx/sites-enabled 2>/dev/null
+          echo "== opt dirs (size) =="; du -sh /opt/* 2>/dev/null
+          echo "== cron =="; ls /etc/cron.d 2>/dev/null; crontab -l 2>/dev/null | grep -vc '^#' | sed 's/^/root crontab lines: /'
+          REMOTE
+          sed -i 's/^          //' /tmp/inv.sh
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'bash -s' < /tmp/inv.sh
