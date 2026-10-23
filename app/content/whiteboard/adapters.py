@@ -24,6 +24,29 @@ from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_INLINE_IMAGE = re.compile(r"^data:image/[A-Za-z0-9.+-]+;base64,")
+
+
+def as_png(raw: bytes) -> bytes:
+    """Any readable picture (PNG, JPEG, WebP, GIF, ...) becomes a PNG; the pixels are never altered.
+
+    What matters is that the provider drew the picture, not which container it came in. Only data
+    that is not an image at all is refused, and the refusal says what arrived (size and first bytes).
+    """
+    from PIL import Image, UnidentifiedImageError
+    try:
+        with Image.open(io.BytesIO(raw)) as source:
+            source.load()
+            if source.format == "PNG" and len(raw) <= 12_000_000:
+                return raw  # already what the pipeline stores
+            has_alpha = source.mode in ("RGBA", "LA", "PA") or "transparency" in source.info
+            converted = source.convert("RGBA" if has_alpha else "RGB")
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise ValueError(f"Image API returned data that is not a readable image: {len(raw)} bytes, "
+                         f"starts with {raw[:8].hex()}") from exc
+    output = io.BytesIO()
+    converted.save(output, format="PNG", optimize=True)  # lossless; also shrinks a heavy 16-bit PNG
+    return output.getvalue()
 
 
 def parse_storyboard(content: str) -> WhiteboardStoryboard:
@@ -131,6 +154,9 @@ class LLMStoryboardProvider:
             + length_rules +
             "Each beat requires a short label, one spoken sentence (narration), "
             "and a precise description of one clean educational diagram (visual). "
+            "Fill in every field completely: each scene has a title of at least three characters and EXACTLY "
+            "two beats (never one, never none); each narration is a full sentence of at least six words; "
+            "each visual description is at least one full sentence. No empty strings, placeholders or one-word fields. "
             "Specify essential attachment points, orientation, relative position and motion direction for technical objects. "
             "Simplify shapes, never the underlying mechanism. Describe visible evidence, not abstract labels alone. "
             "Do not write a call to action, a goodbye or a request to subscribe or like: the closing call is added separately after your last scene. "
@@ -221,12 +247,12 @@ class OpenRouterImageProvider(OpenRouterBase):
                 if len(images) != 1:
                     raise ValueError("Expected one generated image")
                 url = images[0]["image_url"]["url"]
-                prefix = "data:image/png;base64,"
-                if not isinstance(url, str) or not url.startswith(prefix):
-                    raise ValueError("Expected inline PNG; remote image URLs are rejected")
-                data = [{"b64_json": url[len(prefix):], "media_type": "image/png"}]
+                match = _INLINE_IMAGE.match(url) if isinstance(url, str) else None
+                if match is None:
+                    raise ValueError("Expected an inline image; remote image URLs are rejected")
+                data = [{"b64_json": url[match.end():], "media_type": None}]
             except (KeyError, IndexError, TypeError) as exc:
-                raise ValueError("Gemini did not return one inline PNG") from exc
+                raise ValueError("Gemini did not return one inline image") from exc
         else:
             if self.model == "black-forest-labs/flux.2-pro":
                 # FLUX.2 Pro advertises aspect_ratio and output_format, but
@@ -237,15 +263,14 @@ class OpenRouterImageProvider(OpenRouterBase):
             data = response.json().get("data") or []
         if len(data) != 1 or not isinstance(data[0].get("b64_json"), str):
             raise ValueError("Image API did not return one base64 image")
-        if data[0].get("media_type") not in (None, "image/png"):
-            raise ValueError("Expected PNG: select a PNG-capable model/provider")
+        media_type = data[0].get("media_type")
+        if media_type is not None and not str(media_type).startswith("image/"):
+            raise ValueError("Image API returned a non-image media type")
         try:
             image = base64.b64decode(data[0]["b64_json"], validate=True)
         except (ValueError, base64.binascii.Error) as exc:
             raise ValueError("Image API returned invalid base64") from exc
-        if len(image) > 12_000_000 or not image.startswith(PNG_SIGNATURE):
-            raise ValueError("Image API response is not a valid-sized PNG")
-        return image
+        return as_png(image)
 
     async def revise(self, scene, request, corrections):
         if not corrections:
