@@ -19,11 +19,12 @@ from app.workflows.team_cycle import TeamCycle
 SAFE_LLM_METADATA_FIELDS = {"reasoning_effort", "team_role", "task_type", "conversation_id", "provider_timeout_seconds", "routing_phase", "routing_complexity", "requires_web_search"}
 
 
-# The second model reads the whole task: every source in full and every extracted claim. Nothing is cut or skipped
-# for size; only the waiting time is raised to fit a large reply. It is advisory (no revision round), so a slow or
-# failed review never loses the draft.
+# One review by a second model, as everywhere: it reads the whole task (every source in full and every extracted
+# claim), nothing is cut or skipped for size. Only major/critical findings go back to the author, once; the
+# correction is taken only if every claim still carries a verbatim quote from its source. A slow or failed review
+# never loses the draft.
 INTAKE_CRITIC_LIMITS = {"max_context_chars": 2_000_000, "max_original_chars": 200_000,
-                        "review_timeout": 240, "revision_timeout": 5}
+                        "review_timeout": 240, "revision_timeout": 300}
 
 
 def build_intake(db: Session, settings: Settings, provider: LLMProvider | None = None):

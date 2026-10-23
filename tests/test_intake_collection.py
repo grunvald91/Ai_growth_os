@@ -637,3 +637,80 @@ async def test_a_price_repeated_for_different_boats_is_kept(monkeypatch):
     found = await PublicWebsiteFetcher().crawl("https://yachts.example/")
     assert found[0].text.count(price) == 2  # both boats on the same page keep their price
     assert price in found[1].text  # and the next boat's page keeps it too
+
+
+def _review_service(db, tmp_path, *steps):
+    from app.core.composition import INTAKE_CRITIC_LIMITS
+    product = Product(name="Ноготок", slug="nogotok")
+    db.add(product)
+    db.commit()
+    provider = _Scripted(*steps)
+    service = CompanyIntakeService(db, products_root=tmp_path, model="kimi-2.7", llm=LLMService(
+        privacy_gateway=PrivacyGateway(), provider=provider, critic_enabled=True, critic_limits=INTAKE_CRITIC_LIMITS))
+    session = UUID(service.start(product.id, actor="owner")["session_id"])
+    source = service.add_text(product.id, session, "Студия Ноготок в Сочи. Работаем с 2019 года.",
+                              actor="owner")["sources"][-1]
+    return product, session, service, source, provider
+
+
+def _claim(source_id, value, quote):
+    return {"source_id": source_id, "field_path": "identity.name", "proposed_value": value,
+            "evidence_excerpt": quote, "kind": "candidate", "confidence": 0.9}
+
+
+def _reply(payload):
+    return LLMResponse(content=json.dumps(payload, ensure_ascii=False), model="kimi-2.7")
+
+
+MAJOR = {"findings": [{"id": "name", "severity": "major", "problem": "Название взято с опечаткой",
+                       "evidence_in_draft": "Ногток", "proposed_fix": "Взять название как в источнике",
+                       "link_to_original_goal": "Профиль должен совпадать с источником"}]}
+
+
+@pytest.mark.asyncio
+async def test_one_review_and_one_author_correction_for_a_serious_finding(db, tmp_path):
+    product, session, service, source, provider = _review_service(db, tmp_path)
+    provider.steps = [
+        _reply({"claims": [_claim(source["id"], "Ногток", "Студия Ноготок")]}),
+        _reply(MAJOR),
+        _reply({"decisions": [{"finding_id": "name", "decision": "accept", "rationale": "Исправил по источнику"}],
+                "updated_output": {"claims": [_claim(source["id"], "Ноготок", "Студия Ноготок")]}}),
+    ]
+    review = await service.build(product.id, session, actor="owner")
+    assert provider.calls == 3 and provider.steps == []  # draft, one review, one correction; no second round
+    assert [row["proposed_value"] for row in review["supported"]] == ["Ноготок"]
+
+
+@pytest.mark.asyncio
+async def test_correction_with_an_unverifiable_quote_is_refused_and_the_draft_stays(db, tmp_path):
+    product, session, service, source, provider = _review_service(db, tmp_path)
+    provider.steps = [
+        _reply({"claims": [_claim(source["id"], "Ногток", "Студия Ноготок")]}),
+        _reply(MAJOR),
+        _reply({"decisions": [{"finding_id": "name", "decision": "accept", "rationale": "Исправил по источнику"}],
+                "updated_output": {"claims": [_claim(source["id"], "Ноготок Люкс", "Студия Ноготок Люкс")]}}),
+    ]
+    review = await service.build(product.id, session, actor="owner")
+    assert provider.calls == 3
+    assert [row["proposed_value"] for row in review["supported"]] == ["Ногток"]
+
+
+@pytest.mark.asyncio
+async def test_minor_findings_do_not_trigger_a_correction(db, tmp_path):
+    product, session, service, source, provider = _review_service(db, tmp_path)
+    minor = {"findings": [{**MAJOR["findings"][0], "severity": "minor"}]}
+    provider.steps = [_reply({"claims": [_claim(source["id"], "Ноготок", "Студия Ноготок")]}), _reply(minor)]
+    review = await service.build(product.id, session, actor="owner")
+    assert provider.calls == 2
+    assert [row["proposed_value"] for row in review["supported"]] == ["Ноготок"]
+
+
+@pytest.mark.asyncio
+async def test_draft_in_code_fences_with_extra_keys_is_still_reviewed(db, tmp_path):
+    product, session, service, source, provider = _review_service(db, tmp_path)
+    fenced = LLMResponse(content="```json\n" + json.dumps(
+        {"claims": [_claim(source["id"], "Ноготок", "Студия Ноготок")], "notes": "x"}, ensure_ascii=False) + "\n```",
+        model="kimi-2.7")
+    provider.steps = [fenced, _reply({"findings": []})]
+    await service.build(product.id, session, actor="owner")
+    assert provider.calls == 2  # the quirk did not skip the one review

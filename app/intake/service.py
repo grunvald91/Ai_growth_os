@@ -20,6 +20,7 @@ from app.company_profile import (
 from app.intake.contracts import IntakeError, IntakeExtraction, IntakeSource
 from app.intake.questions import missing_questions
 from app.intake.sources import make_source, parse_file, clean_text, PublicWebsiteFetcher
+from app.llm.service import LLMService
 from app.llm.audit import critic_cost_details, persist_critic_audit
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import (
@@ -372,6 +373,25 @@ class CompanyIntakeService:
             if models[0][1] is None:
                 raise IntakeError("Модель для разбора данных не настроена.")
             used_model = models[0][0]
+            source_texts = {source_id: _comparable(source.text) for source_id, source in sources.items()
+                            if source.source_type != "existing_profile"}
+
+            def check_revision(output: dict) -> None:
+                """The author's correction after the one-time review is taken only if it is fully checkable:
+                every claim well-formed, from a supplied source, with its quote found verbatim in that source.
+                Otherwise the original draft stays."""
+                revised, malformed = _parse_extraction(json.dumps(output, ensure_ascii=False))
+                if malformed:
+                    raise IntakeError("revision_malformed")
+                for claim in revised.claims:
+                    text = source_texts.get(claim.source_id)
+                    if text is None or _comparable(claim.evidence_excerpt) not in text:
+                        raise IntakeError("revision_unverifiable")
+
+            def reviewable(text: str) -> dict:
+                """The draft exactly as this service will read it, for the reviewer."""
+                return _parse_extraction(text)[0].model_dump(mode="json")
+
             for attempt, (model, llm, timeout) in enumerate(models):
                 run = AgentRun(task_id=task.id, agent_name=ROLE, provider=self.provider_name,
                                model=model, status="running", started_at=datetime.now(timezone.utc))
@@ -379,6 +399,9 @@ class CompanyIntakeService:
                 self.db.commit()
                 response = None
                 try:
+                    # One review by a second model; only major/critical findings go back to the author once.
+                    extra = ({"validate_revision": check_revision, "prepare_original": reviewable}
+                             if isinstance(llm, LLMService) else {})
                     response = await asyncio.wait_for(llm.generate(LLMRequest(
                         model=model, max_tokens=EXTRACTION_MAX_TOKENS,
                         system_prompt=(
@@ -401,7 +424,7 @@ class CompanyIntakeService:
                             for s in eligible]}))],
                         response_schema=IntakeExtraction.model_json_schema(),
                         metadata={"team_role": ROLE, "reasoning_effort": "low"},
-                    )), timeout=timeout + getattr(llm, "extra_timeout_seconds", 0))
+                    ), **extra), timeout=timeout + getattr(llm, "extra_timeout_seconds", 0))
                     if response.stop_reason not in {None, "end_turn", "stop_sequence"} or len(response.content) > 120_000:
                         raise IntakeError("incomplete_reply")
                     extraction, malformed = _parse_extraction(clean_text(response.content))
