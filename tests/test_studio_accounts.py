@@ -90,7 +90,7 @@ def test_owner_creates_company_and_admin_accounts(studio):
 
 
 # The sign-in page must be reachable without a login; logout only clears the cookie.
-PUBLIC = {"/health", "/health/version", "/studio/login", "/studio/logout", "/studio/sso"}  # sso: signed one-time link from ServGo
+PUBLIC = {"/health", "/health/version", "/studio/login", "/studio/logout", "/studio/sso", "/studio/sso/create"}  # sso: signed one-time link from ServGo
 
 
 def test_every_private_route_requires_studio_login(studio):

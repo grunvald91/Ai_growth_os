@@ -225,7 +225,14 @@ def first_visit(env, **ticket):
     servgo.businesses[31] = {**servgo.businesses[12], "name": "Баня Парная"}
     client = browser()
     response = client.get("/studio/sso", params={"t": make_ticket(biz=31, jti=ticket.pop("jti", "f" * 16), **ticket)})
+    if response.status_code == 200 and "Создать компанию" in response.text:  # the owner is asked; here they say yes
+        response = client.post("/studio/sso/create", data={"c": intent_of(response)})
     return client, response
+
+
+def intent_of(page):
+    import re
+    return re.search(r'name="c" value="([^"]+)"', page.text).group(1)
 
 
 def test_first_visit_creates_the_company_and_starts_collecting_data(env):
@@ -466,7 +473,10 @@ def test_after_disconnecting_the_next_visit_starts_a_new_company(env):
     db, settings, salon, *_ = env
     link = db.scalar(select(StudioBusinessLink))
     browser().post(f"/studio/products/{salon.id}/connections/{link.id}/delete", auth=OWNER, headers={"origin": ORIGIN})
-    response = browser().get("/studio/sso", params={"t": make_ticket(jti="d" * 16)})
+    client = browser()
+    page = client.get("/studio/sso", params={"t": make_ticket(jti="d" * 16)})
+    assert page.status_code == 200 and "Создать компанию" in page.text  # the owner is asked again
+    response = client.post("/studio/sso/create", data={"c": intent_of(page)})
     assert response.status_code == 303 and response.headers["location"].endswith("/profile")
     assert db.scalar(select(Product).where(Product.name == "Салон Лотос")) is not None
 
@@ -524,3 +534,63 @@ def test_about_text_describes_rental_halls_and_per_person_prices():
                        "resources": [{"name": "Зал Лофт", "capacity": 20, "area_sqm": 80, "description": "Окна в пол"}]})
     assert "Аренда — 1 500 ₽ с человека" in text
     assert "- Зал Лофт — до 20 человек, 80 м². Окна в пол" in text
+
+
+# ---- the owner is asked before the company is created ----------------------------------------------
+
+def asked(env, **ticket):
+    _, _, _, _, servgo = env
+    servgo.allowed[(7, 31)] = ticket.pop("role", "owner")
+    servgo.businesses[31] = {**servgo.businesses[12], "name": "Баня Парная"}
+    client = browser()
+    return client, client.get("/studio/sso", params={"t": make_ticket(biz=31, jti=ticket.pop("jti", "q" * 16), **ticket)})
+
+
+def test_the_owner_is_asked_and_nothing_is_created_until_they_say_yes(env):
+    db, *_ = env
+    count = len(list(db.scalars(select(Product))))
+    _, page = asked(env)
+    assert page.status_code == 200 and "Создать компанию" in page.text and "Не сейчас" in page.text
+    assert "set-cookie" not in page.headers and page.headers["cache-control"] == "no-store"
+    assert len(list(db.scalars(select(Product)))) == count
+    assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
+
+
+def test_saying_yes_creates_the_company_once(env):
+    db, *_ = env
+    client, page = asked(env)
+    token = intent_of(page)
+    done = client.post("/studio/sso/create", data={"c": token})
+    assert done.status_code == 303 and done.headers["location"].endswith("/profile")
+    count = len(list(db.scalars(select(Product))))
+    again = browser().post("/studio/sso/create", data={"c": token})  # pressing twice or replaying the form
+    assert len(list(db.scalars(select(Product)))) == count
+    assert again.status_code in (303, 400)
+    assert len(list(db.scalars(select(Product).where(Product.name == "Баня Парная")))) == 1
+
+
+def test_the_question_cannot_be_forged_or_stale(env):
+    from app.core.config import get_settings
+    db, settings, *_ = env
+    _, page = asked(env)
+    token = intent_of(page)
+    forged = browser().post("/studio/sso/create", data={"c": token[:-3] + "AAA"})
+    empty = browser().post("/studio/sso/create", data={"c": ""})
+    assert forged.status_code == 400 and empty.status_code == 400
+    stale = tickets.issue_intent(settings, tickets.read_intent(settings, token), now=time.time() - 3600)
+    assert browser().post("/studio/sso/create", data={"c": stale}).status_code == 400
+    assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
+
+
+def test_yes_is_refused_if_servgo_no_longer_confirms_the_owner(env):
+    db, _, _, _, servgo = env
+    client, page = asked(env)
+    servgo.allowed.clear()
+    answer = client.post("/studio/sso/create", data={"c": intent_of(page)})
+    assert answer.status_code == 403 and "set-cookie" not in answer.headers
+    assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
+
+
+def test_the_business_name_in_the_question_is_escaped(env):
+    _, page = asked(env, name="<script>alert(1)</script>")
+    assert "<script>alert" not in page.text and "&lt;script&gt;" in page.text

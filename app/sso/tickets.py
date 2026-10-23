@@ -113,3 +113,33 @@ def read_session(settings, token: str | None, *, now: float | None = None) -> Se
     if expires < (now if now is not None else time.time()) or session.role not in ROLES:
         return None
     return session
+
+
+INTENT_TTL = 15 * 60  # time to read the question "create the company?"; the one-minute link would not be enough
+
+
+def issue_intent(settings, claims: Claims, *, now: float | None = None) -> str:
+    """A signed, short-lived note that this person was just confirmed by ServGo and may be asked to create a company."""
+    current = now if now is not None else time.time()
+    payload = _b64(json.dumps({"u": claims.user_id, "b": claims.business_id, "r": claims.role, "n": claims.name,
+                               "j": claims.jti, "e": int(current + INTENT_TTL)}, separators=(",", ":")).encode())
+    return f"{payload}.{_sign(settings, 'create:' + payload)}"
+
+
+def read_intent(settings, token: str | None, *, now: float | None = None) -> Claims:
+    if not token or token.count(".") != 1 or len(token) > 1500:
+        raise SsoError("malformed")
+    payload, signature = token.split(".")
+    if not hmac.compare_digest(signature, _sign(settings, "create:" + payload)):
+        raise SsoError("bad signature")
+    try:
+        data = json.loads(_unb64(payload))
+        claims = Claims(user_id=int(data["u"]), business_id=int(data["b"]), role=str(data["r"]),
+                        name=str(data.get("n", ""))[:120], jti=str(data["j"]), expires=int(data["e"]))
+    except (ValueError, KeyError, TypeError):
+        raise SsoError("malformed") from None
+    if claims.expires < (now if now is not None else time.time()):
+        raise SsoError("expired")
+    if claims.role not in ROLES or not 8 <= len(claims.jti) <= 64:
+        raise SsoError("malformed")
+    return claims
