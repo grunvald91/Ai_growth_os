@@ -29,7 +29,7 @@ _BALANCED_ROLES = {
     "youtube_shorts_director", "instagram_reels_director", "sales_agent", "comment_sales",
     "competitive_intelligence", "intelligence", "research_synthesis",
     "post_strategist", "post_writer_editor", "creative_strategist", "editorial_planner",
-    "whiteboard_storyboard",
+    "whiteboard_storyboard", "mail_agent",
 }
 _ECONOMY_ROLES = {
     "dispatcher", "distribution", "analytics", "article_writer", "video_producer",

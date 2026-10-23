@@ -53,3 +53,5 @@ app.include_router(dispatcher_router)
 
 from app.api.studio_accounts import router as studio_accounts_router
 app.include_router(studio_accounts_router)
+from app.api.internal_models import router as internal_models_router
+app.include_router(internal_models_router)
