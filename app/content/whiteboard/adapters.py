@@ -332,6 +332,40 @@ class ClaudeHubGeminiImageProvider(OpenRouterImageProvider):
         return result
 
 
+def json_object_text(content: str) -> str:
+    """Some models wrap a JSON answer in a markdown fence; the JSON itself is unchanged."""
+    text = (content or '').strip()
+    fenced = re.fullmatch(r'```(?:json)?\s*(.*?)\s*```', text, flags=re.DOTALL)
+    return fenced.group(1) if fenced else text
+
+
+class ClaudeHubChat(OpenRouterBase):
+    """Image-understanding chat calls go to ClaudeHub (reachable from Russia without a proxy);
+    OpenRouter is kept for speech only."""
+
+    def __init__(self, *, api_key, base_url, model, client=None):
+        url = urlsplit(base_url)
+        if (url.scheme != 'https' or url.hostname != 'api.claudehub.fun' or url.port not in (None, 443)
+                or url.path.rstrip('/') != '/v1' or url.username or url.password or url.query or url.fragment):
+            raise ValueError('The trusted ClaudeHub API is required')
+        super().__init__(api_key=api_key, model=model, client=client)
+        self.base_url = base_url.rstrip('/') + '/'
+
+    async def post(self, endpoint, payload):
+        if endpoint != 'chat/completions':
+            raise ValueError('Only chat completions are used for image understanding')
+        headers = {'Authorization': 'Bearer ' + self.key}
+        if self.client is not None:
+            response = await self.client.post(endpoint, json=payload, headers=headers)
+        else:
+            # A slow answer may already be billed; do not abort it early.
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=httpx.Timeout(600.0, connect=15.0),
+                                         trust_env=False, follow_redirects=False) as client:
+                response = await client.post(endpoint, json=payload, headers=headers)
+        response.raise_for_status()
+        return response
+
+
 class OpenRouterSpeechProvider(OpenRouterBase):
     """Documented POST /audio/speech. One beat per request for exact segment timing."""
 
@@ -385,9 +419,13 @@ class OpenRouterRegionProvider(OpenRouterBase):
         }
         response = await self.post("chat/completions", payload)
         try:
-            content = response.json()["choices"][0]["message"]["content"]
+            content = json_object_text(response.json()["choices"][0]["message"]["content"])
             regions = WhiteboardRegionPlan.model_validate_json(content)
         except (KeyError, IndexError, TypeError, json.JSONDecodeError, ValueError) as exc:
             raise ValueError("Vision provider returned invalid region JSON") from exc
         regions.check_for(scene)
         return regions
+
+
+class ClaudeHubRegionProvider(ClaudeHubChat, OpenRouterRegionProvider):
+    """Same region detection, answered by a ClaudeHub vision model."""

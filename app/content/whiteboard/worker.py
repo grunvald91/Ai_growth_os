@@ -12,14 +12,15 @@ from sqlalchemy import select, update
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, Task, TaskStatus
 from app.llm.service import LLMService
 from app.privacy import PrivacyGateway
-from .adapters import LLMStoryboardProvider, ClaudeHubGeminiImageProvider, OpenRouterRegionProvider, OpenRouterSpeechProvider
+from .adapters import (ClaudeHubGeminiImageProvider, ClaudeHubRegionProvider, LLMStoryboardProvider,
+                       OpenRouterRegionProvider, OpenRouterSpeechProvider)
 from .checkpoints import CheckpointStore, CheckpointError, _Lock
 from .jobs import (AGENT, CallLedger, GuardedStage, job_directory, owner_task, record_error, records, refund_unanswered,
                    retry_due, schedule_auto_resume)
 from .pipeline import WhiteboardPipeline
 from .render import MarkerSweepRenderer
-from .review import OpenRouterVisualCritic, LLMVisualAuthor
-from .runtime import ReadinessError, SingleCallStoryboardLLM, preflight, safe_error, scoped_settings
+from .review import ClaudeHubVisualCritic, LLMVisualAuthor, OpenRouterVisualCritic
+from .runtime import ReadinessError, SingleCallStoryboardLLM, preflight, regions_on_claudehub, safe_error, scoped_settings
 
 
 def build_pipeline(settings, payload, store):
@@ -27,15 +28,20 @@ def build_pipeline(settings, payload, store):
         raise ReadinessError('image_provider_required')
     privacy = PrivacyGateway()
     service = LLMService(privacy_gateway=privacy, provider=SingleCallStoryboardLLM(settings, diagnostic_directory=store.directory))
+    if regions_on_claudehub(payload.models):
+        regions = ClaudeHubRegionProvider(api_key=settings.xai_api_key, base_url=settings.xai_base_url, model=payload.models.regions)
+        critic = ClaudeHubVisualCritic(api_key=settings.xai_api_key, base_url=settings.xai_base_url, model=payload.models.regions)
+    else:  # jobs approved before the switch keep their own OpenRouter vision model
+        regions = OpenRouterRegionProvider(api_key=settings.openrouter_api_key, model=payload.models.regions, proxy_url=settings.whiteboard_proxy_url)
+        critic = OpenRouterVisualCritic(api_key=settings.openrouter_api_key, model=payload.models.regions, proxy_url=settings.whiteboard_proxy_url)
     return WhiteboardPipeline(
         storyboard=LLMStoryboardProvider(service, model=payload.models.storyboard),
         images=ClaudeHubGeminiImageProvider(api_key=settings.xai_api_key, base_url=settings.xai_base_url, model=payload.models.image),
         speech=OpenRouterSpeechProvider(api_key=settings.openrouter_api_key, model=payload.models.speech, proxy_url=settings.whiteboard_proxy_url),
-        regions=OpenRouterRegionProvider(api_key=settings.openrouter_api_key, model=payload.models.regions, proxy_url=settings.whiteboard_proxy_url),
+        regions=regions,
         renderer=MarkerSweepRenderer(), sanitizer=privacy, checkpoints=store,
         visual_review=payload.visual_review, max_api_calls=payload.max_api_calls,
-        critic=OpenRouterVisualCritic(api_key=settings.openrouter_api_key, model=payload.models.regions,
-            proxy_url=settings.whiteboard_proxy_url) if payload.visual_review else None,
+        critic=critic if payload.visual_review else None,
         visual_author=LLMVisualAuthor(service, model=payload.models.storyboard) if payload.visual_review else None)
 
 

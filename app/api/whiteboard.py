@@ -39,7 +39,7 @@ class CreateJob(Contract):
     call_to_action: str = Field(default='', max_length=200)
     # Empty: exactly as many calls as this video needs.
     max_api_calls: int | None = Field(default=None, ge=13, le=MAX_API_CALLS)
-    profile: Literal['configured', 'gemini_ru'] = 'configured'
+    profile: Literal['configured', 'gemini_ru'] = 'gemini_ru'
     visual_review: bool = False
 
     @model_validator(mode='after')
@@ -422,7 +422,7 @@ async def studio_create(product_id: UUID, request: Request, db: Session = Depend
         body = CreateJob(topic=fields.get('topic', ''), max_api_calls=None if limit in ('', 'auto') else limit,
                          duration_seconds=int(fields.get('duration_seconds') or 30),
                          call_to_action=(fields.get('call_to_action') or '').strip(),
-                         profile=fields.get('profile', 'configured'), visual_review=fields.get('visual_review') == 'once')
+                         profile=fields.get('profile', 'gemini_ru'), visual_review=fields.get('visual_review') == 'once')
     except ValueError:
         return page(product, 'Создать анимацию', creation_form(product_id, fields=fields, durations=task_durations(db),
                     error='Тема: 8–400 символов. Призыв: не короче 6 и не длиннее 200 символов, либо пусто. Выберите длину видео и вариант генерации.'), status=422)
