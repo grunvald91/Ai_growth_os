@@ -73,7 +73,7 @@ def test_empty_and_partial_files_are_not_claimed_read():
         assert source.status == 'unavailable' and source.note and not source.text
     source = parse_file('long.txt', b'a' * (MAX_TEXT + 100), 'long')
     assert source.status == 'truncated' and len(source.text) == MAX_TEXT and source.note
-    assert make_source('owner_message', 'message', 'x' * 13000).note
+    assert make_source('owner_message', 'message', 'x' * (MAX_TEXT + 1000)).note
     assert parse_file('large.txt', b'x' * (MAX_FILE_BYTES + 1), 'large').status == 'unsupported'
 
 
@@ -153,3 +153,14 @@ async def test_long_filename_keeps_format_extension():
     source = await parse_file_async('company-' + 'x' * 210 + '.csv', b'service;price\nMassage;5000', 'long-name')
     assert source.status == 'read' and 'Massage | 5000' in source.text
     assert len(source.filename) == 200
+
+
+def test_contacts_are_redacted_and_a_huge_unbroken_text_is_not_slow():
+    import time
+    from app.intake.sources import clean_text
+    text = "Звоните +7 (918) 123-45-67 или пишите boss@mail.ru, яхта в аренду. " * 400
+    cleaned = clean_text(text)
+    assert "boss@" not in cleaned and "123-45-67" not in cleaned and cleaned.count("[CONTACT_EMAIL]") == 400
+    started = time.monotonic()
+    clean_text("a" * 100_000)  # one unbroken string used to take about twenty seconds
+    assert time.monotonic() - started < 3

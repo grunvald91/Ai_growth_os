@@ -63,6 +63,7 @@ class Revision(BaseModel):
 REVIEW_TIMEOUT = 45
 REVISION_TIMEOUT = 75
 MAX_CONTEXT_CHARS = 24000
+MAX_ORIGINAL_CHARS = 70000
 
 
 # Reader-facing marketing materials: the critic judges whether they attract clients.
@@ -221,8 +222,10 @@ def _record(original: LLMResponse, status: str, extra: list[LLMResponse], decisi
 async def second_opinion(*, request: LLMRequest, original: LLMResponse,
                          generate: Callable[[LLMRequest], Awaitable[LLMResponse]],
                          validate_revision: Callable[[dict], None] | None = None,
+                         prepare_original: Callable[[str], dict] | None = None,
                          on_review_progress: Callable[[LLMResponse], None] | None = None,
                          max_context_chars: int = MAX_CONTEXT_CHARS,
+                         max_original_chars: int = MAX_ORIGINAL_CHARS,
                          review_timeout: float = REVIEW_TIMEOUT,
                          revision_timeout: float = REVISION_TIMEOUT) -> LLMResponse:
     """Only structured agent drafts are eligible; no change to authorization policy."""
@@ -240,16 +243,18 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
     task_text = json.dumps(task, ensure_ascii=False)
     if len(task_text) > max_context_chars:
         return _record(original, "skipped_incomplete_context", [])
-    if len(original.content) > 70000:
+    if len(original.content) > max_original_chars:
         return _record(original, "skipped_size_limit", [])
 
     try:
-        candidate = json.loads(original.content)
+        # A caller that already reads replies leniently (code fences, extra keys) hands the reviewer the same
+        # cleaned draft it will use, so a harmless formatting quirk does not skip the review.
+        candidate = prepare_original(original.content) if prepare_original else json.loads(original.content)
         if not isinstance(candidate, dict):
             return _record(original, "skipped_invalid_original", [])
         validator = Draft202012Validator(request.response_schema)
         validator.validate(candidate)
-    except (ValueError, TypeError, JSONSchemaError):
+    except (ValueError, TypeError, JSONSchemaError, RuntimeError):
         return _record(original, "skipped_invalid_original", [])
 
     extra: list[LLMResponse] = []
@@ -341,16 +346,25 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
         ]
         if not any(d.decision == "accept" for d in revision.decisions):
             return _record(original, "all_rejected", extra, decisions, material_summary)
-        validator.validate(revision.updated_output)
+        updated = revision.updated_output
+        if prepare_original is not None:
+            # The domain check sees the raw correction first (so nothing malformed slips through
+            # the lenient reading), then the correction is read the same lenient way as the draft.
+            try:
+                validate_revision(updated)
+                updated = prepare_original(json.dumps(updated, ensure_ascii=False))
+            except Exception:
+                return _record(original, "rejected_domain_revision", extra, decisions, material_summary)
+        validator.validate(updated)
         try:
-            validate_revision(revision.updated_output)
+            validate_revision(updated)
         except Exception:
             # Any domain validator failure is advisory-only: retain the
             # already-valid original, with an explicit rejected status.
             return _record(original, "rejected_domain_revision", extra, decisions,
                            material_summary)
-        content = json.dumps(revision.updated_output, ensure_ascii=False)
-        if len(content) > 70000:
+        content = json.dumps(updated, ensure_ascii=False)
+        if len(content) > max_original_chars:
             raise ValueError("Oversized revision")
         return _record(original.model_copy(update={"content": content}), "revised", extra, decisions, material_summary)
     except asyncio.CancelledError:

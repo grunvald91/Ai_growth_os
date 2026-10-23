@@ -383,12 +383,34 @@ async def test_one_unverifiable_claim_is_dropped_without_losing_the_verified_one
     assert "Отброшено сведений без точной цитаты в источнике: 3" in render_review(review)
 
 
-def test_profile_extraction_skips_the_critic_even_when_enabled(tmp_path):
+@pytest.mark.asyncio
+async def test_profile_extraction_is_reviewed_by_a_second_model_even_on_huge_materials(tmp_path):
     from app.core.composition import build_intake
     from app.core.config import Settings
-    settings = Settings(_env_file=None, agent_critic_enabled=True, products_root=tmp_path)
-    service = build_intake(None, settings, provider=FakeLLMProvider(LLMResponse(content="{}", model="m")))
-    assert service.llm._critic_enabled is False
+    from app.intake.contracts import IntakeExtraction
+    big_text = "Яхта «Атлант» вмещает до 12 гостей. " * 6000  # ~210k chars: far above the old 24k review limit
+    reply = LLMResponse(content='{"claims": []}', model="m")
+    review = LLMResponse(content='{"findings": []}', model="m")
+    class Sequence:
+        def __init__(self, *replies):
+            self.replies, self.requests = list(replies), []
+
+        async def generate(self, request):
+            self.requests.append(request)
+            return self.replies.pop(0)
+
+    provider = Sequence(reply, review)
+    settings = Settings(_env_file=None, products_root=tmp_path)  # agent_critic_enabled stays off: intake does not depend on it
+    service = build_intake(None, settings, provider=provider)
+    assert service.llm._critic_enabled is True
+    assert service.llm.extra_timeout_seconds > 0
+    from app.llm.schemas import LLMMessage, LLMRequest
+    response = await service.llm.generate(LLMRequest(
+        model="m", max_tokens=100, system_prompt="x", response_schema=IntakeExtraction.model_json_schema(),
+        messages=[LLMMessage(role="user", content=big_text)], metadata={"team_role": "company_intake"}))
+    assert response.quality_review["status"] == "no_material_issues"
+    assert len(provider.requests) == 2  # author + reviewer, nothing skipped for size
+    assert big_text[:200] in provider.requests[1].messages[0].content  # the reviewer saw the materials, uncut
 
 
 @pytest.mark.asyncio
@@ -558,3 +580,137 @@ async def test_the_page_is_cut_only_when_the_site_budget_runs_out(monkeypatch):
     monkeypatch.setattr(PublicWebsiteFetcher, "_get", get)
     page = (await PublicWebsiteFetcher().crawl("https://yachts.example/", text_budget=20_000))[0]
     assert page.status == "truncated" and len(page.text) == 20_000 and "20 000" in page.note
+
+
+@pytest.mark.asyncio
+async def test_menu_and_footer_repeated_on_every_page_are_kept_once(monkeypatch):
+    menu = ("<footer><p>" + "Аренда яхт и катеров в Сочи без капитана и с капитаном, прогулки, рыбалка, "
+            "праздники на воде; оплата картой, бронирование онлайн, условия отмены и возврата на сайте. " * 2
+            + "</p></footer>")
+    pages = {
+        "https://yachts.example/": f"<html><body>{menu}<p>Главная: лучшие яхты Сочи.</p><a href='/prices'>Цены</a></body></html>",
+        "https://yachts.example/prices": f"<html><body>{menu}<p>Цены: яхта Azimut 39 — 15000 рублей в час.</p></body></html>",
+    }
+
+    def get(self, url):
+        return url, "text/html; charset=utf-8", pages[url]
+
+    monkeypatch.setattr(PublicWebsiteFetcher, "_get", get)
+    found = await PublicWebsiteFetcher().crawl("https://yachts.example/")
+    assert len(found) == 2
+    assert "праздники на воде" in found[0].text
+    assert "праздники на воде" not in found[1].text and "Azimut 39 — 15000" in found[1].text
+
+
+@pytest.mark.asyncio
+async def test_a_big_site_is_read_in_full_many_pages(monkeypatch):
+    base = "https://big.example"
+    pages = {f"{base}/": "<html><body><p>Главная: каталог.</p>" + "".join(
+        f"<a href='/prices-{i}'>Цены {i}</a>" for i in range(1, 21)) + "</body></html>"}
+    for i in range(1, 21):
+        pages[f"{base}/prices-{i}"] = f"<html><body><h1>Цены {i}</h1><p>{'Яхта номер ' + str(i) + ' — аренда по часам. ' * 400}</p></body></html>"
+
+    def get(self, url):
+        url = url if url in pages else url + "/"
+        return url, "text/html; charset=utf-8", pages[url]
+
+    monkeypatch.setattr(PublicWebsiteFetcher, "_get", get)
+    found = await PublicWebsiteFetcher().crawl(f"{base}/")
+    assert len(found) >= 15  # not stopped after eight pages
+    assert all(page.status == "read" for page in found)  # each is ~14 000 characters, none is cut
+
+
+
+@pytest.mark.asyncio
+async def test_a_price_repeated_for_different_boats_is_kept(monkeypatch):
+    price = "Стоимость: от 15 000 рублей за один час прогулки"
+    pages = {
+        "https://yachts.example/": f"<html><body><h2>Azimut</h2><p>{price}</p><h2>Princess</h2><p>{price}</p>"
+                                   "<a href='/bavaria'>Bavaria</a></body></html>",
+        "https://yachts.example/bavaria": f"<html><body><h2>Bavaria</h2><p>{price}</p></body></html>",
+    }
+
+    def get(self, url):
+        return url, "text/html; charset=utf-8", pages[url]
+
+    monkeypatch.setattr(PublicWebsiteFetcher, "_get", get)
+    found = await PublicWebsiteFetcher().crawl("https://yachts.example/")
+    assert found[0].text.count(price) == 2  # both boats on the same page keep their price
+    assert price in found[1].text  # and the next boat's page keeps it too
+
+
+def _review_service(db, tmp_path, *steps):
+    from app.core.composition import INTAKE_CRITIC_LIMITS
+    product = Product(name="Ноготок", slug="nogotok")
+    db.add(product)
+    db.commit()
+    provider = _Scripted(*steps)
+    service = CompanyIntakeService(db, products_root=tmp_path, model="kimi-2.7", llm=LLMService(
+        privacy_gateway=PrivacyGateway(), provider=provider, critic_enabled=True, critic_limits=INTAKE_CRITIC_LIMITS))
+    session = UUID(service.start(product.id, actor="owner")["session_id"])
+    source = service.add_text(product.id, session, "Студия Ноготок в Сочи. Работаем с 2019 года.",
+                              actor="owner")["sources"][-1]
+    return product, session, service, source, provider
+
+
+def _claim(source_id, value, quote):
+    return {"source_id": source_id, "field_path": "identity.name", "proposed_value": value,
+            "evidence_excerpt": quote, "kind": "candidate", "confidence": 0.9}
+
+
+def _reply(payload):
+    return LLMResponse(content=json.dumps(payload, ensure_ascii=False), model="kimi-2.7")
+
+
+MAJOR = {"findings": [{"id": "name", "severity": "major", "problem": "Название взято с опечаткой",
+                       "evidence_in_draft": "Ногток", "proposed_fix": "Взять название как в источнике",
+                       "link_to_original_goal": "Профиль должен совпадать с источником"}]}
+
+
+@pytest.mark.asyncio
+async def test_one_review_and_one_author_correction_for_a_serious_finding(db, tmp_path):
+    product, session, service, source, provider = _review_service(db, tmp_path)
+    provider.steps = [
+        _reply({"claims": [_claim(source["id"], "Ногток", "Студия Ноготок")]}),
+        _reply(MAJOR),
+        _reply({"decisions": [{"finding_id": "name", "decision": "accept", "rationale": "Исправил по источнику"}],
+                "updated_output": {"claims": [_claim(source["id"], "Ноготок", "Студия Ноготок")]}}),
+    ]
+    review = await service.build(product.id, session, actor="owner")
+    assert provider.calls == 3 and provider.steps == []  # draft, one review, one correction; no second round
+    assert [row["proposed_value"] for row in review["supported"]] == ["Ноготок"]
+
+
+@pytest.mark.asyncio
+async def test_correction_with_an_unverifiable_quote_is_refused_and_the_draft_stays(db, tmp_path):
+    product, session, service, source, provider = _review_service(db, tmp_path)
+    provider.steps = [
+        _reply({"claims": [_claim(source["id"], "Ногток", "Студия Ноготок")]}),
+        _reply(MAJOR),
+        _reply({"decisions": [{"finding_id": "name", "decision": "accept", "rationale": "Исправил по источнику"}],
+                "updated_output": {"claims": [_claim(source["id"], "Ноготок Люкс", "Студия Ноготок Люкс")]}}),
+    ]
+    review = await service.build(product.id, session, actor="owner")
+    assert provider.calls == 3
+    assert [row["proposed_value"] for row in review["supported"]] == ["Ногток"]
+
+
+@pytest.mark.asyncio
+async def test_minor_findings_do_not_trigger_a_correction(db, tmp_path):
+    product, session, service, source, provider = _review_service(db, tmp_path)
+    minor = {"findings": [{**MAJOR["findings"][0], "severity": "minor"}]}
+    provider.steps = [_reply({"claims": [_claim(source["id"], "Ноготок", "Студия Ноготок")]}), _reply(minor)]
+    review = await service.build(product.id, session, actor="owner")
+    assert provider.calls == 2
+    assert [row["proposed_value"] for row in review["supported"]] == ["Ноготок"]
+
+
+@pytest.mark.asyncio
+async def test_draft_in_code_fences_with_extra_keys_is_still_reviewed(db, tmp_path):
+    product, session, service, source, provider = _review_service(db, tmp_path)
+    fenced = LLMResponse(content="```json\n" + json.dumps(
+        {"claims": [_claim(source["id"], "Ноготок", "Студия Ноготок")], "notes": "x"}, ensure_ascii=False) + "\n```",
+        model="kimi-2.7")
+    provider.steps = [fenced, _reply({"findings": []})]
+    await service.build(product.id, session, actor="owner")
+    assert provider.calls == 2  # the quirk did not skip the one review
