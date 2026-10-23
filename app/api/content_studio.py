@@ -2183,6 +2183,14 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
         raise HTTPException(404, "Задание не найдено")
     if task.assigned_agent == "whiteboard_renderer":
         return RedirectResponse(f"/studio/products/{product_id}/whiteboard/{task_id}", status_code=303)
+    from app.insights.worker import AGENT as INSIGHTS_AGENT
+    if task.assigned_agent == INSIGHTS_AGENT:
+        from app.insights.page import review_html
+        response = HTMLResponse(studio_page_shell(
+            product, active="work", title="Разбор данных бизнеса",
+            subtitle="Решения команды и цифры, на которые они опираются.", body=review_html(db, product.id, task)))
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
     runs = list(db.scalars(select(AgentRun).where(
         AgentRun.task_id == task.id,
     ).order_by(AgentRun.started_at, AgentRun.id)))

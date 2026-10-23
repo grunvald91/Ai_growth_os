@@ -75,9 +75,12 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
     result = Insights(depth_days=depth_days, first=first, last=last)
     past = [b for b in schedule.bookings if first <= b.date <= last]
     ahead = [b for b in schedule.bookings if today <= b.date <= today + timedelta(days=ahead_days - 1)]
-    done = [b for b in past if b.status in COUNTED]
-    cancelled = [b for b in past if b.status == "cancelled"]
-    upcoming = [b for b in ahead if b.status in COUNTED]
+    # Add-ons booked with a main service are separate rows but not separate visits: they count for money and
+    # services, never for visits, clients, days or times.
+    done = [b for b in past if b.status in COUNTED and b.occupies_resource]
+    cancelled = [b for b in past if b.status == "cancelled" and b.occupies_resource]
+    upcoming = [b for b in ahead if b.status in COUNTED and b.occupies_resource]
+    sold = [b for b in past if b.status in COUNTED]  # every paid line, add-ons included
     result.bookings = len(done)
     result.low_data = len(done) < LOW_DATA_BOOKINGS
     facts = result.facts
@@ -95,17 +98,18 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
     result.table.append(["Записей", str(len(done))])
     result.table.append(["Отмен", f"{len(cancelled)} ({_percent(len(cancelled), len(done) + len(cancelled)):g}%)"])
 
-    priced = [b.price for b in done if b.price]
+    priced = [b.price for b in sold if b.price]
     if priced:
-        total, average = sum(priced), sum(priced) / len(priced)
+        total = sum(priced)
+        average = total / len(done) if done else 0.0  # per visit: a visit with an add-on is one cheque
         add("revenue_total", "Сумма записей по цене услуги", total, "₽")
         add("average_check", "Средний чек", average, "₽")
         result.lines.append(f"Сумма записей по цене услуг: {_money(total)}, средний чек {_money(average)}.")
         result.table.append(["Сумма по ценам услуг", _money(total)])
         result.table.append(["Средний чек", _money(average)])
 
-    # Clients: counted by the platform's client number, never by name.
-    visits = Counter(b.client_id for b in done if b.client_id is not None)
+    # Clients: counted by the platform's client number, never by name; two bookings on one day are one visit.
+    visits = Counter(client for client, _ in {(b.client_id, b.date) for b in done if b.client_id is not None})
     if visits:
         returning = sum(1 for count in visits.values() if count >= 2)
         add("clients_unique", "Разных клиентов", len(visits), "чел")
@@ -145,11 +149,12 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
         result.table.append(["Время визитов", ", ".join(f"{label.split(' ')[0]} {parts[key]}" for key, label, _, _ in PARTS)])
 
     # How far ahead people book.
+    # A booking entered after the visit (the owner filling in the past) says nothing about how people book.
     leads = []
     for b in done:
         made = _created_day(b)
-        if made is not None:
-            leads.append(max((b.date - made).days, 0))
+        if made is not None and made <= b.date:
+            leads.append((b.date - made).days)
     if leads:
         same_day = sum(1 for lead in leads if lead == 0)
         add("lead_time_median_days", "За сколько дней до визита записываются (медиана)", median(leads), "дн")
@@ -159,9 +164,9 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
         result.table.append(["Записываются за", f"{median(leads):g} дн. (медиана)"])
 
     # Services and masters/halls.
-    services = Counter(_short(b.service) for b in done)
+    services = Counter(_short(b.service) for b in sold)
     revenue: dict[str, int] = defaultdict(int)
-    for b in done:
+    for b in sold:
         revenue[_short(b.service)] += b.price or 0
     for name, count in services.most_common(TOP_ITEMS):
         add(f"service_bookings:{name}", f"Записей на услугу «{name}»", count, "шт")
@@ -170,7 +175,7 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
     if services:
         result.lines.append("Чаще всего берут: " + ", ".join(f"«{n}» — {c}" for n, c in services.most_common(3)) + ".")
         result.table.append(["Услуги", ", ".join(f"{n} {c}" for n, c in services.most_common(3))])
-    resources = Counter(_short(b.resource) for b in done if b.resource and b.occupies_resource)
+    resources = Counter(_short(b.resource) for b in done if b.resource)
     for name, count in resources.most_common(TOP_ITEMS):
         add(f"resource_bookings:{name}", f"Записей к «{name}»", count, "шт")
     if len(resources) > 1:
@@ -187,6 +192,15 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
                         f"{len(upcoming)}. В среднем {per_day_ahead:.1f} в день, а за прошедший период было "
                         f"{per_day_past:.1f} в день (дальние даты обычно ещё добираются).")
     result.table.append([f"Уже записано на {ahead_days} дн.", str(len(upcoming))])
+
+    # Bookings may start well after the beginning of the period (the business joined the platform later).
+    # Then the daily pace above is diluted by days without data, and the owner should know that.
+    earliest = min((b.date for b in past), default=None)
+    if earliest is not None and (earliest - first).days >= 7:
+        add("first_booking_day_offset", "Через сколько дней от начала периода появилась первая запись",
+            (earliest - first).days, "дн")
+        result.lines.append(f"Первая запись в этом периоде — {day_label(earliest)}; до неё записей нет, поэтому "
+                            "средние «в день» за прошедший период занижены.")
 
     if result.low_data:
         result.lines.append(f"Данных пока мало: всего {len(done)} {_count(len(done), 'запись', 'записи', 'записей')} "

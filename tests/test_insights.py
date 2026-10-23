@@ -418,3 +418,76 @@ def test_numbers_in_chip_parameters_become_text():
     decision = DispatcherDecision.model_validate({"intent": "answer", "next_chips": [
         {"label": "x", "capability": "show_insights", "params": {"days": 90, "gone": None}}]})
     assert decision.next_chips[0].params == {"days": "90"}
+
+
+# ---- found in review ------------------------------------------------------------------------
+
+def test_add_ons_count_for_money_but_not_as_visits():
+    day = TODAY - timedelta(days=3)
+    main = row(1, day, client=5, service_name="Яхта", price=10000)
+    extra = {**row(2, day, client=5, service_name="Фотограф", price=3000), "occupies_resource": False}
+    result = compute(schedule([main, extra]), TODAY, 30, 14)
+    by_name = {f.name: f.value for f in result.facts}
+    assert by_name["servgo.bookings_total"] == 1
+    assert by_name["servgo.clients_returning"] == 0  # the add-on is not a second visit
+    assert by_name["servgo.revenue_total"] == 13000 and by_name["servgo.average_check"] == 13000
+    assert by_name["servgo.service_bookings:Фотограф"] == 1
+
+
+def test_two_bookings_on_one_day_are_one_visit():
+    day = TODAY - timedelta(days=3)
+    result = compute(schedule([row(1, day, client=5), row(2, day, client=5, resource="Катер 2")]), TODAY, 30, 14)
+    assert {f.name: f.value for f in result.facts}["servgo.clients_returning"] == 0
+
+
+def test_a_late_first_booking_is_pointed_out():
+    late = compute(schedule([row(1, TODAY - timedelta(days=5))]), TODAY, 90, 14)
+    assert "Первая запись в этом периоде" in " ".join(late.lines)
+    early = compute(schedule([row(1, TODAY - timedelta(days=88))]), TODAY, 90, 14)
+    assert "Первая запись в этом периоде" not in " ".join(early.lines)
+
+
+@pytest.mark.asyncio
+async def test_review_is_told_which_depth_was_handed_over(db, linked, platform, tmp_path):
+    depth_settings.set_depth(db, linked.id, 60, "owner")
+    await hand_over(db, linked, platform)
+    data = {"summary": "s", "decisions": [{"decision_type": "TEST", "rationale": "r", "next_tasks": []}]}
+    provider, builder = review_builder(tmp_path, data)
+    await run_insights_once(factory(db), env(), builder=builder)
+    assert "servgo_schedule:60d" in provider.last_request.system_prompt
+
+
+def test_review_page_shows_decisions_with_their_facts(db, linked, tmp_path):
+    from app.insights.page import review_html
+    from app.models.domain import DecisionType
+    task = Task(product_id=linked.id, assigned_agent=AGENT, title="t", status=TaskStatus.COMPLETED)
+    metric = Metric(product_id=linked.id, name="servgo.bookings_total", value=11, unit="шт", source="servgo_schedule:30d",
+                    observed_at=datetime.now(timezone.utc), dimensions={"label": "Записей за период"})
+    db.add_all([task, metric])
+    db.flush()
+    decision = Decision(product_id=linked.id, decision_type=DecisionType.TEST, rationale="Проверить <вечер>",
+                        evidence_references=[{"kind": "metric", "id": str(metric.id)}])
+    db.add(decision)
+    db.flush()
+    db.add(Artifact(product_id=linked.id, task_id=task.id, kind=RESULT_KIND, title="r",
+                    content=json.dumps({"summary": "Итог", "decision_ids": [str(decision.id)], "task_ids": []})))
+    db.commit()
+    page = review_html(db, linked.id, task)
+    assert "Проверить" in page and "Записей за период" in page and "<b>11 шт</b>" in page
+    assert "&lt;вечер&gt;" in page  # escaped
+
+
+def test_review_page_before_the_result_says_what_is_happening(db, linked):
+    from app.insights.page import review_html
+    task = Task(product_id=linked.id, assigned_agent=AGENT, title="t", status=TaskStatus.RUNNING)
+    db.add(task)
+    db.commit()
+    assert "разбирает" in review_html(db, linked.id, task)
+
+
+def test_bookings_entered_after_the_visit_do_not_count_as_same_day():
+    day = TODAY - timedelta(days=10)
+    backfilled = row(1, day, made=datetime.combine(TODAY, datetime.min.time()))
+    ahead = row(2, day, client=2, made=datetime.combine(day - timedelta(days=4), datetime.min.time()) + timedelta(hours=9))
+    by_name = {f.name: f.value for f in compute(schedule([backfilled, ahead]), TODAY, 30, 14).facts}
+    assert by_name["servgo.lead_time_median_days"] == 4 and by_name["servgo.same_day_share_pct"] == 0.0

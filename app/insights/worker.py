@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -31,6 +32,11 @@ FOCUS = (
 )
 
 
+def focus_for(depth_days: int) -> str:
+    """The focus names the exact set handed over, so an older set with another depth is not mixed in."""
+    return FOCUS + f" Use the set with source servgo_schedule:{depth_days}d; ignore other servgo_schedule sets."
+
+
 def queue(db, product_id: UUID, depth_days: int, metric_count: int, *, commit: bool = True) -> tuple[Task, bool]:
     """One active hand-over per company: asking twice returns the one already waiting or running."""
     existing = db.scalar(select(Task).where(
@@ -39,7 +45,8 @@ def queue(db, product_id: UUID, depth_days: int, metric_count: int, *, commit: b
     if existing is not None:
         return existing, False
     task = Task(product_id=product_id, assigned_agent=AGENT, title="Маркетинг: разбор данных бизнеса",
-                description=f"Цифры записей за {depth_days} дн. ({metric_count} показателей) переданы команде для разбора.",
+                description=f"Цифры записей за {depth_days} дн. ({metric_count} показателей) переданы команде для разбора. "
+                            f"Набор: servgo_schedule:{depth_days}d.",
                 priority=100, status=TaskStatus.QUEUED)
     db.add(task)
     db.flush()
@@ -70,10 +77,13 @@ async def run_insights_once(session_factory, settings, *, builder=None) -> int:
             db.rollback()
             return 0
         db.commit()
-        product_id = db.get(Task, task_id).product_id
+        task = db.get(Task, task_id)
+        product_id = task.product_id
+        found = re.search(r"servgo_schedule:(\d+)d", task.description or "")
+        focus = focus_for(int(found.group(1))) if found else FOCUS
     with session_factory() as db:  # the review owns its commits and needs a clean session
         try:
-            result = await (builder or build_review)(db, settings).run(product_id, focus=FOCUS)
+            result = await (builder or build_review)(db, settings).run(product_id, focus=focus)
         except Exception as exc:  # noqa: BLE001 - the worker must survive provider and configuration failures
             db.rollback()
             _logger.warning("business_review_failed %s", type(exc).__name__)
