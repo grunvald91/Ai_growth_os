@@ -13,10 +13,14 @@ from app.db.session import SessionLocal
 from app.models.domain import AgentRun, Artifact, Task
 from app.content.whiteboard.jobs import job_directory
 settings = get_settings()
+from urllib.parse import urlsplit
+proxy = settings.whiteboard_proxy_url
+print('whiteboard proxy configured:', bool(proxy), '| scheme:', urlsplit(proxy).scheme if proxy else None)
+print('openrouter key present:', bool(settings.openrouter_api_key), '| claudehub/xai key present:', bool(settings.xai_api_key))
 summary = collections.Counter()
 with SessionLocal() as db:
     tasks = db.scalars(select(Task).where(Task.assigned_agent == 'whiteboard_renderer')
-                       .order_by(Task.created_at.desc()).limit(60)).all()
+                       .order_by(Task.created_at.desc()).limit(4)).all()
     print('total listed:', len(tasks))
     for t in reversed(tasks):
         arts = {a.kind: a for a in db.scalars(select(Artifact).where(Artifact.task_id == t.id))}

@@ -4,7 +4,7 @@ name: Whiteboard video diagnostics (read-only)
 # Nothing is written, restarted or printed from .env. Remove after the run.
 on:
   push:
-    branches: [ops/whiteboard-diagnose-2]
+    branches: [ops/whiteboard-diagnose-3]
 
 permissions:
   contents: read
