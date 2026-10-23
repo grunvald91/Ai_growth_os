@@ -212,3 +212,12 @@ def test_finished_work_comes_back_over_http_once(env):
     assert client.get(f"/studio/products/{servgo.id}/dispatch/updates").json()["messages"] == []
     # another company's page never shows it
     assert client.get(f"/studio/products/{other.id}/dispatch/updates").json()["messages"] == []
+
+
+def test_dispatcher_can_be_enabled_for_every_company_or_a_list():
+    from types import SimpleNamespace
+    from app.api.dispatcher import enabled_for
+    company = SimpleNamespace(slug="company-1")
+    assert enabled_for(SimpleNamespace(dispatcher_enabled_slugs="*"), company)
+    assert enabled_for(SimpleNamespace(dispatcher_enabled_slugs="servgo, company-1"), company)
+    assert not enabled_for(SimpleNamespace(dispatcher_enabled_slugs="servgo"), company)

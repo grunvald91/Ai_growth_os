@@ -124,3 +124,13 @@ def test_sso_provisioning_leaves_the_env_file_whole_if_writing_fails(tmp_path, m
         deploy_growth.provision_sso_secrets(env_file, handoff)
     assert env_file.read_text() == "ANTHROPIC_API_KEY=keep-me\n"
     assert not (tmp_path / ".env.sso-tmp").exists()
+
+
+def test_overlay_passes_the_sign_in_secrets_as_references_not_values():
+    overlay = deploy_growth.overlay_document({"overlay_env": {"FLAG": "true"}}, "img:1", "abc")
+    for service in deploy_growth.SERVICES:
+        env = overlay["services"][service]["environment"]
+        assert env["SERVGO_SSO_SECRET"] == "${SERVGO_SSO_SECRET:-}"
+        assert env["SERVGO_INTERNAL_KEY"] == "${SERVGO_INTERNAL_KEY:-}"
+        assert env["FLAG"] == "true" and env["RELEASE_SHA"] == "abc"
+        assert overlay["services"][service]["image"] == "img:1"

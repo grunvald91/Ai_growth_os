@@ -35,7 +35,7 @@ MAX_BODY_BYTES = 1_000_000  # same guard as the Studio forms
 
 def enabled_for(settings: Settings, product: Product) -> bool:
     slugs = {item.strip() for item in settings.dispatcher_enabled_slugs.split(",") if item.strip()}
-    return product.slug in slugs
+    return "*" in slugs or product.slug in slugs
 
 
 def get_dispatcher_llm(settings: Settings = Depends(get_settings)) -> LLMService | None:

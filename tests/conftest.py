@@ -1,3 +1,8 @@
+import os
+
+# Most page tests describe the classic overview; the dispatcher home is tested with its own settings.
+os.environ.setdefault("DISPATCHER_ENABLED_SLUGS", "servgo")
+
 from collections.abc import Iterator
 
 import pytest
