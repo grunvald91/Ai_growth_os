@@ -56,6 +56,10 @@ with SessionLocal() as db:
             names = sorted(f.name for f in (d / 'stages').iterdir() if 'provider-error' in f.name or f.name.endswith('.log'))
             if names:
                 print('  diagnostic files:', names)
+                if t.status.value == 'failed':
+                    for n in names[-1:]:
+                        if n.endswith('.json'):
+                            print('  provider error body:', (d / 'stages' / n).read_text(errors='replace')[:700])
         out = sorted(p.name for p in (d / 'output').iterdir()) if (d / 'output').is_dir() else None
         print('  output:', out)
 print('\n=== error summary (count, code, stage, exception, http, validation)')
