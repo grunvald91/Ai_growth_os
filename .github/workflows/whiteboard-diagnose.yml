@@ -1,0 +1,35 @@
+name: Whiteboard video diagnostics (read-only)
+
+# One-off: read the state of recent whiteboard video jobs on production.
+# Nothing is written, restarted or printed from .env. Remove after the run.
+on:
+  push:
+    branches: [ops/whiteboard-diagnose-2]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whiteboard-diagnose-2
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read-only whiteboard state
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is missing"; exit 1; }
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > ~/.ssh/known_hosts
+          sudo apt-get install -y -qq sshpass >/dev/null
+          # Redact anything that looks like a credential before it reaches the log.
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "root@$HOST" 'bash -s' < .github/whiteboard-diagnose.sh \
+            | sed -E 's/(sk-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+/\1***/g; s/(Bearer )[^ "]+/\1***/g; s/((api_?key|token|password|secret)["=: ]+)[^ ,"}]+/\1***/Ig'
