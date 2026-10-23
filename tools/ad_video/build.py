@@ -162,7 +162,8 @@ with sync_playwright() as p:
     page.goto((HERE / "template.html").as_uri())
     page.evaluate("([d,t]) => window.init(d,t)", [data, {"beats": timeline}])
     page.evaluate("document.fonts.ready")
-    sample = {int(x * FPS) for b in timeline for x in (b["s"] + 1.2, b["end"] - 0.2)}
+    sample = {int(x * FPS): i for i, b in enumerate(timeline) for x in (b["s"] + 1.2, b["end"] - 0.2)}
+    shots = []
     for f in range(frames):
         tm = f / FPS
         page.evaluate("t => window.seek(t)", tm)
@@ -170,8 +171,17 @@ with sync_playwright() as p:
             bad = page.evaluate("t => window.audit(t)", tm)
             if bad: issues.append((round(tm, 2), bad))
             page.screenshot(path=str(OUT / f"f{f:04d}.png"))
+            shots.append({"beat": sample[f], "t": round(tm, 2), "file": f"f{f:04d}.png"})
         ff.stdin.write(page.screenshot(type="png"))
     br.close()
 ff.stdin.close(); ff.wait()
+report = {
+    "total_seconds": round(total, 2), "timing_method": how,
+    "beats": [{"i": i, "type": b["type"], "seconds": round(t["end"] - t["s"], 2), "voice": b["voice"],
+               "words_per_second": round(len(t["words"]) / max(0.1, t["end"] - t["v0"]), 2)}
+              for i, (b, t) in enumerate(zip(data["beats"], timeline))],
+    "safe_zone_issues": issues, "frames": shots,
+}
+(OUT / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=1))
 print("кадров:", frames, "| замечания по безопасной зоне:", issues or "нет")
 print("готово:", OUT / "ad.mp4")
