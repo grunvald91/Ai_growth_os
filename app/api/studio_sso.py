@@ -123,17 +123,21 @@ def _ask_to_create(settings: Settings, claims: tickets.Claims) -> HTMLResponse:
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer"><meta name="theme-color" content="#F4F6FA">
-<title>Создать компанию · Growth Studio</title><link rel="icon" href="{LOGO}"><style>{STYLE}</style></head>
+<title>Создать компанию · Growth Studio</title><link rel="icon" href="{LOGO}"><style>{STYLE}
+.ask-actions form{{margin-top:0}}.ask-actions{{display:grid;gap:10px;margin-top:20px}}
+.ask-later{{background:transparent;color:var(--blue);box-shadow:inset 0 0 0 1px currentColor}}
+.ask-later:active{{background:transparent}}</style></head>
 <body><main><section>
   <div class="brand"><img src="{LOGO}" width="40" height="40" alt=""><b>Serv<span>Go</span></b></div>
   <h1>Создать компанию «{name}»?</h1>
   <p class="lead">В студии ещё нет компании для этого заведения. Я возьму название, адрес и описание из ServGo
   и подготовлю профиль: останется ответить на несколько вопросов. Ничего не публикуется и не запускается.</p>
 </section>
-<form method="post" action="/studio/sso/create"><input type="hidden" name="c" value="{token}">
-  <button type="submit">Создать компанию</button></form>
-<form method="get" action="{ADMIN_URL}"><button type="submit">Не сейчас</button></form>
-</main></body></html>"""
+<div class="ask-actions">
+<form method="post" action="/studio/sso/create" onsubmit="this.querySelector('button').disabled=true">
+  <input type="hidden" name="c" value="{token}"><button type="submit">Создать компанию</button></form>
+<form method="get" action="{ADMIN_URL}"><button type="submit" class="ask-later">Не сейчас</button></form>
+</div></main></body></html>"""
     return HTMLResponse(body, headers=HEADERS)
 
 
@@ -152,8 +156,9 @@ def sso_create(request: Request, background: BackgroundTasks, c: str = Form(""),
                         action=("Войти по логину", "/studio/login"))
     link = _link_for(db, claims.business_id)
     if link is not None:  # Another tab created it meanwhile: just go there.
-        if not _use_ticket(db, claims, link.product_id):
-            return _message(*EXPIRED, action=("Войти по логину", "/studio/login"))
+        if not _use_ticket(db, claims, link.product_id):  # this very answer was already used (a second press)
+            return _message("Компания уже создана", "Откройте «Маркетинг» в админке ServGo ещё раз — "
+                            "студия откроется сразу.", 409, action=("Вернуться в ServGo", ADMIN_URL))
         return _cookie_redirect(settings, claims, role, link.product_id, f"/studio/products/{link.product_id}", request)
     return _create_company(request, background, db, settings, claims, role)
 

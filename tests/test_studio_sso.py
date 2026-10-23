@@ -565,7 +565,7 @@ def test_saying_yes_creates_the_company_once(env):
     count = len(list(db.scalars(select(Product))))
     again = browser().post("/studio/sso/create", data={"c": token})  # pressing twice or replaying the form
     assert len(list(db.scalars(select(Product)))) == count
-    assert again.status_code in (303, 400)
+    assert again.status_code == 409 and "Компания уже создана" in again.text and "set-cookie" not in again.headers
     assert len(list(db.scalars(select(Product).where(Product.name == "Баня Парная")))) == 1
 
 
