@@ -40,6 +40,24 @@ class Insights:
     table: list[list[str]] = field(default_factory=list)
     bookings: int = 0
     low_data: bool = False
+    # Each line and table row belongs to a topic, so a narrow question gets a narrow answer. "base" is always shown.
+    line_topics: list[str] = field(default_factory=list)
+    row_topics: list[str] = field(default_factory=list)
+    topic: str = "base"
+
+    def line(self, text: str) -> None:
+        self.lines.append(text)
+        self.line_topics.append(self.topic)
+
+    def row(self, cells: list[str]) -> None:
+        self.table.append(cells)
+        self.row_topics.append(self.topic)
+
+    def view(self, topic: str = "all") -> tuple[list[str], list[list[str]]]:
+        """Lines and table rows for one topic (the base ones always come with it)."""
+        keep = lambda t: topic == "all" or t in ("base", topic)  # noqa: E731
+        return ([text for text, t in zip(self.lines, self.line_topics) if keep(t)],
+                [cells for cells, t in zip(self.table, self.row_topics) if keep(t)])
 
 
 def _money(value: float) -> str:
@@ -92,12 +110,13 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
     add("bookings_total", "Записей за период (без отменённых)", len(done), "шт")
     add("bookings_cancelled", "Отменённых записей", len(cancelled), "шт")
     add("cancelled_share_pct", "Доля отмен", _percent(len(cancelled), len(done) + len(cancelled)), "%")
-    result.lines.append(f"За период {day_label(first)} – {day_label(last)} ({depth_days} дн.) записей: {len(done)}"
+    result.line(f"За период {day_label(first)} – {day_label(last)} ({depth_days} дн.) записей: {len(done)}"
                         + (f", отменено: {len(cancelled)} ({_percent(len(cancelled), len(done) + len(cancelled)):g}%)."
                            if cancelled else ", отмен не было."))
-    result.table.append(["Записей", str(len(done))])
-    result.table.append(["Отмен", f"{len(cancelled)} ({_percent(len(cancelled), len(done) + len(cancelled)):g}%)"])
+    result.row(["Записей", str(len(done))])
+    result.row(["Отмен", f"{len(cancelled)} ({_percent(len(cancelled), len(done) + len(cancelled)):g}%)"])
 
+    result.topic = "money"
     priced = [b.price for b in sold if b.price]
     if priced:
         total = sum(priced)
@@ -106,10 +125,11 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
         average = total / paid_visits if paid_visits else 0.0
         add("revenue_total", "Сумма записей по цене услуги", total, "₽")
         add("average_check", "Средний чек", average, "₽")
-        result.lines.append(f"Сумма записей по цене услуг: {_money(total)}, средний чек {_money(average)}.")
-        result.table.append(["Сумма по ценам услуг", _money(total)])
-        result.table.append(["Средний чек", _money(average)])
+        result.line(f"Сумма записей по цене услуг: {_money(total)}, средний чек {_money(average)}.")
+        result.row(["Сумма по ценам услуг", _money(total)])
+        result.row(["Средний чек", _money(average)])
 
+    result.topic = "clients"
     # Clients: counted by the platform's client number, never by name; two bookings on one day are one visit.
     visits = Counter(client for client, _ in {(b.client_id, b.date) for b in done if b.client_id is not None})
     if visits:
@@ -117,11 +137,12 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
         add("clients_unique", "Разных клиентов", len(visits), "чел")
         add("clients_returning", "Клиентов, пришедших 2 раза и больше", returning, "чел")
         add("clients_returning_share_pct", "Доля клиентов, пришедших 2 раза и больше", _percent(returning, len(visits)), "%")
-        result.lines.append(f"Клиентов: {len(visits)}. Пришли больше одного раза: {returning} "
+        result.line(f"Клиентов: {len(visits)}. Пришли больше одного раза: {returning} "
                             f"({_percent(returning, len(visits)):g}%), остальные — один раз за период.")
-        result.table.append(["Клиентов", str(len(visits))])
-        result.table.append(["Вернулись (2+ раза)", f"{returning} ({_percent(returning, len(visits)):g}%)"])
+        result.row(["Клиентов", str(len(visits))])
+        result.row(["Вернулись (2+ раза)", f"{returning} ({_percent(returning, len(visits)):g}%)"])
 
+    result.topic = "weekdays"
     # Weekdays: by visit date. A weekday with no bookings at all is reported as a fact, not as a verdict.
     by_weekday = Counter(b.date.weekday() for b in done)
     for index, key in enumerate(WEEKDAY_KEYS):
@@ -136,9 +157,10 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
         text += "."
         if empty:
             text += f" Дни без единой записи: {', '.join(empty)}."
-        result.lines.append(text)
-        result.table.append(["По дням недели", ", ".join(f"{WEEKDAYS[i]} {by_weekday.get(i, 0)}" for i in range(7))])
+        result.line(text)
+        result.row(["По дням недели", ", ".join(f"{WEEKDAYS[i]} {by_weekday.get(i, 0)}" for i in range(7))])
 
+    result.topic = "daytime"
     # Part of the day, by visit time.
     hours = [(b, _hour(b)) for b in done]
     parts = {key: sum(1 for _, h in hours if h is not None and low <= h < high) for key, _, low, high in PARTS}
@@ -146,9 +168,9 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
         for key, label, _, _ in PARTS:
             add(f"daypart_{key}_bookings", f"Записей: {label}", parts[key], "шт")
         top = max(PARTS, key=lambda p: parts[p[0]])
-        result.lines.append("Время визитов: " + ", ".join(f"{label} — {parts[key]}" for key, label, _, _ in PARTS)
+        result.line("Время визитов: " + ", ".join(f"{label} — {parts[key]}" for key, label, _, _ in PARTS)
                             + f". Чаще всего: {top[1]}.")
-        result.table.append(["Время визитов", ", ".join(f"{label.split(' ')[0]} {parts[key]}" for key, label, _, _ in PARTS)])
+        result.row(["Время визитов", ", ".join(f"{label.split(' ')[0]} {parts[key]}" for key, label, _, _ in PARTS)])
 
     # How far ahead people book.
     # A booking entered after the visit (the owner filling in the past) says nothing about how people book.
@@ -161,10 +183,11 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
         same_day = sum(1 for lead in leads if lead == 0)
         add("lead_time_median_days", "За сколько дней до визита записываются (медиана)", median(leads), "дн")
         add("same_day_share_pct", "Доля записей на тот же день", _percent(same_day, len(leads)), "%")
-        result.lines.append(f"Обычно записываются за {median(leads):g} дн. до визита; в день визита — "
+        result.line(f"Обычно записываются за {median(leads):g} дн. до визита; в день визита — "
                             f"{_percent(same_day, len(leads)):g}% записей.")
-        result.table.append(["Записываются за", f"{median(leads):g} дн. (медиана)"])
+        result.row(["Записываются за", f"{median(leads):g} дн. (медиана)"])
 
+    result.topic = "services"
     # Services and masters/halls.
     services = Counter(_short(b.service) for b in sold)
     revenue: dict[str, int] = defaultdict(int)
@@ -175,36 +198,39 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
         if revenue[name]:
             add(f"service_revenue:{name}", f"Сумма по услуге «{name}»", revenue[name], "₽")
     if services:
-        result.lines.append("Чаще всего берут: " + ", ".join(f"«{n}» — {c}" for n, c in services.most_common(3)) + ".")
-        result.table.append(["Услуги", ", ".join(f"{n} {c}" for n, c in services.most_common(3))])
+        result.line("Чаще всего берут: " + ", ".join(f"«{n}» — {c}" for n, c in services.most_common(3)) + ".")
+        result.row(["Услуги", ", ".join(f"{n} {c}" for n, c in services.most_common(3))])
     resources = Counter(_short(b.resource) for b in done if b.resource)
     for name, count in resources.most_common(TOP_ITEMS):
         add(f"resource_bookings:{name}", f"Записей к «{name}»", count, "шт")
     if len(resources) > 1:
-        result.lines.append("Загрузка по мастерам и залам: "
+        result.line("Загрузка по мастерам и залам: "
                             + ", ".join(f"{n} — {c}" for n, c in resources.most_common(TOP_ITEMS)) + ".")
 
+    result.topic = "upcoming"
     # What is coming: bookings already made for the next days, against the daily pace of the past period.
     per_day_past = len(done) / depth_days
     per_day_ahead = len(upcoming) / ahead_days
     add("upcoming_bookings", f"Записей на ближайшие {ahead_days} дн.", len(upcoming), "шт")
     add("bookings_per_day_past", "Записей в день за прошедший период", round(per_day_past, 2), "шт")
     add("bookings_per_day_upcoming", "Записей в день на ближайшие дни", round(per_day_ahead, 2), "шт")
-    result.lines.append(f"На ближайшие {ahead_days} {_count(ahead_days, 'день', 'дня', 'дней')} уже записано: "
+    result.line(f"На ближайшие {ahead_days} {_count(ahead_days, 'день', 'дня', 'дней')} уже записано: "
                         f"{len(upcoming)}. В среднем {per_day_ahead:.1f} в день, а за прошедший период было "
                         f"{per_day_past:.1f} в день (дальние даты обычно ещё добираются).")
-    result.table.append([f"Уже записано на {ahead_days} дн.", str(len(upcoming))])
+    result.row([f"Уже записано на {ahead_days} дн.", str(len(upcoming))])
 
+    result.topic = "upcoming"  # it explains the daily pace, not cancellations or money
     # Bookings may start well after the beginning of the period (the business joined the platform later).
     # Then the daily pace above is diluted by days without data, and the owner should know that.
     earliest = min((b.date for b in past), default=None)
     if earliest is not None and (earliest - first).days >= 7:
         add("first_booking_day_offset", "Через сколько дней от начала периода появилась первая запись",
             (earliest - first).days, "дн")
-        result.lines.append(f"Первая запись в этом периоде — {day_label(earliest)}; до неё записей нет, поэтому "
+        result.line(f"Первая запись в этом периоде — {day_label(earliest)}; до неё записей нет, поэтому "
                             "средние «в день» за прошедший период занижены.")
 
+    result.topic = "base"
     if result.low_data:
-        result.lines.append(f"Данных пока мало: всего {len(done)} {_count(len(done), 'запись', 'записи', 'записей')} "
+        result.line(f"Данных пока мало: всего {len(done)} {_count(len(done), 'запись', 'записи', 'записей')} "
                             f"за период. Закономерности ниже ориентировочные.")
     return result

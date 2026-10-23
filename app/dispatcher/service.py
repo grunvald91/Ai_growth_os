@@ -34,7 +34,9 @@ from app.tools import ToolOperation
 _logger = logging.getLogger(__name__)
 
 # The owner should not stare at a spinner: after this the dispatcher answers with hints and links.
-DECISION_TIMEOUT_SECONDS = 45
+# The model platforms are slow at times (see app/llm/timeouts.py); a late answer is better than none.
+# Stays below the 300 s the web server waits for the Studio.
+DECISION_TIMEOUT_SECONDS = 180
 # The model sees only the latest messages of the thread (owner's decision, 22.10.2026); the whole
 # thread stays stored and visible on the page.
 HISTORY_FOR_MODEL = 20
