@@ -7,13 +7,13 @@ import base64, io, json, httpx
 from PIL import Image, ImageDraw
 from app.core.config import get_settings
 s = get_settings()
-img = Image.new('RGB', (64, 64), 'white'); ImageDraw.Draw(img).rectangle((8, 8, 40, 40), outline='black', width=3)
+img = Image.new('RGB', (360, 640), 'white'); d = ImageDraw.Draw(img); d.rectangle((20, 40, 340, 100), outline='black', width=4); d.ellipse((240, 450, 320, 610), outline='black', width=4)
 buf = io.BytesIO(); img.save(buf, format='PNG')
 url = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
-for model in ('gemini-flash-3.8', 'gemini-3.7-flash'):
-    body = {'model': model, 'max_tokens': 600, 'response_format': {'type': 'json_object'},
+for model in ('gemini-flash-3.8',):
+    body = {'model': model, 'max_tokens': 16000, 'response_format': {'type': 'json_object'},
             'messages': [{'role': 'user', 'content': [
-                {'type': 'text', 'text': 'Return JSON {"regions":[{"beat_index":0,"box":[xmin,ymin,xmax,ymax]}]} with the normalized 0..1000 box of the drawn square.'},
+                {'type': 'text', 'text': 'Return JSON {"regions":[{"beat_index":0,"box":[xmin,ymin,xmax,ymax]}]} for two beats: beat 0 = the wide rectangle near the top, beat 1 = the tall ellipse at bottom right. Each box is [xmin,ymin,xmax,ymax] in normalized 0..1000 image coordinates.'},
                 {'type': 'image_url', 'image_url': {'url': url}}]}]}
     try:
         r = httpx.post(s.xai_base_url.rstrip('/') + '/chat/completions', json=body, headers={'Authorization': 'Bearer ' + s.xai_api_key}, timeout=120, trust_env=False)
