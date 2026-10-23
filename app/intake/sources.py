@@ -24,6 +24,7 @@ MAX_FILE_BYTES = 20_000_000
 FILE_HELP = "TXT, MD, JSON, CSV, DOCX, PDF, XLSX, XLS, JPG, PNG, WEBP, TIFF и BMP — до 20 МБ. PDF-сканы и изображения: распознавание русского и английского текста."
 MAX_TEXT = 12_000
 MAX_WEB_BYTES = 1024 * 1024
+REPEAT_MIN_CHARS = 15  # shorter pieces ("Цены", "Войти") are not worth tracking across pages
 WEB_PAGE_BUDGET = 48_000  # one page read on its own gets the whole website share of the model input
 
 
@@ -210,8 +211,20 @@ class _VisibleHTML(HTMLParser):
             if self._link_href is not None:
                 self._link_text.append(text)
 
-    def visible_text(self) -> str:
-        return " ".join(" ".join(self.parts).split())
+    def visible_text(self, seen: set[str] | None = None) -> str:
+        """The page text. With `seen`, text pieces an earlier page of the site already had (the menu, the footer,
+        banners) are left out, and the new pieces are remembered."""
+        if seen is None:
+            return " ".join(" ".join(self.parts).split())
+        kept = []
+        for piece in self.parts:
+            key = " ".join(piece.split())
+            if len(key) >= REPEAT_MIN_CHARS:
+                if key in seen:
+                    continue
+                seen.add(key)
+            kept.append(piece)
+        return " ".join(" ".join(kept).split())
 
 
 # Values worth keeping from schema.org markup; everything else is noise for a profile.
@@ -300,7 +313,7 @@ def rank_internal_links(base_url: str, links: list[tuple[str, str]]) -> list[str
     return [url for url, _ in ranked]
 
 
-def page_text(parser: _VisibleHTML) -> str:
+def page_text(parser: _VisibleHTML, seen: set[str] | None = None) -> str:
     sections = []
     title = " ".join(parser.title.split())
     if title:
@@ -311,7 +324,7 @@ def page_text(parser: _VisibleHTML) -> str:
     structured = _json_ld_lines(parser.json_ld)
     if structured:
         sections.append("Структурированные данные страницы:\n" + "\n".join(structured))
-    visible = parser.visible_text()
+    visible = parser.visible_text(seen)
     if visible:
         sections.append("Текст страницы:\n" + visible)
     return "\n\n".join(sections)
@@ -369,7 +382,8 @@ class PublicWebsiteFetcher:
         except (OSError, ValueError, http.client.HTTPException):
             return [make_source("owned_website", url, status="unavailable",
                                 note="Не удалось безопасно прочитать страницу. Можно прислать её текст.")]
-        sources = [self._page_source(url, parser, text_budget)]
+        seen_lines: set[str] = set()
+        sources = [self._page_source(url, parser, text_budget, seen_lines)]
         seen_texts = {hashlib.sha256(parser.visible_text().encode()).hexdigest()}
         used = len(sources[0].text)
         candidates = rank_internal_links(final_url, parser.links)
@@ -384,13 +398,15 @@ class PublicWebsiteFetcher:
             if digest in seen_texts or len(page.visible_text()) < 40:
                 continue
             seen_texts.add(digest)
-            source = self._page_source(candidate, page, text_budget - used)
+            source = self._page_source(candidate, page, text_budget - used, seen_lines)
             sources.append(source)
             used += len(source.text)
         return sources
 
-    def _page_source(self, reference: str, parser: _VisibleHTML, budget: int) -> IntakeSource:
-        text = page_text(parser)
+    def _page_source(self, reference: str, parser: _VisibleHTML, budget: int,
+                     seen_lines: set[str] | None = None) -> IntakeSource:
+        # The same menu and footer on every page would eat the site budget: each piece is counted once.
+        text = page_text(parser, seen_lines)
         note = self.JS_NOTE if looks_script_rendered(parser) else ""
         # A website page is cut only when the whole site budget runs out, not at a fixed per-page size.
         limit = max(1, budget)

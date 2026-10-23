@@ -558,3 +558,21 @@ async def test_the_page_is_cut_only_when_the_site_budget_runs_out(monkeypatch):
     monkeypatch.setattr(PublicWebsiteFetcher, "_get", get)
     page = (await PublicWebsiteFetcher().crawl("https://yachts.example/", text_budget=20_000))[0]
     assert page.status == "truncated" and len(page.text) == 20_000 and "20 000" in page.note
+
+
+@pytest.mark.asyncio
+async def test_menu_and_footer_repeated_on_every_page_are_kept_once(monkeypatch):
+    menu = "<nav><p>Каталог яхт и катеров в аренду без капитана</p><p>Контакты, оплата и условия бронирования</p></nav>"
+    pages = {
+        "https://yachts.example/": f"<html><body>{menu}<p>Главная: лучшие яхты Сочи.</p><a href='/prices'>Цены</a></body></html>",
+        "https://yachts.example/prices": f"<html><body>{menu}<p>Цены: яхта Azimut 39 — 15000 рублей в час.</p></body></html>",
+    }
+
+    def get(self, url):
+        return url, "text/html; charset=utf-8", pages[url]
+
+    monkeypatch.setattr(PublicWebsiteFetcher, "_get", get)
+    found = await PublicWebsiteFetcher().crawl("https://yachts.example/")
+    assert len(found) == 2
+    assert "Каталог яхт и катеров" in found[0].text
+    assert "Каталог яхт и катеров" not in found[1].text and "Azimut 39 — 15000" in found[1].text
