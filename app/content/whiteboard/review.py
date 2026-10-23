@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from .adapters import OpenRouterBase
+from .adapters import ClaudeHubChat, OpenRouterBase, json_object_text
 from .contracts import Contract, WhiteboardStoryboard
 from app.llm.schemas import LLMMessage, LLMRequest
 
@@ -139,11 +139,15 @@ class OpenRouterVisualCritic(OpenRouterBase):
         response = await self.post('chat/completions', {'model': self.model, 'max_tokens': output_ceiling(5000),
             'messages': [{'role': 'user', 'content': content}], 'response_format': {'type': 'json_object'}})
         try:
-            review = VisualReview.model_validate_json(response.json()['choices'][0]['message']['content'])
+            review = VisualReview.model_validate_json(json_object_text(response.json()['choices'][0]['message']['content']))
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise ValueError('Visual critic returned invalid review JSON') from exc
         review.check_for(storyboard)
         return review
+
+
+class ClaudeHubVisualCritic(ClaudeHubChat, OpenRouterVisualCritic):
+    """The one advisory review, answered by a ClaudeHub vision model."""
 
 
 class LLMVisualAuthor:

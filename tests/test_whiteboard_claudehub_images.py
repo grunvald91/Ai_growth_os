@@ -82,13 +82,14 @@ async def test_readiness_uses_claudehub_for_image_catalogue_and_openrouter_only_
     seen=[]
     def hub(req):
         seen.append(('hub',req.method,str(req.url)))
-        return httpx.Response(200,json={'data':[{'id':'gemini-3.1-flash-image'}]})
+        return httpx.Response(200,json={'data':[{'id':'gemini-3.1-flash-image'},{'id':models.regions}]})
     def router(req):
         seen.append(('router',req.method,str(req.url)))
         if req.url.path.endswith('/key'):return httpx.Response(200,json={'data':{}})
-        return httpx.Response(200,json={'data':[{'id':models.speech,'supported_voices':['eve']},{'id':models.regions}]})
+        return httpx.Response(200,json={'data':[{'id':models.speech,'supported_voices':['eve']}]})
     async with (httpx.AsyncClient(base_url='https://api.claudehub.fun/v1/',transport=httpx.MockTransport(hub)) as h,
         httpx.AsyncClient(base_url='https://openrouter.ai/api/v1/',transport=httpx.MockTransport(router)) as r):
         assert (await preflight(scoped,models,voice,client=r,claudehub_client=h))['ready']
-    assert all(method=='GET' for _,method,_ in seen) and len(seen)==4
+    assert all(method=='GET' for _,method,_ in seen) and len(seen)==3
+    assert [who for who,_,url in seen if 'models' in url and who=='router']==['router'] and not any('vision' in url for _,_,url in seen)
     assert not any('/images' in url for _,_,url in seen)
