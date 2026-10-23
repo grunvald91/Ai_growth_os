@@ -46,10 +46,11 @@ _GROUPS = {
     "Видео и дизайн": ("scriptwriter", "creative_director", "video_producer", "video_director",
                       "story_director", "visual_designer", "youtube_shorts_director",
                       "instagram_reels_director", "creative_strategist", "whiteboard_storyboard"),
-    "Продвижение и аналитика": ("distribution", "community_manager", "analytics", "cro", "comment_sales"),
+    "Продвижение и аналитика": ("distribution", "community_manager", "analytics", "cro", "comment_sales", "mail_agent"),
 }
 _NAMES = {
     "dispatcher": "Диспетчер главной страницы",
+    "mail_agent": "Агент почты (письма компаниям)",
     "comment_sales": "Продавец в комментариях",
     "cmo": "Маркетинговый директор",
     "research_lead": "Руководитель исследований",
@@ -130,6 +131,7 @@ _DESCRIPTIONS = {
     "post_writer_editor": "Пишет и редактирует текст поста.",
     "post_rewriter": "Вносит правки в готовый пост по замечаниям.",
     "creative_strategist": "Изучает тему и аудиторию перед созданием материала.",
+    "mail_agent": "Пишет персональные письма компаниям в почте ServGo (mail.servgo.ru) и проверяет их на выдуманные факты. Модель берётся для НОВЫХ писем; остальные из цепочки включаются, если выбранная не отвечает.",
     "dispatcher": "Понимает просьбы владельца на главной странице и решает, куда их направить. Быстрая модель: ответ нужен сразу.",
     "whiteboard_storyboard": "Пишет сценарий рисованного видео. Работает при включённом Model Router. Модель берётся для НОВЫХ заданий; остальные из цепочки включаются, если выбранная не отвечает.",
 }
@@ -140,7 +142,7 @@ def role_descriptors() -> list[dict]:
         "repurposing_editor", "platform_writer",
         "youtube_shorts_director", "instagram_reels_director",
         "competitive_intelligence", "editorial_planner", "post_strategist", "post_writer_editor",
-        "post_rewriter", "creative_strategist", "whiteboard_storyboard", "dispatcher",
+        "post_rewriter", "creative_strategist", "whiteboard_storyboard", "dispatcher", "mail_agent",
     }
     listed = []
     for department, identifiers in _GROUPS.items():

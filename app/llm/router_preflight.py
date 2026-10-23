@@ -17,7 +17,7 @@ _EXTRA_STAGES = frozenset({
     "repurposing_editor", "platform_writer",
     "youtube_shorts_director", "instagram_reels_director",
     "competitive_intelligence", "editorial_planner", "post_strategist", "post_writer_editor",
-    "post_rewriter", "creative_strategist", "whiteboard_storyboard", "dispatcher",
+    "post_rewriter", "creative_strategist", "whiteboard_storyboard", "dispatcher", "mail_agent",
 })
 _HANDLED_ROLES = frozenset(_BALANCED_ROLES | _ECONOMY_ROLES | _PREMIUM_ROLES)
 
