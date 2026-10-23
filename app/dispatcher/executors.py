@@ -148,14 +148,20 @@ async def show_insights(ctx: Context, params: InsightsParams) -> Outcome:
     insights, failure = await _insights(ctx, params.days)
     if insights is None:
         return failure
-    chips = [{"label": "Передать маркетинг-команде", "capability": "send_to_team", "params": {}}]
+    lines, rows = insights.view(params.topic)
+    chips = []
+    if params.topic != "all":
+        chips.append({"label": "Показать всё", "capability": "show_insights",
+                      "params": {"days": str(params.days)} if params.days else {}})
+    chips.append({"label": "Передать маркетинг-команде", "capability": "send_to_team", "params": {}})
     if insights.depth_days < 90:
-        chips.append({"label": "Посмотреть за 90 дней", "capability": "show_insights", "params": {"days": "90"}})
+        chips.append({"label": "Посмотреть за 90 дней", "capability": "show_insights",
+                      "params": {"days": "90", **({"topic": params.topic} if params.topic != "all" else {})}})
     note = ""
     if params.days and params.days != depth_for(ctx.db, ctx.product.id):
         note = f"\n(Срок {params.days} дн. — только для этого просмотра. Сохранить как обычный: «смотри за {params.days} дней».)"
-    return Outcome("\n".join(insights.lines) + note, " ".join(insights.lines[:2]),
-                   [{"type": "table", "columns": ["Показатель", "Значение"], "rows": insights.table},
+    return Outcome("\n".join(lines) + note, " ".join(lines[:2]),
+                   [{"type": "table", "columns": ["Показатель", "Значение"], "rows": rows},
                     {"type": "chips", "items": chips}, _links(ctx, "schedule")])
 
 

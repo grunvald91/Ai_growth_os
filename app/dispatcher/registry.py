@@ -85,7 +85,17 @@ class ScheduleParams(_Params):
     period: Literal["today", "tomorrow", "week"] = "today"
 
 
+INSIGHT_TOPICS = ("all", "cancellations", "money", "clients", "weekdays", "daytime", "services", "upcoming")
+
+
 class InsightsParams(_Params):
+    topic: Literal["all", "cancellations", "money", "clients", "weekdays", "daytime", "services", "upcoming"] = Field(
+        default="all",
+        description="О чём спросил владелец: cancellations — отмены; money — выручка, сколько заработали, средний чек; "
+                    "clients — клиенты, возвраты, постоянные; weekdays — по каким дням недели больше или меньше записей, "
+                    "пустые дни; daytime — утро, день, вечер и за сколько дней записываются; services — какие услуги и "
+                    "какие яхты, мастера, залы берут; upcoming — сколько уже записано вперёд; all — общий вопрос про "
+                    "дела бизнеса или почему мало клиентов.")
     days: int | None = Field(
         default=None, ge=7, le=365,
         description="За сколько последних дней смотреть. Не указывай, если владелец не просил другой срок: "
@@ -167,7 +177,7 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                "вернувшиеся клиенты, самые слабые дни и время, за сколько дней записываются, чем чаще берут, "
                "сколько уже записано вперёд. Подходит для вопросов «как дела в бизнесе», «почему мало клиентов», "
                "«как увеличить число клиентов», «что улучшить», «сколько заработали», «какие дни пустые», "
-               "«как часто возвращаются клиенты». days — за сколько дней, если владелец назвал срок.",
+               "«как часто возвращаются клиенты». topic — о чём именно вопрос (на узкий вопрос — узкий ответ); days — за сколько дней, если владелец назвал срок.",
                ToolOperation.ANALYTICS, Cost.NONE, InsightsParams),
     Capability("set_insights_depth", "Глубина анализа",
                "Изменить, за сколько последних дней смотреть записи при разборе бизнеса (от 7 до 365 дней). "

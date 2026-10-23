@@ -498,3 +498,43 @@ def test_average_check_leaves_out_visits_without_a_price():
     rows_ = [row(1, days[0], price=10000), row(2, days[1], price=20000), row(3, days[2], price=None)]
     by_name = {f.name: f.value for f in compute(schedule(rows_), TODAY, 30, 14).facts}
     assert by_name["servgo.average_check"] == 15000
+
+
+# ---- narrow questions get narrow answers ------------------------------------------------------
+
+def test_a_topic_shows_its_own_lines_and_the_basics():
+    result = compute(schedule(twelve_bookings()), TODAY, 30, 14)
+    lines, rows = result.view("cancellations")
+    text = " ".join(lines)
+    assert "отменено: 1" in text and "Средний чек" not in text and "Клиентов:" not in text
+    assert [r[0] for r in rows] == ["Записей", "Отмен"]
+    money, money_rows = result.view("money")
+    assert "средний чек" in " ".join(money) and "Средний чек" in [r[0] for r in money_rows]
+    assert len(result.view("all")[0]) == len(result.lines)
+
+
+@pytest.mark.parametrize("topic", ["cancellations", "money", "clients", "weekdays", "daytime", "services", "upcoming"])
+def test_every_topic_has_an_answer_and_is_shorter_than_everything(topic):
+    result = compute(schedule(twelve_bookings()), TODAY, 30, 14)
+    lines, rows = result.view(topic)
+    assert lines and rows and len(lines) < len(result.lines)
+
+
+@pytest.mark.asyncio
+async def test_narrow_question_through_the_dispatcher(db, linked, platform):
+    answer = await chip(db, linked, "show_insights", {"topic": "cancellations"})
+    assert "отменено: 1" in answer["text"] and "средний чек" not in answer["text"]
+    chips = [c for b in answer["blocks"] if b["type"] == "chips" for c in b["items"]]
+    assert "Показать всё" in {c["label"] for c in chips}
+    full = await chip(db, linked, "show_insights", {"topic": "all"}, key="all")
+    assert "средний чек" in full["text"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_topic_asks_instead_of_guessing(db, linked, platform):
+    answer = await chip(db, linked, "show_insights", {"topic": "weather"})
+    assert platform.calls == [] and "Уточните" in answer["text"]
+
+
+def test_the_model_gets_more_time_but_less_than_the_web_server_waits():
+    assert 120 <= service.DECISION_TIMEOUT_SECONDS < 300
