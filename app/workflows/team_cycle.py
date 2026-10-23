@@ -113,20 +113,20 @@ class TeamCycle:
         *,
         max_tasks: int = 10,
         followup_cmo: bool = True,
+        task_ids: set[UUID] | None = None,
     ) -> TeamCycleResult:
         product = self.db.get(Product, product_id)
         if product is None:
             raise LookupError("Product not found")
         max_tasks = max(1, min(max_tasks, 20))
-        queued = list(
-            self.db.scalars(
-                select(Task)
-                .where(Task.product_id == product_id, Task.status == TaskStatus.QUEUED)
-                .where(or_(Task.assigned_agent.is_(None), Task.assigned_agent != "competitive_intelligence"))
-                .order_by(Task.priority.desc(), Task.created_at.asc(), Task.id)
-                .limit(max_tasks)
-            )
+        query = (
+            select(Task)
+            .where(Task.product_id == product_id, Task.status == TaskStatus.QUEUED)
+            .where(or_(Task.assigned_agent.is_(None), Task.assigned_agent != "competitive_intelligence"))
         )
+        if task_ids is not None:  # the caller names exactly the tasks it wants run
+            query = query.where(Task.id.in_(task_ids))
+        queued = list(self.db.scalars(query.order_by(Task.priority.desc(), Task.created_at.asc(), Task.id).limit(max_tasks)))
         result = TeamCycleResult(product_id=product_id)
         for task in queued:
             task_result = await self._run_task(product, task)

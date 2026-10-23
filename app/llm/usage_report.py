@@ -22,7 +22,8 @@ def summarize_usage_rows(rows) -> dict:
         "estimated_usd": Decimal("0"), "unpriced_calls": 0,
     })
     for record, role in rows:
-        group = by_role[role or "unknown"]
+        # Calls made outside an agent run (the owner's dispatcher) are named by their own task type, not "unknown".
+        group = by_role[role or (record.details or {}).get("task_type") or "unknown"]
         group["calls"] += 1
         group["input_tokens"] += record.input_tokens or 0
         group["output_tokens"] += record.output_tokens or 0

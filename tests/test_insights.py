@@ -538,3 +538,81 @@ async def test_unknown_topic_asks_instead_of_guessing(db, linked, platform):
 
 def test_the_model_gets_more_time_but_less_than_the_web_server_waits():
     assert 120 <= service.DECISION_TIMEOUT_SECONDS < 300
+
+
+# ---- specialists do the tasks the director handed out ---------------------------------------------
+
+BRIEF = {"summary": "Вечерние предложения для яхт.", "format": "content_plan", "audience_hypothesis": "Пары на закат",
+         "problem_hypothesis": "Вечера пустуют", "angle": "Закат на воде", "title_options": ["Закат на яхте", "Вечер у моря"],
+         "outline": ["Пост 1", "Пост 2", "Пост 3"], "cta": "Забронировать вечер"}
+
+
+def specialist_builder(tmp_path, content=None):
+    from app.core.composition import build_team_cycle
+    provider = FakeLLMProvider(LLMResponse(content=json.dumps(content or BRIEF), model="fake",
+                                           usage=LLMUsage(input_tokens=5, output_tokens=7)))
+    return provider, lambda db, settings: build_team_cycle(db, Settings(products_root=tmp_path), provider)
+
+
+async def reviewed_with_tasks(db, linked, platform, tmp_path, tasks):
+    await hand_over(db, linked, platform)
+    sample = db.scalar(select(Metric).where(Metric.name == "servgo.bookings_total"))
+    data = {"summary": "Вечер почти пустой.", "decisions": [
+        {"decision_type": "TEST", "rationale": "Проверить вечерние предложения.",
+         "evidence_references": [{"kind": "metric", "id": str(sample.id)}], "next_tasks": tasks}]}
+    _, builder = review_builder(tmp_path, data)
+    await run_insights_once(factory(db), env(), builder=builder)
+
+
+PLAN_TASK = {"title": "Контент-план на вечерние выходы", "description": "Идеи постов про закат", "task_type": "content_plan",
+             "assigned_agent": "content_seo"}
+
+
+@pytest.mark.asyncio
+async def test_specialist_takes_the_directors_task_and_leaves_a_draft(db, linked, platform, tmp_path):
+    from app.insights.page import review_html
+    from app.insights.specialists import run_specialists_once
+    await reviewed_with_tasks(db, linked, platform, tmp_path, [PLAN_TASK])
+    child = db.scalar(select(Task).where(Task.title == PLAN_TASK["title"]))
+    assert child.status == TaskStatus.QUEUED and child.assigned_agent == "content_seo"
+    decisions_before = len(list(db.scalars(select(Decision))))
+    provider, builder = specialist_builder(tmp_path)
+    assert await run_specialists_once(factory(db), env(), builder=builder) == 1
+    db.refresh(child)
+    assert child.status == TaskStatus.COMPLETED
+    draft = db.scalar(select(Artifact).where(Artifact.task_id == child.id, Artifact.kind == "content_plan"))
+    assert draft is not None and draft.status.value == "draft"  # a draft, never published
+    assert len(list(db.scalars(select(Decision)))) == decisions_before  # no second review started
+    assert await run_specialists_once(factory(db), env(), builder=builder) == 0  # nothing left
+    review = db.scalar(select(Task).where(Task.assigned_agent == AGENT))
+    page = review_html(db, linked.id, review)
+    assert "Контент и SEO" in page and "черновик готов" in page and "Закат на яхте" in page
+
+
+@pytest.mark.asyncio
+async def test_tasks_a_specialist_cannot_do_safely_are_left_alone(db, linked, platform, tmp_path):
+    from app.insights.specialists import run_specialists_once, waiting_tasks
+    mismatch = {**PLAN_TASK, "title": "Не по профилю", "task_type": "analytics"}  # content_seo does not do analytics
+    publish = {**PLAN_TASK, "title": "Опубликовать пост", "task_type": "action_request",
+               "assigned_agent": "distribution", "operation": "publish"}
+    await reviewed_with_tasks(db, linked, platform, tmp_path, [mismatch, publish, PLAN_TASK])
+    names = {t.title: t for t in db.scalars(select(Task))}
+    ready = waiting_tasks(db)[linked.id]
+    assert ready == {names[PLAN_TASK["title"]].id}  # only the one it can do, and the others do not block it
+    provider, builder = specialist_builder(tmp_path)
+    assert await run_specialists_once(factory(db), env(), builder=builder) == 1
+    db.refresh(names["Не по профилю"])
+    assert names["Не по профилю"].status == TaskStatus.QUEUED
+    assert names["Опубликовать пост"].status != TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_tasks_from_other_sources_are_not_touched(db, linked, tmp_path):
+    from app.insights.specialists import run_specialists_once
+    parent = Task(product_id=linked.id, assigned_agent="cmo", title="Daily organic growth review", status=TaskStatus.COMPLETED)
+    db.add(parent)
+    db.flush()
+    db.add(Task(product_id=linked.id, parent_id=parent.id, assigned_agent="content_seo", title="Чужая", status=TaskStatus.QUEUED))
+    db.commit()
+    _, builder = specialist_builder(tmp_path)
+    assert await run_specialists_once(factory(db), env(), builder=builder) == 0
