@@ -1,0 +1,79 @@
+name: Server cleanup of old Docker images (one-off)
+
+# Разовая чистка старых docker-образов. Удаляет только образы старых пилотов и проверок и старые сборки.
+# Никогда не трогает: образы работающих контейнеров (docker rmi без -f их не удалит), базовый образ из deploy.json,
+# три самые свежие сборки servgo-growth, два самых свежих servgo-growth-release, образы sushef/elitles/postgres/node.
+# После использования удалить вместе с веткой.
+on:
+  push:
+    branches: [ops/server-cleanup]
+    paths: ['.github/workflows/server-cleanup.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Cleanup
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+          MODE: dry
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is not set"; exit 1; }
+          install -m 700 -d ~/.ssh
+          sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Host key does not match the pinned fingerprint"; exit 1; }
+          cat > /tmp/clean.py <<'PYEND'
+          import json, re, subprocess, sys
+          mode = sys.argv[1]
+          def sh(*a):
+              return subprocess.run(a, capture_output=True, text=True)
+          imgs = []
+          for line in sh("docker", "images", "--no-trunc", "--format", "{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedAt}}").stdout.splitlines():
+              r, t, i, c = line.split("\t", 3)
+              imgs.append({"ref": f"{r}:{t}", "repo": r, "tag": t, "id": i, "created": c})
+          used_ids = set(sh("docker", "ps", "-a", "--no-trunc", "--format", "{{.Image}}").stdout.split())
+          used_ids |= {x["id"] for x in imgs if x["ref"] in used_ids or x["id"] in used_ids}
+          try:
+              base = json.load(open("/opt/ai_growth_os/deploy/deploy.json")).get("base_image", "")
+          except Exception:
+              base = ""
+          keep_refs = {base} if base else set()
+          def newest(repo, n):
+              rows = sorted((x for x in imgs if x["repo"] == repo), key=lambda x: x["created"], reverse=True)
+              return {x["ref"] for x in rows[:n]}
+          keep_refs |= newest("servgo-growth", 3) | newest("servgo-growth-release", 2)
+          keep_ids = used_ids | {x["id"] for x in imgs if x["ref"] in keep_refs}
+          old = re.compile(r"^(servgo-(pilot|review|whiteboard)(-[a-z-]+)?|ai-growth-rollback|ai-growth-os(-api|-worker|-telegram|-profile-init)?|servgo-growth|servgo-growth-release)$")
+          todo = [x for x in imgs if old.match(x["repo"]) and x["ref"] not in keep_refs and x["id"] not in keep_ids]
+          print(f"images total: {len(imgs)}; protected ids: {len(keep_ids)}; to remove: {len(todo)}; base_image kept: {base or 'unknown'}")
+          for x in todo:
+              print("  remove", x["ref"])
+          if mode == "apply":
+              ok = bad = 0
+              for x in todo:
+                  r = sh("docker", "rmi", x["ref"])
+                  ok += r.returncode == 0; bad += r.returncode != 0
+              print(f"removed: {ok}, refused (in use): {bad}")
+          print(sh("docker", "system", "df").stdout)
+          print(sh("df", "-h", "/").stdout)
+          print(sh("curl", "-s", "-o", "/dev/null", "-w", "health %{http_code}\n", "http://127.0.0.1:8091/health").stdout)
+          PYEND
+          sed -i 's/^          //' /tmp/clean.py
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" "python3 - $MODE" < /tmp/clean.py
