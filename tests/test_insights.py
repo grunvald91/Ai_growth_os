@@ -382,3 +382,39 @@ async def test_result_comes_back_into_the_conversation_as_decisions(db, linked, 
     assert "опирается на показателей: 1" in table["rows"][0][1] and "без опоры на цифры" in table["rows"][1][1]
     assert "Вечер почти пустой" in added[0].text
     assert updates.collect_updates(db, ctx, conversation) == []  # reported once
+
+
+# ---- what real models send --------------------------------------------------------------------
+
+def model_says(decision: dict):
+    from app.llm.service import LLMService
+    from app.privacy import PrivacyGateway
+    provider = FakeLLMProvider(LLMResponse(content=json.dumps(decision, ensure_ascii=False), model="fake-dispatcher",
+                                           usage=LLMUsage(input_tokens=10, output_tokens=10)))
+    return LLMService(privacy_gateway=PrivacyGateway(), provider=provider, critic_enabled=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("params", [{}, {"days": None}, {"days": 60}, {"days": "60"}])
+async def test_model_may_send_nulls_and_numbers_for_the_period(db, linked, platform, params):
+    """Seen in production: the model returned "days": null and numbers; the owner got 'could not understand'."""
+    decision = {"intent": "execute", "capability": "show_insights", "confidence": 0.9, "params": params,
+                "reply_text": "Смотрю", "next_chips": [
+                    {"label": "За квартал", "capability": "show_insights", "params": {"days": 90}},
+                    {"label": "Передать", "capability": "send_to_team", "params": {}}]}
+    ctx = Context(db=db, product=linked, settings=env(), account="owner")
+    result = await service.handle_message(db, ctx, model_says(decision), text="как дела в бизнесе?", client_key="m")
+    answer = result["messages"][1]
+    from app.dispatcher.models import DispatcherMessage
+    stored = db.scalar(select(DispatcherMessage).where(DispatcherMessage.role == "assistant"))
+    assert answer["intent"] == "execute" and stored.capability == "show_insights"
+    assert "записей: 11" in answer["text"]
+    expected = int(params["days"]) if params.get("days") else 30
+    assert platform.calls[0].url.params["date_from"] == (TODAY - timedelta(days=expected)).isoformat()
+
+
+def test_numbers_in_chip_parameters_become_text():
+    from app.dispatcher.decision import DispatcherDecision
+    decision = DispatcherDecision.model_validate({"intent": "answer", "next_chips": [
+        {"label": "x", "capability": "show_insights", "params": {"days": 90, "gone": None}}]})
+    assert decision.next_chips[0].params == {"days": "90"}

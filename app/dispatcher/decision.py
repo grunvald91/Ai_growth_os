@@ -8,11 +8,20 @@ from __future__ import annotations
 import json
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.dispatcher.registry import catalog_for_model
 
 CONFIDENCE_TO_ACT = 0.6  # below this the dispatcher asks instead of acting
+
+
+def text_params(value):
+    """Models send numbers for numeric parameters and null for ones they leave out. Parameters travel as text:
+    numbers become text, nulls are dropped (the ability then uses its default)."""
+    if not isinstance(value, dict):
+        return value
+    return {str(key): str(item) for key, item in value.items()
+            if item is not None and not isinstance(item, (dict, list))}
 
 
 class SuggestedChip(BaseModel):
@@ -20,6 +29,8 @@ class SuggestedChip(BaseModel):
     label: str = Field(min_length=1, max_length=80)
     capability: str
     params: dict[str, str] = Field(default_factory=dict)
+
+    _text_params = field_validator("params", mode="before")(text_params)
 
 
 class DispatcherDecision(BaseModel):
@@ -32,6 +43,8 @@ class DispatcherDecision(BaseModel):
     reply_text: str = ""
     spoken: str | None = None
     next_chips: list[SuggestedChip] = Field(default_factory=list, max_length=4)
+
+    _text_params = field_validator("params", mode="before")(text_params)
 
 
 SYSTEM_PROMPT = """Ты — диспетчер главной страницы ИИ-студии маркетинга для владельца малого бизнеса.
