@@ -27,7 +27,7 @@ jobs:
           SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
           HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
           HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
-          MODE: dry
+          MODE: apply
         run: |
           set -euo pipefail
           [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is not set"; exit 1; }
@@ -60,7 +60,7 @@ jobs:
               return {x["ref"] for x in rows[:n]}
           keep_refs |= newest("servgo-growth", 3) | newest("servgo-growth-release", 2)
           keep_ids = used_ids | {x["id"] for x in imgs if x["ref"] in keep_refs}
-          old = re.compile(r"^(servgo-(pilot|review|whiteboard)(-[a-z-]+)?|ai-growth-rollback|ai-growth-os(-api|-worker|-telegram|-profile-init)?|servgo-growth|servgo-growth-release)$")
+          old = re.compile(r"^servgo-(pilot|review)(-[a-z-]+)?$")
           todo = [x for x in imgs if old.match(x["repo"]) and x["ref"] not in keep_refs and x["id"] not in keep_ids]
           print(f"images total: {len(imgs)}; protected ids: {len(keep_ids)}; to remove: {len(todo)}; base_image kept: {base or 'unknown'}")
           for x in todo:
