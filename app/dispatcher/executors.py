@@ -160,15 +160,16 @@ async def show_insights(ctx: Context, params: InsightsParams) -> Outcome:
 
 
 async def set_insights_depth(ctx: Context, params: DepthParams) -> Outcome:
-    from app.insights.settings import depth_label, set_depth
+    from app.insights.settings import set_depth
+    from app.schedule.views import _count
     set_depth(ctx.db, ctx.product.id, params.days, ctx.account)
     ctx.db.add(ToolCall(product_id=ctx.product.id, tool_name="dispatcher", operation="set_insights_depth",
                         request_data={"params": {"days": params.days}, "account": ctx.account},
                         response_data={"ok": True}, status="executed", executed_at=datetime.now(timezone.utc)))
     ctx.db.commit()
-    label = depth_label(params.days)
-    return Outcome(f"Готово. Теперь при разборе бизнеса смотрю на {label} назад ({params.days} дн.).",
-                   f"Готово, теперь смотрю на {label} назад.",
+    word = _count(params.days, "день", "дня", "дней")
+    return Outcome(f"Готово. Теперь при разборе бизнеса смотрю назад на {params.days} {word}.",
+                   f"Готово, теперь смотрю назад на {params.days} {word}.",
                    [{"type": "chips", "items": [{"label": "Показать итоги бизнеса", "capability": "show_insights",
                                                  "params": {}}]}])
 
@@ -186,7 +187,9 @@ async def send_to_team(ctx: Context, params) -> Outcome:
     if not created:
         return Outcome("Команда уже разбирает цифры бизнеса. Сообщу, когда будут решения.",
                        "Команда уже разбирает цифры. Сообщу, когда будут решения.", [block], task_id=task.id)
-    text = (f"Передал команде цифры записей за {insights.depth_days} дн. ({len(rows)} показателей). "
+    from app.schedule.views import _count
+    text = (f"Передал команде цифры записей за {insights.depth_days} дн. "
+            f"({len(rows)} {_count(len(rows), 'показатель', 'показателя', 'показателей')}). "
             "Разбор займёт несколько минут: вернусь с решениями, что оставить, остановить, усилить и проверить. "
             "Ничего не публикуется и не тратится на рекламу.")
     if insights.low_data:

@@ -234,7 +234,7 @@ async def test_insights_blocks_offer_the_hand_over(db, linked, platform):
 @pytest.mark.asyncio
 async def test_set_depth_saves_and_is_recorded(db, linked, platform):
     answer = await chip(db, linked, "set_insights_depth", {"days": "90"})
-    assert depth_settings.depth_for(db, linked.id) == 90 and "90 дн." in answer["text"]
+    assert depth_settings.depth_for(db, linked.id) == 90 and "на 90 дней" in answer["text"]
     assert db.scalar(select(ToolCall).where(ToolCall.operation == "set_insights_depth")) is not None
 
 

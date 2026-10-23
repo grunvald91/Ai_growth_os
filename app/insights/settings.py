@@ -30,10 +30,3 @@ def set_depth(db: Session, product_id: UUID, days: int, account: str) -> int:
         row.depth_days, row.updated_by = days, account[:200]
     db.commit()
     return days
-
-
-def depth_label(days: int) -> str:
-    if days % 30 == 0 and days >= 30:
-        months = days // 30
-        return {1: "месяц", 2: "2 месяца", 3: "3 месяца", 4: "4 месяца"}.get(months, f"{months} мес.")
-    return f"{days} дн."
