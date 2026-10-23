@@ -192,6 +192,15 @@ SSO_SERVGO_NAMES = {"SERVGO_SSO_SECRET": "STUDIO_SSO_SECRET", "SERVGO_INTERNAL_K
 SSO_MIN_LENGTH = 32
 
 
+def overlay_document(settings: dict, image: str, sha: str) -> dict:
+    """Compose overlay for api/worker/telegram. The two sign-in secrets are only *references* (${NAME}), which
+    compose fills in from /opt/ai_growth_os/.env when the containers are created; the file never holds a value.
+    Without them in .env the references are empty and the ServGo sign-in and schedule stay switched off."""
+    references = {key: "${" + key + ":-}" for key in SSO_KEYS}
+    return {"services": {s: {"image": image, "environment": {
+        **settings["overlay_env"], **references, "RELEASE_SHA": sha}} for s in SERVICES}}
+
+
 def provision_sso_secrets(env_file: Path = ENV_FILE, handoff: Path = SSO_HANDOFF) -> list[str]:
     """Make sure the sign-in secrets for the ServGo admin exist; create missing ones, never print them.
 
@@ -273,8 +282,7 @@ def deploy(sha: str, payload: bytes) -> None:
 
     base_files = [f for f in previous["files"] if not f.startswith("/opt/servgo-releases/")]
     overlay = release / "overlay.json"
-    overlay.write_text(json.dumps({"services": {s: {"image": image, "environment": {
-        **settings["overlay_env"], "RELEASE_SHA": sha}} for s in SERVICES}}, indent=2))
+    overlay.write_text(json.dumps(overlay_document(settings, image, sha), indent=2))
     LAST_GOOD.write_text(json.dumps(previous))
     created = provision_sso_secrets()
     log("ServGo sign-in secrets: " + (("created " + ", ".join(created)) if created else "already present"))
