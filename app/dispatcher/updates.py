@@ -11,11 +11,14 @@ from sqlalchemy.orm import Session
 from app.dispatcher.materials import KIND_LABELS, card
 from app.dispatcher.models import DispatcherConversation, DispatcherMessage
 from app.dispatcher.outcome import Context
-from app.models.domain import Artifact, ArtifactStatus, Task, TaskStatus
+import json
+from uuid import UUID
+
+from app.models.domain import Artifact, ArtifactStatus, Decision, Task, TaskStatus
 
 RESULT_CAPABILITY = "task_result"
 RESULT_KINDS = ("channel_text", "article", "creative_brief", "video_script", "video_render", "whiteboard_video",
-                "editorial_plan")
+                "editorial_plan", "business_review")
 READY = (ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.DRAFT)
 
 
@@ -29,11 +32,55 @@ def _result(ctx: Context, task: Task) -> Artifact | None:
         Artifact.status.in_(READY)).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
 
 
+DECISION_LABELS = {"KEEP": "Оставить", "STOP": "Остановить", "SCALE": "Усилить", "TEST": "Проверить"}
+
+
+def _cut(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+
+
+def _business_review(ctx: Context, result: Artifact, href: str) -> tuple[str, list[dict]]:
+    """The marketing team's decisions over the business facts, with how many facts each one rests on."""
+    try:
+        data = json.loads(result.content)
+    except ValueError:
+        data = {}
+    ids = []
+    for raw in data.get("decision_ids", []):
+        try:
+            ids.append(UUID(raw))
+        except ValueError:
+            continue
+    rows = list(ctx.db.scalars(select(Decision).where(Decision.product_id == ctx.product.id, Decision.id.in_(ids)))) if ids else []
+    rows.sort(key=lambda row: ids.index(row.id))  # the order the team gave them in
+    text = "Команда разобрала цифры бизнеса."
+    if data.get("summary"):
+        text += " " + _cut(str(data["summary"]), 600)
+    blocks: list[dict] = []
+    if rows:
+        table = []
+        for row in rows:
+            facts = len(row.evidence_references or [])
+            note = f" (опирается на показателей: {facts})" if facts else " (без опоры на цифры)"
+            table.append([DECISION_LABELS.get(row.decision_type.value, row.decision_type.value),
+                          _cut(row.rationale, 380) + note])
+        blocks.append({"type": "table", "columns": ["Решение", "Что это значит"], "rows": table})
+    proposed = len(data.get("task_ids", []))
+    if proposed:
+        text += f" Предложено задач: {proposed}; они в разделе «В работе»."
+    blocks.append({"type": "chips", "items": [{"label": "Показать цифры", "capability": "show_insights", "params": {}}]})
+    blocks.append({"type": "links", "items": [{"label": "Открыть разбор", "href": href}]})
+    return text, blocks
+
+
 def _completed(ctx: Context, task: Task, title: str, href: str) -> tuple[str, list[dict]]:
     base = f"/studio/products/{ctx.product.id}"
     result = _result(ctx, task)
     if result is None:
         return f"Готово: {title}.", [{"type": "links", "items": [{"label": "Открыть", "href": href}]}]
+    if result.kind == "business_review":
+        return _business_review(ctx, result, href)
     if result.kind == "editorial_plan":
         return "Контент-план готов. Он ничего не публикует, пока вы его не утвердите.", [
             {"type": "chips", "items": [{"label": "Утвердить контент-план", "capability": "approve_plan",

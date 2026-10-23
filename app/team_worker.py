@@ -154,6 +154,9 @@ async def run_once() -> int:
     from app.competitive_intelligence.worker import run_intelligence_once
     if await run_intelligence_once(SessionLocal, settings):
         return 1
+    from app.insights.worker import run_insights_once
+    if await run_insights_once(SessionLocal, settings):
+        return 1
     from app.content.calendar import run_planner_once, tick_calendar, recover_stale_planner
     with SessionLocal() as db:
         recover_stale_planner(db)

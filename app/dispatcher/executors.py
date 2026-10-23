@@ -14,10 +14,10 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.dispatcher.readers import ACTIVE, attention, latest_active_video, plans, upcoming_slots, work_rows
-from app.dispatcher.registry import (CAPABILITIES, CHANNEL_LABELS, CancelVideoParams, GoToParams,
-                                     PostParams, ScheduleParams, VideoParams, page_href, page_label)
+from app.dispatcher.registry import (CAPABILITIES, CHANNEL_LABELS, CancelVideoParams, DepthParams, GoToParams,
+                                     InsightsParams, PostParams, ScheduleParams, VideoParams, page_href, page_label)
 from app.dispatcher.outcome import Confirmation, Context, Outcome, links_block, task_block  # noqa: F401
-from app.models.domain import Approval, Product, Task
+from app.models.domain import Approval, Product, Task, ToolCall
 
 
 _task_block = task_block
@@ -116,6 +116,82 @@ async def show_schedule(ctx: Context, params: ScheduleParams) -> Outcome:
     else:
         view = views.bookings_view(schedule, period, first, last, label)
     return Outcome(view.text, view.spoken, [*view.blocks, _links(ctx, "schedule")])
+
+
+# ---- business insights -------------------------------------------------------------------
+
+def _no_booking_data(ctx: Context, reason: str) -> Outcome:
+    if reason == "no_link":
+        return Outcome("Данные записей я пока не вижу: заведение не связано с этой компанией. "
+                       "Открыть его можно в админке ServGo.",
+                       "Данные записей я пока не вижу: заведение не связано с компанией.",
+                       [_links(ctx, "schedule")], no_data=True)
+    return Outcome("Сейчас не вижу данные записей: онлайн-запись не отвечает. Остальное работает.",
+                   "Сейчас не вижу данные записей, онлайн-запись не отвечает.", [_links(ctx, "schedule")], no_data=True)
+
+
+async def _insights(ctx: Context, days: int | None):
+    """(insights, None) or (None, outcome to show instead)."""
+    from app.insights import service
+    resolved = service.resolve(ctx.db, ctx.settings, ctx.product, ctx.account, days)
+    if resolved is None:
+        return None, _no_booking_data(ctx, "no_link")
+    insights = await asyncio.to_thread(service.read, *resolved)
+    if insights is None:
+        return None, _no_booking_data(ctx, "unavailable")
+    return insights, None
+
+
+async def show_insights(ctx: Context, params: InsightsParams) -> Outcome:
+    """Facts about the business over the chosen depth. Read-only; every figure is computed from the platform's rows."""
+    from app.insights.settings import depth_for
+    insights, failure = await _insights(ctx, params.days)
+    if insights is None:
+        return failure
+    chips = [{"label": "Передать маркетинг-команде", "capability": "send_to_team", "params": {}}]
+    if insights.depth_days < 90:
+        chips.append({"label": "Посмотреть за 90 дней", "capability": "show_insights", "params": {"days": "90"}})
+    note = ""
+    if params.days and params.days != depth_for(ctx.db, ctx.product.id):
+        note = f"\n(Срок {params.days} дн. — только для этого просмотра. Сохранить как обычный: «смотри за {params.days} дней».)"
+    return Outcome("\n".join(insights.lines) + note, " ".join(insights.lines[:2]),
+                   [{"type": "table", "columns": ["Показатель", "Значение"], "rows": insights.table},
+                    {"type": "chips", "items": chips}, _links(ctx, "schedule")])
+
+
+async def set_insights_depth(ctx: Context, params: DepthParams) -> Outcome:
+    from app.insights.settings import depth_label, set_depth
+    set_depth(ctx.db, ctx.product.id, params.days, ctx.account)
+    ctx.db.add(ToolCall(product_id=ctx.product.id, tool_name="dispatcher", operation="set_insights_depth",
+                        request_data={"params": {"days": params.days}, "account": ctx.account},
+                        response_data={"ok": True}, status="executed", executed_at=datetime.now(timezone.utc)))
+    ctx.db.commit()
+    label = depth_label(params.days)
+    return Outcome(f"Готово. Теперь при разборе бизнеса смотрю на {label} назад ({params.days} дн.).",
+                   f"Готово, теперь смотрю на {label} назад.",
+                   [{"type": "chips", "items": [{"label": "Показать итоги бизнеса", "capability": "show_insights",
+                                                 "params": {}}]}])
+
+
+async def send_to_team(ctx: Context, params) -> Outcome:
+    """Store the facts as metrics (evidence) and queue the marketing team's review over them. Publishes nothing."""
+    from app.insights import metrics
+    from app.insights.worker import queue
+    insights, failure = await _insights(ctx, None)
+    if insights is None:
+        return failure
+    rows = metrics.store(ctx.db, ctx.product.id, insights)
+    task, created = queue(ctx.db, ctx.product.id, insights.depth_days, len(rows))
+    block = _task_block(ctx, task, "Разбор данных бизнеса", f"/studio/products/{ctx.product.id}/tasks/{task.id}")
+    if not created:
+        return Outcome("Команда уже разбирает цифры бизнеса. Сообщу, когда будут решения.",
+                       "Команда уже разбирает цифры. Сообщу, когда будут решения.", [block], task_id=task.id)
+    text = (f"Передал команде цифры записей за {insights.depth_days} дн. ({len(rows)} показателей). "
+            "Разбор займёт несколько минут: вернусь с решениями, что оставить, остановить, усилить и проверить. "
+            "Ничего не публикуется и не тратится на рекламу.")
+    if insights.low_data:
+        text += f" Данных пока мало (записей: {insights.bookings}), поэтому команда будет осторожна в выводах."
+    return Outcome(text, "Передал цифры команде. Скоро вернусь с решениями.", [block], task_id=task.id)
 
 
 # ---- creating work -----------------------------------------------------------------------
@@ -267,7 +343,8 @@ async def restricted_action(ctx: Context, params) -> Outcome:
 
 EXECUTORS = {
     "show_work": show_work, "show_review": show_review, "show_plan": show_plan, "go_to": go_to,
-    "show_schedule": show_schedule, "create_post": create_post, "make_plan": make_plan,
+    "show_schedule": show_schedule, "show_insights": show_insights,
+    "set_insights_depth": set_insights_depth, "send_to_team": send_to_team, "create_post": create_post, "make_plan": make_plan,
     "whiteboard_video": whiteboard_video, "cancel_video": cancel_video, "restricted_action": restricted_action,
 }
 # Abilities that always ask first: describe what will happen, run it only after a confirmation.

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""One-time preparation of the production server for the ServGo sign-in / dispatcher release. Runs as root.
+"""Preparation of the production server for a release that adds database migrations. Runs as root.
+
+First used for the ServGo sign-in / dispatcher release (migrations 0007-0008), and again for any later release
+with new migrations: the new base image is tagged with the head revision, so earlier base images stay for rollback.
 
     prepare_sso_release.py <release-dir>
 
@@ -12,7 +15,7 @@ Then, in order:
   4. `alembic upgrade head` from that image against the production database (new tables only, additive);
   5. deploy.json points to the new base image; the server's deploy_growth.py is replaced (both backed up).
 A failure before step 4 changes nothing important; after it the new tables simply stay (harmless).
-To undo by hand: restore the .bak files and, if wanted, `alembic downgrade 0006` from the new image.
+To undo by hand: restore the .bak files and, if wanted, `alembic downgrade <previous revision>` from the new image.
 Never prints secrets: the database URL is passed to docker without being logged.
 """
 from __future__ import annotations
@@ -30,7 +33,7 @@ HOME = Path("/opt/ai_growth_os/deploy")
 CONFIG = HOME / "deploy.json"
 INSTALLED = HOME / "deploy_growth.py"
 API = "ai-growth-os-api-1"
-NEW_TAG = "servgo-growth-release:20261023"
+TAG_PREFIX = "servgo-growth-release:"
 
 
 def run(args, **kw):
@@ -63,6 +66,11 @@ def plan(base_migrations: list[str], new_migrations: list[str], current: str | N
     if current != expected:
         problems.append(f"the database is at {current}, the current base image expects {expected}")
     return problems
+
+
+def release_tag(migrations: list[str]) -> str:
+    """The base image tag of a release: named after its newest migration, so older images are never overwritten."""
+    return TAG_PREFIX + max(name.split("_")[0] for name in migrations)
 
 
 def load_deploy_module(release: Path):
@@ -109,10 +117,10 @@ def main(release: Path) -> None:
         try:
             run(["docker", "cp", str(release / "alembic/versions") + "/.", name + ":/app/alembic/versions"])
             run(["docker", "commit", "--change", 'CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]',
-                 name, NEW_TAG], stdout=subprocess.DEVNULL)
+                 name, release_tag(new_migrations)], stdout=subprocess.DEVNULL)
         finally:
             subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-        image = NEW_TAG
+        image = release_tag(new_migrations)
         log(f"built {image}")
     heads = alembic(image, "heads").split()
     log(f"image_head={heads[0] if heads else None}")

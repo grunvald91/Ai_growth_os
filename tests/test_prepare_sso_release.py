@@ -30,6 +30,14 @@ def test_reads_the_revision_out_of_alembic_output():
     assert prepare.revision_of("INFO  [alembic.runtime.migration] Will assume transactional DDL.\n") is None
 
 
+def test_each_release_gets_its_own_image_tag():
+    assert prepare.release_tag(NEW) == "servgo-growth-release:0008"
+    assert prepare.release_tag(NEW + ["0009_insight_settings.py"]) == "servgo-growth-release:0009"
+    assert prepare.release_tag(BASE) == "servgo-growth-release:0006"
+
+
 def test_real_migrations_follow_the_base():
     names = sorted(p.name for p in (ROOT / "alembic/versions").glob("*.py"))
-    assert names[-2:] == ["0007_dispatcher_conversations.py", "0008_studio_sso.py"]
+    # Later migrations may follow; the release these two belong to must stay in this order.
+    first = names.index("0007_dispatcher_conversations.py")
+    assert names[first:first + 2] == ["0007_dispatcher_conversations.py", "0008_studio_sso.py"]
