@@ -157,6 +157,9 @@ async def run_once() -> int:
     from app.insights.worker import run_insights_once
     if await run_insights_once(SessionLocal, settings):
         return 1
+    from app.insights.specialists import run_specialists_once
+    if await run_specialists_once(SessionLocal, settings):
+        return 1
     from app.content.calendar import run_planner_once, tick_calendar, recover_stale_planner
     with SessionLocal() as db:
         recover_stale_planner(db)

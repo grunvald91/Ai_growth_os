@@ -68,7 +68,7 @@ def _business_review(ctx: Context, result: Artifact, href: str) -> tuple[str, li
         blocks.append({"type": "table", "columns": ["Решение", "Что это значит"], "rows": table})
     proposed = len(data.get("task_ids", []))
     if proposed:
-        text += f" Команда предложила задач: {proposed} (список — на странице разбора). Автоматически они пока не выполняются."
+        text += f" Команда предложила задач: {proposed} (у каждой свой специалист; ход работы и черновики — на странице разбора). Ничего не публикуется без вашего согласия."
     blocks.append({"type": "chips", "items": [{"label": "Показать цифры", "capability": "show_insights", "params": {}}]})
     blocks.append({"type": "links", "items": [{"label": "Открыть разбор", "href": href}]})
     return text, blocks

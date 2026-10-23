@@ -40,3 +40,13 @@ def test_role_cost_report_keeps_unknown_counts():
     assert result["estimated_usd"] == "0.00035"
     assert result["by_role"]["cmo"]["unpriced_calls"] == 1
     assert result["pricing_status"] == "estimated_not_billed"
+
+
+def test_calls_outside_agent_runs_are_named_by_their_task_type():
+    """The owner's dispatcher has no agent run; its calls must not hide under "unknown"."""
+    dispatcher = SimpleNamespace(input_tokens=900, output_tokens=150, details={"task_type": "dispatcher"})
+    stray = SimpleNamespace(input_tokens=10, output_tokens=5, details={})
+    result = summarize_usage_rows([(dispatcher, None), (stray, None)])
+    assert result["by_role"]["dispatcher"]["calls"] == 1
+    assert result["by_role"]["dispatcher"]["unpriced_calls"] == 1  # no price configured: stays unknown, not zero
+    assert result["by_role"]["unknown"]["calls"] == 1
