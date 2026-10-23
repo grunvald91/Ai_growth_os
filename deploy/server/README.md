@@ -49,3 +49,11 @@ ssh root@<host> python3 /opt/ai_growth_os/deploy/deploy_growth.py rollback
 ```
 
 The deploy refuses to start while agent tasks are running, so they are not cut off.
+
+## Changing the deploy script itself
+
+The workflow runs the script that is *installed* on the server, not the one in the commit. After a change to
+`deploy_growth.py` run the workflow once with `prepare=true`: it checks the database revision, builds the base
+image if migrations were added, applies them, and installs the commit's `deploy_growth.py` (old copy kept as
+`.bak.<time>`). Later deploys use the new script. (Found 23.10.2026: the ServGo sign-in secrets reached `.env`
+but not the containers until the script with the `${SERVGO_...}` references was installed.)
