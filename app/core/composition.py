@@ -19,6 +19,13 @@ from app.workflows.team_cycle import TeamCycle
 SAFE_LLM_METADATA_FIELDS = {"reasoning_effort", "team_role", "task_type", "conversation_id", "provider_timeout_seconds", "routing_phase", "routing_complexity", "requires_web_search"}
 
 
+# The second model reads the whole task: every source in full and every extracted claim. Nothing is cut or skipped
+# for size; only the waiting time is raised to fit a large reply. It is advisory (no revision round), so a slow or
+# failed review never loses the draft.
+INTAKE_CRITIC_LIMITS = {"max_context_chars": 2_000_000, "max_original_chars": 200_000,
+                        "review_timeout": 240, "revision_timeout": 5}
+
+
 def build_intake(db: Session, settings: Settings, provider: LLMProvider | None = None):
     from app.intake.registry import registry_from_settings
     from app.intake.service import CompanyIntakeService, intake_model_order
@@ -28,7 +35,7 @@ def build_intake(db: Session, settings: Settings, provider: LLMProvider | None =
     if provider is None and settings.llm_provider == "xai" and settings.xai_api_key:
         def factory(model: str) -> LLMService:
             # A fixed model per attempt, bypassing the router: each retry deliberately goes to another provider.
-            return LLMService(privacy_gateway=privacy, critic_enabled=False, provider=XAIProvider(
+            return LLMService(privacy_gateway=privacy, critic_enabled=True, critic_limits=INTAKE_CRITIC_LIMITS, provider=XAIProvider(
                 api_key=settings.xai_api_key, model=model, base_url=settings.xai_base_url,
                 reasoning_effort=settings.xai_reasoning_effort, timeout_seconds=settings.xai_timeout_seconds))
         models = intake_model_order(role_override(settings, "company_intake"),
@@ -36,10 +43,10 @@ def build_intake(db: Session, settings: Settings, provider: LLMProvider | None =
                                     settings.intake_max_attempts)
     return CompanyIntakeService(
         db, products_root=settings.products_root,
-        # No critic here: every extracted value is already checked against a verbatim quote
-        # from its source, and the extra review/revision rounds pushed a draft past the
-        # web server's 300-second limit.
-        llm=LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings), critic_enabled=False),
+        # Every extracted value is checked against a verbatim quote from its source, and a second model reviews the
+        # whole draft on top of that. The drafting runs in the background, so the extra round fits.
+        llm=LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings),
+                       critic_enabled=True, critic_limits=INTAKE_CRITIC_LIMITS),
         model=settings.llm_model, provider_name=settings.llm_provider,
         registry_lookup=registry_from_settings(settings),
         llm_factory=factory, models=models,

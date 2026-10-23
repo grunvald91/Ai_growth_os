@@ -383,12 +383,34 @@ async def test_one_unverifiable_claim_is_dropped_without_losing_the_verified_one
     assert "Отброшено сведений без точной цитаты в источнике: 3" in render_review(review)
 
 
-def test_profile_extraction_skips_the_critic_even_when_enabled(tmp_path):
+@pytest.mark.asyncio
+async def test_profile_extraction_is_reviewed_by_a_second_model_even_on_huge_materials(tmp_path):
     from app.core.composition import build_intake
     from app.core.config import Settings
-    settings = Settings(_env_file=None, agent_critic_enabled=True, products_root=tmp_path)
-    service = build_intake(None, settings, provider=FakeLLMProvider(LLMResponse(content="{}", model="m")))
-    assert service.llm._critic_enabled is False
+    from app.intake.contracts import IntakeExtraction
+    big_text = "Яхта «Атлант» вмещает до 12 гостей. " * 6000  # ~210k chars: far above the old 24k review limit
+    reply = LLMResponse(content='{"claims": []}', model="m")
+    review = LLMResponse(content='{"findings": []}', model="m")
+    class Sequence:
+        def __init__(self, *replies):
+            self.replies, self.requests = list(replies), []
+
+        async def generate(self, request):
+            self.requests.append(request)
+            return self.replies.pop(0)
+
+    provider = Sequence(reply, review)
+    settings = Settings(_env_file=None, products_root=tmp_path)  # agent_critic_enabled stays off: intake does not depend on it
+    service = build_intake(None, settings, provider=provider)
+    assert service.llm._critic_enabled is True
+    assert service.llm.extra_timeout_seconds > 0
+    from app.llm.schemas import LLMMessage, LLMRequest
+    response = await service.llm.generate(LLMRequest(
+        model="m", max_tokens=100, system_prompt="x", response_schema=IntakeExtraction.model_json_schema(),
+        messages=[LLMMessage(role="user", content=big_text)], metadata={"team_role": "company_intake"}))
+    assert response.quality_review["status"] == "no_material_issues"
+    assert len(provider.requests) == 2  # author + reviewer, nothing skipped for size
+    assert big_text[:200] in provider.requests[1].messages[0].content  # the reviewer saw the materials, uncut
 
 
 @pytest.mark.asyncio

@@ -63,6 +63,7 @@ class Revision(BaseModel):
 REVIEW_TIMEOUT = 45
 REVISION_TIMEOUT = 75
 MAX_CONTEXT_CHARS = 24000
+MAX_ORIGINAL_CHARS = 70000
 
 
 # Reader-facing marketing materials: the critic judges whether they attract clients.
@@ -223,6 +224,7 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
                          validate_revision: Callable[[dict], None] | None = None,
                          on_review_progress: Callable[[LLMResponse], None] | None = None,
                          max_context_chars: int = MAX_CONTEXT_CHARS,
+                         max_original_chars: int = MAX_ORIGINAL_CHARS,
                          review_timeout: float = REVIEW_TIMEOUT,
                          revision_timeout: float = REVISION_TIMEOUT) -> LLMResponse:
     """Only structured agent drafts are eligible; no change to authorization policy."""
@@ -240,7 +242,7 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
     task_text = json.dumps(task, ensure_ascii=False)
     if len(task_text) > max_context_chars:
         return _record(original, "skipped_incomplete_context", [])
-    if len(original.content) > 70000:
+    if len(original.content) > max_original_chars:
         return _record(original, "skipped_size_limit", [])
 
     try:

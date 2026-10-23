@@ -401,7 +401,7 @@ class CompanyIntakeService:
                             for s in eligible]}))],
                         response_schema=IntakeExtraction.model_json_schema(),
                         metadata={"team_role": ROLE, "reasoning_effort": "low"},
-                    )), timeout=timeout)
+                    )), timeout=timeout + getattr(llm, "extra_timeout_seconds", 0))
                     if response.stop_reason not in {None, "end_turn", "stop_sequence"} or len(response.content) > 120_000:
                         raise IntakeError("incomplete_reply")
                     extraction, malformed = _parse_extraction(clean_text(response.content))
