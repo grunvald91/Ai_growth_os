@@ -28,7 +28,8 @@ FOCUS = (
     "back, which services to push, what to test). Each decision: plain Russian for a venue owner, concrete numbers "
     "taken from the metrics, and evidence_references of kind metric pointing at the metrics it relies on. "
     "If the data is thin, say so and propose a TEST instead of a confident conclusion. "
-    "Never invent numbers, reasons or clients."
+    "Never invent numbers, reasons or clients. The text is read by the owner: never mention metric names, source "
+    "names, IDs, data sets or the company's technical name; speak about bookings, clients, days and money."
 )
 
 

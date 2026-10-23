@@ -101,7 +101,9 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
     priced = [b.price for b in sold if b.price]
     if priced:
         total = sum(priced)
-        average = total / len(done) if done else 0.0  # per visit: a visit with an add-on is one cheque
+        # Per visit with a price: a visit with an add-on is one cheque; visits without a price are left out.
+        paid_visits = sum(1 for b in done if b.price) or len(done)
+        average = total / paid_visits if paid_visits else 0.0
         add("revenue_total", "Сумма записей по цене услуги", total, "₽")
         add("average_check", "Средний чек", average, "₽")
         result.lines.append(f"Сумма записей по цене услуг: {_money(total)}, средний чек {_money(average)}.")

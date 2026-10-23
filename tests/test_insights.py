@@ -491,3 +491,10 @@ def test_bookings_entered_after_the_visit_do_not_count_as_same_day():
     ahead = row(2, day, client=2, made=datetime.combine(day - timedelta(days=4), datetime.min.time()) + timedelta(hours=9))
     by_name = {f.name: f.value for f in compute(schedule([backfilled, ahead]), TODAY, 30, 14).facts}
     assert by_name["servgo.lead_time_median_days"] == 4 and by_name["servgo.same_day_share_pct"] == 0.0
+
+
+def test_average_check_leaves_out_visits_without_a_price():
+    days = [TODAY - timedelta(days=d) for d in (2, 3, 4)]
+    rows_ = [row(1, days[0], price=10000), row(2, days[1], price=20000), row(3, days[2], price=None)]
+    by_name = {f.name: f.value for f in compute(schedule(rows_), TODAY, 30, 14).facts}
+    assert by_name["servgo.average_check"] == 15000
