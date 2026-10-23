@@ -23,8 +23,10 @@ from app.privacy.gateway import PrivacyGateway
 MAX_FILE_BYTES = 20_000_000
 FILE_HELP = "TXT, MD, JSON, CSV, DOCX, PDF, XLSX, XLS, JPG, PNG, WEBP, TIFF и BMP — до 20 МБ. PDF-сканы и изображения: распознавание русского и английского текста."
 MAX_TEXT = 100_000  # one file or one page; the whole collection is bounded by MAX_SOURCE_TEXT in service.py
-MAX_WEB_BYTES = 1024 * 1024
-REPEAT_MIN_CHARS = 15  # shorter pieces ("Цены", "Войти") are not worth tracking across pages
+MAX_WEB_BYTES = 5 * 1024 * 1024  # HTML of one page, scripts and styles included
+# Only long blocks count as repeats (footer text, cookie notices, SEO paragraphs). Shorter ones such as a price or
+# "до 10 человек, капитан включён" may honestly repeat on another boat's page and must stay with that boat.
+REPEAT_MIN_CHARS = 200
 WEB_PAGE_BUDGET = 200_000  # one page read on its own gets the whole website share of the model input
 
 
@@ -218,14 +220,15 @@ class _VisibleHTML(HTMLParser):
         banners) are left out, and the new pieces are remembered."""
         if seen is None:
             return " ".join(" ".join(self.parts).split())
-        kept = []
+        kept, mine = [], set()
         for piece in self.parts:
             key = " ".join(piece.split())
             if len(key) >= REPEAT_MIN_CHARS:
-                if key in seen:
+                if key in seen:  # only what EARLIER pages had: a price repeated on this page stays
                     continue
-                seen.add(key)
+                mine.add(key)
             kept.append(piece)
+        seen |= mine
         return " ".join(" ".join(kept).split())
 
 

@@ -562,7 +562,9 @@ async def test_the_page_is_cut_only_when_the_site_budget_runs_out(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_menu_and_footer_repeated_on_every_page_are_kept_once(monkeypatch):
-    menu = "<nav><p>Каталог яхт и катеров в аренду без капитана</p><p>Контакты, оплата и условия бронирования</p></nav>"
+    menu = ("<footer><p>" + "Аренда яхт и катеров в Сочи без капитана и с капитаном, прогулки, рыбалка, "
+            "праздники на воде; оплата картой, бронирование онлайн, условия отмены и возврата на сайте. " * 2
+            + "</p></footer>")
     pages = {
         "https://yachts.example/": f"<html><body>{menu}<p>Главная: лучшие яхты Сочи.</p><a href='/prices'>Цены</a></body></html>",
         "https://yachts.example/prices": f"<html><body>{menu}<p>Цены: яхта Azimut 39 — 15000 рублей в час.</p></body></html>",
@@ -574,8 +576,8 @@ async def test_menu_and_footer_repeated_on_every_page_are_kept_once(monkeypatch)
     monkeypatch.setattr(PublicWebsiteFetcher, "_get", get)
     found = await PublicWebsiteFetcher().crawl("https://yachts.example/")
     assert len(found) == 2
-    assert "Каталог яхт и катеров" in found[0].text
-    assert "Каталог яхт и катеров" not in found[1].text and "Azimut 39 — 15000" in found[1].text
+    assert "праздники на воде" in found[0].text
+    assert "праздники на воде" not in found[1].text and "Azimut 39 — 15000" in found[1].text
 
 
 @pytest.mark.asyncio
@@ -594,3 +596,22 @@ async def test_a_big_site_is_read_in_full_many_pages(monkeypatch):
     found = await PublicWebsiteFetcher().crawl(f"{base}/")
     assert len(found) >= 15  # not stopped after eight pages
     assert all(page.status == "read" for page in found)  # each is ~14 000 characters, none is cut
+
+
+
+@pytest.mark.asyncio
+async def test_a_price_repeated_for_different_boats_is_kept(monkeypatch):
+    price = "Стоимость: от 15 000 рублей за один час прогулки"
+    pages = {
+        "https://yachts.example/": f"<html><body><h2>Azimut</h2><p>{price}</p><h2>Princess</h2><p>{price}</p>"
+                                   "<a href='/bavaria'>Bavaria</a></body></html>",
+        "https://yachts.example/bavaria": f"<html><body><h2>Bavaria</h2><p>{price}</p></body></html>",
+    }
+
+    def get(self, url):
+        return url, "text/html; charset=utf-8", pages[url]
+
+    monkeypatch.setattr(PublicWebsiteFetcher, "_get", get)
+    found = await PublicWebsiteFetcher().crawl("https://yachts.example/")
+    assert found[0].text.count(price) == 2  # both boats on the same page keep their price
+    assert price in found[1].text  # and the next boat's page keeps it too
