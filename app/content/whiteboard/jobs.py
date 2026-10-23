@@ -14,7 +14,7 @@ from sqlalchemy import select
 from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Product, Task, TaskStatus
 from app.privacy import PrivacyGateway
 from .contracts import Contract, WhiteboardRequest
-from .runtime import ReadinessError, WhiteboardModels
+from .runtime import TRANSIENT_STATUSES, ReadinessError, WhiteboardModels
 from pydantic import Field, model_validator
 
 AGENT = 'whiteboard_renderer'
@@ -164,8 +164,22 @@ RESUMABLE_ERRORS = frozenset({'generation_failed', 'interrupted', 'provider_serv
                               'openrouter_unavailable', 'storyboard_empty'})
 RESUME_ACTION = 'whiteboard_resume'
 AUTO_RESUME_ACTION = 'whiteboard_auto_resume'
-# Pause before each automatic continuation: 1, 5, 15, 30, 60 minutes.
-AUTO_RESUME_DELAYS = (60, 300, 900, 1800, 3600)
+# Pause before an automatic continuation, the same every time (it never grows):
+# 5 minutes when the provider is down or silent (it is checked again at that rhythm),
+# 30 seconds for anything else (a reply that missed our format; waiting does not help it).
+PROVIDER_RESUME_DELAY = 300
+OTHER_RESUME_DELAY = 30
+PROVIDER_EXCEPTIONS = frozenset({'ConnectError', 'ConnectTimeout', 'ReadTimeout', 'WriteTimeout', 'PoolTimeout',
+                                 'RemoteProtocolError', 'ReadError', 'TimeoutError'})
+
+
+def resume_delay(code, value) -> int:
+    """How long to wait before the next automatic attempt, by who caused the stop."""
+    diagnostic = value.get('diagnostic') or {}
+    provider = (code in ('provider_server_error', 'openrouter_unavailable')
+                or diagnostic.get('exception_type') in PROVIDER_EXCEPTIONS
+                or diagnostic.get('http_status') in TRANSIENT_STATUSES)
+    return PROVIDER_RESUME_DELAY if provider else OTHER_RESUME_DELAY
 ERROR_HISTORY_LIMIT = 50
 TOP_UP_STEP = 10       # extra calls one owner confirmation may add
 TOP_UP_TOTAL = 25      # extra calls a job may receive in total
@@ -219,19 +233,19 @@ def refund_unanswered(value) -> int:
 
 
 def schedule_auto_resume(db, task, source, value, payload, code, *, attempts, now=None) -> bool:
-    """Requeue a transient failure after a growing pause, inside the approved call limit.
+    """Requeue a transient failure after a short fixed pause, inside the approved call limit.
 
     No extra money is approved here: continuation spends only calls the owner
     already confirmed, completed stages are reused, and every automatic attempt
     is recorded as its own policy Approval row.
     """
     used = int(value.get('auto_resumes', 0))
-    limit = min(attempts, len(AUTO_RESUME_DELAYS))
+    limit = attempts
     if (code not in RESUMABLE_ERRORS or used >= limit or payload.visual_repair_from is not None
             or not (value.get('calls', 0) < call_limit(value, payload) or value.get('failed_stage') == 'rendering')):
         return False
     now = now or datetime.now(timezone.utc)
-    delay = AUTO_RESUME_DELAYS[used]
+    delay = resume_delay(code, value)
     db.add(Approval(product_id=task.product_id, artifact_id=source.id, action_type=AUTO_RESUME_ACTION,
                     risk_level='YELLOW', status='approved', requested_by='policy', decided_by='policy:auto_resume',
                     decided_at=now, reason=f'auto resume {used + 1}/{limit} after {code} at {value.get("failed_stage")}; '
