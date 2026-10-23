@@ -532,3 +532,29 @@ async def test_working_first_model_never_calls_the_others(db, tmp_path):
     assert review["extraction_model"] == "deepseek-v4.1-flash"
     assert made["deepseek-v4.1-flash"].calls == 1
     assert all(p.calls == 0 for name, p in made.items() if name != "deepseek-v4.1-flash")
+
+
+@pytest.mark.asyncio
+async def test_a_long_website_page_is_read_whole_not_cut_at_a_fixed_size(monkeypatch):
+    long_text = " ".join(f"Прогулка {i} — яхта по цене {i * 100} рублей." for i in range(1, 700))  # ~30 000 characters
+    assert len(long_text) > 20_000
+
+    def get(self, url):
+        return "https://yachts.example/", "text/html; charset=utf-8", f"<html><body><p>{long_text}</p></body></html>"
+
+    monkeypatch.setattr(PublicWebsiteFetcher, "_get", get)
+    page = (await PublicWebsiteFetcher().crawl("https://yachts.example/"))[0]
+    assert page.status == "read" and not page.note
+    assert "Прогулка 699" in page.text  # the end of the page is there
+
+
+@pytest.mark.asyncio
+async def test_the_page_is_cut_only_when_the_site_budget_runs_out(monkeypatch):
+    long_text = "Яхта в аренду. " * 3000
+
+    def get(self, url):
+        return "https://yachts.example/", "text/html; charset=utf-8", f"<html><body><p>{long_text}</p></body></html>"
+
+    monkeypatch.setattr(PublicWebsiteFetcher, "_get", get)
+    page = (await PublicWebsiteFetcher().crawl("https://yachts.example/", text_budget=20_000))[0]
+    assert page.status == "truncated" and len(page.text) == 20_000 and "20 000" in page.note
