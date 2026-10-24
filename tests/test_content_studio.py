@@ -502,3 +502,13 @@ def test_mobile_navigation_has_four_primary_controls():
     assert nav.controls[2].get('class') == 'active'
     # Every other section is one tap away in the bottom "Ещё" sheet.
     assert 'class="m-more"' in mobile_nav_html(product_id) and base + '/accounts' in mobile_nav_html(product_id)
+
+
+def test_desktop_sidebar_shows_accounts_link_without_opening_the_extras():
+    from uuid import uuid4
+    from app.api.content_studio import sidebar_html
+    product_id = uuid4()
+    html = sidebar_html(product_id)
+    main, extras = html.split('<details class="sg-side-extras">')
+    assert f'/studio/products/{product_id}/accounts' in main and 'Аккаунты' in main
+    assert 'Аккаунты' not in extras
