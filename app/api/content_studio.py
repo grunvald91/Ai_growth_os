@@ -363,11 +363,12 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         {item("work", base + "/work", "◴", "В работе")}
         {item("materials", base + "/materials", "▤", "Мои материалы")}
         <a href="https://servgo.ru/mail"><span class="nav-ico" aria-hidden="true">✉</span>Почта</a>
+        {item("accounts", base + "/accounts", "☺", "Аккаунты")}
       </nav>
       <details class="sg-side-extras">
         <summary>Настройки маркетинга и другое</summary>
         <nav class="nav" aria-label="Дополнительные инструменты">
-          {"".join(item(*link) for link in more_links(product_id) if link[0] not in {"mail", "servgo"})}
+          {"".join(item(*link) for link in more_links(product_id) if link[0] not in {"mail", "servgo", "accounts"})}
         </nav>
       </details>
       <div class="sidebar-spacer"></div>
