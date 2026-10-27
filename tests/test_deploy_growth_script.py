@@ -134,3 +134,24 @@ def test_overlay_passes_the_sign_in_secrets_as_references_not_values():
         assert env["SERVGO_INTERNAL_KEY"] == "${SERVGO_INTERNAL_KEY:-}"
         assert env["FLAG"] == "true" and env["RELEASE_SHA"] == "abc"
         assert overlay["services"][service]["image"] == "img:1"
+
+
+def test_voice_key_is_created_once_kept_and_handed_over_root_only(tmp_path, capsys):
+    env_file, handoff = tmp_path / ".env", tmp_path / "deploy" / "voice_api_key.env"
+    env_file.write_text("OPENROUTER_API_KEY=keep-me\nVOICE_API_KEY=\n")
+    env_file.chmod(0o640)
+    assert deploy_growth.provision_voice_key(env_file, handoff) == ["VOICE_API_KEY"]
+    values = dict(line.split("=", 1) for line in env_file.read_text().splitlines())
+    assert values["OPENROUTER_API_KEY"] == "keep-me" and len(values["VOICE_API_KEY"]) == 64
+    assert env_file.read_text().count("VOICE_API_KEY") == 1 and oct(env_file.stat().st_mode & 0o777) == "0o640"
+    assert handoff.read_text() == f"VOICE_API_KEY={values['VOICE_API_KEY']}\n"
+    assert oct(handoff.stat().st_mode & 0o777) == "0o600"
+    before = env_file.read_text()
+    assert deploy_growth.provision_voice_key(env_file, handoff) == [] and env_file.read_text() == before
+    assert values["VOICE_API_KEY"] not in capsys.readouterr().out
+
+
+def test_overlay_passes_the_voice_key_as_a_reference():
+    overlay = deploy_growth.overlay_document({"overlay_env": {}}, "img:1", "abc")
+    for service in deploy_growth.SERVICES:
+        assert overlay["services"][service]["environment"]["VOICE_API_KEY"] == "${VOICE_API_KEY:-}"

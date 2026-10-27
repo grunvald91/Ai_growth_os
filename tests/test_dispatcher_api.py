@@ -221,3 +221,17 @@ def test_dispatcher_can_be_enabled_for_every_company_or_a_list():
     assert enabled_for(SimpleNamespace(dispatcher_enabled_slugs="*"), company)
     assert enabled_for(SimpleNamespace(dispatcher_enabled_slugs="servgo, company-1"), company)
     assert not enabled_for(SimpleNamespace(dispatcher_enabled_slugs="servgo"), company)
+
+
+def test_home_has_a_microphone_that_only_fills_the_input_field(env):
+    db, settings, servgo, other, _ = env
+    client = TestClient(app)
+    page = client.get(f"/studio/products/{servgo.id}").text
+    assert 'id="dp-mic"' in page and 'data-voice-url="/studio/voice/dictate"' in page
+    assert f'data-voice-max="{settings.voice_max_audio_seconds}"' in page
+    # The mic sits inside the same form as the send button, so it is within thumb reach on a phone.
+    form = page[page.index('id="dp-form"'):page.index("</form>")]
+    assert 'id="dp-mic"' in form and 'id="dp-send"' in form
+    js = client.get("/studio/assets/dispatcher.js").text
+    # Dictation never sends anything by itself: it talks only to the voice endpoint and writes into the field.
+    assert "voiceUrl" in js and "input.value = before + inserted" in js

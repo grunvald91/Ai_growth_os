@@ -190,43 +190,43 @@ SSO_HANDOFF = HOME / "servgo_sso.env"   # the same two values under ServGo's nam
 SSO_KEYS = ("SERVGO_SSO_SECRET", "SERVGO_INTERNAL_KEY")
 SSO_SERVGO_NAMES = {"SERVGO_SSO_SECRET": "STUDIO_SSO_SECRET", "SERVGO_INTERNAL_KEY": "STUDIO_INTERNAL_KEY"}
 SSO_MIN_LENGTH = 32
+VOICE_KEY = "VOICE_API_KEY"
+VOICE_HANDOFF = HOME / "voice_api_key.env"   # the key for bots, root-only, for their own deploys
+VOICE_MIN_LENGTH = 32
 
 
 def overlay_document(settings: dict, image: str, sha: str) -> dict:
     """Compose overlay for api/worker/telegram. The two sign-in secrets are only *references* (${NAME}), which
     compose fills in from /opt/ai_growth_os/.env when the containers are created; the file never holds a value.
     Without them in .env the references are empty and the ServGo sign-in and schedule stay switched off."""
-    references = {key: "${" + key + ":-}" for key in SSO_KEYS}
+    references = {key: "${" + key + ":-}" for key in (*SSO_KEYS, VOICE_KEY)}
     return {"services": {s: {"image": image, "environment": {
         **settings["overlay_env"], **references, "RELEASE_SHA": sha}} for s in SERVICES}}
 
 
-def provision_sso_secrets(env_file: Path = ENV_FILE, handoff: Path = SSO_HANDOFF) -> list[str]:
-    """Make sure the sign-in secrets for the ServGo admin exist; create missing ones, never print them.
+def ensure_env_secrets(env_file: Path, keys: tuple[str, ...], min_length: int) -> tuple[dict[str, str], list[str]]:
+    """Make sure each of `keys` exists in the server's .env with a random value of at least `min_length` characters.
 
-    Both secrets are random, live only in the server's .env (mode kept) and in a root-only handoff file
-    that ServGo's own deploy copies into its environment. Existing values are never changed, so a
-    repeated deploy does not log anyone out. Returns what was created (names only).
+    Existing values are never changed; short or empty placeholders (KEY=) are replaced, not duplicated. The file is
+    swapped in at once (temporary file + rename, mode and owner kept): a failure half-way must never leave production
+    with a truncated .env, it holds every other secret too. Returns (all values, names created); never prints values.
     """
     text = env_file.read_text() if env_file.exists() else ""
     values = {}
     for line in text.splitlines():
         key, separator, value = line.partition("=")
-        if separator and key.strip() in SSO_KEYS:
+        if separator and key.strip() in keys:
             values[key.strip()] = value.strip().strip("\"'")
     created = []
     addition = ""
-    for key in SSO_KEYS:
-        if len(values.get(key, "")) < SSO_MIN_LENGTH:
+    for key in keys:
+        if len(values.get(key, "")) < min_length:
             values[key] = secrets.token_hex(32)
             addition += f"{key}={values[key]}\n"
             created.append(key)
     if addition:
-        # Short or empty placeholders (KEY=) are replaced, not duplicated.
         kept = [line for line in text.splitlines() if line.partition("=")[0].strip() not in created]
         body = "\n".join(kept) + ("\n" if kept else "")
-        # Written to a temporary file and swapped in at once: a failure half-way must never
-        # leave production with a truncated .env (it holds every other secret too).
         stat = env_file.stat() if env_file.exists() else None
         temporary = env_file.with_name(env_file.name + ".sso-tmp")
         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.st_mode & 0o777 if stat else 0o600)
@@ -245,11 +245,37 @@ def provision_sso_secrets(env_file: Path = ENV_FILE, handoff: Path = SSO_HANDOFF
         finally:
             if temporary.exists():
                 temporary.unlink()
+    return values, created
+
+
+def write_handoff(handoff: Path, lines: str) -> None:
     handoff.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(handoff, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w") as stream:
-        stream.write("".join(f"{SSO_SERVGO_NAMES[key]}={values[key]}\n" for key in SSO_KEYS))
+        stream.write(lines)
     os.chmod(handoff, 0o600)
+
+
+def provision_sso_secrets(env_file: Path = ENV_FILE, handoff: Path = SSO_HANDOFF) -> list[str]:
+    """Make sure the sign-in secrets for the ServGo admin exist; create missing ones, never print them.
+
+    Both secrets are random, live only in the server's .env (mode kept) and in a root-only handoff file
+    that ServGo's own deploy copies into its environment. Existing values are never changed, so a
+    repeated deploy does not log anyone out. Returns what was created (names only).
+    """
+    values, created = ensure_env_secrets(env_file, SSO_KEYS, SSO_MIN_LENGTH)
+    write_handoff(handoff, "".join(f"{SSO_SERVGO_NAMES[key]}={values[key]}\n" for key in SSO_KEYS))
+    return created
+
+
+def provision_voice_key(env_file: Path = ENV_FILE, handoff: Path = VOICE_HANDOFF) -> list[str]:
+    """The shared key of the voice module's service door (header X-Voice-Key) for bots and other products' pages.
+
+    Created once, kept in the server's .env and in a root-only handoff file that a bot's own deploy copies into its
+    environment (same way as the ServGo sign-in secrets). Never changed on a repeated deploy, never printed.
+    """
+    values, created = ensure_env_secrets(env_file, (VOICE_KEY,), VOICE_MIN_LENGTH)
+    write_handoff(handoff, f"{VOICE_KEY}={values[VOICE_KEY]}\n")
     return created
 
 
@@ -286,6 +312,8 @@ def deploy(sha: str, payload: bytes) -> None:
     LAST_GOOD.write_text(json.dumps(previous))
     created = provision_sso_secrets()
     log("ServGo sign-in secrets: " + (("created " + ", ".join(created)) if created else "already present"))
+    created = provision_voice_key()
+    log("Voice service key: " + (("created " + ", ".join(created)) if created else "already present"))
     try:
         compose_up(base_files + [str(overlay)], previous["cwd"])
         wait_healthy()
