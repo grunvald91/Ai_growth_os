@@ -250,6 +250,172 @@
     }).catch(function (error) { notify(error.message); });
   });
 
+  // ---- voice input: speak, the text lands in the field, the person sends it themselves -----
+
+  var micButton = document.getElementById('dp-mic');
+  var voiceNote = document.getElementById('dp-voice-note');
+  var voiceUrl = root.getAttribute('data-voice-url');
+  var voiceProject = root.getAttribute('data-voice-project') || '';
+  var voiceMax = parseInt(root.getAttribute('data-voice-max'), 10) || 300;
+  var defaultPlaceholder = input.getAttribute('placeholder');
+  var recorder = null, recordStream = null, recordChunks = [], recordStarted = 0, recordTimer = null;
+  var voiceWorking = false;
+  var lastInsert = null;
+
+  function mimeCandidate() {
+    var list = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+    for (var i = 0; i < list.length; i++) {
+      if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(list[i])) return list[i];
+    }
+    return '';
+  }
+
+  function extensionFor(type) {
+    if (type.indexOf('mp4') >= 0) return 'm4a';
+    if (type.indexOf('ogg') >= 0) return 'ogg';
+    return 'webm';
+  }
+
+  function showNote(text, bad, undo) {
+    voiceNote.textContent = '';
+    voiceNote.classList.toggle('bad', !!bad);
+    if (!text) { voiceNote.hidden = true; return; }
+    voiceNote.appendChild(el('span', '', text));
+    if (undo) voiceNote.appendChild(undo);
+    voiceNote.hidden = false;
+  }
+
+  function clock(seconds) {
+    var m = Math.floor(seconds / 60), s = seconds % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function recentLines() {
+    var lines = [];
+    var nodes = feed.querySelectorAll('.dp-msg:not(.dp-typing):not(.dp-error)');
+    for (var i = Math.max(0, nodes.length - 3); i < nodes.length; i++) {
+      var parts = nodes[i].querySelectorAll('.dp-text');
+      var text = Array.prototype.map.call(parts, function (p) { return p.textContent; }).join(' ').trim();
+      if (text) lines.push(text);
+    }
+    return lines;
+  }
+
+  function setVoiceState(mode) {
+    var recording = mode === 'recording';
+    micButton.classList.toggle('recording', recording);
+    micButton.setAttribute('aria-pressed', recording ? 'true' : 'false');
+    micButton.setAttribute('aria-label', recording ? 'Закончить запись' : 'Надиктовать голосом');
+    micButton.disabled = mode === 'processing';
+    input.setAttribute('placeholder', mode === 'processing' ? 'Распознаю…' : defaultPlaceholder);
+  }
+
+  function releaseStream() {
+    if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
+    if (recordStream) { recordStream.getTracks().forEach(function (t) { t.stop(); }); recordStream = null; }
+  }
+
+  function startRecording() {
+    if (voiceWorking || recorder) return;
+    showNote('');
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      recordStream = stream;
+      var type = mimeCandidate();
+      try { recorder = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream); }
+      catch (error) { releaseStream(); showNote('Этот браузер не умеет записывать звук.', true); return; }
+      recordChunks = [];
+      recorder.addEventListener('dataavailable', function (event) { if (event.data && event.data.size) recordChunks.push(event.data); });
+      recorder.addEventListener('stop', onRecorded);
+      recorder.start();
+      recordStarted = Date.now();
+      setVoiceState('recording');
+      var tick = function () {
+        var seconds = Math.floor((Date.now() - recordStarted) / 1000);
+        input.setAttribute('placeholder', 'Идёт запись ' + clock(seconds));
+        if (seconds >= voiceMax) stopRecording();
+      };
+      tick();
+      recordTimer = setInterval(tick, 250);
+    }).catch(function (error) {
+      releaseStream();
+      var denied = error && (error.name === 'NotAllowedError' || error.name === 'SecurityError');
+      showNote(denied ? 'Нет доступа к микрофону. Разрешите его для этого сайта в настройках браузера.'
+                      : 'Микрофон не найден или занят другим приложением.', true);
+    });
+  }
+
+  function stopRecording() {
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
+  }
+
+  function onRecorded() {
+    var type = (recorder && recorder.mimeType) || 'audio/webm';
+    var millis = Date.now() - recordStarted;
+    recorder = null;
+    releaseStream();
+    var blob = new Blob(recordChunks, { type: type });
+    recordChunks = [];
+    voiceWorking = true;
+    setVoiceState('processing');
+    var form = new FormData();
+    form.append('audio', blob, 'dictation.' + extensionFor(type));
+    form.append('duration_ms', String(millis));
+    form.append('context', JSON.stringify(recentLines()));
+    if (voiceProject) form.append('project', voiceProject);
+    fetch(voiceUrl, { method: 'POST', credentials: 'same-origin', headers: { 'Accept': 'application/json' }, body: form })
+      .then(function (response) {
+        return response.json().catch(function () { return {}; }).then(function (data) {
+          if (!response.ok) throw new Error((data && data.detail) || 'Не получилось распознать. Попробуйте ещё раз.');
+          return data;
+        });
+      })
+      .then(applyDictation)
+      .catch(function (error) { showNote(error.message, true); })
+      .then(function () { voiceWorking = false; setVoiceState('idle'); input.focus(); });
+  }
+
+  var emptyReasons = {
+    too_short: 'Запись слишком короткая. Попробуйте ещё раз.',
+    silence: 'Речи не слышно. Попробуйте ещё раз.',
+    too_long: 'Запись длиннее ' + Math.round(voiceMax / 60) + ' минут. Надиктуйте по частям.',
+    stt_error: 'Не получилось распознать. Попробуйте ещё раз.'
+  };
+
+  function applyDictation(data) {
+    if (data.empty || !data.text) {
+      showNote(emptyReasons[data.empty_reason] || emptyReasons.silence, true);
+      return;
+    }
+    var before = input.value;
+    var glue = before && !/\s$/.test(before) ? ' ' : '';
+    var inserted = glue + data.text;
+    input.value = before + inserted;
+    grow();
+    lastInsert = { before: before, inserted: inserted, raw: glue + data.raw_text };
+    var changes = (data.replacements || []).map(function (item) { return item.from + ' → ' + item.to; });
+    if (data.cleaned && changes.length && data.raw_text !== data.text) {
+      var undo = el('button', 'dp-voice-undo', 'Вернуть как сказано');
+      undo.type = 'button';
+      undo.addEventListener('click', function () {
+        if (lastInsert && input.value === lastInsert.before + lastInsert.inserted) {
+          input.value = lastInsert.before + lastInsert.raw; grow();
+        }
+        showNote('');
+        input.focus();
+      });
+      showNote('Поправил: ' + changes.join(', '), false, undo);
+    } else if (data.fallback_reason) {
+      showNote('Вставил как распознано: правка не получилась.', false);
+    } else {
+      showNote('');
+    }
+  }
+
+  if (micButton && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder && voiceUrl) {
+    micButton.hidden = false;
+    micButton.addEventListener('click', function () { if (recorder) stopRecording(); else startRecording(); });
+  }
+
   // Finished work comes back into the conversation by itself: ask now and then while the page is open.
   function checkUpdates() {
     if (document.hidden || busy) return;

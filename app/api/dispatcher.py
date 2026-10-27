@@ -26,10 +26,11 @@ from app.dispatcher.hints import compute_hints
 from app.llm.service import LLMService
 from app.models.domain import Product
 from app.privacy import PrivacyGateway
+from app.voice.dictionary import SLUG
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ASSETS = Path(__file__).parent / "dispatcher_assets"
-ASSET_VERSION = "5"
+ASSET_VERSION = "6"
 MAX_BODY_BYTES = 1_000_000  # same guard as the Studio forms
 
 
@@ -106,6 +107,9 @@ def _state(db: Session, product: Product, settings: Settings, request: Request) 
 def home_html(db: Session, product: Product, settings: Settings, request: Request) -> str:
     state = json.dumps(_state(db, product, settings, request), ensure_ascii=False).replace("<", "\\u003c")
     base = f"/studio/products/{product.id}"
+    # The product's own dictionary is used only when its slug is a valid dictionary name.
+    voice_project = product.slug if SLUG.match(product.slug or "") else ""
+    voice_max = int(settings.voice_max_audio_seconds)
     return f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -123,20 +127,27 @@ def home_html(db: Session, product: Product, settings: Settings, request: Reques
   {mobile_header_html(product)}
   {mobile_nav_html(product.id, "overview")}
   <main class="main dp-main">
-    <section class="dp-home" data-api="{base}/dispatch" aria-label="Диспетчер">
+    <section class="dp-home" data-api="{base}/dispatch" data-voice-url="/studio/voice/dictate"
+             data-voice-project="{esc(voice_project)}" data-voice-max="{voice_max}" aria-label="Диспетчер">
       <header class="dp-hello">
         <h1>Чем помочь?</h1>
         <p>Напишите, что нужно, — я передам команде или покажу, где это.</p>
       </header>
       <div class="dp-feed" id="dp-feed" role="log" aria-live="polite" aria-label="Разговор"></div>
       <div class="dp-chips" id="dp-chips" aria-label="Подсказки"></div>
-      <form class="dp-form" id="dp-form" autocomplete="off">
-        <label class="dp-sr" for="dp-input">Ваш запрос</label>
-        <textarea id="dp-input" class="dp-input" rows="1" placeholder="Что нужно сделать?" enterkeyhint="send"></textarea>
-        <button class="dp-send" id="dp-send" type="submit" aria-label="Отправить">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-        </button>
-      </form>
+      <div class="dp-compose">
+        <p class="dp-voice-note" id="dp-voice-note" role="status" aria-live="polite" hidden></p>
+        <form class="dp-form" id="dp-form" autocomplete="off">
+          <label class="dp-sr" for="dp-input">Ваш запрос</label>
+          <textarea id="dp-input" class="dp-input" rows="1" placeholder="Что нужно сделать?" enterkeyhint="send"></textarea>
+          <button class="dp-mic" id="dp-mic" type="button" aria-label="Надиктовать голосом" aria-pressed="false" hidden>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          </button>
+          <button class="dp-send" id="dp-send" type="submit" aria-label="Отправить">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </form>
+      </div>
       <button class="dp-new" id="dp-new" type="button">Новая тема</button>
     </section>
   </main>
