@@ -495,3 +495,36 @@ def test_first_busy_day_without_history_is_noticed(env):
     add_usage(db, 0, "0.40", now)
     message = spend_alert(db, settings, now)
     assert message and "сравнивать не с чем" in message
+
+
+# --- live view while recording -------------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_preview_returns_raw_words_without_the_model_and_counts_the_call(env):
+    service, db = pipeline(env, FakeSTT(transcript("проверь вин автомобиля")), None)
+    text, reason = await service.preview(GOOD_AUDIO, filename="a.webm", content_type="audio/webm",
+                                         account="owner", project=None)
+    assert text == "проверь вин автомобиля" and reason is None
+    row = db.scalar(select(VoiceUsage))
+    assert row.outcome == "preview" and row.llm_model is None and row.audio_seconds == 4.0
+
+
+@pytest.mark.asyncio
+async def test_preview_of_silence_or_a_tiny_clip_is_empty(env):
+    stt = FakeSTT(transcript("Продолжение следует", segments=[Segment("Продолжение следует", 0.95, -2.0)]))
+    service, _ = pipeline(env, stt, None)
+    assert await service.preview(GOOD_AUDIO, filename="a.webm", content_type="audio/webm",
+                                 account="owner", project=None) == ("", "silence")
+    stt.calls.clear()
+    assert await service.preview(b"x", filename="a.webm", content_type="audio/webm",
+                                 account="owner", project=None) == ("", "too_short")
+    assert stt.calls == []
+
+
+def test_preview_endpoint_uses_the_studio_login_and_needs_no_model(env):
+    client = api_client(env, stt=FakeSTT(transcript("привет")), llm=None)
+    response = post(client, "/studio/voice/preview")
+    assert response.status_code == 200 and response.json() == {"text": "привет", "empty": False, "empty_reason": None}
+    assert post(api_client(env, stt=None, llm=None), "/studio/voice/preview").status_code == 503
+    failing = api_client(env, stt=FakeSTT(error=STTError("Распознавание вернуло ошибку 500")), llm=None)
+    assert post(failing, "/studio/voice/preview").status_code == 502

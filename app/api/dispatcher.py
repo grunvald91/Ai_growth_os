@@ -30,7 +30,7 @@ from app.voice.dictionary import SLUG
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ASSETS = Path(__file__).parent / "dispatcher_assets"
-ASSET_VERSION = "6"
+ASSET_VERSION = "7"
 MAX_BODY_BYTES = 1_000_000  # same guard as the Studio forms
 
 
@@ -127,7 +127,7 @@ def home_html(db: Session, product: Product, settings: Settings, request: Reques
   {mobile_header_html(product)}
   {mobile_nav_html(product.id, "overview")}
   <main class="main dp-main">
-    <section class="dp-home" data-api="{base}/dispatch" data-voice-url="/studio/voice/dictate"
+    <section class="dp-home" data-api="{base}/dispatch" data-voice-url="/studio/voice/dictate" data-voice-preview-url="/studio/voice/preview"
              data-voice-project="{esc(voice_project)}" data-voice-max="{voice_max}" aria-label="Диспетчер">
       <header class="dp-hello">
         <h1>Чем помочь?</h1>
@@ -136,6 +136,10 @@ def home_html(db: Session, product: Product, settings: Settings, request: Reques
       <div class="dp-feed" id="dp-feed" role="log" aria-live="polite" aria-label="Разговор"></div>
       <div class="dp-chips" id="dp-chips" aria-label="Подсказки"></div>
       <div class="dp-compose">
+        <div class="dp-live" id="dp-live" hidden>
+          <span class="dp-live-label" id="dp-live-label">Слушаю…</span>
+          <p class="dp-live-text" id="dp-live-text"></p>
+        </div>
         <p class="dp-voice-note" id="dp-voice-note" role="status" aria-live="polite" hidden></p>
         <form class="dp-form" id="dp-form" autocomplete="off">
           <label class="dp-sr" for="dp-input">Ваш запрос</label>

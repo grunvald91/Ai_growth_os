@@ -55,7 +55,18 @@
 .dp-msg .dp-chiprow{flex-wrap:wrap;overflow:visible}
 .dp-msg .dp-chip{background:#fff}
 
-.dp-compose{grid-area:form;margin-bottom:6px}
+.dp-compose{grid-area:form;margin-bottom:6px;display:flex;flex-direction:column}
+.dp-live[hidden]{display:none}
+.dp-live{order:-2;margin:0 0 8px;padding:10px 14px;border-radius:16px;background:var(--dp-light);max-height:32vh;overflow-y:auto;
+  overscroll-behavior:contain}
+.dp-live-label{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--dp-muted)}
+.dp-live-label::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--dp-bad);animation:dp-pulse 1.4s ease-in-out infinite}
+.dp-live.working .dp-live-label::before{background:var(--dp-accent);animation:none}
+.dp-live-text{margin:4px 0 0;font-size:16px;line-height:1.4;color:var(--dp-text);white-space:pre-wrap;overflow-wrap:anywhere}
+.dp-live-text:empty{display:none}
+.dp-voice-note{order:-1}
+.dp-form{order:0}
 .dp-form{display:flex;align-items:flex-end;gap:8px;padding:6px 6px 6px 16px;border-radius:26px;
   background:var(--dp-soft);transition:background .15s}
 .dp-form:focus-within{background:var(--dp-light);box-shadow:0 0 0 2px var(--dp-accent)}
@@ -124,7 +135,7 @@
 .dp-task:focus-visible{outline:2px solid var(--dp-accent);outline-offset:2px}
 
 @keyframes dp-rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-@media(prefers-reduced-motion:reduce){.dp-msg,.dp-mic.recording{animation:none}.dp-chip:active{transform:none}}
+@media(prefers-reduced-motion:reduce){.dp-msg,.dp-mic.recording,.dp-live-label::before{animation:none}.dp-chip:active{transform:none}}
 
 /* ---- desktop: Google-like. Greeting, input line, hints, then the answers below ---- */
 @media(min-width:921px){
@@ -143,6 +154,7 @@
   .dp-home.has-feed .dp-hello p{display:none}
   .dp-new{top:0}
   .dp-compose{margin-bottom:0}
+  .dp-live{order:2;margin:10px 0 0}
   .dp-voice-note{margin-left:22px}
   .dp-form{padding:8px 8px 8px 22px;border-radius:30px}
   .dp-input{font-size:17px}

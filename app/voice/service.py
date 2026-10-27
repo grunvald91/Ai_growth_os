@@ -78,6 +78,33 @@ class VoiceService:
             account, project, "ok" if cleanup.cleaned else "cleaned_fallback", transcript, stt_ms,
             raw=raw, cleanup=cleanup, llm_ms=llm_ms)
 
+    async def preview(self, audio: bytes, *, filename: str, content_type: str, account: str, project: str | None,
+                      duration_ms: int | None = None, language: str = "ru") -> tuple[str, str | None]:
+        """Recognised words for the live view while a person is still speaking: no correction, nothing stored.
+
+        Returns (text, empty_reason). The audio is the whole recording so far, so each answer replaces the last.
+        The call is counted like any other recognition so the spend notice sees it."""
+        settings = self._settings
+        if duration_ms is not None and duration_ms > settings.voice_max_audio_seconds * 1000:
+            return "", "too_long"
+        check = precheck_audio(audio, duration_ms=duration_ms, min_audio_ms=settings.voice_min_audio_ms,
+                               silence_rms=settings.voice_silence_rms)
+        if not check.ok:
+            return "", check.reason
+        if self._stt is None:
+            raise STTError("Распознавание не настроено")
+        started = time.monotonic()
+        try:
+            transcript = await self._stt.transcribe(audio, filename=filename, content_type=content_type,
+                                                    language=language, prompt=None)
+        except STTError as exc:
+            self._finish(account, project, "stt_error", None, None, detail=str(exc)[:60], empty_reason="stt_error")
+            raise
+        stt_ms = int((time.monotonic() - started) * 1000)
+        text = speech_text(transcript)
+        self._finish(account, project, "preview", transcript, stt_ms, empty_reason=None if text else "silence")
+        return text, None if text else "silence"
+
     def _finish(self, account, project, outcome, transcript, stt_ms, *, raw: str = "", cleanup=None,
                 llm_ms: int | None = None, empty_reason: str | None = None, detail: str | None = None) -> DictationResult:
         settings = self._settings

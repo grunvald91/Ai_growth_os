@@ -104,6 +104,33 @@ async def _dictate(*, audio: UploadFile, account: str, project: str | None, cont
     return _body(result)
 
 
+@studio_router.post("/studio/voice/preview")
+async def preview_in_studio(
+    request: Request, background: BackgroundTasks, audio: UploadFile = File(...), project: str | None = Form(None),
+    duration_ms: int | None = Form(None), language: str = Form("ru"),
+    settings: Settings = Depends(get_settings), db: Session = Depends(get_db),
+    stt: STTProvider | None = Depends(get_stt),
+):
+    """Live view while recording: the words recognised so far, not corrected, not stored. The final text still goes
+    through /studio/voice/dictate when the person stops."""
+    if stt is None:
+        raise HTTPException(503, "Распознавание речи не настроено на сервере")
+    if project is not None and not SLUG.match(project):
+        raise HTTPException(422, "Неверное имя проекта")
+    account = getattr(request.state, "studio_login", None) or "local-owner"
+    data = await audio.read()
+    try:
+        text, reason = await VoiceService(db=db, settings=settings, stt=stt, llm=None).preview(
+            data, filename=audio.filename or "audio", content_type=audio.content_type or "application/octet-stream",
+            account=account, project=project, duration_ms=duration_ms, language=language)
+    except STTError as exc:
+        raise HTTPException(502, str(exc)) from None
+    message = spend_alert(db, settings)
+    if message:
+        background.add_task(notify_owner, settings, message)
+    return {"text": text, "empty": not text, "empty_reason": reason}
+
+
 @studio_router.post("/studio/voice/dictate")
 async def dictate_in_studio(
     request: Request, background: BackgroundTasks, audio: UploadFile = File(...), project: str | None = Form(None),

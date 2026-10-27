@@ -14,7 +14,7 @@ class VoiceUsage(UUIDMixin, TimestampMixin, Base):
 
     account: Mapped[str] = mapped_column(String(200), nullable=False)
     project: Mapped[str | None] = mapped_column(String(64))
-    # ok | cleaned_fallback | empty | too_long | stt_error
+    # ok | cleaned_fallback | empty | too_long | stt_error | preview (live view while recording)
     outcome: Mapped[str] = mapped_column(String(30), nullable=False)
     detail: Mapped[str | None] = mapped_column(String(60))
     audio_seconds: Mapped[float | None] = mapped_column(Float)
