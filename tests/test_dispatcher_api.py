@@ -235,4 +235,3 @@ def test_home_has_a_microphone_that_only_fills_the_input_field(env):
     js = client.get("/studio/assets/dispatcher.js").text
     # Dictation never sends anything by itself: it talks only to the voice endpoint and writes into the field.
     assert "voiceUrl" in js and "input.value = before + inserted" in js
-
