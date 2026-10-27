@@ -528,3 +528,42 @@ def test_preview_endpoint_uses_the_studio_login_and_needs_no_model(env):
     assert post(api_client(env, stt=None, llm=None), "/studio/voice/preview").status_code == 503
     failing = api_client(env, stt=FakeSTT(error=STTError("Распознавание вернуло ошибку 500")), llm=None)
     assert post(failing, "/studio/voice/preview").status_code == 502
+
+
+# --- review fixes ----------------------------------------------------------------------------------------------
+
+def test_two_notices_at_once_do_not_break_the_dictation(env, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+    db, settings = env
+    now = datetime(2026, 10, 27, 12, 0, tzinfo=timezone.utc)
+    add_usage(db, 0, "0.40", now)
+    real_commit = db.commit
+
+    def racing_commit():
+        monkeypatch.setattr(db, "commit", real_commit)
+        raise IntegrityError("insert", {}, Exception("duplicate day"))
+    monkeypatch.setattr(db, "commit", racing_commit)
+    assert spend_alert(db, settings, now) is None
+
+
+def test_masked_secret_in_the_correction_falls_back_to_the_raw_text():
+    text, reason = check_result("пароль равно 1234 запиши", reply("<text>[REDACTED_SECRET] запиши</text>"))
+    assert text is None and reason == "redacted"
+
+
+def test_language_must_be_a_language_code(env):
+    client = api_client(env, stt=FakeSTT(transcript("привет")), llm=None)
+    assert post(client, "/studio/voice/dictate", data={"language": "ru\nevil"}).status_code == 422
+    assert post(client, "/studio/voice/preview", data={"language": "russian-please"}).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_recognizer_sends_the_bare_audio_type():
+    seen = {}
+
+    def handler(request):
+        seen["body"] = request.content
+        return httpx.Response(200, json={"text": "ok"})
+
+    await recognizer(handler).transcribe(b"abc", filename="a.webm", content_type="audio/webm;codecs=opus")
+    assert b"Content-Type: audio/webm\r\n" in seen["body"] and b"codecs" not in seen["body"]

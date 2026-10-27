@@ -32,6 +32,6 @@ class VoiceCostAlert(UUIDMixin, TimestampMixin, Base):
     """At most one notice per day about unusually high spend."""
     __tablename__ = "voice_cost_alerts"
 
-    day: Mapped[date] = mapped_column(Date, nullable=False, unique=True)
+    day: Mapped[date] = mapped_column(Date, nullable=False, unique=True, index=True)
     day_cost_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     usual_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))

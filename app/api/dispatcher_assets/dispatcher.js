@@ -264,7 +264,7 @@
   var voiceMax = parseInt(root.getAttribute('data-voice-max'), 10) || 300;
   var defaultPlaceholder = input.getAttribute('placeholder');
   var recorder = null, recordStream = null, recordChunks = [], recordStarted = 0, recordTimer = null;
-  var voiceWorking = false;
+  var voiceWorking = false, micOpening = false;
   var lastInsert = null;
 
   function mimeCandidate() {
@@ -373,9 +373,11 @@
   }
 
   function startRecording() {
-    if (voiceWorking || recorder) return;
+    if (voiceWorking || recorder || micOpening) return;
     showNote('');
+    micOpening = true;
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      micOpening = false;
       recordStream = stream;
       var type = mimeCandidate();
       try { recorder = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream); }
@@ -383,7 +385,8 @@
       recordChunks = [];
       recorder.addEventListener('dataavailable', function (event) { if (event.data && event.data.size) recordChunks.push(event.data); });
       recorder.addEventListener('stop', onRecorded);
-      recorder.start(1000);
+      try { recorder.start(1000); }
+      catch (error) { recorder = null; releaseStream(); showNote('Не получилось включить запись.', true); return; }
       recordStarted = Date.now();
       recordingId += 1; lastLive = '';
       showLive('Слушаю…', '', false);
@@ -397,6 +400,7 @@
       tick();
       recordTimer = setInterval(tick, 250);
     }).catch(function (error) {
+      micOpening = false;
       releaseStream();
       var denied = error && (error.name === 'NotAllowedError' || error.name === 'SecurityError');
       showNote(denied ? 'Нет доступа к микрофону. Разрешите его для этого сайта в настройках браузера.'

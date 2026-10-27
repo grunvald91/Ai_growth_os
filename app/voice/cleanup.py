@@ -67,6 +67,8 @@ def check_result(raw: str, reply: LLMResponse) -> tuple[str | None, str | None]:
     text = match.group(1).strip()
     if not text:
         return None, "empty"
+    if "[REDACTED" in text and "[REDACTED" not in raw:
+        return None, "redacted"
     lowered, raw_lowered = text.lower(), raw.strip().lower()
     if lowered.startswith(_ANSWER_STARTS) and not raw_lowered.startswith(_ANSWER_STARTS):
         return None, "looks_like_answer"

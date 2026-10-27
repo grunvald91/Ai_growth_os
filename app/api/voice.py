@@ -31,6 +31,7 @@ from app.voice.usage import notify_owner, spend_alert
 studio_router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 service_router = APIRouter()
 _ACCOUNT = re.compile(r"^[\w.@:+-]{1,200}$")
+_LANGUAGE = re.compile(r"^[a-z]{2,3}$")
 
 
 def get_stt(settings: Settings = Depends(get_settings)) -> STTProvider | None:
@@ -90,6 +91,8 @@ async def _dictate(*, audio: UploadFile, account: str, project: str | None, cont
         raise HTTPException(503, "Распознавание речи не настроено на сервере")
     if project is not None and not SLUG.match(project):
         raise HTTPException(422, "Неверное имя проекта")
+    if not _LANGUAGE.match(language):
+        raise HTTPException(422, "Неверный код языка")
     data = await audio.read()
     try:
         result = await VoiceService(db=db, settings=settings, stt=stt, llm=llm).dictate(
@@ -117,6 +120,8 @@ async def preview_in_studio(
         raise HTTPException(503, "Распознавание речи не настроено на сервере")
     if project is not None and not SLUG.match(project):
         raise HTTPException(422, "Неверное имя проекта")
+    if not _LANGUAGE.match(language):
+        raise HTTPException(422, "Неверный код языка")
     account = getattr(request.state, "studio_login", None) or "local-owner"
     data = await audio.read()
     try:

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -62,7 +63,12 @@ def spend_alert(db: Session, settings: Settings, now: datetime | None = None) ->
     if usual is not None and today_cost < usual * Decimal(str(settings.voice_cost_alert_factor)):
         return None
     db.add(VoiceCostAlert(day=today, day_cost_usd=today_cost, usual_cost_usd=usual))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Another request sent today's notice a moment ago; the dictation itself is already saved.
+        db.rollback()
+        return None
     lines = ["🎙 Голосовой ввод: расход за сегодня заметно выше обычного.",
              f"Сегодня (оценка): ${today_cost:.2f}"]
     lines.append(f"Обычно в день: ${usual:.2f}" if usual is not None

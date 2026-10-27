@@ -30,7 +30,7 @@ from app.voice.dictionary import SLUG
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ASSETS = Path(__file__).parent / "dispatcher_assets"
-ASSET_VERSION = "7"
+ASSET_VERSION = "8"
 MAX_BODY_BYTES = 1_000_000  # same guard as the Studio forms
 
 

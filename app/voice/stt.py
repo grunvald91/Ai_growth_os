@@ -63,6 +63,7 @@ class OpenAICompatibleSTT:
                          language: str = "ru", prompt: str | None = None) -> Transcript:
         if len(audio) > PROVIDER_MAX_BYTES:
             raise STTError("Запись больше 25 МБ: распознавание не принимает такие файлы")
+        content_type = content_type.split(";", 1)[0].strip() or "application/octet-stream"
         data = {"model": self._model, "language": language, "temperature": "0"}
         if prompt and self._send_prompt:
             data["prompt"] = prompt
