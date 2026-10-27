@@ -91,7 +91,8 @@ class VoiceService:
             llm_model=cleanup.model if cleanup else None, llm_input_tokens=input_tokens,
             llm_output_tokens=output_tokens, stt_ms=stt_ms, llm_ms=llm_ms,
             estimated_cost_usd=estimate_cost(settings, audio_seconds=audio_seconds, input_tokens=input_tokens,
-                                             output_tokens=output_tokens),
+                                             output_tokens=output_tokens,
+                                             stt_cost_usd=transcript.cost_usd if transcript else None),
             incurred_at=datetime.now(timezone.utc))
         self._db.add(row)
         self._db.commit()

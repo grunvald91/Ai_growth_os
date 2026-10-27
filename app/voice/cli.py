@@ -1,6 +1,6 @@
 """Try dictation on recordings from the command line, without touching the production database.
 
-    GROQ_API_KEY=... XAI_API_KEY=... python -m app.voice.cli record1.ogg record2.ogg --project sto
+    OPENROUTER_API_KEY=... XAI_API_KEY=... python -m app.voice.cli record1.ogg record2.ogg --project sto
 
 Prints, per file, what was recognised and what the correction made of it. Meant for the first 10-15 real recordings.
 """
@@ -26,7 +26,7 @@ async def run(paths: list[Path], project: str | None) -> int:
     settings = get_settings()
     stt, llm = get_stt(settings), get_voice_llm(settings)
     if stt is None:
-        print("GROQ_API_KEY is not set")
+        print("OPENROUTER_API_KEY is not set")
         return 2
     engine = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)

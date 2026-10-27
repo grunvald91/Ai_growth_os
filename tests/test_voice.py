@@ -4,8 +4,8 @@ import json
 import math
 import struct
 import wave
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -27,7 +27,7 @@ from app.voice.cleanup import check_result, clean_text, replacements
 from app.voice.dictionary import Term, load_dictionary, recognizer_prompt, select_for_text
 from app.voice.models import VoiceCostAlert, VoiceUsage
 from app.voice.silence import is_phantom, precheck_audio, speech_text
-from app.voice.stt import GroqWhisperProvider, STTError, Segment, Transcript
+from app.voice.stt import OpenAICompatibleSTT, STTError, Segment, Transcript
 from app.voice.usage import estimate_cost, spend_alert
 
 KEY = "k" * 40
@@ -101,43 +101,70 @@ def test_segments_that_look_like_silence_are_removed():
 
 # --- recognition adapter ----------------------------------------------------------------------------------
 
-def groq(handler):
-    return GroqWhisperProvider(api_key="gsk-test", transport=httpx.MockTransport(handler))
+def recognizer(handler, **options):
+    return OpenAICompatibleSTT(api_key="sk-or-test", transport=httpx.MockTransport(handler), **options)
 
 
 @pytest.mark.asyncio
-async def test_groq_request_shape_and_parsing():
+async def test_recognizer_request_shape_and_parsing():
     seen = {}
 
     def handler(request: httpx.Request):
         seen["auth"] = request.headers["authorization"]
-        seen["path"] = request.url.path
+        seen["url"] = str(request.url)
         seen["body"] = request.content
-        return httpx.Response(200, json={"text": " вин автомобиля ", "duration": 3.2, "segments": [
-            {"text": " вин автомобиля", "no_speech_prob": 0.01, "avg_logprob": -0.3}]})
+        return httpx.Response(200, json={"text": " вин автомобиля ", "duration": 3.2, "usage": {"seconds": 3.2, "cost": 0.00003},
+                                         "segments": [{"text": " вин автомобиля", "no_speech_prob": 0.01, "avg_logprob": -0.3}]})
 
-    result = await groq(handler).transcribe(b"abc", filename="a.webm", content_type="audio/webm", prompt="Термины: VIN.")
-    assert result.text == "вин автомобиля" and result.duration_seconds == 3.2
-    assert result.segments[0].no_speech_prob == 0.01
-    assert seen["auth"] == "Bearer gsk-test" and seen["path"].endswith("/audio/transcriptions")
-    for expected in (b"whisper-large-v3-turbo", b'name="language"', b"ru", b"verbose_json", "Термины: VIN.".encode()):
+    result = await recognizer(handler).transcribe(b"abc", filename="a.webm", content_type="audio/webm", prompt="Термины: VIN.")
+    assert result.text == "вин автомобиля" and result.duration_seconds == 3.2 and result.cost_usd == 0.00003
+    assert result.segments[0].no_speech_prob == 0.01 and result.model == "openai/whisper-large-v3"
+    assert seen["auth"] == "Bearer sk-or-test"
+    assert seen["url"] == "https://openrouter.ai/api/v1/audio/transcriptions"
+    for expected in (b"openai/whisper-large-v3", b'name="language"', b"ru", b"verbose_json"):
         assert expected in seen["body"]
+    # OpenRouter ignores the hint in multipart requests, so it is not sent unless asked for.
+    assert "Термины".encode() not in seen["body"]
 
 
 @pytest.mark.asyncio
-async def test_groq_error_message_has_no_body_or_key(monkeypatch):
+async def test_recognizer_sends_the_hint_when_enabled():
+    seen = {}
+
+    def handler(request):
+        seen["body"] = request.content
+        return httpx.Response(200, json={"text": "ok"})
+
+    await recognizer(handler, send_prompt=True).transcribe(b"abc", filename="a.ogg", content_type="audio/ogg", prompt="Термины: VIN.")
+    assert "Термины: VIN.".encode() in seen["body"]
+
+
+@pytest.mark.asyncio
+async def test_recognizer_falls_back_to_plain_json_when_model_has_no_segments():
+    formats = []
+
+    def handler(request):
+        formats.append(b"verbose_json" in request.content)
+        return httpx.Response(400) if formats[-1] else httpx.Response(200, json={"text": "привет", "usage": {"seconds": 2}})
+
+    result = await recognizer(handler).transcribe(b"abc", filename="a.ogg", content_type="audio/ogg")
+    assert formats == [True, False] and result.text == "привет" and result.duration_seconds == 2 and result.segments == ()
+
+
+@pytest.mark.asyncio
+async def test_recognizer_error_message_has_no_body_or_key(monkeypatch):
     monkeypatch.setattr("app.voice.stt._RETRY_DELAYS_SECONDS", (0.0, 0.0))
 
     def handler(request):
-        return httpx.Response(403, text="Access denied gsk-test secret prompt text")
+        return httpx.Response(403, text="Access denied sk-or-test secret prompt text")
 
     with pytest.raises(STTError) as caught:
-        await groq(handler).transcribe(b"abc", filename="a.webm", content_type="audio/webm")
-    assert "403" in str(caught.value) and "gsk-test" not in str(caught.value) and "secret" not in str(caught.value)
+        await recognizer(handler).transcribe(b"abc", filename="a.webm", content_type="audio/webm")
+    assert "403" in str(caught.value) and "sk-or-test" not in str(caught.value) and "secret" not in str(caught.value)
 
 
 @pytest.mark.asyncio
-async def test_groq_retries_a_busy_service_then_succeeds(monkeypatch):
+async def test_recognizer_retries_a_busy_service_then_succeeds(monkeypatch):
     monkeypatch.setattr("app.voice.stt._RETRY_DELAYS_SECONDS", (0.0, 0.0))
     attempts = []
 
@@ -145,8 +172,16 @@ async def test_groq_retries_a_busy_service_then_succeeds(monkeypatch):
         attempts.append(1)
         return httpx.Response(429) if len(attempts) < 2 else httpx.Response(200, json={"text": "готово"})
 
-    assert (await groq(handler).transcribe(b"abc", filename="a.ogg", content_type="audio/ogg")).text == "готово"
+    assert (await recognizer(handler).transcribe(b"abc", filename="a.ogg", content_type="audio/ogg")).text == "готово"
     assert len(attempts) == 2
+
+
+def test_reported_recognition_cost_wins_over_the_rate():
+    from app.core.config import Settings
+    from app.voice.usage import estimate_cost
+    settings = Settings()
+    assert estimate_cost(settings, audio_seconds=3600, input_tokens=0, output_tokens=0, stt_cost_usd=0.5) == Decimal("0.5")
+    assert estimate_cost(settings, audio_seconds=3600, input_tokens=0, output_tokens=0) == Decimal(settings.voice_stt_usd_per_hour)
 
 
 # --- dictionary ---------------------------------------------------------------------------------------------
@@ -426,7 +461,7 @@ def add_usage(db, day_offset, cost, now):
 
 def test_cost_estimate_uses_rates_and_treats_unknown_as_zero(env):
     _, settings = env
-    assert estimate_cost(settings, audio_seconds=3600, input_tokens=None, output_tokens=None) == Decimal("0.04")
+    assert estimate_cost(settings, audio_seconds=3600, input_tokens=None, output_tokens=None) == Decimal("0.03")
     assert estimate_cost(settings, audio_seconds=None, input_tokens=1_000_000, output_tokens=1_000_000) == Decimal("6")
 
 

@@ -4,7 +4,7 @@ Two doors to the same pipeline, both closed without credentials:
 - /studio/voice/dictate: for pages inside the Studio (its own sign-in and origin checks);
 - /studio/voice/service/dictate: for bots and other pages, with the shared key in X-Voice-Key. Without
   VOICE_API_KEY on the server this door stays shut.
-Recognition and model keys live only on the server. No audio and no text are stored.
+Recognition (OpenRouter) and model keys live only on the server. No audio and no text are stored.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from app.llm.xai import XAIProvider
 from app.privacy import PrivacyGateway
 from app.voice.dictionary import SLUG
 from app.voice.service import DictationResult, VoiceService
-from app.voice.stt import GroqWhisperProvider, STTError, STTProvider
+from app.voice.stt import OpenAICompatibleSTT, STTError, STTProvider
 from app.voice.usage import notify_owner, spend_alert
 
 studio_router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -34,11 +34,14 @@ _ACCOUNT = re.compile(r"^[\w.@:+-]{1,200}$")
 
 
 def get_stt(settings: Settings = Depends(get_settings)) -> STTProvider | None:
-    """Recognition adapter; tests replace this dependency. None means no key is configured."""
-    if not settings.groq_api_key:
+    """Recognition adapter; tests replace this dependency. None means no OpenRouter key is configured.
+
+    From the production server OpenRouter answers 403 directly, so the already configured trusted proxy
+    (WHITEBOARD_PROXY_URL, the same connection the whiteboard video uses) carries these calls too."""
+    if not settings.openrouter_api_key:
         return None
-    return GroqWhisperProvider(api_key=settings.groq_api_key, model=settings.voice_stt_model,
-                               base_url=settings.groq_base_url)
+    return OpenAICompatibleSTT(api_key=settings.openrouter_api_key, model=settings.voice_stt_model,
+                               base_url=settings.voice_stt_base_url, proxy_url=settings.whiteboard_proxy_url)
 
 
 def get_voice_llm(settings: Settings = Depends(get_settings)) -> LLMService | None:

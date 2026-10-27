@@ -100,9 +100,9 @@ class Settings(BaseSettings):
     viral_research_timeout_seconds: float = 20.0
 
     # Voice module (dictation: speech recognition + correction by meaning). Keys stay on the server.
-    groq_api_key: str | None = None
-    groq_base_url: str = "https://api.groq.com/openai/v1"
-    voice_stt_model: str = "whisper-large-v3-turbo"
+    # Speech recognition goes through OpenRouter (OPENROUTER_API_KEY and, from this server, WHITEBOARD_PROXY_URL).
+    voice_stt_base_url: str = "https://openrouter.ai/api/v1"
+    voice_stt_model: str = "openai/whisper-large-v3"
     # Fast Claude-class model through the same gateway as every other model call.
     voice_cleanup_model: str = "claude-haiku-5-5"
     voice_cleanup_timeout_seconds: float = Field(default=20.0, ge=3, le=120)
@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     voice_min_audio_ms: int = Field(default=300, ge=0, le=5000)
     voice_silence_rms: float = Field(default=0.002, ge=0, le=0.5)
     # Spend estimate (operator-entered rates, verify against the provider consoles).
-    voice_stt_usd_per_hour: str = "0.04"
+    voice_stt_usd_per_hour: str = "0.03"
     voice_llm_input_usd_per_million: str = "1.0"
     voice_llm_output_usd_per_million: str = "5.0"
     # Telegram notice to the owner when today's spend is this many times the usual day (no request limits).

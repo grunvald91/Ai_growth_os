@@ -22,9 +22,13 @@ def _decimal(value: str, default: str) -> Decimal:
 
 
 def estimate_cost(settings: Settings, *, audio_seconds: float | None, input_tokens: int | None,
-                  output_tokens: int | None) -> Decimal:
-    """Estimate from operator-entered rates; an unknown quantity counts as zero, never as a guess."""
-    stt = Decimal(str(audio_seconds or 0)) / Decimal(3600) * _decimal(settings.voice_stt_usd_per_hour, "0.04")
+                  output_tokens: int | None, stt_cost_usd: float | None = None) -> Decimal:
+    """Recognition cost as the provider reported it, else from the operator's rate; an unknown quantity counts as
+    zero, never as a guess."""
+    if stt_cost_usd is not None:
+        stt = Decimal(str(stt_cost_usd))
+    else:
+        stt = Decimal(str(audio_seconds or 0)) / Decimal(3600) * _decimal(settings.voice_stt_usd_per_hour, "0.03")
     llm_in = Decimal(input_tokens or 0) * _decimal(settings.voice_llm_input_usd_per_million, "1.0")
     llm_out = Decimal(output_tokens or 0) * _decimal(settings.voice_llm_output_usd_per_million, "5.0")
     return stt + (llm_in + llm_out) / Decimal(1_000_000)
