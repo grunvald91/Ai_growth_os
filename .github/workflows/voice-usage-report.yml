@@ -1,0 +1,78 @@
+name: Voice usage report (read-only)
+
+# Manual, owner only, through the production environment. Reads the voice module's bookkeeping table
+# (counts, timings, outcomes; it holds no audio and no text) and prints numbers only: per outcome how many
+# requests and how long recognition / correction took, plus the last few requests. Changes nothing.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voice-usage-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Read voice_usage on the server
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is not set"; exit 1; }
+          install -m 700 -d ~/.ssh
+          sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Server host key does not match the pinned fingerprint"; exit 1; }
+          cat > /tmp/report.py <<'PY2'
+          import statistics
+          from datetime import datetime, timedelta, timezone
+
+          from sqlalchemy import select
+
+          from app.db.session import SessionLocal
+          from app.voice.models import VoiceUsage
+
+          since = datetime.now(timezone.utc) - timedelta(hours=24)
+
+          def pct(values, share):
+              values = sorted(values)
+              return values[min(len(values) - 1, int(len(values) * share))] if values else None
+
+          with SessionLocal() as db:
+              rows = db.execute(select(VoiceUsage).where(VoiceUsage.incurred_at >= since)
+                                .order_by(VoiceUsage.incurred_at)).scalars().all()
+              print("requests in the last 24 h:", len(rows))
+              for outcome in sorted({row.outcome for row in rows}):
+                  group = [row for row in rows if row.outcome == outcome]
+                  stt = [row.stt_ms for row in group if row.stt_ms is not None]
+                  llm = [row.llm_ms for row in group if row.llm_ms is not None]
+                  audio = [row.audio_seconds for row in group if row.audio_seconds is not None]
+                  print(f"{outcome}: n={len(group)}"
+                        f" | recognition ms median={statistics.median(stt) if stt else None} p90={pct(stt, 0.9)} max={max(stt) if stt else None}"
+                        f" | correction ms median={statistics.median(llm) if llm else None} max={max(llm) if llm else None}"
+                        f" | audio s median={statistics.median(audio) if audio else None}")
+              errors = {}
+              for row in rows:
+                  if row.detail:
+                      errors[(row.outcome, row.detail)] = errors.get((row.outcome, row.detail), 0) + 1
+              for (outcome, detail), count in sorted(errors.items(), key=lambda item: -item[1])[:10]:
+                  print(f"detail x{count}: {outcome} / {detail}")
+              print("last 15 requests (UTC time, outcome, audio s, recognition ms, correction ms):")
+              for row in rows[-15:]:
+                  print(" ", row.incurred_at.strftime("%H:%M:%S"), row.outcome, row.audio_seconds, row.stt_ms, row.llm_ms)
+          PY2
+          SSH_OPTS=(-o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_OPTS[@]}" "root@$HOST" "docker exec -i ai-growth-os-api-1 python -" < /tmp/report.py
