@@ -1,0 +1,77 @@
+name: Voice - check OpenRouter key from the server
+
+# One-off diagnostic (delete after use). Manual, owner only, through the production environment.
+# Prints only: whether the key and proxy are set, the key's limit/usage numbers, the account's credit totals,
+# and the HTTP status (+ a sanitised error message) of a 1-second silent recognition request. Never the key.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voice-openrouter-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Ask OpenRouter from the server, through the container's own settings
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is not set"; exit 1; }
+          install -m 700 -d ~/.ssh
+          sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Server host key does not match the pinned fingerprint"; exit 1; }
+          cat > /tmp/check.py <<'PY2'
+          import io, os, re, wave
+          import httpx
+
+          def clean(text):
+              return re.sub(r"sk-[A-Za-z0-9_-]+", "[key]", str(text))[:240]
+
+          key = os.environ.get("OPENROUTER_API_KEY", "")
+          proxy = os.environ.get("WHITEBOARD_PROXY_URL") or None
+          print("key set:", bool(key), "| proxy set:", bool(proxy))
+          client = httpx.Client(base_url="https://openrouter.ai/api/v1/", proxy=proxy, trust_env=False, timeout=40,
+                                headers={"Authorization": "Bearer " + key}, follow_redirects=False)
+          r = client.get("key")
+          print("GET /key ->", r.status_code)
+          if r.status_code == 200:
+              d = r.json().get("data", {})
+              label = str(d.get("label", ""))
+              print("  name:", label if not label.startswith("sk-") else "(masked, unnamed key)")
+              for field in ("limit", "limit_remaining", "limit_reset", "usage", "usage_daily", "is_free_tier"):
+                  print(" ", field + ":", d.get(field))
+          else:
+              print("  ", clean(r.text))
+          r = client.get("credits")
+          print("GET /credits ->", r.status_code)
+          if r.status_code == 200:
+              d = r.json().get("data", {})
+              print("  total_credits:", d.get("total_credits"), "| total_usage:", d.get("total_usage"))
+          else:
+              print("  ", clean(r.text))
+          buf = io.BytesIO()
+          with wave.open(buf, "wb") as w:
+              w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b"\x00\x00" * 16000)
+          r = client.post("audio/transcriptions", data={"model": "openai/whisper-large-v3", "language": "ru"},
+                          files={"file": ("silence.wav", buf.getvalue(), "audio/wav")})
+          print("POST /audio/transcriptions (1 s of silence) ->", r.status_code)
+          print("  ", clean(r.text))
+          PY2
+          SSH_OPTS=(-o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_OPTS[@]}" "root@$HOST" "docker exec -i ai-growth-os-api-1 python -" < /tmp/check.py
