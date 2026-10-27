@@ -1,0 +1,44 @@
+name: Voice - check Groq from the server
+
+# One read-only request from the production server: can it reach the speech recognition service at all?
+# It sends no key and no audio, and prints only a status code.
+#   401 = reachable (the service refuses because no key is sent, which is expected)
+#   403 = blocked (region or protection)
+#   000 / unreachable = no connection
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voice-groq-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Request from the server
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+          # SHA256 fingerprint of the server host key, pinned like the deploy workflow.
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is not set"; exit 1; }
+          install -m 700 -d ~/.ssh
+          sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Server host key does not match the pinned fingerprint"; exit 1; }
+          code=$(sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            "curl -sS -o /dev/null -m 15 -w '%{http_code}' https://api.groq.com/openai/v1/models || echo unreachable")
+          echo "Groq answered from the server with: $code"

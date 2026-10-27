@@ -99,6 +99,28 @@ class Settings(BaseSettings):
     viral_research_max_candidates: int = 16
     viral_research_timeout_seconds: float = 20.0
 
+    # Voice module (dictation: speech recognition + correction by meaning). Keys stay on the server.
+    groq_api_key: str | None = None
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    voice_stt_model: str = "whisper-large-v3-turbo"
+    # Fast Claude-class model through the same gateway as every other model call.
+    voice_cleanup_model: str = "claude-haiku-5-5"
+    voice_cleanup_timeout_seconds: float = Field(default=20.0, ge=3, le=120)
+    # Access key for bots and pages outside the Studio. Without it the key endpoint stays closed.
+    voice_api_key: str | None = None
+    # Recording length chosen by the owner (23.10.2026), in seconds.
+    voice_max_audio_seconds: int = Field(default=300, ge=10, le=3600)
+    # Silence pre-check: recordings shorter than this, or WAV quieter than this (share of full scale), are empty.
+    voice_min_audio_ms: int = Field(default=300, ge=0, le=5000)
+    voice_silence_rms: float = Field(default=0.002, ge=0, le=0.5)
+    # Spend estimate (operator-entered rates, verify against the provider consoles).
+    voice_stt_usd_per_hour: str = "0.04"
+    voice_llm_input_usd_per_million: str = "1.0"
+    voice_llm_output_usd_per_million: str = "5.0"
+    # Telegram notice to the owner when today's spend is this many times the usual day (no request limits).
+    voice_cost_alert_factor: float = Field(default=3.0, ge=1.0, le=100)
+    voice_cost_alert_min_usd: str = "0.5"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("studio_users_file", "whiteboard_proxy_url", mode="before")

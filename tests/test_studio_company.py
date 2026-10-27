@@ -221,6 +221,8 @@ def test_deletion_respects_foreign_keys_and_spares_other_companies(tmp_path):
     Base.metadata.create_all(engine)
 
     counter = iter(range(1000, 100000))
+    # Dictation bookkeeping belongs to accounts, not companies: counts and timings only, no company data.
+    account_level = {"voice_usage", "voice_cost_alerts"}
 
     def fill(connection, table, ids, product_id):
         row = {}
@@ -255,10 +257,12 @@ def test_deletion_respects_foreign_keys_and_spares_other_companies(tmp_path):
         for product in products:
             ids = {}
             for table in Base.metadata.sorted_tables:
-                if table.name != "products":
+                if table.name != "products" and table.name not in account_level:
                     fill(db.connection(), table, ids, product.id)
             db.commit()
         delete_company(db, tmp_path, products[0].id)
         for table in Base.metadata.sorted_tables:
+            if table.name in account_level:
+                continue
             assert db.execute(select(func.count()).select_from(table)).scalar() == 1, table.name
     engine.dispose()
