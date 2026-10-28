@@ -1,12 +1,14 @@
 """Turns approved plan items into article tasks for the existing content worker."""
 import json
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.content.service import queue_content
-from app.models.domain import Artifact, Task
+from app.models.domain import Artifact, Task, TaskStatus
 from app.seo.contracts import PlanItem, SeoContentPlan
 from app.seo.planner import PLAN_KIND
 from app.workflows.article_contracts import ArticleProductionInput, SeoBrief
@@ -30,7 +32,7 @@ def queue_plan_item(db: Session, product_id: UUID, plan_artifact_id: UUID, item:
     request = db.scalar(select(Artifact).where(Artifact.task_id == task.id, Artifact.kind == "content_request"))
     data = json.loads(request.content)
     if data.get("seo_brief") is None:
-        data.update(channel="own_site", produce_ready_assets=False, request_publication=False,
+        data.update(channel="own_site", produce_ready_assets=False, request_publication=False, light=True,
                     seo_brief=brief.model_dump(mode="json"))
         request.content = ArticleProductionInput.model_validate(data).model_dump_json()
     db.commit()
@@ -47,3 +49,22 @@ def queue_plan(db: Session, plan_artifact: Artifact, clusters_by_id: dict, *, on
                                      if q != item.primary_query))
         tasks.append(queue_plan_item(db, plan_artifact.product_id, plan_artifact.id, item, related))
     return tasks
+
+
+OWNER_TZ = ZoneInfo("Europe/Moscow")
+
+
+def articles_started_today(db: Session, now: datetime | None = None) -> int:
+    """SEO articles that were started today, Moscow time. Failed attempts count: they spent model calls."""
+    now = now or datetime.now(timezone.utc)
+    local = now.astimezone(OWNER_TZ)
+    day_start = local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    tasks = db.scalars(select(Task).where(
+        Task.assigned_agent == "content_factory", Task.title.like(f"{SEO_TASK_PREFIX}%"),
+        Task.status.in_([TaskStatus.RUNNING, TaskStatus.COMPLETED, TaskStatus.FAILED]),
+        Task.updated_at >= day_start.replace(tzinfo=None) if db.bind.dialect.name == "sqlite" else Task.updated_at >= day_start))
+    return len(list(tasks))
+
+
+def quota_exhausted(db: Session, limit: int, now: datetime | None = None) -> bool:
+    return articles_started_today(db, now) >= limit

@@ -127,3 +127,71 @@ async def test_dispatcher_always_asks_first_and_queues_only_after_confirmation(e
         outcome = await executors.CONFIRMERS["seo_factory"](ctx, card.params, "text")
         assert outcome.ok and outcome.task_id
         assert db.get(Task, outcome.task_id).assigned_agent == "seo_factory"
+
+
+# ---- daily limit of blog articles and light mode ----------------------------------------------------
+
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+
+from app.content import worker
+from app.models.domain import AgentRun
+from app.seo.queue import articles_started_today, quota_exhausted, SEO_TASK_PREFIX
+from app.services.artifacts import ArtifactService
+from app.services.tasks import TaskService
+
+
+def seo_task(db, product_id, key, status, updated=None):
+    task = TaskService(db).create(product_id=product_id, title=f"{SEO_TASK_PREFIX}{key}", assigned_agent="content_factory",
+                                  status=status, priority=100)
+    ArtifactService(db).create(product_id=product_id, task_id=task.id, kind="content_request", title="r", content="{}")
+    if updated:
+        task.updated_at = updated
+    db.commit()
+    return task
+
+
+def test_only_todays_moscow_day_counts_and_failed_attempts_count(env):
+    factory, _, product_id = env
+    now = datetime(2026, 10, 28, 20, 0, tzinfo=timezone.utc)  # 23:00 in Moscow; the Moscow day began at 21:00 UTC on the 27th
+    with factory() as db:
+        seo_task(db, product_id, "a", TaskStatus.COMPLETED, now - timedelta(hours=1))
+        seo_task(db, product_id, "b", TaskStatus.FAILED, now - timedelta(hours=2))
+        seo_task(db, product_id, "old", TaskStatus.COMPLETED, now - timedelta(hours=24))
+        seo_task(db, product_id, "waiting", TaskStatus.QUEUED, now)
+        assert articles_started_today(db, now) == 2
+        assert not quota_exhausted(db, 3, now) and quota_exhausted(db, 2, now)
+
+
+@pytest.mark.asyncio
+async def test_worker_leaves_blog_articles_for_tomorrow_after_the_daily_limit(env, monkeypatch):
+    factory, settings, product_id = env
+    ran = []
+
+    class Fake:
+        async def run(self, data):
+            ran.append(data.seo_brief.plan_item_id if data.seo_brief else None)
+            return SimpleNamespace(status="failed", artifact_ids=[])
+
+    monkeypatch.setattr(worker, "build_article_production", lambda db, settings: Fake())
+    brief = dict(plan_item_id="a009", primary_query="запись клиентов", stage="awareness", intent="informational",
+                 reader_problem="Мастер теряет клиентов.", ai_questions=["как вести запись"], next_step="Онлайн-запись")
+    with factory() as db:
+        for key in "abc":
+            seo_task(db, product_id, key, TaskStatus.COMPLETED, datetime.now(timezone.utc))
+        waiting = seo_task(db, product_id, "d", TaskStatus.QUEUED)
+        db.scalar(select(Artifact).where(Artifact.task_id == waiting.id)).content = ArticleProductionInput(
+            product_id=product_id, topic="Как вести запись", channel="own_site", light=True, seo_brief=brief).model_dump_json()
+        db.commit()
+        waiting_id = waiting.id
+    assert await worker.run_content_once(factory, settings) == 0 and ran == []
+    with factory() as db:
+        assert db.get(Task, waiting_id).status == TaskStatus.QUEUED
+    settings = settings.model_copy(update={"seo_articles_per_day": 4})
+    assert await worker.run_content_once(factory, settings) == 1 and ran == ["a009"]
+
+
+def test_light_mode_is_only_for_search_articles(env):
+    _, _, product_id = env
+    with pytest.raises(ValueError, match="Light mode"):
+        ArticleProductionInput(product_id=product_id, topic="Любая тема", light=True)

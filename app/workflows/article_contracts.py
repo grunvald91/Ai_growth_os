@@ -50,6 +50,14 @@ class ArticleProductionInput(Contract):
     request_publication: bool = False
     produce_ready_assets: bool = False
     seo_brief: SeoBrief | None = None
+    # Light mode for blog articles: the article and its Q&A only, without social, video, story or image packages.
+    light: bool = False
+
+    @model_validator(mode='after')
+    def light_is_for_search_articles(self):
+        if self.light and (self.seo_brief is None or self.produce_ready_assets):
+            raise ValueError('Light mode is only for search-plan articles without ready assets')
+        return self
 
 
 class ArticleStrategy(Contract):
@@ -436,10 +444,13 @@ class ConversionCore(Contract):
 
 
 class ConversionPackage(ConversionCore):
-    derivatives: list[DerivativeBrief] = Field(min_length=9, max_length=9)
+    # Empty for light search articles (article and Q&A only); otherwise exactly one brief per kind.
+    derivatives: list[DerivativeBrief] = Field(max_length=9)
 
     @model_validator(mode='after')
     def distinct_derivatives(self):
+        if not self.derivatives:
+            return self
         expected = {
             'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder',
             'short_video', 'story', 'static_image'

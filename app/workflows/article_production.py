@@ -862,7 +862,7 @@ class ArticleProduction:
             references.append({'kind': 'decision', 'id': str(decision.id)})
         if experiment:
             references.append({'kind': 'experiment', 'id': str(experiment.id)})
-        stages = STAGES
+        stages = STAGES[:6] if request.light else STAGES  # light: strategist ... marketing editor, no derivatives
         if request.produce_ready_assets:
             from app.content.contracts import ReadyTextSet
             stages = (*STAGES, *((name, ReadyTextSet if name == 'platform_writer' else ShortVideoDerivativeDraft, task)
@@ -1103,25 +1103,16 @@ class ArticleProduction:
                     inputs['prior_stage_outputs'][name] = parsed.model_dump(mode='json')
                     if len(json.dumps(inputs, ensure_ascii=False)) > 250000:
                         raise ValueError('Stage context exceeds bound')
-            (
-                strategy,
-                seo,
-                body_draft,
-                conversion_core,
-                safe_reader_article,
-                reader_article,
-                text_derivatives,
-                video_derivative,
-                story_derivative,
-                image_derivative,
-            ) = outputs[:10]
+            strategy, seo, body_draft, conversion_core, safe_reader_article, reader_article = outputs[:6]
+            if not safe_request.light:
+                text_derivatives, video_derivative, story_derivative, image_derivative = outputs[6:10]
             if safe_request.seo_brief:
                 from app.seo.clustering import normalize as normalize_query
                 wanted = safe_request.seo_brief.primary_query
                 if normalize_query(seo.primary_query) != normalize_query(wanted):
                     seo = seo.model_copy(update={'primary_query': wanted})  # the plan's real query wins
             error = 'invalid_derivative_assembly'
-            derivative_drafts = [
+            derivative_drafts = [] if safe_request.light else [
                 *text_derivatives.derivatives,
                 video_derivative,
                 story_derivative,

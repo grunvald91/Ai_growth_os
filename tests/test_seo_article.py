@@ -81,3 +81,30 @@ async def test_plain_articles_are_unchanged(db, product, tmp_path):
     assert all("ПОИСК И ИИ-ПОМОЩНИКИ" not in r.system_prompt for r in provider.requests)
     article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
     assert article.seo_brief is None and "## Частые вопросы" not in article.full_article
+
+
+@pytest.mark.asyncio
+async def test_light_mode_makes_article_and_questions_only_in_six_calls(db, product, tmp_path):
+    provider = SequenceProvider(outputs_with_geo()[:6])
+    workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    request = request_for(product).model_copy(update={"light": True})
+    result = await workflow.run(request)
+    assert result.status == "completed", result.error
+    assert len(provider.requests) == len(result.run_ids) == 6
+    assert {r.metadata["team_role"] for r in provider.requests} == {
+        "content_strategist", "seo_editor", "article_writer", "conversion_editor", "human_editor", "marketing_editor"}
+    kinds = [db.get(Artifact, aid).kind for aid in result.artifact_ids]
+    assert kinds == ["article"]  # no social, video, story or image packages
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    assert article.conversion.derivatives == [] and "## Частые вопросы" in article.full_article
+    assert article.seo.primary_query == BRIEF.primary_query
+
+
+@pytest.mark.asyncio
+async def test_light_mode_still_requires_answer_and_questions(db, product, tmp_path):
+    outputs = outputs_with_geo(final=False)[:6]
+    outputs.insert(6, copy.deepcopy(outputs[5]))
+    provider = SequenceProvider(outputs)
+    workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    result = await workflow.run(request_for(product).model_copy(update={"light": True}))
+    assert result.status == "failed"

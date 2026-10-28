@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     intelligence_campaign_enabled: bool = True
     # Disabled until explicitly enabled for a measured rollout; review adds LLM calls.
     agent_critic_enabled: bool = False
+    # Owner's decision: at most this many blog articles of the SEO plan are started per day (Moscow time).
+    seo_articles_per_day: int = Field(default=3, ge=1)
     # Critic bounds. The reviewer sees the complete task, so oversized contexts
     # are skipped rather than compacted; raise these together with the model.
     agent_critic_max_context_chars: int = Field(default=24000, ge=1000, le=2_000_000)

@@ -15,8 +15,13 @@ from app.workflows.article_contracts import ArticleProductionInput, ShortVideoDe
 
 async def run_content_once(session_factory, settings):
     with session_factory() as db:
-        task = db.scalar(select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer', 'content_editor', 'content_creative']),
-            Task.status == TaskStatus.QUEUED).order_by(Task.priority.desc(), Task.created_at, Task.id).limit(1))
+        from app.seo.queue import SEO_TASK_PREFIX, quota_exhausted
+        query = select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer', 'content_editor', 'content_creative']),
+            Task.status == TaskStatus.QUEUED)
+        if quota_exhausted(db, settings.seo_articles_per_day):
+            # The day's blog articles are used up; they wait for tomorrow while everything else keeps running.
+            query = query.where(Task.title.not_like(f'{SEO_TASK_PREFIX}%'))
+        task = db.scalar(query.order_by(Task.priority.desc(), Task.created_at, Task.id).limit(1))
         if task is None:
             return 0
         task_id, agent, product_id = task.id, task.assigned_agent, task.product_id
