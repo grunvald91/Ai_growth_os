@@ -23,7 +23,7 @@ _TRANSIENT_STATUS = frozenset({429, 500, 502, 503, 504})
 _PREMIUM_ROLES = {"cmo", "research_lead"}
 _BALANCED_ROLES = {
     "company_intake", "research_pmm", "content_seo", "content_strategist",
-    "seo_editor", "conversion_editor", "human_editor", "marketing_editor",
+    "semantic_researcher", "seo_editor", "conversion_editor", "human_editor", "marketing_editor",
     "scriptwriter", "creative_director", "video_director", "visual_designer",
     "cro", "channel_researcher", "problem_researcher", "viral_content_researcher",
     "youtube_shorts_director", "instagram_reels_director", "sales_agent", "comment_sales",

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 from sqlalchemy import select, update
@@ -34,9 +35,17 @@ async def run_content_once(session_factory, settings):
                     data = ArticleProductionInput.model_validate(raw)
                     if data.product_id != product_id:
                         raise ValueError('Wrong product')
-                    await build_article_production(db, settings).run(
+                    result = await build_article_production(db, settings).run(
                         data.model_copy(update={'task_id': task_id})
                     )
+                    if data.seo_brief is not None and result.status == 'completed':
+                        # Plan articles go live on their own, but only after the critic's clean review.
+                        from app.seo.publishing import publish_if_clear
+                        try:
+                            publish_if_clear(db, result.artifact_ids[0])
+                        except Exception:
+                            db.rollback()
+                            logging.getLogger(__name__).exception('SEO article publication failed for task %s', task_id)
                 return 1
             except (Exception, asyncio.CancelledError) as exc:
                 db.rollback()

@@ -165,6 +165,34 @@ ARTICLE_COMMON = ('Return ONLY JSON matching the schema. '
     'ПОЛЬЗА ПРЕЖДЕ ВСЕГО: каждый материал для читателя даёт конкретные советы, шаги, метрики, расчёты или примеры, которые читатель применит сам, даже если не станет клиентом; реклама строится на этой пользе. Пиши уверенно и просто, без оговорок, извинений и фраз «это не гарантия», «пока не умеем», «это ещё не…». Направление развития продукта из позиционирования компании показывай смело как видение («мы строим…», «скоро…»), но не описывай невыпущенную функцию как уже работающую. ')
 
 
+GEO_STAGES = frozenset({'seo_editor', 'article_writer', 'human_editor', 'marketing_editor'})
+GEO_RULES = (
+    ' ПОИСК И ИИ-ПОМОЩНИКИ. Статья обслуживает конкретный реальный запрос из seo_brief: primary_query используй '
+    'дословно как главный запрос, related_queries раскрой по тексту естественно, без переспама. Название и первый '
+    'абзац отвечают на запрос читателя сразу. Для финальной редактуры обязательны: direct_answer — 2–4 '
+    'самодостаточных предложения с прямым ответом на primary_query, понятные без остального текста (так их '
+    'цитируют поисковые системы и ИИ-ассистенты); faq — не менее трёх вопросов из ai_questions и related_queries '
+    'с короткими конкретными ответами по 2–5 предложений, каждый ответ понятен сам по себе; meta_description — '
+    '40–300 знаков о пользе статьи. Заголовки разделов формулируй как вопросы или чёткие утверждения, называй '
+    'предметы полными именами, а не «это» и «он»; шаги и сравнения давай списками. Не придумывай статистику, '
+    'исследования, цитаты экспертов и цены. Конкретные цифры используй только из проверенных фактов. '
+    'Ведёт статья к шагу из seo_brief.next_step, и только к услугам, которые есть в профиле компании.'
+)
+
+
+def _geo_problem(article, brief) -> str | None:
+    """Reader copy for a plan item must carry the answer and the questions; otherwise it is sent back once."""
+    if brief is None or not isinstance(article, HumanEditedArticle):
+        return None
+    if not article.direct_answer:
+        return 'direct_answer is required for a search-plan article'
+    if len(article.faq) < 3:
+        return 'faq needs at least three questions with answers for a search-plan article'
+    if not article.meta_description:
+        return 'meta_description is required for a search-plan article'
+    return None
+
+
 def _default_stage_rule(name: str) -> str:
     """Built-in stage instructions; the owner may override them on /studio/tune."""
     stage_rule = ''
@@ -932,6 +960,7 @@ class ArticleProduction:
                     f'You are the {name}. ' + prompt_text(f'article.task.{name}') + ' '
                     + prompt_text('article.common')
                     + stage_rule
+                    + (GEO_RULES if safe_request.seo_brief and name in GEO_STAGES else '')
                     + '\nSchema: ' + json.dumps(schema.model_json_schema())
                 )
                 fallback_reason = None
@@ -946,6 +975,9 @@ class ArticleProduction:
                     if isinstance(candidate, ArticleDraft):
                         validate_grounding(candidate, sources)
                     if isinstance(candidate, HumanEditedArticle):
+                        geo = _geo_problem(candidate, safe_request.seo_brief) if name == 'marketing_editor' else None
+                        if geo:
+                            raise ValueError(geo)
                         ids = [fact.source_id for fact in candidate.fact_renderings]
                         if len(ids) != len(set(ids)) or set(ids) != set(sources):
                             raise ValueError('Revised article must preserve all verified source IDs exactly once')
@@ -999,6 +1031,9 @@ class ArticleProduction:
                             # Enforce the final ready-video contract here, so a bad brief
                             # takes the stage fallback instead of failing the whole package.
                             value = _normalize_ready_video_timeline(value)
+                        geo = _geo_problem(value, safe_request.seo_brief) if name == 'marketing_editor' else None
+                        if geo:
+                            raise ValueError(geo)
                         return value
 
                     try:
@@ -1080,6 +1115,11 @@ class ArticleProduction:
                 story_derivative,
                 image_derivative,
             ) = outputs[:10]
+            if safe_request.seo_brief:
+                from app.seo.clustering import normalize as normalize_query
+                wanted = safe_request.seo_brief.primary_query
+                if normalize_query(seo.primary_query) != normalize_query(wanted):
+                    seo = seo.model_copy(update={'primary_query': wanted})  # the plan's real query wins
             error = 'invalid_derivative_assembly'
             derivative_drafts = [
                 *text_derivatives.derivatives,
@@ -1159,12 +1199,19 @@ class ArticleProduction:
                     f'## {section.heading}\n\n{section.body}'
                     for section in reader_article.sections
                 )
+                answer = f'**Коротко:** {reader_article.direct_answer}\n\n' if reader_article.direct_answer else ''
+                faq_text = ''
+                if reader_article.faq:
+                    faq_text = '## Частые вопросы\n\n' + '\n\n'.join(
+                        f'### {item.question}\n\n{item.answer}' for item in reader_article.faq) + '\n\n'
                 full_article = (
                     f'# {reader_article.title}\n\n'
                     f'{reader_article.lead}\n\n'
+                    f'{answer}'
                     f'{rendered_facts}'
                     f'{reader_body}\n\n'
                     f'{reader_article.closing}\n\n'
+                    f'{faq_text}'
                     f'{current_conversion.cta}'
                 )
                 return ArticleArtifact(
@@ -1178,6 +1225,7 @@ class ArticleProduction:
                     seo=seo,
                     draft=draft,
                     reader_article=reader_article,
+                    seo_brief=safe_request.seo_brief,
                     full_article=full_article,
                     conversion=current_conversion,
                 )

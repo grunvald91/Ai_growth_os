@@ -234,6 +234,30 @@ async def make_plan(ctx: Context, params) -> Outcome:
                    task_id=task.id)
 
 
+async def describe_seo_factory(ctx: Context, params) -> Outcome | Confirmation:
+    focus = getattr(params, "focus", None)
+    return Confirmation(
+        title="Запустить SEO-завод?",
+        details=([f"Фокус: {focus}."] if focus else []) + [
+            "Команда соберёт реальные запросы клиентов из подсказок Яндекса и Google.",
+            "Составит контент-план статей под воронку и поставит статьи в работу.",
+            "Каждая статья проверяется критиком; чистые статьи сразу выходят в блог, остальные ждут вас.",
+            "Это много обращений к ИИ: чем больше статей в плане, тем дольше и дороже."],
+        params={"focus": focus}, paid=True, confirm_label="Запустить")
+
+
+async def confirm_seo_factory(ctx: Context, stored: dict, via: str) -> Outcome:
+    from app.seo.factory import queue_factory
+    try:
+        task = queue_factory(ctx.db, ctx.product.id, stored.get("focus"))
+    except LookupError:
+        ctx.db.rollback()
+        return Outcome("Компания не найдена.", ok=False)
+    return Outcome("Запустил SEO-завод. Сообщу, когда план будет готов и статьи пойдут в работу.",
+                   "Запустил SEO-завод.", [_task_block(ctx, task, "SEO-завод", f"/studio/products/{ctx.product.id}/tasks/{task.id}")],
+                   task_id=task.id)
+
+
 async def describe_approve_plan(ctx: Context, params) -> Outcome | Confirmation:
     _, draft = plans(ctx.db, ctx.product.id)
     if draft is None:
@@ -357,8 +381,9 @@ EXECUTORS = {
     "whiteboard_video": whiteboard_video, "cancel_video": cancel_video, "restricted_action": restricted_action,
 }
 # Abilities that always ask first: describe what will happen, run it only after a confirmation.
-DESCRIBERS = {"approve_plan": describe_approve_plan}
-CONFIRMERS = {"approve_plan": confirm_approve_plan, "whiteboard_video": confirm_whiteboard_video}
+DESCRIBERS = {"approve_plan": describe_approve_plan, "seo_factory": describe_seo_factory}
+CONFIRMERS = {"approve_plan": confirm_approve_plan, "whiteboard_video": confirm_whiteboard_video,
+              "seo_factory": confirm_seo_factory}
 
 # Materials and publication live in their own module; it imports the shared types from `outcome`, not from here.
 from app.dispatcher import materials  # noqa: E402
