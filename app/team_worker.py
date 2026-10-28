@@ -169,6 +169,10 @@ async def run_once() -> int:
     from app.seo.factory import run_factory_once
     if await run_factory_once(SessionLocal, settings):
         return 1
+    from app.seo.publishing import publish_owner_approved
+    with SessionLocal() as db:
+        if publish_owner_approved(db):
+            return 1
     # Only explicitly scheduled, owner-approved posts can leave the system.
     # The dispatcher is a durable at-most-once sender and is OFF by default.
     if settings.content_telegram_autopost_enabled:

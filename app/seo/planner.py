@@ -43,9 +43,36 @@ class PlanError(ValueError):
     pass
 
 
-def validate_plan(plan: SeoContentPlan, core: SemanticCore) -> None:
+def planned_queries(db: Session, product_id: UUID) -> set[str]:
+    """Primary queries of earlier plans of this company whose article is written or still in work.
+    A query whose article failed or was cancelled is free again."""
+    from sqlalchemy import select
+    from app.models.domain import Task
+    from app.seo.queue import SEO_TASK_PREFIX
+    dead = {TaskStatus.FAILED, TaskStatus.CANCELLED}
+    status_by_title = {t.title: t.status for t in db.scalars(select(Task).where(
+        Task.product_id == product_id, Task.title.like(f"{SEO_TASK_PREFIX}%")))}
+    taken: set[str] = set()
+    for row in db.scalars(select(Artifact).where(Artifact.product_id == product_id, Artifact.kind == PLAN_KIND)):
+        try:
+            items = SeoContentPlan.model_validate_json(row.content).items
+        except ValueError:
+            continue
+        for item in items:
+            if status_by_title.get(f"{SEO_TASK_PREFIX}{row.id}:{item.id}") not in dead:
+                taken.add(normalize(item.primary_query))
+    return taken
+
+
+def fresh_core(core: SemanticCore, taken: set[str]) -> SemanticCore:
+    """Drops clusters an earlier article already covers, so a new run never repeats a topic."""
+    return core.model_copy(update={"clusters": [
+        c for c in core.clusters if not taken & {normalize(q) for q in c.queries}]})
+
+
+def validate_plan(plan: SeoContentPlan, core: SemanticCore, taken: frozenset[str] = frozenset()) -> None:
     clusters = {c.id: c for c in core.clusters}
-    seen_queries: set[str] = set()
+    seen_queries: set[str] = set(taken)
     for item in plan.items:
         members: set[str] = set()
         for cluster_id in item.cluster_ids:
@@ -59,7 +86,7 @@ def validate_plan(plan: SeoContentPlan, core: SemanticCore) -> None:
         if key not in members:
             raise PlanError(f"Primary query of {item.id} is not a collected query of its clusters")
         if key in seen_queries:
-            raise PlanError(f"Primary query repeated: {item.primary_query}")
+            raise PlanError(f"Primary query repeated or already written: {item.primary_query}")
         seen_queries.add(key)
 
 
@@ -103,6 +130,10 @@ async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, pr
     product = db.get(Product, product_id)
     if product is None:
         raise LookupError("Product not found")
+    taken = planned_queries(db, product_id)
+    core = fresh_core(core, taken)
+    if not core.clusters:
+        raise PlanError("Every collected query is already covered by an earlier article")
     clusters = sorted(core.clusters, key=lambda c: (-len(c.engines), -len(c.queries), c.id))
     payload = {
         "company": _company(db, product, products_root, privacy),
@@ -115,7 +146,7 @@ async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, pr
     db.commit()
     try:
         plan = await _ask(llm, model=model, prompt=PLAN_PROMPT, payload=payload, schema=SeoContentPlan,
-                          role="seo_editor", validate=lambda p: validate_plan(p, core))
+                          role="seo_editor", validate=lambda p: validate_plan(p, core, frozenset(taken)))
         artifact = ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=PLAN_KIND,
                                               title=f"Контент-план SEO ({len(plan.items)} статей)",
                                               content=plan.model_dump_json())

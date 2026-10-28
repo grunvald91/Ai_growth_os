@@ -4,6 +4,7 @@ The owner decided that articles of the SEO plan go live on their own once the cr
 corrected them. Anything that does not pass stays with the owner as a pending approval. Every publication is
 recorded as an approval decided by policy, a publication row and the artifact status.
 """
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -62,7 +63,6 @@ def critic_verdict(db: Session, task_id) -> str:
                          .order_by(Artifact.created_at.desc(), Artifact.id.desc()))
     for review in reviews:
         try:
-            import json
             return str(json.loads(review.content).get("status", "missing"))
         except (TypeError, ValueError):
             continue
@@ -109,14 +109,43 @@ def publish_if_clear(db: Session, article_id) -> Outcome:
                                        reason="Held for the owner: " + "; ".join(problems))
         db.commit()
         return Outcome(False, "; ".join(problems))
-    slug = unique_slug(db, row.product_id, article.seo.primary_query)
     now = datetime.now(timezone.utc)
     approval = ApprovalService(db).create(
         product_id=row.product_id, artifact_id=row.id, action_type=ToolOperation.PUBLISH.value,
         risk_level=policy.risk_level.value, status="approved", requested_by="seo_factory", decided_by=DECIDER,
         decided_at=now, reason=f"Critic review {verdict}; static checks passed. Owner-approved automatic publication of plan articles.")
+    slug = _go_live(db, row, article, approval, now)
+    db.commit()
+    return Outcome(True, f"critic {verdict}", slug)
+
+
+def _go_live(db: Session, row: Artifact, article: ArticleArtifact, approval: Approval, now: datetime) -> str:
+    slug = unique_slug(db, row.product_id, article.seo.primary_query)
     db.add(Publication(product_id=row.product_id, artifact_id=row.id, approval_id=approval.id, channel=CHANNEL,
                        status="published", external_reference=f"/blog/{slug}", published_at=now))
     row.status = ArtifactStatus.PUBLISHED
-    db.commit()
-    return Outcome(True, f"critic {verdict}", slug)
+    return slug
+
+
+def publish_owner_approved(db: Session) -> int:
+    """Publish held plan articles once the owner approved them, in the Studio (artifact approved) or on the
+    approval itself. A rejected approval keeps the article off the blog."""
+    held = db.scalars(select(Approval).where(Approval.requested_by == "seo_factory",
+                                             Approval.action_type == ToolOperation.PUBLISH.value,
+                                             Approval.status.in_(["pending", "approved"]),
+                                             Approval.decided_by.is_distinct_from(DECIDER)))
+    published = 0
+    for approval in list(held):
+        row = db.get(Artifact, approval.artifact_id)
+        if row is None or row.kind != "article" or row.status == ArtifactStatus.PUBLISHED:
+            continue
+        owner_said_yes = approval.status == "approved" or row.status == ArtifactStatus.APPROVED
+        if not owner_said_yes or db.scalar(select(Publication.id).where(Publication.artifact_id == row.id).limit(1)):
+            continue
+        now = datetime.now(timezone.utc)
+        if approval.status == "pending":
+            approval.status, approval.decided_by, approval.decided_at = "approved", "owner:studio", now
+        _go_live(db, row, ArticleArtifact.model_validate_json(row.content), approval, now)
+        db.commit()
+        published += 1
+    return published

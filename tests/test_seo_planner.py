@@ -111,3 +111,35 @@ async def test_seeds_use_company_profile(db, product, tmp_path):
                              products_root=tmp_path / "products", model="fake")
     assert seeds[0] == "онлайн запись клиентов"
     assert "онлайн-запись клиентов" in provider.requests[0].messages[0].content
+
+
+def c002_item():
+    return item(id="a002", cluster_ids=["c002"], primary_query="программа для записи клиентов цена",
+                stage="consideration", intent="commercial")
+
+
+@pytest.mark.asyncio
+async def test_next_plan_skips_topics_already_written(db, product, tmp_path):
+    from app.seo.queue import SEO_TASK_PREFIX
+    first = await plan_content(db, service(Provider({"items": [item()]})), PrivacyGateway(), product.id, core(),
+                               products_root=tmp_path / "products", model="fake")
+    provider = Provider({"items": [c002_item()]})
+    await plan_content(db, service(provider), PrivacyGateway(), product.id, core(),
+                       products_root=tmp_path / "products", model="fake")
+    sent = json.loads(provider.requests[0].messages[0].content)
+    assert [c["id"] for c in sent["clusters"]] == ["c002"]  # c001 already has its article
+    # a failed article frees its query for a later plan
+    db.add(Task(product_id=product.id, title=f"{SEO_TASK_PREFIX}{first.id}:a001", assigned_agent="content_factory",
+                status=TaskStatus.FAILED))
+    db.commit()
+    from app.seo.planner import planned_queries
+    assert planned_queries(db, product.id) == {"программа для записи клиентов цена"}
+
+
+@pytest.mark.asyncio
+async def test_plan_stops_when_everything_is_covered(db, product, tmp_path):
+    await plan_content(db, service(Provider({"items": [item(), c002_item()]})), PrivacyGateway(), product.id, core(),
+                       products_root=tmp_path / "products", model="fake")
+    with pytest.raises(PlanError, match="already covered"):
+        await plan_content(db, service(Provider()), PrivacyGateway(), product.id, core(),
+                           products_root=tmp_path / "products", model="fake")

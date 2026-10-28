@@ -54,17 +54,31 @@ def queue_plan(db: Session, plan_artifact: Artifact, clusters_by_id: dict, *, on
 OWNER_TZ = ZoneInfo("Europe/Moscow")
 
 
-def articles_started_today(db: Session, now: datetime | None = None) -> int:
-    """SEO articles that were started today, Moscow time. Failed attempts count: they spent model calls."""
+def _started_today(db: Session, now: datetime | None):
+    """SEO article tasks started today, Moscow time. Failed attempts count: they spent model calls."""
     now = now or datetime.now(timezone.utc)
     local = now.astimezone(OWNER_TZ)
     day_start = local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
-    tasks = db.scalars(select(Task).where(
+    if db.bind.dialect.name == "sqlite":
+        day_start = day_start.replace(tzinfo=None)
+    return db.scalars(select(Task).where(
         Task.assigned_agent == "content_factory", Task.title.like(f"{SEO_TASK_PREFIX}%"),
         Task.status.in_([TaskStatus.RUNNING, TaskStatus.COMPLETED, TaskStatus.FAILED]),
-        Task.updated_at >= day_start.replace(tzinfo=None) if db.bind.dialect.name == "sqlite" else Task.updated_at >= day_start))
-    return len(list(tasks))
+        Task.updated_at >= day_start))
 
 
-def quota_exhausted(db: Session, limit: int, now: datetime | None = None) -> bool:
-    return articles_started_today(db, now) >= limit
+def articles_started_today(db: Session, now: datetime | None = None, product_id: UUID | None = None) -> int:
+    return sum(1 for t in _started_today(db, now) if product_id is None or t.product_id == product_id)
+
+
+def exhausted_products(db: Session, limit: int, now: datetime | None = None) -> set[UUID]:
+    """Companies whose daily article limit is used up. The limit is per company, so one business never
+    takes another's articles."""
+    counts: dict[UUID, int] = {}
+    for task in _started_today(db, now):
+        counts[task.product_id] = counts.get(task.product_id, 0) + 1
+    return {product_id for product_id, count in counts.items() if count >= limit}
+
+
+def quota_exhausted(db: Session, limit: int, now: datetime | None = None, product_id: UUID | None = None) -> bool:
+    return articles_started_today(db, now, product_id) >= limit

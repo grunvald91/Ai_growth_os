@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
-from sqlalchemy import select, update
+from sqlalchemy import and_, select, update
 from app.content.render import asset_path, render_video
 from app.content.quick_post import QuickPostRequest, run_quick_post
 from app.content.revisions import EditRequest, run_post_edit
@@ -15,12 +15,13 @@ from app.workflows.article_contracts import ArticleProductionInput, ShortVideoDe
 
 async def run_content_once(session_factory, settings):
     with session_factory() as db:
-        from app.seo.queue import SEO_TASK_PREFIX, quota_exhausted
+        from app.seo.queue import SEO_TASK_PREFIX, exhausted_products
         query = select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer', 'content_editor', 'content_creative']),
             Task.status == TaskStatus.QUEUED)
-        if quota_exhausted(db, settings.seo_articles_per_day):
-            # The day's blog articles are used up; they wait for tomorrow while everything else keeps running.
-            query = query.where(Task.title.not_like(f'{SEO_TASK_PREFIX}%'))
+        exhausted = exhausted_products(db, settings.seo_articles_per_day)
+        if exhausted:
+            # A company's blog articles for today are used up; they wait for tomorrow while everything else runs.
+            query = query.where(~and_(Task.title.like(f'{SEO_TASK_PREFIX}%'), Task.product_id.in_(exhausted)))
         task = db.scalar(query.order_by(Task.priority.desc(), Task.created_at, Task.id).limit(1))
         if task is None:
             return 0

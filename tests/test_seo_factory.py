@@ -191,6 +191,35 @@ async def test_worker_leaves_blog_articles_for_tomorrow_after_the_daily_limit(en
     assert await worker.run_content_once(factory, settings) == 1 and ran == ["a009"]
 
 
+@pytest.mark.asyncio
+async def test_daily_limit_is_per_company(env, monkeypatch):
+    factory, settings, product_id = env
+    ran = []
+
+    class Fake:
+        async def run(self, data):
+            ran.append(str(data.product_id))
+            return SimpleNamespace(status="failed", artifact_ids=[])
+
+    monkeypatch.setattr(worker, "build_article_production", lambda db, settings: Fake())
+    brief = dict(plan_item_id="a010", primary_query="ремонт обуви", stage="awareness", intent="informational",
+                 reader_problem="Клиент не знает, где починить обувь.", ai_questions=["где починить обувь"],
+                 next_step="Записаться в мастерскую")
+    with factory() as db:
+        other = Product(name="Мастерская", slug="shoes")
+        db.add(other)
+        db.commit()
+        for key in "abc":
+            seo_task(db, product_id, key, TaskStatus.COMPLETED, datetime.now(timezone.utc))
+        waiting = seo_task(db, other.id, "x", TaskStatus.QUEUED)
+        db.scalar(select(Artifact).where(Artifact.task_id == waiting.id)).content = ArticleProductionInput(
+            product_id=other.id, topic="Где починить обувь", channel="own_site", light=True, seo_brief=brief).model_dump_json()
+        db.commit()
+        other_id = str(other.id)
+        assert quota_exhausted(db, 3, product_id=product_id) and not quota_exhausted(db, 3, product_id=other.id)
+    assert await worker.run_content_once(factory, settings) == 1 and ran == [other_id]
+
+
 def test_light_mode_is_only_for_search_articles(env):
     _, _, product_id = env
     with pytest.raises(ValueError, match="Light mode"):

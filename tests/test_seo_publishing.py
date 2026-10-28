@@ -107,3 +107,32 @@ async def test_public_feed_shows_only_published_articles(env, tmp_path):
             assert client.get("/public/blog/unknown/articles").status_code == 404
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_held_article_goes_live_after_the_owner_approves_it(env, tmp_path):
+    from app.content.review import approve_material
+    from app.seo.publishing import publish_owner_approved
+    db, product = env
+    article_id = await make_article(db, product, tmp_path, None)
+    publish_if_clear(db, article_id)
+    assert publish_owner_approved(db) == 0  # still waiting for the owner
+    approve_material(db, tmp_path, product.id, article_id)
+    assert publish_owner_approved(db) == 1
+    publication = db.scalar(select(Publication))
+    assert publication.external_reference == "/blog/kak-vesti-zapis-klientov"
+    assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
+    assert db.get(Approval, publication.approval_id).decided_by == "owner:studio"
+    assert publish_owner_approved(db) == 0  # once
+
+
+@pytest.mark.asyncio
+async def test_rejected_article_stays_off_the_blog(env, tmp_path):
+    from app.seo.publishing import publish_owner_approved
+    db, product = env
+    article_id = await make_article(db, product, tmp_path, None)
+    publish_if_clear(db, article_id)
+    approval = db.scalar(select(Approval))
+    approval.status, approval.decided_by = "rejected", "owner"
+    db.commit()
+    assert publish_owner_approved(db) == 0 and not list(db.scalars(select(Publication)))
