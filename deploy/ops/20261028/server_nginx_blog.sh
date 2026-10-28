@@ -26,20 +26,46 @@ if [ "$MODE" = "inspect" ]; then
 fi
 
 # ---- apply ----
-GROWTH=$(grep -lE "server_name\s+[^;]*growth\.servgo\.ru" /etc/nginx/sites-enabled/* /etc/nginx/sites-available/* /etc/nginx/conf.d/* 2>/dev/null | head -1)
-[ -n "$GROWTH" ] || { echo "growth.servgo.ru site config not found"; exit 1; }
-GROWTH=$(readlink -f "$GROWTH")
+# Inspect showed: servgo.ru/blog and the blog assets already reach BookingBot (127.0.0.1:8080); /llms.txt does not.
+GROWTH=$(readlink -f /etc/nginx/sites-enabled/growth-servgo)
+SERVGO=$(readlink -f /etc/nginx/sites-enabled/webapp)
+[ -f "$GROWTH" ] && [ -f "$SERVGO" ] || { echo "site config not found"; exit 1; }
 STAMP=$(date +%Y%m%d-%H%M%S)
-cp -a "$GROWTH" "$BACKUP/$(basename "$GROWTH").before-public-blog-$STAMP"
-echo "backup: $BACKUP/$(basename "$GROWTH").before-public-blog-$STAMP"
+cp -a "$GROWTH" "$BACKUP/growth-servgo.before-blog-$STAMP"
+cp -a "$SERVGO" "$BACKUP/webapp.before-blog-$STAMP"
+echo "backups: $BACKUP/*-$STAMP"
 
-python3 /tmp/nginx_public_blog.py "$GROWTH" || { cp -a "$BACKUP/$(basename "$GROWTH").before-public-blog-$STAMP" "$GROWTH"; exit 1; }
+restore() {
+  cp -a "$BACKUP/growth-servgo.before-blog-$STAMP" "$GROWTH"
+  cp -a "$BACKUP/webapp.before-blog-$STAMP" "$SERVGO"
+  nginx -t && systemctl reload nginx
+  echo "RESTORED both files"
+}
 
-if ! nginx -t 2>&1; then
-  cp -a "$BACKUP/$(basename "$GROWTH").before-public-blog-$STAMP" "$GROWTH"; echo "nginx -t failed, restored"; exit 1
-fi
+# 1. read-only feed on growth.servgo.ru
+python3 /tmp/nginx_public_blog.py "$GROWTH" || { restore; exit 1; }
+
+# 2. /llms.txt of servgo.ru goes to the BookingBot blog, next to the existing /blog routes
+python3 - "$SERVGO" <<'PY' || { restore; exit 1; }
+import sys
+p = sys.argv[1]; s = open(p).read()
+if "location = /llms.txt" in s:
+    print("llms.txt already routed"); sys.exit(0)
+anchor = "    location = /blog { proxy_pass http://127.0.0.1:8080;"
+assert s.count(anchor) == 1, "blog anchor not found exactly once"
+line = ("    location = /llms.txt { proxy_pass http://127.0.0.1:8080; proxy_set_header Host $host; "
+        "proxy_set_header X-Real-IP $remote_addr; }\n")
+open(p, "w").write(s.replace(anchor, line + anchor))
+print("llms.txt routed")
+PY
+
+nginx -t 2>&1 || { restore; exit 1; }
 systemctl reload nginx
-code=$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 10 --resolve growth.servgo.ru:443:127.0.0.1 https://growth.servgo.ru/public/blog/servgo/articles)
-echo "growth feed status: $code"
-[ "$code" = "200" ] || [ "$code" = "404" ] || { cp -a "$BACKUP/$(basename "$GROWTH").before-public-blog-$STAMP" "$GROWTH"; nginx -t && systemctl reload nginx; echo "restored"; exit 1; }
-echo "applied step 1 (feed). Step 2 (servgo.ru/blog) is applied only after inspect shows how servgo.ru is routed."
+
+feed=$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 10 --resolve growth.servgo.ru:443:127.0.0.1 https://growth.servgo.ru/public/blog/servgo/articles)
+blog=$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 10 --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/blog)
+home=$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 10 --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/)
+studio=$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 10 --resolve growth.servgo.ru:443:127.0.0.1 https://growth.servgo.ru/studio)
+echo "feed=$feed (200 once the platform is deployed, 404 before) blog=$blog home=$home studio=$studio"
+if { [ "$feed" != "200" ] && [ "$feed" != "404" ]; } || [ "$blog" != "200" ] || [ "$home" != "200" ]; then restore; exit 1; fi
+echo "== servgo.ru robots.txt (read-only)"; head -c 600 /opt/booking_bot/web/frontend/dist/robots.txt 2>/dev/null
