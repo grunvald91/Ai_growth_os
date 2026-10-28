@@ -19,6 +19,23 @@ class Contract(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
 
 
+class FaqItem(Contract):
+    question: ShortText
+    answer: Annotated[str, Field(min_length=40, max_length=1500)]
+
+
+class SeoBrief(Contract):
+    """A plan item the article must serve: a real collected query, never an invented one."""
+    plan_item_id: str = Field(pattern=r'^a\d{3,5}$')
+    primary_query: ShortText
+    related_queries: list[ShortText] = Field(default_factory=list)
+    stage: Literal['awareness', 'consideration', 'decision']
+    intent: Literal['informational', 'commercial', 'transactional', 'navigational']
+    reader_problem: Text
+    ai_questions: list[ShortText] = Field(min_length=1)
+    next_step: ShortText
+
+
 class ArticleProductionInput(Contract):
     product_id: UUID
     language: Literal['ru', 'en'] = 'ru'
@@ -32,6 +49,15 @@ class ArticleProductionInput(Contract):
     editorial_brief: Text | None = None
     request_publication: bool = False
     produce_ready_assets: bool = False
+    seo_brief: SeoBrief | None = None
+    # Light mode for blog articles: the article and its Q&A only, without social, video, story or image packages.
+    light: bool = False
+
+    @model_validator(mode='after')
+    def light_is_for_search_articles(self):
+        if self.light and (self.seo_brief is None or self.produce_ready_assets):
+            raise ValueError('Light mode is only for search-plan articles without ready assets')
+        return self
 
 
 class ArticleStrategy(Contract):
@@ -119,6 +145,10 @@ class HumanEditedArticle(Contract):
     sections: list[ReaderSection] = Field(min_length=4, max_length=20)
     closing: Text
     editorial_notes: list[Text] = Field(default_factory=list, max_length=10)
+    # Search and AI-assistant surface: a short self-contained answer and real questions with answers.
+    direct_answer: Annotated[str, Field(min_length=40, max_length=1200)] | None = None
+    faq: list[FaqItem] = Field(default_factory=list)
+    meta_description: Annotated[str, Field(min_length=40, max_length=320)] | None = None
 
     @model_validator(mode='after')
     def readable_long_form(self):
@@ -414,10 +444,13 @@ class ConversionCore(Contract):
 
 
 class ConversionPackage(ConversionCore):
-    derivatives: list[DerivativeBrief] = Field(min_length=9, max_length=9)
+    # Empty for light search articles (article and Q&A only); otherwise exactly one brief per kind.
+    derivatives: list[DerivativeBrief] = Field(max_length=9)
 
     @model_validator(mode='after')
     def distinct_derivatives(self):
+        if not self.derivatives:
+            return self
         expected = {
             'dzen', 'tenchat', 'vc_ru', 'telegram', 'faq', 'founder',
             'short_video', 'story', 'static_image'
@@ -439,6 +472,7 @@ class ArticleArtifact(Contract):
     seo: SEOPlan
     draft: ArticleDraft
     reader_article: HumanEditedArticle | None = None
+    seo_brief: SeoBrief | None = None
     full_article: str = Field(min_length=2000, max_length=110000)
     conversion: ConversionPackage
     grounding_policy: Literal[

@@ -1,8 +1,9 @@
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
-from sqlalchemy import select, update
+from sqlalchemy import and_, select, update
 from app.content.render import asset_path, render_video
 from app.content.quick_post import QuickPostRequest, run_quick_post
 from app.content.revisions import EditRequest, run_post_edit
@@ -14,8 +15,14 @@ from app.workflows.article_contracts import ArticleProductionInput, ShortVideoDe
 
 async def run_content_once(session_factory, settings):
     with session_factory() as db:
-        task = db.scalar(select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer', 'content_editor', 'content_creative']),
-            Task.status == TaskStatus.QUEUED).order_by(Task.priority.desc(), Task.created_at, Task.id).limit(1))
+        from app.seo.queue import SEO_TASK_PREFIX, exhausted_products
+        query = select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer', 'content_editor', 'content_creative']),
+            Task.status == TaskStatus.QUEUED)
+        exhausted = exhausted_products(db, settings.seo_articles_per_day)
+        if exhausted:
+            # A company's blog articles for today are used up; they wait for tomorrow while everything else runs.
+            query = query.where(~and_(Task.title.like(f'{SEO_TASK_PREFIX}%'), Task.product_id.in_(exhausted)))
+        task = db.scalar(query.order_by(Task.priority.desc(), Task.created_at, Task.id).limit(1))
         if task is None:
             return 0
         task_id, agent, product_id = task.id, task.assigned_agent, task.product_id
@@ -34,9 +41,17 @@ async def run_content_once(session_factory, settings):
                     data = ArticleProductionInput.model_validate(raw)
                     if data.product_id != product_id:
                         raise ValueError('Wrong product')
-                    await build_article_production(db, settings).run(
+                    result = await build_article_production(db, settings).run(
                         data.model_copy(update={'task_id': task_id})
                     )
+                    if data.seo_brief is not None and result.status == 'completed':
+                        # Plan articles go live on their own, but only after the critic's clean review.
+                        from app.seo.publishing import publish_if_clear
+                        try:
+                            publish_if_clear(db, result.artifact_ids[0])
+                        except Exception:
+                            db.rollback()
+                            logging.getLogger(__name__).exception('SEO article publication failed for task %s', task_id)
                 return 1
             except (Exception, asyncio.CancelledError) as exc:
                 db.rollback()

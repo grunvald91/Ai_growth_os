@@ -46,6 +46,7 @@ class AgentRole(StrEnum):
     VIRAL_VIDEO_RESEARCHER = "viral_video_researcher"
     VIRAL_CONTENT_RESEARCHER = "viral_content_researcher"
     MARKETING_EDITOR = "marketing_editor"
+    SEMANTIC_RESEARCHER = "semantic_researcher"
 
 
 class AgentConfig(BaseModel):
@@ -95,6 +96,12 @@ AGENT_CONFIGS = MappingProxyType({
         role=AgentRole.ANALYTICS,
         responsibilities=("Define and aggregate observable funnel evidence; do not make strategy decisions.",),
         allowed_operations=frozenset({ToolOperation.ANALYTICS, ToolOperation.CALCULATE}),
+    ),
+    AgentRole.SEMANTIC_RESEARCHER: AgentConfig(
+        role=AgentRole.SEMANTIC_RESEARCHER,
+        responsibilities=("Turn the company profile into seed search queries in the customers' own words.",
+                          "Group collected real search suggestions by intent and funnel stage; never invent queries or demand numbers."),
+        allowed_operations=frozenset({ToolOperation.RESEARCH}),
     ),
     AgentRole.CONTENT_STRATEGIST: AgentConfig(
         role=AgentRole.CONTENT_STRATEGIST,

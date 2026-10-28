@@ -48,6 +48,10 @@ app.include_router(team_dashboard_router)
 from app.api.whiteboard import router as whiteboard_router
 app.include_router(whiteboard_router)
 
+# Public read-only feed of published articles for the blog on servgo.ru.
+from app.api.public_blog import router as public_blog_router
+app.include_router(public_blog_router)
+
 from app.api.dispatcher import router as dispatcher_router
 app.include_router(dispatcher_router)
 

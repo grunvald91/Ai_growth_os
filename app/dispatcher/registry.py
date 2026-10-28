@@ -123,6 +123,13 @@ class SchedulePostParams(_Params):
     channel_id: str | None = Field(default=None, max_length=64)
 
 
+class SeoFactoryParams(_Params):
+    focus: str | None = Field(
+        default=None, min_length=3, max_length=300,
+        description="О чём или для кого строить поисковые статьи, только если владелец сам это назвал, его словами. "
+                    "Не назвал — не указывай: запросы строятся по профилю компании.")
+
+
 class RestrictedParams(_Params):
     kind: Literal["budget", "pricing", "access", "delete", "credentials", "billing"]
 
@@ -194,6 +201,13 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
     Capability("make_plan", "Составить контент-план",
                "Поставить в работу составление нового контент-плана. Он ничего не публикует: план утверждается отдельно.",
                ToolOperation.GENERATE_DRAFT, Cost.CHEAP, NoParams),
+    Capability("seo_factory", "SEO-завод",
+               "Запустить SEO-завод: собрать реальные поисковые запросы клиентов (подсказки Яндекса и Google), "
+               "составить контент-план статей под воронку и поставить статьи в работу. Готовые статьи после проверки "
+               "критиком сами выходят в блог на servgo.ru. Подходит для «сделай SEO-план», «запусти SEO-завод», "
+               "«хочу, чтобы нас находили в поиске и через ИИ», «статьи для блога под запросы клиентов». "
+               "Тратит много запросов к ИИ, поэтому всегда сначала просит подтверждение.",
+               ToolOperation.GENERATE_DRAFT, Cost.PAID, SeoFactoryParams, always_confirm=True),
     Capability("approve_plan", "Утвердить контент-план",
                "Утвердить готовый черновик плана, чтобы команда начала готовить материалы по нему.",
                ToolOperation.PUBLISH, Cost.NONE, NoParams,
