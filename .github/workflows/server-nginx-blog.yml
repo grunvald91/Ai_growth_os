@@ -1,0 +1,57 @@
+name: Server nginx for the blog (inspect / apply)
+
+# Manual only, owner only. One job, two modes:
+#   inspect - read-only: prints which nginx sites serve servgo.ru and growth.servgo.ru (server_name, listen, locations,
+#             proxy targets only; never certificates, keys or passwords).
+#   apply   - (1) opens the read-only /public/blog/ feed on growth.servgo.ru,
+#             (2) makes servgo.ru/blog reach the BookingBot blog, (3) nginx -t, reload, checks, and rollback on any failure.
+# The server host key is pinned. Backups stay on the server in /opt/ai_growth_os/origin-fixes/.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'inspect (read-only) or apply'
+        required: true
+        default: inspect
+        type: choice
+        options: [inspect, apply]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-nginx
+  cancel-in-progress: false
+
+jobs:
+  nginx:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+      MODE: ${{ inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Connect (pinned host key)
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is not configured"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Host key does not match the pinned fingerprint"; exit 1; }
+      - name: Run
+        run: |
+          set -euo pipefail
+          scp_opts=(-o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          sshpass -e scp "${scp_opts[@]}" deploy/ops/20261028/nginx_public_blog.py "root@$HOST:/tmp/nginx_public_blog.py"
+          sshpass -e scp "${scp_opts[@]}" deploy/ops/20261028/server_nginx_blog.sh "root@$HOST:/tmp/server_nginx_blog.sh"
+          sshpass -e ssh "${scp_opts[@]}" "root@$HOST" "bash /tmp/server_nginx_blog.sh $MODE"
