@@ -1076,7 +1076,7 @@ class ArticleProduction:
                         parsed = schema.model_validate(_creative_fallback_payload(name, stage_inputs))
                 if name in {'youtube_shorts_director', 'instagram_reels_director'}:
                     parsed = _normalize_ready_video_timeline(parsed)
-                if name == 'marketing_editor':
+                if safe_request.seo_brief and name == 'marketing_editor':
                     from app.seo.publishing import reader_hash
                     review = dict(response.quality_review or {})
                     review['reader_hash'] = reader_hash(parsed)

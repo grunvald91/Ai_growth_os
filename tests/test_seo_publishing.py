@@ -36,8 +36,10 @@ async def make_article(db, product, tmp_path, critic_status="no_material_issues"
     assert result.status == "completed", result.error
     if critic_status:
         run = db.scalar(select(AgentRun).where(AgentRun.task_id == result.task_id, AgentRun.agent_name == "marketing_editor"))
-        db.add(Artifact(product_id=product.id, task_id=result.task_id, agent_run_id=run.id, kind="seo_final_review",
-                        title="review", content=json.dumps({"status": critic_status, "reader_hash": reader_hash(ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content).reader_article)}), status=ArtifactStatus.DRAFT))
+        review = db.scalar(select(Artifact).where(Artifact.agent_run_id == run.id,
+                                                  Artifact.kind == "seo_final_review"))
+        review.content = json.dumps({"status": critic_status, "reader_hash": reader_hash(
+            ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content).reader_article)})
         db.commit()
     return result.artifact_ids[0]
 

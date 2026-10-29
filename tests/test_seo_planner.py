@@ -88,7 +88,6 @@ async def test_plan_saved_as_artifact_with_completed_task(db, product, tmp_path)
                                   products_root=tmp_path / "products", model="fake")
     assert artifact.kind == "seo_content_plan" and artifact.task_id
     assert db.get(Task, artifact.task_id).status == TaskStatus.COMPLETED
-    queue_plan(db, second, {c.id: c for c in core().clusters})
     sent = json.loads(provider.requests[0].messages[0].content)
     assert [c["id"] for c in sent["clusters"]] == ["c001", "c002"]  # most evidenced cluster first
 
