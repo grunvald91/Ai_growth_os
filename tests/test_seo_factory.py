@@ -110,7 +110,7 @@ async def test_search_engines_down_stops_honestly_without_article_tasks(env):
     with factory() as db:
         assert db.scalar(select(Task).where(Task.assigned_agent == "seo_factory")).status == TaskStatus.FAILED
         report = db.scalar(select(Artifact).where(Artifact.kind == "seo_factory_report"))
-        assert json.loads(report.content) == {"failed_stage": "semantic_core", "error": "RuntimeError"}
+        assert json.loads(report.content) == {"error": "RuntimeError"}
         assert not list(db.scalars(select(Task).where(Task.assigned_agent == "content_factory")))
 
 
@@ -145,6 +145,12 @@ def seo_task(db, product_id, key, status, updated=None):
     task = TaskService(db).create(product_id=product_id, title=f"{SEO_TASK_PREFIX}{key}", assigned_agent="content_factory",
                                   status=status, priority=100)
     ArtifactService(db).create(product_id=product_id, task_id=task.id, kind="content_request", title="r", content="{}")
+    if status != TaskStatus.QUEUED:
+        from app.seo.queue import record_article_start
+        record_article_start(db, task)
+        started = db.scalar(select(Artifact).where(Artifact.task_id == task.id, Artifact.kind == "seo_article_started"))
+        if updated:
+            started.created_at = updated
     if updated:
         task.updated_at = updated
     db.commit()
@@ -224,3 +230,55 @@ def test_light_mode_is_only_for_search_articles(env):
     _, _, product_id = env
     with pytest.raises(ValueError, match="Light mode"):
         ArticleProductionInput(product_id=product_id, topic="Любая тема", light=True)
+
+
+
+def test_stale_factory_recovery_is_bounded(env):
+    from app.seo.factory import recover_stale_factory, ATTEMPT_KIND
+    factory, _, product_id = env
+    with factory() as db:
+        task = queue_factory(db, product_id)
+        for count in range(1, 4):
+            ArtifactService(db).create(product_id=product_id, task_id=task.id,
+                kind=ATTEMPT_KIND, title="attempt", content="{}")
+            task.status = TaskStatus.RUNNING
+            task.updated_at = datetime.now(timezone.utc) - timedelta(hours=1)
+            db.commit()
+            recover_stale_factory(db)
+            assert task.status == (TaskStatus.QUEUED if count < 3 else TaskStatus.FAILED)
+
+
+def test_completion_does_not_move_daily_quota(env):
+    factory, _, product_id = env
+    now = datetime(2026, 10, 29, 12, tzinfo=timezone.utc)
+    with factory() as db:
+        task = seo_task(db, product_id, "yesterday", TaskStatus.RUNNING, now - timedelta(days=1))
+        task.status = TaskStatus.COMPLETED
+        task.updated_at = now
+        db.commit()
+        assert articles_started_today(db, now) == 0
+
+
+@pytest.mark.asyncio
+async def test_factory_resumes_committed_plan_without_new_llm_calls(env, monkeypatch):
+    import app.seo.factory as module
+    factory, settings, product_id = env
+    original = module.queue_plan
+    with factory() as db:
+        task_id = queue_factory(db, product_id).id
+    def interrupted(db, plan, clusters):
+        original(db, plan, clusters)
+        raise RuntimeError("interrupted after queue commit")
+    monkeypatch.setattr(module, "queue_plan", interrupted)
+    await run_factory_once(factory, settings, provider=Provider(), client=suggest_client())
+    with factory() as db:
+        task = db.get(Task, task_id)
+        task.status = TaskStatus.QUEUED
+        db.commit()
+    monkeypatch.setattr(module, "queue_plan", original)
+    provider = Provider()
+    await run_factory_once(factory, settings, provider=provider, client=suggest_client())
+    assert provider.requests == []
+    with factory() as db:
+        assert db.get(Task, task_id).status == TaskStatus.COMPLETED
+        assert len(list(db.scalars(select(Task).where(Task.title.like("SEO-ARTICLE:%"))))) == 1

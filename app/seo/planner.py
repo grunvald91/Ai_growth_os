@@ -59,7 +59,7 @@ def planned_queries(db: Session, product_id: UUID) -> set[str]:
         except ValueError:
             continue
         for item in items:
-            if status_by_title.get(f"{SEO_TASK_PREFIX}{row.id}:{item.id}") not in dead:
+            if status_by_title.get(f"{SEO_TASK_PREFIX}{row.id}:{item.id}") in {TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.WAITING_APPROVAL, TaskStatus.COMPLETED}:
                 taken.add(normalize(item.primary_query))
     return taken
 
@@ -126,7 +126,7 @@ async def plan_seeds(db: Session, llm: LLMService, privacy: PrivacyGateway, prod
 
 
 async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, product_id: UUID, core: SemanticCore, *,
-                       products_root: Path, model: str) -> Artifact:
+                       products_root: Path, model: str, factory_task_id: UUID | None = None) -> Artifact:
     product = db.get(Product, product_id)
     if product is None:
         raise LookupError("Product not found")
@@ -147,7 +147,7 @@ async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, pr
     try:
         plan = await _ask(llm, model=model, prompt=PLAN_PROMPT, payload=payload, schema=SeoContentPlan,
                           role="seo_editor", validate=lambda p: validate_plan(p, core, frozenset(taken)))
-        artifact = ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=PLAN_KIND,
+        artifact = ArtifactService(db).create(product_id=product_id, task_id=factory_task_id or task_id, kind=PLAN_KIND,
                                               title=f"Контент-план SEO ({len(plan.items)} статей)",
                                               content=plan.model_dump_json())
         TaskService(db).update(task_id, status=TaskStatus.COMPLETED)

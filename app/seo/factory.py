@@ -1,4 +1,6 @@
 """The SEO factory as one background job: seeds -> real suggestions -> clusters -> funnel plan -> article tasks."""
+import asyncio
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 from uuid import UUID
@@ -19,6 +21,20 @@ _logger = logging.getLogger(__name__)
 AGENT = "seo_factory"
 REQUEST_KIND = "seo_factory_request"
 REPORT_KIND = "seo_factory_report"
+ATTEMPT_KIND = "seo_factory_attempt"
+
+
+def recover_stale_factory(db):
+    """The lease exceeds the hard run deadline, so expired work cannot still run."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+    if db.bind.dialect.name == "sqlite":
+        cutoff = cutoff.replace(tzinfo=None)
+    for task in db.scalars(select(Task).where(Task.assigned_agent == AGENT,
+            Task.status == TaskStatus.RUNNING, Task.updated_at < cutoff)):
+        attempts = list(db.scalars(select(Artifact.id).where(
+            Artifact.task_id == task.id, Artifact.kind == ATTEMPT_KIND)))
+        task.status = TaskStatus.QUEUED if len(attempts) < 3 else TaskStatus.FAILED
+    db.commit()
 
 
 def queue_factory(db: Session, product_id: UUID, focus: str | None = None, *, commit: bool = True) -> Task:
@@ -39,6 +55,7 @@ def queue_factory(db: Session, product_id: UUID, focus: str | None = None, *, co
 
 async def run_factory_once(session_factory, settings, *, provider=None, client: httpx.AsyncClient | None = None) -> int:
     with session_factory() as db:
+        recover_stale_factory(db)
         task = db.scalar(select(Task).where(Task.assigned_agent == AGENT, Task.status == TaskStatus.QUEUED)
                          .order_by(Task.priority.desc(), Task.created_at, Task.id).limit(1))
         if task is None:
@@ -49,37 +66,52 @@ async def run_factory_once(session_factory, settings, *, provider=None, client: 
         if claimed.rowcount != 1:
             db.rollback()
             return 0
+        ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=ATTEMPT_KIND,
+                                   title="SEO attempt", content="{}")
         db.commit()
         request = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == REQUEST_KIND))
-        focus = (json.loads(request.content).get("focus") if request else None) or None
-        stage = "seeds"
         try:
-            llm, privacy = build_seo_llm(settings, provider)
-            seeds = await plan_seeds(db, llm, privacy, product_id, products_root=settings.products_root,
-                                     model=settings.llm_model, focus=focus)
-            stage = "semantic_core"
-            core_artifact = await build_semantic_core(db, product_id, seeds, client=client)
-            from app.seo.contracts import SemanticCore
-            core = SemanticCore.model_validate_json(core_artifact.content)
-            stage = "content_plan"
-            plan = await plan_content(db, llm, privacy, product_id, core, products_root=settings.products_root,
-                                      model=settings.llm_model)
-            stage = "queue"
-            clusters = {c.id: c for c in core.clusters}
-            queued = queue_plan(db, plan, clusters)
-            report = {"seeds": len(seeds), "clusters": len(core.clusters), "articles_queued": len(queued),
-                      "sources": [s.model_dump() for s in core.sources]}
-            ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=REPORT_KIND,
-                                       title=f"SEO-завод: поставлено статей — {len(queued)}",
-                                       content=json.dumps(report, ensure_ascii=False))
-            TaskService(db).update(task_id, status=TaskStatus.COMPLETED)
-            db.commit()
-        except Exception as exc:  # report the stage and error type only, never raw provider or customer data
+            focus = (json.loads(request.content).get("focus") if request else None) or None
+            async with asyncio.timeout(1200):
+                await _execute(db, settings, task_id, product_id, focus, provider, client)
+        except Exception as exc:
             db.rollback()
-            _logger.warning("SEO factory failed at %s: %s", stage, type(exc).__name__)
+            _logger.warning("SEO factory failed: %s", type(exc).__name__)
             ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=REPORT_KIND,
-                                       title=f"SEO-завод остановился на шаге {stage}",
-                                       content=json.dumps({"failed_stage": stage, "error": type(exc).__name__}))
-            TaskService(db).update(task_id, status=TaskStatus.FAILED)
+                title="SEO-завод остановился", content=json.dumps({"error": type(exc).__name__}))
+            from app.seo.planner import PLAN_KIND
+            attempts = list(db.scalars(select(Artifact.id).where(
+                Artifact.task_id == task_id, Artifact.kind == ATTEMPT_KIND)))
+            resumable = db.scalar(select(Artifact.id).where(Artifact.task_id == task_id,
+                                                           Artifact.kind == PLAN_KIND)) is not None
+            retry = len(attempts) < 3 and (resumable or isinstance(exc, TimeoutError))
+            TaskService(db).update(task_id, status=TaskStatus.QUEUED if retry else TaskStatus.FAILED)
             db.commit()
         return 1
+
+
+async def _execute(db, settings, task_id, product_id, focus, provider, client):
+    from app.seo.contracts import SemanticCore
+    from app.seo.planner import PLAN_KIND
+    from app.seo.service import KIND
+    llm, privacy = build_seo_llm(settings, provider)
+    core_artifact = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == KIND))
+    if core_artifact is None:
+        checkpoint = db.scalar(select(Artifact).where(Artifact.task_id == task_id,
+                                                       Artifact.kind == "seo_suggest_checkpoint"))
+        seeds = (json.loads(checkpoint.content)["seeds"] if checkpoint else
+                 await plan_seeds(db, llm, privacy, product_id, products_root=settings.products_root,
+                                  model=settings.llm_model, focus=focus))
+        core_artifact = await build_semantic_core(db, product_id, seeds, client=client, task_id=task_id)
+    core = SemanticCore.model_validate_json(core_artifact.content)
+    plan = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == PLAN_KIND))
+    if plan is None:
+        plan = await plan_content(db, llm, privacy, product_id, core, products_root=settings.products_root,
+                                  model=settings.llm_model, factory_task_id=task_id)
+    queued = queue_plan(db, plan, {c.id: c for c in core.clusters})
+    ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=REPORT_KIND,
+        title=f"SEO-завод: поставлено статей — {len(queued)}",
+        content=json.dumps({"seeds": len(core.seeds), "clusters": len(core.clusters),
+                            "articles_queued": len(queued), "sources": [s.model_dump() for s in core.sources]}))
+    TaskService(db).update(task_id, status=TaskStatus.COMPLETED)
+    db.commit()

@@ -11,7 +11,8 @@ from app.db.models import Base
 from app.db.session import get_db
 from app.main import app
 from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Product, Publication
-from app.seo.publishing import publish_if_clear, slugify
+from app.seo.publishing import publish_if_clear, slugify, reader_hash
+from app.workflows.article_contracts import ArticleArtifact
 from test_articles import SequenceProvider, build_article_production, Settings
 from test_seo_article import BRIEF, outputs_with_geo, request_for
 
@@ -35,8 +36,10 @@ async def make_article(db, product, tmp_path, critic_status="no_material_issues"
     assert result.status == "completed", result.error
     if critic_status:
         run = db.scalar(select(AgentRun).where(AgentRun.task_id == result.task_id, AgentRun.agent_name == "marketing_editor"))
-        db.add(Artifact(product_id=product.id, task_id=result.task_id, agent_run_id=run.id, kind="agent_quality_review",
-                        title="review", content=json.dumps({"status": critic_status}), status=ArtifactStatus.DRAFT))
+        review = db.scalar(select(Artifact).where(Artifact.agent_run_id == run.id,
+                                                  Artifact.kind == "seo_final_review"))
+        review.content = json.dumps({"status": critic_status, "reader_hash": reader_hash(
+            ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content).reader_article)})
         db.commit()
     return result.artifact_ids[0]
 
@@ -136,3 +139,40 @@ async def test_rejected_article_stays_off_the_blog(env, tmp_path):
     approval.status, approval.decided_by = "rejected", "owner"
     db.commit()
     assert publish_owner_approved(db) == 0 and not list(db.scalars(select(Publication)))
+
+
+
+@pytest.mark.asyncio
+async def test_changed_reader_cannot_use_old_clean_review(env, tmp_path):
+    db, product = env
+    article_id = await make_article(db, product, tmp_path)
+    row = db.get(Artifact, article_id)
+    data = json.loads(row.content)
+    data["reader_article"]["lead"] += " Изменённый текст."
+    row.content = json.dumps(data)
+    db.commit()
+    outcome = publish_if_clear(db, article_id)
+    assert not outcome.published and "content_mismatch" in outcome.reason
+    assert not list(db.scalars(select(Publication)))
+
+
+@pytest.mark.asyncio
+async def test_publication_is_retried_after_transient_failure(env, tmp_path, monkeypatch):
+    import app.seo.publishing as module
+    from app.models.domain import Task
+    db, product = env
+    article_id = await make_article(db, product, tmp_path)
+    row = db.get(Artifact, article_id)
+    db.get(Task, row.task_id).title = "SEO-ARTICLE:retry"
+    db.commit()
+    original = module._go_live
+    def unavailable(*args):
+        raise RuntimeError("temporary failure")
+    monkeypatch.setattr(module, "_go_live", unavailable)
+    assert module.publish_pending(db) == 1
+    assert db.get(Artifact, article_id).status == ArtifactStatus.DRAFT
+    monkeypatch.setattr(module, "_go_live", original)
+    assert module.publish_pending(db) == 1
+    assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
+    assert module.publish_pending(db) == 0
+    assert len(list(db.scalars(select(Publication)))) == 1
