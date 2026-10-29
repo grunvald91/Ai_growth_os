@@ -158,4 +158,3 @@ async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, pr
         TaskService(db).update(task_id, status=TaskStatus.FAILED)
         db.commit()
         raise
-

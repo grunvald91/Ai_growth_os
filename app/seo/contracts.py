@@ -57,4 +57,3 @@ class PlanItem(Contract):
 
 class SeoContentPlan(Contract):
     items: list[PlanItem] = Field(min_length=1)
-

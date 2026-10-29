@@ -110,4 +110,3 @@ async def collect(seeds: Iterable[str], *, client: httpx.AsyncClient | None = No
         if own:
             await client.aclose()
     return results
-

@@ -65,4 +65,3 @@ def latest_semantic_core(db: Session, product_id: UUID) -> SemanticCore | None:
     row = db.scalar(select(Artifact).where(Artifact.product_id == product_id, Artifact.kind == KIND)
                     .order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
     return SemanticCore.model_validate_json(row.content) if row else None
-
