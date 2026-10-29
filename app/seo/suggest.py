@@ -61,8 +61,13 @@ def parse_suggestions(body: str) -> list[str]:
 
 async def collect(seeds: Iterable[str], *, client: httpx.AsyncClient | None = None,
                   engines: tuple[Engine, ...] = ("yandex", "google"),
-                  concurrency: int = 4) -> dict[Engine, EngineResult]:
+                  concurrency: int = 4, max_requests: int = 400, total_timeout: float = 120) -> dict[Engine, EngineResult]:
     """Ask every engine about every probe. A failed request is counted, never replaced with guesses."""
+    if concurrency < 1 or max_requests < 1 or total_timeout <= 0:
+        raise ValueError("Invalid suggestion budget")
+    seeds = list(seeds)
+    if len(seeds) > 10:
+        raise ValueError("At most ten seed queries are allowed")
     probes = list(dict.fromkeys(p for seed in seeds for p in expand_seed(seed)))
     own = client is None
     client = client or httpx.AsyncClient(timeout=10.0, follow_redirects=False,
@@ -84,8 +89,16 @@ async def collect(seeds: Iterable[str], *, client: httpx.AsyncClient | None = No
                 _logger.info("suggest_failed engine=%s error=%s", engine, type(exc).__name__)
 
     try:
-        await asyncio.gather(*(one(engine, probe) for engine in engines for probe in probes))
+        # Round-robin engines; create only one bounded batch of coroutines at a time.
+        jobs = [(engine, probe) for probe in probes for engine in engines][:max_requests]
+        try:
+            async with asyncio.timeout(total_timeout):
+                for offset in range(0, len(jobs), concurrency):
+                    await asyncio.gather(*(one(*job) for job in jobs[offset:offset + concurrency]))
+        except TimeoutError:
+            _logger.info("suggest_budget_exhausted")
     finally:
         if own:
             await client.aclose()
     return results
+

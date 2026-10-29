@@ -61,10 +61,10 @@ def _started_today(db: Session, now: datetime | None):
     day_start = local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     if db.bind.dialect.name == "sqlite":
         day_start = day_start.replace(tzinfo=None)
-    return db.scalars(select(Task).where(
+    return db.scalars(select(Task).join(Artifact, Artifact.task_id == Task.id).where(
+        Artifact.kind == "seo_article_started",
         Task.assigned_agent == "content_factory", Task.title.like(f"{SEO_TASK_PREFIX}%"),
-        Task.status.in_([TaskStatus.RUNNING, TaskStatus.COMPLETED, TaskStatus.FAILED]),
-        Task.updated_at >= day_start))
+        Artifact.created_at >= day_start).distinct())
 
 
 def articles_started_today(db: Session, now: datetime | None = None, product_id: UUID | None = None) -> int:
@@ -82,3 +82,13 @@ def exhausted_products(db: Session, limit: int, now: datetime | None = None) -> 
 
 def quota_exhausted(db: Session, limit: int, now: datetime | None = None, product_id: UUID | None = None) -> bool:
     return articles_started_today(db, now, product_id) >= limit
+
+
+
+def record_article_start(db, task):
+    from app.services.artifacts import ArtifactService
+    if db.scalar(select(Artifact.id).where(Artifact.task_id == task.id,
+                                         Artifact.kind == "seo_article_started")) is None:
+        ArtifactService(db).create(product_id=task.product_id, task_id=task.id,
+            kind="seo_article_started", title="SEO article started", content="{}")
+        db.commit()

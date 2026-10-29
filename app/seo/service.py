@@ -16,7 +16,7 @@ KIND = "semantic_core"
 
 
 async def build_semantic_core(db: Session, product_id: UUID, seeds: list[str], *,
-                              client: httpx.AsyncClient | None = None) -> Artifact:
+                              client: httpx.AsyncClient | None = None, task_id: UUID | None = None) -> Artifact:
     product = db.get(Product, product_id)
     if product is None:
         raise LookupError("Product not found")
@@ -24,7 +24,7 @@ async def build_semantic_core(db: Session, product_id: UUID, seeds: list[str], *
     if not seeds:
         raise ValueError("At least one seed query is required")
     results = await collect(seeds, client=client)
-    if all(r.requests and r.failed == r.requests for r in results.values()):
+    if not any(r.queries for r in results.values()):
         raise RuntimeError("Search engines did not answer; no semantic core was built")
     core = SemanticCore(
         seeds=seeds, collected_at=datetime.now(timezone.utc),
@@ -32,7 +32,7 @@ async def build_semantic_core(db: Session, product_id: UUID, seeds: list[str], *
                               queries_found=len(r.queries)) for r in results.values()],
         clusters=cluster_queries({engine: r.queries for engine, r in results.items()}),
     )
-    artifact = ArtifactService(db).create(product_id=product_id, kind=KIND,
+    artifact = ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=KIND,
                                           title=f"Семантическое ядро: {', '.join(seeds)[:200]}",
                                           content=core.model_dump_json())
     db.commit()
@@ -43,3 +43,4 @@ def latest_semantic_core(db: Session, product_id: UUID) -> SemanticCore | None:
     row = db.scalar(select(Artifact).where(Artifact.product_id == product_id, Artifact.kind == KIND)
                     .order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
     return SemanticCore.model_validate_json(row.content) if row else None
+

@@ -31,6 +31,9 @@ async def run_content_once(session_factory, settings):
             try:
                 if request is None:
                     raise ValueError('Missing content request')
+                if task.title.startswith(SEO_TASK_PREFIX):
+                    from app.seo.queue import record_article_start
+                    record_article_start(db, task)
                 raw = json.loads(request.content)
                 if raw.get("mode") == "post":
                     data = QuickPostRequest.model_validate(raw)
@@ -148,3 +151,4 @@ async def run_content_once(session_factory, settings):
             if isinstance(exc, asyncio.CancelledError):
                 raise
     return 1
+

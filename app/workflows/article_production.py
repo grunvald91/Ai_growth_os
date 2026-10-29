@@ -1043,7 +1043,7 @@ class ArticleProduction:
                             raise  # These stages have a deterministic fallback.
                         # One repair attempt with the exact problem, without a second critic round.
                         problem = _validation_problem(rejected)
-                        repair = LLMService(privacy_gateway=self.llm._privacy_gateway, provider=self.llm._provider)
+                        repair = self.llm
                         response = await asyncio.wait_for(repair.generate(LLMRequest(
                             system_prompt=prompt + '\nYour previous answer was rejected by validation: ' + problem
                             + '. Fix exactly this and return the complete JSON again.',
@@ -1052,7 +1052,7 @@ class ArticleProduction:
                             response_schema=schema.model_json_schema(),
                             metadata={'reasoning_effort': 'low', 'team_role': name, 'task_type': 'article_production',
                                       'provider_timeout_seconds': STAGE_PROVIDER_TIMEOUT_SECONDS.get(name, 90)},
-                        ), on_observed=record_model_call), timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
+                        ), validate_revision=validate_stage_revision, on_observed=record_model_call), timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
                         if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
                             raise rejected
                         parsed = accept(response.content)
@@ -1076,6 +1076,13 @@ class ArticleProduction:
                         parsed = schema.model_validate(_creative_fallback_payload(name, stage_inputs))
                 if name in {'youtube_shorts_director', 'instagram_reels_director'}:
                     parsed = _normalize_ready_video_timeline(parsed)
+                if name == 'marketing_editor':
+                    from app.seo.publishing import reader_hash
+                    review = dict(response.quality_review or {})
+                    review['reader_hash'] = reader_hash(parsed)
+                    ArtifactService(self.db).create(product_id=product_id, task_id=task_id,
+                        agent_run_id=run_id, kind='seo_final_review', title='Final reader review',
+                        content=json.dumps(review))
                 checkpoint = ArtifactService(self.db).create(
                     product_id=product_id,
                     task_id=task_id,

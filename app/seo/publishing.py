@@ -4,6 +4,7 @@ The owner decided that articles of the SEO plan go live on their own once the cr
 corrected them. Anything that does not pass stays with the owner as a pending approval. Every publication is
 recorded as an approval decided by policy, a publication row and the artifact status.
 """
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -53,17 +54,25 @@ def unique_slug(db: Session, product_id, text: str) -> str:
     return slug
 
 
-def critic_verdict(db: Session, task_id) -> str:
+def reader_hash(reader) -> str:
+    return hashlib.sha256(json.dumps(reader.model_dump(mode="json"), sort_keys=True,
+                                    ensure_ascii=False).encode()).hexdigest()
+
+
+def critic_verdict(db: Session, task_id, reader=None) -> str:
     """Status of the critic review of the final reader-facing editor, or 'missing' when no review happened."""
     run = db.scalar(select(AgentRun).where(AgentRun.task_id == task_id, AgentRun.agent_name == FINAL_EDITOR)
                     .order_by(AgentRun.created_at.desc()).limit(1))
     if run is None:
         return "missing"
-    reviews = db.scalars(select(Artifact).where(Artifact.agent_run_id == run.id, Artifact.kind == "agent_quality_review")
+    reviews = db.scalars(select(Artifact).where(Artifact.agent_run_id == run.id, Artifact.kind == "seo_final_review")
                          .order_by(Artifact.created_at.desc(), Artifact.id.desc()))
     for review in reviews:
         try:
-            return str(json.loads(review.content).get("status", "missing"))
+            data = json.loads(review.content)
+            if reader is None or data.get("reader_hash") != reader_hash(reader):
+                return "content_mismatch"
+            return str(data.get("status", "missing"))
         except (TypeError, ValueError):
             continue
     return "missing"
@@ -96,7 +105,7 @@ def publish_if_clear(db: Session, article_id) -> Outcome:
         return Outcome(True, "already_published")
     article = ArticleArtifact.model_validate_json(row.content)
     problems = static_problems(article)
-    verdict = critic_verdict(db, row.task_id)
+    verdict = critic_verdict(db, row.task_id, article.reader_article)
     if verdict not in CLEAN_CRITIC_STATUSES:
         problems.append(f"critic review: {verdict}")
     policy = PolicyEvaluator().evaluate(ToolOperation.PUBLISH)
@@ -149,3 +158,18 @@ def publish_owner_approved(db: Session) -> int:
         db.commit()
         published += 1
     return published
+
+
+
+def publish_pending(db: Session) -> int:
+    from app.models.domain import Task, TaskStatus
+    rows = list(db.scalars(select(Artifact).join(Task, Artifact.task_id == Task.id).where(
+        Artifact.kind == "article", Artifact.status == ArtifactStatus.DRAFT,
+        Task.status == TaskStatus.COMPLETED, Task.title.like("SEO-ARTICLE:%"))
+        .order_by(Artifact.created_at, Artifact.id).limit(10)))
+    for row in rows:
+        try:
+            publish_if_clear(db, row.id)
+        except Exception:
+            db.rollback()
+    return len(rows)

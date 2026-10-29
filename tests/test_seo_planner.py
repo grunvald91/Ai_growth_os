@@ -88,6 +88,7 @@ async def test_plan_saved_as_artifact_with_completed_task(db, product, tmp_path)
                                   products_root=tmp_path / "products", model="fake")
     assert artifact.kind == "seo_content_plan" and artifact.task_id
     assert db.get(Task, artifact.task_id).status == TaskStatus.COMPLETED
+    queue_plan(db, second, {c.id: c for c in core().clusters})
     sent = json.loads(provider.requests[0].messages[0].content)
     assert [c["id"] for c in sent["clusters"]] == ["c001", "c002"]  # most evidenced cluster first
 
@@ -96,7 +97,7 @@ async def test_plan_saved_as_artifact_with_completed_task(db, product, tmp_path)
 async def test_invented_plan_fails_task_and_saves_nothing(db, product, tmp_path):
     provider = Provider({"items": [item(primary_query="выдуманный запрос")]})
     with pytest.raises(PlanError):
-        await plan_content(db, service(provider), PrivacyGateway(), product.id, core(),
+        second = await plan_content(db, service(provider), PrivacyGateway(), product.id, core(),
                            products_root=tmp_path / "products", model="fake")
     task = db.query(Task).one()
     assert task.status == TaskStatus.FAILED
@@ -123,14 +124,17 @@ async def test_next_plan_skips_topics_already_written(db, product, tmp_path):
     from app.seo.queue import SEO_TASK_PREFIX
     first = await plan_content(db, service(Provider({"items": [item()]})), PrivacyGateway(), product.id, core(),
                                products_root=tmp_path / "products", model="fake")
+    from app.seo.queue import queue_plan
+    queue_plan(db, first, {c.id: c for c in core().clusters})
     provider = Provider({"items": [c002_item()]})
-    await plan_content(db, service(provider), PrivacyGateway(), product.id, core(),
+    second = await plan_content(db, service(provider), PrivacyGateway(), product.id, core(),
                        products_root=tmp_path / "products", model="fake")
+    queue_plan(db, second, {c.id: c for c in core().clusters})
     sent = json.loads(provider.requests[0].messages[0].content)
     assert [c["id"] for c in sent["clusters"]] == ["c002"]  # c001 already has its article
     # a failed article frees its query for a later plan
-    db.add(Task(product_id=product.id, title=f"{SEO_TASK_PREFIX}{first.id}:a001", assigned_agent="content_factory",
-                status=TaskStatus.FAILED))
+    from sqlalchemy import select
+    db.scalar(select(Task).where(Task.title == f"{SEO_TASK_PREFIX}{first.id}:a001")).status = TaskStatus.FAILED
     db.commit()
     from app.seo.planner import planned_queries
     assert planned_queries(db, product.id) == {"программа для записи клиентов цена"}
@@ -138,8 +142,19 @@ async def test_next_plan_skips_topics_already_written(db, product, tmp_path):
 
 @pytest.mark.asyncio
 async def test_plan_stops_when_everything_is_covered(db, product, tmp_path):
-    await plan_content(db, service(Provider({"items": [item(), c002_item()]})), PrivacyGateway(), product.id, core(),
+    saved = await plan_content(db, service(Provider({"items": [item(), c002_item()]})), PrivacyGateway(), product.id, core(),
                        products_root=tmp_path / "products", model="fake")
+    from app.seo.queue import queue_plan
+    queue_plan(db, saved, {c.id: c for c in core().clusters})
     with pytest.raises(PlanError, match="already covered"):
         await plan_content(db, service(Provider()), PrivacyGateway(), product.id, core(),
                            products_root=tmp_path / "products", model="fake")
+
+
+
+@pytest.mark.asyncio
+async def test_plan_without_article_task_does_not_reserve_query(db, product, tmp_path):
+    from app.seo.planner import planned_queries
+    await plan_content(db, service(Provider({"items": [item()]})), PrivacyGateway(), product.id, core(),
+                       products_root=tmp_path / "products", model="fake")
+    assert planned_queries(db, product.id) == set()

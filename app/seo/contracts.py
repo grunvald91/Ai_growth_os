@@ -40,7 +40,7 @@ class SemanticCore(Contract):
 
 class SeedList(Contract):
     """Seed queries phrased the way customers search, not the way the company describes itself."""
-    seeds: list[Query] = Field(min_length=3)
+    seeds: list[Query] = Field(min_length=3, max_length=10)
 
 
 class PlanItem(Contract):
@@ -57,3 +57,4 @@ class PlanItem(Contract):
 
 class SeoContentPlan(Contract):
     items: list[PlanItem] = Field(min_length=1)
+
