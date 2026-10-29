@@ -152,3 +152,25 @@ async def test_changed_reader_cannot_use_old_clean_review(env, tmp_path):
     outcome = publish_if_clear(db, article_id)
     assert not outcome.published and "content_mismatch" in outcome.reason
     assert not list(db.scalars(select(Publication)))
+
+
+@pytest.mark.asyncio
+async def test_publication_is_retried_after_transient_failure(env, tmp_path, monkeypatch):
+    import app.seo.publishing as module
+    from app.models.domain import Task
+    db, product = env
+    article_id = await make_article(db, product, tmp_path)
+    row = db.get(Artifact, article_id)
+    db.get(Task, row.task_id).title = "SEO-ARTICLE:retry"
+    db.commit()
+    original = module._go_live
+    def unavailable(*args):
+        raise RuntimeError("temporary failure")
+    monkeypatch.setattr(module, "_go_live", unavailable)
+    assert module.publish_pending(db) == 1
+    assert db.get(Artifact, article_id).status == ArtifactStatus.DRAFT
+    monkeypatch.setattr(module, "_go_live", original)
+    assert module.publish_pending(db) == 1
+    assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
+    assert module.publish_pending(db) == 0
+    assert len(list(db.scalars(select(Publication)))) == 1

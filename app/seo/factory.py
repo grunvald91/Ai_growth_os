@@ -70,7 +70,6 @@ async def run_factory_once(session_factory, settings, *, provider=None, client: 
                                    title="SEO attempt", content="{}")
         db.commit()
         request = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == REQUEST_KIND))
-        stage = "request"
         try:
             focus = (json.loads(request.content).get("focus") if request else None) or None
             async with asyncio.timeout(1200):
@@ -80,7 +79,13 @@ async def run_factory_once(session_factory, settings, *, provider=None, client: 
             _logger.warning("SEO factory failed: %s", type(exc).__name__)
             ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=REPORT_KIND,
                 title="SEO-завод остановился", content=json.dumps({"error": type(exc).__name__}))
-            TaskService(db).update(task_id, status=TaskStatus.FAILED)
+            from app.seo.planner import PLAN_KIND
+            attempts = list(db.scalars(select(Artifact.id).where(
+                Artifact.task_id == task_id, Artifact.kind == ATTEMPT_KIND)))
+            resumable = db.scalar(select(Artifact.id).where(Artifact.task_id == task_id,
+                                                           Artifact.kind == PLAN_KIND)) is not None
+            retry = len(attempts) < 3 and (resumable or isinstance(exc, TimeoutError))
+            TaskService(db).update(task_id, status=TaskStatus.QUEUED if retry else TaskStatus.FAILED)
             db.commit()
         return 1
 
@@ -92,8 +97,11 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client):
     llm, privacy = build_seo_llm(settings, provider)
     core_artifact = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == KIND))
     if core_artifact is None:
-        seeds = await plan_seeds(db, llm, privacy, product_id, products_root=settings.products_root,
-                                 model=settings.llm_model, focus=focus)
+        checkpoint = db.scalar(select(Artifact).where(Artifact.task_id == task_id,
+                                                       Artifact.kind == "seo_suggest_checkpoint"))
+        seeds = (json.loads(checkpoint.content)["seeds"] if checkpoint else
+                 await plan_seeds(db, llm, privacy, product_id, products_root=settings.products_root,
+                                  model=settings.llm_model, focus=focus))
         core_artifact = await build_semantic_core(db, product_id, seeds, client=client, task_id=task_id)
     core = SemanticCore.model_validate_json(core_artifact.content)
     plan = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == PLAN_KIND))

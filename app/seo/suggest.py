@@ -40,6 +40,7 @@ class EngineResult:
     requests: int = 0
     failed: int = 0
     queries: set[str] = field(default_factory=set)
+    completed: set[str] = field(default_factory=set)
 
 
 def parse_suggestions(body: str) -> list[str]:
@@ -61,7 +62,7 @@ def parse_suggestions(body: str) -> list[str]:
 
 async def collect(seeds: Iterable[str], *, client: httpx.AsyncClient | None = None,
                   engines: tuple[Engine, ...] = ("yandex", "google"),
-                  concurrency: int = 4, max_requests: int = 400, total_timeout: float = 120) -> dict[Engine, EngineResult]:
+                  concurrency: int = 4, max_requests: int = 400, total_timeout: float = 120, initial=None, on_batch=None) -> dict[Engine, EngineResult]:
     """Ask every engine about every probe. A failed request is counted, never replaced with guesses."""
     if concurrency < 1 or max_requests < 1 or total_timeout <= 0:
         raise ValueError("Invalid suggestion budget")
@@ -73,6 +74,10 @@ async def collect(seeds: Iterable[str], *, client: httpx.AsyncClient | None = No
     client = client or httpx.AsyncClient(timeout=10.0, follow_redirects=False,
                                          headers={"User-Agent": "Mozilla/5.0 (compatible; GrowthOS/1.0)"})
     results = {engine: EngineResult(engine) for engine in engines}
+    for engine, saved in (initial or {}).items():
+        if engine in results:
+            results[engine] = EngineResult(engine, requests=saved["requests"], failed=saved["failed"],
+                                          queries=set(saved["queries"]), completed=set(saved["completed"]))
     gate = asyncio.Semaphore(concurrency)
 
     async def one(engine: Engine, probe: str) -> None:
@@ -87,14 +92,18 @@ async def collect(seeds: Iterable[str], *, client: httpx.AsyncClient | None = No
             except (httpx.HTTPError, ValueError) as exc:
                 result.failed += 1
                 _logger.info("suggest_failed engine=%s error=%s", engine, type(exc).__name__)
+            result.completed.add(probe)
 
     try:
         # Round-robin engines; create only one bounded batch of coroutines at a time.
         jobs = [(engine, probe) for probe in probes for engine in engines][:max_requests]
+        jobs = [(engine, probe) for engine, probe in jobs if probe not in results[engine].completed]
         try:
             async with asyncio.timeout(total_timeout):
                 for offset in range(0, len(jobs), concurrency):
                     await asyncio.gather(*(one(*job) for job in jobs[offset:offset + concurrency]))
+                    if on_batch is not None:
+                        on_batch(results)
         except TimeoutError:
             _logger.info("suggest_budget_exhausted")
     finally:

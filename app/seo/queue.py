@@ -4,11 +4,11 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.content.service import queue_content
-from app.models.domain import Artifact, Task, TaskStatus
+from app.models.domain import AgentRun, Artifact, Task, TaskStatus
 from app.seo.contracts import PlanItem, SeoContentPlan
 from app.seo.planner import PLAN_KIND
 from app.workflows.article_contracts import ArticleProductionInput, SeoBrief
@@ -61,10 +61,12 @@ def _started_today(db: Session, now: datetime | None):
     day_start = local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     if db.bind.dialect.name == "sqlite":
         day_start = day_start.replace(tzinfo=None)
-    return db.scalars(select(Task).join(Artifact, Artifact.task_id == Task.id).where(
-        Artifact.kind == "seo_article_started",
+    started = select(Artifact.created_at).where(Artifact.task_id == Task.id,
+        Artifact.kind == "seo_article_started").limit(1).scalar_subquery()
+    legacy_start = select(func.min(AgentRun.started_at)).where(AgentRun.task_id == Task.id).scalar_subquery()
+    return db.scalars(select(Task).where(
         Task.assigned_agent == "content_factory", Task.title.like(f"{SEO_TASK_PREFIX}%"),
-        Artifact.created_at >= day_start).distinct())
+        func.coalesce(started, legacy_start) >= day_start))
 
 
 def articles_started_today(db: Session, now: datetime | None = None, product_id: UUID | None = None) -> int:
