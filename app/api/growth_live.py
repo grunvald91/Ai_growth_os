@@ -19,10 +19,9 @@ from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
-from app.api.content_studio import _owner_product, more_links, studio_page_shell
-from app.api.content_studio_brand import servgo_brand_html
+from app.api.content_studio import MATERIAL_KINDS, _owner_product, studio_page_shell
 from app.db.session import get_db
-from app.models.domain import Artifact, Experiment
+from app.models.domain import Artifact, Experiment, Task
 
 ASSETS = Path(__file__).parent / 'assets'
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -46,32 +45,8 @@ def decorate(page: str, request: Request, new: bool) -> str:
     if not match:
         match = re.search(r'/studio/products/([0-9a-fA-F-]{36})', page)
     pid = UUID(match[1]) if match else None
-    base = f'/studio/products/{pid}' if pid else '/studio'
-    links = [('Главная', base), ('Создать', base+'/create'), ('Задания', base+'/work'),
-             ('Согласование', base+'/review'), ('Материалы', base+'/materials'),
-             ('Кампании', base+'/campaigns'), ('SEO-завод', base+'/seo')]
-    if pid:
-        links += [(('Простое видео' if key=='whiteboard' else label), href)
-                  for key, href, _, label in more_links(pid)
-                  if key not in {'review', 'logout'}]
-    else:
-        links = [('Компании', '/studio?choose=1'), ('ИИ-команда', '/studio/team')]
-    def link(label, href):
-        active = ' aria-current="page"' if request.url.path == href.split('?')[0] else ''
-        return f'<a href="{html.escape(href, quote=True)}"{active}>{html.escape(label)}</a>'
-    nav = ''.join(link(*item) for item in links)
-    mobile = ''.join(link(*item) for item in links[:3])
-    chrome = (f'<div class="gv-layout"><aside class="gv-sidebar">{servgo_brand_html(href=base)}'
-              f'<nav aria-label="Разделы Growth OS">{nav}</nav></aside><section class="gv-workspace">'
-              f'<header class="gv-header"><span>{servgo_brand_html(compact=True, href=base)}</span>'
-              f'<a href="{switch}">Старый дизайн</a>'
-              '<button type="button" id="gv-theme" aria-label="Переключить тему">◐</button></header>')
-    page = page.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=1"></head>')
-    page = re.sub(r'<body([^>]*)>', lambda m: '<body'+m[1]+' data-growth-design="v4">'+chrome, page, count=1)
-    footer = ('</section></div><nav class="gv-mobile" aria-label="Быстрая навигация">'+mobile+
-              '<details><summary>Ещё</summary><nav aria-label="Все разделы">'+nav+'</nav></details></nav>'
-              '<script src="/studio/assets/growth-live.js?v=1"></script>')
-    return page.replace('</body>', footer+'</body>')
+    from app.api.growth_v4 import render_v4
+    return render_v4(page, request, pid, switch)
 
 
 class GrowthDesignMiddleware(BaseHTTPMiddleware):
@@ -172,3 +147,19 @@ def campaigns_page(product_id: UUID, db: Session = Depends(get_db)):
         f'<a class="btn" href="{base}/plan">Контент-план</a> '
         '<a class="btn" href="https://servgo.ru/mail">Почтовые кампании</a></p>'+
         (cards or '<p>Маркетинговых экспериментов пока нет.</p>'))
+
+
+@router.get('/studio/products/{product_id}/v4/data')
+def v4_data(product_id: UUID, db: Session = Depends(get_db)):
+    """Company-scoped records for the reviewed board/library components."""
+    _owner_product(db, product_id)
+    tasks = list(db.scalars(select(Task).where(Task.product_id == product_id)
+                           .order_by(Task.created_at.desc()).limit(200)))
+    materials = list(db.scalars(select(Artifact).where(Artifact.product_id == product_id, Artifact.kind.in_(MATERIAL_KINDS))
+                               .order_by(Artifact.created_at.desc()).limit(200)))
+    from fastapi.responses import JSONResponse
+    return JSONResponse({'tasks': [dict(id=str(t.id),title=t.title,status=t.status.value,
+            group=t.assigned_agent or 'ИИ-команда',detail=t.description or '') for t in tasks],
+        'materials': [dict(id=str(a.id),title=a.title,kind=a.kind,status=a.status.value,
+                          description='') for a in materials]},
+        headers={'Cache-Control':'private, no-store'})

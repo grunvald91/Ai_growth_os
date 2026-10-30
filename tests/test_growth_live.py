@@ -61,6 +61,11 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert 'id="dp-state"' in page.text
     assert '/studio/assets/dispatcher.js' in page.text
     assert 'Простое видео' in page.text
+    assert 'hero-intro' in page.text
+    assert 'Добрый день, Марина' not in page.text
+    assert 'initialTasks' not in page.text
+    assert 'function homeV4' not in page.text
+    assert 'Демо · API не подключены' not in page.text
     assert 'https://servgo.ru/mail' in page.text
 
 
@@ -124,8 +129,48 @@ def test_company_scope_is_enforced_for_new_screens(live, monkeypatch, tmp_path):
     create_account(settings, username='company-user', password='local-fixture-password', role='company',
                    product_ids=[str(product.id)], created_by='test')
     monkeypatch.setitem(app.dependency_overrides, get_settings, lambda: settings)
-    for suffix in ('seo','campaigns'):
+    for suffix in ('seo','campaigns','v4/data'):
         assert client.get(f'/studio/products/{product.id}/{suffix}?design=v4',
                           auth=('company-user','local-fixture-password')).status_code == 200
         assert client.get(f'/studio/products/{other.id}/{suffix}?design=v4',
                           auth=('company-user','local-fixture-password')).status_code == 404
+
+
+def test_v4_data_has_only_company_records_and_no_mock_data(live):
+    from app.models.domain import Task
+    client, db, product = live
+    other = Product(name='Other data company',slug='data-other')
+    db.add(other)
+    db.flush()
+    db.add_all([Task(product_id=product.id,title='Настоящее задание'),
+                Task(product_id=other.id,title='Чужое задание')])
+    db.commit()
+    result = client.get(f'/studio/products/{product.id}/v4/data')
+    assert result.status_code == 200
+    assert [t['title'] for t in result.json()['tasks']] == ['Настоящее задание']
+    assert result.headers['cache-control'] == 'private, no-store'
+
+
+def test_v4_home_is_available_for_other_company_and_hides_technical_artifacts(live):
+    client, db, product = live
+    product.slug='company-without-dispatcher-flag'
+    db.add_all([Artifact(product_id=product.id,kind='internal_checkpoint',title='Internal',content='{}'),
+                Artifact(product_id=product.id,kind='article',title='Настоящая статья',content='Текст')])
+    db.commit()
+    page = client.get(f'/studio/products/{product.id}?design=v4')
+    assert 'hero-intro' in page.text and 'data-api=' in page.text
+    data=client.get(f'/studio/products/{product.id}/v4/data').json()
+    assert [a['title'] for a in data['materials']]==['Настоящая статья']
+
+
+def test_v4_reuses_reviewed_css_and_keeps_team_access_overlay(live):
+    from pathlib import Path
+    client, db, product = live
+    page=client.get(f'/studio/products/{product.id}?design=v4')
+    prototype=Path('app/api/assets/growth_os_v4_preview.html').read_text()
+    reviewed_css=prototype.split('<style>',1)[1].split('</style>',1)[0]
+    assert reviewed_css in page.text
+    assert 'gv-layout' not in page.text
+    team=client.get('/studio/team')
+    assert team.text.count('id="authForm"')==1
+    assert team.text.count('class="topbar"')==1
