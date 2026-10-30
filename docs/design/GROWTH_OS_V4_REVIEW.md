@@ -17,6 +17,16 @@ uvicorn app.main:app --reload
 Откройте `http://127.0.0.1:8000/studio/design-preview` после входа в Studio.
 Без запуска приложения можно просто открыть файл `app/api/assets/growth_os_v4_preview.html` в браузере.
 
+## Реестр маршрутов и функций — контроль полноты редизайна
+
+- [Полный технический реестр маршрутов](SERVGO_ROUTE_REGISTRY.md) — 382 объявления с обработчиками и ссылками на исходники.
+- [Таблица CSV для поиска и фильтрации](SERVGO_ROUTE_REGISTRY.csv).
+- [JSON для автоматической сверки](SERVGO_ROUTE_REGISTRY.json).
+- [Матрица пользовательских функций](SERVGO_FUNCTION_MATRIX.md) — 61 сценарий и 19 команд диспетчера.
+- [Сырые снимки исходных деклараций](registry_source_growth_1.json) — сохраняются рядом с аналогичными файлами `registry_source_growth_2.json`, `registry_source_growth_3.json`, `registry_source_booking_1.json`, `registry_source_booking_2.json`, `registry_source_booking_web.json`.
+
+Реестр отражает исходный код, а не живую конфигурацию production. Он включает сопутствующие BookingBot API, но **не доказывает**, что каждый маршрут опубликован, разрешён конкретному пользователю или отвечает на сервере. Во время интеграции нового фронтенда закрывайте сценарии из матрицы по одному, сохраняя права доступа, подтверждения внешних действий и обработку ошибок.
+
 ## Что не изменено
 
 - Основные маршруты `/studio/products/*`, `/studio/team`, `/studio/voice/*`, `/public/blog/*` остаются на прежних обработчиках.
