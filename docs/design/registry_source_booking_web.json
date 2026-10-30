@@ -1,0 +1,720 @@
+{
+  "repo": "grunvald91/booking_bot",
+  "source_ref": "eabd7b6b1321c8a3b147fcdb782241ba688cf47c",
+  "scope": "booking-webapp-react",
+  "files": [
+    {
+      "path": "webapp/server.py",
+      "size": 155297,
+      "count": 48,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/",
+          "handler": "index_handler",
+          "file": "webapp/server.py",
+          "line": 3600,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/calendar",
+          "handler": "calendar_handler",
+          "file": "webapp/server.py",
+          "line": 3601,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/calendar",
+          "handler": "api_calendar_data",
+          "file": "webapp/server.py",
+          "line": 3602,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/booking/{booking_id}",
+          "handler": "api_booking_details",
+          "file": "webapp/server.py",
+          "line": 3603,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "POST",
+          "path": "/api/booking/{booking_id}/status",
+          "handler": "api_update_booking_status",
+          "file": "webapp/server.py",
+          "line": 3604,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/day/{date}",
+          "handler": "api_day_bookings",
+          "file": "webapp/server.py",
+          "line": 3605,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/analytics",
+          "handler": "analytics_handler",
+          "file": "webapp/server.py",
+          "line": 3608,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/analytics/businesses",
+          "handler": "api_analytics_businesses",
+          "file": "webapp/server.py",
+          "line": 3609,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/analytics/data",
+          "handler": "api_analytics_data",
+          "file": "webapp/server.py",
+          "line": 3610,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/analytics/schedule",
+          "handler": "api_analytics_schedule",
+          "file": "webapp/server.py",
+          "line": 3611,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/login",
+          "handler": "login_handler",
+          "file": "webapp/server.py",
+          "line": 3614,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/auth/token/{token}",
+          "handler": "auth_token_handler",
+          "file": "webapp/server.py",
+          "line": 3615,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "POST",
+          "path": "/api/landing/connect-request",
+          "handler": "api_landing_connect_request",
+          "file": "webapp/server.py",
+          "line": 3616,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/login",
+          "handler": "api_auth_login",
+          "file": "webapp/server.py",
+          "line": 3617,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/telegram",
+          "handler": "api_auth_telegram",
+          "file": "webapp/server.py",
+          "line": 3618,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/me",
+          "handler": "api_auth_me",
+          "file": "webapp/server.py",
+          "line": 3619,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/logout",
+          "handler": "api_auth_logout",
+          "file": "webapp/server.py",
+          "line": 3620,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/check",
+          "handler": "api_auth_check",
+          "file": "webapp/server.py",
+          "line": 3621,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/booking",
+          "handler": "api_admin_create_booking",
+          "file": "webapp/server.py",
+          "line": 3624,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/book",
+          "handler": "booking_handler",
+          "file": "webapp/server.py",
+          "line": 3627,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/client/businesses",
+          "handler": "api_client_businesses",
+          "file": "webapp/server.py",
+          "line": 3628,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/client/last-bookings",
+          "handler": "api_client_last_bookings",
+          "file": "webapp/server.py",
+          "line": 3629,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/client/photo",
+          "handler": "api_get_photo",
+          "file": "webapp/server.py",
+          "line": 3630,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/media/{file_id}",
+          "handler": "api_media_proxy",
+          "file": "webapp/server.py",
+          "line": 3631,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/client/business/{business_id}",
+          "handler": "api_client_business_details",
+          "file": "webapp/server.py",
+          "line": 3632,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/client/business/{business_id}/services",
+          "handler": "api_client_business_details",
+          "file": "webapp/server.py",
+          "line": 3633,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/client/business/{business_id}/slots",
+          "handler": "api_client_slots",
+          "file": "webapp/server.py",
+          "line": 3634,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/client/business/{business_id}/calculate-price",
+          "handler": "api_client_calculate_price",
+          "file": "webapp/server.py",
+          "line": 3635,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "POST",
+          "path": "/api/client/booking",
+          "handler": "api_client_create_booking",
+          "file": "webapp/server.py",
+          "line": 3636,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/client/my-bookings",
+          "handler": "api_client_my_bookings",
+          "file": "webapp/server.py",
+          "line": 3639,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "POST",
+          "path": "/api/client/booking/{booking_id}/cancel",
+          "handler": "api_client_cancel_booking",
+          "file": "webapp/server.py",
+          "line": 3640,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "POST",
+          "path": "/api/client/booking/{booking_id}/reschedule",
+          "handler": "api_client_reschedule_booking",
+          "file": "webapp/server.py",
+          "line": 3641,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "POST",
+          "path": "/api/client/booking/{booking_id}/prepayment-sent",
+          "handler": "api_client_prepayment_sent",
+          "file": "webapp/server.py",
+          "line": 3642,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/client/all-subscriptions",
+          "handler": "api_client_all_subscriptions",
+          "file": "webapp/server.py",
+          "line": 3643,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/client/my-subscriptions",
+          "handler": "api_client_my_subscriptions",
+          "file": "webapp/server.py",
+          "line": 3644,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/api/client/subscription/{subscription_id}",
+          "handler": "api_client_subscription_details",
+          "file": "webapp/server.py",
+          "line": 3645,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "POST",
+          "path": "/api/client/subscription/{subscription_id}/buy",
+          "handler": "api_client_buy_subscription",
+          "file": "webapp/server.py",
+          "line": 3646,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "POST",
+          "path": "/api/client/subscription/{client_sub_id}/payment-sent",
+          "handler": "api_client_subscription_payment_sent",
+          "file": "webapp/server.py",
+          "line": 3647,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "POST",
+          "path": "/api/client/subscription/{client_sub_id}/upload-receipt",
+          "handler": "api_client_subscription_upload_receipt",
+          "file": "webapp/server.py",
+          "line": 3648,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "STATIC",
+          "path": "/static",
+          "handler": "static_path",
+          "file": "webapp/server.py",
+          "line": 3651,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/blog/sitemap.xml",
+          "handler": "blog_sitemap_handler",
+          "file": "webapp/server.py",
+          "line": 3654,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/blog",
+          "handler": "blog_handler",
+          "file": "webapp/server.py",
+          "line": 3655,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/blog/{article_slug:[a-z0-9-]+}",
+          "handler": "blog_handler",
+          "file": "webapp/server.py",
+          "line": 3656,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/sitemap.xml",
+          "handler": "sitemap_handler",
+          "file": "webapp/server.py",
+          "line": 3660,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/robots.txt",
+          "handler": "robots_handler",
+          "file": "webapp/server.py",
+          "line": 3661,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/llms.txt",
+          "handler": "llms_txt_handler",
+          "file": "webapp/server.py",
+          "line": 3662,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/roadmap",
+          "handler": "serve_roadmap",
+          "file": "webapp/server.py",
+          "line": 3665,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        },
+        {
+          "method": "GET",
+          "path": "/{slug:[a-z][a-z0-9-]*}",
+          "handler": "serve_niche_landing",
+          "file": "webapp/server.py",
+          "line": 3670,
+          "source": "aiohttp-add",
+          "router": "webapp"
+        }
+      ]
+    },
+    {
+      "path": "web/frontend/src/App.tsx",
+      "size": 9362,
+      "count": 29,
+      "routes": [
+        {
+          "method": "PAGE",
+          "path": "/",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 139,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/business/:id",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 140,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/book/:businessId",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 141,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/b/:token",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 142,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/rental/b/:token",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 143,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/my",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 144,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/subscriptions",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 152,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/chat",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 153,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/legal/:docType/:businessId",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 154,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/login",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 155,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/login/yandex",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 156,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/mail",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 157,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/account",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 158,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/master",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 159,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/prepayments",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 160,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/book",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 163,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/schedule",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 164,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/analytics",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 165,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/calendar",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 166,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/sales",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 169,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/sales/settings",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 170,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 171,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/schedule",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 179,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/services",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 187,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/employees",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 195,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/analytics",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 203,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/settings",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 211,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/subscriptions",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 219,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "*",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 227,
+          "source": "react-route",
+          "router": "frontend"
+        }
+      ]
+    },
+    {
+      "path": "web/frontend/src/main.tsx",
+      "size": 864,
+      "count": 0,
+      "routes": []
+    }
+  ]
+}

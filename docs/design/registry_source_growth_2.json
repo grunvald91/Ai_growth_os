@@ -1,0 +1,530 @@
+{
+  "repo": "grunvald91/Ai_growth_os",
+  "source_ref": "design/growth-os-v4-review-20261030",
+  "scope": "growth-api-2",
+  "files": [
+    {
+      "path": "app/api/research_sources.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 1,
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/research-sources",
+          "handler": "add_research_sources",
+          "file": "app/api/research_sources.py",
+          "line": 15,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 1074
+    },
+    {
+      "path": "app/api/studio_accounts.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 6,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/accounts",
+          "handler": "accounts_page",
+          "file": "app/api/studio_accounts.py",
+          "line": 143,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/accounts",
+          "handler": "accounts_create",
+          "file": "app/api/studio_accounts.py",
+          "line": 151,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/accounts/{username}/password",
+          "handler": "accounts_password",
+          "file": "app/api/studio_accounts.py",
+          "line": 172,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/accounts/{username}/delete",
+          "handler": "accounts_delete",
+          "file": "app/api/studio_accounts.py",
+          "line": 185,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/connections",
+          "handler": "connections_create",
+          "file": "app/api/studio_accounts.py",
+          "line": 198,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/connections/{link_id}/delete",
+          "handler": "connections_delete",
+          "file": "app/api/studio_accounts.py",
+          "line": 212,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 14205
+    },
+    {
+      "path": "app/api/studio_login.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 3,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/studio/login",
+          "handler": "login_form",
+          "file": "app/api/studio_login.py",
+          "line": 97,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/login",
+          "handler": "login_submit",
+          "file": "app/api/studio_login.py",
+          "line": 103,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/logout",
+          "handler": "logout",
+          "file": "app/api/studio_login.py",
+          "line": 133,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 7175
+    },
+    {
+      "path": "app/api/studio_sso.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 2,
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/studio/sso/create",
+          "handler": "sso_create",
+          "file": "app/api/studio_sso.py",
+          "line": 144,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/sso",
+          "handler": "sso_landing",
+          "file": "app/api/studio_sso.py",
+          "line": 204,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 12530
+    },
+    {
+      "path": "app/api/team_dashboard.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 13,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/studio/team",
+          "handler": "team_page",
+          "file": "app/api/team_dashboard.py",
+          "line": 246,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/team/assets/team.css",
+          "handler": "team_css",
+          "file": "app/api/team_dashboard.py",
+          "line": 252,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/team/assets/team.js",
+          "handler": "team_js",
+          "file": "app/api/team_dashboard.py",
+          "line": 258,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/team",
+          "handler": "team_data",
+          "file": "app/api/team_dashboard.py",
+          "line": 264,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/team/api",
+          "handler": "team_data",
+          "file": "app/api/team_dashboard.py",
+          "line": 265,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/team/preview",
+          "handler": "team_preview",
+          "file": "app/api/team_dashboard.py",
+          "line": 282,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/team/api/preview",
+          "handler": "team_preview",
+          "file": "app/api/team_dashboard.py",
+          "line": 283,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/admin/team",
+          "handler": "team_update",
+          "file": "app/api/team_dashboard.py",
+          "line": 291,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PUT",
+          "path": "/studio/team/api",
+          "handler": "team_update",
+          "file": "app/api/team_dashboard.py",
+          "line": 292,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/team/catalog",
+          "handler": "team_catalog",
+          "file": "app/api/team_dashboard.py",
+          "line": 313,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/team/api/catalog",
+          "handler": "team_catalog",
+          "file": "app/api/team_dashboard.py",
+          "line": 314,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/team/usage",
+          "handler": "team_usage",
+          "file": "app/api/team_dashboard.py",
+          "line": 335,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/team/api/usage",
+          "handler": "team_usage",
+          "file": "app/api/team_dashboard.py",
+          "line": 336,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 17593
+    },
+    {
+      "path": "app/api/tune.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 4,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/studio/tune",
+          "handler": "tune_prompts",
+          "file": "app/api/tune.py",
+          "line": 133,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/tune/prompts/{key}",
+          "handler": "tune_save",
+          "file": "app/api/tune.py",
+          "line": 194,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/tune/work",
+          "handler": "tune_work",
+          "file": "app/api/tune.py",
+          "line": 218,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/tune/work/{task_id}",
+          "handler": "tune_task",
+          "file": "app/api/tune.py",
+          "line": 264,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 20743
+    },
+    {
+      "path": "app/api/voice.py",
+      "prefixes": {
+        "studio_router": "",
+        "service_router": ""
+      },
+      "count": 3,
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/studio/voice/preview",
+          "handler": "preview_in_studio",
+          "file": "app/api/voice.py",
+          "line": 110,
+          "source": "decorator",
+          "router": "studio_router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/voice/dictate",
+          "handler": "dictate_in_studio",
+          "file": "app/api/voice.py",
+          "line": 139,
+          "source": "decorator",
+          "router": "studio_router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/voice/service/dictate",
+          "handler": "dictate_for_service",
+          "file": "app/api/voice.py",
+          "line": 151,
+          "source": "decorator",
+          "router": "service_router"
+        }
+      ],
+      "size": 8450
+    },
+    {
+      "path": "app/api/whiteboard.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 14,
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/whiteboard/jobs",
+          "handler": "api_create",
+          "file": "app/api/whiteboard.py",
+          "line": 128,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/products/{product_id}/whiteboard/jobs",
+          "handler": "api_list",
+          "file": "app/api/whiteboard.py",
+          "line": 135,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/whiteboard/jobs.json",
+          "handler": "api_list",
+          "file": "app/api/whiteboard.py",
+          "line": 137,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/products/{product_id}/whiteboard/jobs/{task_id}",
+          "handler": "api_job",
+          "file": "app/api/whiteboard.py",
+          "line": 145,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/whiteboard/jobs/{task_id}/approve",
+          "handler": "api_approve",
+          "file": "app/api/whiteboard.py",
+          "line": 150,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/whiteboard/jobs/{task_id}/cancel",
+          "handler": "api_cancel",
+          "file": "app/api/whiteboard.py",
+          "line": 157,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/whiteboard",
+          "handler": "studio_index",
+          "file": "app/api/whiteboard.py",
+          "line": 399,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/whiteboard",
+          "handler": "studio_create",
+          "file": "app/api/whiteboard.py",
+          "line": 416,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/whiteboard/{task_id}",
+          "handler": "studio_job",
+          "file": "app/api/whiteboard.py",
+          "line": 436,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/whiteboard/{task_id}/approve",
+          "handler": "studio_approve",
+          "file": "app/api/whiteboard.py",
+          "line": 443,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/whiteboard/{task_id}/cancel",
+          "handler": "studio_cancel",
+          "file": "app/api/whiteboard.py",
+          "line": 461,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/whiteboard/{task_id}/resume",
+          "handler": "studio_resume",
+          "file": "app/api/whiteboard.py",
+          "line": 468,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/whiteboard/{task_id}/repair",
+          "handler": "studio_repair",
+          "file": "app/api/whiteboard.py",
+          "line": 484,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/whiteboard/{task_id}/files/{filename}",
+          "handler": "studio_file",
+          "file": "app/api/whiteboard.py",
+          "line": 497,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 33735
+    },
+    {
+      "path": "app/api/content_studio_auth.py",
+      "prefixes": {},
+      "count": 0,
+      "routes": [],
+      "size": 13753
+    },
+    {
+      "path": "app/api/content_studio_activity.py",
+      "prefixes": {},
+      "count": 0,
+      "routes": [],
+      "size": 22359
+    },
+    {
+      "path": "app/api/content_studio_ui.py",
+      "prefixes": {},
+      "count": 0,
+      "routes": [],
+      "size": 19268
+    },
+    {
+      "path": "app/api/content_studio_work_ui.py",
+      "prefixes": {},
+      "count": 0,
+      "routes": [],
+      "size": 13559
+    }
+  ]
+}

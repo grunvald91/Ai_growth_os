@@ -1,0 +1,1274 @@
+{
+  "repo": "grunvald91/booking_bot",
+  "source_ref": "eabd7b6b1321c8a3b147fcdb782241ba688cf47c",
+  "scope": "booking-api-1",
+  "files": [
+    {
+      "path": "web/api/routes/admin.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "/admin",
+      "count": 42,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/admin/dashboard",
+          "handler": "dashboard",
+          "file": "web/api/routes/admin.py",
+          "line": 203,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/bookings",
+          "handler": "list_bookings",
+          "file": "web/api/routes/admin.py",
+          "line": 249,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/businesses/{business_id}/services",
+          "handler": "list_services",
+          "file": "web/api/routes/admin.py",
+          "line": 293,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/businesses/{business_id}/employees",
+          "handler": "list_employees",
+          "file": "web/api/routes/admin.py",
+          "line": 324,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/analytics/{business_id}",
+          "handler": "analytics",
+          "file": "web/api/routes/admin.py",
+          "line": 356,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/analytics/{business_id}/overview",
+          "handler": "analytics_overview",
+          "file": "web/api/routes/admin.py",
+          "line": 392,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/bookings",
+          "handler": "create_manual_booking",
+          "file": "web/api/routes/admin.py",
+          "line": 639,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PATCH",
+          "path": "/api/admin/bookings/{booking_id}/status",
+          "handler": "update_booking_status",
+          "file": "web/api/routes/admin.py",
+          "line": 773,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PATCH",
+          "path": "/api/admin/bookings/{booking_id}/service",
+          "handler": "change_booking_service_route",
+          "file": "web/api/routes/admin.py",
+          "line": 934,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/bookings/{booking_id}/reschedule",
+          "handler": "admin_reschedule_booking",
+          "file": "web/api/routes/admin.py",
+          "line": 978,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/businesses",
+          "handler": "list_admin_businesses",
+          "file": "web/api/routes/admin.py",
+          "line": 1149,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/businesses",
+          "handler": "create_admin_business",
+          "file": "web/api/routes/admin.py",
+          "line": 1173,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/businesses/{business_id}/services",
+          "handler": "create_service",
+          "file": "web/api/routes/admin.py",
+          "line": 1240,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/admin/businesses/{business_id}/services/{service_id}",
+          "handler": "update_service",
+          "file": "web/api/routes/admin.py",
+          "line": 1269,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/admin/businesses/{business_id}/services/{service_id}",
+          "handler": "delete_service",
+          "file": "web/api/routes/admin.py",
+          "line": 1299,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/businesses/{business_id}/employees",
+          "handler": "create_employee",
+          "file": "web/api/routes/admin.py",
+          "line": 1324,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/admin/businesses/{business_id}/employees/{employee_id}",
+          "handler": "update_employee",
+          "file": "web/api/routes/admin.py",
+          "line": 1356,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/admin/businesses/{business_id}/employees/{employee_id}",
+          "handler": "delete_employee",
+          "file": "web/api/routes/admin.py",
+          "line": 1386,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/businesses/{business_id}/photo",
+          "handler": "upload_business_photo",
+          "file": "web/api/routes/admin.py",
+          "line": 1411,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/admin/businesses/{business_id}/photo/{photo_index}",
+          "handler": "delete_business_photo",
+          "file": "web/api/routes/admin.py",
+          "line": 1475,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/businesses/{business_id}/employees/{employee_id}/photo",
+          "handler": "upload_employee_photo",
+          "file": "web/api/routes/admin.py",
+          "line": 1511,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/admin/businesses/{business_id}/employees/{employee_id}/primary-photo",
+          "handler": "set_employee_primary_photo",
+          "file": "web/api/routes/admin.py",
+          "line": 1580,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/admin/businesses/{business_id}/employees/{employee_id}/photo/{photo_index}",
+          "handler": "delete_employee_photo",
+          "file": "web/api/routes/admin.py",
+          "line": 1616,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/businesses/{business_id}/detail",
+          "handler": "get_business_detail",
+          "file": "web/api/routes/admin.py",
+          "line": 1659,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/admin/businesses/{business_id}",
+          "handler": "update_business",
+          "file": "web/api/routes/admin.py",
+          "line": 1682,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/businesses/{business_id}/services/reorder",
+          "handler": "reorder_services",
+          "file": "web/api/routes/admin.py",
+          "line": 1765,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/businesses/{business_id}/employees/{employee_id}/services",
+          "handler": "get_employee_services",
+          "file": "web/api/routes/admin.py",
+          "line": 1792,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/admin/businesses/{business_id}/employees/{employee_id}/services",
+          "handler": "set_employee_services",
+          "file": "web/api/routes/admin.py",
+          "line": 1819,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/businesses/{business_id}/employees/{employee_id}/time-pricing",
+          "handler": "get_time_pricing",
+          "file": "web/api/routes/admin.py",
+          "line": 1854,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/businesses/{business_id}/employees/{employee_id}/time-pricing",
+          "handler": "add_time_pricing",
+          "file": "web/api/routes/admin.py",
+          "line": 1884,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/admin/businesses/{business_id}/employees/{employee_id}/time-pricing/{pricing_id}",
+          "handler": "delete_time_pricing",
+          "file": "web/api/routes/admin.py",
+          "line": 1925,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/businesses/{business_id}/employees/{employee_id}/toggle-duty",
+          "handler": "toggle_duty",
+          "file": "web/api/routes/admin.py",
+          "line": 1956,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/businesses/{business_id}/employees/{employee_id}/duty-schedule",
+          "handler": "get_duty_schedule",
+          "file": "web/api/routes/admin.py",
+          "line": 1987,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/admin/businesses/{business_id}/employees/{employee_id}/duty-schedule",
+          "handler": "set_duty_schedule",
+          "file": "web/api/routes/admin.py",
+          "line": 2016,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/businesses/{business_id}/owners",
+          "handler": "list_owners",
+          "file": "web/api/routes/admin.py",
+          "line": 2053,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/businesses/{business_id}/owners",
+          "handler": "add_owner",
+          "file": "web/api/routes/admin.py",
+          "line": 2103,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/admin/businesses/{business_id}/owners/{owner_id}",
+          "handler": "remove_owner",
+          "file": "web/api/routes/admin.py",
+          "line": 2168,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/businesses/{business_id}/subscriptions",
+          "handler": "list_subscriptions",
+          "file": "web/api/routes/admin.py",
+          "line": 2196,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/businesses/{business_id}/subscriptions",
+          "handler": "create_subscription",
+          "file": "web/api/routes/admin.py",
+          "line": 2235,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/admin/businesses/{business_id}/subscriptions/{subscription_id}",
+          "handler": "update_subscription",
+          "file": "web/api/routes/admin.py",
+          "line": 2286,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/admin/businesses/{business_id}/subscriptions/{subscription_id}",
+          "handler": "delete_subscription",
+          "file": "web/api/routes/admin.py",
+          "line": 2348,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/businesses/{business_id}/qr",
+          "handler": "generate_qr",
+          "file": "web/api/routes/admin.py",
+          "line": 2376,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 85893
+    },
+    {
+      "path": "web/api/routes/ai.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "",
+      "count": 15,
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/api/ai/chat",
+          "handler": "ai_chat",
+          "file": "web/api/routes/ai.py",
+          "line": 106,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/ai/history",
+          "handler": "ai_history",
+          "file": "web/api/routes/ai.py",
+          "line": 130,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/ai/select-slot",
+          "handler": "ai_select_slot",
+          "file": "web/api/routes/ai.py",
+          "line": 149,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/ai/handoff",
+          "handler": "ai_handoff",
+          "file": "web/api/routes/ai.py",
+          "line": 187,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/ai/confirm",
+          "handler": "ai_confirm",
+          "file": "web/api/routes/ai.py",
+          "line": 213,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/ai/reject",
+          "handler": "ai_reject",
+          "file": "web/api/routes/ai.py",
+          "line": 251,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/ai/clear",
+          "handler": "ai_clear",
+          "file": "web/api/routes/ai.py",
+          "line": 264,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/ai/businesses/{business_id}/conversations",
+          "handler": "operator_inbox",
+          "file": "web/api/routes/ai.py",
+          "line": 285,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/ai/conversations/{conversation_id}/reply",
+          "handler": "operator_reply",
+          "file": "web/api/routes/ai.py",
+          "line": 307,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/ai/conversations/{conversation_id}/resume",
+          "handler": "operator_resume",
+          "file": "web/api/routes/ai.py",
+          "line": 321,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/ai/businesses/{business_id}/settings",
+          "handler": "owner_settings",
+          "file": "web/api/routes/ai.py",
+          "line": 342,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/admin/ai/businesses/{business_id}/settings",
+          "handler": "owner_update_settings",
+          "file": "web/api/routes/ai.py",
+          "line": 348,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/platform/sales/businesses",
+          "handler": "platform_businesses",
+          "file": "web/api/routes/ai.py",
+          "line": 370,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/platform/sales/businesses/{business_id}/settings",
+          "handler": "platform_settings",
+          "file": "web/api/routes/ai.py",
+          "line": 377,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/platform/sales/businesses/{business_id}/settings",
+          "handler": "platform_update_settings",
+          "file": "web/api/routes/ai.py",
+          "line": 384,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 18996
+    },
+    {
+      "path": "web/api/routes/auth.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "/auth",
+      "count": 7,
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/api/auth/phone",
+          "handler": "request_code",
+          "file": "web/api/routes/auth.py",
+          "line": 224,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/verify",
+          "handler": "verify_code",
+          "file": "web/api/routes/auth.py",
+          "line": 241,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/telegram-login",
+          "handler": "telegram_login_widget",
+          "file": "web/api/routes/auth.py",
+          "line": 351,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/session",
+          "handler": "session_from_shared_cookie",
+          "file": "web/api/routes/auth.py",
+          "line": 376,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/telegram",
+          "handler": "telegram_auth",
+          "file": "web/api/routes/auth.py",
+          "line": 399,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/logout",
+          "handler": "logout",
+          "file": "web/api/routes/auth.py",
+          "line": 431,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/me",
+          "handler": "me",
+          "file": "web/api/routes/auth.py",
+          "line": 445,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 15305
+    },
+    {
+      "path": "web/api/routes/client.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "",
+      "count": 14,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/businesses",
+          "handler": "list_businesses",
+          "file": "web/api/routes/client.py",
+          "line": 316,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/businesses/{business_id}",
+          "handler": "get_business",
+          "file": "web/api/routes/client.py",
+          "line": 337,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/businesses/{business_id}/slots",
+          "handler": "get_slots",
+          "file": "web/api/routes/client.py",
+          "line": 410,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/businesses/{biz_id}/calculate-price",
+          "handler": "calculate_price",
+          "file": "web/api/routes/client.py",
+          "line": 544,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/bookings",
+          "handler": "create_booking",
+          "file": "web/api/routes/client.py",
+          "line": 673,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/my/bookings",
+          "handler": "my_bookings",
+          "file": "web/api/routes/client.py",
+          "line": 974,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/bookings/{booking_id}/cancel",
+          "handler": "cancel_booking",
+          "file": "web/api/routes/client.py",
+          "line": 1000,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/bookings/{booking_id}/reschedule",
+          "handler": "reschedule_booking",
+          "file": "web/api/routes/client.py",
+          "line": 1050,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/telegram-photo/{file_id:path}",
+          "handler": "get_telegram_photo",
+          "file": "web/api/routes/client.py",
+          "line": 1244,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/bookings/{booking_id}/prepayment-sent",
+          "handler": "prepayment_sent",
+          "file": "web/api/routes/client.py",
+          "line": 1422,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/bookings/{booking_id}/receipt",
+          "handler": "upload_receipt",
+          "file": "web/api/routes/client.py",
+          "line": 1446,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/bookings/by-token/{token}/prepayment-sent",
+          "handler": "prepayment_sent_by_token",
+          "file": "web/api/routes/client.py",
+          "line": 1471,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/bookings/by-token/{token}/receipt",
+          "handler": "upload_receipt_by_token",
+          "file": "web/api/routes/client.py",
+          "line": 1493,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/bookings/by-token/{token}",
+          "handler": "get_booking_by_token",
+          "file": "web/api/routes/client.py",
+          "line": 1535,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 61523
+    },
+    {
+      "path": "web/api/routes/email_auth.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "/auth",
+      "count": 5,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/auth/email/capabilities",
+          "handler": "capabilities",
+          "file": "web/api/routes/email_auth.py",
+          "line": 110,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/email/account",
+          "handler": "account",
+          "file": "web/api/routes/email_auth.py",
+          "line": 115,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/email/start",
+          "handler": "begin",
+          "file": "web/api/routes/email_auth.py",
+          "line": 124,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/email/verify",
+          "handler": "verify",
+          "file": "web/api/routes/email_auth.py",
+          "line": 157,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/email/login",
+          "handler": "login",
+          "file": "web/api/routes/email_auth.py",
+          "line": 216,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 10937
+    },
+    {
+      "path": "web/api/routes/mail_campaign_analytics.py",
+      "router_prefixes": {
+        "router": "/owner-mail/api/campaigns"
+      },
+      "mount": "",
+      "count": 2,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/campaigns/{campaign_id}/analytics",
+          "handler": "report",
+          "file": "web/api/routes/mail_campaign_analytics.py",
+          "line": 25,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/campaigns/{campaign_id}/recipients/{recipient_id}/reply",
+          "handler": "label_reply",
+          "file": "web/api/routes/mail_campaign_analytics.py",
+          "line": 45,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 5472
+    },
+    {
+      "path": "web/api/routes/mail_campaign_api.py",
+      "router_prefixes": {
+        "router": "/owner-mail/api/campaigns"
+      },
+      "mount": "",
+      "count": 6,
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/campaigns",
+          "handler": "create_campaign",
+          "file": "web/api/routes/mail_campaign_api.py",
+          "line": 47,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/campaigns",
+          "handler": "list_campaigns",
+          "file": "web/api/routes/mail_campaign_api.py",
+          "line": 62,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/campaigns/automation",
+          "handler": "get_automation",
+          "file": "web/api/routes/mail_campaign_api.py",
+          "line": 73,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/owner-mail/api/campaigns/automation",
+          "handler": "set_automation",
+          "file": "web/api/routes/mail_campaign_api.py",
+          "line": 80,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/campaigns/{campaign_id}",
+          "handler": "campaign_detail",
+          "file": "web/api/routes/mail_campaign_api.py",
+          "line": 89,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/campaigns/{campaign_id}/recipients",
+          "handler": "add_recipients",
+          "file": "web/api/routes/mail_campaign_api.py",
+          "line": 105,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 5549
+    },
+    {
+      "path": "web/api/routes/mail_campaign_review.py",
+      "router_prefixes": {
+        "router": "/owner-mail/api/campaigns"
+      },
+      "mount": "",
+      "count": 7,
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/campaigns/{campaign_id}/prepare",
+          "handler": "prepare",
+          "file": "web/api/routes/mail_campaign_review.py",
+          "line": 34,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PATCH",
+          "path": "/api/owner-mail/api/campaigns/{campaign_id}/recipients/{recipient_id}",
+          "handler": "edit_message",
+          "file": "web/api/routes/mail_campaign_review.py",
+          "line": 50,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/campaigns/{campaign_id}/approve",
+          "handler": "approve",
+          "file": "web/api/routes/mail_campaign_review.py",
+          "line": 71,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/campaigns/{campaign_id}/launch",
+          "handler": "launch",
+          "file": "web/api/routes/mail_campaign_review.py",
+          "line": 97,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/campaigns/{campaign_id}/pause",
+          "handler": "pause",
+          "file": "web/api/routes/mail_campaign_review.py",
+          "line": 122,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/campaigns/{campaign_id}/finish",
+          "handler": "finish",
+          "file": "web/api/routes/mail_campaign_review.py",
+          "line": 135,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/campaigns/{campaign_id}/recipients/{recipient_id}/exclude",
+          "handler": "exclude",
+          "file": "web/api/routes/mail_campaign_review.py",
+          "line": 148,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 6590
+    },
+    {
+      "path": "web/api/routes/mail_campaign_ui.py",
+      "router_prefixes": {
+        "router": "/owner-mail"
+      },
+      "mount": "",
+      "count": 2,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/campaigns-dashboard",
+          "handler": "campaign_dashboard",
+          "file": "web/api/routes/mail_campaign_ui.py",
+          "line": 15,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/mailbox-dashboard",
+          "handler": "mailbox_dashboard",
+          "file": "web/api/routes/mail_campaign_ui.py",
+          "line": 39,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 2244
+    },
+    {
+      "path": "web/api/routes/mail_company_search.py",
+      "router_prefixes": {
+        "router": "/owner-mail/api/company-search"
+      },
+      "mount": "",
+      "count": 7,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/company-search/companies",
+          "handler": "companies",
+          "file": "web/api/routes/mail_company_search.py",
+          "line": 406,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/company-search/suggest",
+          "handler": "suggest",
+          "file": "web/api/routes/mail_company_search.py",
+          "line": 418,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/company-search",
+          "handler": "start",
+          "file": "web/api/routes/mail_company_search.py",
+          "line": 439,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/company-search",
+          "handler": "recent",
+          "file": "web/api/routes/mail_company_search.py",
+          "line": 456,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/company-search/{job_id}",
+          "handler": "detail",
+          "file": "web/api/routes/mail_company_search.py",
+          "line": 463,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/company-search/{job_id}/cancel",
+          "handler": "cancel",
+          "file": "web/api/routes/mail_company_search.py",
+          "line": 470,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/company-search/{job_id}/to-campaign",
+          "handler": "to_campaign",
+          "file": "web/api/routes/mail_company_search.py",
+          "line": 479,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 24955
+    },
+    {
+      "path": "web/api/routes/owner_mail.py",
+      "router_prefixes": {
+        "router": "/owner-mail"
+      },
+      "mount": "",
+      "count": 18,
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/entry",
+          "handler": "entry",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 142,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/claim",
+          "handler": "claim",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 148,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/login",
+          "handler": "login",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 197,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/logout",
+          "handler": "logout",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 234,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/app",
+          "handler": "app_page",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 271,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/status",
+          "handler": "status",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 299,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/prospects",
+          "handler": "prospects",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 308,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/prospects",
+          "handler": "add_prospect",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 318,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/draft/{prospect_id}",
+          "handler": "generate_draft",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 487,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/approve/{prospect_id}",
+          "handler": "approve_draft",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 548,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/send/{prospect_id}",
+          "handler": "send_draft",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 560,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/exclude/{prospect_id}",
+          "handler": "exclude",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 598,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/inbox",
+          "handler": "inbox",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 639,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/direct-draft",
+          "handler": "direct_draft",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 678,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/api/direct-send",
+          "handler": "direct_send",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 730,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/outbox",
+          "handler": "outbox",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 780,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/permission",
+          "handler": "permission",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 796,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/api/message/{uid}",
+          "handler": "read_message",
+          "file": "web/api/routes/owner_mail.py",
+          "line": 851,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 39043
+    },
+    {
+      "path": "web/api/routes/studio_schedule.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "",
+      "count": 1,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/internal/studio/schedule",
+          "handler": "studio_schedule",
+          "file": "web/api/routes/studio_schedule.py",
+          "line": 74,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 6899
+    }
+  ],
+  "important_note": "/api is FastAPI root_path: deployment mount must be checked at nginx"
+}

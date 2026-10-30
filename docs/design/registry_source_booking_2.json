@@ -1,0 +1,490 @@
+{
+  "repo": "grunvald91/booking_bot",
+  "source_ref": "eabd7b6b1321c8a3b147fcdb782241ba688cf47c",
+  "scope": "booking-api-2",
+  "files": [
+    {
+      "path": "web/api/routes/mail_campaign_dispatch.py",
+      "router_prefixes": {},
+      "mount": "",
+      "count": 0,
+      "routes": [],
+      "size": 4772
+    },
+    {
+      "path": "web/api/routes/mail_campaign_research.py",
+      "router_prefixes": {},
+      "mount": "",
+      "count": 0,
+      "routes": [],
+      "size": 5358
+    },
+    {
+      "path": "web/api/routes/mail_campaign_store.py",
+      "router_prefixes": {},
+      "mount": "",
+      "count": 0,
+      "routes": [],
+      "size": 5438
+    },
+    {
+      "path": "web/api/routes/mail_campaign_unsubscribe.py",
+      "router_prefixes": {
+        "router": "/owner-mail"
+      },
+      "mount": "",
+      "count": 2,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/owner-mail/unsubscribe",
+          "handler": "unsubscribe_page",
+          "file": "web/api/routes/mail_campaign_unsubscribe.py",
+          "line": 24,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/owner-mail/unsubscribe",
+          "handler": "unsubscribe",
+          "file": "web/api/routes/mail_campaign_unsubscribe.py",
+          "line": 43,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 2674
+    },
+    {
+      "path": "web/api/routes/mail_campaign_worker.py",
+      "router_prefixes": {},
+      "mount": "",
+      "count": 0,
+      "routes": [],
+      "size": 2994
+    },
+    {
+      "path": "web/api/routes/master.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "/master",
+      "count": 4,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/master/me",
+          "handler": "master_me",
+          "file": "web/api/routes/master.py",
+          "line": 134,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/master/schedule",
+          "handler": "master_schedule",
+          "file": "web/api/routes/master.py",
+          "line": 140,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/master/bookings/{booking_id}/finish",
+          "handler": "master_finish_booking",
+          "file": "web/api/routes/master.py",
+          "line": 238,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PATCH",
+          "path": "/api/master/bookings/{booking_id}/service",
+          "handler": "master_change_service",
+          "file": "web/api/routes/master.py",
+          "line": 255,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 9778
+    },
+    {
+      "path": "web/api/routes/notifications.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "/notifications",
+      "count": 3,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/notifications/vapid-public-key",
+          "handler": "vapid_public_key",
+          "file": "web/api/routes/notifications.py",
+          "line": 60,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/notifications/subscribe",
+          "handler": "subscribe",
+          "file": "web/api/routes/notifications.py",
+          "line": 70,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/notifications/subscribe",
+          "handler": "unsubscribe",
+          "file": "web/api/routes/notifications.py",
+          "line": 136,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 5143
+    },
+    {
+      "path": "web/api/routes/payments.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "/admin",
+      "count": 5,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/admin/prepayments/attention",
+          "handler": "attention",
+          "file": "web/api/routes/payments.py",
+          "line": 20,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/prepayments",
+          "handler": "inbox",
+          "file": "web/api/routes/payments.py",
+          "line": 43,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/bookings/{booking_id}/payment-details",
+          "handler": "details",
+          "file": "web/api/routes/payments.py",
+          "line": 63,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/admin/receipts/{receipt_id}",
+          "handler": "download",
+          "file": "web/api/routes/payments.py",
+          "line": 78,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/admin/bookings/{booking_id}/prepayment-review",
+          "handler": "review",
+          "file": "web/api/routes/payments.py",
+          "line": 96,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 6243
+    },
+    {
+      "path": "web/api/routes/studio_sso.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "",
+      "count": 4,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/studio/businesses",
+          "handler": "studio_businesses",
+          "file": "web/api/routes/studio_sso.py",
+          "line": 86,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/studio/ticket",
+          "handler": "studio_ticket",
+          "file": "web/api/routes/studio_sso.py",
+          "line": 118,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/internal/studio/access",
+          "handler": "studio_access",
+          "file": "web/api/routes/studio_sso.py",
+          "line": 135,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/internal/studio/business",
+          "handler": "studio_business",
+          "file": "web/api/routes/studio_sso.py",
+          "line": 180,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 9472
+    },
+    {
+      "path": "web/api/routes/subscriptions.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "",
+      "count": 5,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/subscriptions",
+          "handler": "list_subscriptions",
+          "file": "web/api/routes/subscriptions.py",
+          "line": 26,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/subscriptions/{subscription_id}",
+          "handler": "get_subscription",
+          "file": "web/api/routes/subscriptions.py",
+          "line": 65,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/subscriptions/{subscription_id}/buy",
+          "handler": "buy_subscription",
+          "file": "web/api/routes/subscriptions.py",
+          "line": 100,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/my/subscriptions",
+          "handler": "my_subscriptions",
+          "file": "web/api/routes/subscriptions.py",
+          "line": 151,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/my/subscriptions/{client_sub_id}/payment-sent",
+          "handler": "subscription_payment_sent",
+          "file": "web/api/routes/subscriptions.py",
+          "line": 210,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 7261
+    },
+    {
+      "path": "web/api/routes/telegram_link.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "/auth",
+      "count": 4,
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/api/auth/telegram-link/start",
+          "handler": "start",
+          "file": "web/api/routes/telegram_link.py",
+          "line": 62,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/telegram-link/{request_id}",
+          "handler": "status",
+          "file": "web/api/routes/telegram_link.py",
+          "line": 79,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/telegram-link/complete",
+          "handler": "complete",
+          "file": "web/api/routes/telegram_link.py",
+          "line": 93,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/telegram-link/{request_id}/cancel",
+          "handler": "cancel",
+          "file": "web/api/routes/telegram_link.py",
+          "line": 109,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 5245
+    },
+    {
+      "path": "web/api/routes/yandex_auth.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "/auth",
+      "count": 6,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/auth/yandex/capabilities",
+          "handler": "capabilities",
+          "file": "web/api/routes/yandex_auth.py",
+          "line": 159,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/yandex/start",
+          "handler": "start",
+          "file": "web/api/routes/yandex_auth.py",
+          "line": 164,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/yandex/link/start",
+          "handler": "link_start",
+          "file": "web/api/routes/yandex_auth.py",
+          "line": 174,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/yandex/account",
+          "handler": "account",
+          "file": "web/api/routes/yandex_auth.py",
+          "line": 188,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/yandex/callback",
+          "handler": "callback",
+          "file": "web/api/routes/yandex_auth.py",
+          "line": 195,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/yandex/exchange",
+          "handler": "exchange",
+          "file": "web/api/routes/yandex_auth.py",
+          "line": 357,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 20048
+    },
+    {
+      "path": "web/api/rental.py",
+      "router_prefixes": {
+        "router": ""
+      },
+      "mount": "",
+      "count": 4,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/businesses/{business_id}/rental/slots",
+          "handler": "rental_slots",
+          "file": "web/api/rental.py",
+          "line": 84,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/api/businesses/{business_id}/rental/bookings",
+          "handler": "create_rental_booking",
+          "file": "web/api/rental.py",
+          "line": 103,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/api/rental/bookings/{tracking_token}",
+          "handler": "rental_booking_status",
+          "file": "web/api/rental.py",
+          "line": 270,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "PATCH",
+          "path": "/api/admin/rental/bookings/{booking_id}/quote",
+          "handler": "update_rental_quote",
+          "file": "web/api/rental.py",
+          "line": 281,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 14107
+    },
+    {
+      "path": "web/api/main.py",
+      "router_prefixes": {},
+      "mount": "",
+      "count": 1,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/health",
+          "handler": "health",
+          "file": "web/api/main.py",
+          "line": 42,
+          "source": "decorator",
+          "router": "app"
+        }
+      ],
+      "size": 2212
+    }
+  ],
+  "important_note": "/api is FastAPI root_path: deployment mount must be checked at nginx"
+}

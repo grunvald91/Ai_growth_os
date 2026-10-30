@@ -63,3 +63,7 @@ app.include_router(internal_models_router)
 from app.api.voice import service_router as voice_service_router, studio_router as voice_studio_router
 app.include_router(voice_studio_router)
 app.include_router(voice_service_router)
+
+# Review-only UI: disabled unless explicitly enabled; existing Studio remains unchanged.
+from app.api.growth_design_preview import router as growth_design_preview_router
+app.include_router(growth_design_preview_router)

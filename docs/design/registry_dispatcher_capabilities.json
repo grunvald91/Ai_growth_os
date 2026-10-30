@@ -1,0 +1,386 @@
+{
+  "source": "Growth OS dispatcher registry",
+  "source_ref": "design/growth-os-v4-review-20261030",
+  "capabilities": [
+    {
+      "id": "show_work",
+      "label": "Что в работе",
+      "file": "app/dispatcher/registry.py",
+      "line": 164
+    },
+    {
+      "id": "show_review",
+      "label": "Что ждёт проверки",
+      "file": "app/dispatcher/registry.py",
+      "line": 167
+    },
+    {
+      "id": "show_plan",
+      "label": "Показать контент-план",
+      "file": "app/dispatcher/registry.py",
+      "line": 170
+    },
+    {
+      "id": "go_to",
+      "label": "Где это находится",
+      "file": "app/dispatcher/registry.py",
+      "line": 173
+    },
+    {
+      "id": "show_schedule",
+      "label": "Расписание записей",
+      "file": "app/dispatcher/registry.py",
+      "line": 177
+    },
+    {
+      "id": "show_insights",
+      "label": "Итоги бизнеса по записям",
+      "file": "app/dispatcher/registry.py",
+      "line": 182
+    },
+    {
+      "id": "set_insights_depth",
+      "label": "Глубина анализа",
+      "file": "app/dispatcher/registry.py",
+      "line": 189
+    },
+    {
+      "id": "send_to_team",
+      "label": "Передать данные команде",
+      "file": "app/dispatcher/registry.py",
+      "line": 193
+    },
+    {
+      "id": "create_post",
+      "label": "Создать пост",
+      "file": "app/dispatcher/registry.py",
+      "line": 197
+    },
+    {
+      "id": "make_plan",
+      "label": "Составить контент-план",
+      "file": "app/dispatcher/registry.py",
+      "line": 201
+    },
+    {
+      "id": "seo_factory",
+      "label": "SEO-завод",
+      "file": "app/dispatcher/registry.py",
+      "line": 204
+    },
+    {
+      "id": "approve_plan",
+      "label": "Утвердить контент-план",
+      "file": "app/dispatcher/registry.py",
+      "line": 211
+    },
+    {
+      "id": "show_material",
+      "label": "Показать готовый материал",
+      "file": "app/dispatcher/registry.py",
+      "line": 215
+    },
+    {
+      "id": "approve_material",
+      "label": "Утвердить материал",
+      "file": "app/dispatcher/registry.py",
+      "line": 219
+    },
+    {
+      "id": "revise_material",
+      "label": "Доработать пост",
+      "file": "app/dispatcher/registry.py",
+      "line": 224
+    },
+    {
+      "id": "schedule_post",
+      "label": "Запланировать публикацию",
+      "file": "app/dispatcher/registry.py",
+      "line": 230
+    },
+    {
+      "id": "whiteboard_video",
+      "label": "Рисованное видео",
+      "file": "app/dispatcher/registry.py",
+      "line": 235
+    },
+    {
+      "id": "cancel_video",
+      "label": "Отменить рисованное видео",
+      "file": "app/dispatcher/registry.py",
+      "line": 239
+    },
+    {
+      "id": "restricted_action",
+      "label": "Действие под запретом",
+      "file": "app/dispatcher/registry.py",
+      "line": 242
+    }
+  ],
+  "verified_areas": [
+    {
+      "name": "ИИ-команда и модели",
+      "source": "app/api/team_dashboard.py",
+      "pages": [
+        "/studio/team",
+        "/studio/team/api",
+        "/api/admin/team/catalog",
+        "/api/admin/team/usage"
+      ]
+    },
+    {
+      "name": "SEO-завод",
+      "source": "app/seo/factory.py",
+      "capability": "seo_factory"
+    },
+    {
+      "name": "Простое видео — пользовательское название",
+      "source": "app/api/whiteboard.py",
+      "internal_backend": "whiteboard",
+      "capability": "whiteboard_video"
+    },
+    {
+      "name": "Почта — существующий отдельный модуль BookingBot",
+      "source": "web/api/routes/owner_mail.py",
+      "backend": "/owner-mail"
+    }
+  ],
+  "teamEvidence": [
+    {
+      "line": 14,
+      "text": "from app.api.content_studio_auth import _basic, require_studio_auth, require_studio_csrf"
+    },
+    {
+      "line": 23,
+      "text": "from app.llm.model_catalog import CatalogUnavailable, catalog_comparison, gateway_models, list_gateway_models"
+    },
+    {
+      "line": 24,
+      "text": "from app.llm.model_router import ModelRouter, RoutingError"
+    },
+    {
+      "line": 31,
+      "text": "from app.models.domain import Product"
+    },
+    {
+      "line": 36,
+      "text": "# included here because they appear in the actual content workflow."
+    },
+    {
+      "line": 38,
+      "text": "\"Руководство\": (\"cmo\", \"research_lead\", \"dispatcher\"),"
+    },
+    {
+      "line": 39,
+      "text": "\"Изучение бизнеса\": (\"company_intake\", \"research_pmm\", \"segment_researcher\", \"channel_researcher\","
+    },
+    {
+      "line": 40,
+      "text": "\"problem_researcher\", \"competitor_voc_researcher\", \"viral_video_researcher\","
+    },
+    {
+      "line": 41,
+      "text": "\"viral_content_researcher\", \"competitive_intelligence\"),"
+    },
+    {
+      "line": 42,
+      "text": "\"Контент и SEO\": (\"content_seo\", \"semantic_researcher\", \"content_strategist\", \"seo_editor\", \"article_writer\","
+    },
+    {
+      "line": 43,
+      "text": "\"human_editor\", \"marketing_editor\", \"conversion_editor\","
+    },
+    {
+      "line": 49,
+      "text": "\"Продвижение и аналитика\": (\"distribution\", \"community_manager\", \"analytics\", \"cro\", \"comment_sales\", \"mail_agent\"),"
+    },
+    {
+      "line": 52,
+      "text": "\"dispatcher\": \"Диспетчер главной страницы\","
+    },
+    {
+      "line": 53,
+      "text": "\"mail_agent\": \"Агент почты (письма компаниям)\","
+    },
+    {
+      "line": 56,
+      "text": "\"research_lead\": \"Руководитель исследований\","
+    },
+    {
+      "line": 58,
+      "text": "\"research_pmm\": \"Аналитик рынка и позиционирования\","
+    },
+    {
+      "line": 59,
+      "text": "\"segment_researcher\": \"Исследователь сегментов\","
+    },
+    {
+      "line": 60,
+      "text": "\"channel_researcher\": \"Исследователь каналов\","
+    },
+    {
+      "line": 61,
+      "text": "\"problem_researcher\": \"Исследователь потребностей\","
+    },
+    {
+      "line": 62,
+      "text": "\"competitor_voc_researcher\": \"Аналитик отзывов конкурентов\","
+    },
+    {
+      "line": 63,
+      "text": "\"viral_video_researcher\": \"Исследователь популярных видео\","
+    },
+    {
+      "line": 64,
+      "text": "\"viral_content_researcher\": \"Исследователь популярных материалов\","
+    },
+    {
+      "line": 65,
+      "text": "\"content_seo\": \"Контент и SEO\","
+    },
+    {
+      "line": 66,
+      "text": "\"content_strategist\": \"Контент-стратег\","
+    },
+    {
+      "line": 70,
+      "text": "\"marketing_editor\": \"Продающий редактор\","
+    },
+    {
+      "line": 71,
+      "text": "\"semantic_researcher\": \"Исследователь поисковых запросов\","
+    },
+    {
+      "line": 99,
+      "text": "\"research_lead\": \"Объединяет исследования и проверяет обоснованность выводов.\","
+    },
+    {
+      "line": 101,
+      "text": "\"research_pmm\": \"Анализирует аудиторию, рынок и позиционирование.\","
+    },
+    {
+      "line": 102,
+      "text": "\"segment_researcher\": \"Готовит проверяемые гипотезы о сегментах клиентов.\","
+    },
+    {
+      "line": 103,
+      "text": "\"channel_researcher\": \"Исследует каналы привлечения и условия экспериментов.\","
+    },
+    {
+      "line": 104,
+      "text": "\"problem_researcher\": \"Сопоставляет проблемы клиентов с возможностями продукта.\","
+    },
+    {
+      "line": 105,
+      "text": "\"competitor_voc_researcher\": \"Анализирует предоставленные отзывы конкурентов и их источники.\","
+    },
+    {
+      "line": 106,
+      "text": "\"viral_video_researcher\": \"Изучает публичные данные и приёмы популярных видео.\","
+    },
+    {
+      "line": 107,
+      "text": "\"viral_content_researcher\": \"Находит темы, боли и форматы по подтверждённым источникам.\","
+    },
+    {
+      "line": 108,
+      "text": "\"content_seo\": \"Разрабатывает задания на SEO и контент.\","
+    },
+    {
+      "line": 109,
+      "text": "\"content_strategist\": \"Выбирает тему, задачу и структуру материала.\","
+    },
+    {
+      "line": 113,
+      "text": "\"marketing_editor\": \"Усиливает продающую подачу и конкретику без выдуманных фактов.\","
+    },
+    {
+      "line": 114,
+      "text": "\"semantic_researcher\": \"Подбирает реальные запросы клиентов по подсказкам Яндекса и Google и группирует их по воронке.\","
+    },
+    {
+      "line": 136,
+      "text": "\"mail_agent\": \"Пишет персональные письма компаниям в почте ServGo (mail.servgo.ru) и проверяет их на выдуманные факты. М"
+    },
+    {
+      "line": 137,
+      "text": "\"dispatcher\": \"Понимает просьбы владельца на главной странице и решает, куда их направить. Быстрая модель: ответ нужен с"
+    },
+    {
+      "line": 147,
+      "text": "\"post_rewriter\", \"creative_strategist\", \"whiteboard_storyboard\", \"dispatcher\", \"mail_agent\","
+    },
+    {
+      "line": 169,
+      "text": "messages=[LLMMessage(role=\"user\", content=\"Preview routing only; no inference\")],"
+    },
+    {
+      "line": 175,
+      "text": "\"models\": list(selected.candidates),"
+    },
+    {
+      "line": 180,
+      "text": "return {\"models\": [], \"tier\": router_policy._tier_for(role, phase),"
+    },
+    {
+      "line": 189,
+      "text": "critic = _decision(policy, role[\"id\"], \"critic\")"
+    },
+    {
+      "line": 190,
+      "text": "row = {**role, \"main\": main, \"critic\": critic}"
+    },
+    {
+      "line": 194,
+      "text": "if critic[\"status\"] != \"ready\":"
+    },
+    {
+      "line": 195,
+      "text": "issues.append(role[\"id\"] + \": критик — \" + critic[\"reason\"])"
+    },
+    {
+      "line": 197,
+      "text": "\"critics_active\": get_settings().agent_critic_enabled,  # Routing alone does not launch critic calls."
+    },
+    {
+      "line": 224,
+      "text": "token = settings.model_router_admin_token or \"\""
+    },
+    {
+      "line": 232,
+      "text": "def _secure_response(content: str, media_type: str) -> Response:"
+    },
+    {
+      "line": 233,
+      "text": "response = Response(content=content, media_type=media_type)"
+    },
+    {
+      "line": 274,
+      "text": "\"revision\": state.revision, \"config\": state.config.model_dump(),"
+    },
+    {
+      "line": 302,
+      "text": "\"message\": \"Configure safe main and critic routes before enabling.\","
+    },
+    {
+      "line": 310,
+      "text": "return {\"revision\": state.revision, \"config\": state.config.model_dump(), \"preview\": preview}"
+    },
+    {
+      "line": 319,
+      "text": "ids = await list_gateway_models("
+    },
+    {
+      "line": 326,
+      "text": "\"models\": catalog_comparison(ids, policy.profiles),"
+    },
+    {
+      "line": 327,
+      "text": "\"gateway_models\": gateway_models(ids, policy.profiles),"
+    },
+    {
+      "line": 329,
+      "text": "\"unconfigured_ids\": [mid for mid in ids if mid not in {p.model for p in policy.profiles}],"
+    }
+  ]
+}
