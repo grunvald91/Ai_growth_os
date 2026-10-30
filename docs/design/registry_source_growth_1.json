@@ -204,7 +204,7 @@
         },
         {
           "method": "GET",
-          "path": "/competitive-intelligence/runs",
+          "path": "/competitive-intelligence/runs/{run_id}",
           "handler": "get_run",
           "file": "app/api/competitive_intelligence.py",
           "line": 46,
@@ -213,7 +213,7 @@
         },
         {
           "method": "GET",
-          "path": "/competitive-intelligence/runs",
+          "path": "/competitive-intelligence/runs/{run_id}/evidence",
           "handler": "get_evidence",
           "file": "app/api/competitive_intelligence.py",
           "line": 51,
@@ -222,7 +222,7 @@
         },
         {
           "method": "GET",
-          "path": "/competitive-intelligence/runs",
+          "path": "/competitive-intelligence/runs/{run_id}/report",
           "handler": "get_report",
           "file": "app/api/competitive_intelligence.py",
           "line": 59,
@@ -231,7 +231,7 @@
         },
         {
           "method": "POST",
-          "path": "/competitive-intelligence/runs",
+          "path": "/competitive-intelligence/runs/{run_id}/follow-up",
           "handler": "follow_up",
           "file": "app/api/competitive_intelligence.py",
           "line": 68,
@@ -240,7 +240,7 @@
         },
         {
           "method": "POST",
-          "path": "/competitive-intelligence/runs",
+          "path": "/competitive-intelligence/runs/{run_id}/export",
           "handler": "export",
           "file": "app/api/competitive_intelligence.py",
           "line": 74,
@@ -249,7 +249,7 @@
         },
         {
           "method": "GET",
-          "path": "/competitive-intelligence/runs",
+          "path": "/competitive-intelligence/runs/{run_id}/events",
           "handler": "events",
           "file": "app/api/competitive_intelligence.py",
           "line": 85,
