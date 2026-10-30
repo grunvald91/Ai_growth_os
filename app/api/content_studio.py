@@ -1831,7 +1831,9 @@ def studio_product(product_id: UUID, request: Request, db: Session = Depends(get
         raise HTTPException(404, "Product not found")
     # Companies with the dispatcher switched on get the one-line home; the earlier overview stays at /classic.
     from app.api.dispatcher import enabled_for, home_html
-    page = home_html(db, product, settings, request) if enabled_for(settings, product) else product_dashboard(db, product)
+    choice = request.query_params.get("design")
+    design = choice if choice in {"v4", "classic"} else request.cookies.get("growth_design")
+    page = home_html(db, product, settings, request) if design == "v4" or enabled_for(settings, product) else product_dashboard(db, product)
     response = HTMLResponse(page)
     response.headers["Cache-Control"] = "no-store"
     return response
