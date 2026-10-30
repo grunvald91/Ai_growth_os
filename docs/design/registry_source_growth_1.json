@@ -1,0 +1,973 @@
+{
+  "repo": "grunvald91/Ai_growth_os",
+  "source_ref": "design/growth-os-v4-review-20261030",
+  "scope": "growth-api-1",
+  "files": [
+    {
+      "path": "app/api/comments.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 8,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/studio/assets/comments.css",
+          "handler": "css",
+          "file": "app/api/comments.py",
+          "line": 66,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/assets/comments.js",
+          "handler": "js",
+          "file": "app/api/comments.py",
+          "line": 71,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/comments",
+          "handler": "page",
+          "file": "app/api/comments.py",
+          "line": 76,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/comments/settings",
+          "handler": "configure",
+          "file": "app/api/comments.py",
+          "line": 191,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/comments/connect",
+          "handler": "connect",
+          "file": "app/api/comments.py",
+          "line": 201,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/comments/channels/{platform}/{action}",
+          "handler": "channel_action",
+          "file": "app/api/comments.py",
+          "line": 211,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/comments/{mode}",
+          "handler": "create_comment",
+          "file": "app/api/comments.py",
+          "line": 234,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/comments/items/{comment_id}/{action}",
+          "handler": "comment_action",
+          "file": "app/api/comments.py",
+          "line": 252,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 20173
+    },
+    {
+      "path": "app/api/company_intake.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 7,
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/intake",
+          "handler": "start_intake",
+          "file": "app/api/company_intake.py",
+          "line": 58,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/products/{product_id}/intake/{session_id}",
+          "handler": "get_session",
+          "file": "app/api/company_intake.py",
+          "line": 66,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/intake/{session_id}/sources",
+          "handler": "add_source",
+          "file": "app/api/company_intake.py",
+          "line": 74,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/intake/{session_id}/draft",
+          "handler": "build_draft",
+          "file": "app/api/company_intake.py",
+          "line": 99,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/intake/{session_id}/unknown",
+          "handler": "unknown_answer",
+          "file": "app/api/company_intake.py",
+          "line": 115,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/intake/{session_id}/approve",
+          "handler": "approve_profile",
+          "file": "app/api/company_intake.py",
+          "line": 123,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/intake/{session_id}/cancel",
+          "handler": "cancel_intake",
+          "file": "app/api/company_intake.py",
+          "line": 131,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 5467
+    },
+    {
+      "path": "app/api/company_profiles.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 1,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/products/{product_id}/company-profile",
+          "handler": "company_profile",
+          "file": "app/api/company_profiles.py",
+          "line": 29,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 1075
+    },
+    {
+      "path": "app/api/competitive_intelligence.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 10,
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/competitive-intelligence/runs",
+          "handler": "start_run",
+          "file": "app/api/competitive_intelligence.py",
+          "line": 33,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/competitive-intelligence/runs",
+          "handler": "list_runs",
+          "file": "app/api/competitive_intelligence.py",
+          "line": 41,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/competitive-intelligence/runs",
+          "handler": "get_run",
+          "file": "app/api/competitive_intelligence.py",
+          "line": 46,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/competitive-intelligence/runs",
+          "handler": "get_evidence",
+          "file": "app/api/competitive_intelligence.py",
+          "line": 51,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/competitive-intelligence/runs",
+          "handler": "get_report",
+          "file": "app/api/competitive_intelligence.py",
+          "line": 59,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/competitive-intelligence/runs",
+          "handler": "follow_up",
+          "file": "app/api/competitive_intelligence.py",
+          "line": 68,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/competitive-intelligence/runs",
+          "handler": "export",
+          "file": "app/api/competitive_intelligence.py",
+          "line": 74,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/competitive-intelligence/runs",
+          "handler": "events",
+          "file": "app/api/competitive_intelligence.py",
+          "line": 85,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/intelligence",
+          "handler": "intelligence_page",
+          "file": "app/api/competitive_intelligence.py",
+          "line": 112,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/intelligence/assets/page.js",
+          "handler": "page_script",
+          "file": "app/api/competitive_intelligence.py",
+          "line": 121,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 4739
+    },
+    {
+      "path": "app/api/content_studio.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 35,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/studio/assets/servgo.svg",
+          "handler": "studio_official_logo",
+          "file": "app/api/content_studio.py",
+          "line": 1789,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/assets/studio.css",
+          "handler": "studio_css",
+          "file": "app/api/content_studio.py",
+          "line": 1797,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/assets/studio.js",
+          "handler": "studio_js",
+          "file": "app/api/content_studio.py",
+          "line": 1804,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio",
+          "handler": "studio",
+          "file": "app/api/content_studio.py",
+          "line": 1811,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}",
+          "handler": "studio_product",
+          "file": "app/api/content_studio.py",
+          "line": 1826,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/classic",
+          "handler": "studio_product_classic",
+          "file": "app/api/content_studio.py",
+          "line": 1840,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/plan",
+          "handler": "studio_plan",
+          "file": "app/api/content_studio.py",
+          "line": 1851,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/calendar",
+          "handler": "studio_calendar",
+          "file": "app/api/content_studio.py",
+          "line": 1863,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/materials",
+          "handler": "studio_materials",
+          "file": "app/api/content_studio.py",
+          "line": 1873,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/materials/{artifact_id}",
+          "handler": "studio_material_detail",
+          "file": "app/api/content_studio.py",
+          "line": 1886,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/renders/{render_id}/{filename}",
+          "handler": "studio_rendered_asset",
+          "file": "app/api/content_studio.py",
+          "line": 1905,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/packages/{package_key}",
+          "handler": "studio_package_detail",
+          "file": "app/api/content_studio.py",
+          "line": 1937,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/analytics",
+          "handler": "studio_analytics",
+          "file": "app/api/content_studio.py",
+          "line": 1947,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/plans/{plan_id}/approve",
+          "handler": "studio_approve",
+          "file": "app/api/content_studio.py",
+          "line": 1957,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/plans/{plan_id}/pause",
+          "handler": "studio_pause",
+          "file": "app/api/content_studio.py",
+          "line": 1969,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/plans/{plan_id}/packages/{package_key}/queue",
+          "handler": "studio_queue_package",
+          "file": "app/api/content_studio.py",
+          "line": 1981,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/materials/{artifact_id}/edit",
+          "handler": "studio_manual_edit",
+          "file": "app/api/content_studio.py",
+          "line": 2063,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/create",
+          "handler": "studio_create_page",
+          "file": "app/api/content_studio.py",
+          "line": 2075,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/create",
+          "handler": "studio_create_submit",
+          "file": "app/api/content_studio.py",
+          "line": 2092,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/speed",
+          "handler": "studio_speed_page",
+          "file": "app/api/content_studio.py",
+          "line": 2122,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/work",
+          "handler": "studio_work_page",
+          "file": "app/api/content_studio.py",
+          "line": 2135,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/activity.json",
+          "handler": "studio_activity_json",
+          "file": "app/api/content_studio.py",
+          "line": 2149,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/notifications/read-all",
+          "handler": "studio_notifications_read_all",
+          "file": "app/api/content_studio.py",
+          "line": 2165,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/tasks/{task_id}",
+          "handler": "studio_task_page",
+          "file": "app/api/content_studio.py",
+          "line": 2179,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/tasks/{task_id}/retry",
+          "handler": "studio_retry_task",
+          "file": "app/api/content_studio.py",
+          "line": 2217,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/review",
+          "handler": "studio_review_page",
+          "file": "app/api/content_studio.py",
+          "line": 2241,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/review/{artifact_id}/approve",
+          "handler": "studio_material_approve",
+          "file": "app/api/content_studio.py",
+          "line": 2260,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/review/{artifact_id}/revise",
+          "handler": "studio_material_revise",
+          "file": "app/api/content_studio.py",
+          "line": 2275,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/channels",
+          "handler": "studio_channels",
+          "file": "app/api/content_studio.py",
+          "line": 2290,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/channels/connect",
+          "handler": "studio_connect_channel",
+          "file": "app/api/content_studio.py",
+          "line": 2331,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/publishing/schedule",
+          "handler": "studio_schedule_post",
+          "file": "app/api/content_studio.py",
+          "line": 2350,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/publishing/{publication_id}/reconcile",
+          "handler": "studio_reconcile_publication",
+          "file": "app/api/content_studio.py",
+          "line": 2368,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/publishing/{publication_id}/cancel",
+          "handler": "studio_cancel_publication",
+          "file": "app/api/content_studio.py",
+          "line": 2383,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/plans/{plan_id}/slots/{slot_id}/move",
+          "handler": "studio_slot_move",
+          "file": "app/api/content_studio.py",
+          "line": 2396,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/plan/generate",
+          "handler": "studio_generate_plan",
+          "file": "app/api/content_studio.py",
+          "line": 2416,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 121665
+    },
+    {
+      "path": "app/api/content_studio_company.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 6,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/studio/new",
+          "handler": "new_company_form",
+          "file": "app/api/content_studio_company.py",
+          "line": 200,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/new",
+          "handler": "new_company_submit",
+          "file": "app/api/content_studio_company.py",
+          "line": 246,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/profile",
+          "handler": "company_profile",
+          "file": "app/api/content_studio_company.py",
+          "line": 484,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/profile/edit",
+          "handler": "company_profile_edit",
+          "file": "app/api/content_studio_company.py",
+          "line": 505,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/profile/delete",
+          "handler": "company_delete_page",
+          "file": "app/api/content_studio_company.py",
+          "line": 524,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/profile/{action}",
+          "handler": "company_profile_action",
+          "file": "app/api/content_studio_company.py",
+          "line": 552,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 36713
+    },
+    {
+      "path": "app/api/control.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 3,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/control/status",
+          "handler": "control_status",
+          "file": "app/api/control.py",
+          "line": 14,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/products/{product_id}/control/status",
+          "handler": "product_control_status",
+          "file": "app/api/control.py",
+          "line": 19,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/products/{product_id}/control/inbox",
+          "handler": "product_control_inbox",
+          "file": "app/api/control.py",
+          "line": 33,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 1219
+    },
+    {
+      "path": "app/api/dispatcher.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 7,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/studio/assets/dispatcher.css",
+          "handler": "dispatcher_css",
+          "file": "app/api/dispatcher.py",
+          "line": 164,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/assets/dispatcher.js",
+          "handler": "dispatcher_js",
+          "file": "app/api/dispatcher.py",
+          "line": 170,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/dispatch/state",
+          "handler": "dispatch_state",
+          "file": "app/api/dispatcher.py",
+          "line": 176,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/dispatch/messages",
+          "handler": "dispatch_message",
+          "file": "app/api/dispatcher.py",
+          "line": 183,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/dispatch/confirm",
+          "handler": "dispatch_confirm",
+          "file": "app/api/dispatcher.py",
+          "line": 199,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/products/{product_id}/dispatch/updates",
+          "handler": "dispatch_updates",
+          "file": "app/api/dispatcher.py",
+          "line": 215,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/studio/products/{product_id}/dispatch/new",
+          "handler": "dispatch_new",
+          "file": "app/api/dispatcher.py",
+          "line": 230,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 11437
+    },
+    {
+      "path": "app/api/health.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 2,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/health",
+          "handler": "health",
+          "file": "app/api/health.py",
+          "line": 6,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/health/version",
+          "handler": "version",
+          "file": "app/api/health.py",
+          "line": 11,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 299
+    },
+    {
+      "path": "app/api/internal_models.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 3,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/studio/internal/model/{role}",
+          "handler": "model_for_role",
+          "file": "app/api/internal_models.py",
+          "line": 40,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/internal/companies",
+          "handler": "companies",
+          "file": "app/api/internal_models.py",
+          "line": 56,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/studio/internal/companies/{product_id}/brief",
+          "handler": "brief",
+          "file": "app/api/internal_models.py",
+          "line": 114,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 5763
+    },
+    {
+      "path": "app/api/products.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 10,
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/products",
+          "handler": "create_product",
+          "file": "app/api/products.py",
+          "line": 31,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/products",
+          "handler": "products",
+          "file": "app/api/products.py",
+          "line": 43,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/products/{product_id}",
+          "handler": "product",
+          "file": "app/api/products.py",
+          "line": 51,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/goals",
+          "handler": "create_goal",
+          "file": "app/api/products.py",
+          "line": 55,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/experiments",
+          "handler": "create_experiment",
+          "file": "app/api/products.py",
+          "line": 66,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/daily-growth-review",
+          "handler": "daily_growth_review",
+          "file": "app/api/products.py",
+          "line": 83,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/experiments/from-content-plan",
+          "handler": "experiment_from_content_plan",
+          "file": "app/api/products.py",
+          "line": 89,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/team-cycle",
+          "handler": "team_cycle",
+          "file": "app/api/products.py",
+          "line": 113,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "POST",
+          "path": "/products/{product_id}/articles",
+          "handler": "produce_article",
+          "file": "app/api/products.py",
+          "line": 127,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/products/{product_id}/artifacts/{artifact_id}",
+          "handler": "artifact",
+          "file": "app/api/products.py",
+          "line": 142,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 7484
+    },
+    {
+      "path": "app/api/public_blog.py",
+      "prefixes": {
+        "router": "/public/blog"
+      },
+      "count": 2,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/public/blog/{product_slug}/articles",
+          "handler": "list_articles",
+          "file": "app/api/public_blog.py",
+          "line": 63,
+          "source": "decorator",
+          "router": "router"
+        },
+        {
+          "method": "GET",
+          "path": "/public/blog/{product_slug}/articles/{slug}",
+          "handler": "get_article",
+          "file": "app/api/public_blog.py",
+          "line": 72,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 3424
+    }
+  ]
+}
