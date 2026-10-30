@@ -445,7 +445,7 @@
     {
       "path": "web/frontend/src/App.tsx",
       "size": 9362,
-      "count": 21,
+      "count": 29,
       "routes": [
         {
           "method": "PAGE",
@@ -489,6 +489,15 @@
           "handler": "React route",
           "file": "web/frontend/src/App.tsx",
           "line": 143,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/my",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 144,
           "source": "react-route",
           "router": "frontend"
         },
@@ -624,6 +633,69 @@
           "handler": "React route",
           "file": "web/frontend/src/App.tsx",
           "line": 170,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 171,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/schedule",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 179,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/services",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 187,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/employees",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 195,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/analytics",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 203,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/settings",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 211,
+          "source": "react-route",
+          "router": "frontend"
+        },
+        {
+          "method": "PAGE",
+          "path": "/admin/subscriptions",
+          "handler": "React route",
+          "file": "web/frontend/src/App.tsx",
+          "line": 219,
           "source": "react-route",
           "router": "frontend"
         },
