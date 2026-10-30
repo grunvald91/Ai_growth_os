@@ -174,3 +174,53 @@ def test_v4_reuses_reviewed_css_and_keeps_team_access_overlay(live):
     team=client.get('/studio/team')
     assert team.text.count('id="authForm"')==1
     assert team.text.count('class="topbar"')==1
+
+
+def test_library_preserves_server_search_filter_and_pagination(live):
+    from app.api.growth_v4 import Document
+    client, db, product = live
+    for i in range(25):
+        db.add(Artifact(product_id=product.id,kind='article',title=f'ARTICLE_{i}',content='unique-search'))
+    db.add(Artifact(product_id=product.id,kind='channel_text',title='POST_ONLY',content='post'))
+    db.commit()
+    url=f'/studio/products/{product.id}/materials'
+    page=client.get(url+'?design=v4&kind=article&q=unique-search')
+    assert 'POST_ONLY' not in page.text
+    assert 'Следующая' in page.text
+    doc=Document(page.text)
+    assert sum('data-material' in e[1] for e in doc.elements)==24
+    second=Document(client.get(url+'?kind=article&q=unique-search&page=2').text)
+    assert sum('data-material' in e[1] for e in second.elements)==1
+
+
+def test_notifications_and_nested_tune_navigation_are_preserved(live):
+    client, db, product = live
+    for suffix in ('','/work','/create','/materials'):
+        page=client.get(f'/studio/products/{product.id}{suffix}?design=v4')
+        assert page.text.count('data-sg-notifications\n') + page.text.count('data-sg-notifications\r') <= 1
+        assert page.text.count('class="sg-notifications"')==1
+        assert 'data-sg-read-all' in page.text
+    page=client.get('/studio/tune/work?design=v4')
+    assert 'Промпты агентов' in page.text
+    assert 'Модели и критик' in page.text
+
+
+def test_campaign_form_creates_real_draft_and_validates(live):
+    from sqlalchemy import select
+    from app.models.domain import Experiment
+    from app.api.growth_campaigns import FIELDS
+    client, db, product=live
+    url=f'/studio/products/{product.id}/campaigns/new'
+    page=client.get(url+'?design=v4')
+    assert page.status_code==200
+    fields={key:'Описание' for key,_ in FIELDS}
+    fields.update(experiment_key='EXP-UI-TEST',observation_window_days='7',time_budget_minutes='60',budget='100',currency='RUB')
+    assert client.post(url,data={**fields,'budget':'-1'}).status_code==422
+    assert not list(db.scalars(select(Experiment)))
+    result=client.post(url,data=fields,follow_redirects=False)
+    assert result.status_code==303
+    records=list(db.scalars(select(Experiment)))
+    assert len(records)==1 and records[0].status=='draft'
+    duplicate=client.post(url,data=fields)
+    assert duplicate.status_code==409
+    assert 'data-growth-design="v4"' in duplicate.text

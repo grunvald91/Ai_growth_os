@@ -58,7 +58,7 @@ class GrowthDesignMiddleware(BaseHTTPMiddleware):
         choice = request.query_params.get('design')
         new = (choice if choice in {'v4', 'classic'} else request.cookies.get(COOKIE)) == 'v4'
         if eligible and request.method in {'GET', 'POST'}:
-            if response.status_code in {200, 422} and 'text/html' in response.headers.get('content-type', ''):
+            if response.status_code in {200, 409, 422} and 'text/html' in response.headers.get('content-type', ''):
                 body = b''.join([chunk async for chunk in response.body_iterator])
                 page = body.decode('utf-8')
                 if '</body>' in page:
@@ -143,6 +143,7 @@ def campaigns_page(product_id: UUID, db: Session = Depends(get_db)):
     base = f'/studio/products/{product_id}'
     return studio_page_shell(product, active='campaigns', title='Кампании',
         subtitle='Эксперименты и планы вашей компании.', body=
+        f'<p><a class="btn primary" href="{base}/campaigns/new">Новая кампания</a></p>'
         f'<p><a class="btn primary" href="{base}?design=v4&amp;command=campaign">Спланировать кампанию с командой</a> '
         f'<a class="btn" href="{base}/plan">Контент-план</a> '
         '<a class="btn" href="https://servgo.ru/mail">Почтовые кампании</a></p>'+
