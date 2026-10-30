@@ -11,7 +11,7 @@
  const product=location.pathname.match(/\/studio\/products\/([0-9a-f-]{36})/i);
  const base=product?'/studio/products/'+product[1]:null;
  document.getElementById('bizBtn').onclick=()=>location.assign('/studio?choose=1');
- document.getElementById('notifyBtn').onclick=()=>location.assign(base?base+'/work':'/studio');
+ document.getElementById('notifyBtn')?.addEventListener('click',()=>location.assign('/studio?choose=1'));
  document.querySelector('[data-focusvoice]').onclick=()=>{const input=document.getElementById('dp-input');if(input)input.focus();else location.assign(base||'/studio')};
  let searchBox,returnFocus;
  function closeSearch(){if(searchBox){searchBox.remove();searchBox=null;document.querySelector('.shell').inert=false;returnFocus?.focus()}}
@@ -44,7 +44,7 @@
  const suffix=base?location.pathname.slice(base.length):'';
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const glyph=n=>'<svg class="icon"><use href="#i-'+n+'"/></svg>';
- if(base&&['/work','/materials'].includes(suffix)){
+ if(base&&suffix==='/work'){
   const original=main.querySelector('.route-content');
   const view=document.createElement('section');view.className='v4-records';view.setAttribute('aria-live','polite');view.innerHTML='<p class="v4-loading">Загружаем данные компании…</p>';
   // Keep original filters and server-side controls available until data succeeds.
@@ -56,9 +56,6 @@
      const rows=data.tasks.filter(t=>t.status===status);
      return '<section class="board-col"><div class="board-header"><b>'+label+'</b><span>'+rows.length+'</span></div>'+rows.map(t=>'<a class="board-card" href="'+base+'/tasks/'+encodeURIComponent(t.id)+'"><span class="chip '+(status==='waiting_approval'?'amber':'blue')+'">'+esc(t.group)+'</span><div style="margin-top:10px"><b>'+esc(t.title)+'</b><p>'+esc(t.detail.slice(0,200))+'</p></div><span class="link">Открыть '+glyph('arrow')+'</span></a>').join('')+(rows.length?'':'<div class="empty"><p>Нет заданий</p></div>')+'</section>';
     }).join('')+'</div>';
-   }else{
-    let filter='all';const types=[['all','Все'],['post','Посты'],['article','SEO-статьи'],['video','Видео']];
-    function draw(){const kinds={post:['channel_text','dzen_brief','telegram_brief'],video:['video_script','short_video_brief','video_render','whiteboard_video']};const rows=data.materials.filter(a=>filter==='all'||(kinds[filter]||[filter]).includes(a.kind));view.innerHTML='<div class="tab-row mb14">'+types.map(([id,label])=>'<button class="tab '+(filter===id?'active':'')+'" data-kind="'+id+'">'+label+'</button>').join('')+'</div><div class="materials-grid">'+rows.map(a=>'<a class="material-card surface animate-in" href="'+base+'/materials/'+encodeURIComponent(a.id)+'"><span class="type-icon">'+glyph(a.kind==='article'?'globe':'file')+'</span><b>'+esc(a.title)+'</b><p>'+esc(a.kind)+'</p><div class="split" style="width:100%;margin-top:14px"><span class="chip">'+esc(({draft:'Черновик',awaiting_approval:'Ждёт решения',approved:'Одобрено',published:'Опубликовано',rejected:'На доработку'})[a.status]||a.status)+'</span><span class="link">Открыть '+glyph('arrow')+'</span></div></a>').join('')+'</div>'+(rows.length?'':'<div class="empty">Материалов пока нет</div>');view.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>{filter=b.dataset.kind;draw()})}draw();
    }
    original.hidden=true;
    const details=document.createElement('details');details.className='mt14';const summary=document.createElement('summary');summary.textContent='Полный список, поиск и фильтры (карточки: последние 200)';details.append(summary);original.before(details);details.append(original);original.hidden=false;

@@ -68,7 +68,7 @@ def render_v4(page, request, pid, switch):
         # Some administrative handlers return a body without a main landmark.
         main = original.find(tag='body')
     content = original.inner(main).replace('class="topbar"','class="v4-module-head"')
-    if request.url.path == '/studio/tune':
+    if request.url.path.startswith('/studio/tune'):
         content = original.outer(original.find(tag='header'))+content
     template = (ASSETS/'growth_os_v4_preview.html').read_text()
     # Reuse the reviewed CSS, SVG symbols and structural markup verbatim.
@@ -154,6 +154,15 @@ def render_v4(page, request, pid, switch):
         content = content.replace('<div class="route-content">','<div class="route-content">'+pipeline,1)
     # The same reviewed card styles frame the real forms, reports and permissions.
     content = content.replace('class="panel"','class="surface module-card panel"')
+    if pid and current == base+'/materials':
+        content = content.replace('class="material-grid route-material-grid"', 'class="materials-grid"')
+        content = content.replace('class="material-card"', 'class="material-card surface animate-in"')
+    # One real notification widget shared by mobile and desktop, before scripts run.
+    from app.api.content_studio_activity import notice_html
+    from app.api.content_studio_work_ui import CSS as notice_css, JS as notice_js
+    notice = original.find(cls='sg-global-status')
+    if notice:
+        content = content.replace(original.outer(notice), '')
     title_tag = original.outer(original.find(tag='title')) or '<title>Growth OS</title>'
     styles = ''.join(m.group() for m in re.finditer(r'<link\b[^>]*rel="stylesheet"[^>]*>', page))
     styles = re.sub(r'<link[^>]*dispatcher\.css[^>]*>', '', styles)
@@ -189,6 +198,12 @@ def render_v4(page, request, pid, switch):
                      e[0]=='script' and (not main or not main[3] <= e[2] < main[4]))
     extras += ''.join(original.outer(e) for e in original.elements if e[0]=='dialog' and not main[3] <= e[2] < main[4])
     extras += original.outer(original.find(ident='authOverlay'))
+    if pid:
+        button = Document(template).find(ident='notifyBtn')
+        template = template.replace(Document(template).outer(button), notice_html(pid))
+        template = template.replace('</head>', '<style>'+notice_css+'</style></head>')
+        if '/studio/assets/studio.js' not in extras:
+            extras += '<script>'+notice_js+'</script>'
     template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=2"></head>')
     template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=2"></script></body>')
     return template

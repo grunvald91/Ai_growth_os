@@ -71,3 +71,6 @@ app.include_router(growth_design_preview_router)
 from app.api.growth_live import router as growth_live_router, GrowthDesignMiddleware
 app.include_router(growth_live_router)
 app.add_middleware(GrowthDesignMiddleware)
+
+from app.api.growth_campaigns import router as growth_campaigns_router
+app.include_router(growth_campaigns_router)
