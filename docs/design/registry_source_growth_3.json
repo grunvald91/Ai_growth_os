@@ -1,0 +1,89 @@
+{
+  "repo": "grunvald91/Ai_growth_os",
+  "source_ref": "design/growth-os-v4-review-20261030",
+  "scope": "growth-api-3",
+  "files": [
+    {
+      "path": "app/api/content_studio_design.py",
+      "prefixes": {},
+      "count": 0,
+      "routes": [],
+      "size": 44039
+    },
+    {
+      "path": "app/api/content_studio_brand.py",
+      "prefixes": {},
+      "count": 0,
+      "routes": [],
+      "size": 1900
+    },
+    {
+      "path": "app/api/content_studio_brand_fix.py",
+      "prefixes": {},
+      "count": 0,
+      "routes": [],
+      "size": 12157
+    },
+    {
+      "path": "app/api/content_studio_article.py",
+      "prefixes": {},
+      "count": 0,
+      "routes": [],
+      "size": 4613
+    },
+    {
+      "path": "app/api/content_studio_errors.py",
+      "prefixes": {},
+      "count": 0,
+      "routes": [],
+      "size": 4301
+    },
+    {
+      "path": "app/api/content_studio_refresh.py",
+      "prefixes": {},
+      "count": 0,
+      "routes": [],
+      "size": 23940
+    },
+    {
+      "path": "app/api/content_studio_typography.py",
+      "prefixes": {},
+      "count": 0,
+      "routes": [],
+      "size": 8786
+    },
+    {
+      "path": "app/api/comments_design.py",
+      "prefixes": {},
+      "count": 0,
+      "routes": [],
+      "size": 9685
+    },
+    {
+      "path": "app/api/schemas.py",
+      "prefixes": {},
+      "count": 0,
+      "routes": [],
+      "size": 5401
+    },
+    {
+      "path": "app/api/growth_design_preview.py",
+      "prefixes": {
+        "router": ""
+      },
+      "count": 1,
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/studio/design-preview",
+          "handler": "design_preview",
+          "file": "app/api/growth_design_preview.py",
+          "line": 20,
+          "source": "decorator",
+          "router": "router"
+        }
+      ],
+      "size": 1172
+    }
+  ]
+}
