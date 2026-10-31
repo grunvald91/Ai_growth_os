@@ -11,6 +11,7 @@ from app.core.config import Settings, get_settings
 from app.db.models import Base
 from app.db.session import get_db
 from app.models.domain import Artifact, Product
+from app.seo.activation import set_enabled
 
 
 @pytest.fixture
@@ -21,6 +22,7 @@ def live(monkeypatch):
         product = Product(name='Live company', slug='servgo')
         db.add(product)
         db.commit()
+        set_enabled(db, product.id, enabled=True, actor='fixture-owner')
         def session():
             yield db
         monkeypatch.setitem(app.dependency_overrides, get_db, session)

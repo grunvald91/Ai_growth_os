@@ -1,0 +1,39 @@
+name: Growth production release SHA audit (read-only)
+on:
+  push:
+    branches: [integration/servgo-growth-fixed-20261031]
+    paths:
+      - '.github/workflows/servgo-growth-release-sha-audit.yml'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Read running Growth release marker and HTTP status
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "No SSH read-only credential"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/servgo-known-hosts
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/one-key
+            if ssh-keygen -lf /tmp/one-key 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/servgo-known-hosts
+          [ -s ~/.ssh/known_hosts ] || { echo "Pinned SSH fingerprint mismatch"; exit 1; }
+          # Never dump the full container environment. Print only the release SHA.
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" '
+            set -eu
+            docker inspect ai-growth-os-api-1 --format "{{range .Config.Env}}{{println .}}{{end}}" |
+              sed -n "/^RELEASE_SHA=/p" | head -1
+            echo "growth_api_health=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:8091/health)"
+          '

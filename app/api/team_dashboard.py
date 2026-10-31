@@ -255,6 +255,12 @@ def team_css():
     return _secure_response(css.read_text(encoding="utf-8"), "text/css")
 
 
+@router.get("/studio/team/assets/servgo-team-air.css", dependencies=[Depends(require_studio_auth)])
+def team_air_css():
+    css = Path(__file__).parent / "team_dashboard_assets" / "servgo-team-air.css"
+    return _secure_response(css.read_text(encoding="utf-8"), "text/css")
+
+
 @router.get("/studio/team/assets/team.js", dependencies=[Depends(require_studio_auth)])
 def team_js():
     script = Path(__file__).parent / "team_dashboard_assets" / "team.js"

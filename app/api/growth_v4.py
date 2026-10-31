@@ -204,6 +204,12 @@ def render_v4(page, request, pid, switch):
         template = template.replace('</head>', '<style>'+notice_css+'</style></head>')
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
-    template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=4"></head>')
+    template = template.replace('</head>', (
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=4">'
+        '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
+        '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=1">'
+        '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
+        '</head>'
+    ))
     template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=3"></script></body>')
     return template

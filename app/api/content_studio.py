@@ -269,7 +269,7 @@ def artifact_kind_label(record: Artifact, value: dict | None = None) -> str:
     if record.kind == "video_render":
         return "Готовый видеоролик MP4"
     if record.kind == "whiteboard_video":
-        return "Рисованное видео с озвучкой"
+        return "Простое видео с озвучкой"
     if record.kind == "channel_text":
         return platform_label(value.get("channel", "")) or "Пост"
     if record.kind in {"video_script", "short_video_brief"}:
@@ -317,7 +317,7 @@ def artifact_text(record: Artifact, value: dict | None = None) -> str:
     if record.kind == "video_render":
         return "Готовый видеофайл MP4 — откройте для просмотра или скачивания."
     if record.kind == "whiteboard_video":
-        return "Рисованное видео MP4 — нажмите, чтобы посмотреть и скачать."
+        return "Простое видео MP4 — нажмите, чтобы посмотреть и скачать."
     if record.kind == "article":
         return str(value.get("full_article") or value.get("reader_article") or value.get("body") or record.content)
     if record.kind == "channel_text":
@@ -384,7 +384,7 @@ def more_links(product_id: UUID) -> list[tuple[str, str, str, str]]:
         ("review", base + "/review", "✓", "На согласовании"),
         ("plan", base + "/plan", "☷", "Контент-план"),
         ("calendar", base + "/calendar", "▦", "Календарь"),
-        ("whiteboard", base + "/whiteboard", "✎", "Рисованное видео"),
+        ("whiteboard", base + "/whiteboard", "✎", "Простое видео"),
         ("channels", base + "/channels", "↗", "Публикации"),
         ("analytics", base + "/analytics", "⌁", "Результаты"),
         ("comments", base + "/comments", "☰", "Комментарии"),
@@ -986,7 +986,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       <a href="/studio/products/{product.id}/plan">Контент-план</a>
       <a href="/studio/products/{product.id}/calendar">Календарь</a>
       <a href="/studio/products/{product.id}/review">На согласовании</a>
-      <a href="/studio/products/{product.id}/whiteboard">Рисованное видео</a>
+      <a href="/studio/products/{product.id}/whiteboard">Простое видео</a>
       <a href="/studio/products/{product.id}/comments">Комментарии</a>
       <a href="/intelligence?product_id={product.id}">Бизнес-разведка</a>
       <a href="/studio/products/{product.id}/channels">Публикации</a>
@@ -1209,7 +1209,7 @@ def studio_page_shell(
         <summary>Ещё инструменты</summary>
         <div><a href="/studio/products/{product.id}/plan">Контент-план</a>
         <a href="/studio/products/{product.id}/calendar">Календарь</a>
-        <a href="/studio/products/{product.id}/whiteboard">Рисованное видео</a>
+        <a href="/studio/products/{product.id}/whiteboard">Простое видео</a>
         <a href="/studio/products/{product.id}/comments">Комментарии</a>
         <a href="/intelligence?product_id={product.id}">Бизнес-разведка</a>
         <a href="/studio/products/{product.id}/channels">Публикации</a>

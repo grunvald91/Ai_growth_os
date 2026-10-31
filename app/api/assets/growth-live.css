@@ -95,3 +95,181 @@ body[data-growth-design] .wb-job :is(h2,h3),body[data-growth-design] .route-page
 body[data-growth-design] .wb-actions .btn.primary{background:#2465bd;color:#fff;border-color:#2465bd}
 body[data-growth-design] .wb-actions .btn.secondary{background:var(--tint);color:var(--text);border:1px solid var(--line)}
 #main:has(.wb-job)>.route-page-head{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);margin:0;padding:0}
+
+
+/* Narrow 320px screen: keep create-form cards inside their grid column. */
+@media(max-width:360px){
+  body[data-growth-design="v4"] .route-content,
+  body[data-growth-design="v4"] .route-content .sg-create-form,
+  body[data-growth-design="v4"] .route-content .sg-layout-two,
+  body[data-growth-design="v4"] .route-content .sg-field,
+  body[data-growth-design="v4"] .route-content .sg-choice,
+  body[data-growth-design="v4"] .route-content .sg-choice-copy{
+    min-width:0;max-width:100%;box-sizing:border-box;
+  }
+  body[data-growth-design="v4"] .route-content .sg-format-grid{
+    grid-template-columns:minmax(0,1fr);
+  }
+  body[data-growth-design="v4"] .route-content :is(input,select,textarea){
+    min-width:0;max-width:100%;box-sizing:border-box;
+  }
+}
+
+/* v4 /create composes #sg-create-form directly inside .form-card,
+ * outside legacy .route-content. Scope the narrow fix to the real form. */
+@media(max-width:360px){
+  body[data-growth-design="v4"] #sg-create-form,
+  body[data-growth-design="v4"] #sg-create-form .sg-format-grid,
+  body[data-growth-design="v4"] #sg-create-form .sg-choice,
+  body[data-growth-design="v4"] #sg-create-form .sg-choice-copy{
+    min-width:0;max-width:100%;box-sizing:border-box;
+  }
+  body[data-growth-design="v4"] #sg-create-form .sg-format-grid{
+    display:grid;grid-template-columns:minmax(0,1fr);width:100%;
+  }
+  body[data-growth-design="v4"] #sg-create-form :is(input,select,textarea){
+    min-width:0;max-width:100%;box-sizing:border-box;
+  }
+}
+
+
+/* Campaign drafts: short creation path, optional details and truthful status. */
+body[data-growth-design="v4"] .sg-campaign-form{max-width:760px;display:grid;gap:20px}
+body[data-growth-design="v4"] .campaign-essential,
+body[data-growth-design="v4"] .campaign-optional{
+  min-width:0;display:grid;gap:14px;padding:20px;
+  background:var(--card);border:1px solid var(--line);border-radius:18px
+}
+body[data-growth-design="v4"] .campaign-essential h2,
+body[data-growth-design="v4"] .campaign-optional h2{margin:0;font-size:19px}
+body[data-growth-design="v4"] .campaign-essential p,
+body[data-growth-design="v4"] .campaign-optional p,
+body[data-growth-design="v4"] .campaign-save-note{font-size:13px;line-height:1.6;color:var(--muted);margin:0}
+body[data-growth-design="v4"] .sg-campaign-form .field{display:grid;gap:7px;min-width:0;font-size:13px;color:var(--text)}
+body[data-growth-design="v4"] .sg-campaign-form :is(input,textarea){
+  width:100%;min-width:0;max-width:100%;box-sizing:border-box;
+  background:var(--tint);color:var(--text);border:1px solid var(--line);
+  padding:12px;border-radius:12px;font:inherit
+}
+body[data-growth-design="v4"] .campaign-optional>summary{
+  cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:650;
+  list-style:revert
+}
+body[data-growth-design="v4"] .campaign-optional:not([open]){display:block}
+body[data-growth-design="v4"] .campaign-optional:not([open])>:not(summary){display:none}
+body[data-growth-design="v4"] .campaign-actions{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+body[data-growth-design="v4"] .campaign-actions .btn{min-height:44px;display:inline-flex;align-items:center;justify-content:center}
+body[data-growth-design="v4"] .campaign-item{display:grid;gap:9px;min-width:0}
+body[data-growth-design="v4"] .campaign-item-head{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center}
+body[data-growth-design="v4"] .campaign-item-head h2{margin:0;overflow-wrap:anywhere}
+body[data-growth-design="v4"] .campaign-item-status{
+  background:var(--blue-soft);color:var(--blue);padding:5px 10px;border-radius:999px;
+  font-size:12px;font-weight:650;white-space:nowrap
+}
+body[data-growth-design="v4"] .campaign-item p{margin:0;overflow-wrap:anywhere;line-height:1.55}
+@media(max-width:400px){
+  body[data-growth-design="v4"] .campaign-essential,
+  body[data-growth-design="v4"] .campaign-optional{padding:14px}
+  body[data-growth-design="v4"] .campaign-actions .btn{flex:1 1 100%;max-width:100%}
+}
+
+
+/* SEO factory: status comes from recorded task and artifact state. */
+body[data-growth-design="v4"] .seo-run{display:grid;gap:10px;min-width:0}
+body[data-growth-design="v4"] .seo-run-head{
+  display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between
+}
+body[data-growth-design="v4"] .seo-run-head h3{margin:0;min-width:0;overflow-wrap:anywhere}
+body[data-growth-design="v4"] .seo-run-status{
+  padding:6px 10px;border-radius:999px;background:var(--blue-soft);
+  color:var(--blue);font-size:12px;font-weight:650;white-space:nowrap
+}
+body[data-growth-design="v4"] .seo-run[data-seo-status="failed"] .seo-run-status{
+  color:var(--s-danger,#d45a5a);background:var(--tint)
+}
+body[data-growth-design="v4"] .seo-run p{
+  margin:0;font-size:13px;line-height:1.6;overflow-wrap:anywhere
+}
+body[data-growth-design="v4"] .seo-run-details{min-width:0}
+body[data-growth-design="v4"] .seo-run-details summary{
+  cursor:pointer;min-height:44px;display:flex;align-items:center;
+  color:var(--blue);font-weight:650
+}
+body[data-growth-design="v4"] .seo-run-details ul{
+  margin:0 0 12px;padding-left:22px;line-height:1.8
+}
+
+/* SEO job controls and article lineage; preserve existing ServGo Air tokens. */
+body[data-growth-design="v4"] .seo-queue-confirm{
+  max-width:700px;min-width:0;display:grid;gap:14px;
+}
+body[data-growth-design="v4"] .seo-queue-confirm h2,
+body[data-growth-design="v4"] .seo-queue-confirm p{margin:0;line-height:1.6}
+body[data-growth-design="v4"] .seo-queue-confirm form{
+  display:grid;gap:10px;min-width:0
+}
+body[data-growth-design="v4"] .seo-queue-confirm input{
+  min-width:0;max-width:100%;width:100%;box-sizing:border-box;
+  padding:12px;border:1px solid var(--line);background:var(--tint);
+  color:var(--text);border-radius:12px
+}
+body[data-growth-design="v4"] .seo-run-actions{
+  display:flex;gap:10px;flex-wrap:wrap;align-items:center
+}
+body[data-growth-design="v4"] .seo-run-actions .btn{
+  min-height:44px;display:inline-flex;align-items:center;justify-content:center
+}
+body[data-growth-design="v4"] .seo-run-articles>summary{
+  min-height:44px;cursor:pointer;display:flex;align-items:center;
+  font-weight:650;color:var(--blue)
+}
+body[data-growth-design="v4"] .seo-run-articles ul{
+  padding:0;margin:10px 0;list-style:none;display:grid;gap:10px
+}
+body[data-growth-design="v4"] .seo-article-item{
+  display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;
+  padding:10px 12px;border-radius:12px;border:1px solid var(--line);
+  min-width:0
+}
+body[data-growth-design="v4"] .seo-article-item a:first-child{
+  font-weight:650;min-width:0;overflow-wrap:anywhere
+}
+body[data-growth-design="v4"] .seo-article-item span,
+body[data-growth-design="v4"] .seo-run-hint{
+  color:var(--muted);font-size:12px
+}
+@media(max-width:400px){
+  body[data-growth-design="v4"] .seo-run-actions form,
+  body[data-growth-design="v4"] .seo-run-actions .btn{width:100%;max-width:100%}
+  body[data-growth-design="v4"] .seo-article-item{display:grid}
+}
+
+/* SEO critic and publication destination: owner-visible, never a silent publish button. */
+body[data-growth-design="v4"] .seo-publish-destination{
+  padding:14px 16px;border:1px solid var(--line);border-radius:14px;
+  background:var(--tint);line-height:1.65;font-size:13px
+}
+body[data-growth-design="v4"] .seo-article-copy{
+  display:grid;gap:10px;min-width:0;width:100%;overflow-wrap:anywhere
+}
+body[data-growth-design="v4"] .seo-article-copy>a:first-child{font-weight:650}
+body[data-growth-design="v4"] .seo-critic-result{font-weight:600}
+body[data-growth-design="v4"] .seo-critic-findings summary{
+  cursor:pointer;min-height:44px;color:var(--blue);font-weight:600
+}
+body[data-growth-design="v4"] .seo-critic-findings ul{
+  margin:4px 0 10px;padding-left:20px;line-height:1.6
+}
+body[data-growth-design="v4"] .seo-article-approval{
+  display:grid;gap:10px;max-width:540px;min-width:0
+}
+body[data-growth-design="v4"] .seo-article-approval label{
+  display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:1.6
+}
+body[data-growth-design="v4"] .seo-article-approval label input{
+  margin-top:5px;flex:none
+}
+body[data-growth-design="v4"] .seo-article-approval button{justify-self:start;min-height:44px}
+@media(max-width:400px){
+  body[data-growth-design="v4"] .seo-article-approval button{width:100%}
+}

@@ -60,12 +60,12 @@ def create_content_html(product_id, *, created=False, fields=None, error=None, d
     return f"""
     <section class="sg-surface sg-animator-entry sg-animator-top">
       <div><span class="sg-overline">НОВЫЙ ФОРМАТ · ВИДЕО С ОЗВУЧКОЙ</span>
-        <h2>Рисованное видеообъяснение</h2>
+        <h2>Простое анимированное видео</h2>
         <p>Закажите анимированный ролик. Сценарий, рисунки, голос и готовый MP4
         будут доступны в отдельном задании.</p>
         <small>Платные API-вызовы — только после вашего подтверждения.</small>
       </div>
-      <a class="btn primary" href="{base}/whiteboard">Создать рисованное видео →</a>
+      <a class="btn primary" href="{base}/whiteboard">Создать простое видео →</a>
     </section>
     <div class="sg-layout-two">
       <section class="sg-surface sg-create-form">
@@ -104,9 +104,9 @@ def create_content_html(product_id, *, created=False, fields=None, error=None, d
         </form>
       </section>
       <aside class="sg-aside-stack">
-        <section class="sg-surface sg-guide"><h3>Рисованное видео с озвучкой</h3>
+        <section class="sg-surface sg-guide"><h3>Простое видео с озвучкой</h3>
           <p>Готовый вертикальный MP4 на 30 секунд или минуту: русская озвучка, рисование, субтитры и призыв в конце. Платные модели запускаются после отдельного подтверждения.</p>
-          <a class="btn secondary" href="{base}/whiteboard">Создать рисованное видео →</a>
+          <a class="btn secondary" href="{base}/whiteboard">Создать простое видео →</a>
         </section>
         <section class="sg-surface sg-guide"><div class="sg-guide-icon">✦</div>
           <h2>Как работает ИИ-команда</h2>

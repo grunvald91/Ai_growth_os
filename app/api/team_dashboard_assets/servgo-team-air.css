@@ -1,0 +1,30 @@
+/* CSP-compatible ServGo Air styling for the existing, functional AI-team panel.
+ * Loaded after team.css, without unsafe-inline allowances or replacing its JS. */
+:root{font-family:var(--ds-font);color:var(--s-text);background:var(--s-bg);color-scheme:light}
+html[data-theme=dark]{color-scheme:dark}
+body{font-family:var(--ds-font);background:var(--s-bg);color:var(--s-text)}
+.layout,.main{min-width:0}
+.sidebar,.top-settings,.panel,.stat,.auth-card,.model-row,.role-card,.expense-totals>div{
+  background:var(--s-surface);color:var(--s-text);border-color:var(--s-line);
+}
+.sidebar{border-right:1px solid var(--s-line)}
+.sidebar-note,.tip,.stat,.top-settings,.tabs,.role-card,.model-row{
+  background:var(--s-surface-2);border-color:var(--s-line)
+}
+h1,h2,h3,h4,.brand strong,.stat strong,.section-head h2{color:var(--s-text)}
+.nav,.subtitle,.section-head p,.sidebar-bottom,.stat span,.stat small,.footer,
+.footnote,.top-settings p,.eyebrow,.nav-label{color:var(--s-muted)}
+.nav.active,.tab.selected{background:var(--s-accent-soft);color:var(--s-accent)}
+.button.primary,.button.save{background:var(--s-accent-grad);color:var(--s-accent-ink)}
+.button.light,.button.secondary,.tab,.nav,.search-label input,.budget input,
+.model-add input,.model-add select,.model-row input,.model-row select{
+  background:var(--s-surface-2);color:var(--s-text);border-color:var(--s-line-2)
+}
+input,select,textarea{color:var(--s-text)}
+.auth-overlay{background:rgba(10,18,30,.62)}
+@media(max-width:640px){
+  .main{padding-inline:14px;min-width:0}
+  .topbar,.top-actions,.top-settings{min-width:0}
+  .stats,.role-card,.model-row{min-width:0}
+  .top-actions button{white-space:normal}
+}

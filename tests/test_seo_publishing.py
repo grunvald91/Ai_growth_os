@@ -12,6 +12,8 @@ from app.db.session import get_db
 from app.main import app
 from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Product, Publication
 from app.seo.publishing import publish_if_clear, slugify, reader_hash
+from app.seo.activation import set_enabled
+from app.sso.models import StudioBusinessLink
 from app.workflows.article_contracts import ArticleArtifact
 from test_articles import SequenceProvider, build_article_production, Settings
 from test_seo_article import BRIEF, outputs_with_geo, request_for
@@ -25,6 +27,7 @@ def env():
         product = Product(name="ServGo", slug="servgo")
         db.add(product)
         db.commit()
+        set_enabled(db, product.id, enabled=True, actor='fixture-owner')
         yield db, product
     engine.dispose()
 
@@ -176,3 +179,41 @@ async def test_publication_is_retried_after_transient_failure(env, tmp_path, mon
     assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
     assert module.publish_pending(db) == 0
     assert len(list(db.scalars(select(Publication)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_business_blog_uses_verified_link_and_own_booking_route(env, tmp_path):
+    db, product = env
+    second = Product(name="Other business", slug="company-other")
+    db.add_all([second, StudioBusinessLink(servgo_business_id=64, product_id=product.id)])
+    db.flush()
+    db.add(StudioBusinessLink(servgo_business_id=65, product_id=second.id))
+    db.commit()
+    published = await make_article(db, product, tmp_path)
+    held = await make_article(db, product, tmp_path, critic_status=None)
+    publish_if_clear(db, published)
+    publish_if_clear(db, held)
+
+    app.dependency_overrides[get_db] = lambda: db
+    try:
+        with TestClient(app) as client:
+            directory = client.get("/public/blog/businesses/with-articles")
+            assert directory.status_code == 200
+            assert directory.json()["business_ids"] == [64]
+            listing = client.get("/public/blog/businesses/64/articles")
+            assert listing.status_code == 200
+            data = listing.json()
+            assert data["company_url"] == "/business/64"
+            assert data["booking_url"] == "/book/64"
+            assert [a["slug"] for a in data["articles"]] == ["kak-vesti-zapis-klientov"]
+            full = client.get("/public/blog/businesses/64/articles/kak-vesti-zapis-klientov")
+            assert full.status_code == 200
+            assert full.json()["cta_url"] == "/book/64"
+            assert full.json()["company_url"] == "/business/64"
+            assert client.get("/public/blog/businesses/64/articles/kak-vesti-zapis-klientov-2").status_code == 404
+            assert client.get("/public/blog/businesses/65/articles").json()["articles"] == []
+            assert client.get("/public/blog/businesses/65/articles/kak-vesti-zapis-klientov").status_code == 404
+            assert client.get("/public/blog/businesses/66/articles").status_code == 404
+            assert client.get("/public/blog/businesses/0/articles").status_code == 404
+    finally:
+        app.dependency_overrides.clear()

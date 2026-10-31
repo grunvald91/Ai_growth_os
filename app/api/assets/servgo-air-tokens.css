@@ -1,0 +1,91 @@
+/* Extracted verbatim from booking_bot/web/frontend/src/styles/design-system.css.
+ * Canonical ServGo Air light/dark semantic tokens; update both consumers together.
+ */
+:root,
+[data-theme='light'] {
+  /* Поверхности / текст */
+  --s-bg: #ffffff;
+  --s-surface: #ffffff;
+  --s-surface-2: #f6f9fd;             /* soft — подложка карточек и полей */
+  --s-surface-3: #eef5fc;             /* light — выбранное / hover */
+  --s-text: #1b2d42;
+  --s-text-2: #3d536b;
+  --s-muted: #62778b;                 /* mid — описания */
+  --s-muted-2: #8996a4;               /* muted — подсказки */
+  --s-line: #edf2f8;
+  --s-line-2: #dfe8f2;
+  --s-grid: rgba(120, 155, 195, 0.14);
+
+  /* Акцент */
+  --s-accent: #3478d6;
+  --s-accent-press: #2a66be;
+  --s-accent-ink: #FFFFFF;            /* текст на акценте */
+  --s-accent-soft: #eef5fc;
+  --s-accent-grad: linear-gradient(110deg, #3174d4, #578fef);
+  --s-flow-grad: linear-gradient(104deg, #307be8, #8ad8f3, #686fe4, #336be2, #67baf4, #307be8);
+
+  /* Семантика */
+  --s-success: #26886b;
+  --s-warning: #bf8450;
+  --s-danger: #c36262;
+  --s-now: #e0626a;
+
+  /* Статусы записи (бейджи / карточки) */
+  --st-pending: #a8794d;   --st-pending-bg: #fcf1e6;
+  --st-confirmed: #3478d6; --st-confirmed-bg: #eef5fc;
+  --st-completed: #25826d; --st-completed-bg: #e7f5ee;
+  --st-cancelled: #8996a4; --st-cancelled-bg: #f2f5f9;
+  --st-prepay: #8470c5;    --st-prepay-bg: #f0ecfc;
+
+  /* Радиусы */
+  --r-xs: 8px;
+  --r-sm: 10px;
+  --r-md: 12px;
+  --r-lg: 14px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+
+  /* Тени */
+  --sh-1: none;
+  --sh-2: 0 5px 22px rgba(41, 77, 122, 0.052);
+  --sh-pop: 0 12px 40px rgba(24, 62, 108, 0.17);
+
+  /* Типографика */
+  --ds-font: 'Onest Variable', 'Onest', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* Тёмная (для Telegram / тёмной системы — дефолт мини-аппа) */
+[data-theme='dark'] {
+  --s-bg: #111a29;
+  --s-surface: #172237;
+  --s-surface-2: #1e2b40;
+  --s-surface-3: #273a53;
+  --s-text: #f0f5fc;
+  --s-text-2: #d3deea;
+  --s-muted: #b6c4d5;
+  --s-muted-2: #9aaabe;
+  --s-line: #1f2d43;
+  --s-line-2: #2a3b55;
+  --s-grid: rgba(150, 180, 215, 0.10);
+
+  --s-accent: #7aabff;
+  --s-accent-press: #70a7f2;
+  --s-accent-ink: #0f1b2c;
+  --s-accent-soft: #273a53;
+  --s-accent-grad: linear-gradient(110deg, #4f8ae6, #7aabff);
+
+  --s-success: #72caaa;
+  --s-warning: #ecc08e;
+  --s-danger: #f09c9c;
+  --s-now: #f09c9c;
+
+  --st-pending: #ecc08e;   --st-pending-bg: rgba(236, 192, 142, 0.14);
+  --st-confirmed: #7aabff; --st-confirmed-bg: rgba(122, 171, 255, 0.15);
+  --st-completed: #72caaa; --st-completed-bg: rgba(114, 202, 170, 0.15);
+  --st-cancelled: #9aaabe; --st-cancelled-bg: rgba(154, 170, 190, 0.14);
+  --st-prepay: #b9aaff;    --st-prepay-bg: rgba(185, 170, 255, 0.15);
+
+  --sh-1: none;
+  --sh-2: 0 5px 22px rgba(0, 0, 0, 0.09);
+  --sh-pop: 0 12px 34px rgba(0, 0, 0, 0.42);
+}

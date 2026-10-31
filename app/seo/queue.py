@@ -12,6 +12,7 @@ from app.models.domain import AgentRun, Artifact, Task, TaskStatus
 from app.seo.contracts import PlanItem, SeoContentPlan
 from app.seo.planner import PLAN_KIND
 from app.workflows.article_contracts import ArticleProductionInput, SeoBrief
+from app.seo.activation import require_enabled
 
 SEO_TASK_PREFIX = "SEO-ARTICLE:"
 
@@ -24,6 +25,7 @@ def brief_for(item: PlanItem, related: list[str]) -> SeoBrief:
 
 def queue_plan_item(db: Session, product_id: UUID, plan_artifact_id: UUID, item: PlanItem, related: list[str]) -> Task:
     """One task per plan item. The key makes repeats return the same task, never a duplicate article."""
+    require_enabled(db, product_id)
     brief = brief_for(item, related)
     task = queue_content(db, product_id, item.working_title, commit=False,
                          dedupe_key=f"{SEO_TASK_PREFIX}{plan_artifact_id}:{item.id}",
@@ -40,6 +42,7 @@ def queue_plan_item(db: Session, product_id: UUID, plan_artifact_id: UUID, item:
 
 
 def queue_plan(db: Session, plan_artifact: Artifact, clusters_by_id: dict, *, only: set[str] | None = None) -> list[Task]:
+    require_enabled(db, plan_artifact.product_id)
     plan = SeoContentPlan.model_validate_json(plan_artifact.content)
     tasks = []
     for item in plan.items:

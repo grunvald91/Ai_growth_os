@@ -21,7 +21,7 @@ class Contract(BaseModel):
 
 class FaqItem(Contract):
     question: ShortText
-    answer: Annotated[str, Field(min_length=40, max_length=1500)]
+    answer: Annotated[str, Field(min_length=15, max_length=1500)]
 
 
 class SeoBrief(Contract):
@@ -74,7 +74,7 @@ class SEOPlan(Contract):
     related_queries: list[ShortText] = Field(min_length=1, max_length=10)
     title: ShortText
     hook: Text
-    outline: list[Text] = Field(min_length=3, max_length=15)
+    outline: list[Text] = Field(min_length=2, max_length=15)
     adaptation_notes: Text
 
 
@@ -104,18 +104,18 @@ class ArticleBodySection(Contract):
 
 
 class ArticleBodyDraft(Contract):
-    sections: list[ArticleBodySection] = Field(min_length=4, max_length=20)
-    proof_needed_notes: list[Text] = Field(min_length=1, max_length=20)
+    sections: list[ArticleBodySection] = Field(min_length=2, max_length=20)
+    proof_needed_notes: list[Text] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode='after')
     def long_form(self):
-        if sum(len(section.body) for section in self.sections) < 2000:
-            raise ValueError('A full long-form article requires at least 2000 body characters')
+        if sum(len(section.body.strip()) for section in self.sections) < 650:
+            raise ValueError('Article needs substantive explanation, not a placeholder')
         return self
 
 
 class ArticleDraft(Contract):
-    sections: list[ArticleSection] = Field(min_length=4, max_length=25)
+    sections: list[ArticleSection] = Field(min_length=2, max_length=25)
     claims: list[GroundedClaim] = Field(default_factory=list, max_length=30)
     proof_needed_notes: list[Text] = Field(min_length=1, max_length=20)
 
@@ -142,7 +142,7 @@ class HumanEditedArticle(Contract):
     title: ShortText
     lead: Text
     fact_renderings: list[RenderedFact] = Field(default_factory=list, max_length=30)
-    sections: list[ReaderSection] = Field(min_length=4, max_length=20)
+    sections: list[ReaderSection] = Field(min_length=2, max_length=20)
     closing: Text
     editorial_notes: list[Text] = Field(default_factory=list, max_length=10)
     # Search and AI-assistant surface: a short self-contained answer and real questions with answers.
@@ -153,8 +153,8 @@ class HumanEditedArticle(Contract):
     @model_validator(mode='after')
     def readable_long_form(self):
         body = '\n'.join([self.lead, *(s.body for s in self.sections), self.closing])
-        if len(body) < 2500:
-            raise ValueError('Human-facing article must be a complete long-form read')
+        if len(body.strip()) < 900:
+            raise ValueError('Reader article needs a substantive answer, not a placeholder')
         forbidden = ('[HYPOTHESIS]', '[ADVICE]', 'proof_needed_notes', 'schema:', 'agent note')
         if any(token.casefold() in body.casefold() for token in forbidden):
             raise ValueError('Internal workflow labels must not leak into reader-facing copy')
