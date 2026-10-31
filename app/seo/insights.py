@@ -5,6 +5,7 @@ from the existence of an article. No claim of a connected webmaster account.
 """
 from __future__ import annotations
 
+import os
 from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -29,10 +30,20 @@ def company_seo_insights(db: Session, product_id: UUID) -> dict:
         "hidden_articles": status_counts.get("unpublished", 0),
         # These are distinct data feeds. Never substitute zeros for unknowns.
         "search_sources": {
-            "google_search_console": {"status": "integration_not_configured",
-                                      "clicks": None, "impressions": None},
-            "yandex_webmaster": {"status": "integration_not_configured",
-                                "clicks": None, "impressions": None},
+            "google_search_console": {
+                "status": ("available_on_demand"
+                           if os.getenv("SERVGO_GSC_READONLY_TOKEN")
+                           and os.getenv("SERVGO_GSC_SITE_URL") in (
+                               "https://servgo.ru/", "sc-domain:servgo.ru")
+                           else "integration_not_configured"),
+                "clicks": None, "impressions": None},
+            "yandex_webmaster": {
+                "status": ("available_on_demand"
+                           if os.getenv("SERVGO_YANDEX_WEBMASTER_TOKEN")
+                           and os.getenv("SERVGO_YANDEX_WEBMASTER_USER_ID")
+                           and os.getenv("SERVGO_YANDEX_WEBMASTER_HOST_ID")
+                           else "integration_not_configured"),
+                "clicks": None, "impressions": None},
             "bing_ai_performance": {"status": "integration_not_configured",
                                     "citations": None},
             "chatgpt_search": {"status": "no_verified_citation_feed",
