@@ -60,6 +60,10 @@ def main():
     assets_manifest = local / "offline-assets.json"
     if not assets_manifest.is_file():
         raise RuntimeError("Missing offline-assets.json")
+    revision = hashlib.sha256(assets_manifest.read_bytes()).hexdigest()[:16]
+    revision_marker = f"// servgo-offline-manifest-sha256: {revision}".encode()
+    if revision_marker not in (local / "sw.js").read_bytes():
+        raise RuntimeError("Built service worker does not match offline asset manifest")
 
     import json
     paths = json.loads(assets_manifest.read_text(encoding="utf-8"))
