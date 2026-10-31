@@ -93,6 +93,7 @@ def test_owner_creates_company_and_admin_accounts(studio):
 PUBLIC = {"/health", "/health/version", "/studio/login", "/studio/logout", "/studio/sso", "/studio/sso/create",  # sso: signed one-time link from ServGo
           # Read-only feed of already published blog articles; the public blog on servgo.ru renders pages from it.
           "/public/blog/{product_slug}/articles", "/public/blog/{product_slug}/articles/{slug}",
+          "/public/blog/businesses/with-articles",
           "/public/blog/businesses/{business_id}/articles",
           "/public/blog/businesses/{business_id}/articles/{slug}"}
 
