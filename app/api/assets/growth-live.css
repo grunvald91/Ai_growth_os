@@ -131,3 +131,44 @@ body[data-growth-design] .wb-actions .btn.secondary{background:var(--tint);color
     min-width:0;max-width:100%;box-sizing:border-box;
   }
 }
+
+
+/* Campaign drafts: short creation path, optional details and truthful status. */
+body[data-growth-design="v4"] .sg-campaign-form{max-width:760px;display:grid;gap:20px}
+body[data-growth-design="v4"] .campaign-essential,
+body[data-growth-design="v4"] .campaign-optional{
+  min-width:0;display:grid;gap:14px;padding:20px;
+  background:var(--card);border:1px solid var(--line);border-radius:18px
+}
+body[data-growth-design="v4"] .campaign-essential h2,
+body[data-growth-design="v4"] .campaign-optional h2{margin:0;font-size:19px}
+body[data-growth-design="v4"] .campaign-essential p,
+body[data-growth-design="v4"] .campaign-optional p,
+body[data-growth-design="v4"] .campaign-save-note{font-size:13px;line-height:1.6;color:var(--muted);margin:0}
+body[data-growth-design="v4"] .sg-campaign-form .field{display:grid;gap:7px;min-width:0;font-size:13px;color:var(--text)}
+body[data-growth-design="v4"] .sg-campaign-form :is(input,textarea){
+  width:100%;min-width:0;max-width:100%;box-sizing:border-box;
+  background:var(--tint);color:var(--text);border:1px solid var(--line);
+  padding:12px;border-radius:12px;font:inherit
+}
+body[data-growth-design="v4"] .campaign-optional>summary{
+  cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:650;
+  list-style:revert
+}
+body[data-growth-design="v4"] .campaign-optional:not([open]){display:block}
+body[data-growth-design="v4"] .campaign-optional:not([open])>:not(summary){display:none}
+body[data-growth-design="v4"] .campaign-actions{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+body[data-growth-design="v4"] .campaign-actions .btn{min-height:44px;display:inline-flex;align-items:center;justify-content:center}
+body[data-growth-design="v4"] .campaign-item{display:grid;gap:9px;min-width:0}
+body[data-growth-design="v4"] .campaign-item-head{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center}
+body[data-growth-design="v4"] .campaign-item-head h2{margin:0;overflow-wrap:anywhere}
+body[data-growth-design="v4"] .campaign-item-status{
+  background:var(--blue-soft);color:var(--blue);padding:5px 10px;border-radius:999px;
+  font-size:12px;font-weight:650;white-space:nowrap
+}
+body[data-growth-design="v4"] .campaign-item p{margin:0;overflow-wrap:anywhere;line-height:1.55}
+@media(max-width:400px){
+  body[data-growth-design="v4"] .campaign-essential,
+  body[data-growth-design="v4"] .campaign-optional{padding:14px}
+  body[data-growth-design="v4"] .campaign-actions .btn{flex:1 1 100%;max-width:100%}
+}
