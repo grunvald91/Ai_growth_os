@@ -8,6 +8,8 @@ on:
       - 'deploy/nginx/**'
       - 'tests/test_studio_sso.py'
       - 'tests/test_public_company_seo_pages.py'
+      - 'tests/test_seo_public_release_smoke.py'
+      - 'scripts/seo_public_release_smoke.py'
       - 'tests/test_public_company_blog.py'
       - 'tests/test_seo_referrals.py'
       - 'web/api/seo_referrals.py'
@@ -142,6 +144,11 @@ jobs:
 
       - name: Validate narrow Growth reverse-proxy routes
         run: python tests/test_growth_gateway_contract.py
+
+      - name: Verify offline SEO release smoke contract
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m unittest discover -s tests -p test_seo_public_release_smoke.py -v
 
       - name: Run regression tests
         env:
