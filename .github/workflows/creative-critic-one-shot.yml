@@ -2,7 +2,7 @@ name: Creative Critic one-shot
 on:
   push:
     branches: [experiment/creative-critic-one-shot-20261031]
-    paths: ['.github/critic-claudehub-trigger.txt']
+    paths: ['.github/critic-claudehub-trigger-fixed.txt']
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,11 +24,11 @@ jobs:
           req=urllib.request.Request('https://api.claudehub.fun/v1/models',headers={'Authorization':'Bearer '+key})
           try:
             with urllib.request.urlopen(req,timeout=15) as r:
-              print('OpenRouter key validated, HTTP',r.status)
+              print('ClaudeHub key validated, HTTP',r.status)
           except urllib.error.HTTPError as e:
-            sys.exit('OpenRouter validation failed, HTTP '+str(e.code)+'; no model request made')
+            sys.exit('ClaudeHub validation failed, HTTP '+str(e.code)+'; no model request made')
           except Exception as e:
-            sys.exit('OpenRouter validation connection failed: '+type(e).__name__+'; no model request made')
+            sys.exit('ClaudeHub validation connection failed: '+type(e).__name__+'; no model request made')
           PY
       - name: One API request, save before and after
         shell: bash
@@ -47,9 +47,9 @@ jobs:
               {"title":"Время клиента","beats":[{"narration":"Клиент выбирает свободное время.","visual":"Нарисованный календарь"},{"narration":"Владелец видит расписание.","visual":"Нарисованный телефон"}]}
             ]}
           (out/'before.json').write_text(json.dumps(original,ensure_ascii=False,indent=2))
-          key=os.environ.get('OPENROUTER_API_KEY','')
+          key=os.environ.get('CLAUDEHUB_API_KEY','')
           if not key:
-            status('preflight_failed','OPENROUTER_API_KEY secret is missing or unavailable to this workflow; no API request made')
+            status('preflight_failed','CLAUDEHUB_API_KEY secret is missing or unavailable to this workflow; no API request made')
             raise SystemExit(2)
           status('preflight_ok','Secret present; preparing exactly one API request')
           system=("Ты независимый AI Creative Critic. Оцени исходный сценарий по цели: логика, повторения, "
@@ -70,7 +70,7 @@ jobs:
             with urllib.request.urlopen(req,timeout=90) as response:
               raw=json.load(response)
           except urllib.error.HTTPError as exc:
-            status('api_http_failed','OpenRouter HTTP '+str(exc.code)+'; check API key permissions, credits, model availability and account limits')
+            status('api_http_failed','ClaudeHub HTTP '+str(exc.code)+'; check API key permissions, credits, model availability and account limits')
             raise SystemExit(3)
           except Exception as exc:
             status('api_transport_failed',type(exc).__name__+'; request may have reached provider; do not rerun before checking usage')
