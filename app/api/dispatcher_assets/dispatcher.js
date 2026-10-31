@@ -193,6 +193,15 @@
   }
 
   function toBottom() { feed.scrollTop = feed.scrollHeight; }
+  function syncConversationLayout() {
+    var hasMessages = feed.children.length > 0;
+    root.classList.toggle('has-feed', hasMessages);
+    // v4's empty-home CSS centers the welcome hero. It must be disabled as
+    // soon as a conversation begins, otherwise an empty stripe persists.
+    if (document.body.getAttribute('data-growth-design') === 'v4') {
+      document.body.classList.toggle('home-empty', !hasMessages);
+    }
+  }
 
   function setBusy(value) {
     busy = value;
@@ -216,13 +225,14 @@
   function notify(text) {
     var note = el('div', 'dp-msg bot dp-error', text);
     feed.appendChild(note);
+    syncConversationLayout();
     toBottom();
   }
 
   function applyResult(data) {
     (data.messages || []).forEach(upsert);
     if (data.hints) { state.hints = data.hints; renderHints(); }
-    root.classList.toggle('has-feed', feed.children.length > 0);
+    syncConversationLayout();
     toBottom();
   }
 
@@ -237,7 +247,7 @@
     if (echo) {
       echoNode = renderMessage({ id: 'local-' + key, role: 'user', text: echo });
       feed.appendChild(echoNode);
-      root.classList.add('has-feed');
+      syncConversationLayout();
     }
     setBusy(true);
     post('/messages', body).then(function (data) {
@@ -292,7 +302,7 @@
   newButton.addEventListener('click', function () {
     if (busy) return;
     post('/new', {}).then(function (data) {
-      feed.textContent = ''; root.classList.remove('has-feed');
+      feed.textContent = ''; syncConversationLayout();
       state.hints = data.hints || []; renderHints(); input.focus();
     }).catch(function (error) { notify(error.message); });
   });
@@ -721,7 +731,7 @@
   document.addEventListener('visibilitychange', function () { if (!document.hidden) checkUpdates(); });
 
   (state.messages || []).forEach(upsert);
-  root.classList.toggle('has-feed', feed.children.length > 0);
+  syncConversationLayout();
   renderHints();
   toBottom();
 })();
