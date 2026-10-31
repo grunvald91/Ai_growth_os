@@ -229,7 +229,51 @@ def main():
                 assert geometry['gap']<=45, f"Separate header band still visible: {geometry}"
                 assert geometry['topicTop']>=geometry['composerBottom'], geometry
                 assert geometry['topicTop']>=geometry['toolbarTop'], geometry
-                page.screenshot(path=str(OUT/'chat-no-top-band-390.png'),animations='disabled')
+                # A genuinely transparent dock overlaps the scrollable history;
+                # its children retain their own surfaces and remain clickable.
+                page.evaluate("""() => {
+                  const feed=document.querySelector('#dp-feed');
+                  for(let i=0;i<14;i++){
+                    const m=document.createElement('div');
+                    m.className='dp-msg bot'; m.textContent='Проверка истории '+i+' — сообщение в ленте.';
+                    feed.appendChild(m);
+                  }
+                }""")
+                page.wait_for_function("""() => {
+                  const dock=document.querySelector('.command-dock');
+                  return parseFloat(getComputedStyle(document.querySelector('#dp-feed')).paddingBottom)
+                    >=dock.getBoundingClientRect().height+8;
+                }""")
+                overlap=page.evaluate("""() => {
+                  const feed=document.querySelector('#dp-feed'),
+                        dock=document.querySelector('.command-dock'),
+                        tools=document.querySelector('.command-tools'),
+                        hints=document.querySelector('.command-hints');
+                  const fr=feed.getBoundingClientRect(), dr=dock.getBoundingClientRect();
+                  const transparent=el=>getComputedStyle(el).backgroundColor;
+                  const reserved=parseFloat(getComputedStyle(feed).paddingBottom);
+                  feed.scrollTop=feed.scrollHeight;
+                  return {feedBottom:fr.bottom,dockTop:dr.top,dockBottom:dr.bottom,
+                    feedScrollHeight:feed.scrollHeight,feedClientHeight:feed.clientHeight,
+                    dockHeight:dr.height,reserved,
+                    dockBg:transparent(dock),toolsBg:transparent(tools),hintsBg:transparent(hints),
+                    composerBg:transparent(document.querySelector('#dp-form')),
+                    lastBottom:feed.lastElementChild.getBoundingClientRect().bottom,
+                    scrollTop:feed.scrollTop};
+                }""")
+                assert overlap['dockBg']=='rgba(0, 0, 0, 0)',overlap
+                assert overlap['toolsBg']=='rgba(0, 0, 0, 0)',overlap
+                assert overlap['hintsBg']=='rgba(0, 0, 0, 0)',overlap
+                assert overlap['composerBg']!='rgba(0, 0, 0, 0)',overlap
+                assert overlap['feedBottom']>=overlap['dockBottom']-12,overlap
+                assert overlap['dockTop']<overlap['feedBottom']-45,overlap
+                assert overlap['reserved']>=overlap['dockHeight']+8,overlap
+                assert overlap['feedScrollHeight']>overlap['feedClientHeight'],overlap
+                assert overlap['lastBottom']<=overlap['dockTop']+3,overlap
+                page.screenshot(path=str(OUT/'transparent-floating-composer-390.png'),animations='disabled')
+                result['checks'].append({'page':'transparent-floating-composer-390',
+                    'dock_transparent':True,'shortcuts_transparent':True,
+                    'feed_scrolls_behind_dock':True,'last_message_readable':True})
                 page.route('**/studio/products/*/dispatch/new',
                            lambda route:route.fulfill(status=200,content_type='application/json',
                                body=json.dumps({'hints':[]})))
