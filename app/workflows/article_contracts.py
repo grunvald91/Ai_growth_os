@@ -117,12 +117,12 @@ class ArticleBodyDraft(Contract):
 class ArticleDraft(Contract):
     sections: list[ArticleSection] = Field(min_length=2, max_length=25)
     claims: list[GroundedClaim] = Field(default_factory=list, max_length=30)
-    proof_needed_notes: list[Text] = Field(min_length=1, max_length=20)
+    proof_needed_notes: list[Text] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode='after')
     def long_form(self):
-        if sum(len(section.body) for section in self.sections) < 2000:
-            raise ValueError('A full long-form article requires at least 2000 body characters')
+        if sum(len(section.body.strip()) for section in self.sections) < 650:
+            raise ValueError('Article needs substantive explanation, not a placeholder')
         return self
 
 
@@ -473,7 +473,7 @@ class ArticleArtifact(Contract):
     draft: ArticleDraft
     reader_article: HumanEditedArticle | None = None
     seo_brief: SeoBrief | None = None
-    full_article: str = Field(min_length=2000, max_length=110000)
+    full_article: str = Field(min_length=900, max_length=110000)
     conversion: ConversionPackage
     grounding_policy: Literal[
         'verbatim_product_facts_and_labeled_advice',
