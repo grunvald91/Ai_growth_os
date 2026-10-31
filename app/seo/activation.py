@@ -59,8 +59,9 @@ def set_enabled(db: Session, product_id: UUID, *, enabled: bool, actor: str) -> 
         row.changed_by = actor[:200]
     else:
         return enabled
-    if not enabled:
-        # Only this company's pending SEO tasks; other marketing content is untouched.
+    if True:
+        # Cancel dormant SEO tasks both on connection and disconnection.
+        # Other marketing work is untouched.
         db.execute(update(Task).where(
             Task.product_id == product_id,
             Task.status == TaskStatus.QUEUED,
