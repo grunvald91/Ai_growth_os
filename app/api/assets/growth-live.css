@@ -599,3 +599,8 @@ body[data-growth-design="v4"] .command-bar textarea::placeholder{
 @media(max-width:360px){
   body[data-growth-design="v4"] .command-bar textarea::placeholder{font-size:10.5px}
 }
+
+/* No supported recorder: the user must still be able to select/edit text. */
+body[data-growth-design="v4"] .command-bar.voice-unavailable .voice-hold-hitbox{
+  pointer-events:none;
+}
