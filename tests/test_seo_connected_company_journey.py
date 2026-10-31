@@ -227,8 +227,11 @@ async def test_connected_company_article_reaches_own_blog_with_critic_and_demo_s
         assert outcome.published and outcome.slug
         assert db.get(Artifact, article.id).status == ArtifactStatus.PUBLISHED
         # No owner approval is required after a clean critic verdict.
-        approval = db.scalar(select(Approval).where(Approval.artifact_id == article.id))
+        publication = db.scalar(select(Publication).where(Publication.artifact_id == article.id))
+        approval = db.get(Approval, publication.approval_id)
         assert approval.status == "approved" and approval.decided_by == "policy:critic_reviewed"
+        assert not list(db.scalars(select(Approval).where(
+            Approval.artifact_id == article.id, Approval.status == "pending")))
         assert db.scalar(select(Publication).where(Publication.product_id == demo_id)) is None
 
         app.dependency_overrides[get_db] = lambda: db
