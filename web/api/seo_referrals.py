@@ -6,6 +6,7 @@ bookings still function normally without SEO attribution.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import os
@@ -63,7 +64,7 @@ def read_reference(token: str | None, business_id: int, *, now: int | None = Non
         if issued > current + 60 or current - issued > TTL_SECONDS:
             return None
         return slug
-    except (ValueError, UnicodeError, OverflowError):
+    except (binascii.Error, ValueError, UnicodeError, OverflowError):
         return None
 
 
@@ -115,8 +116,10 @@ async def article_booking_link(db: AsyncSession, business_id: int, article: dict
     if token is not None:
         params["seo_ref"] = token
     base = f"/book/{business_id}"
+    company_base = f"/business/{business_id}"
     return {
         "service_id": service_id,
         "seo_ref": token,
         "cta_url": base + ("?" + urlencode(params) if params else ""),
+        "company_url": company_base + ("?" + urlencode({"seo_ref": token}) if token else ""),
     }
