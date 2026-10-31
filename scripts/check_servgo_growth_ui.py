@@ -100,6 +100,12 @@ def main():
                         assert page.get_by_text("Дополнительные настройки (необязательно)").count() == 1
                     if segment == "seo":
                         assert value["hasRunsHeading"], "SEO run heading missing"
+                        # New companies and demos must explicitly opt in; navigation
+                        # cannot start paid SEO work without the owner's click.
+                        assert page.get_by_role("button", name="Подключить SEO-завод").count() == 1
+                        page.get_by_role("button", name="Подключить SEO-завод").click()
+                        page.wait_for_url("**/seo")
+                        assert page.get_by_role("button", name="Отключить SEO-завод").count() == 1
                     if segment == "seo/queue":
                         assert page.get_by_text("Подтвердить постановку в очередь").count() == 1
                     page.screenshot(path=str(OUT / f"{segment.replace('/', '-')}-320.png"),
