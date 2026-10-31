@@ -88,8 +88,8 @@ def static_problems(article: ArticleArtifact) -> list[str]:
         return problems + ["no reader-facing article"]
     if not reader.direct_answer:
         problems.append("no direct answer")
-    if len(reader.faq) < 3:
-        problems.append("fewer than three FAQ items")
+    # FAQ blocks are optional. Fabricating three questions for every article
+    # makes the blog repetitive and does not improve its factual reliability.
     if not reader.meta_description:
         problems.append("no meta description")
     if _LEAKS.search(article.full_article):
