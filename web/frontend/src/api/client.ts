@@ -28,6 +28,7 @@ export interface BusinessBlogFeed {
 export interface BusinessBlogArticle extends BlogArticleSummary {
   direct_answer: string
   sections: { title: string; paragraphs: string[]; bullets: string[] }[]
+  company_facts?: string[]
   closing: string
   faq: { question: string; answer: string }[]
   cta: string
