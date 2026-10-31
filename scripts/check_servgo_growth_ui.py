@@ -78,7 +78,7 @@ def main():
 
                 # Newly revised product pages must render on the same narrow
                 # Android-size layout without horizontal scroll or fake state.
-                for segment in ("campaigns/new", "seo"):
+                for segment in ("campaigns/new", "seo", "seo/queue"):
                     response = page.goto(
                         f"{origin}/studio/products/{product.id}/{segment}?design=v4",
                         wait_until="load",
@@ -100,6 +100,8 @@ def main():
                         assert page.get_by_text("Дополнительные настройки (необязательно)").count() == 1
                     if segment == "seo":
                         assert value["hasRunsHeading"], "SEO run heading missing"
+                    if segment == "seo/queue":
+                        assert page.get_by_text("Подтвердить постановку в очередь").count() == 1
                     page.screenshot(path=str(OUT / f"{segment.replace('/', '-')}-320.png"),
                                     full_page=True, animations="disabled")
 
