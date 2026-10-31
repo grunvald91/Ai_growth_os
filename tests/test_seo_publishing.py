@@ -196,6 +196,35 @@ async def test_changed_reader_does_not_require_new_approval(env, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_completed_seo_article_auto_publishes_on_worker_recovery_without_owner(env, tmp_path):
+    from app.models.domain import Task
+    from app.seo.publishing import publish_pending
+    db, product = env
+    article_id = await make_article(db, product, tmp_path)
+    row = db.get(Artifact, article_id)
+    db.get(Task, row.task_id).title = "SEO-ARTICLE:worker-recovery"
+    db.commit()
+    assert not list(db.scalars(select(Publication)))
+    assert publish_pending(db) == 1
+    assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
+    approval = db.scalar(select(Approval).where(Approval.artifact_id == article_id))
+    assert approval.status == "approved"
+    assert approval.decided_by == "policy:critic_reviewed"
+    assert publish_pending(db) == 0
+
+
+@pytest.mark.asyncio
+async def test_opted_out_company_cannot_auto_publish_its_prepared_article(env, tmp_path):
+    db, product = env
+    article_id = await make_article(db, product, tmp_path)
+    set_enabled(db, product.id, enabled=False, actor="owner")
+    outcome = publish_if_clear(db, article_id)
+    assert not outcome.published and outcome.reason == "seo_disabled"
+    assert db.get(Artifact, article_id).status != ArtifactStatus.PUBLISHED
+    assert not list(db.scalars(select(Publication)))
+
+
+@pytest.mark.asyncio
 async def test_auto_publication_can_retry_after_transient_failure(env, tmp_path, monkeypatch):
     import app.seo.publishing as module
     db, product = env
