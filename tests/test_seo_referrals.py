@@ -169,6 +169,20 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(created), 1)
             self.assertIsNotNone(await db.get(Booking, created[0].id))
 
+    async def test_disabled_tracking_does_not_query_unmigrated_attribution_table(self):
+        # Backend release can precede the separately approved SEO table migration.
+        async with self.engine.begin() as conn:
+            await conn.run_sync(SeoBookingAttribution.__table__.drop)
+        async with self.sessions() as db:
+            owner = await db.get(User, self.owner_id)
+            with patch.dict(os.environ, {"SEO_ATTRIBUTION_SECRET": ""}):
+                summary = await seo_conversions(self.business_id, 90, owner, db)
+            self.assertFalse(summary["tracking_enabled"])
+            self.assertEqual(summary["articles"], [])
+            self.assertEqual(summary["total_created"], 0)
+            self.assertEqual(summary["total_confirmed"], 0)
+
+
     async def test_other_owner_cannot_read_company_analytics(self):
         from fastapi import HTTPException
         async with self.sessions() as db:
