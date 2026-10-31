@@ -24,6 +24,8 @@ from sqlalchemy.orm import selectinload
 
 from ..photo_transport import create_photo_client
 from ..database import get_db, Business, Service, Employee, EmployeeService, Booking, User, VenueTimePricing
+from database.models import SeoBookingAttribution
+from ..seo_referrals import article_booking_link, read_reference
 from ..deps import get_current_user, get_current_user_optional
 from database.crud import get_or_create_guest_user
 from database.prepayment import payment_deadline
@@ -689,6 +691,10 @@ async def create_booking_visit(
     if not business:
         raise HTTPException(status_code=404, detail="Business not found")
 
+    # Only a signed reference minted for this active business is counted.
+    # Invalid/absent SEO referrals do not interfere with customer booking.
+    seo_article_slug = read_reference(body.seo_ref, body.business_id)
+
     legal_enabled = bool(getattr(business, "legal_documents_enabled", False))
     legal_accepted_at = None
     if legal_enabled:
@@ -897,6 +903,16 @@ async def create_booking_visit(
             current_time += timedelta(minutes=resource_duration)
 
     try:
+        if seo_article_slug and created_bookings:
+            # Multi-service or recurring bookings create several rows.
+            # Attribute the initial visit only; one click is one acquired booking.
+            # Migrate seo_booking_attributions before enabling SEO_ATTRIBUTION_SECRET.
+            await db.flush()
+            db.add(SeoBookingAttribution(
+                business_id=body.business_id,
+                booking_id=created_bookings[0].id,
+                article_slug=seo_article_slug,
+            ))
         if commit:
             await db.commit()
         else:
@@ -1650,4 +1666,6 @@ async def business_blog_articles(business_id: int, db: AsyncSession = Depends(ge
 @router.get("/businesses/{business_id}/blog/articles/{slug}")
 async def business_blog_article(business_id: int, slug: str, db: AsyncSession = Depends(get_db)):
     """Published SEO article for the active business, with its own company/booking CTA."""
-    return await _company_blog_data(business_id, db, slug)
+    article = await _company_blog_data(business_id, db, slug)
+    # Server-side service verification is shared with the HTML renderer.
+    return {**article, **await article_booking_link(db, business_id, article)}
