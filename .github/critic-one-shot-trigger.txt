@@ -1,0 +1,2 @@
+Run exactly one creative critic credential check and, if valid, one model inference.
+Trigger date: 2026-10-31.
