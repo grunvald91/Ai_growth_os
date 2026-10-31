@@ -12,7 +12,9 @@ from uuid import UUID
 from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
-from app.models.domain import Artifact, Publication, Task
+from app.models.domain import AgentRun, Approval, Artifact, Publication, Task
+from app.seo.publishing import reader_hash
+from app.workflows.article_contracts import ArticleArtifact
 
 SEO_AGENT = "seo_factory"
 SEO_KINDS = (
@@ -35,6 +37,36 @@ def _report_data(content: str) -> dict:
     except (ValueError, TypeError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _critic_details(article: Artifact, review: Artifact | None) -> dict:
+    """Only display a verdict for the exact final reader-facing article reviewed."""
+    empty = {"critic_status": "missing", "critic_findings": []}
+    if review is None:
+        return empty
+    data = _report_data(review.content)
+    try:
+        parsed = ArticleArtifact.model_validate_json(article.content)
+        reader = parsed.reader_article
+        if reader is None or data.get("reader_hash") != reader_hash(reader):
+            return {"critic_status": "content_mismatch", "critic_findings": []}
+    except (ValueError, TypeError):
+        return {"critic_status": "content_mismatch", "critic_findings": []}
+    status = data.get("status")
+    findings = data.get("findings")
+    issues = []
+    if isinstance(findings, list):
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            problem = finding.get("problem")
+            if isinstance(problem, str) and problem.strip():
+                issues.append(problem.strip()[:500])
+    return {
+        "critic_status": status if isinstance(status, str) and status else "missing",
+        "critic_findings": issues[:3],
+        "critic_findings_total": len(issues),
+    }
 
 
 def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
@@ -131,6 +163,33 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
         Publication.artifact_id.in_(completed_ids),
     ))) if completed_ids else []
     published = {p.artifact_id: p.external_reference for p in publications}
+
+    # Batch-read latest final-editor runs and reviews. No model calls, changes
+    # to article status, or hidden approval decisions during page rendering.
+    final_runs = list(db.scalars(select(AgentRun).where(
+        AgentRun.task_id.in_(article_ids),
+        AgentRun.agent_name == "marketing_editor",
+    ).order_by(AgentRun.created_at.desc(), AgentRun.id.desc())))
+    latest_runs = {}
+    for run in final_runs:
+        latest_runs.setdefault(run.task_id, run.id)
+    reviews = list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id, Artifact.kind == "seo_final_review",
+        Artifact.agent_run_id.in_(list(latest_runs.values())),
+    ).order_by(Artifact.created_at.desc(), Artifact.id.desc()))) if latest_runs else []
+    review_by_run = {}
+    for review in reviews:
+        review_by_run.setdefault(review.agent_run_id, review)
+
+    approvals = list(db.scalars(select(Approval).where(
+        Approval.product_id == product_id,
+        Approval.artifact_id.in_(completed_ids),
+        Approval.requested_by == "seo_factory",
+        Approval.action_type == "publish",
+    ).order_by(Approval.created_at.desc(), Approval.id.desc()))) if completed_ids else []
+    approval_by_article = {}
+    for approval in approvals:
+        approval_by_article.setdefault(approval.artifact_id, approval)
     by_run = defaultdict(list)
     for task in article_tasks:
         parts_of_title = task.title.split(":", 2)
@@ -141,7 +200,14 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
         request = _report_data(source.content) if source is not None else {}
         title = article.title if article else str(request.get("topic") or "Статья в очереди")
         state = task.status.value if hasattr(task.status, "value") else str(task.status)
+        critic = _critic_details(article, review_by_run.get(latest_runs.get(task.id))) if article else {
+            "critic_status": "not_ready", "critic_findings": [],
+        }
+        approval = approval_by_article.get(article.id) if article else None
         by_run[plan_run[parts_of_title[1]]].append({
+            **critic,
+            "approval_reason": approval.reason if approval and approval.status == "pending" else None,
+            "needs_fact_check": bool(_report_data(article.content).get("fact_check_required")) if article else False,
             "task_id": str(task.id),
             "title": title,
             "task_status": state,
