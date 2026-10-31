@@ -186,3 +186,74 @@ def test_run_articles_link_to_queued_task_saved_material_and_public_blog(env):
     own_page = client.get(url(pid))
     assert "https://servgo.ru/blog/seo-test-article" in own_page.text
     assert seo_runs(db, other_pid) == []
+
+
+def test_verified_critic_review_is_visible_only_for_correct_article_version(env, monkeypatch):
+    """The owner sees persisted findings, but never a critic verdict from a stale article."""
+    from types import SimpleNamespace
+    from app.models.domain import AgentRun, Approval
+
+    client, db, pid, other_pid = env
+    run = create_seo_run(db, product_id=pid)
+    plan = Artifact(product_id=pid, task_id=run.id, kind="seo_content_plan",
+                    title="План", content="{}")
+    db.add(plan)
+    db.flush()
+    task = Task(product_id=pid, assigned_agent="content_factory",
+                title=f"SEO-ARTICLE:{plan.id}:a001", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    article = Artifact(product_id=pid, task_id=task.id, kind="article",
+                       title="Статья с проверкой", content="{}",
+                       status=ArtifactStatus.AWAITING_APPROVAL)
+    reviewer_run = AgentRun(task_id=task.id, agent_name="marketing_editor", status="completed")
+    db.add_all([article, reviewer_run])
+    db.flush()
+    review = Artifact(product_id=pid, task_id=task.id, agent_run_id=reviewer_run.id,
+                      kind="seo_final_review", title="Final review",
+                      content=json.dumps({"status": "all_rejected", "reader_hash": "hash-1",
+                          "findings": [{"problem": "<img src=x onerror=alert(1)>",
+                                         "severity": "major"}]}))
+    approval = Approval(product_id=pid, artifact_id=article.id, action_type="publish",
+                        risk_level="high", status="pending", requested_by="seo_factory",
+                        reason="Проверить: <script>alert(1)</script>")
+    db.add_all([review, approval])
+    db.commit()
+
+    from app.api import seo_run_view
+    monkeypatch.setattr(seo_run_view.ArticleArtifact, "model_validate_json",
+                        classmethod(lambda cls, content: SimpleNamespace(reader_article=object())))
+    monkeypatch.setattr(seo_run_view, "reader_hash", lambda reader: "hash-1")
+    data = seo_runs(db, pid)[0]["articles"][0]
+    assert data["critic_status"] == "all_rejected"
+    assert data["critic_findings_total"] == 1
+    assert "onerror" in data["critic_findings"][0]
+
+    page = client.get(url(pid))
+    assert page.status_code == 200
+    assert "автором" in page.text
+    assert "&lt;img src=x onerror=alert(1)&gt;" in page.text
+    assert "<img src=x onerror=alert(1)>" not in page.text
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page.text
+    assert 'name="confirm_publish"' in page.text
+    assert f'/review/{article.id}/approve' in page.text
+    assert "Согласовать публикацию" in page.text
+    assert client.get(url(other_pid)).status_code == 200
+    assert "Статья с проверкой" not in client.get(url(other_pid)).text
+
+    # The recorded critic hash must match the CURRENT article; otherwise no findings are trusted.
+    monkeypatch.setattr(seo_run_view, "reader_hash", lambda reader: "changed-reader")
+    stale = seo_runs(db, pid)[0]["articles"][0]
+    assert stale["critic_status"] == "content_mismatch"
+    assert stale["critic_findings"] == []
+    assert "проверка относится к другой версии" in client.get(url(pid)).text
+
+
+def test_seo_discloses_unconnected_blog_without_claiming_publication(env):
+    client, db, pid, other_pid = env
+    assert "Внешний адрес сайта для этой компании пока не подключён" in client.get(url(pid)).text
+    assert "для других компаний публичный сайт ещё не подключён" in client.get(url(pid, "/queue")).text
+    db.get(Product, pid).slug = "servgo"
+    db.commit()
+    assert "https://servgo.ru/blog" in client.get(url(pid)).text
+    assert "Внешний адрес сайта для этой компании пока не подключён" in client.get(url(other_pid)).text
