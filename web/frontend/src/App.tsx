@@ -7,6 +7,7 @@ import { OfflineNotice } from './components/OfflineNotice'
 import { cleanupExpiredOfflineSnapshots } from './utils/offlineStore'
 import { HomePage } from './pages/client/HomePage'
 import { BusinessPage } from './pages/client/BusinessPage'
+import { BusinessBlogPage } from './pages/client/BusinessBlogPage'
 import { BookingStatusPage } from './pages/client/BookingStatusPage'
 import { MyBookingsPage } from './pages/client/MyBookingsPage'
 import { SubscriptionsPage } from './pages/client/SubscriptionsPage'
@@ -155,6 +156,8 @@ function App() {
         {/* Client routes */}
         <Route path="/" element={<HomePage />} />
         <Route path="/business/:id" element={<BusinessPage />} />
+        <Route path="/business/:id/blog" element={<BusinessBlogPage />} />
+        <Route path="/business/:id/blog/:slug" element={<BusinessBlogPage />} />
         <Route path="/book/:businessId" element={<BookingPage />} />
         <Route path="/b/:token" element={<BookingStatusPage />} />
         <Route path="/rental/b/:token" element={<RentalBookingStatusPage />} />
