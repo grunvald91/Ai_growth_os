@@ -105,11 +105,11 @@ def render_v4(page, request, pid, switch):
         # the composition to v4 instead of restyling the old chat layout.
         inner = Document(original.inner(root))
         form = inner.outer(inner.find(ident='dp-form')).replace('class="dp-form"','class="dp-form command-bar"')
-        form = form.replace('class="dp-mic"','class="dp-mic command-mic"').replace('class="dp-send"','class="dp-send command-go"')
-        # Microphone is the first control in the approved command bar.
+        form = form.replace('class="dp-send"','class="dp-send command-go"')
+        # The whole text composer handles hold-to-talk in v4. Classic Studio keeps its mic.
         formdoc = Document(form)
         mic = formdoc.outer(formdoc.find(ident='dp-mic'))
-        form = form.replace(mic, '').replace('<label class="dp-sr"', mic+'<label class="dp-sr"', 1)
+        form = form.replace(mic, '').replace('id="dp-input"', 'id="dp-input" aria-describedby="dp-press-hint"', 1)
         attrs = ' '.join(f'{k}="{html.escape(v or "",quote=True)}"' for k,v in root[1].items() if k!='class')
         content = (f'<section class="dp-home empty-hero animate-in" {attrs}>'
                    '<div class="hero-intro"><div class="hero-eyebrow">ServGo · ваш AI-помощник</div>'
@@ -119,6 +119,7 @@ def render_v4(page, request, pid, switch):
                    +inner.outer(inner.find(ident='dp-feed'))+
                    '<div class="command-dock">'+inner.outer(inner.find(ident='dp-live'))+
                    inner.outer(inner.find(ident='dp-voice-note'))+form+
+                   '<p id="dp-press-hint" class="dp-press-hint">Удерживайте строку, чтобы говорить</p>'
                    '<div class="command-hints" id="dp-chips" aria-label="Подсказки"></div>'
                    '<div class="home-hero-subnote">Результаты и следующие шаги появятся после запроса</div></div></section>')
     if pid and current == base+'/create':
@@ -198,12 +199,15 @@ def render_v4(page, request, pid, switch):
                      e[0]=='script' and (not main or not main[3] <= e[2] < main[4]))
     extras += ''.join(original.outer(e) for e in original.elements if e[0]=='dialog' and not main[3] <= e[2] < main[4])
     extras += original.outer(original.find(ident='authOverlay'))
+    # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
+    if home:
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>hold-20261031', extras)
     if pid:
         button = Document(template).find(ident='notifyBtn')
         template = template.replace(Document(template).outer(button), notice_html(pid).replace('<span aria-hidden="true">🔔</span>', icon('bell')))
         template = template.replace('</head>', '<style>'+notice_css+'</style></head>')
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
-    template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=4"></head>')
-    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=3"></script></body>')
+    template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=5"></head>')
+    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=4"></script></body>')
     return template
