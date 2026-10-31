@@ -42,6 +42,8 @@ def _article(row: Artifact, publication: Publication) -> dict:
         "lead": reader.lead,
         "direct_answer": reader.direct_answer or "",
         "sections": sections,
+        # Only text rendered from verified facts; no internal source IDs in public HTML.
+        "company_facts": [fact.text for fact in reader.fact_renderings],
         "closing": reader.closing,
         "faq": [item.model_dump() for item in reader.faq],
         "cta": article.conversion.cta,
