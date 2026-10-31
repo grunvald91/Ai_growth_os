@@ -203,6 +203,12 @@ def publish_owner_approved(db: Session) -> int:
         except (TypeError, ValueError) as exc:
             problems = [f"invalid article: {type(exc).__name__}"]
         if problems:
+            # The reviewed version failed: invalidate the owner's old signoff,
+            # show the reason, and demand a fresh decision after correction.
+            row.status = ArtifactStatus.AWAITING_APPROVAL
+            approval.status = "pending"
+            approval.decided_by = None
+            approval.decided_at = None
             approval.reason = "Публикация остановлена: " + "; ".join(problems)
             db.commit()
             continue
