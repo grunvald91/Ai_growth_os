@@ -30,6 +30,8 @@ export function SeoAttributionCard({ businessId, days }: { businessId: number; d
         <p className="ds-sub" role="status">Загружаем источники записей…</p>
       ) : error ? (
         <p className="ds-sub">Статистика статей пока недоступна. Остальные показатели работают независимо.</p>
+      ) : data && !data.tracking_enabled ? (
+        <p className="ds-sub">Учёт записей из SEO-статей пока не подключён. Для запуска потребуется серверная настройка.</p>
       ) : !data || data.articles.length === 0 ? (
         <p className="ds-sub">За выбранный период подтверждённых переходов из статей в запись пока нет.</p>
       ) : (
