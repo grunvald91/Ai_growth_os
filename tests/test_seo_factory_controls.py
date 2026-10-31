@@ -258,5 +258,5 @@ def test_seo_discloses_unconnected_blog_without_claiming_publication(env):
     assert "публикация доступна только для подключённых компаний" in client.get(url(pid, "/queue")).text
     db.get(Product, pid).slug = "servgo"
     db.commit()
-    assert "https://servgo.ru/blog" in client.get(url(pid)).text
-    assert "Внешний адрес сайта для этой компании пока не подключён" in client.get(url(other_pid)).text
+    assert "Место публикации: блог ServGo" in client.get(url(pid)).text
+    assert "персональный блог компании на ServGo" in client.get(url(other_pid)).text
