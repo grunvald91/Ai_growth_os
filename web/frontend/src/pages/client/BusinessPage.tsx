@@ -1,7 +1,7 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { MapPin, Phone, Clock, Navigation, DoorOpen, X, ChevronRight, ArrowRight, Sparkles } from 'lucide-react'
-import { api, type BusinessDetail, type EmployeeWithPricing } from '../../api/client'
+import { api, type BusinessDetail, type BlogArticleSummary, type EmployeeWithPricing } from '../../api/client'
 import { AirFrame, HeroArt } from './AirFrame'
 import { parsePhotoList, photoSrc, photoThumbSrc } from './airPhotos'
 import { applySeo, shortText } from '../../utils/seo'
@@ -80,6 +80,7 @@ export function BusinessPage() {
   const [error, setError] = useState(false)
   const [selectedEmp, setSelectedEmp] = useState<EmployeeWithPricing | null>(null)
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [blogArticles, setBlogArticles] = useState<BlogArticleSummary[]>([])
 
   useEffect(() => {
     if (!id) return
@@ -106,6 +107,16 @@ export function BusinessPage() {
       description: shortText(business.description?.trim() || fallback),
     })
   }, [id, business, error])
+
+
+  useEffect(() => {
+    if (!id || !Number.isSafeInteger(Number(id))) return
+    let active = true
+    api.getBusinessBlog(Number(id))
+      .then((result) => { if (active) setBlogArticles(result.articles) })
+      .catch(() => { if (active) setBlogArticles([]) })
+    return () => { active = false }
+  }, [id])
 
   if (loading) {
     return (
@@ -231,6 +242,27 @@ export function BusinessPage() {
                 {services.length > 6 && (
                   <Link to={`/book/${business.id}`} className="bf-about" style={{ display: 'inline-block', textDecoration: 'none' }}>Все услуги — {services.length}</Link>
                 )}
+              </section>
+            )}
+
+
+            {blogArticles.length > 0 && (
+              <section className="bf-block" aria-label="Статьи и советы">
+                <div className="bf-kicker">Статьи и советы</div>
+                <div className="bf-list">
+                  {blogArticles.slice(0, 3).map((item) => (
+                    <Link key={item.slug} to={`/business/${business.id}/blog/${item.slug}`} className="bf-option bf-option--link">
+                      <span className="bf-option-data">
+                        <span className="bf-option-title">{item.title}</span>
+                        <span className="bf-option-meta">{item.description || item.lead}</span>
+                      </span>
+                      <ChevronRight className="bf-chevron" />
+                    </Link>
+                  ))}
+                </div>
+                <Link to={`/business/${business.id}/blog`} className="bf-about" style={{ display: 'inline-block', textDecoration: 'none' }}>
+                  Все статьи
+                </Link>
               </section>
             )}
 
