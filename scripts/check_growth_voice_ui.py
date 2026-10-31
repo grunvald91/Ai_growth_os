@@ -231,7 +231,7 @@ def main():
                 assert page.locator('body').evaluate("el=>!el.classList.contains('home-empty')")
                 assert page.locator('#dp-new').is_visible()
                 assert page.locator('#dp-new').evaluate(
-                    "el=>el.parentElement.classList.contains('command-tools')")
+                    "el=>el.parentElement.classList.contains('command-topicbar')")
                 geometry=page.evaluate("""() => {
                   const main=document.querySelector('#main').getBoundingClientRect(),
                     feed=document.querySelector('#dp-feed').getBoundingClientRect(),
