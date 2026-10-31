@@ -297,8 +297,24 @@ def require_studio_csrf(
         received = urlsplit(submitted_origin)
     except ValueError:
         _reject_origin(request, 403, "Cross-origin action rejected", configured)
-    if (received.scheme.casefold() != allowed.scheme.casefold()
-            or received.netloc.casefold() != allowed.netloc.casefold()
-            or received.username or received.password):
+    if received.username or received.password:
+        _reject_origin(request, 403, "Cross-origin action rejected", configured)
+
+    is_legacy_origin = (
+        received.scheme.casefold() == allowed.scheme.casefold()
+        and received.netloc.casefold() == allowed.netloc.casefold()
+    )
+    # This exception is deliberately NOT a blanket allowlist for another site's
+    # Origin header. It only applies to a genuine same-origin request received
+    # through the canonical HTTPS servgo.ru virtual host (nginx preserves Host).
+    # A POST to growth.servgo.ru with Origin: https://servgo.ru is still rejected.
+    is_servgo_gateway_origin = (
+        settings.studio_servgo_gateway_enabled
+        and received.scheme.casefold() == "https"
+        and received.netloc.casefold() == "servgo.ru"
+        and request.url.scheme.casefold() == "https"
+        and request.url.netloc.casefold() == "servgo.ru"
+    )
+    if not (is_legacy_origin or is_servgo_gateway_origin):
         _reject_origin(request, 403, "Cross-origin action rejected", configured)
     return None
