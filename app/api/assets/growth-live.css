@@ -437,6 +437,107 @@ body[data-growth-design="v4"] .command-bar.voice-connecting{
   -webkit-touch-callout:none;
 }
 
+/* Keep New Topic inside the compact shortcuts toolbar, never in a separate
+   band above the chat. The conversation can now begin directly below the header. */
+body[data-growth-design="v4"] .dp-home .command-tools{
+  display:flex;align-items:center;gap:8px;
+  width:100%;min-width:0;margin-top:8px;
+}
+body[data-growth-design="v4"] .dp-home .command-tools .command-hints{
+  min-width:0;flex:1 1 auto;margin:0;
+  overflow-x:auto;overflow-y:hidden;
+  overscroll-behavior-x:contain;
+  scrollbar-width:none;
+}
+body[data-growth-design="v4"] .dp-home .command-tools .command-hints::-webkit-scrollbar{display:none}
+body[data-growth-design="v4"] .dp-home .command-tools .dp-new{
+  position:static;align-self:center;flex:none;
+  display:inline-flex;align-items:center;justify-content:center;
+  gap:5px;margin:0;padding:0 11px;
+  min-height:34px;border-radius:12px;border:1px solid var(--line);
+  color:var(--muted);background:var(--card);
+  font-size:11px;font-weight:600;line-height:1.2;white-space:nowrap;
+  box-shadow:none;
+}
+body[data-growth-design="v4"] .dp-home .command-tools .dp-new:hover{
+  background:var(--blue-soft);color:var(--blue);
+}
+body[data-growth-design="v4"] .dp-home .command-tools .dp-new span:first-child{
+  font-size:17px;font-weight:400;line-height:1;
+}
+body[data-growth-design="v4"] .dp-home:not(.has-feed) .command-tools .dp-new{
+  display:none;
+}
+@media(max-width:780px){
+  body[data-growth-design="v4"] .dp-home .command-tools{gap:6px;margin-top:8px}
+  body[data-growth-design="v4"] .dp-home .command-tools .dp-new{
+    padding:0 8px;min-height:34px;font-size:10px;
+  }
+}
+@media(max-width:360px){
+  body[data-growth-design="v4"] .dp-home .command-tools .dp-new-label{display:none}
+  body[data-growth-design="v4"] .dp-home .command-tools .dp-new{width:36px;padding:0}
+}
+
+
+/* Transparent floating composer: conversation scrolls underneath the controls.
+   Do not paint a full-width footer panel over the conversation; only the
+   composer and actual shortcut buttons have their own visible surfaces. */
+body.home-page:not(.home-empty) .dp-home.has-feed{
+  position:relative;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .dp-feed{
+  position:relative;
+  flex:1 1 auto;
+  min-height:0;
+  max-height:none;
+  box-sizing:border-box;
+  margin:0;
+  padding:4px 4px calc(var(--v4-dock-height, 142px) + 12px);
+  scroll-padding-bottom:calc(var(--v4-dock-height, 142px) + 12px);
+  overflow-y:auto;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .command-dock{
+  position:absolute;
+  left:0;
+  right:0;
+  bottom:0;
+  width:100%;
+  z-index:auto; /* do not trap the fixed voice-hold glow below mobile navigation */
+  box-sizing:border-box;
+  margin:0;
+  padding:0 0 8px!important;
+  border:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  pointer-events:none;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .command-tools{
+  position:relative;
+  z-index:1;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .command-bar{
+  z-index:2;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .command-tools,
+body.home-page:not(.home-empty) .dp-home.has-feed .command-hints{
+  background:transparent!important;
+  border:0!important;
+  box-shadow:none!important;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .command-dock
+  :is(.command-bar,.command-tools,.dp-voice-note){
+  pointer-events:auto;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .command-dock
+  :is(.command-bar,.dp-chip,.dp-new){
+  /* Their individual fills and borders remain; only the parent panel vanishes. */
+  visibility:visible;
+}
+@media(max-width:780px){
+  body.home-page:not(.home-empty) #main{padding-bottom:0!important}
+}
+
 
 /* Narrow 320px screen: keep create-form cards inside their grid column. */
 @media(max-width:360px){
