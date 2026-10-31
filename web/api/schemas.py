@@ -193,6 +193,8 @@ class CreateBookingIn(BaseModel):
     booking_terms_accepted: bool = False
     # Повтор той же брони еженедельно на N недель (включая первую); None = без повтора.
     repeat_weeks: Optional[int] = Field(default=None, ge=2, le=8)
+    # Signed source from a published ServGo article; never used as an authorization token.
+    seo_ref: Optional[str] = Field(default=None, max_length=512)
 
 
 class BookingOut(BaseModel):
