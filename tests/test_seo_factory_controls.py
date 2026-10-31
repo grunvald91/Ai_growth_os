@@ -96,6 +96,53 @@ def test_pilot_dashboard_shows_queued_and_deferred_articles(env):
     assert seo_runs(db, other_pid) == []
 
 
+def test_owner_can_hide_and_restore_company_article_without_creating_a_second_url(env):
+    client, db, pid, other_pid = env
+    article = Artifact(product_id=pid, kind="article", title="Оригинальная статья",
+                       content="{}", status=ArtifactStatus.PUBLISHED)
+    other = Artifact(product_id=other_pid, kind="article", title="Чужая статья",
+                     content="{}", status=ArtifactStatus.PUBLISHED)
+    db.add_all([article, other])
+    db.flush()
+    published = Publication(product_id=pid, artifact_id=article.id, channel="own_site",
+                            status="published", external_reference="/blog/article-one",
+                            published_at=datetime.now(timezone.utc))
+    other_pub = Publication(product_id=other_pid, artifact_id=other.id, channel="own_site",
+                            status="published", external_reference="/blog/article-other",
+                            published_at=datetime.now(timezone.utc))
+    db.add_all([published, other_pub])
+    db.commit()
+
+    base = f"/studio/products/{pid}/seo/articles/{article.id}"
+    assert "Снять с публикации" in client.get(url(pid)).text
+    response = client.post(base + "/hide", follow_redirects=False)
+    assert response.status_code == 303
+    db.refresh(article)
+    db.refresh(published)
+    assert published.status == "unpublished"
+    assert article.status == ArtifactStatus.APPROVED
+    assert "Вернуть в блог" in client.get(url(pid)).text
+    assert other_pub.status == "published"
+
+    assert client.post(base + "/hide", follow_redirects=False).status_code == 303
+    assert client.post(f"/studio/products/{pid}/seo/articles/{other.id}/hide").status_code == 404
+    assert client.post(base + "/restore", follow_redirects=False).status_code == 303
+    db.refresh(published)
+    db.refresh(article)
+    assert published.status == "published" and article.status == ArtifactStatus.PUBLISHED
+    assert published.external_reference == "/blog/article-one"
+    assert len(list(db.scalars(select(Publication).where(Publication.artifact_id == article.id)))) == 1
+    events = list(db.scalars(select(Artifact).where(Artifact.kind == "seo_visibility_event")))
+    assert len(events) == 2
+    assert [json.loads(e.content)["action"] for e in events] == ["hide", "restore"]
+
+    set_enabled(db, pid, enabled=False, actor="test-owner")
+    assert client.post(base + "/hide", follow_redirects=False).status_code == 303
+    assert client.post(base + "/restore").status_code == 409
+    assert published.status == "unpublished"
+    assert other_pub.status == "published"
+
+
 def test_queue_cancel_retry_and_running_claim_guard(env):
     client, db, pid, _ = env
     task = create_seo_run(db, product_id=pid, focus="сервис")
