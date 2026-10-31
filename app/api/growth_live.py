@@ -177,6 +177,22 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
         "approved": "Согласована", "published": "Опубликована",
         "rejected": "Отклонена",
     }
+    critic_labels = {
+        "no_material_issues": "существенных замечаний нет",
+        "revised": "замечания учтены, статья доработана",
+        "all_rejected": "замечания отклонены автором",
+        "rejected_domain_revision": "доработка не прошла проверку",
+        "review_unavailable": "проверка не завершена",
+        "revision_unavailable": "доработка не завершена",
+        "revision_pending": "ожидает доработки",
+        "revision_cancelled": "доработка прервана",
+        "skipped_incomplete_context": "проверка пропущена: неполный контекст",
+        "skipped_incomplete_original": "проверка пропущена: ответ оборван",
+        "skipped_size_limit": "проверка пропущена: ограничение размера",
+        "skipped_invalid_original": "проверка пропущена: неверный формат",
+        "missing": "нет подтверждённого результата",
+        "content_mismatch": "проверка относится к другой версии",
+    }
     article_cards = []
     if base:
         for article in row.get("articles", []):
@@ -194,10 +210,43 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
                              ' target="_blank" rel="noopener noreferrer">Посмотреть в блоге</a>')
                 else:
                     extra = '<span>Запись о публикации есть; адрес сайта этой компании не подключён</span>'
+            critic = ''
+            article_id = article.get("article_id")
+            if article_id:
+                verdict = article.get("critic_status", "missing")
+                label = critic_labels.get(verdict, "статус требует проверки")
+                critic = (f'<p class="seo-critic-result">Критик: '
+                          f'{html.escape(label)}</p>')
+                findings = article.get("critic_findings") or []
+                total = article.get("critic_findings_total", len(findings))
+                if findings:
+                    issues = ''.join(f'<li>{html.escape(str(issue))}</li>' for issue in findings)
+                    critic += (f'<details class="seo-critic-findings"><summary>'
+                               f'Замечания критика ({total})</summary><ul>{issues}</ul></details>')
+                if article.get("approval_reason") and article.get("article_status") == "awaiting_approval":
+                    critic += ('<p class="seo-critic-reason">Причина согласования: ' +
+                               html.escape(article["approval_reason"][:600]) + '</p>')
+                if article.get("article_status") == "awaiting_approval":
+                    critic += (f'<a class="btn secondary" href="{html.escape(target, quote=True)}">'
+                               'Открыть статью и проверить</a>')
+                    if not article.get("needs_fact_check"):
+                        action = f'/studio/products/{product_id}/review/{article_id}/approve'
+                        critic += (
+                            f'<form method="post" action="{html.escape(action, quote=True)}" '
+                            'class="seo-article-approval">'
+                            '<label><input type="checkbox" required name="confirm_publish" value="yes"> '
+                            'Я проверил статью и разрешаю публикацию в блоге продукта</label>'
+                            '<button class="btn primary" type="submit">Согласовать публикацию</button>'
+                            '</form>'
+                        )
+                    else:
+                        critic += '<p>Для согласования сначала проверьте факты в карточке материала.</p>'
             article_cards.append(
                 '<li class="seo-article-item">'
-                f'<a href="{html.escape(target, quote=True)}">{html.escape(article["title"])}</a>'
-                f'<span>{html.escape(status or "Статус неизвестен")}</span>{extra}</li>'
+                f'<div class="seo-article-copy"><a href="{html.escape(target, quote=True)}">'
+                f'{html.escape(article["title"])}</a>'
+                f'<span>{html.escape(status or "Статус неизвестен")}</span>'
+                + critic + extra + '</div></li>'
             )
     article_list = (
         f'<details class="seo-run-articles"><summary>Статьи ({len(article_cards)})</summary>'
@@ -239,7 +288,9 @@ def seo_queue_confirm(product_id: UUID, db: Session = Depends(get_db)):
         '<p>Завод подготовит поисковые запросы, SEO-план и задания на статьи. '
         'Обработка после постановки в очередь может использовать платные модели. '
         'Готовые статьи после успешной проверки критиком могут автоматически '
-        'публиковаться в блоге компании. Не прошедшие проверку ждут согласования. '
+        'попадать в ленту блога продукта (own_site). Для ServGo она подключена '
+        'к servgo.ru/blog; для других компаний публичный сайт ещё не подключён. '
+        'Не прошедшие проверку статьи ждут согласования. '
         'Отмена запуска в очереди не удаляет созданные статьи и не отменяет '
         'уже поставленные отдельно задания на статьи.</p>'
         f'<form method="post" action="{base}/queue">'
@@ -319,9 +370,18 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     # Other companies have a per-product feed but no known public frontend URL.
     blog_base = 'https://servgo.ru' if product.slug == 'servgo' else None
     run_cards = ''.join(seo_run_card(row, product_id, blog_base=blog_base) for row in runs)
+    publication_note = (
+        '<p class="seo-publish-destination">Место публикации: блог ServGo '
+        '(<a href="https://servgo.ru/blog" target="_blank" rel="noopener noreferrer">'
+        'servgo.ru/blog</a>). Публичную доступность конкретной статьи проверяйте по её ссылке.</p>'
+        if blog_base else
+        '<p class="seo-publish-destination">Место публикации: внутренняя лента блога компании '
+        '(own_site). Внешний адрес сайта для этой компании пока не подключён. '
+        'Здесь может быть статус «Опубликована», но публичной ссылки на сайте ещё нет.</p>'
+    )
     return studio_page_shell(product, active='seo', title='SEO-завод',
         subtitle='Реальные статусы запусков, результаты и ошибки из базы вашей компании.',
-        body=f'<p><a class="btn primary" href="{base}/seo/queue">Новый запуск SEO-завода</a> '
+        body=publication_note + f'<p><a class="btn primary" href="{base}/seo/queue">Новый запуск SEO-завода</a> '
              f'<a class="btn" href="{base}?design=v4&amp;command=seo_factory">'
              'Через ИИ-диспетчер</a> '
              f'<a class="btn" href="{base}/work">Все задания</a> '
