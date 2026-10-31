@@ -122,7 +122,6 @@ def render_v4(page, request, pid, switch):
                    '<div class="hero-intro"><div class="hero-eyebrow">ServGo · ваш AI-помощник</div>'
                    '<h1 class="hero-h">Добрый день</h1><p class="hero-desc">Скажите, что нужно сделать. '
                    'Помогу создать контент, запустить работу команды или разобраться в показателях бизнеса.</p></div>'
-                   '<button class="dp-new link" id="dp-new" type="button">Новая тема</button>'
                    +inner.outer(inner.find(ident='dp-feed'))+
                    '<div class="command-dock">'
                    '<div class="voice-hold-overlay" id="dp-voice-overlay" aria-hidden="true">'
@@ -131,7 +130,11 @@ def render_v4(page, request, pid, switch):
                    '<div class="voice-hold-scale" aria-hidden="true"><span class="voice-hold-dot"></span></div>'
                    '</div>'+inner.outer(inner.find(ident='dp-live'))+
                    inner.outer(inner.find(ident='dp-voice-note'))+form+
+                   '<div class="command-tools">'
                    '<div class="command-hints" id="dp-chips" aria-label="Подсказки"></div>'
+                   '<button class="dp-new" id="dp-new" type="button" aria-label="Новая тема" title="Начать новый диалог">'
+                   '<span aria-hidden="true">＋</span><span class="dp-new-label">Новая тема</span></button>'
+                   '</div>'
                    '<div class="home-hero-subnote">Результаты и следующие шаги появятся после запроса</div></div></section>')
     if pid and current == base+'/create':
         form = original.outer(original.find(ident='sg-create-form'))
@@ -212,7 +215,7 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>touchfix-20261031', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>topic-ui-20261031', extras)
     if pid:
         button = Document(template).find(ident='notifyBtn')
         template = template.replace(Document(template).outer(button), notice_html(pid).replace('<span aria-hidden="true">🔔</span>', icon('bell')))
@@ -220,11 +223,11 @@ def render_v4(page, request, pid, switch):
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=7">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=9">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=1">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
         '</head>'
     ))
-    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=4"></script></body>')
+    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=5"></script></body>')
     return template
