@@ -2,7 +2,7 @@ name: Creative Critic one-shot
 on:
   push:
     branches: [experiment/creative-critic-one-shot-20261031]
-    paths: ['.github/critic-one-shot-trigger.txt']
+    paths: ['.github/critic-claudehub-trigger.txt']
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,17 +11,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      OPENROUTER_API_KEY: ${{ secrets.API }}
+      CLAUDEHUB_API_KEY: ${{ secrets.API }}
     steps:
-      - name: Validate API secret against OpenRouter without model inference
+      - name: Validate API secret against ClaudeHub without model inference
         shell: bash
         run: |
           python - <<'PY'
           import os, urllib.request, urllib.error, sys
-          key=os.environ.get('OPENROUTER_API_KEY','')
+          key=os.environ.get('CLAUDEHUB_API_KEY','')
           if not key:
             sys.exit('Repository secret API is empty or inaccessible')
-          req=urllib.request.Request('https://openrouter.ai/api/v1/auth/key',headers={'Authorization':'Bearer '+key})
+          req=urllib.request.Request('https://api.claudehub.fun/v1/models',headers={'Authorization':'Bearer '+key})
           try:
             with urllib.request.urlopen(req,timeout=15) as r:
               print('OpenRouter key validated, HTTP',r.status)
@@ -59,10 +59,10 @@ jobs:
                   "findings (массив объектов severity, evidence, problem, proposed_fix), "
                   "decisions (массив объектов finding_index, decision, reason), "
                   "after (объект с полями goal и scenes, как во входе). Никаких пояснений вне JSON.")
-          payload={"model":"openai/gpt-4o-mini","temperature":0.2,"max_tokens":2200,
+          payload={"model":"kimi-2.7","temperature":0.2,"max_tokens":2200,
                    "response_format":{"type":"json_object"},
                    "messages":[{"role":"system","content":system},{"role":"user","content":json.dumps(original,ensure_ascii=False)}]}
-          req=urllib.request.Request('https://openrouter.ai/api/v1/chat/completions',
+          req=urllib.request.Request('https://api.claudehub.fun/v1/chat/completions',
               data=json.dumps(payload,ensure_ascii=False).encode(),
               headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},
               method='POST')
