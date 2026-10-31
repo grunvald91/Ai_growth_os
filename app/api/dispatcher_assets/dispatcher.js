@@ -59,7 +59,10 @@
       items.every(function (item) { return String(item.label || '').indexOf('Открыть: ') === 0; })
       ? items.slice().reverse() : items;
     rows.forEach(function (item) {
-      var link = el('a', 'dp-link', item.label);
+      var raw = String(item.label || '');
+      var caption = voiceHoldEnabled && raw.indexOf('Открыть: ') === 0
+        ? 'Открыть: ' + friendlyTitle(raw.slice(9)) : raw;
+      var link = el('a', 'dp-link', caption);
       link.href = item.href;
       list.appendChild(link);
     });
