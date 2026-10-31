@@ -198,3 +198,48 @@ body[data-growth-design="v4"] .seo-run-details summary{
 body[data-growth-design="v4"] .seo-run-details ul{
   margin:0 0 12px;padding-left:22px;line-height:1.8
 }
+
+/* SEO job controls and article lineage; preserve existing ServGo Air tokens. */
+body[data-growth-design="v4"] .seo-queue-confirm{
+  max-width:700px;min-width:0;display:grid;gap:14px;
+}
+body[data-growth-design="v4"] .seo-queue-confirm h2,
+body[data-growth-design="v4"] .seo-queue-confirm p{margin:0;line-height:1.6}
+body[data-growth-design="v4"] .seo-queue-confirm form{
+  display:grid;gap:10px;min-width:0
+}
+body[data-growth-design="v4"] .seo-queue-confirm input{
+  min-width:0;max-width:100%;width:100%;box-sizing:border-box;
+  padding:12px;border:1px solid var(--line);background:var(--tint);
+  color:var(--text);border-radius:12px
+}
+body[data-growth-design="v4"] .seo-run-actions{
+  display:flex;gap:10px;flex-wrap:wrap;align-items:center
+}
+body[data-growth-design="v4"] .seo-run-actions .btn{
+  min-height:44px;display:inline-flex;align-items:center;justify-content:center
+}
+body[data-growth-design="v4"] .seo-run-articles>summary{
+  min-height:44px;cursor:pointer;display:flex;align-items:center;
+  font-weight:650;color:var(--blue)
+}
+body[data-growth-design="v4"] .seo-run-articles ul{
+  padding:0;margin:10px 0;list-style:none;display:grid;gap:10px
+}
+body[data-growth-design="v4"] .seo-article-item{
+  display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;
+  padding:10px 12px;border-radius:12px;border:1px solid var(--line);
+  min-width:0
+}
+body[data-growth-design="v4"] .seo-article-item a:first-child{
+  font-weight:650;min-width:0;overflow-wrap:anywhere
+}
+body[data-growth-design="v4"] .seo-article-item span,
+body[data-growth-design="v4"] .seo-run-hint{
+  color:var(--muted);font-size:12px
+}
+@media(max-width:400px){
+  body[data-growth-design="v4"] .seo-run-actions form,
+  body[data-growth-design="v4"] .seo-run-actions .btn{width:100%;max-width:100%}
+  body[data-growth-design="v4"] .seo-article-item{display:grid}
+}
