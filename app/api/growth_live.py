@@ -27,6 +27,7 @@ from app.api.seo_run_view import seo_runs
 from app.seo.control import SeoControlError, create_seo_run, change_seo_run
 from app.seo.activation import is_enabled, set_enabled
 from app.seo.visibility import VisibilityError, change_article_visibility
+from app.seo.insights import company_seo_insights
 from app.models.domain import ArtifactStatus, Publication
 from app.workflows.article_contracts import ArticleArtifact
 from app.sso.models import StudioBusinessLink
@@ -426,6 +427,32 @@ def seo_published_articles(db: Session, product_id: UUID, enabled: bool) -> str:
     return '<ul class="seo-article-visibility">' + ''.join(items) + '</ul>'
 
 
+@router.get('/studio/products/{product_id}/seo/insights')
+def seo_insights_endpoint(product_id: UUID, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    return JSONResponse(company_seo_insights(db, product_id),
+                        headers={'Cache-Control': 'private, no-store'})
+
+
+def seo_insights_html(db: Session, product_id: UUID) -> str:
+    report = company_seo_insights(db, product_id)
+    return (
+        '<section class="panel" aria-label="Поиск и AI-ответы">'
+        '<h3>Поиск и AI-ответы</h3>'
+        f'<p>Опубликовано статей: <strong>{report["published_articles"]}</strong>. '
+        f'Скрыто: <strong>{report["hidden_articles"]}</strong>.</p>'
+        '<p>Google Search Console: данные пока не подключены. '
+        'Яндекс Вебмастер: данные пока не подключены. '
+        'Bing AI Performance: данные о цитировании пока не подключены.</p>'
+        '<p>Показы, клики, позиции и цитирования неизвестны — '
+        'публикация статьи сама по себе их не подтверждает.</p>'
+        '<p>Техническая готовность: полный HTML, canonical, разметка Article '
+        'и sitemap подготовлены в BookingBot; их внешняя доступность '
+        'проверяется после отдельного серверного выпуска.</p>'
+        '</section>'
+    )
+
+
 @router.get('/studio/products/{product_id}/seo/status')
 def seo_status(product_id: UUID, db: Session = Depends(get_db)):
     """Existing task state, retry attempts, stage results; never fake spend."""
@@ -493,6 +520,7 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
              + (run_cards or '<p>Запуски SEO-завода пока не зарегистрированы.</p>')
              + '<h2>Статьи в блоге</h2>'
              + seo_published_articles(db, product_id, enabled)
+             + seo_insights_html(db, product_id)
              + '<h2>Сохранённые материалы и отчёты</h2>'
              + (cards or '<p>Материалы пока не подготовлены.</p>'))
 
