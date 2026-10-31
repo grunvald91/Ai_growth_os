@@ -28,6 +28,7 @@ from app.seo.control import SeoControlError, create_seo_run, change_seo_run
 from app.seo.activation import is_enabled, set_enabled
 from app.seo.visibility import VisibilityError, change_article_visibility
 from app.seo.insights import company_seo_insights
+from app.seo.search_metrics import company_search_metrics
 from app.models.domain import ArtifactStatus, Publication, Product
 from app.workflows.article_contracts import ArticleArtifact
 from app.sso.models import StudioBusinessLink
@@ -429,6 +430,67 @@ def seo_published_articles(db: Session, product_id: UUID, enabled: bool) -> str:
     return '<ul class="seo-article-visibility">' + ''.join(items) + '</ul>'
 
 
+@router.get('/studio/products/{product_id}/seo/search-metrics.json')
+async def seo_search_metrics_api(product_id: UUID, days: int = 28,
+                                 db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    if not 1 <= days <= 90:
+        raise HTTPException(422, 'Период: от 1 до 90 дней')
+    return JSONResponse(await company_search_metrics(db, product_id, days=days),
+                        headers={'Cache-Control': 'private, no-store'})
+
+
+@router.get('/studio/products/{product_id}/seo/search-metrics', response_class=HTMLResponse)
+async def seo_search_metrics_page(product_id: UUID, days: int = 28,
+                                  db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    if not 1 <= days <= 90:
+        raise HTTPException(422, 'Период: от 1 до 90 дней')
+    metrics = await company_search_metrics(db, product_id, days=days)
+    names = [('google_search_console', 'Google Search Console'),
+             ('yandex_webmaster', 'Яндекс Вебмастер')]
+    cards = []
+    for source, name in names:
+        data = metrics[source]
+        if data['status'] != 'connected':
+            labels = {'not_configured': 'Источник пока не подключён',
+                      'no_public_articles': 'Нет опубликованных статей с доступными URL',
+                      'provider_unavailable': 'Не удалось получить данные провайдера'}
+            cards.append('<section class="panel"><h3>' + name + '</h3><p>'
+                         + html.escape(labels.get(data['status'], 'Данные недоступны'))
+                         + '</p></section>')
+            continue
+        entries = []
+        for item in data['pages']:
+            url = str(item['url'])
+            entries.append('<li><a href="' + html.escape(url, quote=True)
+                           + '" rel="noopener noreferrer" target="_blank">'
+                           + html.escape(url.removeprefix('https://servgo.ru'))
+                           + '</a> · клики: ' + str(item['clicks'])
+                           + ', показы: ' + str(item['impressions']) + '</li>')
+        cards.append('<section class="panel"><h3>' + name + '</h3>'
+                     + '<p>Данные за ' + str(data['period_days'])
+                     + ' дн. Только опубликованные статьи этого бизнеса.</p>'
+                     + '<p>Клики по доступным строкам: <strong>' + str(data['clicks'])
+                     + '</strong>; показы: <strong>' + str(data['impressions'])
+                     + '</strong>.</p>'
+                     + '<p>API может возвращать неполную выборку страниц — '
+                       'это не гарантированные общие показатели.</p>'
+                     + '<ul>' + ''.join(entries) + '</ul></section>')
+    content = ('<p><a href="/studio/products/' + str(product_id)
+               + '/seo">← SEO-завод</a></p>'
+               + '<p>Опубликованных адресов: '
+               + str(metrics['published_url_count']) + '.</p>'
+               + ''.join(cards)
+               + '<section class="panel"><h3>AI-ответы</h3>'
+                 '<p>Точное количество цитирований в Bing Copilot и ChatGPT '
+                 'неизвестно: подтверждённый источник данных пока не подключён.</p>'
+                 '</section>')
+    return studio_page_shell(product, active='seo', title='Поиск и AI-ответы',
+                             subtitle='Проверенные показатели по публичным статьям компании',
+                             body=content)
+
+
 @router.get('/studio/products/{product_id}/seo/insights')
 def seo_insights_endpoint(product_id: UUID, db: Session = Depends(get_db)):
     _owner_product(db, product_id)
@@ -448,6 +510,8 @@ def seo_insights_html(db: Session, product_id: UUID) -> str:
         'Bing AI Performance: данные о цитировании пока не подключены.</p>'
         '<p>Показы, клики, позиции и цитирования неизвестны — '
         'публикация статьи сама по себе их не подтверждает.</p>'
+        '<p><a class="btn" href="/studio/products/' + str(product_id)
+        + '/seo/search-metrics">Открыть поисковые показатели</a></p>'
         '<p>Техническая готовность: полный HTML, canonical, разметка Article '
         'и sitemap подготовлены в BookingBot; их внешняя доступность '
         'проверяется после отдельного серверного выпуска.</p>'
