@@ -109,13 +109,21 @@ def render_v4(page, request, pid, switch):
         # The whole text composer handles hold-to-talk in v4. Classic Studio keeps its mic.
         formdoc = Document(form)
         mic = formdoc.outer(formdoc.find(ident='dp-mic'))
-        form = form.replace(mic, '').replace('placeholder="Что нужно сделать?"', 'placeholder="Удерживайте, чтобы говорить"', 1)
+        form = form.replace(mic, '').replace('placeholder="Что нужно сделать?"', 'placeholder="Нажмите — текст · удерживайте — голос"', 1)
         # An empty, non-selectable touch surface intercepts Android's native
         # long-press text selection, while a short tap still focuses the editor.
         form = form.replace('</textarea>',
                             '</textarea><span class="voice-hold-hitbox" id="dp-voice-hitbox" aria-hidden="true"></span>', 1)
         form = form.replace('<button class="dp-send command-go"',
                             '<span class="voice-composer-status" id="dp-voice-status" role="status" hidden></span>'
+                            '<button class="command-mode-mic" id="dp-mode-mic" type="button" hidden '
+                            'aria-label="Скрыть клавиатуру и перейти к голосовому вводу" '
+                            'title="Вернуться к голосовому вводу">'
+                            '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                            'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
+                            '<rect x="9" y="2.5" width="6" height="12" rx="3"/>'
+                            '<path d="M5.5 10.5v1.5a6.5 6.5 0 0 0 13 0v-1.5M12 18.5V22M8.5 22h7"/>'
+                            '</svg></button>'
                             '<button class="dp-send command-go"', 1)
         attrs = ' '.join(f'{k}="{html.escape(v or "",quote=True)}"' for k,v in root[1].items() if k!='class')
         content = (f'<section class="dp-home empty-hero animate-in" {attrs}>'
@@ -217,13 +225,13 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>glowfix-20261031', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>keyboard-mode-20261031', extras)
     if pid:
         button = Document(template).find(ident='notifyBtn')
         template = template.replace(Document(template).outer(button), notice_html(pid).replace('<span aria-hidden="true">🔔</span>', icon('bell')))
         template = template.replace('</head>', '<style>'+notice_css+'</style></head>')
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
-    template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=10"></head>')
+    template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=11"></head>')
     template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=5"></script></body>')
     return template
