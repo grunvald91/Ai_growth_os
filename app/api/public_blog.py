@@ -79,6 +79,20 @@ def _business_urls(business_id: int) -> dict:
     return {"company_url": f"/business/{business_id}", "booking_url": f"/book/{business_id}"}
 
 
+@router.get("/businesses/with-articles")
+def businesses_with_articles(db: Session = Depends(get_db)) -> dict:
+    """Public sitemap discovery: only company IDs with at least one published article."""
+    ids = db.scalars(
+        select(StudioBusinessLink.servgo_business_id)
+        .join(Publication, Publication.product_id == StudioBusinessLink.product_id)
+        .join(Artifact, Artifact.id == Publication.artifact_id)
+        .where(Publication.channel == "own_site", Publication.status == "published",
+               Artifact.status == ArtifactStatus.PUBLISHED, Artifact.kind == "article")
+        .distinct().order_by(StudioBusinessLink.servgo_business_id)
+    ).all()
+    return {"business_ids": ids}
+
+
 @router.get("/businesses/{business_id}/articles")
 def list_business_articles(business_id: int, db: Session = Depends(get_db)) -> dict:
     """Published articles for a ServGo business, ready for its existing public profile."""
