@@ -1,5 +1,33 @@
 // === Type definitions ===
 
+export interface BlogArticleSummary {
+  slug: string
+  title: string
+  description: string
+  category: string
+  lead: string
+  published_at: string
+}
+
+export interface BusinessBlogFeed {
+  business_id: number
+  company_url: string
+  booking_url: string
+  articles: BlogArticleSummary[]
+}
+
+export interface BusinessBlogArticle extends BlogArticleSummary {
+  direct_answer: string
+  sections: { title: string; paragraphs: string[]; bullets: string[] }[]
+  closing: string
+  faq: { question: string; answer: string }[]
+  cta: string
+  cta_url: string
+  company_url: string
+  booking_url: string
+}
+
+
 export interface SalesBookingSummary {
   business_name: string;
   service_name: string;
@@ -768,6 +796,9 @@ export const api = {
   // Client
   getBusinesses: () => request<Business[]>('/businesses'),
   getBusiness: (id: number) => request<BusinessDetail>(`/businesses/${id}`),
+  getBusinessBlog: (id: number) => request<BusinessBlogFeed>(`/businesses/${id}/blog/articles`),
+  getBusinessBlogArticle: (id: number, slug: string) => request<BusinessBlogArticle>(
+    `/businesses/${id}/blog/articles/${encodeURIComponent(slug)}`),
   getSlots: async (
     bizId: number,
     serviceId: number,
