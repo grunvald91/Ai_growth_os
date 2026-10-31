@@ -1,6 +1,9 @@
 """Pure release-contract checks, no live production access."""
 from pathlib import Path
 
+import pytest
+
+from scripts import servgo_unified_api_release as release
 from scripts.servgo_unified_api_release import BASE_SHA, FILES, ADDED_FILES, classify, sha, baseline
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,3 +56,32 @@ def test_reviewed_baselines_and_candidate_files_exist():
         if old is not None:
             assert old != expected, path
         assert sha(expected) != 'absent'
+
+
+def test_missing_remote_file_is_distinct_from_permission_or_transport_errors():
+    class FakeSFTP:
+        def __init__(self, error):
+            self.error = error
+
+        def open(self, path, mode):
+            raise self.error
+
+    assert release.read(FakeSFTP(FileNotFoundError("not found")), "/missing") is None
+    with pytest.raises(PermissionError):
+        release.read(FakeSFTP(PermissionError("forbidden")), "/private")
+    with pytest.raises(OSError, match="connection closed"):
+        release.read(FakeSFTP(OSError("connection closed")), "/unreachable")
+
+
+def test_failed_upload_is_registered_for_rollback_before_write(monkeypatch):
+    registered = []
+
+    def failing_put(sftp, target, contents, mode):
+        assert registered == ["web/api/main.py"]
+        raise OSError("rename failed after upload")
+
+    monkeypatch.setattr(release, "put", failing_put)
+    with pytest.raises(OSError, match="rename failed"):
+        release.put_tracked(None, "/opt/booking_bot/web/api/main.py", b"new",
+                            0o644, "web/api/main.py", registered)
+    assert registered == ["web/api/main.py"]
