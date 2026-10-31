@@ -59,7 +59,7 @@ async def run_content_once(session_factory, settings):
                         data.model_copy(update={'task_id': task_id})
                     )
                     if data.seo_brief is not None and result.status == 'completed':
-                        # Only prepare the owner's pending review; the critic can never publish by itself.
+                        # Clean critic verdict + static checks publish automatically; failures wait for review.
                         from app.seo.publishing import publish_if_clear
                         try:
                             publish_if_clear(db, result.artifact_ids[0])
