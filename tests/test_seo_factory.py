@@ -104,6 +104,46 @@ async def test_factory_turns_company_profile_into_queued_search_articles(env):
 
 
 @pytest.mark.asyncio
+async def test_one_factory_launch_queues_only_three_pilot_articles(env):
+    from app.seo.factory import MAX_ARTICLES_PER_RUN
+    assert MAX_ARTICLES_PER_RUN == 3
+
+    class SeveralTopics(Provider):
+        async def generate(self, request):
+            if request.metadata["team_role"] == "semantic_researcher":
+                return await super().generate(request)
+            self.requests.append(request)
+            clusters = json.loads(request.messages[0].content)["clusters"][:5]
+            assert len(clusters) >= 4
+            items = [
+                dict(id=f"a{index:03d}", cluster_ids=[cluster["id"]],
+                     primary_query=cluster["queries"][0],
+                     working_title=f"Полезная статья по вопросу номер {index}",
+                     stage=cluster["stage"], intent=cluster["intent"],
+                     reader_problem="Выбрать нужную услугу и понять процесс",
+                     ai_questions=["Что важно знать перед записью?"],
+                     next_step="Посмотреть каталог услуг компании")
+                for index, cluster in enumerate(clusters, 1)
+            ]
+            return LLMResponse(content=json.dumps({"items": items}, ensure_ascii=False),
+                               model="fake", usage=LLMUsage(), stop_reason="end_turn")
+
+    factory, settings, product_id = env
+    with factory() as db:
+        queue_factory(db, product_id)
+    assert await run_factory_once(factory, settings, provider=SeveralTopics(), client=suggest_client()) == 1
+    with factory() as db:
+        jobs = list(db.scalars(select(Task).where(
+            Task.product_id == product_id, Task.title.like("SEO-ARTICLE:%"))))
+        assert len(jobs) == MAX_ARTICLES_PER_RUN
+        report = db.scalar(select(Artifact).where(Artifact.kind == "seo_factory_report"))
+        summary = json.loads(report.content)
+        assert summary["articles_queued"] == MAX_ARTICLES_PER_RUN
+        assert summary["articles_deferred"] >= 1
+        assert summary["pilot_limit"] == MAX_ARTICLES_PER_RUN
+
+
+@pytest.mark.asyncio
 async def test_search_engines_down_stops_honestly_without_article_tasks(env):
     factory, settings, product_id = env
     with factory() as db:
@@ -269,8 +309,8 @@ async def test_factory_resumes_committed_plan_without_new_llm_calls(env, monkeyp
     original = module.queue_plan
     with factory() as db:
         task_id = queue_factory(db, product_id).id
-    def interrupted(db, plan, clusters):
-        original(db, plan, clusters)
+    def interrupted(db, plan, clusters, **kwargs):
+        original(db, plan, clusters, **kwargs)
         raise RuntimeError("interrupted after queue commit")
     monkeypatch.setattr(module, "queue_plan", interrupted)
     await run_factory_once(factory, settings, provider=Provider(), client=suggest_client())
