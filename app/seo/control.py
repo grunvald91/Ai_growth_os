@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models.domain import Product, Task, TaskStatus
 from app.seo.factory import AGENT, queue_factory
+from app.seo.activation import require_enabled
 
 
 class SeoControlError(ValueError):
@@ -34,12 +35,17 @@ def create_seo_run(db: Session, *, product_id: UUID, focus: str | None = None) -
     if len(normalized) > 300:
         raise SeoControlError("Тема SEO-завода слишком длинная")
     # The existing function deduplicates queued/running tasks.
-    return queue_factory(db, product_id, normalized or None)
+    try:
+        return queue_factory(db, product_id, normalized or None)
+    except ValueError as exc:
+        raise SeoControlError(str(exc)) from exc
 
 
 def change_seo_run(db: Session, *, product_id: UUID, task_id: UUID, action: str) -> str:
     """Atomic, tenant-scoped status CAS. Never alter running/completed runs."""
     _product_lock(db, product_id)
+    if action == "retry":
+        require_enabled(db, product_id)
     task = db.scalar(select(Task).where(
         Task.id == task_id,
         Task.product_id == product_id,
