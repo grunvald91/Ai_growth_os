@@ -16,6 +16,7 @@ from app.dispatcher.registry import CAPABILITIES
 from app.llm.schemas import LLMResponse, LLMUsage
 from app.models.domain import Artifact, Product, Task, TaskStatus
 from app.seo.factory import queue_factory, run_factory_once
+from app.seo.activation import set_enabled
 from app.workflows.article_contracts import ArticleProductionInput
 
 
@@ -66,6 +67,7 @@ def env(tmp_path):
         db.add(product)
         db.commit()
         product_id = product.id
+        set_enabled(db, product_id, enabled=True, actor='fixture-owner')
     yield factory, Settings(products_root=tmp_path / "products"), product_id
     engine.dispose()
 
@@ -215,6 +217,7 @@ async def test_daily_limit_is_per_company(env, monkeypatch):
         other = Product(name="Мастерская", slug="shoes")
         db.add(other)
         db.commit()
+        set_enabled(db, other.id, enabled=True, actor="fixture-owner")
         for key in "abc":
             seo_task(db, product_id, key, TaskStatus.COMPLETED, datetime.now(timezone.utc))
         waiting = seo_task(db, other.id, "x", TaskStatus.QUEUED)
