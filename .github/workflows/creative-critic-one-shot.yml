@@ -76,12 +76,32 @@ jobs:
             status('api_transport_failed',type(exc).__name__+'; request may have reached provider; do not rerun before checking usage')
             raise SystemExit(4)
           (out/'usage.json').write_text(json.dumps({'model':raw.get('model'),'usage':raw.get('usage')},indent=2))
-          try:
-            msg=raw['choices'][0]['message']['content']
-            result=json.loads(msg)
-          except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-            status('response_parse_failed',type(exc).__name__+'; API request completed, do not rerun without reviewing usage')
+          choices=raw.get('choices') or []
+          choice=choices[0] if choices else {}
+          msg=(choice.get('message') or {}).get('content')
+          finish=choice.get('finish_reason')
+          diagnostic={'finish_reason':finish,'content_type':type(msg).__name__,
+                      'content_chars':len(msg) if isinstance(msg,str) else None,
+                      'usage_completion_tokens':(raw.get('usage') or {}).get('completion_tokens'),
+                      'max_tokens_requested':payload['max_tokens']}
+          if isinstance(msg,str):
+            # Synthetic test input only; retain bounded model output for offline inspection.
+            (out/'response-content.txt').write_text(msg[:32000],encoding='utf-8')
+            diagnostic['content_saved_chars']=min(len(msg),32000)
+          (out/'diagnostic.json').write_text(json.dumps(diagnostic,ensure_ascii=False,indent=2))
+          if not isinstance(msg,str):
+            status('response_content_missing','No text content returned; API request completed')
             raise SystemExit(5)
+          try:
+            result=json.loads(msg)
+          except json.JSONDecodeError as exc:
+            diagnostic['json_error']={'message':exc.msg,'line':exc.lineno,'column':exc.colno,'position':exc.pos}
+            (out/'diagnostic.json').write_text(json.dumps(diagnostic,ensure_ascii=False,indent=2))
+            status('response_parse_failed','JSONDecodeError; inspect diagnostic.json and response-content.txt; do not automatically rerun')
+            raise SystemExit(5)
+          if not isinstance(result,dict):
+            status('response_schema_failed','Top-level response is not an object')
+            raise SystemExit(6)
           if not isinstance(result.get('findings'),list) or not isinstance(result.get('decisions'),list) or not isinstance(result.get('after'),dict):
             status('response_schema_failed','Missing findings, decisions or after; API request completed')
             raise SystemExit(6)
