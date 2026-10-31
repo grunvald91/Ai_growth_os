@@ -157,6 +157,10 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
     queued = (f'<p>Статей поставлено в очередь: <b>{row["articles_queued"]}</b></p>'
               if row["articles_queued"] is not None else
               '<p>Количество поставленных статей пока не подтверждено.</p>')
+    deferred = row.get("articles_deferred")
+    if isinstance(deferred, int) and deferred > 0:
+        queued += (f'<p>Осталось в SEO-плане без генерации: <b>{deferred}</b>. '
+                   'Следующая партия запускается отдельно.</p>')
     attempts = (f'<p>Попыток выполнения: {row["attempts"]}</p>'
                 if row["attempts"] else '<p>Попытки выполнения ещё не зарегистрированы.</p>')
     base = f'/studio/products/{product_id}/seo' if product_id else ''
