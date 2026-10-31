@@ -53,7 +53,11 @@ def main():
                 time.sleep(0.05)
             with sync_playwright() as p:
                 browser = p.chromium.launch()
-                page = browser.new_page(viewport={"width": 320, "height": 844})
+                # Real touch emulation catches Android selection/pointercancel
+                # which synthetic PointerEvents never exercise.
+                context = browser.new_context(viewport={"width": 390, "height": 844},
+                                              is_mobile=True, has_touch=True, device_scale_factor=1)
+                page = context.new_page()
                 errors = []
                 page.on("pageerror", lambda error: errors.append("js: " + str(error)))
                 page.on("console", lambda event: errors.append("console: " + event.text[:240]) if event.type == "error" else None)
@@ -111,6 +115,13 @@ def main():
                 assert page.locator('#dp-press-hint').count()==0, 'hint belongs inside composer'
                 assert page.locator('#dp-input').get_attribute('placeholder')=='Удерживайте, чтобы говорить'
                 assert page.locator('#dp-voice-overlay').count()==1
+                assert page.locator('#dp-voice-hitbox').count()==1, 'Android touch guard missing'
+                guard = page.locator('#dp-voice-hitbox').evaluate("""element => ({
+                  touchAction:getComputedStyle(element).touchAction,
+                  userSelect:getComputedStyle(element).userSelect,
+                  callout:getComputedStyle(element).webkitTouchCallout
+                })""")
+                assert guard['touchAction']=='none' and guard['userSelect']=='none', guard
                 composer=page.locator('#dp-form').evaluate("""element=>{
                   const s=getComputedStyle(element),r=element.getBoundingClientRect();
                   return {radius:parseFloat(s.borderTopLeftRadius),height:r.height}
@@ -169,12 +180,36 @@ def main():
                 assert len(dispatch_calls)==2,dispatch_calls
                 assert dispatch_calls[0]['client_key']==dispatch_calls[1]['client_key'], 'retry lost idempotency key'
                 assert page.locator('#dp-voice-note').is_hidden()
+
+                # Actual touchscreen long-press on the visible placeholder:
+                # must not select text, raise context menu or cancel audio.
+                page.locator('#dp-input').evaluate("el=>el.blur()")
+                page.wait_for_function("() => !document.querySelector('#dp-form').classList.contains('voice-text-editing')")
+                guard_box=page.locator('#dp-voice-hitbox').bounding_box()
+                assert guard_box is not None
+                hit_x=guard_box['x']+guard_box['width']*.55
+                hit_y=guard_box['y']+guard_box['height']*.5
+                cdp=context.new_cdp_session(page)
+                page.evaluate("() => { document.getSelection()?.removeAllRanges(); window.__voiceContextMenus=0; document.addEventListener('contextmenu', () => window.__voiceContextMenus++); }")
+                cdp.send('Input.dispatchTouchEvent',{'type':'touchStart',
+                         'touchPoints':[{'x':hit_x,'y':hit_y,'id':41}]})
+                page.wait_for_function("() => window.__mockMicStarts===3 && document.querySelector('#dp-form').classList.contains('voice-recording')")
+                page.wait_for_timeout(950)  # past Android's normal text-selection threshold
+                assert page.locator('#dp-form').evaluate("e=>e.classList.contains('voice-recording')"), 'Android long press cancelled recording'
+                assert page.evaluate("() => document.getSelection()?.toString() || ''") == '', 'Android selected placeholder text'
+                assert page.evaluate("() => window.__voiceContextMenus")==0, 'Context menu opened during hold'
+                cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
+                page.wait_for_function("() => !document.querySelector('#dp-form').classList.contains('voice-recording')")
+                page.wait_for_function("() => !document.querySelector('#dp-form').classList.contains('voice-processing')")
+                assert len(voice_calls)==2,voice_calls
+                assert len(dispatch_calls)==3,dispatch_calls
                 assert not [error for error in errors if error.startswith('js:')],errors
                 result['checks'].append({'page':'voice-hold-mock','width':390,
                     'short_tap':True,'cancel':True,'automatic_send':True,'retry_idempotent':True,
                     'preserved_typed_draft':True,'nav_aligned':True,
                     'overlay_enter_exit':True,'processing_inside_composer':True,
-                    'compact_composer':True})
+                    'compact_composer':True,'real_touch_long_press':True,
+                    'no_native_text_selection':True})
                 page.screenshot(path=str(OUT/'voice-hold-390.png'),animations='disabled')
                 browser.close()
         finally:
