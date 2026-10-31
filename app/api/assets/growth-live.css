@@ -204,3 +204,161 @@ body[data-growth-design="v4"] .dp-live:not(.working)::after{
 @media(prefers-reduced-motion:reduce){
   body[data-growth-design="v4"] .dp-live:not(.working)::after{animation:none}
 }
+
+
+/* Voice-hold v2. Composer remains compact, while an independent overlay
+   follows the motion and bottom-heavy glow of the supplied reference. */
+body[data-growth-design="v4"] .command-bar{
+  min-height:62px!important;
+  border-radius:23px!important;
+  margin-bottom:0!important;
+  padding:8px 10px 8px 16px!important;
+  gap:8px!important;
+  background:var(--card);
+  border:1px solid rgba(119,159,211,.42);
+  box-shadow:0 5px 18px rgba(41,95,164,.09);
+  align-items:center;
+}
+body[data-growth-design="v4"] .command-bar:focus-within{
+  border-color:rgba(102,153,226,.6);
+  box-shadow:0 5px 20px rgba(41,95,164,.12);
+}
+body[data-growth-design="v4"] .command-bar textarea{
+  min-height:23px;
+  max-height:125px;
+  padding:6px 0;
+  font-size:13px!important;
+  line-height:1.35;
+  font-weight:400;
+  text-align:center;
+}
+body[data-growth-design="v4"] .command-bar textarea::placeholder{
+  color:var(--muted);
+  opacity:.63;
+  font-size:12.5px;
+  font-weight:400;
+  text-align:center;
+}
+body[data-growth-design="v4"] .command-bar textarea:not(:placeholder-shown){
+  text-align:left;
+}
+body[data-growth-design="v4"] .command-bar .command-go{
+  width:39px;height:39px;flex:0 0 39px;
+  min-height:39px;min-width:39px;
+  box-shadow:none;
+}
+body[data-growth-design="v4"] .dp-home .dp-press-hint{display:none!important}
+body[data-growth-design="v4"] .dp-home .dp-live{display:none!important}
+body[data-growth-design="v4"] .command-bar.voice-recording,
+body[data-growth-design="v4"] .command-bar.voice-processing,
+body[data-growth-design="v4"] .command-bar.voice-sending{
+  animation:none!important;
+  background:var(--card);
+  border-color:rgba(106,161,230,.56);
+  box-shadow:0 5px 20px rgba(42,104,188,.12);
+}
+body[data-growth-design="v4"] .command-bar.voice-recording{
+  border-color:rgba(92,151,224,.55);
+}
+body[data-growth-design="v4"] .dp-home .command-hints{margin-top:9px}
+
+/* The entire hold overlay is decorative and never steals the release event. */
+body[data-growth-design="v4"] .voice-hold-overlay{
+  position:fixed;inset:0;z-index:90;
+  opacity:0;visibility:hidden;pointer-events:none;
+  transform:translateY(12px) scale(.97);
+  transform-origin:center bottom;
+  transition:opacity 185ms ease-in,transform 185ms ease-in,visibility 0s linear 185ms;
+  overflow:hidden;
+  color:#eef6ff;
+}
+body[data-growth-design="v4"] .voice-hold-overlay::before{
+  content:"";position:absolute;inset:0;
+  background:rgba(20,27,43,.26);
+  backdrop-filter:blur(1px);
+  -webkit-backdrop-filter:blur(1px);
+}
+body[data-growth-design="v4"] .voice-hold-overlay::after{
+  content:"";position:absolute;left:-12%;right:-12%;bottom:-55px;
+  height:min(58dvh,540px);z-index:0;
+  background:
+    radial-gradient(ellipse 72% 75% at 50% 98%,
+      rgba(47,107,196,.95) 0%,
+      rgba(71,130,214,.89) 28%,
+      rgba(111,164,232,.69) 51%,
+      rgba(143,184,239,.39) 72%,
+      rgba(152,190,237,0) 100%),
+    linear-gradient(to top,rgba(50,110,196,.65),rgba(106,162,224,.16) 70%,transparent);
+  filter:blur(20px);
+  transform:scale(1);
+  opacity:1;
+}
+body[data-growth-design="v4"] .voice-hold-instruction,
+body[data-growth-design="v4"] .voice-hold-scale{
+  position:absolute;z-index:1;left:50%;
+  width:min(90vw,560px);
+  opacity:0;
+  transform:translate(-50%,9px);
+  transition:opacity 165ms ease,transform 165ms ease;
+}
+body[data-growth-design="v4"] .voice-hold-instruction{
+  bottom:clamp(130px,21dvh,205px);
+  text-align:center;
+  font-size:clamp(12px,3.1vw,14px);
+  line-height:1.6;
+  color:rgba(239,247,255,.88);
+  font-weight:400;
+  letter-spacing:.005em;
+  text-shadow:0 1px 8px rgba(19,60,118,.16);
+}
+body[data-growth-design="v4"] .voice-hold-scale{
+  bottom:clamp(73px,13dvh,130px);
+  width:min(62vw,320px);
+  height:18px;
+  transform:translate(-50%,9px);
+}
+body[data-growth-design="v4"] .voice-hold-scale::before{
+  content:"";position:absolute;top:8px;left:0;right:0;height:5px;
+  background:repeating-linear-gradient(90deg,
+    rgba(230,245,255,.68) 0 2px,transparent 2px 9px);
+  mask-image:linear-gradient(90deg,transparent,#000 20%,#000 80%,transparent);
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 20%,#000 80%,transparent);
+  border-radius:5px;
+}
+body[data-growth-design="v4"] .voice-hold-dot{
+  position:absolute;left:50%;top:4px;
+  width:12px;height:12px;border-radius:50%;
+  transform:translateX(-50%);
+  background:rgba(240,248,255,.8);
+  border:2px solid rgba(235,247,255,.7);
+  box-shadow:0 0 0 4px rgba(202,229,255,.12),0 0 13px rgba(214,238,255,.34);
+}
+body[data-growth-design="v4"] .dp-home:is(.voice-connecting,.voice-recording) .voice-hold-overlay{
+  opacity:1;visibility:visible;transform:translateY(0) scale(1);
+  transition-duration:160ms,160ms,0s;
+  transition-delay:0s;
+  transition-timing-function:cubic-bezier(.2,.8,.2,1);
+}
+body[data-growth-design="v4"] .dp-home:is(.voice-connecting,.voice-recording)
+  .voice-hold-instruction,
+body[data-growth-design="v4"] .dp-home:is(.voice-connecting,.voice-recording)
+  .voice-hold-scale{
+  opacity:1;transform:translate(-50%,0);
+  transition-delay:45ms;
+}
+body[data-growth-design="v4"] .dp-home:is(.voice-connecting,.voice-recording)
+  .voice-hold-overlay::after{
+  animation:sg-hold-glow-breathe 3s ease-in-out infinite;
+}
+@keyframes sg-hold-glow-breathe{
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:.94;transform:scale(1.02)}
+}
+@media(prefers-reduced-motion:reduce){
+  body[data-growth-design="v4"] .voice-hold-overlay,
+  body[data-growth-design="v4"] .voice-hold-instruction,
+  body[data-growth-design="v4"] .voice-hold-scale{
+    transition-duration:0.01ms!important;transition-delay:0s!important;
+  }
+  body[data-growth-design="v4"] .voice-hold-overlay::after{animation:none!important}
+}
