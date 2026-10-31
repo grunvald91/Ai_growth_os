@@ -49,9 +49,9 @@ jobs:
         working-directory: web/frontend
         run: npm ci --legacy-peer-deps
 
-      - name: Test PWA cache isolation and push navigation
+      - name: Test PWA and booking preselection
         working-directory: web/frontend
-        run: node --test tests/sw-security.test.mjs
+        run: node --test tests/sw-security.test.mjs tests/booking-entry.test.mjs
 
       - name: Build frontend
         working-directory: web/frontend
