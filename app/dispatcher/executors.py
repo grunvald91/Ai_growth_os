@@ -392,5 +392,9 @@ CONFIRMERS = {"approve_plan": confirm_approve_plan, "whiteboard_video": confirm_
 from app.dispatcher import materials  # noqa: E402
 
 EXECUTORS.update(materials.EXECUTORS)
+
+from app.dispatcher.owner_views import recommend_today, show_recent_videos  # noqa: E402
+
+EXECUTORS.update({"recommend_today": recommend_today, "show_recent_videos": show_recent_videos})
 DESCRIBERS.update(materials.DESCRIBERS)
 CONFIRMERS.update(materials.CONFIRMERS)
