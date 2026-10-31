@@ -21,6 +21,7 @@ from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.db.session import get_db
 from app.models.domain import Experiment
 from app.services.experiments import ExperimentService
+from app.services.campaign_lifecycle import change_campaign_status, CampaignTransitionError
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 
@@ -214,4 +215,26 @@ async def update_campaign(product_id: UUID, experiment_id: UUID,
         db.rollback()
         return HTMLResponse(form_page(product, values, "Кампания с таким кодом уже существует.", record),
                             status_code=409)
+    return RedirectResponse(f"/studio/products/{product_id}/campaigns", status_code=303)
+
+
+@router.post("/studio/products/{product_id}/campaigns/{experiment_id}/status")
+async def campaign_status_change(product_id: UUID, experiment_id: UUID,
+                                 request: Request, db: Session = Depends(get_db)):
+    """Owner-confirmed manual milestone, not advertising/external execution."""
+    _owner_product(db, product_id)
+    values = await _studio_form(request)
+    action = values.get("action", "")
+    if not isinstance(action, str) or len(action) > 64:
+        raise HTTPException(422, "Недопустимое действие кампании")
+    try:
+        change_campaign_status(
+            db, product_id=product_id, campaign_id=experiment_id,
+            action=action,
+            actor=getattr(request.state, "studio_login", None),
+        )
+    except LookupError:
+        raise HTTPException(404, "Кампания не найдена") from None
+    except CampaignTransitionError as exc:
+        raise HTTPException(409, str(exc)) from None
     return RedirectResponse(f"/studio/products/{product_id}/campaigns", status_code=303)
