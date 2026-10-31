@@ -170,7 +170,7 @@ def main():
             )
             owner_page.wait_for_function(
                 "() => localStorage.getItem('userRole') === 'owner' && "
-                "!!document.querySelector('button[aria-label=\\\"Выйти\\\"]')",
+                "!!document.querySelector('button[aria-label=Выйти]')",
                 timeout=15000,
             )
             # The schedule header is re-mounted during its initial data loads.
