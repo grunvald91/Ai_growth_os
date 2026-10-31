@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import Business, get_db
+from ..seo_referrals import article_booking_link
 from .client import _company_blog_data
 
 router = APIRouter(prefix="/seo-pages", tags=["public-seo"], include_in_schema=False)
@@ -111,9 +112,9 @@ async def _active_business(db: AsyncSession, business_id: int) -> Business:
     return business
 
 
-def _links(business: Business) -> str:
-    home = f"/business/{business.id}"
-    booking = f"/book/{business.id}"
+def _links(business: Business, *, links: dict | None = None) -> str:
+    home = (links or {}).get("company_url") or f"/business/{business.id}"
+    booking = (links or {}).get("cta_url") or f"/book/{business.id}"
     return (
         '<section class="cta"><h2>Услуги и запись</h2>'
         f'<p>Вы можете ознакомиться с услугами {_text(business.name)} и выбрать удобное время.</p>'
@@ -148,7 +149,7 @@ def _paragraphs(block: dict) -> str:
     return "".join(output)
 
 
-def _article_body(article: dict, business: Business) -> str:
+def _article_body(article: dict, business: Business, *, links: dict | None = None) -> str:
     output = [
         f'<p class="meta">{_text(business.name)} · Статьи и советы</p>',
         f'<h1>{_text(article["title"])}</h1>',
@@ -173,7 +174,7 @@ def _article_body(article: dict, business: Business) -> str:
         output.append("</section>")
     if article.get("closing"):
         output.append(f'<p>{_text(article["closing"])}</p>')
-    output.append(_links(business))
+    output.append(_links(business, links=links))
     output.append(_contacts(business))
     output.append(f'<p><a href="/business/{business.id}/blog">Все статьи компании</a></p>')
     return "".join(output)
@@ -262,8 +263,10 @@ async def business_article_html(business_id: int, slug: str, db: AsyncSession = 
         "datePublished": article.get("published_at"),
         "dateModified": article.get("updated_at") or article.get("published_at"),
     }
+    booking_links = await article_booking_link(db, business_id, article)
     return _html_page(title=f'{article["title"]} — {business.name} | ServGo',
-                      description=meta, path=path, body=_article_body(article, business), structured=data)
+                      description=meta, path=path,
+                      body=_article_body(article, business, links=booking_links), structured=data)
 
 
 async def _published_business_ids(db: AsyncSession) -> list[int]:
