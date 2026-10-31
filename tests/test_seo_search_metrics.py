@@ -184,3 +184,45 @@ async def test_url_inspection_is_explicit_owner_scoped_and_index_only(env):
                 db, one, url="https://servgo.ru/business/64/blog/hidden-topic",
                 client=client, env=envs)
         assert len(messages) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", [None, "unknown", -1, True])
+async def test_malformed_provider_statistics_are_unknown_not_zero(env, bad):
+    db, product_id, _ = env
+    mine = "https://servgo.ru/business/64/blog/main-topic"
+    day = datetime.now(timezone.utc).date().isoformat()
+
+    def fake(request):
+        if request.url.host == "www.googleapis.com":
+            return httpx.Response(200, json={"rows": [
+                {"keys": [mine], "clicks": bad, "impressions": 12},
+            ]})
+        return httpx.Response(200, json={"text_indicator_to_statistics": [
+            {"text_indicator": {"type": "URL", "value": mine},
+             "statistics": [{"date": day, "field": "CLICKS", "value": bad},
+                            {"date": day, "field": "IMPRESSIONS", "value": 12}]},
+        ]})
+
+    creds = {
+        "SERVGO_GSC_READONLY_TOKEN": "google-token",
+        "SERVGO_GSC_SITE_URL": "sc-domain:servgo.ru",
+        "SERVGO_YANDEX_WEBMASTER_TOKEN": "yandex-token",
+        "SERVGO_YANDEX_WEBMASTER_USER_ID": "123",
+        "SERVGO_YANDEX_WEBMASTER_HOST_ID": "https:servgo.ru:443",
+    }
+    async with httpx.AsyncClient(transport=httpx.MockTransport(fake)) as client:
+        report = await company_search_metrics(db, product_id, client=client, env=creds)
+    for source in ("google_search_console", "yandex_webmaster"):
+        assert report[source]["status"] == "provider_unavailable"
+        assert report[source]["clicks"] is None
+        assert report[source]["impressions"] is None
+
+
+def test_nonfinite_provider_values_are_not_converted_to_zero():
+    from app.seo.search_metrics import _number
+    assert _number(0) == 0
+    assert _number(2.5) == 2.5
+    for value in (float("nan"), float("inf"), float("-inf"), -1):
+        with pytest.raises(ValueError, match="Invalid search metric"):
+            _number(value)
