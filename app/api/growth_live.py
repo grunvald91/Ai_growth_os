@@ -12,18 +12,19 @@ from pathlib import Path
 from urllib.parse import urlencode
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, Response, JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, Response, JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
-from app.api.content_studio import MATERIAL_KINDS, _owner_product, studio_page_shell
+from app.api.content_studio import MATERIAL_KINDS, _owner_product, _studio_form, studio_page_shell
 from app.db.session import get_db
 from app.models.domain import Artifact, Experiment, Task
 from app.services.campaign_lifecycle import LABELS as CAMPAIGN_LABELS, allowed_actions, campaign_event_history
 from app.api.seo_run_view import seo_runs
+from app.seo.control import SeoControlError, create_seo_run, change_seo_run
 
 ASSETS = Path(__file__).parent / 'assets'
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -146,7 +147,7 @@ def artifact_content(content: str) -> str:
     return '<details class="gv-result"><summary>Подробнее</summary>'+render(value)+'</details>'
 
 
-def seo_run_card(row: dict) -> str:
+def seo_run_card(row: dict, product_id: UUID | None = None) -> str:
     def state(label: str, done: bool) -> str:
         return (f'<li>{html.escape(label)}: '
                 f'<strong>{"Есть результат" if done else "Пока нет результата"}</strong></li>')
@@ -157,6 +158,15 @@ def seo_run_card(row: dict) -> str:
               '<p>Количество поставленных статей пока не подтверждено.</p>')
     attempts = (f'<p>Попыток выполнения: {row["attempts"]}</p>'
                 if row["attempts"] else '<p>Попытки выполнения ещё не зарегистрированы.</p>')
+    base = f'/studio/products/{product_id}/seo' if product_id else ''
+    actions = ''
+    if base and row["status"] in {"queued", "failed", "cancelled"}:
+        operation = "cancel" if row["status"] == "queued" else "retry"
+        caption = "Отменить из очереди" if operation == "cancel" else "Повторить запуск"
+        actions = (
+            f'<form method="post" action="{base}/{row["id"]}/{operation}" class="seo-run-actions">'
+            f'<button class="btn secondary" type="submit">{caption}</button></form>'
+        )
     return (
         f'<article class="panel seo-run" data-seo-status="{html.escape(row["status"], quote=True)}">'
         f'<div class="seo-run-head"><h3>{html.escape(row["title"])}</h3>'
@@ -172,8 +182,78 @@ def seo_run_card(row: dict) -> str:
            if row["sources_confirmed"] is not None else
            '<p>Количество источников пока не подтверждено.</p>')
         + '<p>Стоимость: нет подтверждённых данных о списании провайдера.</p>'
-        + '</details></article>'
+        + '</details>'
+        + actions
+        + ('<p class="seo-run-hint">Запущенное выполнение нельзя прервать этой кнопкой.</p>'
+           if row['status'] == 'running' else '')
+        + '</article>'
     )
+
+
+
+@router.get('/studio/products/{product_id}/seo/queue', response_class=HTMLResponse)
+def seo_queue_confirm(product_id: UUID, db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    base = f'/studio/products/{product_id}/seo'
+    body = (
+        '<section class="panel seo-queue-confirm">'
+        '<h2>Новый запуск SEO-завода</h2>'
+        '<p>Завод подготовит поисковые запросы, SEO-план и задания на статьи. '
+        'Обработка после постановки в очередь может использовать платные модели. '
+        'Готовые статьи после успешной проверки критиком могут автоматически '
+        'публиковаться в блоге компании. Не прошедшие проверку ждут согласования.</p>'
+        f'<form method="post" action="{base}/queue">'
+        '<label class="field" for="seo-focus">Тема или направление (необязательно)</label>'
+        '<input id="seo-focus" name="focus" maxlength="300"'
+        ' placeholder="Например, онлайн-запись для салонов красоты">'
+        '<div class="seo-run-actions"><button class="btn primary" type="submit">'
+        'Подтвердить постановку в очередь</button>'
+        f'<a class="btn" href="{base}">Вернуться без запуска</a></div></form>'
+        '</section>'
+    )
+    return studio_page_shell(product, active='seo', title='Новый запуск SEO-завода',
+                             subtitle='Подтвердите создание задания.', body=body)
+
+
+@router.post('/studio/products/{product_id}/seo/queue')
+async def seo_queue_submit(product_id: UUID, request: Request,
+                           db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    values = await _studio_form(request)
+    focus = values.get('focus', '')
+    if not isinstance(focus, str) or len(focus) > 300:
+        raise HTTPException(422, 'Уточните тему SEO-завода')
+    try:
+        create_seo_run(db, product_id=product_id, focus=focus)
+    except LookupError:
+        raise HTTPException(404, 'Компания не найдена') from None
+    except SeoControlError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
+
+
+@router.post('/studio/products/{product_id}/seo/{task_id}/cancel')
+def seo_cancel_queued(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    try:
+        change_seo_run(db, product_id=product_id, task_id=task_id, action='cancel')
+    except LookupError:
+        raise HTTPException(404, 'Запуск SEO-завода не найден') from None
+    except SeoControlError as exc:
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
+
+
+@router.post('/studio/products/{product_id}/seo/{task_id}/retry')
+def seo_retry_run(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    try:
+        change_seo_run(db, product_id=product_id, task_id=task_id, action='retry')
+    except LookupError:
+        raise HTTPException(404, 'Запуск SEO-завода не найден') from None
+    except SeoControlError as exc:
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
 
 
 @router.get('/studio/products/{product_id}/seo/status')
@@ -195,11 +275,12 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
                     f'<p>{html.escape(row.kind)} · {html.escape(row.status.value)}</p>'
                     f'{artifact_content(row.content)}</article>' for row in rows)
     base = f'/studio/products/{product_id}'
-    run_cards = ''.join(seo_run_card(row) for row in runs)
+    run_cards = ''.join(seo_run_card(row, product_id) for row in runs)
     return studio_page_shell(product, active='seo', title='SEO-завод',
         subtitle='Реальные статусы запусков, результаты и ошибки из базы вашей компании.',
-        body=f'<p><a class="btn primary" href="{base}?design=v4&amp;command=seo_factory">'
-             'Запросить запуск через диспетчер</a> '
+        body=f'<p><a class="btn primary" href="{base}/seo/queue">Новый запуск SEO-завода</a> '
+             f'<a class="btn" href="{base}?design=v4&amp;command=seo_factory">'
+             'Через ИИ-диспетчер</a> '
              f'<a class="btn" href="{base}/work">Все задания</a> '
              f'<a class="btn" href="{base}/materials?kind=article">Статьи</a></p>'
              '<h2>Запуски SEO-завода</h2>'
