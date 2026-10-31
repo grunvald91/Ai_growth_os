@@ -187,7 +187,23 @@ def main():
             )
             second_tab = owner.new_page()
             second_tab.goto(url + "/admin/schedule", wait_until="domcontentloaded")
-            second_tab.wait_for_url(url + "/login", timeout=15000)
+            # React Router performs an in-document redirect. Observe both the
+            # pathname and logout tombstone instead of waiting for a new
+            # document's 'load' event (not required for client-side routing).
+            try:
+                second_tab.wait_for_function("""() =>
+                  location.pathname === '/login' &&
+                  localStorage.getItem('token') === null &&
+                  localStorage.getItem('servgoExplicitLogout') === '1'
+                """, timeout=15000)
+            except Exception:
+                print("PWA_BROWSER_SECOND_TAB_DIAGNOSTICS", json.dumps({
+                    "url": second_tab.url,
+                    "body": second_tab.locator("body").inner_text()[:800],
+                    "token": second_tab.evaluate("!!localStorage.getItem('token')"),
+                    "logout_marker": second_tab.evaluate("localStorage.getItem('servgoExplicitLogout')"),
+                }, ensure_ascii=False), flush=True)
+                raise
             assert second_tab.evaluate("localStorage.getItem('token')") is None
             assert second_tab.evaluate("localStorage.getItem('servgoExplicitLogout')") == "1"
             print("PWA_BROWSER_LOGOUT_AND_PAYMENT_FAILURE_OK", flush=True)
