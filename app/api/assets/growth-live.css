@@ -114,3 +114,20 @@ body[data-growth-design] .wb-actions .btn.secondary{background:var(--tint);color
     min-width:0;max-width:100%;box-sizing:border-box;
   }
 }
+
+/* v4 /create composes #sg-create-form directly inside .form-card,
+ * outside legacy .route-content. Scope the narrow fix to the real form. */
+@media(max-width:360px){
+  body[data-growth-design="v4"] #sg-create-form,
+  body[data-growth-design="v4"] #sg-create-form .sg-format-grid,
+  body[data-growth-design="v4"] #sg-create-form .sg-choice,
+  body[data-growth-design="v4"] #sg-create-form .sg-choice-copy{
+    min-width:0;max-width:100%;box-sizing:border-box;
+  }
+  body[data-growth-design="v4"] #sg-create-form .sg-format-grid{
+    display:grid;grid-template-columns:minmax(0,1fr);width:100%;
+  }
+  body[data-growth-design="v4"] #sg-create-form :is(input,select,textarea){
+    min-width:0;max-width:100%;box-sizing:border-box;
+  }
+}
