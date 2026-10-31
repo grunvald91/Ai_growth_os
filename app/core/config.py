@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     studio_admin_username: str | None = None
     studio_admin_password: str | None = None
     studio_public_origin: str | None = None
+    # Opt-in: allow POST from https://servgo.ru when it is also the actual proxied request origin.
+    # Keep the legacy growth.servgo.ru origin valid during rollout. Off by default.
+    studio_servgo_gateway_enabled: bool = False
     studio_htpasswd_file: Path | None = None
     studio_users_file: Path | None = None
     # Optional; without it a private key file is created next to the accounts file.
