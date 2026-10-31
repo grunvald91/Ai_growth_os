@@ -305,6 +305,7 @@
   var voiceHoldEnabled = form.classList.contains('command-bar');
   var voiceDispatchPending = false, discardRecording = false, activeHold = null, holdTimer = null;
   var previewUrl = root.getAttribute('data-voice-preview-url');
+  var voiceHitbox = document.getElementById('dp-voice-hitbox');
   var voiceOverlay = document.getElementById('dp-voice-overlay');
   var voiceOverlayText = document.getElementById('dp-voice-overlay-text');
   var voiceStatus = document.getElementById('dp-voice-status');
@@ -644,13 +645,27 @@
     input.setAttribute('placeholder', defaultPlaceholder);
   }
   if (voiceHoldEnabled && supportedVoice) {
-    // Short tap keeps text editing; deliberate hold records. No separate mic control.
+    // Short taps enter real text editing; while editing, the native textarea
+    // stays interactive. A blur restores the dedicated voice press surface.
+    input.addEventListener('focus', function () { form.classList.add('voice-text-editing'); });
+    input.addEventListener('blur', function () { form.classList.remove('voice-text-editing'); });
+    if (voiceHitbox) {
+      voiceHitbox.addEventListener('touchstart', function (event) {
+        // Android otherwise opens selection/callout and emits pointercancel
+        // while a finger is held over the placeholder.
+        if (event.cancelable) event.preventDefault();
+      }, { passive: false });
+    }
     form.addEventListener('pointerdown', function (event) {
       if (event.button !== 0 || event.target.closest('button') || activeHold || recorder ||
           micOpening || voiceWorking || busy || voiceDispatchPending) return;
       // Defer the Android keyboard/text-selection gesture until a short tap is known.
       if (event.pointerType === 'touch') event.preventDefault();
       activeHold = { id: event.pointerId, x: event.clientX, y: event.clientY, cancelled: false, started: false };
+      // Keep the pointer stream attached to the non-selectable surface.
+      if (event.pointerType === 'touch' && event.target.setPointerCapture) {
+        try { event.target.setPointerCapture(event.pointerId); } catch (error) {}
+      }
       form.classList.add('voice-arming');
       holdTimer = setTimeout(function () {
         holdTimer = null;
@@ -687,7 +702,10 @@
       if (document.hidden) endHold(null, true);
     });
     form.addEventListener('contextmenu', function (event) {
-      if (activeHold || recorder) event.preventDefault();
+      if (event.target === voiceHitbox || activeHold || recorder) event.preventDefault();
+    });
+    form.addEventListener('selectstart', function (event) {
+      if (activeHold || event.target === voiceHitbox) event.preventDefault();
     });
   }
 
