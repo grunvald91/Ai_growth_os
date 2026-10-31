@@ -69,10 +69,10 @@ async def test_seo_article_keeps_only_topic_relevant_verified_facts(db, product,
     from app.workflows.article_production import product_facts
     root = tmp_path / product.slug / ".claude"
     root.mkdir(parents=True)
-    context = ("## Product\\n"
-               "ServGo помогает владельцам организовать онлайн-запись.\\n"
-               "Владельцы управляют календарём и услугами.\\n"
-               "Для другой темы доступны функции ведения смен.\\n")
+    context = ("## Product\n"
+               "ServGo помогает владельцам организовать онлайн-запись.\n"
+               "Владельцы управляют календарём и услугами.\n"
+               "Для другой темы доступны функции ведения смен.\n")
     root.joinpath("product-marketing-context.md").write_text(context, encoding="utf-8")
     facts = product_facts(context)
     assert len(facts) == 3
