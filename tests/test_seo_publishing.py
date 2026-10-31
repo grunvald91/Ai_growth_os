@@ -150,6 +150,30 @@ async def test_held_article_goes_live_after_the_owner_approves_it(env, tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_human_approval_cannot_override_unclean_critic_or_changed_article(env, tmp_path):
+    from app.content.review import approve_material
+    db, product = env
+    article_id = await make_article(db, product, tmp_path, critic_status="all_rejected")
+    assert not publish_if_clear(db, article_id).published
+    approve_material(db, tmp_path, product.id, article_id)
+    assert publish_owner_approved(db) == 0
+    assert not list(db.scalars(select(Publication)))
+    approval = db.scalar(select(Approval).where(Approval.artifact_id == article_id))
+    assert "critic review" in approval.reason
+
+    clean_id = await make_article(db, product, tmp_path)
+    assert not publish_if_clear(db, clean_id).published
+    approve_material(db, tmp_path, product.id, clean_id)
+    row = db.get(Artifact, clean_id)
+    data = json.loads(row.content)
+    data["reader_article"]["lead"] += " Несогласованное изменение."
+    row.content = json.dumps(data, ensure_ascii=False)
+    db.commit()
+    assert publish_owner_approved(db) == 0
+    assert not list(db.scalars(select(Publication)))
+
+
+@pytest.mark.asyncio
 async def test_rejected_article_stays_off_the_blog(env, tmp_path):
     from app.seo.publishing import publish_owner_approved
     db, product = env
@@ -231,7 +255,7 @@ async def test_business_blog_uses_verified_link_and_own_booking_route(env, tmp_p
     db.commit()
     published = await make_article(db, product, tmp_path)
     held = await make_article(db, product, tmp_path, critic_status=None)
-    publish_if_clear(db, published)
+    owner_publish(db, product, tmp_path, published)
     publish_if_clear(db, held)
 
     app.dependency_overrides[get_db] = lambda: db
