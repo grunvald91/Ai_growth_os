@@ -76,6 +76,33 @@ def main():
                 page.screenshot(path=str(OUT/"create-320.png"),full_page=True,animations="disabled")
                 assert measurements["overflow"] <= 1, f"320px form overflows: {measurements}"
 
+                # Newly revised product pages must render on the same narrow
+                # Android-size layout without horizontal scroll or fake state.
+                for segment in ("campaigns/new", "seo"):
+                    response = page.goto(
+                        f"{origin}/studio/products/{product.id}/{segment}?design=v4",
+                        wait_until="load",
+                    )
+                    assert response and response.status == 200, (
+                        f"{segment} HTTP: {response.status if response else None}"
+                    )
+                    value = page.evaluate("""() => ({
+                        viewport: innerWidth,
+                        overflow: Math.max(0, document.documentElement.scrollWidth-innerWidth),
+                        formFields: document.querySelectorAll('.sg-campaign-form [required]').length,
+                        hasSavedRuns: !!document.querySelector('.seo-run'),
+                        hasRunsHeading: document.body.innerText.includes('Запуски SEO-завода'),
+                    })""")
+                    result["checks"].append({"page": segment, "width": 320, **value})
+                    assert value["overflow"] <= 1, f"{segment} overflow: {value}"
+                    if segment == "campaigns/new":
+                        assert value["formFields"] == 2, "Short draft must require only goal and name"
+                        assert page.get_by_text("Дополнительные настройки (необязательно)").count() == 1
+                    if segment == "seo":
+                        assert value["hasRunsHeading"], "SEO run heading missing"
+                    page.screenshot(path=str(OUT / f"{segment.replace('/', '-')}-320.png"),
+                                    full_page=True, animations="disabled")
+
                 for width in (390, 1440):
                     page.set_viewport_size({"width":width,"height":844 if width==390 else 900})
                     errors.clear()
