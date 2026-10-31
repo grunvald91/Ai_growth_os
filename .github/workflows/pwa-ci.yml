@@ -7,6 +7,8 @@ on:
       - 'web/api/**'
       - 'deploy/nginx/**'
       - 'tests/test_studio_sso.py'
+      - 'tests/test_public_company_seo_pages.py'
+      - 'tests/test_public_company_blog.py'
       - 'tests/test_growth_gateway_contract.py'
       - 'tests/test_mail_same_origin.py'
       - 'bot/services/notifications.py'
@@ -113,6 +115,7 @@ jobs:
             web/api/routes/admin.py \
             web/api/routes/notifications.py \
             web/api/routes/client.py \
+            web/api/routes/seo_pages.py \
             web/api/schemas.py
 
       - name: Install API dependencies for protected Mail PWA tests
@@ -138,6 +141,8 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
+          python tests/test_public_company_blog.py
+          python tests/test_public_company_seo_pages.py
           python tests/test_booking_safety.py
           python tests/test_notification_rules.py
           python tests/test_email_utils.py
