@@ -156,6 +156,19 @@ def main():
                 assert active_overlay['opacity']>.9 and active_overlay['position']=='fixed',active_overlay
                 assert active_overlay['animation']=='3s',active_overlay
                 assert 'Отпустите' in active_overlay['label']
+                overlay_geometry=page.locator('#dp-voice-overlay').evaluate("""element=>{
+                  const r=element.getBoundingClientRect(),sty=getComputedStyle(element);
+                  return {parent:element.parentElement.tagName,top:r.top,left:r.left,
+                    width:r.width,height:r.height,viewportWidth:innerWidth,viewportHeight:innerHeight,
+                    bg:sty.backgroundColor,dim:getComputedStyle(element,'::before').content,
+                    overlayActive:element.classList.contains('is-active')};
+                }""")
+                assert overlay_geometry['parent']=='BODY',overlay_geometry
+                assert abs(overlay_geometry['left'])<2 and abs(overlay_geometry['top'])<2,overlay_geometry
+                assert abs(overlay_geometry['width']-overlay_geometry['viewportWidth'])<2,overlay_geometry
+                assert abs(overlay_geometry['height']-overlay_geometry['viewportHeight'])<2,overlay_geometry
+                assert overlay_geometry['bg']=='rgba(0, 0, 0, 0)',overlay_geometry
+                assert overlay_geometry['dim']=='none' and overlay_geometry['overlayActive'],overlay_geometry
                 page.screenshot(path=str(OUT/'voice-hold-active-390.png'),animations='allow')
                 pointer('pointercancel',12)
                 page.wait_for_timeout(220)
@@ -183,8 +196,10 @@ def main():
 
                 # Actual touchscreen long-press on the visible placeholder:
                 # must not select text, raise context menu or cancel audio.
-                page.locator('#dp-input').evaluate("el=>el.blur()")
-                page.wait_for_function("() => !document.querySelector('#dp-form').classList.contains('voice-text-editing')")
+                page.locator('#dp-input').evaluate("el=>el.focus()")
+                page.wait_for_function("() => document.querySelector('#dp-form').classList.contains('voice-text-editing')")
+                assert page.locator('#dp-voice-hitbox').evaluate(
+                  "e=>getComputedStyle(e).pointerEvents")=='auto', 'focused input disabled the hold guard'
                 guard_box=page.locator('#dp-voice-hitbox').bounding_box()
                 assert guard_box is not None
                 hit_x=guard_box['x']+guard_box['width']*.55
@@ -216,19 +231,21 @@ def main():
                 assert page.locator('body').evaluate("el=>!el.classList.contains('home-empty')")
                 assert page.locator('#dp-new').is_visible()
                 assert page.locator('#dp-new').evaluate(
-                    "el=>el.parentElement.classList.contains('command-tools')")
+                    "el=>el.parentElement.classList.contains('command-topicbar')")
                 geometry=page.evaluate("""() => {
                   const main=document.querySelector('#main').getBoundingClientRect(),
                     feed=document.querySelector('#dp-feed').getBoundingClientRect(),
                     composer=document.querySelector('#dp-form').getBoundingClientRect(),
                     topic=document.querySelector('#dp-new').getBoundingClientRect(),
                     toolbar=document.querySelector('.command-tools').getBoundingClientRect();
-                  return {gap:feed.top-main.top,topicTop:topic.top,
-                          composerBottom:composer.bottom,toolbarTop:toolbar.top};
+                  return {gap:feed.top-main.top,topicBottom:topic.bottom,
+                          composerTop:composer.top,composerBottom:composer.bottom,
+                          toolbarTop:toolbar.top,topicParent:document.querySelector('#dp-new').parentElement.className};
                 }""")
                 assert geometry['gap']<=45, f"Separate header band still visible: {geometry}"
-                assert geometry['topicTop']>=geometry['composerBottom'], geometry
-                assert geometry['topicTop']>=geometry['toolbarTop'], geometry
+                assert geometry['topicParent']=='command-topicbar', geometry
+                assert geometry['topicBottom']<=geometry['composerTop']+2, geometry
+                assert geometry['toolbarTop']>=geometry['composerBottom']-2, geometry
                 # A genuinely transparent dock overlaps the scrollable history;
                 # its children retain their own surfaces and remain clickable.
                 page.evaluate("""() => {
@@ -280,8 +297,10 @@ def main():
                 page.locator('#dp-new').click()
                 page.wait_for_function("() => document.body.classList.contains('home-empty') && !document.querySelector('.dp-home').classList.contains('has-feed')")
                 assert page.locator('#dp-new').is_hidden()
+                assert not page.locator('#dp-input').evaluate("e=>document.activeElement===e"), 'New Topic opened keyboard'
+                assert page.locator('#dp-input').input_value()=='', 'New Topic retained old draft'
                 result['checks'].append({'page':'topic-toolbar-390','no_blank_header_band':True,
-                    'new_topic_in_shortcuts':True,'empty_state_restored':True})
+                    'new_topic_above_composer':True,'no_keyboard_autofocus':True,'empty_state_restored':True})
                 browser.close()
         finally:
             server.should_exit=True
