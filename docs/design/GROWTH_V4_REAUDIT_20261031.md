@@ -4,6 +4,23 @@
 **Сравнение:** [матрица 61 функции](https://github.com/grunvald91/Ai_growth_os/blob/main/docs/design/SERVGO_FUNCTION_MATRIX.md).
 **Проверка:** [изолированный Chromium-аудит](https://github.com/grunvald91/Ai_growth_os/actions/runs/41172873732), [черновой PR с диагностикой](https://github.com/grunvald91/Ai_growth_os/pull/181). **Код production не менялся.**
 
+
+## Новое обязательное решение: ServGo Air + одно PWA (31.10.2026)
+
+После ревизии пользователь зафиксировал **скриншоты клиентского пути BookingBot как визуальный эталон**: спокойный белый интерфейс, голубые мягкие подложки, крупные действия, единый логотип, контекстная нижняя навигация. Не считать старую палитру/трёхколоночную компоновку Growth v4 самостоятельным design standard.
+
+**Полный план:** [SERVGO_UNIFIED_DESIGN_PWA_PLAN.md](SERVGO_UNIFIED_DESIGN_PWA_PLAN.md). Реализация затрагивает **booking_bot и Ai_growth_os**, а не только HTML-макет.
+
+- **P0 — архитектура PWA:** одно устанавливаемое ServGo на каноническом https://servgo.ru/ с same-origin пользовательскими маршрутами клиентского пути, админки, Growth и Mail. Текущие growth.servgo.ru/mail.servgo.ru выходят из scope; experimentally supported scope_extensions не является кроссбраузерной заменой.
+- **P0 — service worker:** перед проксированием приватных экранов исправить BookingBot sw.js, который кэширует произвольные navigation responses под ключом /index.html. Закрыть кеширование писем, API, авторизованных HTML/JSON и токенов.
+- **P0 — безопасность и SSO:** роль mail_owner, Growth company scope, host-only cookies, Origin/CSRF, CSP, trusted proxy headers и отдельно протестированные deep links. Одно PWA **не** означает общие права доступа.
+- **P1 — единый дизайн:** применить canonical [ServGo Air design-system.css](https://github.com/grunvald91/booking_bot/blob/main/web/frontend/src/styles/design-system.css) ко всем модулям, заменить собственные палитры Growth/Mail. Главная Growth остаётся полупустой, UI перестраивается после команды.
+- **P1 — глобальная тема:** light/dark/system как одна настройка; миграция schedTheme и servgo-desktop-theme, сохранение предпочтения на сервере для синхронизации между устройствами, общий theme-color, без мигания при переходе.
+- **P1 — UX-паритет:** пересмотреть все 61 сценарий, все вкладки/формы на 320–1440 px, единый стиль Mobile/Desktop; «Простое видео» во всех пользовательских местах.
+- **Выпуск:** feature flags, изолированные E2E тесты, реальный Android/iOS install/scope, временные старые адреса и откат. Production и main не менялись этим документом.
+
+Это **требования к следующей реализации**, а не выполненные функции.
+
 ## Область и метод
 
 - Первая проверка: **107 экранов на ширинах 320, 390, 768, 1024 и 1440 px** (19 продуктовых страниц × 5 + 6 глобальных × 2). Каждая страница проверена по HTTP 200, факту рендера v4 и переполнению. Собраны 47 скриншотов и JSON-отчёт; CI тестов и браузерного прогона успешен.
