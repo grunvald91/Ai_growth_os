@@ -84,7 +84,7 @@ def change_campaign_status(
             Experiment.id == campaign_id,
             Experiment.product_id == product_id,
             Experiment.status == previous,
-        ).values(status=target).execution_options(synchronize_session=False)
+        ).values(status=target).execution_options(synchronize_session="fetch")
     )
     if result.rowcount != 1:
         db.rollback()
