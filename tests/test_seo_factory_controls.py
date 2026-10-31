@@ -61,7 +61,7 @@ def test_confirmation_does_not_queue_and_explicit_post_deduplicates(env):
     client, db, pid, _ = env
     before = client.get(url(pid, "/queue"))
     assert before.status_code == 200
-    assert "автоматически" in before.text
+    assert "не более трёх статей" in before.text
     assert "Подтвердить постановку в очередь" in before.text
     assert jobs(db, pid) == []
     for _ in range(2):
@@ -238,9 +238,9 @@ def test_verified_critic_review_is_visible_only_for_correct_article_version(env,
     assert "&lt;img src=x onerror=alert(1)&gt;" in page.text
     assert "<img src=x onerror=alert(1)>" not in page.text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page.text
-    assert 'name="confirm_publish"' in page.text
-    assert f'/review/{article.id}/approve' in page.text
-    assert "Согласовать публикацию" in page.text
+    assert 'name="confirm_publish"' not in page.text
+    assert "Согласовать публикацию" not in page.text
+    assert "исправьте замечания критика" in page.text
     assert client.get(url(other_pid)).status_code == 200
     assert "Статья с проверкой" not in client.get(url(other_pid)).text
 
@@ -255,7 +255,7 @@ def test_verified_critic_review_is_visible_only_for_correct_article_version(env,
 def test_seo_discloses_unconnected_blog_without_claiming_publication(env):
     client, db, pid, other_pid = env
     assert "персональный блог компании на ServGo" in client.get(url(pid)).text
-    assert "публикация доступна только для подключённых компаний" in client.get(url(pid, "/queue")).text
+    assert "личной проверки" in client.get(url(pid, "/queue")).text
     db.get(Product, pid).slug = "servgo"
     db.commit()
     assert "Место публикации: блог ServGo" in client.get(url(pid)).text
