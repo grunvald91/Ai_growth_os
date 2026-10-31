@@ -1,8 +1,5 @@
 name: Creative Critic one-shot
 on:
-  push:
-    branches: [experiment/creative-critic-one-shot-20261031]
-    paths: ['.github/workflows/creative-critic-one-shot.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,8 +14,11 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import json, os, pathlib, urllib.request
-          out=pathlib.Path('critic-result'); out.mkdir()
+          import json, os, pathlib, urllib.request, urllib.error
+          out=pathlib.Path('critic-result'); out.mkdir(exist_ok=True)
+          def status(stage, detail):
+            (out/'status.json').write_text(json.dumps({'stage':stage,'detail':detail},ensure_ascii=False,indent=2))
+            print('STATUS:',stage,detail,flush=True)
           original={
             "goal":"Короткая объясняющая раскадровка: зачем бизнесу онлайн-запись. Не придумывать цифры и гарантии.",
             "scenes":[
@@ -29,7 +29,9 @@ jobs:
           (out/'before.json').write_text(json.dumps(original,ensure_ascii=False,indent=2))
           key=os.environ.get('OPENROUTER_API_KEY','')
           if not key:
-            raise SystemExit('OPENROUTER_API_KEY is missing; no API request made')
+            status('preflight_failed','OPENROUTER_API_KEY secret is missing or unavailable to this workflow; no API request made')
+            raise SystemExit(2)
+          status('preflight_ok','Secret present; preparing exactly one API request')
           system=("Ты независимый AI Creative Critic. Оцени исходный сценарий по цели: логика, повторения, "
                   "конкретность, соответствие визуала тексту. Только существенные замечания, с цитатами "
                   "и готовыми исправлениями; не выдумывай фактов. Затем ОДИН РАЗ примени только обоснованные "
@@ -47,16 +49,25 @@ jobs:
           try:
             with urllib.request.urlopen(req,timeout=90) as response:
               raw=json.load(response)
+          except urllib.error.HTTPError as exc:
+            status('api_http_failed','OpenRouter HTTP '+str(exc.code)+'; check API key permissions, credits, model availability and account limits')
+            raise SystemExit(3)
           except Exception as exc:
-            raise SystemExit('Single API request failed: '+type(exc).__name__)
-          msg=raw['choices'][0]['message']['content']
-          result=json.loads(msg)
+            status('api_transport_failed',type(exc).__name__+'; request may have reached provider; do not rerun before checking usage')
+            raise SystemExit(4)
+          (out/'usage.json').write_text(json.dumps({'model':raw.get('model'),'usage':raw.get('usage')},indent=2))
+          try:
+            msg=raw['choices'][0]['message']['content']
+            result=json.loads(msg)
+          except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            status('response_parse_failed',type(exc).__name__+'; API request completed, do not rerun without reviewing usage')
+            raise SystemExit(5)
           if not isinstance(result.get('findings'),list) or not isinstance(result.get('decisions'),list) or not isinstance(result.get('after'),dict):
-            raise SystemExit('Invalid review JSON shape')
+            status('response_schema_failed','Missing findings, decisions or after; API request completed')
+            raise SystemExit(6)
           (out/'review.json').write_text(json.dumps({"findings":result['findings'],"decisions":result['decisions']},ensure_ascii=False,indent=2))
           (out/'after.json').write_text(json.dumps(result['after'],ensure_ascii=False,indent=2))
-          (out/'usage.json').write_text(json.dumps({"model":raw.get('model'),"usage":raw.get('usage')},indent=2))
-          print('One request completed; saved before, review, after and usage.')
+          status('completed','One request completed; before/review/after/usage saved')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
