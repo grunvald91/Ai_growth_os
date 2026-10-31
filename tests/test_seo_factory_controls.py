@@ -79,6 +79,23 @@ def test_confirmation_does_not_queue_and_explicit_post_deduplicates(env):
     assert json.loads(request.content) == {"focus": "запись для салонов"}
 
 
+def test_pilot_dashboard_shows_queued_and_deferred_articles(env):
+    client, db, pid, other_pid = env
+    run = create_seo_run(db, product_id=pid)
+    db.add(Artifact(product_id=pid, task_id=run.id, kind="seo_factory_report",
+                    title="Пилот SEO", content=json.dumps({
+                        "articles_queued": 3, "articles_deferred": 9, "pilot_limit": 3,
+                        "sources": []
+                    })))
+    db.commit()
+    overview = seo_runs(db, pid)[0]
+    assert overview["articles_queued"] == 3 and overview["articles_deferred"] == 9
+    page = client.get(url(pid)).text
+    assert "Статей поставлено в очередь: <b>3</b>" in page
+    assert "Осталось в SEO-плане без генерации: <b>9</b>" in page
+    assert seo_runs(db, other_pid) == []
+
+
 def test_queue_cancel_retry_and_running_claim_guard(env):
     client, db, pid, _ = env
     task = create_seo_run(db, product_id=pid, focus="сервис")
