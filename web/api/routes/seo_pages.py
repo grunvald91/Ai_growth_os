@@ -165,6 +165,12 @@ def _article_body(article: dict, business: Business, *, links: dict | None = Non
     for section in article.get("sections", []):
         if isinstance(section, dict):
             output.append(f'<section><h2>{_text(section.get("title"))}</h2>{_paragraphs(section)}</section>')
+    company_facts = article.get("company_facts") or []
+    if isinstance(company_facts, list) and company_facts:
+        paragraphs = "".join(f"<p>{_text(fact)}</p>" for fact in company_facts
+                             if isinstance(fact, str) and fact.strip())
+        if paragraphs:
+            output.append(f'<section><h2>О {_text(business.name)}</h2>{paragraphs}</section>')
     faq = article.get("faq") or []
     if faq:
         output.append('<section><h2>Частые вопросы</h2>')
