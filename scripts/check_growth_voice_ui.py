@@ -196,7 +196,7 @@ def main():
                 page.wait_for_function("() => window.__mockMicStarts===3 && document.querySelector('#dp-form').classList.contains('voice-recording')")
                 page.wait_for_timeout(950)  # past Android's normal text-selection threshold
                 assert page.locator('#dp-form').evaluate("e=>e.classList.contains('voice-recording')"), 'Android long press cancelled recording'
-                assert page.evaluate("() => document.getSelection()?.toString() || ''")==='', 'Android selected placeholder text'
+                assert page.evaluate("() => document.getSelection()?.toString() || ''") == '', 'Android selected placeholder text'
                 assert page.evaluate("() => window.__voiceContextMenus")==0, 'Context menu opened during hold'
                 cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
                 page.wait_for_function("() => !document.querySelector('#dp-form').classList.contains('voice-recording')")
