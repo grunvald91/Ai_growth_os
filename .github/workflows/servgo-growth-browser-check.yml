@@ -1,0 +1,32 @@
+name: ServGo Growth targeted browser verification
+on:
+  pull_request:
+    paths:
+      - 'app/api/**'
+      - 'scripts/check_servgo_growth_ui.py'
+      - '.github/workflows/servgo-growth-browser-check.yml'
+permissions:
+  contents: read
+jobs:
+  targeted-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Browser dependencies
+        run: |
+          python -m pip install -e '.[test]' playwright
+          python -m playwright install --with-deps chromium
+      - name: Isolated 320px create and CSP-protected team checks
+        run: python scripts/check_servgo_growth_ui.py
+      - name: Save isolated screenshots and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: servgo-growth-targeted-ui
+          path: /tmp/servgo-growth-targeted-ui/
+          retention-days: 7
+          if-no-files-found: warn
