@@ -47,6 +47,9 @@ async def test_article_serves_plan_query_and_carries_answer_and_faq(db, product,
     for request in provider.requests:
         has_rules = "ПОИСК БЕЗ SEO-ПЕРЕСПАМА" in request.system_prompt
         assert has_rules == (request.metadata["team_role"] in geo_roles)
+        if has_rules:
+            assert "поисковый ИИ-помощник" in request.system_prompt
+            assert "Не добавляй искусственные цитаты" in request.system_prompt
 
 
 @pytest.mark.asyncio
