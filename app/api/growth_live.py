@@ -22,6 +22,7 @@ from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.content_studio import MATERIAL_KINDS, _owner_product, studio_page_shell
 from app.db.session import get_db
 from app.models.domain import Artifact, Experiment, Task
+from app.services.campaign_lifecycle import LABELS as CAMPAIGN_LABELS, allowed_actions, campaign_event_history
 from app.api.seo_run_view import seo_runs
 
 ASSETS = Path(__file__).parent / 'assets'
@@ -213,12 +214,39 @@ def campaigns_page(product_id: UUID, db: Session = Depends(get_db)):
     rows = list(db.scalars(select(Experiment).where(Experiment.product_id == product_id)
                           .order_by(Experiment.created_at.desc()).limit(100)))
     base = f'/studio/products/{product_id}'
+    history = campaign_event_history(db, product_id=product_id,
+                                     campaign_ids=[row.id for row in rows])
+
     def card(row: Experiment) -> str:
-        status = 'Черновик' if row.status == 'draft' else row.status
+        status = CAMPAIGN_LABELS.get(row.status, row.status)
         budget = (f'{html.escape(str(row.budget))} {html.escape(row.currency or "")}'
                   if row.budget is not None else 'не задан')
         edit = (f'<a class="btn" href="{base}/campaigns/{row.id}/edit">'
                 'Продолжить настройку</a>' if row.status == 'draft' else '')
+        actions = allowed_actions(row.status)
+        buttons = ''.join(
+            f'<form method="post" action="{base}/campaigns/{row.id}/status">'
+            f'<input type="hidden" name="action" value="{html.escape(action, quote=True)}">'
+            f'<button class="btn" type="submit">{html.escape(label)}</button>'
+            '</form>'
+            for action, (_target, label) in actions.items()
+        )
+        events = history.get(row.id, [])
+        changes = ''.join(
+            '<li>'
+            + html.escape(str(event.get("at") or "Время не зафиксировано"))
+            + ' — '
+            + html.escape(CAMPAIGN_LABELS.get(str(event.get("to") or ""),
+                                              str(event.get("to") or "Неизвестно")))
+            + (': ' + html.escape(str(event["actor"])) if event.get("actor") else '')
+            + '</li>'
+            for event in events
+        )
+        audit = (
+            '<details class="campaign-history"><summary>История изменений</summary>'
+            '<ol>' + changes + '</ol></details>'
+            if changes else ''
+        )
         return (
             f'<article class="panel campaign-item" data-campaign-status="{html.escape(row.status, quote=True)}">'
             f'<div class="campaign-item-head"><h2>{html.escape(row.name)}</h2>'
@@ -229,11 +257,12 @@ def campaigns_page(product_id: UUID, db: Session = Depends(get_db)):
             f'<p>Плановый бюджет: {budget}</p>'
             + (f'<p>Основной показатель: {html.escape(row.target_metric)}</p>'
                if row.target_metric else '')
-            + edit + '</article>'
+            + (f'<div class="campaign-actions">{edit}{buttons}</div>' if edit or buttons else '')
+            + audit + '</article>'
         )
     cards = ''.join(card(row) for row in rows)
     return studio_page_shell(product, active='campaigns', title='Кампании',
-        subtitle='Эксперименты и планы вашей компании.', body=
+        subtitle='Кампании и их ручные этапы. «В работе» не запускает рекламу или рассылки.', body=
         f'<p><a class="btn primary" href="{base}/campaigns/new">Новая кампания</a></p>'
         f'<p><a class="btn primary" href="{base}?design=v4&amp;command=campaign">Спланировать кампанию с командой</a> '
         f'<a class="btn" href="{base}/plan">Контент-план</a> '
