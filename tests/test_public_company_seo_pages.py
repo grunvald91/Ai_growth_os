@@ -42,6 +42,9 @@ class FakeDB:
         return SimpleNamespace(id=64, name="Салон <Мария>", address="Сочи",
                                phone="+7 (900) 000-00-00", is_active=self.active)
 
+    async def scalars(self, query):
+        return SimpleNamespace(all=lambda: [])
+
 
 class PublicSEOHTMLTests(unittest.TestCase):
     def setUp(self):
