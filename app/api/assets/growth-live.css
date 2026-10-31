@@ -436,3 +436,45 @@ body[data-growth-design="v4"] .command-bar.voice-connecting{
   user-select:none;
   -webkit-touch-callout:none;
 }
+
+/* Keep New Topic inside the compact shortcuts toolbar, never in a separate
+   band above the chat. The conversation can now begin directly below the header. */
+body[data-growth-design="v4"] .dp-home .command-tools{
+  display:flex;align-items:center;gap:8px;
+  width:100%;min-width:0;margin-top:8px;
+}
+body[data-growth-design="v4"] .dp-home .command-tools .command-hints{
+  min-width:0;flex:1 1 auto;margin:0;
+  overflow-x:auto;overflow-y:hidden;
+  overscroll-behavior-x:contain;
+  scrollbar-width:none;
+}
+body[data-growth-design="v4"] .dp-home .command-tools .command-hints::-webkit-scrollbar{display:none}
+body[data-growth-design="v4"] .dp-home .command-tools .dp-new{
+  position:static;align-self:center;flex:none;
+  display:inline-flex;align-items:center;justify-content:center;
+  gap:5px;margin:0;padding:0 11px;
+  min-height:34px;border-radius:12px;border:1px solid var(--line);
+  color:var(--muted);background:var(--card);
+  font-size:11px;font-weight:600;line-height:1.2;white-space:nowrap;
+  box-shadow:none;
+}
+body[data-growth-design="v4"] .dp-home .command-tools .dp-new:hover{
+  background:var(--blue-soft);color:var(--blue);
+}
+body[data-growth-design="v4"] .dp-home .command-tools .dp-new span:first-child{
+  font-size:17px;font-weight:400;line-height:1;
+}
+body[data-growth-design="v4"] .dp-home:not(.has-feed) .command-tools .dp-new{
+  display:none;
+}
+@media(max-width:780px){
+  body[data-growth-design="v4"] .dp-home .command-tools{gap:6px;margin-top:8px}
+  body[data-growth-design="v4"] .dp-home .command-tools .dp-new{
+    padding:0 8px;min-height:34px;font-size:10px;
+  }
+}
+@media(max-width:360px){
+  body[data-growth-design="v4"] .dp-home .command-tools .dp-new-label{display:none}
+  body[data-growth-design="v4"] .dp-home .command-tools .dp-new{width:36px;padding:0}
+}
