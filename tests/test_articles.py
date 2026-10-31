@@ -946,13 +946,13 @@ async def test_editor_prompts_are_commercially_useful_without_weakening_groundin
 
     assert result.status == 'completed', result.error
     by_role = {r.metadata['team_role']: r for r in provider.requests}
-    assert 'подтверждённых audience_pains' in by_role['content_strategist'].system_prompt
-    assert 'полезный и для поиска, и для продаж' in by_role['seo_editor'].system_prompt
-    assert 'конкретной узнаваемой ситуации' in by_role['human_editor'].system_prompt
-    assert 'Пиши, сокращай' in by_role['human_editor'].system_prompt
-    assert 'СЦЕНА → БОЛЬ → ЦЕНА ПРОБЛЕМЫ' in by_role['marketing_editor'].system_prompt
-    assert 'Юмор — только к месту' in by_role['marketing_editor'].system_prompt
-    assert 'без шуток' in by_role['marketing_editor'].system_prompt
+    assert 'audience_pains' in by_role['content_strategist'].system_prompt
+    assert 'SEO-редактор и любознательный читатель' in by_role['seo_editor'].system_prompt
+    assert 'цельный, приятный для чтения' in by_role['human_editor'].system_prompt
+    assert 'не в сухую инструкцию' in by_role['human_editor'].system_prompt
+    assert 'не следуй фиксированной схеме' in by_role['marketing_editor'].system_prompt
+    assert 'уместную иронию' in by_role['marketing_editor'].system_prompt
+    assert 'юмор не навязывай' in by_role['marketing_editor'].system_prompt
     assert 'third-party cases' in by_role['marketing_editor'].system_prompt
     assert 'Write marketing, not an academic paper' in by_role['marketing_editor'].system_prompt
     assert '30-45 seconds' in by_role['video_director'].system_prompt
@@ -1087,14 +1087,14 @@ def test_article_text_chain_rules_are_value_first_and_keep_hard_constraints():
     rules = {name: prompt_text(f'article.rules.{name}') for name in (
         'content_strategist', 'seo_editor', 'article_writer', 'conversion_editor',
         'human_editor', 'marketing_editor', 'repurposing_editor')}
-    assert '3–5 приёмов' in rules['content_strategist']
-    assert 'конкретное действие' in rules['seo_editor']
-    assert 'не меньше 2000 символов' in rules['article_writer']
-    assert 'kind=advice' in rules['article_writer']
+    assert 'не обязуй автора писать фиксированное число шагов' in rules['content_strategist']
+    assert 'не делай списки и чек-листы обязательными' in rules['seo_editor']
+    assert 'Не растягивай статью ради числа знаков' in rules['article_writer']
+    assert 'сомнительные утверждения вынеси' in rules['article_writer']
     assert 'ровно один призыв' in rules['conversion_editor']
-    assert 'ровно по одному' in rules['human_editor']
-    assert 'Сохрани все конкретные' in rules['marketing_editor']
-    assert 'ровно один fact_rendering' in rules['marketing_editor']
+    assert 'по одному на source_id' in rules['human_editor']
+    assert 'естественную композицию' in rules['marketing_editor']
+    assert 'fact_renderings с прежними source_id' in rules['marketing_editor']
     assert 'ровно шесть' in rules['repurposing_editor']
     for name in ('human_editor', 'marketing_editor'):
-        assert 'Не придумывай' in rules[name] or 'не как уже работающую' in rules[name]
+        assert 'выдуман' in rules[name].casefold() or 'не выдумывай' in rules[name].casefold()
