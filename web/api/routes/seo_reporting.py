@@ -31,6 +31,18 @@ async def seo_conversions(
     """
     if business_id not in await _get_owner_business_ids(db, user):
         raise HTTPException(status_code=403, detail="Нет доступа к этому бизнесу")
+    # The optional database migration is not part of the guarded API-only
+    # rollout. Until attribution is explicitly configured, don't query a
+    # table that may not exist on the current production schema.
+    if not tracking_enabled():
+        return {
+            "business_id": business_id,
+            "tracking_enabled": False,
+            "days": days,
+            "articles": [],
+            "total_created": 0,
+            "total_confirmed": 0,
+        }
     since = utc_now() - timedelta(days=days)
     rows = await db.execute(
         select(
