@@ -22,7 +22,7 @@ def quick_capability(text: str) -> str | None:
         return "show_recent_videos"
 
     business = bool(re.search(r"\b(бизнес\w*|компани\w*|маркетинг\w*|продвижени\w*)\b", words))
-    advice = bool(re.search(r"\b(рекоменд\w*|посовет\w*|совет\w*|что\s+сделать|чем\s+заняться|какие\s+шаги|что\s+улучшить|с\s+чего\s+начать)\b", words))
+    advice = bool(re.search(r"\b(порекоменд\w*|рекоменд\w*|посовет\w*|совет\w*|что\s+сделать|чем\s+заняться|какие\s+шаги|что\s+улучшить|с\s+чего\s+начать)\b", words))
     if business and advice and not re.match(r"^(сделай|создай|запусти|опубликуй)\b", words):
         return "recommend_today"
     return None
