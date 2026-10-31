@@ -1,5 +1,13 @@
 // === Type definitions ===
 
+export interface SeoConversionSummary {
+  business_id: number
+  days: number
+  total_created: number
+  total_confirmed: number
+  articles: { article_slug: string; bookings_created: number; bookings_confirmed: number }[]
+}
+
 export interface BlogArticleSummary {
   slug: string
   title: string
@@ -984,6 +992,8 @@ export const api = {
     ),
   getAnalyticsOverview: (bizId: number, days: number) =>
     request<AnalyticsOverview>(`/admin/analytics/${bizId}/overview?days=${days}`),
+  getSeoConversions: (bizId: number, days: number) =>
+    request<SeoConversionSummary>(`/admin/businesses/${bizId}/seo/conversions?days=${days}`),
   getAdminBusinesses: () =>
     request<Business[]>('/admin/businesses'),
   createBusiness: (data: BusinessCreateData) =>
