@@ -1,0 +1,45 @@
+name: ServGo unified PWA backend release (guarded)
+# Branch push = READ ONLY preflight. No automatic production changes.
+# Explicit workflow_dispatch apply=true is required for production rollout.
+on:
+  push:
+    branches: [integration/servgo-unified-fixed-20261031]
+    paths:
+      - 'web/api/**'
+      - 'scripts/servgo_unified_api_release.py'
+      - 'tests/test_servgo_unified_api_release.py'
+      - '.github/workflows/servgo-unified-api-release.yml'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Explicitly deploy only after preflight and approval (false = read-only)'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: ${{ github.event_name == 'workflow_dispatch' && inputs.apply && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned SSH client and tests
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1' 'pytest>=8,<9'
+      - name: Confirm backend diff and rollback contract
+        run: python -m pytest -q tests/test_servgo_unified_api_release.py
+      - name: Read-only source fingerprint preflight or explicitly approved release
+        run: python scripts/servgo_unified_api_release.py
