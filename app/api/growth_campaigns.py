@@ -205,7 +205,8 @@ async def update_campaign(product_id: UUID, experiment_id: UUID,
         return HTMLResponse(form_page(product, values, _invalid_message(values, error), record),
                             status_code=422)
     # All 16 form keys are submitted, and blank optional fields clear old values.
-    clearing = {key: None for key, _ in FIELDS if key not in BASIC and not values.get(key, "").strip()}
+    clearing = {key: None for key, _ in FIELDS if key not in ("name", "hypothesis")
+                and not values.get(key, "").strip()}
     try:
         ExperimentService(db).update(record.id, **fields, **clearing)
         db.commit()
