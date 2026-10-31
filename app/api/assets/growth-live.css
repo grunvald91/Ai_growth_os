@@ -95,3 +95,22 @@ body[data-growth-design] .wb-job :is(h2,h3),body[data-growth-design] .route-page
 body[data-growth-design] .wb-actions .btn.primary{background:#2465bd;color:#fff;border-color:#2465bd}
 body[data-growth-design] .wb-actions .btn.secondary{background:var(--tint);color:var(--text);border:1px solid var(--line)}
 #main:has(.wb-job)>.route-page-head{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);margin:0;padding:0}
+
+
+/* Narrow 320px screen: keep create-form cards inside their grid column. */
+@media(max-width:360px){
+  body[data-growth-design="v4"] .route-content,
+  body[data-growth-design="v4"] .route-content .sg-create-form,
+  body[data-growth-design="v4"] .route-content .sg-layout-two,
+  body[data-growth-design="v4"] .route-content .sg-field,
+  body[data-growth-design="v4"] .route-content .sg-choice,
+  body[data-growth-design="v4"] .route-content .sg-choice-copy{
+    min-width:0;max-width:100%;box-sizing:border-box;
+  }
+  body[data-growth-design="v4"] .route-content .sg-format-grid{
+    grid-template-columns:minmax(0,1fr);
+  }
+  body[data-growth-design="v4"] .route-content :is(input,select,textarea){
+    min-width:0;max-width:100%;box-sizing:border-box;
+  }
+}
