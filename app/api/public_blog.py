@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.domain import Artifact, ArtifactStatus, Product, Publication
+from app.sso.models import StudioBusinessLink
 from app.workflows.article_contracts import ArticleArtifact
 
 router = APIRouter(prefix="/public/blog", tags=["public-blog"])
@@ -49,15 +50,56 @@ def _article(row: Artifact, publication: Publication) -> dict:
     }
 
 
+def _published_for_product(db: Session, product_id):
+    return db.execute(
+        select(Artifact, Publication).join(Publication, Publication.artifact_id == Artifact.id)
+        .where(Publication.product_id == product_id, Publication.channel == "own_site", Publication.status == "published",
+               Artifact.status == ArtifactStatus.PUBLISHED, Artifact.kind == "article")
+        .order_by(Publication.published_at.desc())).all()
+
+
 def _published(db: Session, product_slug: str):
     product = db.scalar(select(Product).where(Product.slug == product_slug))
     if product is None:
         raise HTTPException(404, "Not found")
-    return db.execute(
-        select(Artifact, Publication).join(Publication, Publication.artifact_id == Artifact.id)
-        .where(Publication.product_id == product.id, Publication.channel == "own_site", Publication.status == "published",
-               Artifact.status == ArtifactStatus.PUBLISHED, Artifact.kind == "article")
-        .order_by(Publication.published_at.desc())).all()
+    return _published_for_product(db, product.id)
+
+
+def _business_product(db: Session, business_id: int):
+    """Use the verified ServGo/Studio link, never a guessed slug or matching company name."""
+    if business_id <= 0:
+        raise HTTPException(404, "Not found")
+    link = db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == business_id))
+    if link is None:
+        raise HTTPException(404, "Not found")
+    return link.product_id
+
+
+def _business_urls(business_id: int) -> dict:
+    return {"company_url": f"/business/{business_id}", "booking_url": f"/book/{business_id}"}
+
+
+@router.get("/businesses/{business_id}/articles")
+def list_business_articles(business_id: int, db: Session = Depends(get_db)) -> dict:
+    """Published articles for a ServGo business, ready for its existing public profile."""
+    product_id = _business_product(db, business_id)
+    articles = []
+    for row, publication in _published_for_product(db, product_id):
+        full = _article(row, publication)
+        articles.append({k: full[k] for k in
+                         ("slug", "title", "description", "category", "stage", "lead", "published_at", "updated_at")})
+    return {"business_id": business_id, **_business_urls(business_id), "articles": articles}
+
+
+@router.get("/businesses/{business_id}/articles/{slug}")
+def get_business_article(business_id: int, slug: str, db: Session = Depends(get_db)) -> dict:
+    """Article CTA falls back to that company's actual booking route, not a fabricated service."""
+    product_id = _business_product(db, business_id)
+    for row, publication in _published_for_product(db, product_id):
+        if publication.external_reference == f"/blog/{slug}":
+            return {**_article(row, publication), **_business_urls(business_id),
+                    "cta_url": f"/book/{business_id}"}
+    raise HTTPException(404, "Not found")
 
 
 @router.get("/{product_slug}/articles")
