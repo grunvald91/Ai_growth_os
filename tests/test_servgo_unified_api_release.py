@@ -1,16 +1,26 @@
 """Pure release-contract checks, no live production access."""
 from pathlib import Path
 
-from scripts.servgo_unified_api_release import BASE_SHA, FILES, classify, sha, baseline
+from scripts.servgo_unified_api_release import BASE_SHA, FILES, ADDED_FILES, classify, sha, baseline
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_source_is_pinned_to_verified_booking_main_and_only_api_files():
     assert BASE_SHA == 'fe6777bf5238559ead8e660157d570dca277fed8'
-    assert len(FILES) == 12
-    assert 'web/api/routes/client.py' in FILES, 'SEO company blogs must ship with the backend'
-    assert all(p.startswith('web/api/') for p in FILES)
+    assert len(FILES) == 16
+    required = {
+        'web/api/main.py',
+        'web/api/routes/client.py',
+        'web/api/routes/seo_pages.py',
+        'web/api/routes/seo_reporting.py',
+        'web/api/seo_referrals.py',
+        'database/models.py',
+    }
+    assert required <= set(FILES), 'SEO blogs, booking attribution and their ORM model must ship together'
+    assert all(p.startswith('web/api/') or p == 'database/models.py' for p in FILES)
+    assert ADDED_FILES <= set(FILES)
+    assert not {'migrations/add_seo_booking_attributions.sql', 'web/frontend/public/sw.js'} & set(FILES)
     assert len(set(FILES)) == len(FILES)
 
 
@@ -20,6 +30,19 @@ def test_never_overwrite_a_server_only_hotfix():
     assert classify(b'new-version', b'old-version', b'new-version') == 'already'
     assert classify(None, None, b'new-route') == 'create'
     assert classify(b'unreviewed-route', None, b'new-route') == 'conflict'
+
+
+def test_article_routes_and_booking_attribution_have_pinned_deploy_dependencies():
+    # Root ORM model is not under web/api/. Without it, the new
+    # seo_reporting import would crash even if seo_pages.py deployed.
+    code = (ROOT / 'web/api/main.py').read_text(encoding='utf-8')
+    assert 'seo_pages' in code and 'seo_reporting' in code
+    reporting = (ROOT / 'web/api/routes/seo_reporting.py').read_text(encoding='utf-8')
+    assert 'SeoBookingAttribution' in reporting
+    models = (ROOT / 'database/models.py').read_text(encoding='utf-8')
+    assert 'class SeoBookingAttribution' in models
+    migration = (ROOT / 'migrations/add_seo_booking_attributions.sql').read_text(encoding='utf-8')
+    assert 'CREATE TABLE IF NOT EXISTS seo_booking_attributions' in migration
 
 
 def test_reviewed_baselines_and_candidate_files_exist():
