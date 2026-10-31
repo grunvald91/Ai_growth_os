@@ -59,7 +59,10 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert f'data-api="/studio/products/{product.id}/dispatch"' in page.text
     assert 'data-voice-url="/studio/voice/dictate"' in page.text
     assert 'id="dp-state"' in page.text
-    assert '/studio/assets/dispatcher.js' in page.text
+    assert '/studio/assets/dispatcher.js?v=hold-20261031' in page.text
+    assert 'id="dp-press-hint"' in page.text
+    assert 'Удерживайте строку, чтобы говорить' in page.text
+    assert 'id="dp-mic"' not in page.text
     assert 'Простое видео' in page.text
     assert 'hero-intro' in page.text
     assert 'Добрый день, Марина' not in page.text
