@@ -94,7 +94,7 @@ class PublicSEOHTMLTests(unittest.TestCase):
         self.assertIn("\\u003cscript>", body)
         self.assertIn('name="robots" content="index,follow,max-snippet:-1,max-image-preview:large"', body)
         self.assertNotIn("nosnippet", body)
-        json_ld = re.search(r'<script type="application/ld\\+json">(.+?)</script>', body)
+        json_ld = re.search(r'<script type="application/ld\+json">(.+?)</script>', body)
         self.assertIsNotNone(json_ld)
         article = json.loads(json_ld.group(1))
         self.assertEqual(article["@id"], "https://servgo.ru/business/64/blog/kak-uhazhivat-za-volosami#article")
