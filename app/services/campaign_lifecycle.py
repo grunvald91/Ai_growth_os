@@ -129,8 +129,6 @@ def campaign_event_history(
         if key not in ids:
             continue
         target = ids[key]
-        if len(history[target]) >= max_events:
-            continue
         try:
             event = json.loads(item.content)
         except (TypeError, ValueError):
@@ -138,4 +136,9 @@ def campaign_event_history(
         if not isinstance(event, dict) or event.get("campaign_id") != key:
             continue
         history[target].append(event)
+    # UUID IDs are not chronological and some databases store created_at
+    # only to second precision. Use the UTC event time from each transition.
+    for target in history:
+        history[target].sort(key=lambda item: str(item.get("at") or ""), reverse=True)
+        history[target] = history[target][:max_events]
     return history
