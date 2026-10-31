@@ -24,17 +24,33 @@
     return 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   }
 
-  // Every request is a POST of JSON; the Origin header is added by the browser.
-  function post(path, body) {
-    return fetch(api + path, {
+  // Bound only dispatcher messages: other confirmation requests have different budgets.
+  // Keep the idempotency key in the caller so a mobile retry cannot duplicate an action.
+  function post(path, body, timeoutMs) {
+    var controller = timeoutMs && window.AbortController ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, timeoutMs) : null;
+    var request = fetch(api + path, {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify(body || {})
+      body: JSON.stringify(body || {}),
+      signal: controller ? controller.signal : undefined
     }).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (data) {
         if (!response.ok) throw new Error((data && data.detail) || 'Не получилось. Попробуйте ещё раз.');
         return data;
       });
+    }).catch(function (error) {
+      if (error && error.name === 'AbortError') {
+        throw new Error('Диспетчер отвечает слишком долго. Попробуйте ещё раз — команда не будет выполнена повторно.');
+      }
+      throw error;
+    });
+    return request.then(function (value) {
+      if (timer) clearTimeout(timer);
+      return value;
+    }, function (error) {
+      if (timer) clearTimeout(timer);
+      throw error;
     });
   }
 
@@ -250,7 +266,7 @@
       syncConversationLayout();
     }
     setBusy(true);
-    post('/messages', body).then(function (data) {
+    post('/messages', body, 35000).then(function (data) {
       if (echoNode) echoNode.remove();
       applyResult(data);
       if (voiceRequest) showNote('');
@@ -424,7 +440,7 @@
       if (voiceStatus) {
         voiceStatus.hidden = mode !== 'processing' && mode !== 'sending';
         voiceStatus.textContent = mode === 'processing' ? 'Распознаю и редактирую запись…'
-          : mode === 'sending' ? 'Передаю команду диспетчеру…' : '';
+          : mode === 'sending' ? 'Обрабатываю команду…' : '';
       }
       input.readOnly = mode !== 'idle';
       form.setAttribute('aria-busy', mode === 'processing' || mode === 'sending' ? 'true' : 'false');
@@ -595,7 +611,7 @@
           }
           voiceDispatchPending = true;
           setVoiceState('sending');
-          showLive('Передаю команду диспетчеру…', '', true);
+          showLive('Обрабатываю запрос…', '', true);
           send({ mode: 'text', text: transcript }, transcript, true);
         } else {
           applyDictation(data);
