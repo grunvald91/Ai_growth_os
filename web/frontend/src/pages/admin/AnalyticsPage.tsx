@@ -13,6 +13,7 @@ import { api, type AnalyticsOverview, type AnalyticsDailyPoint } from '../../api
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
 import { BusinessSelector } from '../../components/BusinessSelector'
 import { AdminShell } from '../../components/AdminShell'
+import { SeoAttributionCard } from '../../components/SeoAttributionCard'
 
 // ── Helpers ──
 const PERIOD_DAYS: Record<string, number> = { week: 7, month: 30, year: 365 }
@@ -269,6 +270,7 @@ export function AnalyticsPage() {
             <TopCard title="Топ услуг" icon={<Scissors size={14} style={{ color: 'var(--s-accent)' }} />} items={data?.top_services ?? []} />
             <TopCard title="Топ сотрудников" icon={<User size={14} style={{ color: 'var(--s-accent)' }} />} items={data?.top_employees ?? []} />
           </div>
+          {businessId ? <SeoAttributionCard businessId={businessId} days={PERIOD_DAYS[period]} /> : null}
         </>
       )}
 
