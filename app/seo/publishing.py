@@ -135,6 +135,13 @@ def publish_if_clear(db: Session, article_id) -> Outcome:
         raise LookupError("Article not found")
     if row.status == ArtifactStatus.PUBLISHED:
         return Outcome(True, "already_published")
+    # An intentionally hidden page may only return through the owner's
+    # explicit restore action. Worker retries must not create a second URL.
+    hidden = db.scalar(select(Publication.id).where(
+        Publication.artifact_id == row.id, Publication.product_id == row.product_id,
+        Publication.channel == CHANNEL, Publication.status == "unpublished").limit(1))
+    if hidden is not None:
+        return Outcome(False, "manually_unpublished")
     if not is_enabled(db, row.product_id):
         return Outcome(False, "seo_disabled")
     article = ArticleArtifact.model_validate_json(row.content)
