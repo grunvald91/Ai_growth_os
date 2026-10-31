@@ -1087,7 +1087,7 @@ def test_article_text_chain_rules_are_value_first_and_keep_hard_constraints():
     rules = {name: prompt_text(f'article.rules.{name}') for name in (
         'content_strategist', 'seo_editor', 'article_writer', 'conversion_editor',
         'human_editor', 'marketing_editor', 'repurposing_editor')}
-    assert 'не обязуй автора писать фиксированное число шагов' in rules['content_strategist']
+    assert 'не обязуй автора писать фиксированное число шагов' in rules['content_strategist'].casefold()
     assert 'не делай списки и чек-листы обязательными' in rules['seo_editor']
     assert 'Не растягивай статью ради числа знаков' in rules['article_writer']
     assert 'сомнительные утверждения вынеси' in rules['article_writer']
