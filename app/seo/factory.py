@@ -23,6 +23,8 @@ AGENT = "seo_factory"
 REQUEST_KIND = "seo_factory_request"
 REPORT_KIND = "seo_factory_report"
 ATTEMPT_KIND = "seo_factory_attempt"
+# Deliberate pilot: another owner-started run is needed for the next batch.
+MAX_ARTICLES_PER_RUN = 3
 
 
 def recover_stale_factory(db):
@@ -103,7 +105,7 @@ async def run_factory_once(session_factory, settings, *, provider=None, client: 
 
 
 async def _execute(db, settings, task_id, product_id, focus, provider, client):
-    from app.seo.contracts import SemanticCore
+    from app.seo.contracts import SemanticCore, SeoContentPlan
     from app.seo.planner import PLAN_KIND
     from app.seo.service import KIND
     require_enabled(db, product_id)
@@ -122,10 +124,16 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client):
         plan = await plan_content(db, llm, privacy, product_id, core, products_root=settings.products_root,
                                   model=settings.llm_model, factory_task_id=task_id)
     require_enabled(db, product_id)
-    queued = queue_plan(db, plan, {c.id: c for c in core.clusters})
+    # A successful SEO plan is not authorization to generate every proposed URL.
+    # Start with a small bounded cohort; other plan items remain unqueued.
+    all_items = SeoContentPlan.model_validate_json(plan.content).items
+    pilot = {item.id for item in all_items[:MAX_ARTICLES_PER_RUN]}
+    queued = queue_plan(db, plan, {c.id: c for c in core.clusters}, only=pilot)
     ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=REPORT_KIND,
         title=f"SEO-завод: поставлено статей — {len(queued)}",
         content=json.dumps({"seeds": len(core.seeds), "clusters": len(core.clusters),
-                            "articles_queued": len(queued), "sources": [s.model_dump() for s in core.sources]}))
+                            "articles_queued": len(queued), "articles_deferred": len(all_items) - len(queued),
+                            "pilot_limit": MAX_ARTICLES_PER_RUN,
+                            "sources": [s.model_dump() for s in core.sources]}))
     TaskService(db).update(task_id, status=TaskStatus.COMPLETED)
     db.commit()
