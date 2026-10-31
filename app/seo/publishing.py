@@ -1,8 +1,7 @@
-"""Automatic publication of search-plan articles, only after a clean critic review and static checks.
+"""SEO publication requires a clean review AND explicit human approval for each article.
 
-The owner decided that articles of the SEO plan go live on their own once the critic has reviewed and, if needed,
-corrected them. Anything that does not pass stays with the owner as a pending approval. Every publication is
-recorded as an approval decided by policy, a publication row and the artifact status.
+A good model-critic verdict makes an article ready for owner review, not automatically public.
+Only accepted, reviewable pages become visible in the company blog and sitemap.
 """
 import hashlib
 import json
@@ -24,7 +23,7 @@ from app.seo.activation import is_enabled
 CHANNEL = "own_site"
 CLEAN_CRITIC_STATUSES = frozenset({"no_material_issues", "revised"})
 FINAL_EDITOR = "marketing_editor"
-DECIDER = "policy:critic_reviewed"
+DECIDER = "policy:critic_reviewed"  # Legacy autonomous approvals; never used for new SEO pages.
 
 _TRANSLIT = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
                      ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r", "s", "t",
@@ -98,7 +97,7 @@ def static_problems(article: ArticleArtifact) -> list[str]:
 
 
 def publish_if_clear(db: Session, article_id) -> Outcome:
-    """Publish when the critic review was clean and the static checks pass; otherwise hand it to the owner."""
+    """Prepare a reviewable draft. A clean AI critic is not a human publication decision."""
     row = db.get(Artifact, article_id)
     if row is None or row.kind != "article":
         raise LookupError("Article not found")
@@ -112,23 +111,26 @@ def publish_if_clear(db: Session, article_id) -> Outcome:
     if verdict not in CLEAN_CRITIC_STATUSES:
         problems.append(f"critic review: {verdict}")
     policy = PolicyEvaluator().evaluate(ToolOperation.PUBLISH)
-    if problems:
-        row.status = ArtifactStatus.AWAITING_APPROVAL
-        already = db.scalar(select(Approval).where(Approval.artifact_id == row.id, Approval.status == "pending"))
-        if already is None:
-            ApprovalService(db).create(product_id=row.product_id, artifact_id=row.id, action_type=ToolOperation.PUBLISH.value,
-                                       risk_level=policy.risk_level.value, status="pending", requested_by="seo_factory",
-                                       reason="Held for the owner: " + "; ".join(problems))
-        db.commit()
-        return Outcome(False, "; ".join(problems))
-    now = datetime.now(timezone.utc)
-    approval = ApprovalService(db).create(
-        product_id=row.product_id, artifact_id=row.id, action_type=ToolOperation.PUBLISH.value,
-        risk_level=policy.risk_level.value, status="approved", requested_by="seo_factory", decided_by=DECIDER,
-        decided_at=now, reason=f"Critic review {verdict}; static checks passed. Owner-approved automatic publication of plan articles.")
-    slug = _go_live(db, row, article, approval, now)
+
+    # Never mark a clean article public merely because a critic has no findings.
+    # The owner must review the actual version and decide in Studio.
+    row.status = ArtifactStatus.AWAITING_APPROVAL
+    reason = ("Требуется ручная проверка пользы, оригинальности и фактов перед публикацией."
+              if not problems else "Требуется исправление до публикации: " + "; ".join(problems))
+    approval = db.scalar(select(Approval).where(
+        Approval.artifact_id == row.id,
+        Approval.requested_by == "seo_factory",
+        Approval.status.in_(["pending", "approved"]),
+    ).order_by(Approval.created_at.desc()).limit(1))
+    if approval is None:
+        ApprovalService(db).create(
+            product_id=row.product_id, artifact_id=row.id,
+            action_type=ToolOperation.PUBLISH.value, risk_level=policy.risk_level.value,
+            status="pending", requested_by="seo_factory", reason=reason)
+    elif approval.status == "pending":
+        approval.reason = reason
     db.commit()
-    return Outcome(True, f"critic {verdict}", slug)
+    return Outcome(False, "; ".join(problems) if problems else "human_review_required")
 
 
 def _go_live(db: Session, row: Artifact, article: ArticleArtifact, approval: Approval, now: datetime) -> str:
@@ -153,13 +155,28 @@ def publish_owner_approved(db: Session) -> int:
             continue
         if not is_enabled(db, row.product_id):
             continue
-        owner_said_yes = approval.status == "approved" or row.status == ArtifactStatus.APPROVED
+        owner_said_yes = row.status == ArtifactStatus.APPROVED or (
+            approval.status == "approved" and str(approval.decided_by or "").startswith("owner:"))
         if not owner_said_yes or db.scalar(select(Publication.id).where(Publication.artifact_id == row.id).limit(1)):
+            continue
+        # Re-check the exact version at the moment of publishing. Owner signoff
+        # cannot bypass an invalid, changed, or unreviewed SEO article.
+        try:
+            article = ArticleArtifact.model_validate_json(row.content)
+            problems = static_problems(article)
+            verdict = critic_verdict(db, row.task_id, article.reader_article)
+            if verdict not in CLEAN_CRITIC_STATUSES:
+                problems.append(f"critic review: {verdict}")
+        except (TypeError, ValueError) as exc:
+            problems = [f"invalid article: {type(exc).__name__}"]
+        if problems:
+            approval.reason = "Публикация остановлена: " + "; ".join(problems)
+            db.commit()
             continue
         now = datetime.now(timezone.utc)
         if approval.status == "pending":
             approval.status, approval.decided_by, approval.decided_at = "approved", "owner:studio", now
-        _go_live(db, row, ArticleArtifact.model_validate_json(row.content), approval, now)
+        _go_live(db, row, article, approval, now)
         db.commit()
         published += 1
     return published
