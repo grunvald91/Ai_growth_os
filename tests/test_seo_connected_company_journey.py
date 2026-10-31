@@ -209,17 +209,19 @@ async def test_connected_company_article_reaches_own_blog_with_critic_and_demo_s
         assert content.reader_article.faq == []
         assert content.seo_brief.primary_query == QUERY
         assert "ServGo" not in content.full_article
-        assert "Цветочная" not in content.full_article or "Цветочная мастерская" not in content.full_article
+        assert "Стоите перед витриной" in content.full_article
+        assert "У букета есть адресат" in content.full_article
         assert article.status == ArtifactStatus.AWAITING_APPROVAL
         assert not list(db.scalars(select(Publication)))
         reviewer = db.scalar(select(AgentRun).where(AgentRun.task_id == article.task_id,
             AgentRun.agent_name == "marketing_editor"))
         assert reviewer is not None
-        # The fake model doesn't provide critic evidence. A missing verdict blocks auto-publish.
-        db.add(Artifact(product_id=company_id, task_id=article.task_id, agent_run_id=reviewer.id,
-            kind="seo_final_review", title="Проверка финальной версии",
-            content=json.dumps({"status": "no_material_issues",
-                                "reader_hash": reader_hash(content.reader_article)})))
+        # The fake model gave no clean critic verdict. It must not auto-publish.
+        review = db.scalar(select(Artifact).where(
+            Artifact.agent_run_id == reviewer.id, Artifact.kind == "seo_final_review"))
+        assert review is not None
+        review.content = json.dumps({"status": "no_material_issues",
+                                     "reader_hash": reader_hash(content.reader_article)})
         db.commit()
         outcome = publish_if_clear(db, article.id)
         assert outcome.published and outcome.slug
