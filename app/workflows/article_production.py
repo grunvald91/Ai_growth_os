@@ -180,6 +180,10 @@ GEO_RULES = (
     'Подзаголовки помогают чтению, но не обязаны быть одинаковыми или вопросительными; '
     'маркированные списки нужны лишь там, где список удобнее прозы. '
     'Никаких выдуманных статистики, цен, исследований и отзывов. '
+    'Из verified_product_facts выбирай ТОЛЬКО прямо относящиеся к теме сведения; '
+    'не заставляй читателя просматривать весь профиль компании. '
+    'Если подходящих подтверждённых фактов нет, оставь fact_renderings пустым. '
+    'Каждый использованный source_id должен существовать в verified_product_facts. '
     'Переводи интерес к услугам компании ненавязчиво; не называй несуществующие услуги.'
 )
 
@@ -941,8 +945,9 @@ class ArticleProduction:
                         if geo:
                             raise ValueError(geo)
                         ids = [fact.source_id for fact in candidate.fact_renderings]
-                        if len(ids) != len(set(ids)) or set(ids) != set(sources):
-                            raise ValueError('Revised article must preserve all verified source IDs exactly once')
+                        valid_scope = (set(ids) <= set(sources) if safe_request.seo_brief else set(ids) == set(sources))
+                        if len(ids) != len(set(ids)) or not valid_scope:
+                            raise ValueError('Article must reference only verified sources, each at most once')
                     return candidate
 
                 def record_model_call(stage, observed):
@@ -1096,8 +1101,10 @@ class ArticleProduction:
             reader_fact_ids = [item.source_id for item in reader_article.fact_renderings]
             if len(reader_fact_ids) != len(set(reader_fact_ids)):
                 raise ValueError('Human editor duplicated a verified fact source')
-            if set(reader_fact_ids) != set(facts):
-                raise ValueError('Human editor must render exactly the verified product facts')
+            valid_scope = (set(reader_fact_ids) <= set(facts) if safe_request.seo_brief else
+                           set(reader_fact_ids) == set(facts))
+            if not valid_scope:
+                raise ValueError('Human editor used unknown or missing verified product facts')
             for item in reader_article.fact_renderings:
                 if item.source_id not in facts:
                     raise ValueError('Human editor referenced an unknown verified fact')
@@ -1105,6 +1112,7 @@ class ArticleProduction:
             grounded_claims = [
                 GroundedClaim(claim=quote, source_id=source_id, quote=quote)
                 for source_id, quote in facts.items()
+                if not safe_request.seo_brief or source_id in reader_fact_ids
             ]
             fact_sections = []
             if grounded_claims:
