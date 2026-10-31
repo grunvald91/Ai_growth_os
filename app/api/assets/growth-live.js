@@ -2,10 +2,25 @@
 (function(){
  'use strict';
  const body=document.body, main=document.getElementById('main');
- try{body.classList.toggle('dark',localStorage.getItem('servgo-desktop-theme')==='dark')}catch(e){}
- document.getElementById('themeTop').addEventListener('click',()=>{
-  const dark=body.classList.toggle('dark');
-  try{localStorage.setItem('servgo-desktop-theme',dark?'dark':'light')}catch(e){}
+ const themeApi=window.ServGoTheme;
+ const themeTop=document.getElementById('themeTop');
+ const themeNames={light:'Светлая',dark:'Тёмная',system:'Как в системе'};
+ function syncTheme(){
+   const mode=themeApi ? themeApi.getPreference() : 'system';
+   const resolved=themeApi ? themeApi.resolve(mode) : 'light';
+   body.classList.toggle('dark',resolved==='dark');
+   if(themeTop) {
+     themeTop.title='Тема оформления: '+themeNames[mode]+'. Нажмите, чтобы переключить';
+     themeTop.setAttribute('aria-label',themeTop.title);
+   }
+ }
+ syncTheme();
+ window.addEventListener('servgo-themechange',syncTheme);
+ themeTop?.addEventListener('click',()=>{
+   if(!themeApi)return;
+   const available=['system','light','dark'];
+   const current=themeApi.getPreference();
+   themeApi.setPreference(available[(available.indexOf(current)+1)%available.length]);
  });
  document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.mobile-nav details[open]').forEach(d=>d.open=false);closeSearch()}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();search()}});
  const product=location.pathname.match(/\/studio\/products\/([0-9a-f-]{36})/i);

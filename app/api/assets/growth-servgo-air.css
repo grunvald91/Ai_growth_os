@@ -1,0 +1,75 @@
+/* ServGo Air adapter for the existing live Growth v4 shell.
+ * Semantic tokens are exported from BookingBot design-system.css.
+ * This stage changes colors/themes only, not Growth routing or business behavior.
+ */
+body[data-growth-design="v4"] {
+  --bg: var(--s-bg);
+  --card: var(--s-surface);
+  --tint: var(--s-surface-2);
+  --tint2: var(--s-surface-3);
+  --text: var(--s-text);
+  --muted: var(--s-muted);
+  --quiet: var(--s-muted-2);
+  --line: var(--s-line);
+  --blue: var(--s-accent);
+  --blue2: var(--s-accent-press);
+  --blue-dark: var(--s-accent);
+  --blue-soft: var(--s-accent-soft);
+  --green: var(--s-success);
+  --amber: var(--s-warning);
+  --red: var(--s-danger);
+  --shadow: var(--sh-2);
+  --radius: var(--r-xl);
+  --shadow-hover: var(--sh-pop);
+  color: var(--s-text);
+  background: var(--s-bg);
+  font-family: var(--ds-font);
+  color-scheme: normal;
+}
+html[data-theme="dark"] body[data-growth-design="v4"] {
+  color-scheme: dark;
+}
+body[data-growth-design="v4"] .brand-identity,
+body[data-growth-design="v4"] .mobile-brand {
+  background: var(--s-surface);
+}
+body[data-growth-design="v4"] .brand-main {
+  color: var(--s-text);
+}
+body[data-growth-design="v4"] .brand-main span {
+  color: var(--s-accent);
+}
+body[data-growth-design="v4"] .brand-sub {
+  color: var(--s-muted);
+}
+body[data-growth-design="v4"] .btn.blue {
+  background: var(--s-accent-grad);
+  color: var(--s-accent-ink);
+}
+body[data-growth-design="v4"] .nav-btn.active {
+  color: var(--s-accent);
+  background: var(--s-accent-soft);
+}
+body[data-growth-design="v4"] .icon-btn,
+body[data-growth-design="v4"] .cmd-search,
+body[data-growth-design="v4"] .field input,
+body[data-growth-design="v4"] .field select,
+body[data-growth-design="v4"] .field textarea {
+  color: var(--s-text);
+}
+body[data-growth-design="v4"] .topbar,
+body[data-growth-design="v4"] .sidebar,
+body[data-growth-design="v4"] .rail,
+body[data-growth-design="v4"] .mobile-nav {
+  background: var(--s-surface);
+  border-color: var(--s-line);
+}
+@media (prefers-reduced-motion: reduce) {
+  body[data-growth-design="v4"] *,
+  body[data-growth-design="v4"] *::before,
+  body[data-growth-design="v4"] *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}

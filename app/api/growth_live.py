@@ -92,6 +92,31 @@ def javascript():
     return Response((ASSETS/'growth-live.js').read_text(), media_type='application/javascript')
 
 
+# Explicit allowlist: v4 can only serve these reviewed same-origin design resources.
+@router.get('/studio/assets/servgo-air-tokens.css', include_in_schema=False)
+def air_tokens():
+    response = Response((ASSETS/'servgo-air-tokens.css').read_text(), media_type='text/css')
+    response.headers['Cache-Control'] = 'public, max-age=300'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+@router.get('/studio/assets/growth-servgo-air.css', include_in_schema=False)
+def air_adapter():
+    response = Response((ASSETS/'growth-servgo-air.css').read_text(), media_type='text/css')
+    response.headers['Cache-Control'] = 'public, max-age=300'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+@router.get('/studio/assets/servgo-air-theme.js', include_in_schema=False)
+def air_theme_script():
+    response = Response((ASSETS/'servgo-air-theme.js').read_text(), media_type='application/javascript')
+    response.headers['Cache-Control'] = 'public, max-age=300'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
 def artifact_content(content: str) -> str:
     """Readable structured results; raw model/transport JSON is not a UI."""
     labels = {'seeds':'Исходные запросы', 'clusters':'Группы запросов', 'queries':'Запросы',
