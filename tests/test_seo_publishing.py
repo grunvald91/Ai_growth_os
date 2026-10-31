@@ -182,6 +182,103 @@ async def test_rejected_article_stays_off_the_blog(env, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_explicit_owner_rejection_survives_a_later_clean_critic(env, tmp_path):
+    db, product = env
+    article_id = await make_article(db, product, tmp_path, critic_status="all_rejected")
+    assert not publish_if_clear(db, article_id).published
+    approval = db.scalar(select(Approval).where(Approval.artifact_id == article_id))
+    approval.status, approval.decided_by = "rejected", "owner:studio"
+    db.commit()
+
+    row = db.get(Artifact, article_id)
+    run = db.scalar(select(AgentRun).where(
+        AgentRun.task_id == row.task_id, AgentRun.agent_name == "marketing_editor"))
+    review = db.scalar(select(Artifact).where(
+        Artifact.agent_run_id == run.id, Artifact.kind == "seo_final_review"))
+    review.content = json.dumps({"status": "no_material_issues"})
+    db.commit()
+
+    # A retry after critic revision must not override an explicit veto.
+    outcome = publish_if_clear(db, article_id)
+    assert not outcome.published and outcome.reason == "owner_rejected"
+    assert not list(db.scalars(select(Publication)))
+    assert [(a.status, a.decided_by) for a in db.scalars(select(Approval))] == [
+        ("rejected", "owner:studio")]
+    assert row.status != ArtifactStatus.PUBLISHED
+
+
+@pytest.mark.asyncio
+async def test_manual_override_cannot_publish_article_without_reader_content(env, tmp_path):
+    from app.content.review import approve_material
+    db, product = env
+    article_id = await make_article(db, product, tmp_path, critic_status="all_rejected")
+    assert not publish_if_clear(db, article_id).published
+    row = db.get(Artifact, article_id)
+    data = json.loads(row.content)
+    data["reader_article"] = None
+    row.content = json.dumps(data, ensure_ascii=False)
+    db.commit()
+
+    # Explicit owner confirmation may override an editorial critic failure,
+    # but it cannot turn an unusable page into a public 200/500 route.
+    approve_material(db, tmp_path, product.id, article_id)
+    assert publish_owner_approved(db) == 0
+    assert not list(db.scalars(select(Publication)))
+    assert row.status != ArtifactStatus.PUBLISHED
+
+
+@pytest.mark.asyncio
+async def test_publication_recovery_skips_disabled_companies_before_limit(env, tmp_path):
+    from datetime import datetime, timezone
+    from app.models.domain import Task, TaskStatus
+    from app.seo.publishing import publish_pending
+
+    db, product = env
+    active_id = await make_article(db, product, tmp_path)
+    active_row = db.get(Artifact, active_id)
+    db.get(Task, active_row.task_id).title = "SEO-ARTICLE:active-recovery"
+
+    inactive = Product(name="SEO disabled company", slug="seo-disabled-company")
+    db.add(inactive)
+    db.flush()
+    for n in range(12):
+        task = Task(product_id=inactive.id, title=f"SEO-ARTICLE:inactive-{n}",
+                    assigned_agent="content_factory", status=TaskStatus.COMPLETED)
+        db.add(task)
+        db.flush()
+        db.add(Artifact(product_id=inactive.id, task_id=task.id, kind="article",
+                        title="Inactive draft", content="{}", status=ArtifactStatus.DRAFT,
+                        created_at=datetime(2020, 1, 1, tzinfo=timezone.utc)))
+    db.commit()
+
+    # The first twelve chronological drafts belong to the OFF company.
+    # They must never consume the ten eligible recovery slots.
+    assert publish_pending(db) == 1
+    assert db.get(Artifact, active_id).status == ArtifactStatus.PUBLISHED
+    assert len(list(db.scalars(select(Publication)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_publication_recovery_logs_failed_articles(env, tmp_path, monkeypatch, caplog):
+    from app.models.domain import Task
+    import app.seo.publishing as publishing
+
+    db, product = env
+    article_id = await make_article(db, product, tmp_path)
+    db.get(Task, db.get(Artifact, article_id).task_id).title = "SEO-ARTICLE:bad-recovery"
+    db.commit()
+
+    def fail(*_args):
+        raise RuntimeError("simulated transient publication error")
+
+    monkeypatch.setattr(publishing, "publish_if_clear", fail)
+    with caplog.at_level("ERROR", logger="app.seo.publishing"):
+        assert publishing.publish_pending(db) == 1
+    assert "SEO publication recovery failed for article" in caplog.text
+    assert not list(db.scalars(select(Publication)))
+
+
+@pytest.mark.asyncio
 async def test_changed_reader_does_not_require_new_approval(env, tmp_path):
     db, product = env
     article_id = await make_article(db, product, tmp_path)
