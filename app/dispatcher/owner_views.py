@@ -8,6 +8,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from app.dispatcher.outcome import Context, Outcome, links_block
+from app.dispatcher.registry import page_href
 from app.dispatcher.readers import ACTIVE, attention, plans, work_rows
 from app.models.domain import Artifact, Task
 
@@ -138,7 +139,7 @@ async def recommend_today(ctx: Context, params) -> Outcome:
     steps.append(("Проверить цифры бизнеса", "Записи, отмены и загрузку нужно сверить с источником.",
                   "analytics", "Открыть аналитику"))
     steps = steps[:5]
-    links = [{"label": label, "href": __import__("app.dispatcher.registry", fromlist=["page_href"]).page_href(page, ctx.product.id)}
+    links = [{"label": label, "href": page_href(page, ctx.product.id)}
              for _, _, page, label in steps]
 
     return Outcome(
