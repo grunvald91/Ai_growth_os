@@ -71,6 +71,7 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
     assert '/studio/assets/growth-live.css?v=8' in page.text
+    assert '/studio/assets/dispatcher.js?v=topic-ui-20261031' in page.text
     assert 'Простое видео' in page.text
     assert 'hero-intro' in page.text
     assert 'Добрый день, Марина' not in page.text
