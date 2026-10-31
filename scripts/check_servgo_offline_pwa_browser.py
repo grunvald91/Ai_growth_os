@@ -169,7 +169,7 @@ def main():
                 "Failed payment check must not trap schedule behind a modal"
             )
             owner_page.get_by_role("button", name="Выйти").first.click()
-            owner_page.wait_for_url(url + "/", timeout=15000)
+            owner_page.wait_for_url(url + "/login", timeout=15000)
             assert not any(cookie["name"] == "sg_shared" for cookie in owner.cookies()), (
                 "Logout failed to clear the shared HttpOnly cookie"
             )
