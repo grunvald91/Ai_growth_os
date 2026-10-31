@@ -64,6 +64,26 @@
  const suffix=base?location.pathname.slice(base.length):'';
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const glyph=n=>'<svg class="icon"><use href="#i-'+n+'"/></svg>';
+ // Internal worker identifiers belong in diagnostics, not in a business owner's cards.
+ const workerLabels={whiteboard_renderer:'Простое видео',company_intake:'Профиль компании',
+  distribution:'Публикация',seo_factory:'SEO-завод',content_factory:'Создание контента',
+  critic:'Проверка качества',research:'Аналитика'};
+ const friendlyWorker=value=>workerLabels[String(value||'').toLowerCase()]||
+  (/^[a-z0-9_-]+$/.test(String(value||''))?'ИИ-команда':String(value||'ИИ-команда'));
+ const friendlyTaskTitle=t=>{
+  const title=String(t.title||'Задание');
+  if(/^WHITEBOARD-JOB:\s*[a-f0-9-]{6,}$/i.test(title))
+   return String(t.detail||'Создание простого видео').replace(/^Рисованное видео:/i,'Простое видео:');
+  if(/^Request approval to publish own-site SEO article/i.test(title))
+   return 'Подтвердить публикацию SEO-статьи';
+  return title;
+ };
+ const friendlyTaskDetail=t=>{
+  const detail=String(t.detail||'');
+  if(/^Human-approval request only:/i.test(detail))
+   return 'Статья подготовлена. Проверьте её перед публикацией.';
+  return detail.replace(/^Рисованное видео:/i,'Простое видео:');
+ };
  if(base&&suffix==='/work'){
   const original=main.querySelector('.route-content');
   const view=document.createElement('section');view.className='v4-records';view.setAttribute('aria-live','polite');view.innerHTML='<p class="v4-loading">Загружаем данные компании…</p>';
@@ -74,7 +94,7 @@
     const labels={queued:'Запланировано',running:'В процессе',waiting_approval:'Ждут решения',completed:'Готово',failed:'Нужны действия',cancelled:'Отменено'};
     view.innerHTML='<div class="board animate-in">'+Object.entries(labels).map(([status,label])=>{
      const rows=data.tasks.filter(t=>t.status===status);
-     return '<section class="board-col"><div class="board-header"><b>'+label+'</b><span>'+rows.length+'</span></div>'+rows.map(t=>'<a class="board-card" href="'+base+'/tasks/'+encodeURIComponent(t.id)+'"><span class="chip '+(status==='waiting_approval'?'amber':'blue')+'">'+esc(t.group)+'</span><div style="margin-top:10px"><b>'+esc(t.title)+'</b><p>'+esc(t.detail.slice(0,200))+'</p></div><span class="link">Открыть '+glyph('arrow')+'</span></a>').join('')+(rows.length?'':'<div class="empty"><p>Нет заданий</p></div>')+'</section>';
+     return '<section class="board-col"><div class="board-header"><b>'+label+'</b><span>'+rows.length+'</span></div>'+rows.map(t=>'<a class="board-card" href="'+base+'/tasks/'+encodeURIComponent(t.id)+'"><span class="chip '+(status==='waiting_approval'?'amber':'blue')+'">'+esc(friendlyWorker(t.group))+'</span><div style="margin-top:10px"><b>'+esc(friendlyTaskTitle(t))+'</b><p>'+esc(friendlyTaskDetail(t).slice(0,200))+'</p></div><span class="link">Открыть '+glyph('arrow')+'</span></a>').join('')+(rows.length?'':'<div class="empty"><p>Нет заданий</p></div>')+'</section>';
     }).join('')+'</div>';
    }
    original.hidden=true;
