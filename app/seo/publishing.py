@@ -19,6 +19,7 @@ from app.seo.clustering import normalize
 from app.services.approvals import ApprovalService
 from app.tools import ToolOperation
 from app.workflows.article_contracts import ArticleArtifact
+from app.seo.activation import is_enabled
 
 CHANNEL = "own_site"
 CLEAN_CRITIC_STATUSES = frozenset({"no_material_issues", "revised"})
@@ -103,6 +104,8 @@ def publish_if_clear(db: Session, article_id) -> Outcome:
         raise LookupError("Article not found")
     if row.status == ArtifactStatus.PUBLISHED:
         return Outcome(True, "already_published")
+    if not is_enabled(db, row.product_id):
+        return Outcome(False, "seo_disabled")
     article = ArticleArtifact.model_validate_json(row.content)
     problems = static_problems(article)
     verdict = critic_verdict(db, row.task_id, article.reader_article)
@@ -148,6 +151,8 @@ def publish_owner_approved(db: Session) -> int:
         row = db.get(Artifact, approval.artifact_id)
         if row is None or row.kind != "article" or row.status == ArtifactStatus.PUBLISHED:
             continue
+        if not is_enabled(db, row.product_id):
+            continue
         owner_said_yes = approval.status == "approved" or row.status == ArtifactStatus.APPROVED
         if not owner_said_yes or db.scalar(select(Publication.id).where(Publication.artifact_id == row.id).limit(1)):
             continue
@@ -168,6 +173,8 @@ def publish_pending(db: Session) -> int:
         Task.status == TaskStatus.COMPLETED, Task.title.like("SEO-ARTICLE:%"))
         .order_by(Artifact.created_at, Artifact.id).limit(10)))
     for row in rows:
+        if not is_enabled(db, row.product_id):
+            continue
         try:
             publish_if_clear(db, row.id)
         except Exception:
