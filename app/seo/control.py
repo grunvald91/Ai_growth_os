@@ -45,7 +45,10 @@ def change_seo_run(db: Session, *, product_id: UUID, task_id: UUID, action: str)
     """Atomic, tenant-scoped status CAS. Never alter running/completed runs."""
     _product_lock(db, product_id)
     if action == "retry":
-        require_enabled(db, product_id)
+        try:
+            require_enabled(db, product_id)
+        except ValueError as exc:
+            raise SeoControlError(str(exc)) from exc
     task = db.scalar(select(Task).where(
         Task.id == task_id,
         Task.product_id == product_id,
