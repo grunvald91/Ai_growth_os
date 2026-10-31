@@ -249,6 +249,13 @@ def main():
                 page.wait_for_function("() => !document.querySelector('#dp-form').classList.contains('voice-recording')")
                 page.wait_for_function("() => !document.querySelector('#dp-form').classList.contains('voice-processing')")
                 assert len(voice_calls)==2,voice_calls
+                # Voice processing clears immediately before the async dispatch
+                # request reaches the mocked HTTP handler. Wait for that
+                # observable event instead of relying on a browser scheduler race.
+                for _ in range(30):
+                    if len(dispatch_calls) >= 3:
+                        break
+                    page.wait_for_timeout(100)
                 assert len(dispatch_calls)==3,dispatch_calls
                 assert not [error for error in errors if error.startswith('js:')],errors
                 result['checks'].append({'page':'voice-hold-mock','width':390,
