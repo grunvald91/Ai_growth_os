@@ -182,6 +182,25 @@ async def test_publication_is_retried_after_transient_failure(env, tmp_path, mon
 
 
 @pytest.mark.asyncio
+async def test_public_article_shows_fact_renderings_as_reader_prose(env, tmp_path):
+    from app.api.public_blog import _article
+    db, product = env
+    article_id = await make_article(db, product, tmp_path)
+    assert publish_if_clear(db, article_id).published
+    row = db.get(Artifact, article_id)
+    data = json.loads(row.content)
+    data["reader_article"]["fact_renderings"] = [
+        {"source_id": "catalog-service", "text": "В этой мастерской собирают букеты на заказ."}
+    ]
+    row.content = json.dumps(data, ensure_ascii=False)
+    db.commit()
+    publication = db.scalar(select(Publication).where(Publication.artifact_id == article_id))
+    public = _article(row, publication)
+    assert public["company_facts"] == ["В этой мастерской собирают букеты на заказ."]
+    assert "source_id" not in str(public["company_facts"])
+
+
+@pytest.mark.asyncio
 async def test_business_blog_uses_verified_link_and_own_booking_route(env, tmp_path):
     db, product = env
     second = Product(name="Other business", slug="company-other")
