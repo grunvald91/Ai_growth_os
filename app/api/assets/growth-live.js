@@ -87,7 +87,7 @@
   (/^[a-z0-9_-]+$/.test(String(value||''))?'ИИ-команда':String(value||'ИИ-команда'));
  const friendlyTaskTitle=t=>{
   const title=String(t.title||'Задание');
-  if(/^WHITEBOARD-JOB:\\s*[a-f0-9-]{6,}$/i.test(title))
+  if(/^WHITEBOARD-JOB:\s*[a-f0-9-]{6,}$/i.test(title))
    return String(t.detail||'Создание простого видео').replace(/^Рисованное видео:/i,'Простое видео:');
   if(/^Request approval to publish own-site SEO article/i.test(title))
    return 'Подтвердить публикацию SEO-статьи';
