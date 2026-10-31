@@ -9,6 +9,10 @@ on:
       - 'tests/test_studio_sso.py'
       - 'tests/test_public_company_seo_pages.py'
       - 'tests/test_public_company_blog.py'
+      - 'tests/test_seo_referrals.py'
+      - 'web/api/seo_referrals.py'
+      - 'web/api/routes/seo_reporting.py'
+      - 'migrations/add_seo_booking_attributions.sql'
       - 'tests/test_growth_gateway_contract.py'
       - 'tests/test_mail_same_origin.py'
       - 'bot/services/notifications.py'
@@ -116,6 +120,8 @@ jobs:
             web/api/routes/notifications.py \
             web/api/routes/client.py \
             web/api/routes/seo_pages.py \
+            web/api/routes/seo_reporting.py \
+            web/api/seo_referrals.py \
             web/api/schemas.py
 
       - name: Install API dependencies for protected Mail PWA tests
@@ -143,6 +149,7 @@ jobs:
         run: |
           python tests/test_public_company_blog.py
           python tests/test_public_company_seo_pages.py
+          python tests/test_seo_referrals.py
           python tests/test_booking_safety.py
           python tests/test_notification_rules.py
           python tests/test_email_utils.py
