@@ -8,7 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_source_is_pinned_to_verified_booking_main_and_only_api_files():
     assert BASE_SHA == 'fe6777bf5238559ead8e660157d570dca277fed8'
-    assert len(FILES) == 11
+    assert len(FILES) == 12
+    assert 'web/api/routes/client.py' in FILES, 'SEO company blogs must ship with the backend'
     assert all(p.startswith('web/api/') for p in FILES)
     assert len(set(FILES)) == len(FILES)
 
