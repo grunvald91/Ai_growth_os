@@ -3,6 +3,39 @@
 Состояние на 31.10.2026. **Интеграционная ветка, не production.**
 **Текущие кандидаты:** [BookingBot #109](https://github.com/grunvald91/booking_bot/pull/109) и [Growth #186](https://github.com/grunvald91/Ai_growth_os/pull/186). Исходные #107/#108/#184 остаются историческими review-PR. Production по-прежнему SW v3; SW v4 и Gateway не развёрнуты.
 
+## Финальная кодовая ревизия SEO + PWA (31.10.2026)
+
+Этот пункт фиксирует **кодовую**, а не серверную готовность. В production
+не вносились изменения в рамках этой ревизии; объединение #109 в main
+запустит автоматический деплой frontend и требует отдельного решения.
+
+| Ранее выявленный P1 | Статус в кандидатной ветке | Подтверждающий путь |
+|---|---|---|
+| Logout расписания восстанавливал общую cookie-сессию | Исправлено в коде: `clearLogin()` устанавливает общий tombstone, удаляет JWT, вызывает `POST /auth/logout`; backend удаляет cookie | `web/frontend/src/authUtils.ts`, `web/frontend/src/App.tsx`, `web/api/routes/auth.py` |
+| SW мог кешировать личный HTML и выдавать его offline | Исправлено в коде: network-only private navigation, static offline shell, изолированные IndexedDB-снимки на 7 дней, очистка при logout; офлайн-правки запрещены | `web/frontend/public/sw.js`, `web/frontend/src/utils/offlineStore.ts`, `web/frontend/tests/sw-security.test.mjs`, `web/frontend/tests/offline-store.test.mjs` |
+| Неудачная проверка предоплаты блокировала offline-расписание | Исправлено: при offline/error уведомление без блокирующей модалки; даже при новой предоплате окно можно свернуть, не отменяя проверку | `web/frontend/src/components/AdminPaymentAttention.tsx`, `web/frontend/tests/prepayment-modal.test.mjs` |
+| Одновременные изменения статуса кампании могли конфликтовать | Исправлено в Growth #186: атомарный compare-and-swap по прежнему статусу, отказ в случае гонки | `Ai_growth_os/app/services/campaign_lifecycle.py`, `Ai_growth_os/tests/test_growth_campaign_lifecycle.py` |
+| Backend-релиз не доставлял маршруты блога компаний | Подготовлен отдельный guarded API-only rollout с зависимостями; **сам backend пока не выпущен** | `scripts/servgo_unified_api_release.py`, `tests/test_servgo_unified_api_release.py` |
+
+До последнего frontend-изменения **BookingBot PWA CI** был зелёным:
+https://github.com/grunvald91/booking_bot/actions/runs/41236696139 .
+Для Growth #186 зелёный полный CI:
+https://github.com/grunvald91/Ai_growth_os/actions/runs/41236956656 .
+Каждый новый head требует собственного подтверждённого CI, а не
+переноса зелёного статуса с предыдущего SHA.
+
+**Остаток, который невозможно закрыть без отдельного практического
+выпуска:** backup и `nginx -t` действующего конфигурационного контекста,
+доставка совместимых API/HTML/sitemap и Growth migrations, проверка
+на настоящем сервере (включая оба старых домена), внешний HTTP/robots
+и фактическая доступность `OAI-SearchBot`/Googlebot/YandexBot;
+подключение реальных учётных данных Search Console и Вебмастера.
+Без этих действий не утверждать, что страницы уже индексируются
+или цитируются AI-поиском.
+
+**Не менять флаги gateway, не запускать платные фабрики на demo,
+не делать merge/deploy при одной только успешной CI.**
+
 ## Что вошло в проверяемую сборку
 
 | Область | Исходный PR | Интеграционная версия |
