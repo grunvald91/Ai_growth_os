@@ -374,6 +374,7 @@ export interface CreateBookingData {
   personal_data_consent?: boolean;
   booking_terms_accepted?: boolean;
   repeat_weeks?: number;
+  seo_ref?: string;
 }
 
 export interface CRMContact {
