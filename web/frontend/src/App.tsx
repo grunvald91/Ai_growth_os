@@ -98,11 +98,13 @@ function App() {
     let active = true
     async function restoreAuth() {
       try {
-        if (sessionStorage.getItem('servgoExplicitLogout') === '1') return
+        if (sessionStorage.getItem('servgoExplicitLogout') === '1' ||
+            localStorage.getItem('servgoExplicitLogout') === '1') return
         const initData = window.Telegram?.WebApp?.initData
         if (initData) {
           try {
             const login = await api.telegramAuth(initData)
+            if (!active || localStorage.getItem('servgoExplicitLogout') === '1') return
             saveLogin(login)
             // Мастера, открывшего сайт из Telegram, один раз за сеанс ведём сразу в его расписание.
             if (window.location.pathname === '/' && !sessionStorage.getItem('servgoMasterRedirect')) {
@@ -128,7 +130,10 @@ function App() {
         // Existing browser cookie from an authenticated Telegram session.
         // Never use it after the user explicitly logged out.
         try {
-          saveLogin(await api.sharedSession())
+          const session = await api.sharedSession()
+          if (!active || localStorage.getItem('servgoExplicitLogout') === '1' ||
+              sessionStorage.getItem('servgoExplicitLogout') === '1') return
+          saveLogin(session)
         } catch {
           // Not every visitor has a shared Telegram session.
         }
