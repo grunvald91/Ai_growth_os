@@ -6,6 +6,7 @@ Credentials are server-side only and never written to the database/logs.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -56,10 +57,14 @@ def _empty(status: str, *, period_days: int) -> dict:
 
 
 def _number(raw) -> float:
+    # Invalid provider values are NOT zero clicks or impressions. Fail the
+    # provider report closed, preserving "unknown" in the owner's dashboard.
     if isinstance(raw, bool) or not isinstance(raw, (float, int)):
-        return 0.0
+        raise ValueError("Invalid search metric")
     value = float(raw)
-    return value if 0 <= value < 1e15 else 0.0
+    if not math.isfinite(value) or not 0 <= value < 1e15:
+        raise ValueError("Invalid search metric")
+    return value
 
 
 def _rows_permitted(rows: list[dict], urls: list[str]) -> tuple[list[dict], float, float]:
