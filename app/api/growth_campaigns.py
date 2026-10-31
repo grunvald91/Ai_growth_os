@@ -13,6 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -209,7 +210,19 @@ async def update_campaign(product_id: UUID, experiment_id: UUID,
     clearing = {key: None for key, _ in FIELDS if key not in ("name", "hypothesis")
                 and not values.get(key, "").strip()}
     try:
-        ExperimentService(db).update(record.id, **fields, **clearing)
+        # The GET/read validation is not enough: approval can commit in another
+        # transaction before this save. Only a still-draft, still-owned record
+        # may be updated (single SQL compare-and-swap).
+        saved = db.execute(
+            update(Experiment).where(
+                Experiment.id == experiment_id,
+                Experiment.product_id == product_id,
+                Experiment.status == "draft",
+            ).values(**fields, **clearing).execution_options(synchronize_session="fetch")
+        )
+        if saved.rowcount != 1:
+            db.rollback()
+            raise HTTPException(409, "Кампания уже согласована или изменена. Обновите страницу.")
         db.commit()
     except IntegrityError:
         db.rollback()
