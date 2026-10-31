@@ -166,7 +166,7 @@ def page(product, title, body, *, status=200, refresh=False):
     if refresh:
         headers['Refresh'] = '8'
     return HTMLResponse(studio_page_shell(product, active='create', title=title,
-        subtitle='Рисованное объяснение с русской озвучкой · 30 секунд или минута · 9:16', body=body), status_code=status, headers=headers)
+        subtitle='Анимированное объяснение с русской озвучкой · 30 секунд или минута · 9:16', body=body), status_code=status, headers=headers)
 
 
 def approval_card(state, product_id, error=None):
@@ -202,7 +202,7 @@ def approval_card(state, product_id, error=None):
             f'<span>Разрешаю платную генерацию этого видео: до {state["max_api_calls"]} API-вызовов</span></label>'
             '<button class="btn primary" type="submit">Подтвердить и сгенерировать</button></form>'
             f'<form method="post" action="{base}/cancel"><button class="btn secondary" type="submit">Остановить задание</button></form>'
-            f'<a class="wb-back" href="/studio/products/{product_id}/whiteboard">К рисованным видео →</a></footer></section>')
+            f'<a class="wb-back" href="/studio/products/{product_id}/whiteboard">К простым видео →</a></footer></section>')
 
 
 def job_html(state, product_id, *, error=None):
@@ -330,7 +330,7 @@ def job_html(state, product_id, *, error=None):
             body += (f'<form method="post" action="{base}/repair" class="sg-form">'
                      '<button class="btn secondary">Переделать рисунки, сохранить озвучку</button>'
                      '<small>Сначала создаётся запрос на проверку и исправление рисунков. Платные вызовы начнутся только после подтверждения; сценарий и звук не генерируются заново.</small></form>')
-    body += f'<p><a href="/studio/products/{product_id}/whiteboard">К рисованным видео</a></p></section>'
+    body += f'<p><a href="/studio/products/{product_id}/whiteboard">К простым видео</a></p></section>'
     return body
 
 
@@ -448,7 +448,7 @@ async def studio_index(product_id: UUID, db: Session = Depends(get_db), settings
     tasks = list(db.scalars(select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT)
                            .order_by(Task.created_at.desc(), Task.id.desc()).limit(20)))
     body += history_html([_load(db, product_id, task.id) for task in tasks], product_id)
-    return page(product, 'Рисованное видео', body)
+    return page(product, 'Простое видео', body)
 
 
 @router.post('/studio/products/{product_id}/whiteboard')
