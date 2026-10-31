@@ -211,6 +211,33 @@ def main():
                     'compact_composer':True,'real_touch_long_press':True,
                     'no_native_text_selection':True})
                 page.screenshot(path=str(OUT/'voice-hold-390.png'),animations='disabled')
+                # The conversation must not retain the centered empty-home
+                # layout, or reserve a separate band for New Topic above chat.
+                assert page.locator('body').evaluate("el=>!el.classList.contains('home-empty')")
+                assert page.locator('#dp-new').is_visible()
+                assert page.locator('#dp-new').evaluate(
+                    "el=>el.parentElement.classList.contains('command-tools')")
+                geometry=page.evaluate("""() => {
+                  const main=document.querySelector('#main').getBoundingClientRect(),
+                    feed=document.querySelector('#dp-feed').getBoundingClientRect(),
+                    composer=document.querySelector('#dp-form').getBoundingClientRect(),
+                    topic=document.querySelector('#dp-new').getBoundingClientRect(),
+                    toolbar=document.querySelector('.command-tools').getBoundingClientRect();
+                  return {gap:feed.top-main.top,topicTop:topic.top,
+                          composerBottom:composer.bottom,toolbarTop:toolbar.top};
+                }""")
+                assert geometry['gap']<=45, f"Separate header band still visible: {geometry}"
+                assert geometry['topicTop']>=geometry['composerBottom'], geometry
+                assert geometry['topicTop']>=geometry['toolbarTop'], geometry
+                page.screenshot(path=str(OUT/'chat-no-top-band-390.png'),animations='disabled')
+                page.route('**/studio/products/*/dispatch/new',
+                           lambda route:route.fulfill(status=200,content_type='application/json',
+                               body=json.dumps({'hints':[]})))
+                page.locator('#dp-new').click()
+                page.wait_for_function("() => document.body.classList.contains('home-empty') && !document.querySelector('.dp-home').classList.contains('has-feed')")
+                assert page.locator('#dp-new').is_hidden()
+                result['checks'].append({'page':'topic-toolbar-390','no_blank_header_band':True,
+                    'new_topic_in_shortcuts':True,'empty_state_restored':True})
                 browser.close()
         finally:
             server.should_exit=True
