@@ -168,7 +168,19 @@ def main():
             assert owner_page.locator('[role="alertdialog"]').count() == 0, (
                 "Failed payment check must not trap schedule behind a modal"
             )
-            owner_page.get_by_role("button", name="Выйти").first.click()
+            owner_page.wait_for_function(
+                "() => localStorage.getItem('userRole') === 'owner' && "
+                "!!document.querySelector('button[aria-label=\\\"Выйти\\\"]')",
+                timeout=15000,
+            )
+            # The schedule header is re-mounted during its initial data loads.
+            # DOM click avoids Playwright's stable-box retry on the detached
+            # header; the same real React onClick handler still runs.
+            owner_page.evaluate("""() => {
+                const button = document.querySelector('button[aria-label="Выйти"]');
+                if (!button) throw Error('Schedule logout control missing');
+                button.click();
+            }""")
             owner_page.wait_for_url(url + "/login", timeout=15000)
             assert not any(cookie["name"] == "sg_shared" for cookie in owner.cookies()), (
                 "Logout failed to clear the shared HttpOnly cookie"
