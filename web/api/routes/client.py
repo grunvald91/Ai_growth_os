@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, func, and_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -693,7 +693,7 @@ async def create_booking_visit(
 
     # Only a signed reference minted for this active business is counted.
     # Invalid/absent SEO referrals do not interfere with customer booking.
-    seo_article_slug = read_reference(body.seo_ref, body.business_id)
+    seo_article_slug = read_reference(getattr(body, "seo_ref", None), body.business_id)
 
     legal_enabled = bool(getattr(business, "legal_documents_enabled", False))
     legal_accepted_at = None
@@ -904,15 +904,19 @@ async def create_booking_visit(
 
     try:
         if seo_article_slug and created_bookings:
-            # Multi-service or recurring bookings create several rows.
-            # Attribute the initial visit only; one click is one acquired booking.
-            # Migrate seo_booking_attributions before enabling SEO_ATTRIBUTION_SECRET.
+            # One reference per visit. A failure in optional marketing storage
+            # must not roll back the customer's real booking transaction.
             await db.flush()
-            db.add(SeoBookingAttribution(
-                business_id=body.business_id,
-                booking_id=created_bookings[0].id,
-                article_slug=seo_article_slug,
-            ))
+            try:
+                async with db.begin_nested():
+                    db.add(SeoBookingAttribution(
+                        business_id=body.business_id,
+                        booking_id=created_bookings[0].id,
+                        article_slug=seo_article_slug,
+                    ))
+                    await db.flush()
+            except SQLAlchemyError as exc:
+                logger.warning("SEO referral attribution skipped: %s", type(exc).__name__)
         if commit:
             await db.commit()
         else:
