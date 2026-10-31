@@ -1,7 +1,7 @@
 """Guarded, scoped ServGo PWA API rollout; defaults to read-only preflight.
 
 The existing BookingBot frontend deployment does NOT ship web/api/. This tool
-deploys only the twelve reviewed backend files of the integrated Growth/Mail
+deploys only the reviewed backend dependencies of the integrated Growth/Mail/SEO
 candidate, refusing any production-only divergence instead of overwriting it.
 Runs only on an explicit manual operator invocation with APPLY=true.
 """
@@ -21,8 +21,12 @@ from scripts.deploy_business_creation_and_reminders import ROOT, WEB_SERVICE, co
 
 BASE_SHA = "fe6777bf5238559ead8e660157d570dca277fed8"
 FILES = (
+    "database/models.py",  # SeoBookingAttribution ORM mapping; original DB schema is preserved.
     "web/api/main.py",
     "web/api/routes/client.py",  # Public business blog feed and article routes
+    "web/api/routes/seo_pages.py",  # Server-side HTML and sitemap for company articles.
+    "web/api/routes/seo_reporting.py",  # Owner-only booking attribution aggregation.
+    "web/api/seo_referrals.py",  # Signed attribution and verified booking links.
     "web/api/routes/studio_sso.py",
     "web/api/routes/owner_mail.py",
     "web/api/routes/mail_pwa.py",
@@ -34,6 +38,18 @@ FILES = (
     "web/api/routes/servgo-mail-air.css",
     "web/api/routes/servgo-mail-theme-picker.js",
 )
+# These are new backend files; they may legitimately be missing on the server.
+# Every other file must exist at BASE_SHA and may only be updated from that baseline.
+ADDED_FILES = frozenset({
+    "web/api/routes/seo_pages.py",
+    "web/api/routes/seo_reporting.py",
+    "web/api/seo_referrals.py",
+    "web/api/routes/mail_pwa.py",
+    "web/api/routes/servgo-air-theme.js",
+    "web/api/routes/servgo-air-tokens.css",
+    "web/api/routes/servgo-mail-air.css",
+    "web/api/routes/servgo-mail-theme-picker.js",
+})
 BACKUP_ROOT = ROOT + "/.servgo-pwa-api-releases"
 
 
@@ -58,12 +74,7 @@ def baseline(repo: Path, path: str) -> bytes | None:
         return proc.stdout
     # These files were created by this feature; other missing baseline paths
     # would be an unexpected error rather than permission to overwrite.
-    if path in (
-        "web/api/routes/mail_pwa.py", "web/api/routes/servgo-air-theme.js",
-        "web/api/routes/servgo-air-tokens.css",
-        "web/api/routes/servgo-mail-air.css",
-        "web/api/routes/servgo-mail-theme-picker.js",
-    ):
+    if path in ADDED_FILES:
         return None
     raise RuntimeError(f"Baseline missing for existing file: {path}")
 
@@ -85,6 +96,8 @@ def main() -> None:
     # Do not let a source ref from elsewhere silently replace production.
     if not (repo / "web/frontend/public/sw.js").read_text().count("servgo-pwa-v4"):
         raise RuntimeError("Expected integrated v4 source branch")
+    # The SQL migration stays a distinct, explicitly approved database step:
+    # code release alone must not silently change live schema or enable tracking.
     desired = {path: (repo / path).read_bytes() for path in FILES}
     original_ref = {path: baseline(repo, path) for path in FILES}
     for path in FILES:
