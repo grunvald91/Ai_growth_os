@@ -85,3 +85,44 @@ Growth OS [`deploy-growth.yml`](https://github.com/grunvald91/Ai_growth_os/blob/
 9. Выполнить Android/iOS/desktop E2E. При ошибках — сначала выключить **issuer flags** в BookingBot, затем после истечения/завершения новых сессий откатить gateway и nginx.
 
 Текущий git-статус: **новые флаги выключены; main и production не переключены**. Проверки CI не эквивалентны тесту установленного приложения на реальном сервере.
+
+
+## Повторная ревизия пяти P1 перед объединением (31.10.2026)
+
+Эта секция описывает **код и CI review-ветки**, не фактический production.
+
+1. **Выход и cookie-сессия.** `web/frontend/src/authUtils.ts`
+   устанавливает `servgoExplicitLogout` в localStorage/sessionStorage,
+   вызывает серверный `POST /auth/logout`, затем удаляет офлайн-снимки.
+   `web/api/routes/auth.py` удаляет HttpOnly-cookie с тем же path/domain.
+   `App.tsx` не выполняет повторный silent login, когда установлен флаг
+   явного выхода. Возврат offline после безуспешного сетевого logout
+   блокируется локально, но удаление cookie на сервере требует соединения.
+2. **Обновление Service Worker.** `web/frontend/public/sw.js`
+   использует временное поколение кеша и сохраняет предыдущее успешное.
+   `web/frontend/tests/sw-security.test.mjs` содержит тест падения при
+   precache и сохранения рабочего app shell.
+3. **Предоплаты и офлайн-расписание.**
+   `web/frontend/src/components/AdminPaymentAttention.tsx` при
+   отсутствии сети очищает устаревший платежный контекст; сбой запроса
+   выводится небольшим уведомлением, а не блокирующей модалкой.
+4. **Сохранение уже согласованной кампании.**
+   `Growth app/api/growth_campaigns.py` выполняет SQL UPDATE только
+   при `status=draft`, с проверкой `rowcount==1`.
+   Если другая транзакция успела перевести статус, возвращается HTTP 409.
+5. **Полный релиз backend блога.** `scripts/servgo_unified_api_release.py`
+   включает `web/api/routes/seo_pages.py`, `seo_reporting.py`,
+   `seo_referrals.py` и зависимые модули. Workflow
+   `servgo-unified-api-release.yml` по умолчанию запускается в режиме
+   read-only; реальные записи требуют отдельного `workflow_dispatch`
+   с `apply=true`.
+
+Это конкретные исправления по пяти пунктам аудита, а **не снятие всех
+релизных ограничений**. Для общего выпуска ещё нужны миграции Growth
+`0011_seo_factory_opt_in.py` и Booking
+`migrations/add_seo_booking_attributions.sql`, настройка nginx rewrite
+`deploy/nginx/servgo-company-blog.conf`, секрет атрибуции, настройка
+Growth public blog upstream и проверка действующих HTTPS-путей.
+`growth.servgo.ru` и `mail.servgo.ru` сохраняются без редиректа.
+Автоматическое объединение PR или включение gateway-флагов здесь не
+выполнялось.
