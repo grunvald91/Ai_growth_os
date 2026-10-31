@@ -96,6 +96,29 @@ def test_pilot_dashboard_shows_queued_and_deferred_articles(env):
     assert seo_runs(db, other_pid) == []
 
 
+def test_search_insights_do_not_invent_search_traffic_or_ai_citations(env):
+    client, db, pid, other_pid = env
+    article = Artifact(product_id=pid, kind="article", title="SEO-статья",
+                       content="{}", status=ArtifactStatus.PUBLISHED)
+    db.add(article)
+    db.flush()
+    db.add(Publication(product_id=pid, artifact_id=article.id, channel="own_site",
+                       status="published", external_reference="/blog/seo-article",
+                       published_at=datetime.now(timezone.utc)))
+    db.commit()
+    response = client.get(url(pid, "/insights"))
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    report = response.json()
+    assert report["published_articles"] == 1
+    assert report["hidden_articles"] == 0
+    assert report["search_sources"]["google_search_console"]["clicks"] is None
+    assert report["search_sources"]["yandex_webmaster"]["impressions"] is None
+    assert report["search_sources"]["bing_ai_performance"]["citations"] is None
+    assert "неизвестны" in client.get(url(pid)).text
+    assert client.get(url(other_pid, "/insights")).json()["published_articles"] == 0
+
+
 def test_owner_can_hide_and_restore_company_article_without_creating_a_second_url(env):
     client, db, pid, other_pid = env
     article = Artifact(product_id=pid, kind="article", title="Оригинальная статья",
