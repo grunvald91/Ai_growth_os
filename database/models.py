@@ -491,6 +491,26 @@ class Booking(Base):
     )
 
 
+
+class SeoBookingAttribution(Base):
+    """One verified article referral per booking visit, never per service row.
+
+    Created only when a valid signed token came from a published ServGo article.
+    No client contact data; status is read from the original Booking row.
+    """
+    __tablename__ = "seo_booking_attributions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    business_id: Mapped[int] = mapped_column(
+        ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    booking_id: Mapped[int] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    article_slug: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+
 class EmployeeDayOff(Base):
     """Выходные дни сотрудников"""
     __tablename__ = "employee_days_off"
