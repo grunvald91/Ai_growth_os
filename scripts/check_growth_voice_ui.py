@@ -113,7 +113,8 @@ def main():
                 assert response and response.status==200
                 assert page.locator('#dp-mic').count()==0, 'v4 must have no microphone button'
                 assert page.locator('#dp-press-hint').count()==0, 'hint belongs inside composer'
-                assert page.locator('#dp-input').get_attribute('placeholder')=='Удерживайте, чтобы говорить'
+                assert page.locator('#dp-input').get_attribute('placeholder')=='Нажмите — текст · удерживайте — голос'
+                assert page.locator('#dp-mode-mic').is_hidden(), 'mic should appear only in text mode'
                 assert page.locator('#dp-voice-overlay').count()==1
                 assert page.locator('#dp-voice-hitbox').count()==1, 'Android touch guard missing'
                 guard = page.locator('#dp-voice-hitbox').evaluate("""element => ({
@@ -143,7 +144,24 @@ def main():
                 page.wait_for_timeout(270)
                 assert page.evaluate('window.__mockMicStarts')==0, 'short tap started audio'
                 assert page.locator('#dp-input').evaluate("el=>document.activeElement===el")
+                assert page.locator('#dp-mode-mic').is_visible(), 'typing must reveal mic switch'
+                assert page.locator('#dp-input').get_attribute('placeholder')=='Введите команду…'
+                assert page.locator('#dp-voice-hitbox').evaluate(
+                  "e=>getComputedStyle(e).pointerEvents")=='none', 'typing must allow cursor placement'
                 page.locator('#dp-input').fill('Мой незавершённый текст')
+                # Holding the editable textarea does not trigger voice recording.
+                pointer('pointerdown',20)
+                page.wait_for_timeout(270)
+                pointer('pointerup',20)
+                assert page.evaluate('window.__mockMicStarts')==0, 'typing long press started recording'
+                # Tap the small mic once: hide keyboard, preserve text, restore hold gesture.
+                page.locator('#dp-mode-mic').dispatch_event(
+                    'pointerdown',{'bubbles':True,'cancelable':True,'button':0,'pointerType':'touch','pointerId':51})
+                assert page.locator('#dp-mode-mic').is_hidden()
+                assert not page.locator('#dp-input').evaluate("el=>document.activeElement===el"), 'keyboard was not dismissed'
+                assert page.locator('#dp-voice-hitbox').evaluate(
+                  "e=>getComputedStyle(e).pointerEvents")=='auto', 'voice hitbox not restored'
+                assert page.locator('#dp-input').input_value()=='Мой незавершённый текст'
                 pointer('pointerdown',12)
                 page.wait_for_function("() => window.__mockMicStarts===1 && document.querySelector('#dp-form').classList.contains('voice-recording')")
                 page.wait_for_timeout(180)
@@ -194,17 +212,31 @@ def main():
                 assert dispatch_calls[0]['client_key']==dispatch_calls[1]['client_key'], 'retry lost idempotency key'
                 assert page.locator('#dp-voice-note').is_hidden()
 
-                # Actual touchscreen long-press on the visible placeholder:
-                # must not select text, raise context menu or cancel audio.
+                # Physical touch on the contextual mic exits typing mode before
+                # the hold gesture, including with an already focused editor.
                 page.locator('#dp-input').evaluate("el=>el.focus()")
                 page.wait_for_function("() => document.querySelector('#dp-form').classList.contains('voice-text-editing')")
+                assert page.locator('#dp-mode-mic').is_visible()
                 assert page.locator('#dp-voice-hitbox').evaluate(
-                  "e=>getComputedStyle(e).pointerEvents")=='auto', 'focused input disabled the hold guard'
+                  "e=>getComputedStyle(e).pointerEvents")=='none', 'caret surface should be editable'
+                mic_box=page.locator('#dp-mode-mic').bounding_box()
+                assert mic_box is not None
+                mx=mic_box['x']+mic_box['width']/2
+                my=mic_box['y']+mic_box['height']/2
+                cdp=context.new_cdp_session(page)
+                cdp.send('Input.dispatchTouchEvent',{'type':'touchStart',
+                         'touchPoints':[{'x':mx,'y':my,'id':40}]})
+                cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
+                page.wait_for_function("() => !document.querySelector('#dp-form').classList.contains('voice-text-editing')")
+                assert page.locator('#dp-mode-mic').is_hidden()
+                assert not page.locator('#dp-input').evaluate("e=>document.activeElement===e")
+                assert page.locator('#dp-input').input_value()=='Мой незавершённый текст'
+                # Now a real long touch on the hold surface must not select
+                # text, open a context menu or cancel the microphone.
                 guard_box=page.locator('#dp-voice-hitbox').bounding_box()
                 assert guard_box is not None
                 hit_x=guard_box['x']+guard_box['width']*.55
                 hit_y=guard_box['y']+guard_box['height']*.5
-                cdp=context.new_cdp_session(page)
                 page.evaluate("() => { document.getSelection()?.removeAllRanges(); window.__voiceContextMenus=0; document.addEventListener('contextmenu', () => window.__voiceContextMenus++); }")
                 cdp.send('Input.dispatchTouchEvent',{'type':'touchStart',
                          'touchPoints':[{'x':hit_x,'y':hit_y,'id':41}]})
@@ -224,7 +256,9 @@ def main():
                     'preserved_typed_draft':True,'nav_aligned':True,
                     'overlay_enter_exit':True,'processing_inside_composer':True,
                     'compact_composer':True,'real_touch_long_press':True,
-                    'no_native_text_selection':True})
+                    'no_native_text_selection':True,'mic_visible_on_focus':True,
+                    'mic_hides_keyboard':True,'text_editable_with_keyboard':True,
+                    'typing_draft_preserved':True})
                 page.screenshot(path=str(OUT/'voice-hold-390.png'),animations='disabled')
                 # The conversation must not retain the centered empty-home
                 # layout, or reserve a separate band for New Topic above chat.
