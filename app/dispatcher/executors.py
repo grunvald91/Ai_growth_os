@@ -228,6 +228,9 @@ async def make_plan(ctx: Context, params) -> Outcome:
     except LookupError:
         ctx.db.rollback()
         return Outcome("Компания не найдена.", ok=False)
+    except ValueError as exc:
+        ctx.db.rollback()
+        return Outcome(str(exc), str(exc), ok=False)
     text = "Принял. Составляю контент-план. Он ничего не опубликует: сначала я покажу его на утверждение."
     return Outcome(text, "Принял, составляю контент-план. Покажу его на утверждение.",
                    [_task_block(ctx, task, "Контент-план", f"/studio/products/{ctx.product.id}/tasks/{task.id}")],
@@ -235,6 +238,12 @@ async def make_plan(ctx: Context, params) -> Outcome:
 
 
 async def describe_seo_factory(ctx: Context, params) -> Outcome | Confirmation:
+    from app.seo.activation import is_enabled
+    if not is_enabled(ctx.db, ctx.product.id):
+        href = f"/studio/products/{ctx.product.id}/seo"
+        return Outcome("SEO-завод для этой компании выключен. Подключите его кнопкой в разделе SEO-завод.",
+                       "SEO-завод выключен. Подключите его в настройках компании.",
+                       [{"type": "links", "items": [{"label": "Подключить SEO-завод", "href": href}]}], ok=False)
     focus = getattr(params, "focus", None)
     return Confirmation(
         title="Запустить SEO-завод?",
