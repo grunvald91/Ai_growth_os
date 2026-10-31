@@ -303,6 +303,10 @@ def require_studio_csrf(
     is_legacy_origin = (
         received.scheme.casefold() == allowed.scheme.casefold()
         and received.netloc.casefold() == allowed.netloc.casefold()
+        and (not settings.studio_servgo_gateway_enabled or (
+            request.url.scheme.casefold() == allowed.scheme.casefold()
+            and request.url.netloc.casefold() == allowed.netloc.casefold()
+        ))
     )
     # This exception is deliberately NOT a blanket allowlist for another site's
     # Origin header. It only applies to a genuine same-origin request received
