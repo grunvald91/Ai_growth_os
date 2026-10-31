@@ -41,12 +41,27 @@ async def test_article_serves_plan_query_and_carries_answer_and_faq(db, product,
     article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
     assert article.seo.primary_query == "как вести запись клиентов"  # the plan's real query, not the model's
     assert article.seo_brief.plan_item_id == "a001"
-    assert "**Коротко:**" in article.full_article and "## Частые вопросы" in article.full_article
+    assert article.reader_article.direct_answer in article.full_article and "## Частые вопросы" in article.full_article
     assert article.reader_article.meta_description and len(article.reader_article.faq) == 3
     geo_roles = {"seo_editor", "article_writer", "human_editor", "marketing_editor"}
     for request in provider.requests:
         has_rules = "ПОИСК И ИИ-ПОМОЩНИКИ" in request.system_prompt
         assert has_rules == (request.metadata["team_role"] in geo_roles)
+
+
+@pytest.mark.asyncio
+async def test_two_section_article_without_artificial_faq_passes_reader_gate(db, product, tmp_path):
+    outputs = outputs_with_geo()
+    for index in (4, 5):
+        outputs[index]["sections"] = outputs[index]["sections"][:2]
+        outputs[index]["faq"] = []
+        outputs[index]["editorial_notes"] = []
+    provider = SequenceProvider(outputs[:6])
+    workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    result = await workflow.run(request_for(product).model_copy(update={"light": True}))
+    assert result.status == "completed", result.error
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    assert len(article.reader_article.sections) == 2 and article.reader_article.faq == []
 
 
 @pytest.mark.asyncio
