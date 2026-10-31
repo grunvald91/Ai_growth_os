@@ -175,8 +175,10 @@ async def test_human_approval_cannot_override_unclean_critic_or_changed_article(
     assert not publish_if_clear(db, article_id).published
     approve_material(db, tmp_path, product.id, article_id)
     assert publish_owner_approved(db) == 0
+    assert db.get(Artifact, article_id).status == ArtifactStatus.AWAITING_APPROVAL
     assert not list(db.scalars(select(Publication)))
     approval = db.scalar(select(Approval).where(Approval.artifact_id == article_id))
+    assert approval.status == "pending"
     assert "critic review" in approval.reason
 
     clean_id = await make_article(db, product, tmp_path)
@@ -188,6 +190,7 @@ async def test_human_approval_cannot_override_unclean_critic_or_changed_article(
     row.content = json.dumps(data, ensure_ascii=False)
     db.commit()
     assert publish_owner_approved(db) == 0
+    assert db.get(Artifact, clean_id).status == ArtifactStatus.AWAITING_APPROVAL
     assert not list(db.scalars(select(Publication)))
 
 
