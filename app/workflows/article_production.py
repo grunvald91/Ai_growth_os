@@ -1159,7 +1159,13 @@ class ArticleProduction:
                     f'## {section.heading}\n\n{section.body}'
                     for section in reader_article.sections
                 )
-                answer = f'**Коротко:** {reader_article.direct_answer}\n\n' if reader_article.direct_answer else ''
+                # The answer is an ordinary paragraph, not a forced SEO callout.
+                # When the lead already contains it, do not repeat it.
+                answer = (f'{reader_article.direct_answer}\n\n'
+                          if reader_article.direct_answer
+                          and reader_article.direct_answer.strip().casefold()
+                              not in reader_article.lead.casefold()
+                          else '')
                 faq_text = ''
                 if reader_article.faq:
                     faq_text = '## Частые вопросы\n\n' + '\n\n'.join(
