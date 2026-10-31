@@ -55,3 +55,24 @@ body[data-growth-design="v4"] .topbar{height:76px;min-height:76px}
 .top-actions .sg-notifications{display:block}.top-actions .sg-notify-label{display:none}.top-actions .sg-notifications>summary{padding:8px;min-width:40px;background:var(--card);color:var(--text)}.sg-notify-popover{background:var(--card);color:var(--text);z-index:80}.sg-notify-entry{color:var(--text)}
 .materials-grid .material-cover{height:auto;min-height:36px;background:var(--blue-soft);border-radius:10px;padding:10px}.materials-grid .material-body{padding:12px 0;width:100%}.materials-grid h4{margin:0 0 8px;font-size:14px}.library-controls{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:20px}.sg-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:20px}
 @media(max-width:780px){.top-actions{gap:4px}.top-actions .sg-notifications>summary{padding:6px}.sg-notify-popover{position:fixed;top:64px;left:10px;right:10px;width:auto;max-height:65dvh;overflow:auto}}
+/* A conversation is a bounded workspace: only the message history scrolls. */
+body.home-page:not(.home-empty){overflow:hidden}
+body.home-page:not(.home-empty) .shell{height:var(--v4-viewport,100dvh);min-height:0}
+body.home-page:not(.home-empty) #main{height:calc(var(--v4-viewport,100dvh) - var(--v4-header,76px) - var(--v4-nav,0px));min-height:0;max-width:1150px;margin-inline:auto;padding:16px 24px;display:flex;overflow:hidden}
+body.home-page .dp-home.has-feed{display:flex;flex-direction:column;flex:1;min-height:0;height:100%;max-height:100%;margin:0 auto;padding:0;gap:10px;animation:none}
+.dp-home.has-feed .dp-new{flex:none;margin:0;min-height:36px}
+.dp-home.has-feed .dp-feed{flex:1;min-height:0;max-height:none;margin:0;padding:4px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;overflow-x:hidden;scroll-padding-block:8px}
+.dp-home.has-feed .dp-msg{flex:none;animation:none}
+.dp-msg.user{align-self:flex-end;background:var(--blue-soft);max-width:90%}
+.dp-home.has-feed .command-dock{flex:none;margin:0;padding:0;width:100%}
+.dp-home.has-feed .command-hints{margin-top:8px;overflow-x:auto;justify-content:flex-start}
+.dp-home.has-feed .command-hints .dp-chiprow{flex-wrap:nowrap;justify-content:flex-start;gap:8px;min-width:0}
+.dp-home.has-feed .command-hints .dp-chip{flex:none;max-width:250px}
+.dp-home.has-feed .home-hero-subnote{display:none}
+.dp-home.has-feed .dp-link{border-radius:10px;white-space:normal;line-height:1.5}
+.dp-home.has-feed .dp-links{display:grid;gap:8px}
+@media(max-width:780px){body.home-page:not(.home-empty) #main{padding:10px 12px}.dp-home.has-feed .dp-msg{padding:14px 16px}.dp-home.has-feed .dp-new{min-height:32px}.dp-home.has-feed .command-hints .dp-chip{min-height:36px;padding:6px 10px}}
+body.home-page:not(.home-empty) #main{padding-bottom:16px!important}
+body[data-growth-design="v4"] #mobileNav{background:var(--card)!important;border-color:var(--line)!important}
+@media(max-width:780px){body.home-page:not(.home-empty) #main{padding-bottom:10px!important}}
+body[data-growth-design="v4"] .workspace>.topbar{margin:0}

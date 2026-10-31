@@ -29,6 +29,26 @@
  document.getElementById('openSearch').onclick=search;
  const root=document.querySelector('.dp-home');
  if(root){
+  const viewport=window.visualViewport;
+  const fitConversation=()=>{
+   body.style.setProperty('--v4-viewport',(viewport?.height||window.innerHeight)+'px');
+   body.style.setProperty('--v4-header',document.querySelector('.topbar').getBoundingClientRect().height+'px');
+   body.style.setProperty('--v4-nav',document.getElementById('mobileNav').getBoundingClientRect().height+'px');
+  };
+  const layoutObserver=new ResizeObserver(fitConversation);
+  layoutObserver.observe(document.querySelector('.topbar'));
+  layoutObserver.observe(document.getElementById('mobileNav'));
+  viewport?.addEventListener('resize',fitConversation);
+  window.addEventListener('resize',fitConversation);
+  fitConversation();
+  const feed=document.getElementById('dp-feed');
+  let previousHeight=feed.clientHeight,previousContent=feed.scrollHeight;
+  new ResizeObserver(()=>{
+   const atBottom=feed.scrollTop>=previousContent-previousHeight-24;
+   if(atBottom)feed.scrollTop=feed.scrollHeight;
+   previousHeight=feed.clientHeight;previousContent=feed.scrollHeight;
+  }).observe(feed);
+  requestAnimationFrame(()=>{feed.scrollTop=feed.scrollHeight});
   const hints=document.getElementById('dp-chips');
   function compactHints(){hints.querySelectorAll('.dp-chip').forEach(button=>{
    const label=button.getAttribute('aria-label')||button.textContent;
