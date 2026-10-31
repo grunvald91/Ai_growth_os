@@ -211,6 +211,77 @@ def main():
                     'compact_composer':True,'real_touch_long_press':True,
                     'no_native_text_selection':True})
                 page.screenshot(path=str(OUT/'voice-hold-390.png'),animations='disabled')
+                # The conversation must not retain the centered empty-home
+                # layout, or reserve a separate band for New Topic above chat.
+                assert page.locator('body').evaluate("el=>!el.classList.contains('home-empty')")
+                assert page.locator('#dp-new').is_visible()
+                assert page.locator('#dp-new').evaluate(
+                    "el=>el.parentElement.classList.contains('command-tools')")
+                geometry=page.evaluate("""() => {
+                  const main=document.querySelector('#main').getBoundingClientRect(),
+                    feed=document.querySelector('#dp-feed').getBoundingClientRect(),
+                    composer=document.querySelector('#dp-form').getBoundingClientRect(),
+                    topic=document.querySelector('#dp-new').getBoundingClientRect(),
+                    toolbar=document.querySelector('.command-tools').getBoundingClientRect();
+                  return {gap:feed.top-main.top,topicTop:topic.top,
+                          composerBottom:composer.bottom,toolbarTop:toolbar.top};
+                }""")
+                assert geometry['gap']<=45, f"Separate header band still visible: {geometry}"
+                assert geometry['topicTop']>=geometry['composerBottom'], geometry
+                assert geometry['topicTop']>=geometry['toolbarTop'], geometry
+                # A genuinely transparent dock overlaps the scrollable history;
+                # its children retain their own surfaces and remain clickable.
+                page.evaluate("""() => {
+                  const feed=document.querySelector('#dp-feed');
+                  for(let i=0;i<14;i++){
+                    const m=document.createElement('div');
+                    m.className='dp-msg bot'; m.textContent='Проверка истории '+i+' — сообщение в ленте.';
+                    feed.appendChild(m);
+                  }
+                }""")
+                page.wait_for_function("""() => {
+                  const dock=document.querySelector('.command-dock');
+                  return parseFloat(getComputedStyle(document.querySelector('#dp-feed')).paddingBottom)
+                    >=dock.getBoundingClientRect().height+8;
+                }""")
+                overlap=page.evaluate("""() => {
+                  const feed=document.querySelector('#dp-feed'),
+                        dock=document.querySelector('.command-dock'),
+                        tools=document.querySelector('.command-tools'),
+                        hints=document.querySelector('.command-hints');
+                  const fr=feed.getBoundingClientRect(), dr=dock.getBoundingClientRect();
+                  const transparent=el=>getComputedStyle(el).backgroundColor;
+                  const reserved=parseFloat(getComputedStyle(feed).paddingBottom);
+                  feed.scrollTop=feed.scrollHeight;
+                  return {feedBottom:fr.bottom,dockTop:dr.top,dockBottom:dr.bottom,
+                    feedScrollHeight:feed.scrollHeight,feedClientHeight:feed.clientHeight,
+                    dockHeight:dr.height,reserved,
+                    dockBg:transparent(dock),toolsBg:transparent(tools),hintsBg:transparent(hints),
+                    composerBg:transparent(document.querySelector('#dp-form')),
+                    lastBottom:feed.lastElementChild.getBoundingClientRect().bottom,
+                    scrollTop:feed.scrollTop};
+                }""")
+                assert overlap['dockBg']=='rgba(0, 0, 0, 0)',overlap
+                assert overlap['toolsBg']=='rgba(0, 0, 0, 0)',overlap
+                assert overlap['hintsBg']=='rgba(0, 0, 0, 0)',overlap
+                assert overlap['composerBg']!='rgba(0, 0, 0, 0)',overlap
+                assert overlap['feedBottom']>=overlap['dockBottom']-12,overlap
+                assert overlap['dockTop']<overlap['feedBottom']-45,overlap
+                assert overlap['reserved']>=overlap['dockHeight']+8,overlap
+                assert overlap['feedScrollHeight']>overlap['feedClientHeight'],overlap
+                assert overlap['lastBottom']<=overlap['dockTop']+3,overlap
+                page.screenshot(path=str(OUT/'transparent-floating-composer-390.png'),animations='disabled')
+                result['checks'].append({'page':'transparent-floating-composer-390',
+                    'dock_transparent':True,'shortcuts_transparent':True,
+                    'feed_scrolls_behind_dock':True,'last_message_readable':True})
+                page.route('**/studio/products/*/dispatch/new',
+                           lambda route:route.fulfill(status=200,content_type='application/json',
+                               body=json.dumps({'hints':[]})))
+                page.locator('#dp-new').click()
+                page.wait_for_function("() => document.body.classList.contains('home-empty') && !document.querySelector('.dp-home').classList.contains('has-feed')")
+                assert page.locator('#dp-new').is_hidden()
+                result['checks'].append({'page':'topic-toolbar-390','no_blank_header_band':True,
+                    'new_topic_in_shortcuts':True,'empty_state_restored':True})
                 browser.close()
         finally:
             server.should_exit=True
