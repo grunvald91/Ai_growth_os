@@ -65,6 +65,33 @@ async def test_two_section_article_without_artificial_faq_passes_reader_gate(db,
 
 
 @pytest.mark.asyncio
+async def test_seo_article_keeps_only_topic_relevant_verified_facts(db, product, tmp_path):
+    from app.workflows.article_production import product_facts
+    root = tmp_path / product.slug / ".claude"
+    root.mkdir(parents=True)
+    context = ("## Product\\n"
+               "ServGo помогает владельцам организовать онлайн-запись.\\n"
+               "Владельцы управляют календарём и услугами.\\n"
+               "Для другой темы доступны функции ведения смен.\\n")
+    root.joinpath("product-marketing-context.md").write_text(context, encoding="utf-8")
+    facts = product_facts(context)
+    assert len(facts) == 3
+    selected = next(iter(facts))
+    outputs = outputs_with_geo()
+    for idx in (4, 5):
+        outputs[idx]["fact_renderings"] = [
+            {"source_id": selected, "text": "ServGo помогает владельцам организовать онлайн-запись."}
+        ]
+    workflow = build_article_production(db, Settings(products_root=tmp_path), SequenceProvider(outputs[:6]))
+    result = await workflow.run(request_for(product).model_copy(update={"light": True}))
+    assert result.status == "completed", result.error
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    assert [claim.source_id for claim in article.draft.claims] == [selected]
+    assert len(article.reader_article.fact_renderings) == 1
+    assert "Для другой темы" not in article.full_article
+
+
+@pytest.mark.asyncio
 async def test_final_editor_missing_answer_is_sent_back_once(db, product, tmp_path):
     outputs = outputs_with_geo(final=False)
     outputs.insert(6, copy.deepcopy(outputs[5]) | copy.deepcopy(GEO))  # the repair answer follows the rejected one
