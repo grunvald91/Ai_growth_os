@@ -22,7 +22,7 @@ def company_seo_insights(db: Session, product_id: UUID) -> dict:
                Artifact.kind == "article",
                Publication.status.in_(["published", "unpublished"]))
         .group_by(Publication.status)
-    ))
+    ).all())
     return {
         "product_id": str(product_id),
         "published_articles": status_counts.get("published", 0),
