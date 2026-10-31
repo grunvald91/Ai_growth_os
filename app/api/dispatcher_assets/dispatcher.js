@@ -301,9 +301,17 @@
   });
   newButton.addEventListener('click', function () {
     if (busy) return;
+    // Start a new conversation without opening the Android keyboard.
+    if (voiceHoldEnabled) input.blur();
     post('/new', {}).then(function (data) {
       feed.textContent = ''; syncConversationLayout();
-      state.hints = data.hints || []; renderHints(); input.focus();
+      state.hints = data.hints || []; renderHints();
+      if (voiceHoldEnabled) {
+        input.value = '';
+        grow();
+        input.blur();
+        showNote('');
+      } else input.focus();
     }).catch(function (error) { notify(error.message); });
   });
 
@@ -316,7 +324,12 @@
   var voiceDispatchPending = false, discardRecording = false, activeHold = null, holdTimer = null;
   var previewUrl = root.getAttribute('data-voice-preview-url');
   var voiceHitbox = document.getElementById('dp-voice-hitbox');
+  var modeMicButton = document.getElementById('dp-mode-mic');
+  var typingPlaceholder = 'Введите команду…';
   var voiceOverlay = document.getElementById('dp-voice-overlay');
+  // A fixed layer inside the animated home section is clipped to its
+  // transformed ancestor on Android. Portal it to <body> instead.
+  if (voiceHoldEnabled && voiceOverlay) document.body.appendChild(voiceOverlay);
   var voiceOverlayText = document.getElementById('dp-voice-overlay-text');
   var voiceStatus = document.getElementById('dp-voice-status');
   var overlayExitTimer = null;
@@ -403,6 +416,7 @@
             overlayExitTimer = null;
           }, 195);
         }
+        voiceOverlay.classList.toggle('is-active', entering);
         voiceOverlay.setAttribute('aria-hidden', entering ? 'false' : 'true');
       }
       if (voiceOverlayText) voiceOverlayText.textContent = mode === 'connecting'
@@ -415,7 +429,8 @@
       input.readOnly = mode !== 'idle';
       form.setAttribute('aria-busy', mode === 'processing' || mode === 'sending' ? 'true' : 'false');
       sendButton.disabled = busy || mode !== 'idle';
-      input.setAttribute('placeholder', defaultPlaceholder);
+      input.setAttribute('placeholder',
+        form.classList.contains('voice-text-editing') ? typingPlaceholder : defaultPlaceholder);
     } else {
       var message = mode === 'processing' ? 'Распознаю…'
         : mode === 'recording' ? 'Говорите…' : defaultPlaceholder;
@@ -653,12 +668,45 @@
   if (voiceHoldEnabled && !supportedVoice) {
     defaultPlaceholder = 'Напишите команду';
     input.setAttribute('placeholder', defaultPlaceholder);
+    form.classList.add('voice-unavailable');
   }
   if (voiceHoldEnabled && supportedVoice) {
-    // Short taps enter real text editing; while editing, the native textarea
-    // stays interactive. A blur restores the dedicated voice press surface.
-    input.addEventListener('focus', function () { form.classList.add('voice-text-editing'); });
-    input.addEventListener('blur', function () { form.classList.remove('voice-text-editing'); });
+    // Typed editing and hold-to-talk are deliberately distinct on Android.
+    // The mic is a keyboard-dismiss / mode-switch action, NOT a record button.
+    function enterTypingMode() {
+      if (busy || voiceWorking || recorder || micOpening) return;
+      form.classList.add('voice-text-editing');
+      if (modeMicButton) modeMicButton.hidden = false;
+      input.setAttribute('placeholder', typingPlaceholder);
+    }
+    function leaveTypingMode() {
+      input.blur();
+      form.classList.remove('voice-text-editing');
+      if (modeMicButton) modeMicButton.hidden = true;
+      input.setAttribute('placeholder', defaultPlaceholder);
+    }
+    input.addEventListener('focus', enterTypingMode);
+    input.addEventListener('blur', function () {
+      form.classList.remove('voice-text-editing');
+      if (modeMicButton) modeMicButton.hidden = true;
+      input.setAttribute('placeholder', defaultPlaceholder);
+    });
+    if (modeMicButton) {
+      modeMicButton.addEventListener('pointerdown', function (event) {
+        // Complete the action before Android's automatic blur can remove
+        // the button from the layout and swallow the subsequent click.
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        leaveTypingMode();
+      });
+      modeMicButton.addEventListener('click', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        leaveTypingMode(); // keyboard/assistive-technology activation
+      });
+    }
+    if (document.activeElement === input) enterTypingMode();
     if (voiceHitbox) {
       voiceHitbox.addEventListener('touchstart', function (event) {
         // Android otherwise opens selection/callout and emits pointercancel
@@ -667,7 +715,8 @@
       }, { passive: false });
     }
     form.addEventListener('pointerdown', function (event) {
-      if (event.button !== 0 || event.target.closest('button') || activeHold || recorder ||
+      if (event.button !== 0 || event.target.closest('button') ||
+          form.classList.contains('voice-text-editing') || activeHold || recorder ||
           micOpening || voiceWorking || busy || voiceDispatchPending) return;
       // Defer the Android keyboard/text-selection gesture until a short tap is known.
       if (event.pointerType === 'touch') event.preventDefault();

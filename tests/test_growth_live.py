@@ -64,14 +64,17 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert 'id="dp-voice-overlay"' in page.text
     assert 'id="dp-voice-hitbox"' in page.text
     assert 'id="dp-voice-status"' in page.text
-    assert 'placeholder="Удерживайте, чтобы говорить"' in page.text
+    assert 'placeholder="Нажмите — текст · удерживайте — голос"' in page.text
+    assert 'id="dp-mode-mic"' in page.text
+    assert 'Скрыть клавиатуру и перейти к голосовому вводу' in page.text
     assert 'id="dp-press-hint"' not in page.text
     assert 'id="dp-mic"' not in page.text
     assert 'class="command-tools"' in page.text
     assert page.text.count('id="dp-new"') == 1
+    assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=9' in page.text
-    assert '/studio/assets/dispatcher.js?v=topic-ui-20261031' in page.text
+    assert '/studio/assets/growth-live.css?v=11' in page.text
+    assert '/studio/assets/dispatcher.js?v=keyboard-mode-20261031' in page.text
     assert '/studio/assets/growth-live.js?v=5' in page.text
     assert 'Простое видео' in page.text
     assert 'hero-intro' in page.text

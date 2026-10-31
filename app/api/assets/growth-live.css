@@ -273,23 +273,19 @@ body[data-growth-design="v4"] .voice-hold-overlay{
   color:#eef6ff;
 }
 body[data-growth-design="v4"] .voice-hold-overlay::before{
-  content:"";position:absolute;inset:0;
-  background:rgba(20,27,43,.26);
-  backdrop-filter:blur(1px);
-  -webkit-backdrop-filter:blur(1px);
+  /* No full-screen grey dimmer: glow is the only visible overlay. */
+  content:none;
 }
 body[data-growth-design="v4"] .voice-hold-overlay::after{
   content:"";position:absolute;left:-12%;right:-12%;bottom:-55px;
   height:min(58dvh,540px);z-index:0;
-  background:
-    radial-gradient(ellipse 72% 75% at 50% 98%,
-      rgba(47,107,196,.95) 0%,
-      rgba(71,130,214,.89) 28%,
-      rgba(111,164,232,.69) 51%,
-      rgba(143,184,239,.39) 72%,
-      rgba(152,190,237,0) 100%),
-    linear-gradient(to top,rgba(50,110,196,.65),rgba(106,162,224,.16) 70%,transparent);
-  filter:blur(20px);
+  background:radial-gradient(ellipse 74% 80% at 50% 100%,
+      rgba(38,108,218,.64) 0%,
+      rgba(80,151,238,.48) 28%,
+      rgba(128,184,249,.26) 52%,
+      rgba(176,212,255,.07) 74%,
+      rgba(181,216,255,0) 100%);
+  filter:blur(32px);
   transform:scale(1);
   opacity:1;
 }
@@ -333,21 +329,20 @@ body[data-growth-design="v4"] .voice-hold-dot{
   border:2px solid rgba(235,247,255,.7);
   box-shadow:0 0 0 4px rgba(202,229,255,.12),0 0 13px rgba(214,238,255,.34);
 }
-body[data-growth-design="v4"] .dp-home:is(.voice-connecting,.voice-recording) .voice-hold-overlay{
+body[data-growth-design="v4"] .voice-hold-overlay.is-active{
   opacity:1;visibility:visible;transform:translateY(0) scale(1);
   transition-duration:160ms,160ms,0s;
   transition-delay:0s;
   transition-timing-function:cubic-bezier(.2,.8,.2,1);
 }
-body[data-growth-design="v4"] .dp-home:is(.voice-connecting,.voice-recording)
+body[data-growth-design="v4"] .voice-hold-overlay.is-active
   .voice-hold-instruction,
-body[data-growth-design="v4"] .dp-home:is(.voice-connecting,.voice-recording)
+body[data-growth-design="v4"] .voice-hold-overlay.is-active
   .voice-hold-scale{
   opacity:1;transform:translate(-50%,0);
   transition-delay:45ms;
 }
-body[data-growth-design="v4"] .dp-home:is(.voice-connecting,.voice-recording)
-  .voice-hold-overlay::after{
+body[data-growth-design="v4"] .voice-hold-overlay.is-active::after{
   animation:sg-hold-glow-breathe 3s ease-in-out infinite;
 }
 @keyframes sg-hold-glow-breathe{
@@ -421,7 +416,6 @@ body[data-growth-design="v4"] .command-bar .voice-hold-hitbox{
   -webkit-tap-highlight-color:transparent;
   cursor:text;
 }
-body[data-growth-design="v4"] .command-bar.voice-text-editing .voice-hold-hitbox,
 body[data-growth-design="v4"] .command-bar:is(.voice-processing,.voice-sending) .voice-hold-hitbox{
   pointer-events:none;
 }
@@ -526,7 +520,7 @@ body.home-page:not(.home-empty) .dp-home.has-feed .command-hints{
   box-shadow:none!important;
 }
 body.home-page:not(.home-empty) .dp-home.has-feed .command-dock
-  :is(.command-bar,.command-tools,.dp-voice-note){
+  :is(.command-bar,.command-topicbar,.command-tools,.dp-voice-note){
   pointer-events:auto;
 }
 body.home-page:not(.home-empty) .dp-home.has-feed .command-dock
@@ -536,6 +530,79 @@ body.home-page:not(.home-empty) .dp-home.has-feed .command-dock
 }
 @media(max-width:780px){
   body.home-page:not(.home-empty) #main{padding-bottom:0!important}
+}
+
+/* New Topic: small floating control above the input, not among prompt chips. */
+body[data-growth-design="v4"] .dp-home .command-topicbar{
+  display:flex;justify-content:flex-end;align-items:center;
+  width:100%;padding:0 5px 5px;
+  border:0;background:transparent;box-shadow:none;
+}
+body[data-growth-design="v4"] .dp-home:not(.has-feed) .command-topicbar{display:none}
+body[data-growth-design="v4"] .dp-home .command-topicbar .dp-new{
+  position:static!important;display:inline-flex;align-items:center;justify-content:center;
+  gap:4px;margin:0!important;padding:4px 9px!important;min-height:28px!important;
+  border-radius:10px;border:1px solid var(--line);
+  background:var(--card);color:var(--muted);box-shadow:0 3px 10px rgba(25,71,137,.04);
+  font-size:11px;font-weight:600;line-height:1.1;
+}
+body[data-growth-design="v4"] .dp-home .command-topicbar .dp-new:hover{
+  border-color:rgba(77,145,229,.4);color:var(--blue);
+}
+/* On touch the entire editable area must remain a selectable-free hold target,
+   including after a short tap has focused the hidden textarea. */
+@media (hover:hover) and (pointer:fine) {
+  body[data-growth-design="v4"] .command-bar .voice-hold-hitbox{
+    pointer-events:none;
+  }
+}
+
+/* Contextual keyboard -> voice switcher. It appears only while editing text.
+   The whole textarea is selectable in typing mode and a separate hold surface
+   returns when the keyboard-dismiss action is activated. */
+body[data-growth-design="v4"] .command-bar .command-mode-mic{
+  position:relative;
+  z-index:4;
+  flex:0 0 32px;
+  width:32px;
+  height:32px;
+  margin:0;
+  padding:0;
+  border:1px solid rgba(90,149,222,.3);
+  border-radius:12px;
+  background:rgba(234,244,255,.9);
+  color:#3578bd;
+  box-shadow:none;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
+body[data-growth-design="v4"] .command-bar .command-mode-mic:not([hidden]){display:grid}
+body[data-growth-design="v4"] .command-bar .command-mode-mic[hidden]{display:none!important}
+body[data-growth-design="v4"] .command-bar .command-mode-mic svg{
+  width:17px;height:17px;display:block;pointer-events:none;
+}
+body[data-growth-design="v4"] .command-bar .command-mode-mic:focus-visible{
+  outline:2px solid var(--blue);outline-offset:2px;
+}
+body[data-growth-design="v4"] .command-bar.voice-text-editing .voice-hold-hitbox{
+  pointer-events:none;
+}
+body[data-growth-design="v4"] .command-bar.voice-text-editing textarea,
+body[data-growth-design="v4"] .command-bar.voice-text-editing textarea::placeholder{
+  text-align:left;
+}
+body[data-growth-design="v4"] .command-bar textarea::placeholder{
+  font-size:11.5px;
+}
+@media(max-width:360px){
+  body[data-growth-design="v4"] .command-bar textarea::placeholder{font-size:10.5px}
+}
+
+/* No supported recorder: the user must still be able to select/edit text. */
+body[data-growth-design="v4"] .command-bar.voice-unavailable .voice-hold-hitbox{
+  pointer-events:none;
 }
 
 
