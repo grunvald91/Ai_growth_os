@@ -308,6 +308,7 @@
   var voiceOverlay = document.getElementById('dp-voice-overlay');
   var voiceOverlayText = document.getElementById('dp-voice-overlay-text');
   var voiceStatus = document.getElementById('dp-voice-status');
+  var overlayExitTimer = null;
   var liveBox = document.getElementById('dp-live');
   var liveLabel = document.getElementById('dp-live-label');
   var liveText = document.getElementById('dp-live-text');
@@ -374,7 +375,25 @@
       root.classList.toggle('voice-connecting', mode === 'connecting');
       root.classList.toggle('voice-recording', recording);
       root.classList.toggle('voice-processing', mode === 'processing' || mode === 'sending');
-      if (voiceOverlay) voiceOverlay.setAttribute('aria-hidden', entering ? 'false' : 'true');
+      if (voiceOverlay) {
+        var wasVisible = voiceOverlay.getAttribute('aria-hidden') === 'false';
+        if (entering) {
+          if (overlayExitTimer) clearTimeout(overlayExitTimer);
+          overlayExitTimer = null;
+          voiceOverlay.classList.remove('is-exiting');
+        } else if (wasVisible) {
+          // Distinct exit trajectory: opacity 1->0 and scale 1->.985 in 185ms.
+          voiceOverlay.classList.add('is-exiting');
+          if (overlayExitTimer) clearTimeout(overlayExitTimer);
+          overlayExitTimer = setTimeout(function () {
+            if (voiceOverlay.getAttribute('aria-hidden') === 'true') {
+              voiceOverlay.classList.remove('is-exiting');
+            }
+            overlayExitTimer = null;
+          }, 195);
+        }
+        voiceOverlay.setAttribute('aria-hidden', entering ? 'false' : 'true');
+      }
       if (voiceOverlayText) voiceOverlayText.textContent = mode === 'connecting'
         ? 'Подключаю микрофон…' : 'Отпустите, чтобы отправить';
       if (voiceStatus) {
