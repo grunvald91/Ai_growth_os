@@ -20,3 +20,4 @@ Disallow: /rental-admin-11.html
 
 Sitemap: https://servgo.ru/sitemap.xml
 Sitemap: https://servgo.ru/blog/sitemap.xml
+Sitemap: https://servgo.ru/business-blog-sitemap.xml
