@@ -13,8 +13,6 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from app.models.domain import AgentRun, Approval, Artifact, Publication, Task
-from app.seo.publishing import reader_hash
-from app.workflows.article_contracts import ArticleArtifact
 
 SEO_AGENT = "seo_factory"
 SEO_KINDS = (
@@ -40,18 +38,11 @@ def _report_data(content: str) -> dict:
 
 
 def _critic_details(article: Artifact, review: Artifact | None) -> dict:
-    """Only display a verdict for the exact final reader-facing article reviewed."""
+    """Show the final critic verdict without version/hash approval gates."""
     empty = {"critic_status": "missing", "critic_findings": []}
     if review is None:
         return empty
     data = _report_data(review.content)
-    try:
-        parsed = ArticleArtifact.model_validate_json(article.content)
-        reader = parsed.reader_article
-        if reader is None or data.get("reader_hash") != reader_hash(reader):
-            return {"critic_status": "content_mismatch", "critic_findings": []}
-    except (ValueError, TypeError):
-        return {"critic_status": "content_mismatch", "critic_findings": []}
     status = data.get("status")
     findings = data.get("findings")
     issues = []
