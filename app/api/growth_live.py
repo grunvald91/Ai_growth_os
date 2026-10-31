@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import html
 import json
+import httpx
 import re
 from pathlib import Path
 from urllib.parse import urlencode
@@ -28,7 +29,7 @@ from app.seo.control import SeoControlError, create_seo_run, change_seo_run
 from app.seo.activation import is_enabled, set_enabled
 from app.seo.visibility import VisibilityError, change_article_visibility
 from app.seo.insights import company_seo_insights
-from app.seo.search_metrics import company_search_metrics
+from app.seo.search_metrics import company_search_metrics, inspect_google_article
 from app.models.domain import ArtifactStatus, Publication, Product
 from app.workflows.article_contracts import ArticleArtifact
 from app.sso.models import StudioBusinessLink
@@ -430,6 +431,45 @@ def seo_published_articles(db: Session, product_id: UUID, enabled: bool) -> str:
     return '<ul class="seo-article-visibility">' + ''.join(items) + '</ul>'
 
 
+@router.post('/studio/products/{product_id}/seo/inspect', response_class=HTMLResponse)
+async def seo_inspect_published_url(product_id: UUID, request: Request,
+                                    db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    form = await _studio_form(request)
+    url = form.get("url", "")
+    if not isinstance(url, str) or len(url) > 500:
+        raise HTTPException(422, 'Укажите адрес опубликованной статьи')
+    async with httpx.AsyncClient(follow_redirects=False) as client:
+        try:
+            data = await inspect_google_article(db, product_id, url=url, client=client)
+        except LookupError:
+            raise HTTPException(404, 'Статья этого бизнеса не найдена') from None
+    status = data["status"]
+    if status != "connected":
+        message = ('Google Search Console ещё не подключён.' if status == 'not_configured'
+                   else 'Google временно не вернул данные об индексировании.')
+    else:
+        result = data["indexing"]
+        names = {"verdict": "Вердикт Google", "coverageState": "Состояние в индексе",
+                 "lastCrawlTime": "Последний известный обход",
+                 "robotsTxtState": "robots.txt", "indexingState": "Разрешение индексации",
+                 "pageFetchState": "Загрузка страницы",
+                 "googleCanonical": "Canonical Google",
+                 "userCanonical": "Canonical страницы"}
+        message = '<ul>' + ''.join('<li><strong>' + label + '</strong>: '
+                 + html.escape(str(result[key])) + '</li>'
+                 for key, label in names.items() if result.get(key) is not None) + '</ul>'
+    body = ('<p><a href="/studio/products/' + str(product_id)
+            + '/seo/search-metrics">← К поисковой аналитике</a></p>'
+            + '<p>Проверена только эта опубликованная страница: '
+            + html.escape(url) + '</p>' + message
+            + '<p>Это состояние версии в индексе Google, '
+              'а не проверка доступности сайта в реальном времени. '
+              'Цитирование в AI-ответах не подтверждается.</p>')
+    return studio_page_shell(product, active='seo', title='Индексирование Google',
+                             subtitle='Проверка конкретной статьи', body=body)
+
+
 @router.get('/studio/products/{product_id}/seo/search-metrics.json')
 async def seo_search_metrics_api(product_id: UUID, days: int = 28,
                                  db: Session = Depends(get_db)):
@@ -467,7 +507,13 @@ async def seo_search_metrics_page(product_id: UUID, days: int = 28,
                            + '" rel="noopener noreferrer" target="_blank">'
                            + html.escape(url.removeprefix('https://servgo.ru'))
                            + '</a> · клики: ' + str(item['clicks'])
-                           + ', показы: ' + str(item['impressions']) + '</li>')
+                           + ', показы: ' + str(item['impressions'])
+                           + '<form method="post" action="/studio/products/'
+                           + str(product_id) + '/seo/inspect">'
+                           + '<input type="hidden" name="url" value="'
+                           + html.escape(url, quote=True) + '">'
+                           + '<button type="submit" class="btn">Проверить индекс Google</button>'
+                           + '</form></li>')
         cards.append('<section class="panel"><h3>' + name + '</h3>'
                      + '<p>Данные за ' + str(data['period_days'])
                      + ' дн. Только опубликованные статьи этого бизнеса.</p>'
