@@ -62,6 +62,21 @@
     return list;
   }
 
+  function friendlyKind(text) {
+    return ({
+      whiteboard_renderer:'Простое видео',company_intake:'Профиль компании',
+      distribution:'Публикация',seo_factory:'SEO-завод',content_factory:'Создание контента',
+      article:'Статья',whiteboard:'Простое видео'
+    })[text] || (/^[a-z_]+$/.test(String(text || '')) ? 'Материал' : text);
+  }
+
+  function friendlyTitle(title) {
+    var value = String(title || '');
+    if (/^WHITEBOARD-JOB:\s*[a-f0-9-]{6,}$/i.test(value)) return 'Создание простого видео';
+    if (/^Request approval to publish own-site SEO article/i.test(value)) return 'Подтвердить публикацию статьи';
+    return value.replace(/^Рисованное видео:/i, 'Простое видео:');
+  }
+
   function renderTable(block) {
     var wrap = el('div', 'dp-tablewrap');
     var table = el('table', 'dp-table');
@@ -69,10 +84,15 @@
     block.columns.forEach(function (name) { head.appendChild(el('th', '', name)); });
     var thead = el('thead'); thead.appendChild(head); table.appendChild(thead);
     var body = el('tbody');
-    block.rows.forEach(function (row) {
+    // Work-list APIs return newest first. In the bottom-anchored conversation
+    // display those rows oldest first so the newest stays closest to the composer.
+    var isWorkList = voiceHoldEnabled && block.columns.indexOf('Задание') >= 0 &&
+      block.columns.indexOf('Статус') >= 0;
+    var rows = isWorkList ? block.rows.slice().reverse() : block.rows;
+    rows.forEach(function (row) {
       var tr = el('tr');
       row.forEach(function (cell, index) {
-        var td = el('td', '', cell);
+        var td = el('td', '', index === 0 && isWorkList ? friendlyTitle(cell) : cell);
         td.setAttribute('data-label', block.columns[index]);
         tr.appendChild(td);
       });
@@ -85,7 +105,7 @@
   function renderTask(block) {
     var card = el('a', 'dp-task');
     card.href = block.href;
-    card.appendChild(el('span', 'dp-task-title', block.title));
+    card.appendChild(el('span', 'dp-task-title', voiceHoldEnabled ? friendlyTitle(block.title) : block.title));
     card.appendChild(el('span', 'dp-task-status', statusWord(block.status)));
     return card;
   }
@@ -94,10 +114,10 @@
   function renderMaterial(block) {
     var card = el('div', 'dp-material');
     var top = el('div', 'dp-material-top');
-    top.appendChild(el('span', 'dp-material-kind', block.kind));
+    top.appendChild(el('span', 'dp-material-kind', voiceHoldEnabled ? friendlyKind(block.kind) : block.kind));
     top.appendChild(el('span', 'dp-material-status', block.status));
     card.appendChild(top);
-    card.appendChild(el('strong', 'dp-material-title', block.title));
+    card.appendChild(el('strong', 'dp-material-title', voiceHoldEnabled ? friendlyTitle(block.title) : block.title));
     if (block.excerpt) card.appendChild(el('p', 'dp-material-text', block.excerpt));
     var open = el('a', 'dp-link', 'Открыть полностью');
     open.href = block.href;
@@ -114,7 +134,7 @@
 
   function renderConfirm(block) {
     var card = el('div', 'dp-confirm' + (block.paid ? ' paid' : ''));
-    card.appendChild(el('strong', 'dp-confirm-title', block.title));
+    card.appendChild(el('strong', 'dp-confirm-title', voiceHoldEnabled ? friendlyTitle(block.title) : block.title));
     if (block.paid) card.appendChild(el('span', 'dp-badge', 'Платно'));
     var list = el('ul', 'dp-confirm-list');
     block.details.forEach(function (line) { list.appendChild(el('li', '', line)); });
