@@ -1,0 +1,23 @@
+name: Diagnose dispatcher stall (read-only)
+on:
+  push:
+    branches:
+      - incident/growth-dispatcher-delay-20261031
+    paths:
+      - .github/workflows/diagnose-dispatcher-stall.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_SSH_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check paramiko==3.5.1
+      - name: Read-only production analysis (no PII)
+        run: python -m scripts.diagnose_dispatcher_stall
