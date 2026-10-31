@@ -12,6 +12,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Product, Publication
 from app.seo.publishing import publish_if_clear, slugify, reader_hash
+from app.seo.activation import set_enabled
 from app.sso.models import StudioBusinessLink
 from app.workflows.article_contracts import ArticleArtifact
 from test_articles import SequenceProvider, build_article_production, Settings
@@ -26,6 +27,7 @@ def env():
         product = Product(name="ServGo", slug="servgo")
         db.add(product)
         db.commit()
+        set_enabled(db, product.id, enabled=True, actor='fixture-owner')
         yield db, product
     engine.dispose()
 
