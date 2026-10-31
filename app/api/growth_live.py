@@ -25,6 +25,7 @@ from app.models.domain import Artifact, Experiment, Task
 from app.services.campaign_lifecycle import LABELS as CAMPAIGN_LABELS, allowed_actions, campaign_event_history
 from app.api.seo_run_view import seo_runs
 from app.seo.control import SeoControlError, create_seo_run, change_seo_run
+from app.seo.activation import is_enabled, set_enabled
 
 ASSETS = Path(__file__).parent / 'assets'
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -281,6 +282,8 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
 @router.get('/studio/products/{product_id}/seo/queue', response_class=HTMLResponse)
 def seo_queue_confirm(product_id: UUID, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
+    if not is_enabled(db, product_id):
+        return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
     base = f'/studio/products/{product_id}/seo'
     body = (
         '<section class="panel seo-queue-confirm">'
@@ -289,7 +292,7 @@ def seo_queue_confirm(product_id: UUID, db: Session = Depends(get_db)):
         'Обработка после постановки в очередь может использовать платные модели. '
         'Готовые статьи после успешной проверки критиком могут автоматически '
         'попадать в ленту блога продукта (own_site). Для ServGo она подключена '
-        'к servgo.ru/blog; для других компаний публичный сайт ещё не подключён. '
+        'к ServGo; публикация доступна только для подключённых компаний. '
         'Не прошедшие проверку статьи ждут согласования. '
         'Отмена запуска в очереди не удаляет созданные статьи и не отменяет '
         'уже поставленные отдельно задания на статьи.</p>'
@@ -304,6 +307,21 @@ def seo_queue_confirm(product_id: UUID, db: Session = Depends(get_db)):
     )
     return studio_page_shell(product, active='seo', title='Новый запуск SEO-завода',
                              subtitle='Подтвердите создание задания.', body=body)
+
+
+@router.post('/studio/products/{product_id}/seo/activation')
+async def seo_activation(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+    """Explicit owner action. Never enable SEO while creating or viewing a company."""
+    _owner_product(db, product_id)
+    if getattr(request.state, 'studio_sso_role', None) not in (None, 'owner', 'co_owner'):
+        raise HTTPException(403, 'Подключать SEO-завод может только владелец бизнеса')
+    form = await _studio_form(request)
+    action = form.get('action')
+    if action not in ('enable', 'disable'):
+        raise HTTPException(422, 'Некорректное действие')
+    set_enabled(db, product_id, enabled=action == 'enable',
+                actor=getattr(request.state, 'studio_login', 'studio_owner'))
+    return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
 
 
 @router.post('/studio/products/{product_id}/seo/queue')
@@ -358,6 +376,7 @@ def seo_status(product_id: UUID, db: Session = Depends(get_db)):
 @router.get('/studio/products/{product_id}/seo', response_class=HTMLResponse)
 def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
+    enabled = is_enabled(db, product_id)
     runs = seo_runs(db, product_id)
     rows = list(db.scalars(select(Artifact).where(Artifact.product_id == product_id,
                       Artifact.kind.in_(['semantic_core', 'seo_content_plan', 'seo_factory_report']))
@@ -379,14 +398,37 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
         '(own_site). Внешний адрес сайта для этой компании пока не подключён. '
         'Здесь может быть статус «Опубликована», но публичной ссылки на сайте ещё нет.</p>'
     )
+    activation_form = (
+        '<section class="panel seo-activation" aria-label="Подключение SEO-завода">'
+        '<h2>SEO-завод компании</h2>'
+        + ('<p><strong>Подключён.</strong> Можно запускать подготовку статей для этого бизнеса.</p>'
+           if enabled else
+           '<p><strong>Выключен.</strong> Эта компания, включая демо-бизнесы, '
+           'не создаёт SEO-статьи и не тратит средства на генерацию.</p>')
+        + (f'<form method="post" action="{base}/seo/activation">'
+           f'<input type="hidden" name="action" value="{"disable" if enabled else "enable"}">'
+           f'<button class="btn {"danger" if enabled else "primary"}" type="submit">'
+           + ('Отключить SEO-завод' if enabled else 'Подключить SEO-завод')
+           + '</button></form>')
+        + '<p class="subtitle">Подключение само по себе не запускает платную генерацию. '
+          'После подключения нажмите «Новый запуск». Отключение отменяет задания '
+          'в очереди и блокирует новые статьи; уже опубликованные материалы остаются.</p>'
+        + '</section>'
+    )
+    if not enabled:
+        available_actions = '<p>Сначала подключите SEO-завод для этой компании.</p>'
+    else:
+        available_actions = (
+            f'<p><a class="btn primary" href="{base}/seo/queue">Новый запуск SEO-завода</a> '
+            f'<a class="btn" href="{base}?design=v4&amp;command=seo_factory">'
+            'Через ИИ-диспетчер</a> '
+            f'<a class="btn" href="{base}/work">Все задания</a> '
+            f'<a class="btn" href="{base}/materials?kind=article">Статьи</a></p>'
+        )
     return studio_page_shell(product, active='seo', title='SEO-завод',
         subtitle='Реальные статусы запусков, результаты и ошибки из базы вашей компании.',
-        body=publication_note + f'<p><a class="btn primary" href="{base}/seo/queue">Новый запуск SEO-завода</a> '
-             f'<a class="btn" href="{base}?design=v4&amp;command=seo_factory">'
-             'Через ИИ-диспетчер</a> '
-             f'<a class="btn" href="{base}/work">Все задания</a> '
-             f'<a class="btn" href="{base}/materials?kind=article">Статьи</a></p>'
-             '<h2>Запуски SEO-завода</h2>'
+        body=activation_form + publication_note + available_actions
+             + '<h2>Запуски SEO-завода</h2>'
              + (run_cards or '<p>Запуски SEO-завода пока не зарегистрированы.</p>')
              + '<h2>Сохранённые материалы и отчёты</h2>'
              + (cards or '<p>Материалы пока не подготовлены.</p>'))
