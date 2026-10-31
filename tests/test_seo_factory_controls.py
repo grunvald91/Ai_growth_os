@@ -178,5 +178,11 @@ def test_run_articles_link_to_queued_task_saved_material_and_public_blog(env):
     summary = seo_runs(db, pid)
     assert summary[0]["articles"][0]["publication_path"] == "/blog/seo-test-article"
     page = client.get(url(pid))
-    assert "https://servgo.ru/blog/seo-test-article" in page.text
+    assert "https://servgo.ru/blog/seo-test-article" not in page.text
+    assert "адрес сайта этой компании не подключён" in page.text
+    # ServGo's own product is the ONLY one currently mounted at servgo.ru/blog.
+    db.get(Product, pid).slug = "servgo"
+    db.commit()
+    own_page = client.get(url(pid))
+    assert "https://servgo.ru/blog/seo-test-article" in own_page.text
     assert seo_runs(db, other_pid) == []
