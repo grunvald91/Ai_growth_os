@@ -172,3 +172,29 @@ body[data-growth-design="v4"] .campaign-item p{margin:0;overflow-wrap:anywhere;l
   body[data-growth-design="v4"] .campaign-optional{padding:14px}
   body[data-growth-design="v4"] .campaign-actions .btn{flex:1 1 100%;max-width:100%}
 }
+
+
+/* SEO factory: status comes from recorded task and artifact state. */
+body[data-growth-design="v4"] .seo-run{display:grid;gap:10px;min-width:0}
+body[data-growth-design="v4"] .seo-run-head{
+  display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between
+}
+body[data-growth-design="v4"] .seo-run-head h3{margin:0;min-width:0;overflow-wrap:anywhere}
+body[data-growth-design="v4"] .seo-run-status{
+  padding:6px 10px;border-radius:999px;background:var(--blue-soft);
+  color:var(--blue);font-size:12px;font-weight:650;white-space:nowrap
+}
+body[data-growth-design="v4"] .seo-run[data-seo-status="failed"] .seo-run-status{
+  color:var(--s-danger,#d45a5a);background:var(--tint)
+}
+body[data-growth-design="v4"] .seo-run p{
+  margin:0;font-size:13px;line-height:1.6;overflow-wrap:anywhere
+}
+body[data-growth-design="v4"] .seo-run-details{min-width:0}
+body[data-growth-design="v4"] .seo-run-details summary{
+  cursor:pointer;min-height:44px;display:flex;align-items:center;
+  color:var(--blue);font-weight:650
+}
+body[data-growth-design="v4"] .seo-run-details ul{
+  margin:0 0 12px;padding-left:22px;line-height:1.8
+}
