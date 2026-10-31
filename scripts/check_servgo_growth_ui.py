@@ -131,6 +131,91 @@ def main():
                     blocked=[x for x in errors if "content security policy" in x.lower() or "refused to apply inline" in x.lower()]
                     assert not blocked, "CSP blocked team presentation: " + str(blocked)
                     page.screenshot(path=str(OUT/f"team-{width}.png"),full_page=True,animations="disabled")
+
+                # Hold-to-talk is a real browser interaction, not just a markup assertion.
+                # Mock microphone and POST responses: no model tokens, recordings or live tasks.
+                page.add_init_script("""(() => {
+                  window.__mockMicStarts = 0;
+                  Object.defineProperty(navigator, 'mediaDevices', {configurable:true, value:{
+                    getUserMedia: async () => { window.__mockMicStarts++; return {
+                      getTracks: () => [{stop(){}}]
+                    }; }
+                  }});
+                  class MockRecorder {
+                    constructor(){this.state='inactive';this.mimeType='audio/webm';this.handlers={};}
+                    static isTypeSupported(){return true;}
+                    addEventListener(kind,cb){this.handlers[kind]=cb;}
+                    start(){this.state='recording';}
+                    stop(){
+                      if(this.state==='inactive')return;
+                      this.state='inactive';
+                      this.handlers.dataavailable?.({data:new Blob(['test voice'],{type:this.mimeType})});
+                      this.handlers.stop?.();
+                    }
+                  }
+                  window.MediaRecorder=MockRecorder;
+                })();""")
+                voice_calls, dispatch_calls = [], []
+                def mock_voice(route):
+                    voice_calls.append(route.request.method)
+                    route.fulfill(status=200,content_type='application/json',
+                        body=json.dumps({'text':'Что в работе','raw_text':'что в работе',
+                                         'empty':False,'cleaned':True,'fallback_reason':None,
+                                         'replacements':[]}))
+                def mock_dispatch(route):
+                    item=json.loads(route.request.post_data or '{}')
+                    dispatch_calls.append(item)
+                    route.fulfill(status=503 if len(dispatch_calls)==1 else 200,
+                        content_type='application/json',
+                        body=json.dumps({'detail':'Временная ошибка' } if len(dispatch_calls)==1
+                                        else {'messages':[],'hints':[]}))
+                page.route('**/studio/voice/dictate',mock_voice)
+                page.route('**/studio/products/*/dispatch/messages',mock_dispatch)
+                page.set_viewport_size({'width':390,'height':844})
+                response=page.goto(
+                    f'{origin}/studio/products/{product.id}?design=v4',wait_until='load')
+                assert response and response.status==200
+                assert page.locator('#dp-mic').count()==0, 'v4 must have no microphone button'
+                # All bottom-nav labels, including the details/summary "Ещё", share a baseline.
+                nav_y=page.locator('#mobileNav').evaluate("""nav => [...nav.children]
+                  .map(cell => cell.querySelector('span').getBoundingClientRect().top)""")
+                assert max(nav_y)-min(nav_y)<=3, f'Bottom navigation is misaligned: {nav_y}'
+                def pointer(kind, pointer_id):
+                    page.evaluate("""([kind,id]) => {
+                      const where=kind==='pointerdown' ? document.querySelector('#dp-input') : document;
+                      where.dispatchEvent(new PointerEvent(kind,{
+                        bubbles:true,cancelable:true,button:0,pointerType:'touch',pointerId:id,clientX:120,clientY:630
+                      }));
+                    }""",[kind,pointer_id])
+                pointer('pointerdown',11)
+                pointer('pointerup',11)
+                page.wait_for_timeout(270)
+                assert page.evaluate('window.__mockMicStarts')==0, 'short tap started audio'
+                assert page.locator('#dp-input').evaluate("el=>document.activeElement===el")
+                page.locator('#dp-input').fill('Мой незавершённый текст')
+                pointer('pointerdown',12)
+                page.wait_for_function("() => window.__mockMicStarts===1 && document.querySelector('#dp-form').classList.contains('voice-recording')")
+                pointer('pointercancel',12)
+                page.wait_for_timeout(100)
+                assert not voice_calls, 'cancelled hold uploaded audio'
+                pointer('pointerdown',13)
+                page.wait_for_function("() => window.__mockMicStarts===2 && document.querySelector('#dp-form').classList.contains('voice-recording')")
+                pointer('pointerup',13)
+                page.wait_for_function("() => document.querySelector('#dp-voice-note button.dp-voice-undo')")
+                assert len(voice_calls)==1 and len(dispatch_calls)==1, (voice_calls,dispatch_calls)
+                assert dispatch_calls[0]['mode']=='text'
+                assert dispatch_calls[0]['text']=='Что в работе'
+                assert page.locator('#dp-input').input_value()=='Мой незавершённый текст', 'dictation overwrote draft'
+                page.get_by_role('button',name='Отправить ещё раз').click()
+                page.wait_for_function("() => !document.querySelector('.dp-home').classList.contains('busy')")
+                assert len(dispatch_calls)==2,dispatch_calls
+                assert dispatch_calls[0]['client_key']==dispatch_calls[1]['client_key'], 'retry lost idempotency key'
+                assert page.locator('#dp-voice-note').is_hidden()
+                assert not errors,errors
+                result['checks'].append({'page':'voice-hold-mock','width':390,
+                    'short_tap':True,'cancel':True,'automatic_send':True,'retry_idempotent':True,
+                    'preserved_typed_draft':True,'nav_aligned':True})
+                page.screenshot(path=str(OUT/'voice-hold-390.png'),animations='disabled')
                 browser.close()
         finally:
             server.should_exit=True
