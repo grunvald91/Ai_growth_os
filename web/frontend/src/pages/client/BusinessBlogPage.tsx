@@ -10,13 +10,13 @@ export function BusinessBlogPage() {
   const { id, slug } = useParams<{ id: string; slug?: string }>()
   const businessId = Number(id)
   const base = `/business/${id}`
-  const companyLink = slug && article?.company_url ? article.company_url : base
-  const bookingLink = slug && article?.cta_url ? article.cta_url : `/book/${businessId}`
   const [business, setBusiness] = useState<BusinessDetail | null>(null)
   const [feed, setFeed] = useState<BusinessBlogFeed | null>(null)
   const [article, setArticle] = useState<BusinessBlogArticle | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const companyLink = slug && article?.company_url ? article.company_url : base
+  const bookingLink = slug && article?.cta_url ? article.cta_url : `/book/${businessId}`
 
   useEffect(() => {
     let active = true
