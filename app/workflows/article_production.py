@@ -48,10 +48,10 @@ CHANNEL_PROFILES = {
 
 STAGES = (
     ('content_strategist', ArticleStrategy, 'Определи читателя, его узнаваемую боль, поисковое намерение и главную практическую пользу статьи.'),
-    ('seo_editor', SEOPlan, 'Выбери поисковый запрос, сильный заголовок, заход и план статьи, где каждый раздел даёт читателю действие.'),
+    ('seo_editor', SEOPlan, 'Выбери поисковый запрос, естественный заголовок и смысловой план, подходящий теме без обязательных списков.'),
     ('article_writer', ArticleBodyDraft, 'Напиши живую содержательную статью под вопрос читателя: объясни, проиллюстрируй или покажи выбор без искусственного объёма и шаблонных списков. Факты компании подставляет система.'),
     ('conversion_editor', ConversionCore, 'Спроектируй один призыв к действию, ссылки, измерение воронки и шаги распространения. Без производных материалов.'),
-    ('human_editor', HumanEditedArticle, 'Сделай из черновика ясную и полезную статью для живого читателя, не добавляя неподтверждённых фактов о продукте.'),
+    ('human_editor', HumanEditedArticle, 'Сделай черновик цельной, интересной статьёй для живого читателя, сохранив голос и достоверность.'),
     ('marketing_editor', HumanEditedArticle, 'Финальная читательская редактура: сохранить голос, полезность и удовольствие от чтения; приглашение к услуге только уместно и ненавязчиво.'),
     ('repurposing_editor', TextDerivativeSet, 'Сделай шесть разных текстовых адаптаций статьи под площадки.'),
     ('video_director', ShortVideoDerivativeDraft, 'Write a complete text-only director brief for one vertical short video.'),
@@ -157,7 +157,7 @@ ARTICLE_COMMON = ('Return ONLY JSON matching the schema. '
     'Titles, hooks and CTAs may be strong declarative statements when they describe a supported reader '
     'problem, the process being explained, or a benefit the reader can pursue. They must never promise '
     'guaranteed growth, revenue, conversion, rankings or other unsupported outcomes. Prefer concrete '
-    'pain -> mechanism -> value -> next-step writing over cautious abstract wording. Missing evidence '
+    'reader question -> clear explanation -> helpful detail -> gentle next step where relevant. Missing evidence '
     'belongs in proof_needed_notes, not repetitive disclaimers. Links are proposed local paths requiring verification. '
     'Measure content -> traffic -> lead -> demo/registration/booking -> customer; targets are '
     'hypotheses, never achieved results. If no observation window is supplied in context, set '
@@ -200,16 +200,16 @@ def _default_stage_rule(name: str) -> str:
     stage_rule = ''
     if name == 'content_strategist':
         stage_rule = (
-            ' Ты — контент-стратег. Сначала польза: найди узнаваемую боль целевого читателя и сформулируй, что '
-            'конкретно он унесёт из статьи — 3–5 приёмов, шагов, метрик или расчётов, которые применит сам, '
-            'даже если не станет клиентом. Запиши это в hypothesis по существу, а не общими словами; в angle — '
-            'необычный угол, которым статья отличается от типовых текстов. Если в marketing_research есть '
-            'viral_content_research, начинай с его подтверждённых audience_pains и сильных паттернов статей и '
-            'видео, а не с описания продукта; предпочитай боли с подтверждённым product_match. Повторяющиеся '
-            'сигналы из нескольких независимых источников можно называть заметной темой, но не измеренным '
-            'спросом. Цифры чужих кейсов — только как контекст источника, не как обещание результата компании. '
-            'Чужие формулировки не копируй. В titles дай 2–5 заголовков: конкретная проблема или выгода, без '
-            'кликбейта. Пропиши мост от проблемы читателя к подтверждённой пользе компании.'
+            ' Ты — контент-стратег, который представляет реального человека с вопросом, а не '
+            '«трафик» и «лид». Найди узнаваемое сомнение, интерес или ситуацию, зачем человек '
+            'откроет материал и что поймёт после него. Выбери один собственный, понятный угол '
+            'подачи: объяснение, сравнение, маленькую сцену или практическое руководство. '
+            'Не обязуй автора писать фиксированное число шагов и не изображай каждый запрос '
+            'как драматическую боль. В исследовании опирайся на подтверждённые '
+            'audience_pains и product_match, не выдавая наблюдения за измеренный спрос. '
+            'Если есть юмор или образ, пусть они помогают пониманию. Придумай несколько '
+            'честных интересных заголовков без кликбейта. Не сочиняй истории реальных '
+            'клиентов, цифры, отзывы или факты о компании.'
         )
     elif name == 'seo_editor':
         stage_rule = (
