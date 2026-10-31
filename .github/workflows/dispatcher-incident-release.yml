@@ -1,0 +1,44 @@
+name: Dispatcher incident guarded production release
+on:
+  push:
+    branches:
+      - fix/dispatcher-latency-recommendations-videos-20261031
+    paths:
+      - .github/workflows/dispatcher-incident-release.yml
+permissions:
+  contents: read
+concurrency:
+  group: growth-production
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[test]'
+      - name: Focused dispatcher and auth regression
+        run: python -m pytest -q tests/test_dispatcher_fast_owner.py tests/test_dispatcher.py tests/test_dispatcher_api.py tests/test_growth_voice_recency.py
+      - run: node --check app/api/dispatcher_assets/dispatcher.js
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+    env:
+      SERVER_SSH_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install paramiko==3.5.1
+      - name: Verify production baseline, release, and check runtime
+        run: python -m scripts.deploy_dispatcher_incident
