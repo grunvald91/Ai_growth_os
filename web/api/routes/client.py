@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import httpx
 import uuid
 
@@ -1604,3 +1605,49 @@ async def get_booking_by_token(token: str, db: AsyncSession = Depends(get_db)):
         cancellation_policy_text=getattr(business, "cancellation_policy_text", None),
         cancellation_policy_photo=getattr(business, "cancellation_policy_photo", None),
     )
+
+
+# ---------- ServGo-hosted SEO articles (public, read-only) ----------
+# Growth owns the content; BookingBot owns the company profile and booking links.
+# Never accept an upstream URL from the caller (avoids SSRF/open-proxy behaviour).
+
+async def _company_blog_data(business_id: int, db: AsyncSession, slug: str | None = None) -> dict:
+    if business_id <= 0 or (slug is not None and not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug)):
+        raise HTTPException(status_code=404, detail="Article not found")
+    business = await db.get(Business, business_id)
+    if business is None or not business.is_active:
+        raise HTTPException(status_code=404, detail="Business not found")
+
+    origin = os.getenv("GROWTH_PUBLIC_BLOG_URL", "https://growth.servgo.ru").rstrip("/")
+    url = f"{origin}/public/blog/businesses/{business_id}/articles"
+    if slug is not None:
+        url += f"/{slug}"
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
+            upstream = await client.get(url, headers={"Accept": "application/json"})
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Articles temporarily unavailable") from None
+
+    if upstream.status_code == 404:
+        raise HTTPException(status_code=404, detail="Article not found")
+    if upstream.status_code != 200:
+        raise HTTPException(status_code=502, detail="Article feed unavailable")
+    try:
+        payload = upstream.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Article feed returned invalid data") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="Article feed returned invalid data")
+    return payload
+
+
+@router.get("/businesses/{business_id}/blog/articles")
+async def business_blog_articles(business_id: int, db: AsyncSession = Depends(get_db)):
+    """Public list with a verified ServGo business profile, no client records or credentials."""
+    return await _company_blog_data(business_id, db)
+
+
+@router.get("/businesses/{business_id}/blog/articles/{slug}")
+async def business_blog_article(business_id: int, slug: str, db: AsyncSession = Depends(get_db)):
+    """Published SEO article for the active business, with its own company/booking CTA."""
+    return await _company_blog_data(business_id, db, slug)
