@@ -20,6 +20,7 @@ from app.dispatcher import executors
 from app.dispatcher.blocks import Chip, clean_blocks
 from app.dispatcher.decision import (CONFIDENCE_TO_ACT, SYSTEM_PROMPT, DispatcherDecision, build_user_message)
 from app.dispatcher.executors import Confirmation, Context, Outcome
+from app.dispatcher.fast_routes import quick_capability
 from app.dispatcher.models import DispatcherConversation, DispatcherMessage
 from app.dispatcher.policy import Verdict, verdict
 from app.dispatcher.readers import snapshot
@@ -33,10 +34,11 @@ from app.tools import ToolOperation
 
 _logger = logging.getLogger(__name__)
 
-# The owner should not stare at a spinner: after this the dispatcher answers with hints and links.
-# The model platforms are slow at times (see app/llm/timeouts.py); a late answer is better than none.
-# Stays below the 300 s the web server waits for the Studio.
-DECISION_TIMEOUT_SECONDS = 180
+# Read-only owner requests are routed without an LLM. Other model routing must
+# return a usable fallback before the client and edge proxy time out.
+# Content generation uses its own longer timeouts; this limit only applies to
+# deciding the next dispatcher action.
+DECISION_TIMEOUT_SECONDS = 25
 # The model sees only the latest messages of the thread (owner's decision, 22.10.2026); the whole
 # thread stays stored and visible on the page.
 HISTORY_FOR_MODEL = 20
@@ -259,8 +261,12 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             decision = DispatcherDecision(intent="execute", capability=known.id,
                                           params={k: str(v) for k, v in (chip.get("params") or {}).items()},
                                           confidence=1.0)
-    elif llm is not None:
-        decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
+    else:
+        quick = quick_capability(text)
+        if quick is not None:
+            decision = DispatcherDecision(intent="execute", capability=quick, params={}, confidence=1.0)
+        elif llm is not None:
+            decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
 
     outcome: Outcome | None = None
     confirmation: Confirmation | None = None
