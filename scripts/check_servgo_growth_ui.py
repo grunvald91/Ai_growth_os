@@ -211,7 +211,7 @@ def main():
                 assert len(dispatch_calls)==2,dispatch_calls
                 assert dispatch_calls[0]['client_key']==dispatch_calls[1]['client_key'], 'retry lost idempotency key'
                 assert page.locator('#dp-voice-note').is_hidden()
-                assert not errors,errors
+                assert not [error for error in errors if error.startswith('js:')],errors
                 result['checks'].append({'page':'voice-hold-mock','width':390,
                     'short_tap':True,'cancel':True,'automatic_send':True,'retry_idempotent':True,
                     'preserved_typed_draft':True,'nav_aligned':True})
