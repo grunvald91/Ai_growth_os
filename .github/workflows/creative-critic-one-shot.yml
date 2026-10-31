@@ -2,7 +2,7 @@ name: Creative Critic one-shot
 on:
   push:
     branches: [experiment/creative-critic-one-shot-20261031]
-    paths: ['.github/critic-claudehub-trigger-fixed.txt']
+    paths: ['.github/critic-full-answer-trigger.txt']
   workflow_dispatch:
 permissions:
   contents: read
@@ -59,7 +59,7 @@ jobs:
                   "findings (массив объектов severity, evidence, problem, proposed_fix), "
                   "decisions (массив объектов finding_index, decision, reason), "
                   "after (объект с полями goal и scenes, как во входе). Никаких пояснений вне JSON.")
-          payload={"model":"kimi-2.7","temperature":0.2,"max_tokens":2200,
+          payload={"model":"kimi-2.7","temperature":0.2,
                    "response_format":{"type":"json_object"},
                    "messages":[{"role":"system","content":system},{"role":"user","content":json.dumps(original,ensure_ascii=False)}]}
           req=urllib.request.Request('https://api.claudehub.fun/v1/chat/completions',
@@ -83,7 +83,7 @@ jobs:
           diagnostic={'finish_reason':finish,'content_type':type(msg).__name__,
                       'content_chars':len(msg) if isinstance(msg,str) else None,
                       'usage_completion_tokens':(raw.get('usage') or {}).get('completion_tokens'),
-                      'max_tokens_requested':payload['max_tokens']}
+                      'max_tokens_requested':payload.get('max_tokens')}
           if isinstance(msg,str):
             # Synthetic test input only; retain bounded model output for offline inspection.
             (out/'response-content.txt').write_text(msg[:32000],encoding='utf-8')
