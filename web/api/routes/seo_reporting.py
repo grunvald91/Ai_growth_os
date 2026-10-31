@@ -9,6 +9,7 @@ from database.models import SeoBookingAttribution
 from datetime_utils import utc_now
 from ..database import Booking, get_db, User
 from ..deps import get_current_user
+from ..seo_referrals import tracking_enabled
 from .admin import _get_owner_business_ids
 
 router = APIRouter(prefix="/admin/businesses", tags=["seo-attribution"])
@@ -53,6 +54,7 @@ async def seo_conversions(
     ]
     return {
         "business_id": business_id,
+        "tracking_enabled": tracking_enabled(),
         "days": days,
         "articles": articles,
         "total_created": sum(a["bookings_created"] for a in articles),
