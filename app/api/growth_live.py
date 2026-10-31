@@ -147,7 +147,7 @@ def artifact_content(content: str) -> str:
     return '<details class="gv-result"><summary>Подробнее</summary>'+render(value)+'</details>'
 
 
-def seo_run_card(row: dict, product_id: UUID | None = None) -> str:
+def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | None = None) -> str:
     def state(label: str, done: bool) -> str:
         return (f'<li>{html.escape(label)}: '
                 f'<strong>{"Есть результат" if done else "Пока нет результата"}</strong></li>')
@@ -189,8 +189,11 @@ def seo_run_card(row: dict, product_id: UUID | None = None) -> str:
             extra = ''
             pub = article.get("publication_path")
             if pub and pub.startswith("/blog/"):
-                extra = (f'<a href="https://servgo.ru{html.escape(pub, quote=True)}"'
-                         ' target="_blank" rel="noopener noreferrer">Посмотреть в блоге</a>')
+                if blog_base:
+                    extra = (f'<a href="{html.escape(blog_base + pub, quote=True)}"'
+                             ' target="_blank" rel="noopener noreferrer">Посмотреть в блоге</a>')
+                else:
+                    extra = '<span>Запись о публикации есть; адрес сайта этой компании не подключён</span>'
             article_cards.append(
                 '<li class="seo-article-item">'
                 f'<a href="{html.escape(target, quote=True)}">{html.escape(article["title"])}</a>'
@@ -312,7 +315,10 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
                     f'<p>{html.escape(row.kind)} · {html.escape(row.status.value)}</p>'
                     f'{artifact_content(row.content)}</article>' for row in rows)
     base = f'/studio/products/{product_id}'
-    run_cards = ''.join(seo_run_card(row, product_id) for row in runs)
+    # servgo.ru/blog is wired to the single Growth product slug 'servgo'.
+    # Other companies have a per-product feed but no known public frontend URL.
+    blog_base = 'https://servgo.ru' if product.slug == 'servgo' else None
+    run_cards = ''.join(seo_run_card(row, product_id, blog_base=blog_base) for row in runs)
     return studio_page_shell(product, active='seo', title='SEO-завод',
         subtitle='Реальные статусы запусков, результаты и ошибки из базы вашей компании.',
         body=f'<p><a class="btn primary" href="{base}/seo/queue">Новый запуск SEO-завода</a> '
