@@ -419,6 +419,7 @@
     var intent = activeHold;
     discardRecording = false;
     showNote('');
+    if (voiceHoldEnabled) input.blur(); // close the keyboard before showing the recording glow
     micOpening = true;
     if (voiceHoldEnabled) {
       showLive('Подключаю микрофон…', '', true);
@@ -577,6 +578,11 @@
   if (micButton && supportedVoice) {
     micButton.hidden = false;
     micButton.addEventListener('click', function () { if (recorder) stopRecording(); else startRecording(); });
+  }
+  if (voiceHoldEnabled && !supportedVoice) {
+    var unsupportedHint = document.getElementById('dp-press-hint');
+    if (unsupportedHint) unsupportedHint.textContent =
+      'Голосовой ввод недоступен — напишите команду';
   }
   if (voiceHoldEnabled && supportedVoice) {
     // Short tap keeps text editing; deliberate hold records. No separate mic control.
