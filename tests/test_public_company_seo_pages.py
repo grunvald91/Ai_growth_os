@@ -23,6 +23,7 @@ ARTICLE = {
     "direct_answer": "Не используйте слишком горячую воду.",
     "sections": [{"title": "Правила ухода", "paragraphs": ["Бережный шампунь."],
                   "bullets": ["Защита от солнца"]}],
+    "company_facts": ["В салоне можно заказать консультацию <script>bad()</script>."],
     "closing": "Записывайтесь на консультацию.",
     "faq": [{"question": "Как часто?", "answer": "По состоянию волос."}],
     "cta": "Запись в салон",
@@ -77,6 +78,9 @@ class PublicSEOHTMLTests(unittest.TestCase):
         self.assertIn("Бережный шампунь.", body)
         self.assertIn("Защита от солнца", body)
         self.assertIn("Не используйте слишком горячую воду.", body)
+        self.assertIn("В салоне можно заказать консультацию", body)
+        self.assertNotIn("<script>bad()</script>", body)
+        self.assertIn("&lt;script&gt;bad()&lt;/script&gt;", body)
         self.assertIn('href="/book/64"', body)
         self.assertIn('href="/business/64"', body)
         self.assertIn('rel="canonical" href="https://servgo.ru/business/64/blog/kak-uhazhivat-za-volosami"', body)
