@@ -1,10 +1,14 @@
 import { useState, useEffect, type ReactNode } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { MapPin, Phone, Clock, Navigation, DoorOpen, X, ChevronRight, ArrowRight, Sparkles } from 'lucide-react'
 import { api, type BusinessDetail, type BlogArticleSummary, type EmployeeWithPricing } from '../../api/client'
 import { AirFrame, HeroArt } from './AirFrame'
 import { parsePhotoList, photoSrc, photoThumbSrc } from './airPhotos'
 import { applySeo, shortText } from '../../utils/seo'
+
+function withSeoRef(path: string, reference: string | null): string {
+  return reference ? path + (path.includes('?') ? '&' : '?') + 'seo_ref=' + encodeURIComponent(reference) : path
+}
 
 function linkifyText(text: string): ReactNode {
   const urlPattern = /(https?:\/\/[^\s]+|(?:vk\.com|t\.me)\/[^\s]+)/gi
@@ -34,7 +38,7 @@ function formatPrice(n: number) {
   return `${n.toLocaleString('ru-RU')} ₽`
 }
 
-function ResourceSheet({ emp, isVenue, businessId, onClose }: { emp: EmployeeWithPricing; isVenue: boolean; businessId: number; onClose: () => void }) {
+function ResourceSheet({ emp, isVenue, businessId, seoRef, onClose }: { emp: EmployeeWithPricing; isVenue: boolean; businessId: number; seoRef: string | null; onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -65,7 +69,7 @@ function ResourceSheet({ emp, isVenue, businessId, onClose }: { emp: EmployeeWit
         {emp.specialization && <div className="bf-sheet-sub">{emp.specialization}</div>}
         {emp.description?.trim() && <p>{linkifyText(emp.description)}</p>}
         {details.length > 0 && <div className="details">{details.map((d) => <div key={d}>{d}</div>)}</div>}
-        <Link to={`/book/${businessId}?employee=${emp.id}`} className="bf-primary bf-sheet-cta">
+        <Link to={withSeoRef(`/book/${businessId}?employee=${emp.id}`, seoRef)} className="bf-primary bf-sheet-cta">
           {isVenue ? 'Забронировать' : 'Записаться'} <ArrowRight />
         </Link>
       </div>
@@ -75,6 +79,10 @@ function ResourceSheet({ emp, isVenue, businessId, onClose }: { emp: EmployeeWit
 
 export function BusinessPage() {
   const { id } = useParams<{ id: string }>()
+  const [searchParams] = useSearchParams()
+  const candidate = searchParams.get('seo_ref')
+  // The server verifies the signature; the browser only limits URL propagation.
+  const seoRef = candidate && /^[A-Za-z0-9_.-]{1,512}$/.test(candidate) ? candidate : null
   const [business, setBusiness] = useState<BusinessDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -163,7 +171,7 @@ export function BusinessPage() {
       label={business.name}
       backTo="/"
       overlay={selectedEmp && (
-        <ResourceSheet emp={selectedEmp} isVenue={isVenue} businessId={business.id} onClose={() => setSelectedEmp(null)} />
+        <ResourceSheet emp={selectedEmp} isVenue={isVenue} businessId={business.id} seoRef={seoRef} onClose={() => setSelectedEmp(null)} />
       )}
     >
       <section className="bf-screen bf-screen--business" aria-label={business.name}>
@@ -228,7 +236,7 @@ export function BusinessPage() {
                 <div className="bf-kicker">{isVenue ? 'Форматы аренды' : 'Услуги'} · {services.length}</div>
                 <div className="bf-list">
                   {services.slice(0, 6).map((s) => (
-                    <Link key={s.id} to={`/book/${business.id}?service=${s.id}`} className="bf-option bf-option--link">
+                    <Link key={s.id} to={withSeoRef(`/book/${business.id}?service=${s.id}`, seoRef)} className="bf-option bf-option--link">
                       <span className="bf-option-data">
                         <span className="bf-option-title">{s.name}</span>
                         <span className="bf-option-meta">
@@ -240,7 +248,7 @@ export function BusinessPage() {
                   ))}
                 </div>
                 {services.length > 6 && (
-                  <Link to={`/book/${business.id}`} className="bf-about" style={{ display: 'inline-block', textDecoration: 'none' }}>Все услуги — {services.length}</Link>
+                  <Link to={withSeoRef(`/book/${business.id}`, seoRef)} className="bf-about" style={{ display: 'inline-block', textDecoration: 'none' }}>Все услуги — {services.length}</Link>
                 )}
               </section>
             )}
