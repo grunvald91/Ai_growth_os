@@ -362,3 +362,31 @@ body[data-growth-design="v4"] .dp-home:is(.voice-connecting,.voice-recording)
   }
   body[data-growth-design="v4"] .voice-hold-overlay::after{animation:none!important}
 }
+
+/* One centered progress caption inside the composer, including when a typed draft exists. */
+body[data-growth-design="v4"] .command-bar .voice-composer-status{
+  position:absolute;left:16px;right:59px;top:50%;
+  transform:translateY(-50%);
+  pointer-events:none;text-align:center;
+  color:var(--muted);opacity:.8;
+  font:400 12.5px/1.4 inherit;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+body[data-growth-design="v4"] .command-bar .voice-composer-status[hidden]{display:none!important}
+body[data-growth-design="v4"] .command-bar:is(.voice-processing,.voice-sending) textarea{
+  opacity:0;pointer-events:none;
+}
+body[data-growth-design="v4"] .command-bar:is(.voice-processing,.voice-sending)::after{
+  content:"";position:absolute;bottom:4px;left:24%;right:24%;height:2px;
+  pointer-events:none;border-radius:6px;opacity:.65;
+  background:linear-gradient(90deg,transparent,#86b9f4,#4b96ec,#86b9f4,transparent);
+  background-size:230% 100%;
+  animation:sg-composer-wait 2.8s ease-in-out infinite;
+}
+@keyframes sg-composer-wait{
+  0%,100%{background-position:0 50%;opacity:.3}
+  50%{background-position:100% 50%;opacity:.75}
+}
+@media(prefers-reduced-motion:reduce){
+  body[data-growth-design="v4"] .command-bar:is(.voice-processing,.voice-sending)::after{animation:none}
+}
