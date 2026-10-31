@@ -28,7 +28,7 @@ from app.seo.control import SeoControlError, create_seo_run, change_seo_run
 from app.seo.activation import is_enabled, set_enabled
 from app.seo.visibility import VisibilityError, change_article_visibility
 from app.seo.insights import company_seo_insights
-from app.models.domain import ArtifactStatus, Publication
+from app.models.domain import ArtifactStatus, Publication, Product
 from app.workflows.article_contracts import ArticleArtifact
 from app.sso.models import StudioBusinessLink
 
@@ -405,6 +405,8 @@ def seo_published_articles(db: Session, product_id: UUID, enabled: bool) -> str:
         if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug):
             if business_id is not None:
                 public_url = f'https://servgo.ru/business/{business_id}/blog/{slug}'
+            elif db.scalar(select(Product.slug).where(Product.id == product_id)) == "servgo":
+                public_url = f'https://servgo.ru/blog/{slug}'
             else:
                 # A standalone Growth product may not have a BookingBot public route yet.
                 public_url = None
