@@ -79,6 +79,13 @@ def main():
                     }
                   }
                   window.MediaRecorder=MockRecorder;
+                  const originalFetch = window.fetch.bind(window);
+                  window.fetch = (url, init) => {
+                    const response = originalFetch(url, init);
+                    return String(url).includes('/studio/voice/dictate')
+                      ? response.then(data => new Promise(done => setTimeout(() => done(data), 330)))
+                      : response;
+                  };
                 })();""")
                 voice_calls, dispatch_calls = [], []
                 def mock_voice(route):
@@ -101,6 +108,14 @@ def main():
                     f'{origin}/studio/products/{product.id}?design=v4',wait_until='load')
                 assert response and response.status==200
                 assert page.locator('#dp-mic').count()==0, 'v4 must have no microphone button'
+                assert page.locator('#dp-press-hint').count()==0, 'hint belongs inside composer'
+                assert page.locator('#dp-input').get_attribute('placeholder')=='Удерживайте, чтобы говорить'
+                assert page.locator('#dp-voice-overlay').count()==1
+                composer=page.locator('#dp-form').evaluate("""element=>{
+                  const s=getComputedStyle(element),r=element.getBoundingClientRect();
+                  return {radius:parseFloat(s.borderTopLeftRadius),height:r.height}
+                }""")
+                assert composer['radius']<=24 and composer['height']<=70,composer
                 # All bottom-nav labels, including the details/summary "Ещё", share a baseline.
                 nav_y=page.locator('#mobileNav').evaluate("""nav => [...nav.children]
                   .map(cell => cell.querySelector('span').getBoundingClientRect().top)""")
@@ -120,12 +135,30 @@ def main():
                 page.locator('#dp-input').fill('Мой незавершённый текст')
                 pointer('pointerdown',12)
                 page.wait_for_function("() => window.__mockMicStarts===1 && document.querySelector('#dp-form').classList.contains('voice-recording')")
+                page.wait_for_timeout(180)
+                active_overlay=page.locator('#dp-voice-overlay').evaluate("""element=>({
+                  opacity:parseFloat(getComputedStyle(element).opacity),
+                  position:getComputedStyle(element).position,
+                  animation:getComputedStyle(element,'::after').animationDuration,
+                  label:element.querySelector('#dp-voice-overlay-text').textContent
+                })""")
+                assert active_overlay['opacity']>.9 and active_overlay['position']=='fixed',active_overlay
+                assert active_overlay['animation']=='3s',active_overlay
+                assert 'Отпустите' in active_overlay['label']
+                page.screenshot(path=str(OUT/'voice-hold-active-390.png'),animations='allow')
                 pointer('pointercancel',12)
-                page.wait_for_timeout(100)
+                page.wait_for_timeout(220)
+                assert page.locator('#dp-voice-overlay').evaluate("e=>parseFloat(getComputedStyle(e).opacity)")<.1
                 assert not voice_calls, 'cancelled hold uploaded audio'
                 pointer('pointerdown',13)
                 page.wait_for_function("() => window.__mockMicStarts===2 && document.querySelector('#dp-form').classList.contains('voice-recording')")
                 pointer('pointerup',13)
+                page.wait_for_function("() => document.querySelector('#dp-form').classList.contains('voice-processing')")
+                assert page.locator('#dp-voice-status').is_visible()
+                assert 'Распознаю и редактирую' in page.locator('#dp-voice-status').inner_text()
+                page.wait_for_timeout(200)
+                assert page.locator('#dp-voice-overlay').evaluate("e=>parseFloat(getComputedStyle(e).opacity)")<.1
+                page.screenshot(path=str(OUT/'voice-processing-390.png'),animations='disabled')
                 page.wait_for_function("() => document.querySelector('#dp-voice-note button.dp-voice-undo')")
                 assert len(voice_calls)==1 and len(dispatch_calls)==1, (voice_calls,dispatch_calls)
                 assert dispatch_calls[0]['mode']=='text'
@@ -139,7 +172,9 @@ def main():
                 assert not [error for error in errors if error.startswith('js:')],errors
                 result['checks'].append({'page':'voice-hold-mock','width':390,
                     'short_tap':True,'cancel':True,'automatic_send':True,'retry_idempotent':True,
-                    'preserved_typed_draft':True,'nav_aligned':True})
+                    'preserved_typed_draft':True,'nav_aligned':True,
+                    'overlay_enter_exit':True,'processing_inside_composer':True,
+                    'compact_composer':True})
                 page.screenshot(path=str(OUT/'voice-hold-390.png'),animations='disabled')
                 browser.close()
         finally:

@@ -54,11 +54,8 @@
 
   function renderLinks(items) {
     var list = el('div', 'dp-links');
-    // The newest work link belongs nearest to the composer, not at the top.
-    var rows = voiceHoldEnabled && items.length > 1 &&
-      items.every(function (item) { return String(item.label || '').indexOf('Открыть: ') === 0; })
-      ? items.slice().reverse() : items;
-    rows.forEach(function (item) {
+    // Chronological ordering is decided by the executor from real timestamps.
+    items.forEach(function (item) {
       var raw = String(item.label || '');
       var caption = voiceHoldEnabled && raw.indexOf('Открыть: ') === 0
         ? 'Открыть: ' + friendlyTitle(raw.slice(9)) : raw;
@@ -91,12 +88,10 @@
     block.columns.forEach(function (name) { head.appendChild(el('th', '', name)); });
     var thead = el('thead'); thead.appendChild(head); table.appendChild(thead);
     var body = el('tbody');
-    // Work-list APIs return newest first. In the bottom-anchored conversation
-    // display those rows oldest first so the newest stays closest to the composer.
+    // Executors send oldest-to-newest rows for the bottom-anchored dispatcher.
     var isWorkList = voiceHoldEnabled && block.columns.indexOf('Задание') >= 0 &&
       block.columns.indexOf('Статус') >= 0;
-    var rows = isWorkList ? block.rows.slice().reverse() : block.rows;
-    rows.forEach(function (row) {
+    block.rows.forEach(function (row) {
       var tr = el('tr');
       row.forEach(function (cell, index) {
         var td = el('td', '', index === 0 && isWorkList ? friendlyTitle(cell) : cell);
@@ -310,6 +305,10 @@
   var voiceHoldEnabled = form.classList.contains('command-bar');
   var voiceDispatchPending = false, discardRecording = false, activeHold = null, holdTimer = null;
   var previewUrl = root.getAttribute('data-voice-preview-url');
+  var voiceOverlay = document.getElementById('dp-voice-overlay');
+  var voiceOverlayText = document.getElementById('dp-voice-overlay-text');
+  var voiceStatus = document.getElementById('dp-voice-status');
+  var overlayExitTimer = null;
   var liveBox = document.getElementById('dp-live');
   var liveLabel = document.getElementById('dp-live-label');
   var liveText = document.getElementById('dp-live-text');
@@ -369,19 +368,48 @@
       micButton.disabled = mode === 'processing' || mode === 'sending';
     }
     if (voiceHoldEnabled) {
+      var entering = mode === 'connecting' || recording;
       form.classList.toggle('voice-recording', recording);
       form.classList.toggle('voice-processing', mode === 'processing');
       form.classList.toggle('voice-sending', mode === 'sending');
+      root.classList.toggle('voice-connecting', mode === 'connecting');
       root.classList.toggle('voice-recording', recording);
       root.classList.toggle('voice-processing', mode === 'processing' || mode === 'sending');
+      if (voiceOverlay) {
+        var wasVisible = voiceOverlay.getAttribute('aria-hidden') === 'false';
+        if (entering) {
+          if (overlayExitTimer) clearTimeout(overlayExitTimer);
+          overlayExitTimer = null;
+          voiceOverlay.classList.remove('is-exiting');
+        } else if (wasVisible) {
+          // Distinct exit trajectory: opacity 1->0 and scale 1->.985 in 185ms.
+          voiceOverlay.classList.add('is-exiting');
+          if (overlayExitTimer) clearTimeout(overlayExitTimer);
+          overlayExitTimer = setTimeout(function () {
+            if (voiceOverlay.getAttribute('aria-hidden') === 'true') {
+              voiceOverlay.classList.remove('is-exiting');
+            }
+            overlayExitTimer = null;
+          }, 195);
+        }
+        voiceOverlay.setAttribute('aria-hidden', entering ? 'false' : 'true');
+      }
+      if (voiceOverlayText) voiceOverlayText.textContent = mode === 'connecting'
+        ? 'Подключаю микрофон…' : 'Отпустите, чтобы отправить';
+      if (voiceStatus) {
+        voiceStatus.hidden = mode !== 'processing' && mode !== 'sending';
+        voiceStatus.textContent = mode === 'processing' ? 'Распознаю и редактирую запись…'
+          : mode === 'sending' ? 'Передаю команду диспетчеру…' : '';
+      }
       input.readOnly = mode !== 'idle';
       form.setAttribute('aria-busy', mode === 'processing' || mode === 'sending' ? 'true' : 'false');
       sendButton.disabled = busy || mode !== 'idle';
+      input.setAttribute('placeholder', defaultPlaceholder);
+    } else {
+      var message = mode === 'processing' ? 'Распознаю…'
+        : mode === 'recording' ? 'Говорите…' : defaultPlaceholder;
+      input.setAttribute('placeholder', message);
     }
-    var message = mode === 'processing' ? 'Обрабатываю запись…'
-      : mode === 'sending' ? 'Выполняю команду…'
-      : mode === 'recording' ? 'Говорите…' : defaultPlaceholder;
-    input.setAttribute('placeholder', message);
   }
 
   function releaseStream() {
@@ -449,6 +477,7 @@
     if (voiceHoldEnabled) input.blur(); // close the keyboard before showing the recording glow
     micOpening = true;
     if (voiceHoldEnabled) {
+      setVoiceState('connecting');
       showLive('Подключаю микрофон…', '', true);
     }
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
@@ -611,9 +640,8 @@
     micButton.addEventListener('click', function () { if (recorder) stopRecording(); else startRecording(); });
   }
   if (voiceHoldEnabled && !supportedVoice) {
-    var unsupportedHint = document.getElementById('dp-press-hint');
-    if (unsupportedHint) unsupportedHint.textContent =
-      'Голосовой ввод недоступен — напишите команду';
+    defaultPlaceholder = 'Напишите команду';
+    input.setAttribute('placeholder', defaultPlaceholder);
   }
   if (voiceHoldEnabled && supportedVoice) {
     // Short tap keeps text editing; deliberate hold records. No separate mic control.

@@ -109,7 +109,10 @@ def render_v4(page, request, pid, switch):
         # The whole text composer handles hold-to-talk in v4. Classic Studio keeps its mic.
         formdoc = Document(form)
         mic = formdoc.outer(formdoc.find(ident='dp-mic'))
-        form = form.replace(mic, '').replace('id="dp-input"', 'id="dp-input" aria-describedby="dp-press-hint"', 1)
+        form = form.replace(mic, '').replace('placeholder="Что нужно сделать?"', 'placeholder="Удерживайте, чтобы говорить"', 1)
+        form = form.replace('<button class="dp-send command-go"',
+                            '<span class="voice-composer-status" id="dp-voice-status" role="status" hidden></span>'
+                            '<button class="dp-send command-go"', 1)
         attrs = ' '.join(f'{k}="{html.escape(v or "",quote=True)}"' for k,v in root[1].items() if k!='class')
         content = (f'<section class="dp-home empty-hero animate-in" {attrs}>'
                    '<div class="hero-intro"><div class="hero-eyebrow">ServGo · ваш AI-помощник</div>'
@@ -117,9 +120,13 @@ def render_v4(page, request, pid, switch):
                    'Помогу создать контент, запустить работу команды или разобраться в показателях бизнеса.</p></div>'
                    '<button class="dp-new link" id="dp-new" type="button">Новая тема</button>'
                    +inner.outer(inner.find(ident='dp-feed'))+
-                   '<div class="command-dock">'+inner.outer(inner.find(ident='dp-live'))+
+                   '<div class="command-dock">'
+                   '<div class="voice-hold-overlay" id="dp-voice-overlay" aria-hidden="true">'
+                   '<div class="voice-hold-instruction" id="dp-voice-overlay-text">'
+                   'Отпустите, чтобы отправить</div>'
+                   '<div class="voice-hold-scale" aria-hidden="true"><span class="voice-hold-dot"></span></div>'
+                   '</div>'+inner.outer(inner.find(ident='dp-live'))+
                    inner.outer(inner.find(ident='dp-voice-note'))+form+
-                   '<p id="dp-press-hint" class="dp-press-hint">Удерживайте строку, чтобы говорить</p>'
                    '<div class="command-hints" id="dp-chips" aria-label="Подсказки"></div>'
                    '<div class="home-hero-subnote">Результаты и следующие шаги появятся после запроса</div></div></section>')
     if pid and current == base+'/create':
@@ -201,13 +208,13 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>hold-20261031', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>overlay-20261031', extras)
     if pid:
         button = Document(template).find(ident='notifyBtn')
         template = template.replace(Document(template).outer(button), notice_html(pid).replace('<span aria-hidden="true">🔔</span>', icon('bell')))
         template = template.replace('</head>', '<style>'+notice_css+'</style></head>')
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
-    template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=5"></head>')
+    template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=6"></head>')
     template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=4"></script></body>')
     return template
