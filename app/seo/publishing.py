@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Publication
+from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Product, Publication
 from app.policies import PolicyEvaluator
 from app.seo.clustering import normalize
 from app.services.approvals import ApprovalService
@@ -133,15 +133,28 @@ def publish_if_clear(db: Session, article_id) -> Outcome:
     row = db.get(Artifact, article_id)
     if row is None or row.kind != "article":
         raise LookupError("Article not found")
+    # Serialize publication, duplicate checks, opt-out and owner visibility on
+    # the SAME company row. Under PostgreSQL, another worker waits here before
+    # it can choose a slug or insert an additional publication.
+    if db.scalar(select(Product.id).where(
+            Product.id == row.product_id).with_for_update()) is None:
+        raise LookupError("Company not found")
+    db.refresh(row)  # Do not trust a stale status cached before the row lock.
+    existing = db.scalar(select(Publication).where(
+        Publication.artifact_id == row.id, Publication.product_id == row.product_id,
+        Publication.channel == CHANNEL).limit(1))
+    if existing is not None:
+        if existing.status == "published":
+            if row.status != ArtifactStatus.PUBLISHED:
+                row.status = ArtifactStatus.PUBLISHED
+                db.commit()
+            return Outcome(True, "already_published",
+                           (existing.external_reference or "").removeprefix("/blog/") or None)
+        if existing.status == "unpublished":
+            return Outcome(False, "manually_unpublished")
+        return Outcome(False, "existing_publication")
     if row.status == ArtifactStatus.PUBLISHED:
         return Outcome(True, "already_published")
-    # An intentionally hidden page may only return through the owner's
-    # explicit restore action. Worker retries must not create a second URL.
-    hidden = db.scalar(select(Publication.id).where(
-        Publication.artifact_id == row.id, Publication.product_id == row.product_id,
-        Publication.channel == CHANNEL, Publication.status == "unpublished").limit(1))
-    if hidden is not None:
-        return Outcome(False, "manually_unpublished")
     if not is_enabled(db, row.product_id):
         return Outcome(False, "seo_disabled")
     article = ArticleArtifact.model_validate_json(row.content)
@@ -214,7 +227,18 @@ def publish_owner_approved(db: Session) -> int:
     published = 0
     for approval in list(held):
         row = db.get(Artifact, approval.artifact_id)
-        if row is None or row.kind != "article" or row.status == ArtifactStatus.PUBLISHED:
+        if row is None or row.kind != "article":
+            continue
+        # The automatic and manual paths must use the same per-company lock:
+        # an owner action must not race a clean-critic worker.
+        if db.scalar(select(Product.id).where(
+                Product.id == row.product_id).with_for_update()) is None:
+            continue
+        db.refresh(row)
+        db.refresh(approval)
+        if row.status == ArtifactStatus.PUBLISHED or approval.status not in ("pending", "approved"):
+            continue
+        if approval.decided_by == DECIDER:
             continue
         if not is_enabled(db, row.product_id):
             continue
