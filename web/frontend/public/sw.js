@@ -62,8 +62,8 @@ self.addEventListener('install', (event) => {
       const assetPaths = await manifest.json()
       if (!Array.isArray(assetPaths) || assetPaths.length === 0 ||
           !assetPaths.every((path) => typeof path === 'string' && publicStaticAsset(path)) ||
-          !assetPaths.some((path) => /\\.js$/i.test(path)) ||
-          !assetPaths.some((path) => /\\.css$/i.test(path))) {
+          !assetPaths.some((path) => /\.js$/i.test(path)) ||
+          !assetPaths.some((path) => /\.css$/i.test(path))) {
         throw new Error('Invalid offline asset manifest')
       }
       await cache.addAll(assetPaths)
@@ -99,7 +99,7 @@ self.addEventListener('activate', (event) => {
     // Retain the previous complete generation for rollback; remove v2/v3
     // legacy private HTML caches and orphaned staging caches.
     await Promise.all(names
-      .filter((name) => /^servgo-pwa-v\\d+(?:-|$)/.test(name) &&
+      .filter((name) => /^servgo-pwa-v\d+(?:-|$)/.test(name) &&
         name !== staged && name !== previous)
       .map((name) => caches.delete(name)))
   })())
