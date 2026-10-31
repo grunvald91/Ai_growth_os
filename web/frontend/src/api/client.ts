@@ -2,6 +2,7 @@
 
 export interface SeoConversionSummary {
   business_id: number
+  tracking_enabled: boolean
   days: number
   total_created: number
   total_confirmed: number
