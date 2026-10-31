@@ -53,7 +53,12 @@ class GrowthDesignMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
         path = request.url.path
-        eligible = (path == '/intelligence' or path.startswith('/studio')) and not any(
+        # /studio/team owns a CSP-protected, fully functional standalone UI.
+        # Rewrapping it with inline v4 styles/handlers breaks its strict CSP.
+        # Theme it through external assets instead; keep its existing controls.
+        eligible = (path == '/intelligence' or path.startswith('/studio')) and not (
+            path == '/studio/team' or path.startswith('/studio/team/')
+        ) and not any(
             part in path for part in ('/assets/', '/login', '/logout', '/sso/', '/design-preview'))
         choice = request.query_params.get('design')
         new = (choice if choice in {'v4', 'classic'} else request.cookies.get(COOKIE)) == 'v4'
