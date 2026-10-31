@@ -1,4 +1,4 @@
-"""Automatic publication: only after a clean critic review and static checks; everything else waits for the owner."""
+"""All SEO articles remain private until a human approves the reviewed version."""
 import json
 
 import pytest
@@ -11,7 +11,7 @@ from app.db.models import Base
 from app.db.session import get_db
 from app.main import app
 from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Product, Publication
-from app.seo.publishing import publish_if_clear, slugify, reader_hash
+from app.seo.publishing import publish_if_clear, publish_owner_approved, slugify, reader_hash
 from app.seo.activation import set_enabled
 from app.sso.models import StudioBusinessLink
 from app.workflows.article_contracts import ArticleArtifact
@@ -47,6 +47,16 @@ async def make_article(db, product, tmp_path, critic_status="no_material_issues"
     return result.artifact_ids[0]
 
 
+def owner_publish(db, product, tmp_path, article_id):
+    from app.content.review import approve_material
+    outcome = publish_if_clear(db, article_id)
+    assert not outcome.published and outcome.reason == "human_review_required"
+    assert not list(db.scalars(select(Publication).where(Publication.artifact_id == article_id)))
+    approve_material(db, tmp_path, product.id, article_id)
+    assert publish_owner_approved(db) == 1
+    return db.scalar(select(Publication).where(Publication.artifact_id == article_id))
+
+
 def test_slugify_transliterates_russian_to_url_safe_text():
     assert slugify("Как вести запись клиентов?") == "kak-vesti-zapis-klientov"
     assert slugify("ё!!") == "e"
@@ -55,18 +65,25 @@ def test_slugify_transliterates_russian_to_url_safe_text():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["no_material_issues", "revised"])
-async def test_clean_critic_review_publishes_with_policy_record(env, tmp_path, status):
+async def test_clean_critic_still_requires_real_owner_approval(env, tmp_path, status):
     db, product = env
     article_id = await make_article(db, product, tmp_path, status)
     outcome = publish_if_clear(db, article_id)
-    assert outcome.published and outcome.slug == "kak-vesti-zapis-klientov"
-    assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
+    assert not outcome.published and outcome.reason == "human_review_required"
+    assert db.get(Artifact, article_id).status == ArtifactStatus.AWAITING_APPROVAL
+    approval = db.scalar(select(Approval).where(Approval.artifact_id == article_id))
+    assert approval.status == "pending" and approval.decided_by is None
+    assert not list(db.scalars(select(Publication)))
+    assert publish_owner_approved(db) == 0
+    from app.content.review import approve_material
+    approve_material(db, tmp_path, product.id, article_id)
+    assert publish_owner_approved(db) == 1
     publication = db.scalar(select(Publication))
     assert publication.status == "published" and publication.external_reference == "/blog/kak-vesti-zapis-klientov"
-    approval = db.get(Approval, publication.approval_id)
-    assert approval.status == "approved" and approval.decided_by == "policy:critic_reviewed"
+    assert db.get(Approval, publication.approval_id).decided_by == "owner:studio"
+    assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
     assert publish_if_clear(db, article_id).reason == "already_published"
-    assert len(list(db.scalars(select(Publication)))) == 1
+    assert publish_owner_approved(db) == 0
 
 
 @pytest.mark.asyncio
@@ -87,9 +104,9 @@ async def test_without_clean_critic_review_the_owner_decides(env, tmp_path, stat
 @pytest.mark.asyncio
 async def test_same_query_gets_distinct_slug(env, tmp_path):
     db, product = env
-    first = publish_if_clear(db, await make_article(db, product, tmp_path))
-    second = publish_if_clear(db, await make_article(db, product, tmp_path))
-    assert (first.slug, second.slug) == ("kak-vesti-zapis-klientov", "kak-vesti-zapis-klientov-2")
+    first = owner_publish(db, product, tmp_path, await make_article(db, product, tmp_path))
+    second = owner_publish(db, product, tmp_path, await make_article(db, product, tmp_path))
+    assert (first.external_reference, second.external_reference) == ("/blog/kak-vesti-zapis-klientov", "/blog/kak-vesti-zapis-klientov-2")
 
 
 @pytest.mark.asyncio
@@ -97,7 +114,7 @@ async def test_public_feed_shows_only_published_articles(env, tmp_path):
     db, product = env
     published = await make_article(db, product, tmp_path)
     held = await make_article(db, product, tmp_path, critic_status=None)
-    publish_if_clear(db, published)
+    owner_publish(db, product, tmp_path, published)
     publish_if_clear(db, held)
     app.dependency_overrides[get_db] = lambda: db
     try:
@@ -120,7 +137,7 @@ async def test_held_article_goes_live_after_the_owner_approves_it(env, tmp_path)
     from app.content.review import approve_material
     from app.seo.publishing import publish_owner_approved
     db, product = env
-    article_id = await make_article(db, product, tmp_path, None)
+    article_id = await make_article(db, product, tmp_path)
     publish_if_clear(db, article_id)
     assert publish_owner_approved(db) == 0  # still waiting for the owner
     approve_material(db, tmp_path, product.id, article_id)
@@ -172,12 +189,16 @@ async def test_publication_is_retried_after_transient_failure(env, tmp_path, mon
     def unavailable(*args):
         raise RuntimeError("temporary failure")
     monkeypatch.setattr(module, "_go_live", unavailable)
-    assert module.publish_pending(db) == 1
-    assert db.get(Artifact, article_id).status == ArtifactStatus.DRAFT
+    from app.content.review import approve_material
+    publish_if_clear(db, article_id)
+    approve_material(db, tmp_path, product.id, article_id)
+    with pytest.raises(RuntimeError, match="temporary failure"):
+        module.publish_owner_approved(db)
+    db.rollback()
     monkeypatch.setattr(module, "_go_live", original)
-    assert module.publish_pending(db) == 1
+    assert module.publish_owner_approved(db) == 1
     assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
-    assert module.publish_pending(db) == 0
+    assert module.publish_owner_approved(db) == 0
     assert len(list(db.scalars(select(Publication)))) == 1
 
 
@@ -186,7 +207,7 @@ async def test_public_article_shows_fact_renderings_as_reader_prose(env, tmp_pat
     from app.api.public_blog import _article
     db, product = env
     article_id = await make_article(db, product, tmp_path)
-    assert publish_if_clear(db, article_id).published
+    owner_publish(db, product, tmp_path, article_id)
     row = db.get(Artifact, article_id)
     data = json.loads(row.content)
     data["reader_article"]["fact_renderings"] = [
