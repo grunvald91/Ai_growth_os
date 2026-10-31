@@ -262,7 +262,7 @@
         });
         showNote('Голосовая команда сохранена, отправка не удалась.', true, retry);
       } else if (body.mode === 'text') {
-        input.value = body.text + (input.value.trim() ? '\\n' + input.value : '');
+        input.value = body.text + (input.value.trim() ? '\n' + input.value : '');
         grow();
       }
     }).then(function () { setBusy(false); });
