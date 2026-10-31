@@ -20,6 +20,7 @@ from app.db.session import get_db
 from app.models.domain import Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
 from app.seo.factory import AGENT, REQUEST_KIND
 from app.seo.control import create_seo_run
+from app.seo.activation import set_enabled
 
 
 @pytest.fixture()
@@ -34,6 +35,8 @@ def env():
         db.commit()
         db.refresh(first)
         db.refresh(other)
+        set_enabled(db, first.id, enabled=True, actor='test-owner')
+        set_enabled(db, other.id, enabled=True, actor='test-owner')
         app = FastAPI()
         app.include_router(growth_router)
         app.dependency_overrides[get_db] = lambda: db
@@ -251,8 +254,8 @@ def test_verified_critic_review_is_visible_only_for_correct_article_version(env,
 
 def test_seo_discloses_unconnected_blog_without_claiming_publication(env):
     client, db, pid, other_pid = env
-    assert "Внешний адрес сайта для этой компании пока не подключён" in client.get(url(pid)).text
-    assert "для других компаний публичный сайт ещё не подключён" in client.get(url(pid, "/queue")).text
+    assert "персональный блог компании на ServGo" in client.get(url(pid)).text
+    assert "публикация доступна только для подключённых компаний" in client.get(url(pid, "/queue")).text
     db.get(Product, pid).slug = "servgo"
     db.commit()
     assert "https://servgo.ru/blog" in client.get(url(pid)).text
