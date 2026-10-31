@@ -84,7 +84,7 @@ def _html_page(*, title: str, description: str, path: str, body: str,
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<title>{_text(title)}</title>'
         f'<meta name="description" content="{_text(description)}">'
-        '<meta name="robots" content="index,follow">'
+        '<meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large">'
         f'<link rel="canonical" href="{_text(canonical)}">'
         f'<meta property="og:title" content="{_text(title)}">'
         f'<meta property="og:description" content="{_text(description)}">'
@@ -261,14 +261,27 @@ async def business_article_html(business_id: int, slug: str, db: AsyncSession = 
     data = {
         "@context": "https://schema.org",
         "@type": "Article",
+        "@id": _full_url(path) + "#article",
+        "url": _full_url(path),
         "mainEntityOfPage": _full_url(path),
+        "inLanguage": "ru",
+        "isAccessibleForFree": True,
         "headline": article["title"],
         "description": meta,
-        "author": {"@type": "Organization", "name": business.name},
-        "publisher": {"@type": "Organization", "name": business.name},
+        "author": {"@type": "Organization", "name": business.name,
+                   "url": _full_url(f"/business/{business_id}")},
+        "publisher": {"@type": "Organization", "name": business.name,
+                      "url": _full_url(f"/business/{business_id}")},
+        "isPartOf": {"@type": "Blog", "url": _full_url(f"/business/{business_id}/blog"),
+                     "name": f"Статьи и советы — {business.name}"},
         "datePublished": article.get("published_at"),
         "dateModified": article.get("updated_at") or article.get("published_at"),
     }
+    # A genuine collected search question helps define what this page answers.
+    # Do not invent expert bylines, review ratings, sources or FAQ schema.
+    query = article.get("primary_query")
+    if isinstance(query, str) and query.strip():
+        data["about"] = {"@type": "Thing", "name": query.strip()}
     booking_links = await article_booking_link(db, business_id, article)
     return _html_page(title=f'{article["title"]} — {business.name} | ServGo',
                       description=meta, path=path,
