@@ -67,6 +67,10 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert 'placeholder="Удерживайте, чтобы говорить"' in page.text
     assert 'id="dp-press-hint"' not in page.text
     assert 'id="dp-mic"' not in page.text
+    assert 'class="command-tools"' in page.text
+    assert page.text.count('id="dp-new"') == 1
+    assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
+    assert '/studio/assets/growth-live.css?v=8' in page.text
     assert 'Простое видео' in page.text
     assert 'hero-intro' in page.text
     assert 'Добрый день, Марина' not in page.text
