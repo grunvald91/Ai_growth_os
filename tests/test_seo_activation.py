@@ -100,7 +100,7 @@ def test_owner_toggle_is_post_only_and_queue_blocked_until_enable(env):
             page = client.get(base)
             assert page.status_code == 200
             assert 'Подключить SEO-завод' in page.text
-            assert 'action="enable"' in page.text
+            assert 'value="enable"' in page.text
             assert 'Новый запуск SEO-завода</a>' not in page.text
             assert client.get(base + "/activation").status_code == 405
             unapproved = client.post(base + "/queue", data={"focus": "парикмахеры"})
