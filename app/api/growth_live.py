@@ -26,6 +26,10 @@ from app.services.campaign_lifecycle import LABELS as CAMPAIGN_LABELS, allowed_a
 from app.api.seo_run_view import seo_runs
 from app.seo.control import SeoControlError, create_seo_run, change_seo_run
 from app.seo.activation import is_enabled, set_enabled
+from app.seo.visibility import VisibilityError, change_article_visibility
+from app.models.domain import ArtifactStatus, Publication
+from app.workflows.article_contracts import ArticleArtifact
+from app.sso.models import StudioBusinessLink
 
 ASSETS = Path(__file__).parent / 'assets'
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -358,6 +362,70 @@ def seo_retry_run(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)
     return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
 
 
+@router.post('/studio/products/{product_id}/seo/articles/{article_id}/{action}')
+def seo_article_visibility(product_id: UUID, article_id: UUID, action: str,
+                           request: Request, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    if getattr(request.state, 'studio_sso_role', None) not in (None, 'owner', 'co_owner'):
+        raise HTTPException(403, 'Управлять видимостью статьи может только владелец бизнеса')
+    try:
+        change_article_visibility(
+            db, product_id=product_id, article_id=article_id, action=action,
+            actor=getattr(request.state, 'studio_login', 'studio_owner'))
+    except LookupError:
+        raise HTTPException(404, 'Статья не найдена') from None
+    except VisibilityError as exc:
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
+
+
+def seo_published_articles(db: Session, product_id: UUID, enabled: bool) -> str:
+    """A compact owner view of public and hidden pages, never of other companies."""
+    published = list(db.execute(
+        select(Publication, Artifact).join(Artifact, Publication.artifact_id == Artifact.id)
+        .where(Publication.product_id == product_id, Artifact.product_id == product_id,
+               Publication.channel == "own_site",
+               Publication.status.in_(["published", "unpublished"]),
+               Artifact.kind == "article")
+        .order_by(Publication.published_at.desc(), Publication.id.desc()).limit(100)
+    ))
+    if not published:
+        return '<p>Опубликованных или скрытых статей пока нет.</p>'
+    business_id = db.scalar(select(StudioBusinessLink.servgo_business_id).where(
+        StudioBusinessLink.product_id == product_id).limit(1))
+    items = []
+    for publication, article in published:
+        try:
+            title = ArticleArtifact.model_validate_json(article.content).reader_article.title
+        except (TypeError, ValueError, AttributeError):
+            title = article.title
+        public_url = None
+        slug = (publication.external_reference or "").removeprefix("/blog/")
+        if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug):
+            if business_id is not None:
+                public_url = f'https://servgo.ru/business/{business_id}/blog/{slug}'
+            else:
+                # A standalone Growth product may not have a BookingBot public route yet.
+                public_url = None
+        visible = publication.status == "published" and article.status == ArtifactStatus.PUBLISHED
+        action = 'hide' if visible else 'restore'
+        button = 'Снять с публикации' if visible else 'Вернуть в блог'
+        links = (f'<a href="{html.escape(public_url, quote=True)}" '
+                 'target="_blank" rel="noopener noreferrer">Открыть статью</a>'
+                 if visible and public_url else
+                 '<span>Ссылка на публичную страницу появится после подключения бизнеса.</span>'
+                 if visible else '<span>Страница скрыта от публичного блога и sitemap.</span>')
+        items.append(
+            '<li><strong>' + html.escape(title) + '</strong> '
+            + ('<span>Опубликована</span>' if visible else '<span>Скрыта</span>')
+            + ' · ' + links
+            + f'<form method="post" action="/studio/products/{product_id}/seo/articles/{article.id}/{action}">'
+            + f'<button class="btn secondary" type="submit"{"" if visible or enabled else " disabled"}>'
+            + button + '</button></form></li>'
+        )
+    return '<ul class="seo-article-visibility">' + ''.join(items) + '</ul>'
+
+
 @router.get('/studio/products/{product_id}/seo/status')
 def seo_status(product_id: UUID, db: Session = Depends(get_db)):
     """Existing task state, retry attempts, stage results; never fake spend."""
@@ -423,6 +491,8 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
         body=activation_form + publication_note + available_actions
              + '<h2>Запуски SEO-завода</h2>'
              + (run_cards or '<p>Запуски SEO-завода пока не зарегистрированы.</p>')
+             + '<h2>Статьи в блоге</h2>'
+             + seo_published_articles(db, product_id, enabled)
              + '<h2>Сохранённые материалы и отчёты</h2>'
              + (cards or '<p>Материалы пока не подготовлены.</p>'))
 
