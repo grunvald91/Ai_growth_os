@@ -214,6 +214,27 @@ async def test_completed_seo_article_auto_publishes_on_worker_recovery_without_o
 
 
 @pytest.mark.asyncio
+async def test_retry_recovers_stale_article_state_without_creating_second_publication(env, tmp_path):
+    db, product = env
+    article_id = await make_article(db, product, tmp_path)
+    first = publish_if_clear(db, article_id)
+    assert first.published
+    # Simulate inconsistent legacy/recovery state: the publication already
+    # exists, while the article state was reset before worker retry.
+    row = db.get(Artifact, article_id)
+    row.status = ArtifactStatus.DRAFT
+    db.commit()
+    again = publish_if_clear(db, article_id)
+    assert again.published and again.reason == "already_published"
+    assert again.slug == first.slug
+    assert row.status == ArtifactStatus.PUBLISHED
+    assert len(list(db.scalars(select(Publication).where(
+        Publication.artifact_id == article_id)))) == 1
+    assert len(list(db.scalars(select(Approval).where(
+        Approval.artifact_id == article_id)))) == 1
+
+
+@pytest.mark.asyncio
 async def test_hidden_article_does_not_republish_on_worker_retry(env, tmp_path):
     from app.seo.visibility import change_article_visibility
     db, product = env
