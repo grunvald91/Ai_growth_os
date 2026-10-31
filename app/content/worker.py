@@ -16,8 +16,16 @@ from app.workflows.article_contracts import ArticleProductionInput, ShortVideoDe
 async def run_content_once(session_factory, settings):
     with session_factory() as db:
         from app.seo.queue import SEO_TASK_PREFIX, exhausted_products
+        from app.seo.activation import enabled_product_ids, require_enabled
         query = select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer', 'content_editor', 'content_creative']),
             Task.status == TaskStatus.QUEUED)
+        # Never run paid SEO content work for a company that did not opt in.
+        enabled = enabled_product_ids(db)
+        from sqlalchemy import or_
+        query = query.where(or_(
+            ~Task.title.like(f'{SEO_TASK_PREFIX}%'),
+            Task.product_id.in_(enabled) if enabled else False,
+        ))
         exhausted = exhausted_products(db, settings.seo_articles_per_day)
         if exhausted:
             # A company's blog articles for today are used up; they wait for tomorrow while everything else runs.
@@ -32,6 +40,7 @@ async def run_content_once(session_factory, settings):
                 if request is None:
                     raise ValueError('Missing content request')
                 if task.title.startswith(SEO_TASK_PREFIX):
+                    require_enabled(db, product_id)
                     from app.seo.queue import record_article_start
                     record_article_start(db, task)
                 raw = json.loads(request.content)
