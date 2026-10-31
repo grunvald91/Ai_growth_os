@@ -13,6 +13,7 @@ const CACHE_NAME = 'servgo-pwa-v4'
 const CACHE_PREFIX = CACHE_NAME + '-install-'
 const META_CACHE = 'servgo-pwa-cache-meta'
 const ACTIVE_CACHE_KEY = '/__servgo-active-cache__'
+const NEXT_CACHE_KEY = '/__servgo-next-cache__'
 const READY_KEY = '/__servgo-install-ready__'
 const PRECACHE = ['/index.html', '/offline.html', '/favicon.svg', '/icon-192.png', '/icon-512.png']
 const PUBLIC_ICONS = new Set(['/favicon.svg', '/icon-192.png', '/icon-512.png'])
@@ -68,6 +69,8 @@ self.addEventListener('install', (event) => {
       }
       await cache.addAll(assetPaths)
       await cache.put(READY_KEY, new Response('ready'))
+      const meta = await caches.open(META_CACHE)
+      await meta.put(NEXT_CACHE_KEY, new Response(staging))
       await self.skipWaiting()
     } catch (error) {
       await caches.delete(staging)
@@ -79,8 +82,10 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const names = await caches.keys()
-    const staged = names.filter((name) => name.startsWith(CACHE_PREFIX)).sort().at(-1)
-    if (!staged) {
+    const meta = await caches.open(META_CACHE)
+    const next = await meta.match(NEXT_CACHE_KEY)
+    const staged = next ? await next.text() : ''
+    if (!staged.startsWith(CACHE_PREFIX)) {
       // A storage eviction or unusual restart must not remove old offline data.
       await self.clients.claim()
       return
@@ -90,11 +95,11 @@ self.addEventListener('activate', (event) => {
         || !(await cache.match('/offline.html'))) {
       throw new Error('Incomplete ServGo offline cache: old cache preserved')
     }
-    const meta = await caches.open(META_CACHE)
     const oldPointer = await meta.match(ACTIVE_CACHE_KEY)
     const previous = oldPointer ? await oldPointer.text() : CACHE_NAME
     // Publish only the fully built cache after validation.
     await meta.put(ACTIVE_CACHE_KEY, new Response(staged))
+    await meta.delete(NEXT_CACHE_KEY)
     await self.clients.claim()
     // Retain the previous complete generation for rollback; remove v2/v3
     // legacy private HTML caches and orphaned staging caches.
