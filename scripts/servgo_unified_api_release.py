@@ -83,8 +83,17 @@ def read(sftp, remote: str) -> bytes | None:
     try:
         with sftp.open(remote, "rb") as handle:
             return handle.read()
-    except OSError:
+    except FileNotFoundError:
         return None
+    # Permission errors and SSH/SFTP transport failures are NOT an absent
+    # file. Never classify them as a safe create/overwrite operation.
+
+
+def put_tracked(sftp, target: str, data: bytes, mode: int,
+                logical_path: str, updated: list[str]) -> None:
+    """Record the rollback target before an SFTP write/rename can start."""
+    updated.append(logical_path)
+    put(sftp, target, data, mode)
 
 
 def main() -> None:
@@ -154,8 +163,8 @@ def main() -> None:
                 run(client, "install -d -m 0700 " + shlex.quote(str(Path(backup).parent)) +
                     " && cp -p " + shlex.quote(target) + " " + shlex.quote(backup))
             run(client, "install -d -m 0755 " + shlex.quote(str(Path(target).parent)))
-            put(sftp, target, desired[path], permission.get(path, 0o644))
-            updated.append(path)
+            put_tracked(sftp, target, desired[path], permission.get(path, 0o644),
+                        path, updated)
             if sha(read(sftp, target)) != sha(desired[path]):
                 raise RuntimeError("SHA mismatch after write: " + path)
 
