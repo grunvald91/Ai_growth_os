@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -22,6 +22,7 @@ from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.content_studio import MATERIAL_KINDS, _owner_product, studio_page_shell
 from app.db.session import get_db
 from app.models.domain import Artifact, Experiment, Task
+from app.api.seo_run_view import seo_runs
 
 ASSETS = Path(__file__).parent / 'assets'
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -144,20 +145,66 @@ def artifact_content(content: str) -> str:
     return '<details class="gv-result"><summary>Подробнее</summary>'+render(value)+'</details>'
 
 
+def seo_run_card(row: dict) -> str:
+    def state(label: str, done: bool) -> str:
+        return (f'<li>{html.escape(label)}: '
+                f'<strong>{"Есть результат" if done else "Пока нет результата"}</strong></li>')
+    error = (f'<p role="status">Последняя ошибка: {html.escape(row["last_error"])}</p>'
+             if row["last_error"] else '')
+    queued = (f'<p>Статей поставлено в очередь: <b>{row["articles_queued"]}</b></p>'
+              if row["articles_queued"] is not None else
+              '<p>Количество поставленных статей пока не подтверждено.</p>')
+    attempts = (f'<p>Попыток выполнения: {row["attempts"]}</p>'
+                if row["attempts"] else '<p>Попытки выполнения ещё не зарегистрированы.</p>')
+    return (
+        f'<article class="panel seo-run" data-seo-status="{html.escape(row["status"], quote=True)}">'
+        f'<div class="seo-run-head"><h3>{html.escape(row["title"])}</h3>'
+        f'<span class="seo-run-status">{html.escape(row["status_label"])}</span></div>'
+        f'<p>Последнее обновление: {html.escape(row["updated_at"] or "неизвестно")}</p>'
+        + attempts + queued + error
+        + '<details class="seo-run-details"><summary>Этапы и источники данных</summary>'
+        + '<ul>'
+        + state('Семантическое ядро', row['semantic_ready'])
+        + state('SEO-контент-план', row['plan_ready'])
+        + '</ul>'
+        + (f'<p>Источников в итоговом отчёте: {row["sources_confirmed"]}</p>'
+           if row["sources_confirmed"] is not None else
+           '<p>Количество источников пока не подтверждено.</p>')
+        + '<p>Стоимость: нет подтверждённых данных о списании провайдера.</p>'
+        + '</details></article>'
+    )
+
+
+@router.get('/studio/products/{product_id}/seo/status')
+def seo_status(product_id: UUID, db: Session = Depends(get_db)):
+    """Existing task state, retry attempts, stage results; never fake spend."""
+    _owner_product(db, product_id)
+    return JSONResponse({'runs': seo_runs(db, product_id)},
+                        headers={'Cache-Control': 'private, no-store'})
+
+
 @router.get('/studio/products/{product_id}/seo', response_class=HTMLResponse)
 def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
+    runs = seo_runs(db, product_id)
     rows = list(db.scalars(select(Artifact).where(Artifact.product_id == product_id,
-                      Artifact.kind.in_(['semantic_core', 'seo_content_plan', 'seo_factory_report'])).order_by(Artifact.created_at.desc()).limit(100)))
-    cards = ''.join(f'<article class="panel"><h2>{html.escape(row.title)}</h2>'
+                      Artifact.kind.in_(['semantic_core', 'seo_content_plan', 'seo_factory_report']))
+                      .order_by(Artifact.created_at.desc()).limit(100)))
+    cards = ''.join(f'<article class="panel"><h3>{html.escape(row.title)}</h3>'
                     f'<p>{html.escape(row.kind)} · {html.escape(row.status.value)}</p>'
                     f'{artifact_content(row.content)}</article>' for row in rows)
     base = f'/studio/products/{product_id}'
+    run_cards = ''.join(seo_run_card(row) for row in runs)
     return studio_page_shell(product, active='seo', title='SEO-завод',
-        subtitle='Семантика, планы и отчёты из базы вашей компании.',
-        body=f'<p><a class="btn primary" href="{base}?design=v4&amp;command=seo_factory">Запустить SEO-завод</a> '
-             f'<a class="btn" href="{base}/materials?kind=article">Статьи</a></p>'+
-             (cards or '<p>SEO-материалов пока нет. Запустите сбор через диспетчер.</p>'))
+        subtitle='Реальные статусы запусков, результаты и ошибки из базы вашей компании.',
+        body=f'<p><a class="btn primary" href="{base}?design=v4&amp;command=seo_factory">'
+             'Запросить запуск через диспетчер</a> '
+             f'<a class="btn" href="{base}/work">Все задания</a> '
+             f'<a class="btn" href="{base}/materials?kind=article">Статьи</a></p>'
+             '<h2>Запуски SEO-завода</h2>'
+             + (run_cards or '<p>Запуски SEO-завода пока не зарегистрированы.</p>')
+             + '<h2>Сохранённые материалы и отчёты</h2>'
+             + (cards or '<p>Материалы пока не подготовлены.</p>'))
 
 
 @router.get('/studio/products/{product_id}/campaigns', response_class=HTMLResponse)
