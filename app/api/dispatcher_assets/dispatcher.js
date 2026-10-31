@@ -443,7 +443,7 @@
       catch (error) { recorder = null; releaseStream(); hideLive(); setVoiceState('idle'); showNote('Не получилось включить запись.', true); return; }
       recordStarted = Date.now();
       recordingId += 1; lastLive = '';
-      showLive('Слушаю…', '', false);
+      showLive(voiceHoldEnabled ? 'Говорите · отпустите, чтобы отправить' : 'Слушаю…', '', false);
       schedulePreview(2500, recordingId);
       setVoiceState('recording');
       var tick = function () {
