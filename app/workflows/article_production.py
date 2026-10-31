@@ -1149,10 +1149,10 @@ class ArticleProduction:
             def build_package(current_conversion):
                 rendered_facts = ''
                 if reader_article.fact_renderings:
-                    fact_heading = f'Проверенные возможности: {product.name}' if request.language == 'ru' else f'Verified capabilities: {product.name}'
+                    fact_heading = f'О компании {product.name}' if request.language == 'ru' else f'About {product.name}'
                     rendered_facts = (
                         f'## {fact_heading}\n\n'
-                        + '\n'.join(f'- {item.text}' for item in reader_article.fact_renderings)
+                        + '\n\n'.join(item.text for item in reader_article.fact_renderings)
                         + '\n\n'
                     )
                 reader_body = '\n\n'.join(
@@ -1174,8 +1174,8 @@ class ArticleProduction:
                     f'# {reader_article.title}\n\n'
                     f'{reader_article.lead}\n\n'
                     f'{answer}'
-                    f'{rendered_facts}'
                     f'{reader_body}\n\n'
+                    f'{rendered_facts}'
                     f'{reader_article.closing}\n\n'
                     f'{faq_text}'
                     f'{current_conversion.cta}'
