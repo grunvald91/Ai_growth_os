@@ -201,7 +201,7 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\\.js\\?v=)[^"&]+', r'\\g<1>hold-20261031', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>hold-20261031', extras)
     if pid:
         button = Document(template).find(ident='notifyBtn')
         template = template.replace(Document(template).outer(button), notice_html(pid).replace('<span aria-hidden="true">🔔</span>', icon('bell')))
