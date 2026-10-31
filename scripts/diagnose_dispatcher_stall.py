@@ -67,6 +67,10 @@ try:
                 .order_by(CostRecord.incurred_at.desc()).limit(200)))
     dispatch_costs = [c for c in costs if (c.details or {}).get("task_type")=="dispatcher"]
     print("recent_dispatcher_cost_events:",len(dispatch_costs))
+    from sqlalchemy import func
+    from app.models.domain import TaskStatus
+    busy = db.scalar(select(func.count()).select_from(Task).where(Task.status == TaskStatus.RUNNING))
+    print("running_tasks_blocking_safe_deploy:", busy)
 except Exception as exc:
     print("diagnostic_error_type:",type(exc).__name__)
     raise
