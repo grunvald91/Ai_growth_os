@@ -1,4 +1,4 @@
-name: Diagnose dispatcher stall (read-only)
+name: Diagnose dispatcher stall and safe release readiness (read-only)
 on:
   push:
     branches:
