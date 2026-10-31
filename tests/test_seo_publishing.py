@@ -214,6 +214,24 @@ async def test_completed_seo_article_auto_publishes_on_worker_recovery_without_o
 
 
 @pytest.mark.asyncio
+async def test_hidden_article_does_not_republish_on_worker_retry(env, tmp_path):
+    from app.seo.visibility import change_article_visibility
+    db, product = env
+    article_id = await make_article(db, product, tmp_path)
+    assert publish_if_clear(db, article_id).published
+    first = db.scalar(select(Publication).where(Publication.artifact_id == article_id))
+    original_url = first.external_reference
+    assert change_article_visibility(db, product_id=product.id,
+                                     article_id=article_id, action="hide", actor="owner")
+    assert not publish_if_clear(db, article_id).published
+    assert publish_if_clear(db, article_id).reason == "manually_unpublished"
+    assert publish_owner_approved(db) == 0
+    assert len(list(db.scalars(select(Publication).where(Publication.artifact_id == article_id)))) == 1
+    assert first.status == "unpublished"
+    assert first.external_reference == original_url
+
+
+@pytest.mark.asyncio
 async def test_opted_out_company_cannot_auto_publish_its_prepared_article(env, tmp_path):
     db, product = env
     article_id = await make_article(db, product, tmp_path)
