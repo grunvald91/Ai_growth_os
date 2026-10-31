@@ -61,7 +61,7 @@ jobs:
 
       - name: Test PWA cache isolation and push navigation
         working-directory: web/frontend
-        run: node --test tests/sw-security.test.mjs tests/offline-store.test.mjs
+        run: node --test tests/sw-security.test.mjs tests/offline-store.test.mjs tests/prepayment-modal.test.mjs
 
       - name: Verify ServGo theme migration and synchronization
         working-directory: web/frontend
