@@ -195,6 +195,9 @@ async def test_business_blog_uses_verified_link_and_own_booking_route(env, tmp_p
     app.dependency_overrides[get_db] = lambda: db
     try:
         with TestClient(app) as client:
+            directory = client.get("/public/blog/businesses/with-articles")
+            assert directory.status_code == 200
+            assert directory.json()["business_ids"] == [64]
             listing = client.get("/public/blog/businesses/64/articles")
             assert listing.status_code == 200
             data = listing.json()
