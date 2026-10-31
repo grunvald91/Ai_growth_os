@@ -102,11 +102,29 @@ async def test_without_clean_critic_review_the_owner_decides(env, tmp_path, stat
 
 
 @pytest.mark.asyncio
-async def test_same_query_gets_distinct_slug(env, tmp_path):
+async def test_same_company_cannot_publish_two_pages_for_one_query(env, tmp_path):
     db, product = env
     first = owner_publish(db, product, tmp_path, await make_article(db, product, tmp_path))
-    second = owner_publish(db, product, tmp_path, await make_article(db, product, tmp_path))
-    assert (first.external_reference, second.external_reference) == ("/blog/kak-vesti-zapis-klientov", "/blog/kak-vesti-zapis-klientov-2")
+    second_id = await make_article(db, product, tmp_path)
+    result = publish_if_clear(db, second_id)
+    assert not result.published and "search query already has a published page" in result.reason
+    assert first.external_reference == "/blog/kak-vesti-zapis-klientov"
+    assert len(list(db.scalars(select(Publication)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_identical_body_with_different_query_stays_unpublished(env, tmp_path):
+    db, product = env
+    owner_publish(db, product, tmp_path, await make_article(db, product, tmp_path))
+    second_id = await make_article(db, product, tmp_path)
+    row = db.get(Artifact, second_id)
+    data = json.loads(row.content)
+    data["seo"]["primary_query"] = "другой поисковый запрос"
+    row.content = json.dumps(data, ensure_ascii=False)
+    db.commit()
+    result = publish_if_clear(db, second_id)
+    assert not result.published and "identical article body" in result.reason
+    assert len(list(db.scalars(select(Publication)))) == 1
 
 
 @pytest.mark.asyncio
