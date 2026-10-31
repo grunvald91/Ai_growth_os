@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db.models import Base
 from app.models.domain import Artifact, ArtifactStatus, Product, Publication
-from app.seo.search_metrics import article_urls, company_search_metrics
+from app.seo.search_metrics import article_urls, company_search_metrics, inspect_google_article
 from app.sso.models import StudioBusinessLink
 
 
@@ -149,3 +149,38 @@ async def test_invalid_page_filters_are_not_accepted(env):
     assert article_urls(db, pid) == ["https://servgo.ru/business/64/blog/main-topic"]
     with pytest.raises(ValueError, match="days"):
         await company_search_metrics(db, pid, days=365, env={})
+
+
+@pytest.mark.asyncio
+async def test_url_inspection_is_explicit_owner_scoped_and_index_only(env):
+    db, one, other = env
+    mine = "https://servgo.ru/business/64/blog/main-topic"
+    foreign = "https://servgo.ru/business/65/blog/other-topic"
+    messages = []
+    def fake(request):
+        messages.append(request)
+        assert request.url.host == "searchconsole.googleapis.com"
+        assert json.loads(request.content) == {
+            "inspectionUrl": mine, "siteUrl": "sc-domain:servgo.ru",
+            "languageCode": "ru-RU"}
+        return httpx.Response(200, json={
+            "inspectionResult": {"indexStatusResult": {
+                "verdict": "PASS", "coverageState": "Submitted and indexed",
+                "lastCrawlTime": "2026-10-30T05:00:00Z", "pageFetchState": "SUCCESSFUL"}}})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(fake)) as client:
+        envs = {"SERVGO_GSC_READONLY_TOKEN": "secret",
+                "SERVGO_GSC_SITE_URL": "sc-domain:servgo.ru"}
+        report = await inspect_google_article(db, one, url=mine,
+                                              client=client, env=envs)
+        assert report["status"] == "connected"
+        assert report["indexing"]["verdict"] == "PASS"
+        assert report["indexing"]["coverageState"] == "Submitted and indexed"
+        assert "clicks" not in report and "citations" not in report
+        with pytest.raises(LookupError):
+            await inspect_google_article(db, one, url=foreign,
+                                         client=client, env=envs)
+        with pytest.raises(LookupError):
+            await inspect_google_article(
+                db, one, url="https://servgo.ru/business/64/blog/hidden-topic",
+                client=client, env=envs)
+        assert len(messages) == 1
