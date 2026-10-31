@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
 import { api } from '../api/client'
 import { errorMessage } from '../authUtils'
+import { useConnectivity } from '../utils/useConnectivity'
 
 type Attention = Awaited<ReturnType<typeof api.prepaymentAttention>>
 type Details = Awaited<ReturnType<typeof api.getPaymentDetails>>
@@ -14,6 +15,7 @@ export function AdminPaymentAttention() {
 }
 function PendingPayments() {
   const { pathname } = useLocation()
+  const online = useConnectivity()
   const [attention, setAttention] = useState<Attention | null>(null)
   const [details, setDetails] = useState<Details | null>(null)
   const [error, setError] = useState('')
@@ -25,11 +27,24 @@ function PendingPayments() {
   const request = useRef(0)
   const refresh = useCallback(async () => {
     const seq = ++request.current
+    // Payment checking must never trap the owner inside an offline schedule.
+    if (!online) {
+      setAttention(null)
+      setDetails(null)
+      setError('Нет соединения: проверка предоплат временно недоступна.')
+      return
+    }
     try {
       const result = await api.prepaymentAttention()
       if (alive.current && seq === request.current) { setAttention(result); setError('') }
-    } catch { if (alive.current && seq === request.current) setError('Не удалось проверить новые предоплаты. Повторяем проверку…') }
-  }, [])
+    } catch {
+      if (alive.current && seq === request.current) {
+        setAttention(null) // A previous successful poll is now stale.
+        setDetails(null)
+        setError('Не удалось проверить новые предоплаты. Расписание остаётся доступным.')
+      }
+    }
+  }, [online])
   useEffect(() => {
     alive.current = true
     const update = () => { if (!document.hidden) void refresh() }
@@ -52,7 +67,7 @@ function PendingPayments() {
   useEffect(() => {
     if (!id || inQueue) return
     let current = true
-    api.getPaymentDetails(id).then(result => { if (current) setDetails(result) }).catch(e => { if (current) setError(errorMessage(e)) })
+    api.getPaymentDetails(id).then(result => { if (current) setDetails(result) }).catch(e => { if (current) { setDetails(null); setError(errorMessage(e)) } })
     return () => { current = false }
   }, [id, version, inQueue])
   useEffect(() => {
@@ -90,15 +105,20 @@ function PendingPayments() {
     // Full navigation also resets the shared business cache/selector.
     window.location.assign('/admin/prepayments')
   }
-  if (!attention?.count && !error) return null
+  const hasFreshAttention = !!attention?.count && online && !error
+  if (!hasFreshAttention && !error) return null
   const ready = details && details.booking.id === id && details.booking.version === version && details.booking.status === 'prepayment_sent'
   return createPortal(<>
-    <div role="alert" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 10000, background: '#9a3412', color: 'white', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-      <strong>{attention?.count ? `Предоплаты на проверке: ${attention.count}` : 'Проверка предоплат недоступна'}</strong>
-      <button onClick={queue} style={{ color: '#9a3412', background: 'white', padding: '6px 10px', borderRadius: 8 }}>Проверить</button>
+    <div role="status" style={hasFreshAttention
+      ? { position: 'fixed', top: 0, left: 0, right: 0, zIndex: 10000, background: '#9a3412', color: 'white', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }
+      : { position: 'fixed', right: 12, bottom: 76, zIndex: 1000, maxWidth: 'min(340px, calc(100vw - 24px))', background: '#9a3412', color: 'white', padding: '10px 14px', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <strong>{hasFreshAttention ? `Предоплаты на проверке: ${attention?.count}` : 'Проверка предоплат недоступна'}</strong>
+      {hasFreshAttention
+        ? <button onClick={queue} style={{ color: '#9a3412', background: 'white', padding: '6px 10px', borderRadius: 8 }}>Проверить</button>
+        : <button onClick={() => setError('')} style={{ color: '#9a3412', background: 'white', padding: '6px 10px', borderRadius: 8 }}>Закрыть</button>}
       {error && <span>{error}</span>}
     </div>
-    {!!attention?.count && !inQueue && <div style={{ position: 'fixed', inset: 0, zIndex: 10001, background: 'rgba(0,0,0,.6)', display: 'grid', placeItems: 'center', padding: 18 }}>
+    {hasFreshAttention && !inQueue && ready && <div style={{ position: 'fixed', inset: 0, zIndex: 10001, background: 'rgba(0,0,0,.6)', display: 'grid', placeItems: 'center', padding: 18 }}>
       <section ref={modal} tabIndex={-1} role="alertdialog" aria-modal="true" aria-labelledby="payment-alert-title" style={{ background: 'white', color: '#111827', borderRadius: 16, padding: 22, width: 'min(100%, 560px)', maxHeight: '90vh', overflowY: 'auto', fontSize: 16, lineHeight: 1.5 }}>
         <h2 id="payment-alert-title" style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Клиент сообщил об отправке предоплаты</h2>
         <p><strong>{first?.business_name}</strong> · {first?.booking.client_name}</p>
