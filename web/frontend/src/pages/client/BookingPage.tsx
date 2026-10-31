@@ -337,6 +337,9 @@ function BookingPageInner() {
 
   const preselectedServiceId = searchParams.get('service') ? Number(searchParams.get('service')) : null
   const preselectedEmployeeId = searchParams.get('employee') ? Number(searchParams.get('employee')) : null
+  const seoRefCandidate = searchParams.get('seo_ref')
+  const seoRef = seoRefCandidate && /^[A-Za-z0-9_.-]{1,512}$/.test(seoRefCandidate)
+    ? seoRefCandidate : undefined
 
   // Business data
   const [business, setBusiness] = useState<BusinessDetail | null>(null)
@@ -868,6 +871,7 @@ function BookingPageInner() {
         personal_data_consent: business?.legal_documents_enabled ? personalDataConsent : undefined,
         booking_terms_accepted: business?.legal_documents_enabled ? bookingTermsAccepted : undefined,
         repeat_weeks: repeatEnabled ? repeatWeeks : undefined,
+        seo_ref: seoRef,
       })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const firstResult: any = Array.isArray(result) && result.length > 0
