@@ -165,12 +165,26 @@ def campaigns_page(product_id: UUID, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
     rows = list(db.scalars(select(Experiment).where(Experiment.product_id == product_id)
                           .order_by(Experiment.created_at.desc()).limit(100)))
-    cards = ''.join(f'<article class="panel"><h2>{html.escape(row.name)}</h2>'
-                    f'<p>{html.escape(row.status)} · {html.escape(row.channel or "Канал не задан")}</p>'
-                    f'<p>{html.escape(row.hypothesis)}</p><p>Бюджет: '
-                    f'{html.escape(str(row.budget)) if row.budget is not None else "не задан"}</p></article>'
-                    for row in rows)
     base = f'/studio/products/{product_id}'
+    def card(row: Experiment) -> str:
+        status = 'Черновик' if row.status == 'draft' else row.status
+        budget = (f'{html.escape(str(row.budget))} {html.escape(row.currency or "")}'
+                  if row.budget is not None else 'не задан')
+        edit = (f'<a class="btn" href="{base}/campaigns/{row.id}/edit">'
+                'Продолжить настройку</a>' if row.status == 'draft' else '')
+        return (
+            f'<article class="panel campaign-item" data-campaign-status="{html.escape(row.status, quote=True)}">'
+            f'<div class="campaign-item-head"><h2>{html.escape(row.name)}</h2>'
+            f'<span class="campaign-item-status">{html.escape(status)}</span></div>'
+            f'<p>{html.escape(row.hypothesis)}</p>'
+            f'<p>Аудитория: {html.escape(row.audience or "ещё не задана")}</p>'
+            f'<p>Канал: {html.escape(row.channel or "ещё не выбран")}</p>'
+            f'<p>Плановый бюджет: {budget}</p>'
+            + (f'<p>Основной показатель: {html.escape(row.target_metric)}</p>'
+               if row.target_metric else '')
+            + edit + '</article>'
+        )
+    cards = ''.join(card(row) for row in rows)
     return studio_page_shell(product, active='campaigns', title='Кампании',
         subtitle='Эксперименты и планы вашей компании.', body=
         f'<p><a class="btn primary" href="{base}/campaigns/new">Новая кампания</a></p>'
