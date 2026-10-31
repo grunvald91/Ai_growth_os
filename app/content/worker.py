@@ -53,6 +53,8 @@ async def run_content_once(session_factory, settings):
                     data = ArticleProductionInput.model_validate(raw)
                     if data.product_id != product_id:
                         raise ValueError('Wrong product')
+                    if data.seo_brief is not None:
+                        require_enabled(db, product_id)
                     result = await build_article_production(db, settings).run(
                         data.model_copy(update={'task_id': task_id})
                     )
