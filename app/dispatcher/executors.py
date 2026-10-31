@@ -29,7 +29,8 @@ _links = links_block
 async def show_work(ctx: Context, params) -> Outcome:
     from app.api.content_studio_activity import work_url
     rows = work_rows(ctx.db, ctx.product.id)
-    active = [row for row in rows if row["state"] in ACTIVE]
+    active = sorted((row for row in rows if row["state"] in ACTIVE),
+                    key=lambda row: (row.get("created_at") or "", row["id"]))
     if not active:
         return Outcome("Сейчас ничего не выполняется.", "Сейчас ничего не выполняется.",
                        [_links(ctx, "work")])
@@ -42,16 +43,18 @@ async def show_work(ctx: Context, params) -> Outcome:
 
 
 async def show_review(ctx: Context, params) -> Outcome:
-    notes = attention(ctx.db, ctx.product.id)
+    notes = sorted(attention(ctx.db, ctx.product.id),
+                   key=lambda note: (note.get("created_at") or "", note["id"]))
     if not notes:
         return Outcome("Ничего не ждёт вашего решения.", "Ничего не ждёт вашего решения.", [_links(ctx, "review")])
+    # Everything above the bottom composer runs oldest -> newest.
     links = {"type": "links", "items": [{"label": note["text"][:80], "href": note["url"]} for note in notes]}
     blocks = [links]
     newest = materials.find_material(ctx, None)
-    if newest is not None:  # the freshest ready material right here, with its «Утвердить» button
-        blocks = [materials.card(ctx, newest),
-                  {"type": "chips", "items": [{"label": "Утвердить", "capability": "approve_material",
-                                               "params": {"material_id": str(newest.id)}}]}, links]
+    if newest is not None:  # Keep the actionable card beside the composer.
+        blocks += [materials.card(ctx, newest),
+                   {"type": "chips", "items": [{"label": "Утвердить", "capability": "approve_material",
+                                                "params": {"material_id": str(newest.id)}}]}]
     return Outcome(f"Требует внимания: {len(notes)}.", f"Требует внимания: {len(notes)}. Они на экране.", blocks)
 
 
