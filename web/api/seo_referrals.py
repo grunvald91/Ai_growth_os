@@ -30,6 +30,11 @@ def _key() -> bytes | None:
     return raw.encode("utf-8") if len(raw.encode("utf-8")) >= 32 else None
 
 
+def tracking_enabled() -> bool:
+    """Whether the signed article source is configured on this server."""
+    return _key() is not None
+
+
 def _b64(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
