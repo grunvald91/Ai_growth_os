@@ -4,6 +4,9 @@ os.environ.setdefault("BOT_TOKEN", "test-token")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 import unittest
+import json
+import re
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from xml.etree import ElementTree
@@ -21,6 +24,7 @@ ARTICLE = {
     "description": "Советы по уходу за волосами.",
     "lead": "Уход после окрашивания.",
     "direct_answer": "Не используйте слишком горячую воду.",
+    "primary_query": "как ухаживать за волосами после окрашивания",
     "sections": [{"title": "Правила ухода", "paragraphs": ["Бережный шампунь."],
                   "bullets": ["Защита от солнца"]}],
     "company_facts": ["В салоне можно заказать консультацию <script>bad()</script>."],
@@ -88,7 +92,29 @@ class PublicSEOHTMLTests(unittest.TestCase):
         self.assertNotIn("<script>alert(1)</script>", body)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", body)
         self.assertIn("\\u003cscript>", body)
-        self.assertIn('name="robots" content="index,follow"', body)
+        self.assertIn('name="robots" content="index,follow,max-snippet:-1,max-image-preview:large"', body)
+        self.assertNotIn("nosnippet", body)
+        json_ld = re.search(r'<script type="application/ld\\+json">(.+?)</script>', body)
+        self.assertIsNotNone(json_ld)
+        article = json.loads(json_ld.group(1))
+        self.assertEqual(article["@id"], "https://servgo.ru/business/64/blog/kak-uhazhivat-za-volosami#article")
+        self.assertEqual(article["about"]["name"], ARTICLE["primary_query"])
+        self.assertEqual(article["publisher"]["name"], "Салон <Мария>")
+        self.assertEqual(article["inLanguage"], "ru")
+        self.assertTrue(article["isAccessibleForFree"])
+        self.assertEqual(article["isPartOf"]["url"], "https://servgo.ru/business/64/blog")
+
+    def test_search_and_ai_crawlers_can_reach_public_blog_without_indexing_private_app(self):
+        robots = (Path(__file__).resolve().parents[1] / "web" / "frontend" / "public" / "robots.txt").read_text(encoding="utf-8")
+        self.assertIn("User-agent: *", robots)
+        self.assertIn("Allow: /", robots)
+        self.assertNotIn("Disallow: /business", robots)
+        self.assertIn("Disallow: /my", robots)
+        self.assertIn("Disallow: /admin", robots)
+        self.assertIn("Sitemap: https://servgo.ru/business-blog-sitemap.xml", robots)
+        # OAI-SearchBot inherits this wildcard rule unless the production
+        # WAF/nginx adds a separate deny; production checks remain required.
+        self.assertNotIn("User-agent: OAI-SearchBot\\nDisallow: /", robots)
 
     def test_index_page_links_only_to_published_articles(self):
         response = self.client.get("/seo-pages/business/64/blog")
