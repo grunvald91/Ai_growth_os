@@ -96,6 +96,39 @@ def static_problems(article: ArticleArtifact) -> list[str]:
     return problems
 
 
+def duplicate_page_problems(db: Session, row: Artifact, article: ArticleArtifact) -> list[str]:
+    """Fail on actual repeats; avoid fuzzy heuristics that punish legitimately similar guides."""
+    def core_text(value: ArticleArtifact) -> str:
+        reader = value.reader_article
+        if reader is None:
+            return ""
+        # Compare the substance, not SEO headings or a boilerplate CTA.
+        return " ".join(" ".join(section.body.casefold().split())
+                        for section in reader.sections).strip()
+
+    key = normalize(article.seo.primary_query)
+    body = core_text(article)
+    published = db.scalars(
+        select(Artifact).join(Publication, Publication.artifact_id == Artifact.id).where(
+            Publication.product_id == row.product_id,
+            Publication.channel == CHANNEL,
+            Publication.status == "published",
+            Artifact.kind == "article",
+            Artifact.id != row.id,
+        )
+    )
+    for previous in published:
+        try:
+            earlier = ArticleArtifact.model_validate_json(previous.content)
+        except ValueError:
+            continue
+        if normalize(earlier.seo.primary_query) == key:
+            return ["search query already has a published page for this company"]
+        if body and core_text(earlier) == body:
+            return ["identical article body is already published for this company"]
+    return []
+
+
 def publish_if_clear(db: Session, article_id) -> Outcome:
     """Prepare a reviewable draft. A clean AI critic is not a human publication decision."""
     row = db.get(Artifact, article_id)
@@ -106,7 +139,7 @@ def publish_if_clear(db: Session, article_id) -> Outcome:
     if not is_enabled(db, row.product_id):
         return Outcome(False, "seo_disabled")
     article = ArticleArtifact.model_validate_json(row.content)
-    problems = static_problems(article)
+    problems = static_problems(article) + duplicate_page_problems(db, row, article)
     verdict = critic_verdict(db, row.task_id, article.reader_article)
     if verdict not in CLEAN_CRITIC_STATUSES:
         problems.append(f"critic review: {verdict}")
@@ -163,7 +196,7 @@ def publish_owner_approved(db: Session) -> int:
         # cannot bypass an invalid, changed, or unreviewed SEO article.
         try:
             article = ArticleArtifact.model_validate_json(row.content)
-            problems = static_problems(article)
+            problems = static_problems(article) + duplicate_page_problems(db, row, article)
             verdict = critic_verdict(db, row.task_id, article.reader_article)
             if verdict not in CLEAN_CRITIC_STATUSES:
                 problems.append(f"critic review: {verdict}")
