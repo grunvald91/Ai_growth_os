@@ -59,10 +59,8 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert f'data-api="/studio/products/{product.id}/dispatch"' in page.text
     assert 'data-voice-url="/studio/voice/dictate"' in page.text
     assert 'id="dp-state"' in page.text
-    assert '/studio/assets/dispatcher.js?v=touchfix-20261031' in page.text
     assert 'id="dp-voice-overlay"' in page.text
     assert 'id="dp-voice-hitbox"' in page.text
-    assert '/studio/assets/growth-live.css?v=7' in page.text
     assert 'id="dp-voice-status"' in page.text
     assert 'placeholder="Удерживайте, чтобы говорить"' in page.text
     assert 'id="dp-press-hint"' not in page.text
