@@ -17,7 +17,7 @@ from urllib.parse import urlencode
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database import Service
+from .database import Service
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 WORDS = re.compile(r"[a-zа-яё0-9]+", re.IGNORECASE)
