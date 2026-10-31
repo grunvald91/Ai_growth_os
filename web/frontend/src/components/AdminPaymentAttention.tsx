@@ -21,6 +21,8 @@ function PendingPayments() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [decisionError, setDecisionError] = useState('')
+  // Keep a visible alert while allowing the owner to use the schedule.
+  const [minimized, setMinimized] = useState(false)
   const modal = useRef<HTMLElement>(null)
   const [proof, setProof] = useState<{ url: string; mime: string; bookingId: number; version: number } | null>(null)
   const alive = useRef(true)
@@ -64,6 +66,8 @@ function PendingPayments() {
   const id = first?.booking.id
   const version = first?.booking.version
   const inQueue = pathname === '/admin/prepayments'
+  // A different incoming payment must be shown even if an earlier one was minimized.
+  useEffect(() => { setMinimized(false) }, [id])
   useEffect(() => {
     if (!id || inQueue) return
     let current = true
@@ -72,10 +76,10 @@ function PendingPayments() {
   }, [id, version, inQueue])
   useEffect(() => {
     const node = modal.current
-    if (!node || inQueue || !id) return
+    if (!node || inQueue || !id || minimized) return
     node.focus()
     const trap = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); return }
+      if (e.key === 'Escape') { e.preventDefault(); setMinimized(true); return }
       if (e.key !== 'Tab') return
       const elements = Array.from(node.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]'))
       const firstElement = elements[0], lastElement = elements[elements.length - 1]
@@ -85,7 +89,7 @@ function PendingPayments() {
     }
     node.addEventListener('keydown', trap)
     return () => node.removeEventListener('keydown', trap)
-  }, [id, inQueue])
+  }, [id, inQueue, minimized])
   useEffect(() => () => { if (proof) URL.revokeObjectURL(proof.url) }, [proof])
   async function decide(decision: 'confirm' | 'reject') {
     if (!details || details.booking.id !== id) return
@@ -114,11 +118,15 @@ function PendingPayments() {
       : { position: 'fixed', right: 12, bottom: 76, zIndex: 1000, maxWidth: 'min(340px, calc(100vw - 24px))', background: '#9a3412', color: 'white', padding: '10px 14px', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
       <strong>{hasFreshAttention ? `Предоплаты на проверке: ${attention?.count}` : 'Проверка предоплат недоступна'}</strong>
       {hasFreshAttention
-        ? <button onClick={queue} style={{ color: '#9a3412', background: 'white', padding: '6px 10px', borderRadius: 8 }}>Проверить</button>
+        ? <>
+            <button onClick={queue} style={{ color: '#9a3412', background: 'white', padding: '6px 10px', borderRadius: 8 }}>Список предоплат</button>
+            {minimized && <button onClick={() => setMinimized(false)}
+              style={{ color: '#9a3412', background: 'white', padding: '6px 10px', borderRadius: 8 }}>Развернуть</button>}
+          </>
         : <button onClick={() => setError('')} style={{ color: '#9a3412', background: 'white', padding: '6px 10px', borderRadius: 8 }}>Закрыть</button>}
       {error && <span>{error}</span>}
     </div>
-    {hasFreshAttention && !inQueue && ready && <div style={{ position: 'fixed', inset: 0, zIndex: 10001, background: 'rgba(0,0,0,.6)', display: 'grid', placeItems: 'center', padding: 18 }}>
+    {hasFreshAttention && !inQueue && ready && !minimized && <div style={{ position: 'fixed', inset: 0, zIndex: 10001, background: 'rgba(0,0,0,.6)', display: 'grid', placeItems: 'center', padding: 18 }}>
       <section ref={modal} tabIndex={-1} role="alertdialog" aria-modal="true" aria-labelledby="payment-alert-title" style={{ background: 'white', color: '#111827', borderRadius: 16, padding: 22, width: 'min(100%, 560px)', maxHeight: '90vh', overflowY: 'auto', fontSize: 16, lineHeight: 1.5 }}>
         <h2 id="payment-alert-title" style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Клиент сообщил об отправке предоплаты</h2>
         <p><strong>{first?.business_name}</strong> · {first?.booking.client_name}</p>
@@ -130,6 +138,8 @@ function PendingPayments() {
         </>}
         {(error || decisionError) && <p role="alert">{decisionError || error}</p>}
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
+          <button onClick={() => setMinimized(true)}
+            style={{ background: '#f1f5f9', color: '#334155', borderRadius: 9, padding: '10px 14px' }}>Свернуть и вернуться к расписанию</button>
           <button style={{ background: '#166534', color: 'white', borderRadius: 9, padding: '10px 14px', fontWeight: 600, opacity: busy || !ready ? .5 : 1 }} disabled={busy || !ready} onClick={() => void decide('confirm')}>Да, деньги поступили</button>
           <button style={{ background: '#fff1f2', color: '#9f1239', border: '1px solid #fda4af', borderRadius: 9, padding: '10px 14px', fontWeight: 600, opacity: busy || !ready ? .5 : 1 }} disabled={busy || !ready} onClick={() => void decide('reject')}>Нет, поступление не подтверждено</button>
           <button style={{ textDecoration: 'underline', padding: '8px 0' }} onClick={queue}>Открыть список предоплат</button>
