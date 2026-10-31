@@ -67,7 +67,7 @@ jobs:
               headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},
               method='POST')
           try:
-            with urllib.request.urlopen(req,timeout=90) as response:
+            with urllib.request.urlopen(req,timeout=240) as response:
               raw=json.load(response)
           except urllib.error.HTTPError as exc:
             status('api_http_failed','ClaudeHub HTTP '+str(exc.code)+'; check API key permissions, credits, model availability and account limits')
@@ -85,9 +85,9 @@ jobs:
                       'usage_completion_tokens':(raw.get('usage') or {}).get('completion_tokens'),
                       'max_tokens_requested':payload.get('max_tokens')}
           if isinstance(msg,str):
-            # Synthetic test input only; retain bounded model output for offline inspection.
-            (out/'response-content.txt').write_text(msg[:32000],encoding='utf-8')
-            diagnostic['content_saved_chars']=min(len(msg),32000)
+            # Synthetic test input only; preserve full model output for diagnosis.
+            (out/'response-content.txt').write_text(msg,encoding='utf-8')
+            diagnostic['content_saved_chars']=len(msg)
           (out/'diagnostic.json').write_text(json.dumps(diagnostic,ensure_ascii=False,indent=2))
           if not isinstance(msg,str):
             status('response_content_missing','No text content returned; API request completed')
