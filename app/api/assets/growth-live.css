@@ -390,3 +390,17 @@ body[data-growth-design="v4"] .command-bar:is(.voice-processing,.voice-sending):
 @media(prefers-reduced-motion:reduce){
   body[data-growth-design="v4"] .command-bar:is(.voice-processing,.voice-sending)::after{animation:none}
 }
+
+/* Exit uses the slightly shallower scale requested by the motion reference. */
+body[data-growth-design="v4"] .voice-hold-overlay.is-exiting{
+  visibility:visible;
+  opacity:0;
+  transform:translateY(0) scale(.985);
+  transition:opacity 185ms ease-in,transform 185ms ease-in,visibility 0s linear 185ms;
+}
+body[data-growth-design="v4"] .voice-hold-overlay.is-exiting
+  :is(.voice-hold-instruction,.voice-hold-scale){
+  opacity:0;
+  transform:translate(-50%,0) scale(.985);
+  transition:opacity 185ms ease-in,transform 185ms ease-in;
+}
