@@ -160,8 +160,10 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
                 date=date.today() + timedelta(days=6), time="12:00",
                 seo_ref=make_reference(self.business_id, "real-article"),
             )
-            with patch("web.api.routes.client.lock_resource_days", new_callable=AsyncMock), \\
-                 patch("web.api.routes.client.ensure_resource_available", new_callable=AsyncMock):
+            with (
+                patch("web.api.routes.client.lock_resource_days", new_callable=AsyncMock),
+                patch("web.api.routes.client.ensure_resource_available", new_callable=AsyncMock),
+            ):
                 created = await create_booking_visit(body, db, owner, commit=False)
             await db.commit()
             self.assertEqual(len(created), 1)
