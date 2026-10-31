@@ -50,3 +50,27 @@ def test_growth_theme_keeps_old_value_as_fallback_only():
     assert "'servgo-theme'" in bootstrap
     assert "'servgo-desktop-theme'" in bootstrap
     assert "prefers-color-scheme: dark" in bootstrap
+
+
+
+def test_new_growth_theme_assets_have_registered_routes_and_serve_successfully():
+    from app.api.growth_live import air_tokens, air_adapter, air_theme_script, router
+
+    registered = {route.path for route in router.routes}
+    for uri in (
+        "/studio/assets/servgo-air-tokens.css",
+        "/studio/assets/growth-servgo-air.css",
+        "/studio/assets/servgo-air-theme.js",
+    ):
+        assert uri in registered
+
+    for handler, mime in (
+        (air_tokens, "text/css"),
+        (air_adapter, "text/css"),
+        (air_theme_script, "application/javascript"),
+    ):
+        response = handler()
+        assert response.status_code == 200
+        assert response.media_type == mime
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.body
