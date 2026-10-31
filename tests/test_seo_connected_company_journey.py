@@ -224,7 +224,13 @@ async def test_connected_company_article_reaches_own_blog_with_critic_and_demo_s
                                      "reader_hash": reader_hash(content.reader_article)})
         db.commit()
         outcome = publish_if_clear(db, article.id)
-        assert outcome.published and outcome.slug
+        assert not outcome.published and outcome.reason == "human_review_required"
+        assert db.get(Artifact, article.id).status == ArtifactStatus.AWAITING_APPROVAL
+        assert not list(db.scalars(select(Publication)))
+        from app.content.review import approve_material
+        from app.seo.publishing import publish_owner_approved
+        approve_material(db, settings.products_root, company_id, article.id)
+        assert publish_owner_approved(db) == 1
         assert db.get(Artifact, article.id).status == ArtifactStatus.PUBLISHED
         assert db.scalar(select(Publication).where(Publication.product_id == demo_id)) is None
 
