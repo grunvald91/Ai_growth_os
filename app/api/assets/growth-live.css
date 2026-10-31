@@ -406,6 +406,38 @@ body[data-growth-design="v4"] .voice-hold-overlay.is-exiting
 }
 
 
+/* Android touch selection guard: the press starts on a non-editable hitbox,
+   not on the native textarea (long-press there opens text selection).
+   While text editing, remove the guard so caret/selection work normally. */
+body[data-growth-design="v4"] .command-bar .voice-hold-hitbox{
+  position:absolute;
+  inset:0 57px 0 0;
+  z-index:2;
+  border-radius:22px 0 0 22px;
+  touch-action:none;
+  -webkit-touch-callout:none;
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-tap-highlight-color:transparent;
+  cursor:text;
+}
+body[data-growth-design="v4"] .command-bar.voice-text-editing .voice-hold-hitbox,
+body[data-growth-design="v4"] .command-bar:is(.voice-processing,.voice-sending) .voice-hold-hitbox{
+  pointer-events:none;
+}
+body[data-growth-design="v4"] .command-bar .command-go{
+  position:relative;
+  z-index:3;
+}
+body[data-growth-design="v4"] .command-bar.voice-arming,
+body[data-growth-design="v4"] .command-bar.voice-recording,
+body[data-growth-design="v4"] .command-bar.voice-connecting{
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-touch-callout:none;
+}
+
+
 /* Narrow 320px screen: keep create-form cards inside their grid column. */
 @media(max-width:360px){
   body[data-growth-design="v4"] .route-content,
