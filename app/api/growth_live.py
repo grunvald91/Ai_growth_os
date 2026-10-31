@@ -230,18 +230,19 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
                 if article.get("article_status") == "awaiting_approval":
                     critic += (f'<a class="btn secondary" href="{html.escape(target, quote=True)}">'
                                'Открыть статью и проверить</a>')
-                    if not article.get("needs_fact_check"):
+                    if verdict in {"no_material_issues", "revised"} and not article.get("needs_fact_check"):
                         action = f'/studio/products/{product_id}/review/{article_id}/approve'
                         critic += (
                             f'<form method="post" action="{html.escape(action, quote=True)}" '
                             'class="seo-article-approval">'
                             '<label><input type="checkbox" required name="confirm_publish" value="yes"> '
-                            'Я проверил статью и разрешаю публикацию в блоге продукта</label>'
+                            'Я прочитал статью, проверил оригинальную пользу и факты и разрешаю публикацию</label>'
                             '<button class="btn primary" type="submit">Согласовать публикацию</button>'
                             '</form>'
                         )
                     else:
-                        critic += '<p>Для согласования сначала проверьте факты в карточке материала.</p>'
+                        critic += ('<p>Перед публикацией исправьте замечания критика и '
+                                   'проверьте факты в карточке материала.</p>')
             article_cards.append(
                 '<li class="seo-article-item">'
                 f'<div class="seo-article-copy"><a href="{html.escape(target, quote=True)}">'
@@ -290,10 +291,12 @@ def seo_queue_confirm(product_id: UUID, db: Session = Depends(get_db)):
         '<h2>Новый запуск SEO-завода</h2>'
         '<p>Завод подготовит поисковые запросы, SEO-план и задания на статьи. '
         'Обработка после постановки в очередь может использовать платные модели. '
-        'Готовые статьи после успешной проверки критиком могут автоматически '
-        'попадать в ленту блога продукта (own_site). Для ServGo она подключена '
-        'к ServGo; публикация доступна только для подключённых компаний. '
-        'Не прошедшие проверку статьи ждут согласования. '
+        'Один запуск создаёт не более трёх статей первой проверочной партии; '
+        'остальные темы останутся в SEO-плане без автоматического выпуска. '
+        'Даже если ИИ-критик одобрит статью, она останется закрытой от публичного '
+        'блога до вашей личной проверки и согласования. '
+        'Проверьте, чем статья полезна, есть ли собственные факты, примеры '
+        'или сравнения, достоверны ли сведения о компании и нет ли повторов. '
         'Отмена запуска в очереди не удаляет созданные статьи и не отменяет '
         'уже поставленные отдельно задания на статьи.</p>'
         f'<form method="post" action="{base}/queue">'
@@ -410,8 +413,9 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
            + ('Отключить SEO-завод' if enabled else 'Подключить SEO-завод')
            + '</button></form>')
         + '<p class="subtitle">Подключение само по себе не запускает платную генерацию. '
-          'После подключения нажмите «Новый запуск». Отключение отменяет задания '
-          'в очереди и блокирует новые статьи; уже опубликованные материалы остаются.</p>'
+          '«Новый запуск» готовит до трёх статей. Каждую нужно лично проверить '
+          'и согласовать до публикации. Отключение отменяет задания в очереди '
+          'и блокирует новые статьи; уже опубликованные материалы остаются.</p>'
         + '</section>'
     )
     if not enabled:
