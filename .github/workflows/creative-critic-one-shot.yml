@@ -1,0 +1,65 @@
+name: Creative Critic one-shot
+on:
+  push:
+    branches: [experiment/creative-critic-one-shot-20261031]
+    paths: ['.github/workflows/creative-critic-one-shot.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  one-shot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - name: One API request, save before and after
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, urllib.request
+          out=pathlib.Path('critic-result'); out.mkdir()
+          original={
+            "goal":"Короткая объясняющая раскадровка: зачем бизнесу онлайн-запись. Не придумывать цифры и гарантии.",
+            "scenes":[
+              {"title":"Время клиента","beats":[{"narration":"Клиент выбирает свободное время.","visual":"Нарисованный календарь"},{"narration":"Владелец видит расписание.","visual":"Нарисованный телефон"}]},
+              {"title":"Время клиента","beats":[{"narration":"Клиент выбирает свободное время.","visual":"Нарисованный календарь"},{"narration":"Владелец видит расписание.","visual":"Нарисованный телефон"}]},
+              {"title":"Время клиента","beats":[{"narration":"Клиент выбирает свободное время.","visual":"Нарисованный календарь"},{"narration":"Владелец видит расписание.","visual":"Нарисованный телефон"}]}
+            ]}
+          (out/'before.json').write_text(json.dumps(original,ensure_ascii=False,indent=2))
+          key=os.environ.get('OPENROUTER_API_KEY','')
+          if not key:
+            raise SystemExit('OPENROUTER_API_KEY is missing; no API request made')
+          system=("Ты независимый AI Creative Critic. Оцени исходный сценарий по цели: логика, повторения, "
+                  "конкретность, соответствие визуала тексту. Только существенные замечания, с цитатами "
+                  "и готовыми исправлениями; не выдумывай фактов. Затем ОДИН РАЗ примени только обоснованные "
+                  "замечания, сохраняя исходные ограничения. Ответь строго JSON-объектом с полями "
+                  "findings (массив объектов severity, evidence, problem, proposed_fix), "
+                  "decisions (массив объектов finding_index, decision, reason), "
+                  "after (объект с полями goal и scenes, как во входе). Никаких пояснений вне JSON.")
+          payload={"model":"openai/gpt-4o-mini","temperature":0.2,"max_tokens":2200,
+                   "response_format":{"type":"json_object"},
+                   "messages":[{"role":"system","content":system},{"role":"user","content":json.dumps(original,ensure_ascii=False)}]}
+          req=urllib.request.Request('https://openrouter.ai/api/v1/chat/completions',
+              data=json.dumps(payload,ensure_ascii=False).encode(),
+              headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"},
+              method='POST')
+          try:
+            with urllib.request.urlopen(req,timeout=90) as response:
+              raw=json.load(response)
+          except Exception as exc:
+            raise SystemExit('Single API request failed: '+type(exc).__name__)
+          msg=raw['choices'][0]['message']['content']
+          result=json.loads(msg)
+          if not isinstance(result.get('findings'),list) or not isinstance(result.get('decisions'),list) or not isinstance(result.get('after'),dict):
+            raise SystemExit('Invalid review JSON shape')
+          (out/'review.json').write_text(json.dumps({"findings":result['findings'],"decisions":result['decisions']},ensure_ascii=False,indent=2))
+          (out/'after.json').write_text(json.dumps(result['after'],ensure_ascii=False,indent=2))
+          (out/'usage.json').write_text(json.dumps({"model":raw.get('model'),"usage":raw.get('usage')},indent=2))
+          print('One request completed; saved before, review, after and usage.')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: creative-critic-one-shot
+          path: critic-result/
