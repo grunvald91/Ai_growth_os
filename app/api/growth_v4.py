@@ -200,10 +200,10 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     if pid:
         button = Document(template).find(ident='notifyBtn')
-        template = template.replace(Document(template).outer(button), notice_html(pid))
+        template = template.replace(Document(template).outer(button), notice_html(pid).replace('<span aria-hidden="true">🔔</span>', icon('bell')))
         template = template.replace('</head>', '<style>'+notice_css+'</style></head>')
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
-    template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=2"></head>')
-    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=2"></script></body>')
+    template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=3"></head>')
+    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=3"></script></body>')
     return template

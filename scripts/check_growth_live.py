@@ -125,9 +125,39 @@ def main():
                 page.get_by_text('Старый дизайн', exact=True).click()
                 expect(page.locator('[data-growth-design]')).to_have_count(0)
                 expect(page.get_by_text('Новый дизайн →', exact=True)).to_be_visible()
+                # Persist a long history, matching the populated production screen.
+                from app.dispatcher import service
+                conversation=service.open_conversation(db,product.id,'local-owner')
+                for i in range(30):
+                    service._add(db,conversation,role='assistant',text='Проверка длинной истории',blocks=[
+                        {'type':'text','text':f'Результат {i+1}. Проверка длинного диалога.'},
+                        {'type':'links','items':[{'label':'Не удалось подготовить материал — проверьте задание','href':f'/studio/products/{product.id}/work'} for _ in range(5)]}])
+                db.commit()
+                page.evaluate("localStorage.setItem('servgo-desktop-theme','light')")
+                for width,height in [(360,740),(390,780),(412,820),(390,400),(1440,900)]:
+                    page.set_viewport_size({'width':width,'height':height})
+                    page.goto(base+'?design=v4')
+                    expect(page.locator('.dp-msg').last).to_be_visible()
+                    page.locator('#dp-input').fill('Черновик сохраняется при изменении окна')
+                    page.wait_for_function("()=>{const e=document.querySelector('#dp-feed');return e.scrollHeight-e.clientHeight-e.scrollTop<3}")
+                    page.screenshot(path=f'/tmp/v4-history-{width}-{height}.png',animations='disabled')
+                    metrics=page.evaluate("""()=>{
+                      const rect=s=>document.querySelector(s).getBoundingClientRect();
+                      const feed=rect('#dp-feed'),form=rect('#dp-form'),dock=rect('.command-dock'),nav=rect('#mobileNav'),top=rect('.topbar');
+                      const el=document.querySelector('#dp-feed');
+                      return {feedTop:feed.top,feedBottom:feed.bottom,formTop:form.top,dockBottom:dock.bottom,navTop:nav.height?nav.top:innerHeight,
+                        mainStyle:getComputedStyle(document.querySelector('#main')).padding,rootStyle:getComputedStyle(document.querySelector('.dp-home')).padding,rootMargin:getComputedStyle(document.querySelector('.dp-home')).margin,headerBottom:top.bottom,overflow:document.documentElement.scrollWidth>innerWidth,scrollable:el.scrollHeight>el.clientHeight};
+                    }""")
+                    assert metrics['scrollable'] and not metrics['overflow'],metrics
+                    assert metrics['feedTop']-metrics['headerBottom']<75,metrics
+                    assert metrics['feedBottom']<=metrics['formTop'],metrics
+                    assert metrics['dockBottom']<=metrics['navTop']+1,metrics
+                    page.locator('#dp-feed').evaluate('e=>e.scrollTop=0')
+                    assert page.locator('#dp-feed').evaluate('e=>e.scrollTop')==0
+                    expect(page.locator('#dp-input')).to_have_value('Черновик сохраняется при изменении окна')
                 assert not errors, errors
                 browser.close()
-                print('PASS: 32 live page layouts + 3 global pages, queue creation, real dispatcher, theme persistence, both switches; no JS errors')
+                print('PASS: 32 live page layouts + 3 global pages, queue creation, real dispatcher, theme persistence, both switches, 30-message history at 5 viewport sizes; no JS errors')
         finally:
             server.should_exit = True
             thread.join(timeout=10)
