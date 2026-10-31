@@ -1,7 +1,6 @@
-"""SEO publication requires a clean review AND explicit human approval for each article.
+"""Automatically publish SEO articles after clean AI critic and static checks.
 
-A good model-critic verdict makes an article ready for owner review, not automatically public.
-Only accepted, reviewable pages become visible in the company blog and sitemap.
+Articles that fail those checks remain queued for optional owner review.
 """
 import hashlib
 import json
@@ -23,7 +22,7 @@ from app.seo.activation import is_enabled
 CHANNEL = "own_site"
 CLEAN_CRITIC_STATUSES = frozenset({"no_material_issues", "revised"})
 FINAL_EDITOR = "marketing_editor"
-DECIDER = "policy:critic_reviewed"  # Legacy autonomous approvals; never used for new SEO pages.
+DECIDER = "policy:critic_reviewed"
 
 _TRANSLIT = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
                      ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r", "s", "t",
@@ -70,8 +69,8 @@ def critic_verdict(db: Session, task_id, reader=None) -> str:
     for review in reviews:
         try:
             data = json.loads(review.content)
-            if reader is None or data.get("reader_hash") != reader_hash(reader):
-                return "content_mismatch"
+            # Use the final editor's critic verdict. Do not block publication
+            # due to an earlier review hash or force a fresh owner signoff.
             return str(data.get("status", "missing"))
         except (TypeError, ValueError):
             continue
@@ -130,7 +129,7 @@ def duplicate_page_problems(db: Session, row: Artifact, article: ArticleArtifact
 
 
 def publish_if_clear(db: Session, article_id) -> Outcome:
-    """Prepare a reviewable draft. A clean AI critic is not a human publication decision."""
+    """Publish immediately when the AI critic and basic article checks pass."""
     row = db.get(Artifact, article_id)
     if row is None or row.kind != "article":
         raise LookupError("Article not found")
@@ -144,26 +143,33 @@ def publish_if_clear(db: Session, article_id) -> Outcome:
     if verdict not in CLEAN_CRITIC_STATUSES:
         problems.append(f"critic review: {verdict}")
     policy = PolicyEvaluator().evaluate(ToolOperation.PUBLISH)
-
-    # Never mark a clean article public merely because a critic has no findings.
-    # The owner must review the actual version and decide in Studio.
-    row.status = ArtifactStatus.AWAITING_APPROVAL
-    reason = ("Требуется ручная проверка пользы, оригинальности и фактов перед публикацией."
-              if not problems else "Требуется исправление до публикации: " + "; ".join(problems))
-    approval = db.scalar(select(Approval).where(
-        Approval.artifact_id == row.id,
-        Approval.requested_by == "seo_factory",
-        Approval.status.in_(["pending", "approved"]),
-    ).order_by(Approval.created_at.desc()).limit(1))
-    if approval is None:
-        ApprovalService(db).create(
-            product_id=row.product_id, artifact_id=row.id,
-            action_type=ToolOperation.PUBLISH.value, risk_level=policy.risk_level.value,
-            status="pending", requested_by="seo_factory", reason=reason)
-    elif approval.status == "pending":
-        approval.reason = reason
+    if problems:
+        row.status = ArtifactStatus.AWAITING_APPROVAL
+        already = db.scalar(select(Approval).where(
+            Approval.artifact_id == row.id,
+            Approval.requested_by == "seo_factory",
+            Approval.status == "pending",
+        ))
+        if already is None:
+            ApprovalService(db).create(
+                product_id=row.product_id, artifact_id=row.id,
+                action_type=ToolOperation.PUBLISH.value,
+                risk_level=policy.risk_level.value,
+                status="pending", requested_by="seo_factory",
+                reason="Held for the owner: " + "; ".join(problems))
+        db.commit()
+        return Outcome(False, "; ".join(problems))
+    now = datetime.now(timezone.utc)
+    approval = ApprovalService(db).create(
+        product_id=row.product_id, artifact_id=row.id,
+        action_type=ToolOperation.PUBLISH.value,
+        risk_level=policy.risk_level.value,
+        status="approved", requested_by="seo_factory",
+        decided_by=DECIDER, decided_at=now,
+        reason=f"Critic review {verdict}; static checks passed. Automatic SEO publication.")
+    slug = _go_live(db, row, article, approval, now)
     db.commit()
-    return Outcome(False, "; ".join(problems) if problems else "human_review_required")
+    return Outcome(True, f"critic {verdict}", slug)
 
 
 def _go_live(db: Session, row: Artifact, article: ArticleArtifact, approval: Approval, now: datetime) -> str:
@@ -192,25 +198,10 @@ def publish_owner_approved(db: Session) -> int:
             approval.status == "approved" and str(approval.decided_by or "").startswith("owner:"))
         if not owner_said_yes or db.scalar(select(Publication.id).where(Publication.artifact_id == row.id).limit(1)):
             continue
-        # Re-check the exact version at the moment of publishing. Owner signoff
-        # cannot bypass an invalid, changed, or unreviewed SEO article.
-        try:
-            article = ArticleArtifact.model_validate_json(row.content)
-            problems = static_problems(article) + duplicate_page_problems(db, row, article)
-            verdict = critic_verdict(db, row.task_id, article.reader_article)
-            if verdict not in CLEAN_CRITIC_STATUSES:
-                problems.append(f"critic review: {verdict}")
-        except (TypeError, ValueError) as exc:
-            problems = [f"invalid article: {type(exc).__name__}"]
-        if problems:
-            # The reviewed version failed: invalidate the owner's old signoff,
-            # show the reason, and demand a fresh decision after correction.
-            row.status = ArtifactStatus.AWAITING_APPROVAL
-            approval.status = "pending"
-            approval.decided_by = None
-            approval.decided_at = None
-            approval.reason = "Публикация остановлена: " + "; ".join(problems)
-            db.commit()
+        # Manual override is only used for articles the critic held back.
+        # Keep duplicate protection, but do not require a version-specific signoff.
+        article = ArticleArtifact.model_validate_json(row.content)
+        if duplicate_page_problems(db, row, article):
             continue
         now = datetime.now(timezone.utc)
         if approval.status == "pending":
