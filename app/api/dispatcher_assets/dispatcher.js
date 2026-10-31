@@ -301,9 +301,17 @@
   });
   newButton.addEventListener('click', function () {
     if (busy) return;
+    // Start a new conversation without opening the Android keyboard.
+    if (voiceHoldEnabled) input.blur();
     post('/new', {}).then(function (data) {
       feed.textContent = ''; syncConversationLayout();
-      state.hints = data.hints || []; renderHints(); input.focus();
+      state.hints = data.hints || []; renderHints();
+      if (voiceHoldEnabled) {
+        input.value = '';
+        grow();
+        input.blur();
+        showNote('');
+      } else input.focus();
     }).catch(function (error) { notify(error.message); });
   });
 
@@ -317,6 +325,9 @@
   var previewUrl = root.getAttribute('data-voice-preview-url');
   var voiceHitbox = document.getElementById('dp-voice-hitbox');
   var voiceOverlay = document.getElementById('dp-voice-overlay');
+  // A fixed layer inside the animated home section is clipped to its
+  // transformed ancestor on Android. Portal it to <body> instead.
+  if (voiceHoldEnabled && voiceOverlay) document.body.appendChild(voiceOverlay);
   var voiceOverlayText = document.getElementById('dp-voice-overlay-text');
   var voiceStatus = document.getElementById('dp-voice-status');
   var overlayExitTimer = null;
@@ -403,6 +414,7 @@
             overlayExitTimer = null;
           }, 195);
         }
+        voiceOverlay.classList.toggle('is-active', entering);
         voiceOverlay.setAttribute('aria-hidden', entering ? 'false' : 'true');
       }
       if (voiceOverlayText) voiceOverlayText.textContent = mode === 'connecting'
@@ -655,8 +667,9 @@
     input.setAttribute('placeholder', defaultPlaceholder);
   }
   if (voiceHoldEnabled && supportedVoice) {
-    // Short taps enter real text editing; while editing, the native textarea
-    // stays interactive. A blur restores the dedicated voice press surface.
+    // A short tap focuses the editor, but must NOT uncover the native
+    // textarea on touch screens: a second long press would select its text
+    // and cancel recording. Keep the non-selectable hitbox in both states.
     input.addEventListener('focus', function () { form.classList.add('voice-text-editing'); });
     input.addEventListener('blur', function () { form.classList.remove('voice-text-editing'); });
     if (voiceHitbox) {
