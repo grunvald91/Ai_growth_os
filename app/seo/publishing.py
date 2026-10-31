@@ -167,13 +167,30 @@ def publish_if_clear(db: Session, article_id) -> Outcome:
         db.commit()
         return Outcome(False, "; ".join(problems))
     now = datetime.now(timezone.utc)
-    approval = ApprovalService(db).create(
-        product_id=row.product_id, artifact_id=row.id,
-        action_type=ToolOperation.PUBLISH.value,
-        risk_level=policy.risk_level.value,
-        status="approved", requested_by="seo_factory",
-        decided_by=DECIDER, decided_at=now,
-        reason=f"Critic review {verdict}; static checks passed. Automatic SEO publication.")
+    # A failed first critic can leave a pending request. Once the critic
+    # passes, resolve that request automatically; never leave a ghost
+    # "waiting for owner" notification beside an already published article.
+    reason = f"Critic review {verdict}; static checks passed. Automatic SEO publication."
+    approval = db.scalar(select(Approval).where(
+        Approval.product_id == row.product_id,
+        Approval.artifact_id == row.id,
+        Approval.action_type == ToolOperation.PUBLISH.value,
+        Approval.requested_by == "seo_factory",
+        Approval.status == "pending",
+    ).order_by(Approval.created_at.desc()).limit(1))
+    if approval is None:
+        approval = ApprovalService(db).create(
+            product_id=row.product_id, artifact_id=row.id,
+            action_type=ToolOperation.PUBLISH.value,
+            risk_level=policy.risk_level.value,
+            status="approved", requested_by="seo_factory",
+            decided_by=DECIDER, decided_at=now,
+            reason=reason)
+    else:
+        approval.status = "approved"
+        approval.decided_by = DECIDER
+        approval.decided_at = now
+        approval.reason = reason
     slug = _go_live(db, row, article, approval, now)
     db.commit()
     return Outcome(True, f"critic {verdict}", slug)
