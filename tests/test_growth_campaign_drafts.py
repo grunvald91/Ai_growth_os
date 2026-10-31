@@ -9,7 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -133,6 +133,34 @@ def test_non_drafts_cannot_be_edited(workspace):
     assert client.post(path, data={"name": "Изменено", "hypothesis": "x"}).status_code == 409
     db.refresh(item)
     assert item.name == "Проводится"
+
+
+def test_concurrent_approval_cannot_be_overwritten_by_stale_draft_save(workspace, monkeypatch):
+    """An approval after draft read but before UPDATE must win over the form."""
+    from app.api import growth_campaigns as campaigns
+
+    client, db, product_id, _ = workspace
+    item = Experiment(product_id=product_id, name="Before", hypothesis="Goal", status="draft")
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+
+    async def approve_after_initial_read(request):
+        # Simulate a different request committing approval in the race window.
+        db.execute(update(Experiment).where(Experiment.id == item.id).values(status="manual_approved"))
+        db.commit()
+        return {"name": "Stale edit", "hypothesis": "Should not replace approved campaign"}
+
+    monkeypatch.setattr(campaigns, "_studio_form", approve_after_initial_read)
+    response = client.post(
+        f"/studio/products/{product_id}/campaigns/{item.id}/edit",
+        follow_redirects=False,
+    )
+    assert response.status_code == 409
+    db.refresh(item)
+    assert item.status == "manual_approved"
+    assert item.name == "Before"
+    assert item.hypothesis == "Goal"
 
 
 def test_internal_short_form_does_not_relax_strict_experiment_api():
