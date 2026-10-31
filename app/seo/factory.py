@@ -10,7 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.composition import build_seo_llm
-from app.models.domain import Artifact, Task, TaskStatus
+from app.models.domain import Artifact, Product, Task, TaskStatus
 from app.seo.planner import plan_content, plan_seeds
 from app.seo.queue import queue_plan
 from app.seo.service import build_semantic_core
@@ -38,7 +38,12 @@ def recover_stale_factory(db):
 
 
 def queue_factory(db: Session, product_id: UUID, focus: str | None = None, *, commit: bool = True) -> Task:
-    """One active factory run per company: asking again while one is queued or running returns that run."""
+    """One active factory run per company, including simultaneous dispatcher/UI requests."""
+    # Serialize *all* producer paths (dispatcher and Studio form) on the
+    # company row. The partial unique constraint is not present in old schemas.
+    product = db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
+    if product is None:
+        raise LookupError("Компания не найдена")
     active = db.scalar(select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT,
                                           Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING])))
     if active is not None:
