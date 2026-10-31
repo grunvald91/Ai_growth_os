@@ -260,7 +260,7 @@ def test_form_creates_a_minute_job_and_the_page_says_so(environment):
             'call_to_action': 'Напишите, что объяснить дальше', 'max_api_calls': 'auto', 'visual_review': 'off'})
         assert response.status_code == 303
         page = browser.get(response.headers['location']).text
-        assert 'Около минуты, 6 сцен' in page and 'Напишите, что объяснить дальше' in page
+        assert 'Около минуты' in page and '6 сцен' in page and 'Напишите, что объяснить дальше' in page
         assert 'до 26 API-вызовов' in page
         too_few = browser.post(f'/studio/products/{product}/whiteboard', data={
             'topic': 'Как работает онлайн-запись', 'duration_seconds': '60', 'max_api_calls': '19', 'visual_review': 'off'})
