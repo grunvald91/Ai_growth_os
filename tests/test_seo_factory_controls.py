@@ -208,9 +208,8 @@ def test_run_articles_link_to_queued_task_saved_material_and_public_blog(env):
     assert seo_runs(db, other_pid) == []
 
 
-def test_verified_critic_review_is_visible_only_for_correct_article_version(env, monkeypatch):
-    """The owner sees persisted findings, but never a critic verdict from a stale article."""
-    from types import SimpleNamespace
+def test_critic_review_is_visible_without_version_hash_gate(env):
+    """The owner sees the persisted verdict and escaped findings without a hash gate."""
     from app.models.domain import AgentRun, Approval
 
     client, db, pid, other_pid = env
@@ -240,10 +239,6 @@ def test_verified_critic_review_is_visible_only_for_correct_article_version(env,
     db.add_all([review, approval])
     db.commit()
 
-    from app.api import seo_run_view
-    monkeypatch.setattr(seo_run_view.ArticleArtifact, "model_validate_json",
-                        classmethod(lambda cls, content: SimpleNamespace(reader_article=object())))
-    monkeypatch.setattr(seo_run_view, "reader_hash", lambda reader: "hash-1")
     data = seo_runs(db, pid)[0]["articles"][0]
     assert data["critic_status"] == "all_rejected"
     assert data["critic_findings_total"] == 1
@@ -257,22 +252,23 @@ def test_verified_critic_review_is_visible_only_for_correct_article_version(env,
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page.text
     assert 'name="confirm_publish"' not in page.text
     assert "Согласовать публикацию" not in page.text
-    assert "исправьте замечания критика" in page.text
+    assert "Статья не прошла автоматическую проверку" in page.text
     assert client.get(url(other_pid)).status_code == 200
     assert "Статья с проверкой" not in client.get(url(other_pid)).text
 
-    # The recorded critic hash must match the CURRENT article; otherwise no findings are trusted.
-    monkeypatch.setattr(seo_run_view, "reader_hash", lambda reader: "changed-reader")
-    stale = seo_runs(db, pid)[0]["articles"][0]
-    assert stale["critic_status"] == "content_mismatch"
-    assert stale["critic_findings"] == []
-    assert "проверка относится к другой версии" in client.get(url(pid)).text
+    # The verdict is displayed regardless of a changed or missing review hash.
+    review.content = json.dumps({"status": "all_rejected", "reader_hash": "different",
+                                 "findings": [{"problem": "Нужна доработка"}]})
+    db.commit()
+    current = seo_runs(db, pid)[0]["articles"][0]
+    assert current["critic_status"] == "all_rejected"
+    assert current["critic_findings"] == ["Нужна доработка"]
 
 
 def test_seo_discloses_unconnected_blog_without_claiming_publication(env):
     client, db, pid, other_pid = env
     assert "персональный блог компании на ServGo" in client.get(url(pid)).text
-    assert "личной проверки" in client.get(url(pid, "/queue")).text
+    assert "автоматически публикуются" in client.get(url(pid, "/queue")).text
     db.get(Product, pid).slug = "servgo"
     db.commit()
     assert "Место публикации: блог ServGo" in client.get(url(pid)).text
