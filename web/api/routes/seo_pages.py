@@ -210,6 +210,37 @@ async def business_blog_html(business_id: int, db: AsyncSession = Depends(get_db
                       path=f"/business/{business_id}/blog", body=body)
 
 
+@router.get("/business/{business_id}/blog/sitemap.xml")
+async def business_article_sitemap(business_id: int, db: AsyncSession = Depends(get_db)):
+    await _active_business(db, business_id)
+    feed = await _company_blog_data(business_id, db)
+    articles = feed.get("articles") if isinstance(feed, dict) else None
+    if not isinstance(articles, list) or not articles:
+        raise HTTPException(404, "No published articles")
+
+    def lastmod(raw: object) -> str:
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).date().isoformat()
+        except ValueError:
+            return ""
+
+    urls = [f'<url><loc>{_full_url(f"/business/{business_id}/blog")}</loc></url>']
+    for article in articles:
+        if not isinstance(article, dict) or not SLUG.fullmatch(str(article.get("slug", ""))):
+            continue
+        loc = _full_url(f'/business/{business_id}/blog/{article["slug"]}')
+        date = lastmod(article.get("updated_at") or article.get("published_at"))
+        urls.append(f'<url><loc>{xml_escape(loc)}</loc>'
+                    + (f'<lastmod>{date}</lastmod>' if date else "") + "</url>")
+    if len(urls) == 1:
+        raise HTTPException(404, "No published articles")
+    xml = '<?xml version="1.0" encoding="UTF-8"?>' + (
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + "".join(urls) + "</urlset>"
+    )
+    return Response(xml, media_type="application/xml", headers=XML_HEADERS)
+
+
 @router.get("/business/{business_id}/blog/{slug}", response_class=HTMLResponse)
 async def business_article_html(business_id: int, slug: str, db: AsyncSession = Depends(get_db)):
     business = await _active_business(db, business_id)
@@ -274,33 +305,3 @@ async def company_blog_sitemap_index(db: AsyncSession = Depends(get_db)):
     )
     return Response(content, media_type="application/xml", headers=XML_HEADERS)
 
-
-@router.get("/business/{business_id}/sitemap.xml")
-async def business_article_sitemap(business_id: int, db: AsyncSession = Depends(get_db)):
-    await _active_business(db, business_id)
-    feed = await _company_blog_data(business_id, db)
-    articles = feed.get("articles") if isinstance(feed, dict) else None
-    if not isinstance(articles, list) or not articles:
-        raise HTTPException(404, "No published articles")
-
-    def lastmod(raw: object) -> str:
-        try:
-            return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).date().isoformat()
-        except ValueError:
-            return ""
-
-    urls = [f'<url><loc>{_full_url(f"/business/{business_id}/blog")}</loc></url>']
-    for article in articles:
-        if not isinstance(article, dict) or not SLUG.fullmatch(str(article.get("slug", ""))):
-            continue
-        loc = _full_url(f'/business/{business_id}/blog/{article["slug"]}')
-        date = lastmod(article.get("updated_at") or article.get("published_at"))
-        urls.append(f'<url><loc>{xml_escape(loc)}</loc>'
-                    + (f'<lastmod>{date}</lastmod>' if date else "") + "</url>")
-    if len(urls) == 1:
-        raise HTTPException(404, "No published articles")
-    xml = '<?xml version="1.0" encoding="UTF-8"?>' + (
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
-        + "".join(urls) + "</urlset>"
-    )
-    return Response(xml, media_type="application/xml", headers=XML_HEADERS)
