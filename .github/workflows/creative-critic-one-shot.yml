@@ -1,5 +1,8 @@
 name: Creative Critic one-shot
 on:
+  push:
+    branches: [experiment/creative-critic-one-shot-20261031]
+    paths: ['.github/critic-one-shot-trigger.txt']
   workflow_dispatch:
 permissions:
   contents: read
