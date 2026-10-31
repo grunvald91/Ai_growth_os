@@ -149,6 +149,24 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(bookings), 1)
             self.assertEqual((await db.scalars(select(SeoBookingAttribution))).all(), [])
 
+    async def test_unavailable_attribution_table_never_breaks_real_booking(self):
+        # Simulate a deployment where only the SEO statistics migration is missing.
+        async with self.engine.begin() as conn:
+            await conn.run_sync(SeoBookingAttribution.__table__.drop)
+        async with self.sessions() as db:
+            owner = await db.get(User, self.owner_id)
+            body = CreateBookingIn(
+                business_id=self.business_id, service_ids=[self.service_ids[0]],
+                date=date.today() + timedelta(days=6), time="12:00",
+                seo_ref=make_reference(self.business_id, "real-article"),
+            )
+            with patch("web.api.routes.client.lock_resource_days", new_callable=AsyncMock), \\
+                 patch("web.api.routes.client.ensure_resource_available", new_callable=AsyncMock):
+                created = await create_booking_visit(body, db, owner, commit=False)
+            await db.commit()
+            self.assertEqual(len(created), 1)
+            self.assertIsNotNone(await db.get(Booking, created[0].id))
+
     async def test_other_owner_cannot_read_company_analytics(self):
         from fastapi import HTTPException
         async with self.sessions() as db:
