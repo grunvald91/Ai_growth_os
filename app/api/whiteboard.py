@@ -169,7 +169,45 @@ def page(product, title, body, *, status=200, refresh=False):
         subtitle='Рисованное объяснение с русской озвучкой · 30 секунд или минута · 9:16', body=body), status_code=status, headers=headers)
 
 
+def approval_card(state, product_id, error=None):
+    """Readable approval sheet; the paid-consent contract stays unchanged."""
+    base = f'/studio/products/{product_id}/whiteboard/{state["task_id"]}'
+    scenes = state['request'].get('scenes', 3)
+    duration = 'Около минуты' if scenes == 6 else 'Около 30 секунд'
+    models = ''.join(f'<li>{esc(value)}</li>' for value in state['models'].values())
+    warning = f'<p class="sg-warning" role="alert">{esc(error)}</p>' if error else ''
+    cta = state['request'].get('call_to_action')
+    cta_html = f'<p class="wb-cta"><strong>Призыв в конце:</strong> {esc(cta)}</p>' if cta else ''
+    review = ('<p>Один проход визуального критика. Автор выбирает существенные исправления; '
+              'каждая выбранная сцена перерисовывается максимум один раз.</p>' if state.get('visual_review_enabled') else '')
+    provider = ('<p>Новые рисунки и перерисовки: Gemini 3.1 Flash Image через API ClaudeHub. '
+                'Автоматической замены модели или провайдера нет.</p>' if state.get('image_provider') == 'claudehub' else '')
+    # Repair requests have additional cost and audio-reuse disclosures in the
+    # regular renderer; retain that path rather than omit those conditions.
+    return (f'<section class="sg-surface wb-job wb-approval"><header class="wb-heading">'
+            '<span class="chip amber">Ожидает подтверждения</span><p class="eyebrow">Простое видео</p>'
+            f'<h2>{esc(state["request"]["topic"])}</h2></header>{warning}'
+            '<div class="wb-facts"><div><span>Длительность</span>'
+            f'<strong>{duration}</strong></div><div><span>Сценарий</span><strong>{scenes} сцен</strong></div>'
+            f'<div><span>Лимит генерации</span><strong>До {state["max_api_calls"]} API-вызовов</strong></div></div>{cta_html}'
+            '<section class="wb-cost"><h3>Платная генерация</h3><p>Точная стоимость в долларах пока неизвестна. '
+            'Лимит ограничивает число API-вызовов, а не сумму списаний.</p>'
+            '<p>После временного сбоя генерация продолжается автоматически в пределах подтверждённого лимита.</p></section>'
+            '<details class="wb-details"><summary>Как будет создано видео</summary>'
+            f'{review}{provider}<h3>Модели и голос</h3><ul>{models}</ul>'
+            f'<p>Голос: {esc(state["request"]["voice"])}</p></details>'
+            f'<footer class="wb-actions"><form method="post" action="{base}/approve" class="sg-form">'
+            f'<input type="hidden" name="request_digest" value="{esc(state["request_digest"])}">'
+            '<label class="wb-consent"><input type="checkbox" name="confirmed" value="yes" required>'
+            f'<span>Разрешаю платную генерацию этого видео: до {state["max_api_calls"]} API-вызовов</span></label>'
+            '<button class="btn primary" type="submit">Подтвердить и сгенерировать</button></form>'
+            f'<form method="post" action="{base}/cancel"><button class="btn secondary" type="submit">Остановить задание</button></form>'
+            f'<a class="wb-back" href="/studio/products/{product_id}/whiteboard">К рисованным видео →</a></footer></section>')
+
+
 def job_html(state, product_id, *, error=None):
+    if state['status'] == 'waiting_approval' and not state.get('visual_repair_from'):
+        return approval_card(state, product_id, error or MESSAGES.get(state.get('error')))
     base = f'/studio/products/{product_id}/whiteboard/{state["task_id"]}'
     stages = {'storyboard': 'Сценарий', 'image': 'Рисунок', 'regions': 'Области рисования', 'speech': 'Озвучка',
               'visual_review': 'Критик проверяет рисунки', 'visual_decision': 'Автор разбирает замечания',
@@ -180,7 +218,7 @@ def job_html(state, product_id, *, error=None):
               'retry_wait': 'Пауза перед автоматическим продолжением'}
     code = state.get('error')
     warning = error or MESSAGES.get(code)
-    body = (f'<section class="sg-surface"><h2>{esc(state["request"]["topic"])}</h2>'
+    body = (f'<section class="sg-surface wb-job"><h2>{esc(state["request"]["topic"])}</h2>'
             f'<p role="status">{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p>'
             f'<p>{esc(stages.get(state.get("stage"), "Подготовка задания"))} · '
             f'API-вызовы: {state["calls"]} из {state.get("call_limit_total", state["max_api_calls"])}</p>')

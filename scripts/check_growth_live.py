@@ -125,6 +125,46 @@ def main():
                 page.get_by_text('Старый дизайн', exact=True).click()
                 expect(page.locator('[data-growth-design]')).to_have_count(0)
                 expect(page.get_by_text('Новый дизайн →', exact=True)).to_be_visible()
+                # A populated paid-video approval, without running any provider.
+                from app.content.whiteboard.contracts import WhiteboardRequest
+                from app.content.whiteboard.runtime import configured_models
+                from app.content.whiteboard.jobs import queue_job
+                video=queue_job(db,WhiteboardRequest(product_id=product.id,
+                    topic='Почему сенсорный экран телефона перестаёт слушаться пальцев, когда руки мокрые',
+                    duration_seconds=60,scenes=6,call_to_action='Подпишитесь на канал'),
+                    configured_models(Settings(_env_file=None,whiteboard_storyboard_model="fixture/story",whiteboard_image_model="gemini-3.1-flash-image",whiteboard_speech_model="fixture/speech",whiteboard_regions_model="fixture/regions")),max_api_calls=34,visual_review=True,image_provider='claudehub')
+                page.evaluate("localStorage.setItem('servgo-desktop-theme','light')")
+                for width in (360,390,1440):
+                    page.set_viewport_size({'width':width,'height':844})
+                    page.goto(base+'/whiteboard/'+str(video.id)+'?design=v4')
+                    expect(page.locator('.wb-approval')).to_be_visible()
+                    consent=page.locator('input[name="confirmed"]')
+                    expect(consent).not_to_be_checked()
+                    assert consent.evaluate('e=>e.required')
+                    box=consent.bounding_box()
+                    assert box['width']<=24 and box['height']<=24,box
+                    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+                    expect(page.locator('.wb-cost')).to_contain_text('Точная стоимость')
+                    page.locator('.wb-actions .btn.primary').scroll_into_view_if_needed()
+                    bounds=page.locator('.wb-actions .btn.primary').bounding_box()
+                    nav=page.locator('#mobileNav').bounding_box()
+                    if nav: assert bounds['y']+bounds['height']<=nav['y'],(bounds,nav)
+                    consent.check()
+                    expect(consent).to_be_checked()
+                    page.evaluate('scrollTo(0,0)')
+                    page.screenshot(path=f'/tmp/v4-video-approval-{width}.png',full_page=True,animations='disabled')
+                page.set_viewport_size({'width':390,'height':844})
+                page.locator('#themeTop').click()
+                assert page.locator('.wb-heading h2').evaluate("e=>getComputedStyle(e).color")=='rgb(237, 243, 251)'
+                page.screenshot(path='/tmp/v4-video-approval-dark.png',full_page=True,animations='disabled')
+                from app.models.domain import TaskStatus
+                page.set_viewport_size({'width':390,'height':844})
+                for status in (TaskStatus.QUEUED,TaskStatus.RUNNING,TaskStatus.FAILED,TaskStatus.CANCELLED,TaskStatus.COMPLETED):
+                    video.status=status;db.commit()
+                    page.goto(base+'/whiteboard/'+str(video.id))
+                    expect(page.locator('.wb-job')).to_be_visible()
+                    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),status
+                    page.screenshot(path=f'/tmp/v4-video-{status.value}.png',full_page=True,animations='disabled')
                 # Persist a long history, matching the populated production screen.
                 from app.dispatcher import service
                 conversation=service.open_conversation(db,product.id,'local-owner')
