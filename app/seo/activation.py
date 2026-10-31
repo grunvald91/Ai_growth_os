@@ -59,14 +59,13 @@ def set_enabled(db: Session, product_id: UUID, *, enabled: bool, actor: str) -> 
         row.changed_by = actor[:200]
     else:
         return enabled
-    if True:
-        # Cancel dormant SEO tasks both on connection and disconnection.
-        # Other marketing work is untouched.
-        db.execute(update(Task).where(
-            Task.product_id == product_id,
-            Task.status == TaskStatus.QUEUED,
-            or_(Task.assigned_agent == "seo_factory",
-                Task.title.like(f"{SEO_TASK_PREFIX}%")),
-        ).values(status=TaskStatus.CANCELLED))
+    # Cancel dormant SEO tasks both on connection and disconnection;
+    # the opt-in never resumes pre-existing jobs and other work is untouched.
+    db.execute(update(Task).where(
+        Task.product_id == product_id,
+        Task.status == TaskStatus.QUEUED,
+        or_(Task.assigned_agent == "seo_factory",
+            Task.title.like(f"{SEO_TASK_PREFIX}%")),
+    ).values(status=TaskStatus.CANCELLED))
     db.commit()
     return enabled
