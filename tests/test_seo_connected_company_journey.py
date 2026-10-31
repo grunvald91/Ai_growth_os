@@ -19,7 +19,7 @@ from app.db.models import Base
 from app.db.session import get_db
 from app.llm.fake import LLMResponse, LLMUsage
 from app.main import app
-from app.models.domain import AgentRun, Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
+from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
 from app.seo.activation import is_enabled, set_enabled
 from app.seo.factory import queue_factory, run_factory_once
 from app.seo.publishing import publish_if_clear, reader_hash
@@ -224,14 +224,11 @@ async def test_connected_company_article_reaches_own_blog_with_critic_and_demo_s
                                      "reader_hash": reader_hash(content.reader_article)})
         db.commit()
         outcome = publish_if_clear(db, article.id)
-        assert not outcome.published and outcome.reason == "human_review_required"
-        assert db.get(Artifact, article.id).status == ArtifactStatus.AWAITING_APPROVAL
-        assert not list(db.scalars(select(Publication)))
-        from app.content.review import approve_material
-        from app.seo.publishing import publish_owner_approved
-        approve_material(db, settings.products_root, company_id, article.id)
-        assert publish_owner_approved(db) == 1
+        assert outcome.published and outcome.slug
         assert db.get(Artifact, article.id).status == ArtifactStatus.PUBLISHED
+        # No owner approval is required after a clean critic verdict.
+        approval = db.scalar(select(Approval).where(Approval.artifact_id == article.id))
+        assert approval.status == "approved" and approval.decided_by == "policy:critic_reviewed"
         assert db.scalar(select(Publication).where(Publication.product_id == demo_id)) is None
 
         app.dependency_overrides[get_db] = lambda: db
