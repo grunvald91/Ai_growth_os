@@ -4,6 +4,7 @@ Articles that fail those checks remain queued for optional owner review.
 """
 import hashlib
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,12 +18,13 @@ from app.seo.clustering import normalize
 from app.services.approvals import ApprovalService
 from app.tools import ToolOperation
 from app.workflows.article_contracts import ArticleArtifact
-from app.seo.activation import is_enabled
+from app.seo.activation import SeoFactoryActivation, is_enabled
 
 CHANNEL = "own_site"
 CLEAN_CRITIC_STATUSES = frozenset({"no_material_issues", "revised"})
 FINAL_EDITOR = "marketing_editor"
 DECIDER = "policy:critic_reviewed"
+_logger = logging.getLogger(__name__)
 
 _TRANSLIT = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
                      ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r", "s", "t",
@@ -155,6 +157,17 @@ def publish_if_clear(db: Session, article_id) -> Outcome:
         return Outcome(False, "existing_publication")
     if row.status == ArtifactStatus.PUBLISHED:
         return Outcome(True, "already_published")
+    # An explicit owner rejection is a veto, not another critic failure.
+    # Automatic retries must not create a new policy approval over that vote.
+    rejected = db.scalar(select(Approval.id).where(
+        Approval.product_id == row.product_id,
+        Approval.artifact_id == row.id,
+        Approval.action_type == ToolOperation.PUBLISH.value,
+        Approval.requested_by == "seo_factory",
+        Approval.status == "rejected",
+    ).limit(1))
+    if row.status == ArtifactStatus.REJECTED or rejected is not None:
+        return Outcome(False, "owner_rejected")
     if not is_enabled(db, row.product_id):
         return Outcome(False, "seo_disabled")
     article = ArticleArtifact.model_validate_json(row.content)
@@ -248,8 +261,17 @@ def publish_owner_approved(db: Session) -> int:
             continue
         # Manual override is only used for articles the critic held back.
         # Keep duplicate protection, but do not require a version-specific signoff.
-        article = ArticleArtifact.model_validate_json(row.content)
-        if duplicate_page_problems(db, row, article):
+        try:
+            article = ArticleArtifact.model_validate_json(row.content)
+        except ValueError:
+            _logger.warning("SEO owner-approved article has invalid content: %s", row.id)
+            continue
+        # Owner confirmation can override the critic's editorial verdict, not
+        # basic page completeness: public_blog dereferences reader_article.
+        problems = static_problems(article) + duplicate_page_problems(db, row, article)
+        if problems:
+            _logger.warning("SEO owner-approved article failed static checks %s: %s",
+                            row.id, "; ".join(problems))
             continue
         now = datetime.now(timezone.utc)
         if approval.status == "pending":
@@ -263,9 +285,12 @@ def publish_owner_approved(db: Session) -> int:
 
 def publish_pending(db: Session) -> int:
     from app.models.domain import Task, TaskStatus
-    rows = list(db.scalars(select(Artifact).join(Task, Artifact.task_id == Task.id).where(
-        Artifact.kind == "article", Artifact.status == ArtifactStatus.DRAFT,
-        Task.status == TaskStatus.COMPLETED, Task.title.like("SEO-ARTICLE:%"))
+    rows = list(db.scalars(select(Artifact)
+        .join(Task, Artifact.task_id == Task.id)
+        .join(SeoFactoryActivation, SeoFactoryActivation.product_id == Artifact.product_id)
+        .where(Artifact.kind == "article", Artifact.status == ArtifactStatus.DRAFT,
+               Task.status == TaskStatus.COMPLETED, Task.title.like("SEO-ARTICLE:%"),
+               SeoFactoryActivation.enabled.is_(True))
         .order_by(Artifact.created_at, Artifact.id).limit(10)))
     for row in rows:
         if not is_enabled(db, row.product_id):
@@ -274,4 +299,5 @@ def publish_pending(db: Session) -> int:
             publish_if_clear(db, row.id)
         except Exception:
             db.rollback()
+            _logger.exception("SEO publication recovery failed for article %s", row.id)
     return len(rows)
