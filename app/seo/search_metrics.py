@@ -172,6 +172,42 @@ async def yandex_metrics(urls: list[str], *, days: int, client: httpx.AsyncClien
         return _empty("provider_unavailable", period_days=period)
 
 
+async def inspect_google_article(db: Session, product_id: UUID, *,
+                                 url: str, client: httpx.AsyncClient,
+                                 env: dict | None = None) -> dict:
+    """Explicit inspection of ONE published tenant page, not a live URL test.
+
+    Google URL Inspection reads the version known to Google; successful
+    API access does not imply indexing, impressions or AI citation.
+    """
+    if url not in article_urls(db, product_id):
+        raise LookupError("Опубликованная статья этого бизнеса не найдена")
+    variables = os.environ if env is None else env
+    token = variables.get("SERVGO_GSC_READONLY_TOKEN", "")
+    property_url = variables.get("SERVGO_GSC_SITE_URL", "")
+    if not token or property_url not in (ORIGIN + "/", "sc-domain:servgo.ru"):
+        return {"url": url, "status": "not_configured", "indexing": None}
+    try:
+        response = await client.post(
+            "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect",
+            headers={"Authorization": "Bearer " + token},
+            json={"inspectionUrl": url, "siteUrl": property_url, "languageCode": "ru-RU"},
+            timeout=8)
+        response.raise_for_status()
+        payload = response.json()
+        result = payload.get("inspectionResult") if isinstance(payload, dict) else None
+        index = result.get("indexStatusResult") if isinstance(result, dict) else None
+        if not isinstance(index, dict):
+            raise ValueError("Invalid inspection result")
+        return {"url": url, "status": "connected",
+                "indexing": {key: index.get(key) for key in (
+                    "verdict", "coverageState", "lastCrawlTime", "robotsTxtState",
+                    "indexingState", "pageFetchState", "googleCanonical",
+                    "userCanonical")}}
+    except (httpx.HTTPError, ValueError, TypeError):
+        return {"url": url, "status": "provider_unavailable", "indexing": None}
+
+
 async def company_search_metrics(db: Session, product_id: UUID, *,
                                  days: int = 28,
                                  client: httpx.AsyncClient | None = None,
