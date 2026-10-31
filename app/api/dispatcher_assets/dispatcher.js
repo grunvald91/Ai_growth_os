@@ -54,12 +54,31 @@
 
   function renderLinks(items) {
     var list = el('div', 'dp-links');
+    // Chronological ordering is decided by the executor from real timestamps.
     items.forEach(function (item) {
-      var link = el('a', 'dp-link', item.label);
+      var raw = String(item.label || '');
+      var caption = voiceHoldEnabled && raw.indexOf('Открыть: ') === 0
+        ? 'Открыть: ' + friendlyTitle(raw.slice(9)) : raw;
+      var link = el('a', 'dp-link', caption);
       link.href = item.href;
       list.appendChild(link);
     });
     return list;
+  }
+
+  function friendlyKind(text) {
+    return ({
+      whiteboard_renderer:'Простое видео',company_intake:'Профиль компании',
+      distribution:'Публикация',seo_factory:'SEO-завод',content_factory:'Создание контента',
+      article:'Статья',whiteboard:'Простое видео'
+    })[text] || (/^[a-z_]+$/.test(String(text || '')) ? 'Материал' : text);
+  }
+
+  function friendlyTitle(title) {
+    var value = String(title || '');
+    if (/^WHITEBOARD-JOB:\s*[a-f0-9-]{6,}$/i.test(value)) return 'Создание простого видео';
+    if (/^Request approval to publish own-site SEO article/i.test(value)) return 'Подтвердить публикацию статьи';
+    return value.replace(/^Рисованное видео:/i, 'Простое видео:');
   }
 
   function renderTable(block) {
@@ -69,10 +88,13 @@
     block.columns.forEach(function (name) { head.appendChild(el('th', '', name)); });
     var thead = el('thead'); thead.appendChild(head); table.appendChild(thead);
     var body = el('tbody');
+    // Executors send oldest-to-newest rows for the bottom-anchored dispatcher.
+    var isWorkList = voiceHoldEnabled && block.columns.indexOf('Задание') >= 0 &&
+      block.columns.indexOf('Статус') >= 0;
     block.rows.forEach(function (row) {
       var tr = el('tr');
       row.forEach(function (cell, index) {
-        var td = el('td', '', cell);
+        var td = el('td', '', index === 0 && isWorkList ? friendlyTitle(cell) : cell);
         td.setAttribute('data-label', block.columns[index]);
         tr.appendChild(td);
       });
@@ -85,7 +107,7 @@
   function renderTask(block) {
     var card = el('a', 'dp-task');
     card.href = block.href;
-    card.appendChild(el('span', 'dp-task-title', block.title));
+    card.appendChild(el('span', 'dp-task-title', voiceHoldEnabled ? friendlyTitle(block.title) : block.title));
     card.appendChild(el('span', 'dp-task-status', statusWord(block.status)));
     return card;
   }
@@ -94,10 +116,10 @@
   function renderMaterial(block) {
     var card = el('div', 'dp-material');
     var top = el('div', 'dp-material-top');
-    top.appendChild(el('span', 'dp-material-kind', block.kind));
+    top.appendChild(el('span', 'dp-material-kind', voiceHoldEnabled ? friendlyKind(block.kind) : block.kind));
     top.appendChild(el('span', 'dp-material-status', block.status));
     card.appendChild(top);
-    card.appendChild(el('strong', 'dp-material-title', block.title));
+    card.appendChild(el('strong', 'dp-material-title', voiceHoldEnabled ? friendlyTitle(block.title) : block.title));
     if (block.excerpt) card.appendChild(el('p', 'dp-material-text', block.excerpt));
     var open = el('a', 'dp-link', 'Открыть полностью');
     open.href = block.href;
@@ -114,7 +136,7 @@
 
   function renderConfirm(block) {
     var card = el('div', 'dp-confirm' + (block.paid ? ' paid' : ''));
-    card.appendChild(el('strong', 'dp-confirm-title', block.title));
+    card.appendChild(el('strong', 'dp-confirm-title', voiceHoldEnabled ? friendlyTitle(block.title) : block.title));
     if (block.paid) card.appendChild(el('span', 'dp-badge', 'Платно'));
     var list = el('ul', 'dp-confirm-list');
     block.details.forEach(function (line) { list.appendChild(el('li', '', line)); });
@@ -183,6 +205,11 @@
       feed.appendChild(dots);
     }
     if (!value && pending) pending.remove();
+    if (!value && voiceDispatchPending) {
+      voiceDispatchPending = false;
+      hideLive();
+      setVoiceState('idle');
+    }
     toBottom();
   }
 
@@ -201,9 +228,10 @@
 
   // ---- sending ----------------------------------------------------------------------------
 
-  function send(body, echo) {
-    if (busy) return;
-    var key = newKey();
+  function send(body, echo, voiceRequest) {
+    if (busy) return false;
+    // Preserve the same idempotency key when retrying an ambiguous network failure.
+    var key = body.client_key || newKey();
     body.client_key = key;
     var echoNode = null;
     if (echo) {
@@ -215,9 +243,28 @@
     post('/messages', body).then(function (data) {
       if (echoNode) echoNode.remove();
       applyResult(data);
+      if (voiceRequest) showNote('');
     }).catch(function (error) {
+      if (echoNode) echoNode.remove();
       notify(error.message);
+      if (voiceRequest) {
+        var retry = el('button', 'dp-voice-undo', 'Отправить ещё раз');
+        retry.type = 'button';
+        retry.addEventListener('click', function () {
+          if (busy) return;
+          showNote('');
+          voiceDispatchPending = true;
+          setVoiceState('sending');
+          showLive('Повторно передаю команду…', '', true);
+          send(body, echo, true);
+        });
+        showNote('Голосовая команда сохранена, отправка не удалась.', true, retry);
+      } else if (body.mode === 'text') {
+        input.value = body.text + (input.value.trim() ? '\n' + input.value : '');
+        grow();
+      }
     }).then(function () { setBusy(false); });
+    return true;
   }
 
   function sendChip(chip) {
@@ -250,12 +297,18 @@
     }).catch(function (error) { notify(error.message); });
   });
 
-  // ---- voice input: speak, the text lands in the field, the person sends it themselves -----
+  // The classic Studio mic remains click-to-record; v4 uses the entire composer as hold-to-talk.
 
   var micButton = document.getElementById('dp-mic');
   var voiceNote = document.getElementById('dp-voice-note');
   var voiceUrl = root.getAttribute('data-voice-url');
+  var voiceHoldEnabled = form.classList.contains('command-bar');
+  var voiceDispatchPending = false, discardRecording = false, activeHold = null, holdTimer = null;
   var previewUrl = root.getAttribute('data-voice-preview-url');
+  var voiceOverlay = document.getElementById('dp-voice-overlay');
+  var voiceOverlayText = document.getElementById('dp-voice-overlay-text');
+  var voiceStatus = document.getElementById('dp-voice-status');
+  var overlayExitTimer = null;
   var liveBox = document.getElementById('dp-live');
   var liveLabel = document.getElementById('dp-live-label');
   var liveText = document.getElementById('dp-live-text');
@@ -308,11 +361,55 @@
 
   function setVoiceState(mode) {
     var recording = mode === 'recording';
-    micButton.classList.toggle('recording', recording);
-    micButton.setAttribute('aria-pressed', recording ? 'true' : 'false');
-    micButton.setAttribute('aria-label', recording ? 'Закончить запись' : 'Надиктовать голосом');
-    micButton.disabled = mode === 'processing';
-    input.setAttribute('placeholder', mode === 'processing' ? 'Распознаю…' : defaultPlaceholder);
+    if (micButton) {
+      micButton.classList.toggle('recording', recording);
+      micButton.setAttribute('aria-pressed', recording ? 'true' : 'false');
+      micButton.setAttribute('aria-label', recording ? 'Закончить запись' : 'Надиктовать голосом');
+      micButton.disabled = mode === 'processing' || mode === 'sending';
+    }
+    if (voiceHoldEnabled) {
+      var entering = mode === 'connecting' || recording;
+      form.classList.toggle('voice-recording', recording);
+      form.classList.toggle('voice-processing', mode === 'processing');
+      form.classList.toggle('voice-sending', mode === 'sending');
+      root.classList.toggle('voice-connecting', mode === 'connecting');
+      root.classList.toggle('voice-recording', recording);
+      root.classList.toggle('voice-processing', mode === 'processing' || mode === 'sending');
+      if (voiceOverlay) {
+        var wasVisible = voiceOverlay.getAttribute('aria-hidden') === 'false';
+        if (entering) {
+          if (overlayExitTimer) clearTimeout(overlayExitTimer);
+          overlayExitTimer = null;
+          voiceOverlay.classList.remove('is-exiting');
+        } else if (wasVisible) {
+          // Distinct exit trajectory: opacity 1->0 and scale 1->.985 in 185ms.
+          voiceOverlay.classList.add('is-exiting');
+          if (overlayExitTimer) clearTimeout(overlayExitTimer);
+          overlayExitTimer = setTimeout(function () {
+            if (voiceOverlay.getAttribute('aria-hidden') === 'true') {
+              voiceOverlay.classList.remove('is-exiting');
+            }
+            overlayExitTimer = null;
+          }, 195);
+        }
+        voiceOverlay.setAttribute('aria-hidden', entering ? 'false' : 'true');
+      }
+      if (voiceOverlayText) voiceOverlayText.textContent = mode === 'connecting'
+        ? 'Подключаю микрофон…' : 'Отпустите, чтобы отправить';
+      if (voiceStatus) {
+        voiceStatus.hidden = mode !== 'processing' && mode !== 'sending';
+        voiceStatus.textContent = mode === 'processing' ? 'Распознаю и редактирую запись…'
+          : mode === 'sending' ? 'Передаю команду диспетчеру…' : '';
+      }
+      input.readOnly = mode !== 'idle';
+      form.setAttribute('aria-busy', mode === 'processing' || mode === 'sending' ? 'true' : 'false');
+      sendButton.disabled = busy || mode !== 'idle';
+      input.setAttribute('placeholder', defaultPlaceholder);
+    } else {
+      var message = mode === 'processing' ? 'Распознаю…'
+        : mode === 'recording' ? 'Говорите…' : defaultPlaceholder;
+      input.setAttribute('placeholder', message);
+    }
   }
 
   function releaseStream() {
@@ -373,23 +470,36 @@
   }
 
   function startRecording() {
-    if (voiceWorking || recorder || micOpening) return;
+    if (voiceWorking || recorder || micOpening || busy || (voiceHoldEnabled && !activeHold)) return;
+    var intent = activeHold;
+    discardRecording = false;
     showNote('');
+    if (voiceHoldEnabled) input.blur(); // close the keyboard before showing the recording glow
     micOpening = true;
+    if (voiceHoldEnabled) {
+      setVoiceState('connecting');
+      showLive('Подключаю микрофон…', '', true);
+    }
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
       micOpening = false;
+      if (voiceHoldEnabled && (!intent || intent !== activeHold || intent.cancelled)) {
+        stream.getTracks().forEach(function (track) { track.stop(); });
+        hideLive();
+        setVoiceState('idle');
+        return;
+      }
       recordStream = stream;
       var type = mimeCandidate();
       try { recorder = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream); }
-      catch (error) { releaseStream(); showNote('Этот браузер не умеет записывать звук.', true); return; }
+      catch (error) { releaseStream(); hideLive(); setVoiceState('idle'); showNote('Этот браузер не умеет записывать звук.', true); return; }
       recordChunks = [];
       recorder.addEventListener('dataavailable', function (event) { if (event.data && event.data.size) recordChunks.push(event.data); });
       recorder.addEventListener('stop', onRecorded);
       try { recorder.start(1000); }
-      catch (error) { recorder = null; releaseStream(); showNote('Не получилось включить запись.', true); return; }
+      catch (error) { recorder = null; releaseStream(); hideLive(); setVoiceState('idle'); showNote('Не получилось включить запись.', true); return; }
       recordStarted = Date.now();
       recordingId += 1; lastLive = '';
-      showLive('Слушаю…', '', false);
+      showLive(voiceHoldEnabled ? 'Говорите · отпустите, чтобы отправить' : 'Слушаю…', '', false);
       schedulePreview(2500, recordingId);
       setVoiceState('recording');
       var tick = function () {
@@ -402,6 +512,8 @@
     }).catch(function (error) {
       micOpening = false;
       releaseStream();
+      hideLive();
+      setVoiceState('idle');
       var denied = error && (error.name === 'NotAllowedError' || error.name === 'SecurityError');
       showNote(denied ? 'Нет доступа к микрофону. Разрешите его для этого сайта в настройках браузера.'
                       : 'Микрофон не найден или занят другим приложением.', true);
@@ -418,8 +530,15 @@
     stopPreview();
     recordingId += 1;
     recorder = null;
-    showLive('Правлю текст…', lastLive, true);
     releaseStream();
+    if (discardRecording) {
+      discardRecording = false;
+      recordChunks = [];
+      hideLive();
+      setVoiceState('idle');
+      return;
+    }
+    showLive('Распознаю и редактирую запись…', lastLive, true);
     var blob = new Blob(recordChunks, { type: type });
     recordChunks = [];
     voiceWorking = true;
@@ -436,7 +555,26 @@
           return data;
         });
       })
-      .then(function (data) { hideLive(); applyDictation(data); })
+      .then(function (data) {
+        hideLive();
+        if (voiceHoldEnabled) {
+          if (data.empty || !data.text) {
+            showNote(emptyReasons[data.empty_reason] || emptyReasons.silence, true);
+            return;
+          }
+          // Voice requests are independent of a typed draft already in the field.
+          var transcript = String(data.text).trim();
+          if (data.fallback_reason) {
+            showNote('Редактор не завершил правку: передаю распознанный текст.', false);
+          }
+          voiceDispatchPending = true;
+          setVoiceState('sending');
+          showLive('Передаю команду диспетчеру…', '', true);
+          send({ mode: 'text', text: transcript }, transcript, true);
+        } else {
+          applyDictation(data);
+        }
+      })
       .catch(function (error) {
         // The words already seen on screen are not lost: they go into the field as recognised.
         var kept = lastLive;
@@ -444,7 +582,13 @@
         if (kept) insertText(kept);
         showNote(error.message + (kept ? ' Вставил распознанное без правки.' : ''), true);
       })
-      .then(function () { voiceWorking = false; setVoiceState('idle'); input.focus(); });
+      .then(function () {
+        voiceWorking = false;
+        if (!voiceDispatchPending) {
+          setVoiceState('idle');
+          if (!voiceHoldEnabled) input.focus();
+        }
+      });
   }
 
   var emptyReasons = {
@@ -490,9 +634,61 @@
     }
   }
 
-  if (micButton && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder && voiceUrl) {
+  var supportedVoice = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder && voiceUrl);
+  if (micButton && supportedVoice) {
     micButton.hidden = false;
     micButton.addEventListener('click', function () { if (recorder) stopRecording(); else startRecording(); });
+  }
+  if (voiceHoldEnabled && !supportedVoice) {
+    defaultPlaceholder = 'Напишите команду';
+    input.setAttribute('placeholder', defaultPlaceholder);
+  }
+  if (voiceHoldEnabled && supportedVoice) {
+    // Short tap keeps text editing; deliberate hold records. No separate mic control.
+    form.addEventListener('pointerdown', function (event) {
+      if (event.button !== 0 || event.target.closest('button') || activeHold || recorder ||
+          micOpening || voiceWorking || busy || voiceDispatchPending) return;
+      // Defer the Android keyboard/text-selection gesture until a short tap is known.
+      if (event.pointerType === 'touch') event.preventDefault();
+      activeHold = { id: event.pointerId, x: event.clientX, y: event.clientY, cancelled: false, started: false };
+      form.classList.add('voice-arming');
+      holdTimer = setTimeout(function () {
+        holdTimer = null;
+        if (!activeHold || activeHold.cancelled) return;
+        activeHold.started = true;
+        startRecording();
+      }, 220);
+    });
+    function endHold(event, cancelled) {
+      if (!activeHold || (event && event.pointerId !== activeHold.id)) return;
+      var intent = activeHold;
+      intent.cancelled = true;
+      activeHold = null;
+      if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+      form.classList.remove('voice-arming');
+      if (recorder) {
+        discardRecording = cancelled;
+        stopRecording();
+      } else if (micOpening) {
+        // Releasing during the first permissions prompt must not silently discard intent.
+        hideLive();
+        setVoiceState('idle');
+        if (!cancelled) showNote('После разрешения микрофона удерживайте строку ещё раз.', false);
+      } else if (!intent.started && !cancelled) {
+        input.focus();
+      } else {
+        hideLive();
+        setVoiceState('idle');
+      }
+    }
+    document.addEventListener('pointerup', function (event) { endHold(event, false); });
+    document.addEventListener('pointercancel', function (event) { endHold(event, true); });
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) endHold(null, true);
+    });
+    form.addEventListener('contextmenu', function (event) {
+      if (activeHold || recorder) event.preventDefault();
+    });
   }
 
   // Finished work comes back into the conversation by itself: ask now and then while the page is open.

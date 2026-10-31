@@ -212,6 +212,14 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
     """
     notes = []
     recent = datetime.now(timezone.utc) - timedelta(days=21)
+    def created_stamp(row):
+        value = row.created_at
+        if value is None:
+            return ""
+        if value.tzinfo is not None:
+            value = value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value.isoformat()
+
     candidates = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
         Artifact.kind.in_(RESULT_KINDS - {"editorial_plan"}),
@@ -226,7 +234,7 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
             ) + readable_artifact_title(row)[:95],
             "url": (f"/studio/products/{product_id}/whiteboard/{row.task_id}"
                      if is_animator else f"/studio/products/{product_id}/materials/{row.id}"),
-            "id": str(row.id),
+            "id": str(row.id), "created_at": created_stamp(row),
         })
     # Some historical pipeline outputs are saved as draft rather than as
     # awaiting_approval. Surface recent completed outputs without claiming
@@ -244,7 +252,7 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
                 "kind": "review",
                 "text": "Материал подготовлен: " + readable_artifact_title(draft)[:95],
                 "url": f"/studio/products/{product_id}/materials/{draft.id}",
-                "id": str(draft.id),
+                "id": str(draft.id), "created_at": created_stamp(draft),
             })
     plans = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.kind == "editorial_plan",
@@ -258,7 +266,7 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
             notes.append({
                 "kind": "review", "text": "Новый контент-план готов к утверждению",
                 "url": f"/studio/products/{product_id}/plan?view=draft",
-                "id": str(plan.id),
+                "id": str(plan.id), "created_at": created_stamp(plan),
             })
             break
     # Approval is a separate required owner decision before paid Animator
@@ -273,7 +281,7 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
             "kind": "review",
             "text": "Подтвердите создание рисованного видео (платные API)",
             "url": f"/studio/products/{product_id}/whiteboard/{task.id}",
-            "id": str(task.id),
+            "id": str(task.id), "created_at": created_stamp(task),
         })
     failed = list(db.scalars(select(Task).where(
         Task.product_id == product_id,
@@ -288,8 +296,11 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
             "url": (f"/studio/products/{product_id}/whiteboard/{task.id}"
                      if task.assigned_agent == "whiteboard_renderer"
                      else f"/studio/products/{product_id}/tasks/{task.id}"),
-            "id": str(task.id),
+            "id": str(task.id), "created_at": created_stamp(task),
         })
+    # Mixed materials, draft plans and failed jobs must be ordered by real
+    # creation time, not by which database query produced them.
+    notes.sort(key=lambda item: (item["created_at"], item["id"]), reverse=True)
     return notes[:limit]
 
 
