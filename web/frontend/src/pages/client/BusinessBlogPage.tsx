@@ -10,6 +10,8 @@ export function BusinessBlogPage() {
   const { id, slug } = useParams<{ id: string; slug?: string }>()
   const businessId = Number(id)
   const base = `/business/${id}`
+  const companyLink = slug && article?.company_url ? article.company_url : base
+  const bookingLink = slug && article?.cta_url ? article.cta_url : `/book/${businessId}`
   const [business, setBusiness] = useState<BusinessDetail | null>(null)
   const [feed, setFeed] = useState<BusinessBlogFeed | null>(null)
   const [article, setArticle] = useState<BusinessBlogArticle | null>(null)
@@ -82,7 +84,7 @@ export function BusinessBlogPage() {
       <section className="bf-screen bf-screen--business" aria-label={slug ? article!.title : 'Блог компании'}>
         <div className="bf-inner bf-page">
           <div className="bf-panel bf-panel--page" style={{ padding: '20px 16px', marginTop: 16 }}>
-            <Link to={base} className="bf-about" style={{ textDecoration: 'none' }}>{business.name}</Link>
+            <Link to={companyLink} className="bf-about" style={{ textDecoration: 'none' }}>{business.name}</Link>
             {slug && article ? (
               <article>
                 <h1 className="bf-h1">{article.title}</h1>
@@ -103,8 +105,8 @@ export function BusinessBlogPage() {
                 <section className="bf-block" aria-label="Запись на услуги">
                   <h2 className="bf-h2">{article.cta || 'Запишитесь на услугу'}</h2>
                   <p className="bf-intro">Выберите услугу и подходящее время в {business.name}.</p>
-                  <Link to={base} className="bf-secondary">О компании</Link>
-                  <Link to={`/book/${businessId}`} className="bf-primary">Записаться <ArrowRight /></Link>
+                  <Link to={companyLink} className="bf-secondary">О компании</Link>
+                  <Link to={bookingLink} className="bf-primary">Записаться <ArrowRight /></Link>
                 </section>
                 <Link to={`${base}/blog`} className="bf-about">Все статьи</Link>
               </article>
@@ -130,8 +132,8 @@ export function BusinessBlogPage() {
           </div>
         </div>
         <div className="bf-bottombar">
-          <Link to={base} className="bf-secondary">О компании</Link>
-          <Link to={`/book/${businessId}`} className="bf-primary">Записаться <ArrowRight /></Link>
+          <Link to={companyLink} className="bf-secondary">О компании</Link>
+          <Link to={bookingLink} className="bf-primary">Записаться <ArrowRight /></Link>
         </div>
       </section>
     </AirFrame>
