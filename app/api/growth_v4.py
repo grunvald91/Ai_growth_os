@@ -110,6 +110,9 @@ def render_v4(page, request, pid, switch):
         formdoc = Document(form)
         mic = formdoc.outer(formdoc.find(ident='dp-mic'))
         form = form.replace(mic, '').replace('placeholder="Что нужно сделать?"', 'placeholder="Удерживайте, чтобы говорить"', 1)
+        form = form.replace('<button class="dp-send command-go"',
+                            '<span class="voice-composer-status" id="dp-voice-status" role="status" hidden></span>'
+                            '<button class="dp-send command-go"', 1)
         attrs = ' '.join(f'{k}="{html.escape(v or "",quote=True)}"' for k,v in root[1].items() if k!='class')
         content = (f'<section class="dp-home empty-hero animate-in" {attrs}>'
                    '<div class="hero-intro"><div class="hero-eyebrow">ServGo · ваш AI-помощник</div>'
