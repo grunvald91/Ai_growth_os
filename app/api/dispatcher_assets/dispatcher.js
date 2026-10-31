@@ -54,7 +54,11 @@
 
   function renderLinks(items) {
     var list = el('div', 'dp-links');
-    items.forEach(function (item) {
+    // The newest work link belongs nearest to the composer, not at the top.
+    var rows = voiceHoldEnabled && items.length > 1 &&
+      items.every(function (item) { return String(item.label || '').indexOf('Открыть: ') === 0; })
+      ? items.slice().reverse() : items;
+    rows.forEach(function (item) {
       var link = el('a', 'dp-link', item.label);
       link.href = item.href;
       list.appendChild(link);
@@ -226,9 +230,10 @@
 
   // ---- sending ----------------------------------------------------------------------------
 
-  function send(body, echo) {
-    if (busy) return;
-    var key = newKey();
+  function send(body, echo, voiceRequest) {
+    if (busy) return false;
+    // Preserve the same idempotency key when retrying an ambiguous network failure.
+    var key = body.client_key || newKey();
     body.client_key = key;
     var echoNode = null;
     if (echo) {
@@ -240,9 +245,28 @@
     post('/messages', body).then(function (data) {
       if (echoNode) echoNode.remove();
       applyResult(data);
+      if (voiceRequest) showNote('');
     }).catch(function (error) {
+      if (echoNode) echoNode.remove();
       notify(error.message);
+      if (voiceRequest) {
+        var retry = el('button', 'dp-voice-undo', 'Отправить ещё раз');
+        retry.type = 'button';
+        retry.addEventListener('click', function () {
+          if (busy) return;
+          showNote('');
+          voiceDispatchPending = true;
+          setVoiceState('sending');
+          showLive('Повторно передаю команду…', '', true);
+          send(body, echo, true);
+        });
+        showNote('Голосовая команда сохранена, отправка не удалась.', true, retry);
+      } else if (body.mode === 'text') {
+        input.value = body.text + (input.value.trim() ? '\\n' + input.value : '');
+        grow();
+      }
     }).then(function () { setBusy(false); });
+    return true;
   }
 
   function sendChip(chip) {
@@ -506,11 +530,15 @@
             showNote(emptyReasons[data.empty_reason] || emptyReasons.silence, true);
             return;
           }
-          insertText(data.text);
+          // Voice requests are independent of a typed draft already in the field.
+          var transcript = String(data.text).trim();
+          if (data.fallback_reason) {
+            showNote('Редактор не завершил правку: передаю распознанный текст.', false);
+          }
           voiceDispatchPending = true;
           setVoiceState('sending');
           showLive('Передаю команду диспетчеру…', '', true);
-          sendText();
+          send({ mode: 'text', text: transcript }, transcript, true);
         } else {
           applyDictation(data);
         }
@@ -589,6 +617,8 @@
     form.addEventListener('pointerdown', function (event) {
       if (event.button !== 0 || event.target.closest('button') || activeHold || recorder ||
           micOpening || voiceWorking || busy || voiceDispatchPending) return;
+      // Defer the Android keyboard/text-selection gesture until a short tap is known.
+      if (event.pointerType === 'touch') event.preventDefault();
       activeHold = { id: event.pointerId, x: event.clientX, y: event.clientY, cancelled: false, started: false };
       form.classList.add('voice-arming');
       holdTimer = setTimeout(function () {
@@ -609,9 +639,10 @@
         discardRecording = cancelled;
         stopRecording();
       } else if (micOpening) {
-        // The permission prompt may resolve later; the intent check closes that stream.
+        // Releasing during the first permissions prompt must not silently discard intent.
         hideLive();
         setVoiceState('idle');
+        if (!cancelled) showNote('После разрешения микрофона удерживайте строку ещё раз.', false);
       } else if (!intent.started && !cancelled) {
         input.focus();
       } else {
@@ -621,12 +652,6 @@
     }
     document.addEventListener('pointerup', function (event) { endHold(event, false); });
     document.addEventListener('pointercancel', function (event) { endHold(event, true); });
-    document.addEventListener('pointermove', function (event) {
-      if (!activeHold || event.pointerId !== activeHold.id) return;
-      if (Math.hypot(event.clientX - activeHold.x, event.clientY - activeHold.y) > 24) {
-        endHold(event, true);
-      }
-    }, { passive: true });
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) endHold(null, true);
     });
