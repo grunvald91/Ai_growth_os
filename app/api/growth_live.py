@@ -148,7 +148,7 @@ def artifact_content(content: str) -> str:
     return '<details class="gv-result"><summary>Подробнее</summary>'+render(value)+'</details>'
 
 
-def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | None = None) -> str:
+def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | None = None, enabled: bool = True) -> str:
     def state(label: str, done: bool) -> str:
         return (f'<li>{html.escape(label)}: '
                 f'<strong>{"Есть результат" if done else "Пока нет результата"}</strong></li>')
@@ -161,7 +161,7 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
                 if row["attempts"] else '<p>Попытки выполнения ещё не зарегистрированы.</p>')
     base = f'/studio/products/{product_id}/seo' if product_id else ''
     actions = ''
-    if base and row["status"] in {"queued", "failed", "cancelled"}:
+    if base and enabled and row["status"] in {"queued", "failed", "cancelled"}:
         operation = "cancel" if row["status"] == "queued" else "retry"
         caption = "Отменить из очереди" if operation == "cancel" else "Повторить запуск"
         actions = (
@@ -388,15 +388,14 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     # servgo.ru/blog is wired to the single Growth product slug 'servgo'.
     # Other companies have a per-product feed but no known public frontend URL.
     blog_base = 'https://servgo.ru' if product.slug == 'servgo' else None
-    run_cards = ''.join(seo_run_card(row, product_id, blog_base=blog_base) for row in runs)
+    run_cards = ''.join(seo_run_card(row, product_id, blog_base=blog_base, enabled=enabled) for row in runs)
     publication_note = (
-        '<p class="seo-publish-destination">Место публикации: блог ServGo '
-        '(<a href="https://servgo.ru/blog" target="_blank" rel="noopener noreferrer">'
-        'servgo.ru/blog</a>). Публичную доступность конкретной статьи проверяйте по её ссылке.</p>'
+        '<p class="seo-publish-destination">Место публикации: блог ServGo. '
+        'Публичную доступность статьи нужно проверить после отдельного выпуска SEO-страниц.</p>'
         if blog_base else
-        '<p class="seo-publish-destination">Место публикации: внутренняя лента блога компании '
-        '(own_site). Внешний адрес сайта для этой компании пока не подключён. '
-        'Здесь может быть статус «Опубликована», но публичной ссылки на сайте ещё нет.</p>'
+        '<p class="seo-publish-destination">Место публикации: персональный блог компании на ServGo '
+        '(own_site). Адреса и серверный HTML подготовлены в коде и станут доступны после выпуска '
+        'BookingBot и настройки маршрутов, не на внешнем сайте клиента.</p>'
     )
     activation_form = (
         '<section class="panel seo-activation" aria-label="Подключение SEO-завода">'
