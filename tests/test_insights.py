@@ -536,8 +536,10 @@ async def test_unknown_topic_asks_instead_of_guessing(db, linked, platform):
     assert platform.calls == [] and "Уточните" in answer["text"]
 
 
-def test_the_model_gets_more_time_but_less_than_the_web_server_waits():
-    assert 120 <= service.DECISION_TIMEOUT_SECONDS < 300
+def test_dispatcher_decision_returns_before_mobile_and_web_timeouts():
+    # Only intent selection has this short budget. Video/content production
+    # keeps separate provider timeouts and continues as a background task.
+    assert 5 <= service.DECISION_TIMEOUT_SECONDS <= 30
 
 
 # ---- specialists do the tasks the director handed out ---------------------------------------------
