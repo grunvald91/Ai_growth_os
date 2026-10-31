@@ -92,6 +92,7 @@ def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
         "semantic_ready": "semantic_core" in kinds,
         "plan_ready": "seo_content_plan" in kinds,
         "articles_queued": success["articles_queued"] if success is not None else None,
+        "articles_deferred": (success.get("articles_deferred") if success is not None else None),
         "sources_confirmed": (len(success["sources"])
                               if success is not None and isinstance(success.get("sources"), list)
                               else None),
