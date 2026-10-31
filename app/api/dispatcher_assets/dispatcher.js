@@ -183,6 +183,11 @@
       feed.appendChild(dots);
     }
     if (!value && pending) pending.remove();
+    if (!value && voiceDispatchPending) {
+      voiceDispatchPending = false;
+      hideLive();
+      setVoiceState('idle');
+    }
     toBottom();
   }
 
@@ -250,11 +255,13 @@
     }).catch(function (error) { notify(error.message); });
   });
 
-  // ---- voice input: speak, the text lands in the field, the person sends it themselves -----
+  // The classic Studio mic remains click-to-record; v4 uses the entire composer as hold-to-talk.
 
   var micButton = document.getElementById('dp-mic');
   var voiceNote = document.getElementById('dp-voice-note');
   var voiceUrl = root.getAttribute('data-voice-url');
+  var voiceHoldEnabled = form.classList.contains('command-bar');
+  var voiceDispatchPending = false, discardRecording = false, activeHold = null, holdTimer = null;
   var previewUrl = root.getAttribute('data-voice-preview-url');
   var liveBox = document.getElementById('dp-live');
   var liveLabel = document.getElementById('dp-live-label');
@@ -308,11 +315,26 @@
 
   function setVoiceState(mode) {
     var recording = mode === 'recording';
-    micButton.classList.toggle('recording', recording);
-    micButton.setAttribute('aria-pressed', recording ? 'true' : 'false');
-    micButton.setAttribute('aria-label', recording ? 'Закончить запись' : 'Надиктовать голосом');
-    micButton.disabled = mode === 'processing';
-    input.setAttribute('placeholder', mode === 'processing' ? 'Распознаю…' : defaultPlaceholder);
+    if (micButton) {
+      micButton.classList.toggle('recording', recording);
+      micButton.setAttribute('aria-pressed', recording ? 'true' : 'false');
+      micButton.setAttribute('aria-label', recording ? 'Закончить запись' : 'Надиктовать голосом');
+      micButton.disabled = mode === 'processing' || mode === 'sending';
+    }
+    if (voiceHoldEnabled) {
+      form.classList.toggle('voice-recording', recording);
+      form.classList.toggle('voice-processing', mode === 'processing');
+      form.classList.toggle('voice-sending', mode === 'sending');
+      root.classList.toggle('voice-recording', recording);
+      root.classList.toggle('voice-processing', mode === 'processing' || mode === 'sending');
+      input.readOnly = mode !== 'idle';
+      form.setAttribute('aria-busy', mode === 'processing' || mode === 'sending' ? 'true' : 'false');
+      sendButton.disabled = busy || mode !== 'idle';
+    }
+    var message = mode === 'processing' ? 'Обрабатываю запись…'
+      : mode === 'sending' ? 'Выполняю команду…'
+      : mode === 'recording' ? 'Говорите…' : defaultPlaceholder;
+    input.setAttribute('placeholder', message);
   }
 
   function releaseStream() {
@@ -373,20 +395,31 @@
   }
 
   function startRecording() {
-    if (voiceWorking || recorder || micOpening) return;
+    if (voiceWorking || recorder || micOpening || busy || (voiceHoldEnabled && !activeHold)) return;
+    var intent = activeHold;
+    discardRecording = false;
     showNote('');
     micOpening = true;
+    if (voiceHoldEnabled) {
+      showLive('Подключаю микрофон…', '', true);
+    }
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
       micOpening = false;
+      if (voiceHoldEnabled && (!intent || intent !== activeHold || intent.cancelled)) {
+        stream.getTracks().forEach(function (track) { track.stop(); });
+        hideLive();
+        setVoiceState('idle');
+        return;
+      }
       recordStream = stream;
       var type = mimeCandidate();
       try { recorder = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream); }
-      catch (error) { releaseStream(); showNote('Этот браузер не умеет записывать звук.', true); return; }
+      catch (error) { releaseStream(); hideLive(); setVoiceState('idle'); showNote('Этот браузер не умеет записывать звук.', true); return; }
       recordChunks = [];
       recorder.addEventListener('dataavailable', function (event) { if (event.data && event.data.size) recordChunks.push(event.data); });
       recorder.addEventListener('stop', onRecorded);
       try { recorder.start(1000); }
-      catch (error) { recorder = null; releaseStream(); showNote('Не получилось включить запись.', true); return; }
+      catch (error) { recorder = null; releaseStream(); hideLive(); setVoiceState('idle'); showNote('Не получилось включить запись.', true); return; }
       recordStarted = Date.now();
       recordingId += 1; lastLive = '';
       showLive('Слушаю…', '', false);
@@ -402,6 +435,8 @@
     }).catch(function (error) {
       micOpening = false;
       releaseStream();
+      hideLive();
+      setVoiceState('idle');
       var denied = error && (error.name === 'NotAllowedError' || error.name === 'SecurityError');
       showNote(denied ? 'Нет доступа к микрофону. Разрешите его для этого сайта в настройках браузера.'
                       : 'Микрофон не найден или занят другим приложением.', true);
@@ -418,8 +453,15 @@
     stopPreview();
     recordingId += 1;
     recorder = null;
-    showLive('Правлю текст…', lastLive, true);
     releaseStream();
+    if (discardRecording) {
+      discardRecording = false;
+      recordChunks = [];
+      hideLive();
+      setVoiceState('idle');
+      return;
+    }
+    showLive('Распознаю и редактирую запись…', lastLive, true);
     var blob = new Blob(recordChunks, { type: type });
     recordChunks = [];
     voiceWorking = true;
@@ -436,7 +478,22 @@
           return data;
         });
       })
-      .then(function (data) { hideLive(); applyDictation(data); })
+      .then(function (data) {
+        hideLive();
+        if (voiceHoldEnabled) {
+          if (data.empty || !data.text) {
+            showNote(emptyReasons[data.empty_reason] || emptyReasons.silence, true);
+            return;
+          }
+          insertText(data.text);
+          voiceDispatchPending = true;
+          setVoiceState('sending');
+          showLive('Передаю команду диспетчеру…', '', true);
+          sendText();
+        } else {
+          applyDictation(data);
+        }
+      })
       .catch(function (error) {
         // The words already seen on screen are not lost: they go into the field as recognised.
         var kept = lastLive;
@@ -444,7 +501,13 @@
         if (kept) insertText(kept);
         showNote(error.message + (kept ? ' Вставил распознанное без правки.' : ''), true);
       })
-      .then(function () { voiceWorking = false; setVoiceState('idle'); input.focus(); });
+      .then(function () {
+        voiceWorking = false;
+        if (!voiceDispatchPending) {
+          setVoiceState('idle');
+          if (!voiceHoldEnabled) input.focus();
+        }
+      });
   }
 
   var emptyReasons = {
@@ -490,9 +553,60 @@
     }
   }
 
-  if (micButton && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder && voiceUrl) {
+  var supportedVoice = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder && voiceUrl);
+  if (micButton && supportedVoice) {
     micButton.hidden = false;
     micButton.addEventListener('click', function () { if (recorder) stopRecording(); else startRecording(); });
+  }
+  if (voiceHoldEnabled && supportedVoice) {
+    // Short tap keeps text editing; deliberate hold records. No separate mic control.
+    form.addEventListener('pointerdown', function (event) {
+      if (event.button !== 0 || event.target.closest('button') || activeHold || recorder ||
+          micOpening || voiceWorking || busy || voiceDispatchPending) return;
+      activeHold = { id: event.pointerId, x: event.clientX, y: event.clientY, cancelled: false, started: false };
+      form.classList.add('voice-arming');
+      holdTimer = setTimeout(function () {
+        holdTimer = null;
+        if (!activeHold || activeHold.cancelled) return;
+        activeHold.started = true;
+        startRecording();
+      }, 220);
+    });
+    function endHold(event, cancelled) {
+      if (!activeHold || (event && event.pointerId !== activeHold.id)) return;
+      var intent = activeHold;
+      intent.cancelled = true;
+      activeHold = null;
+      if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+      form.classList.remove('voice-arming');
+      if (recorder) {
+        discardRecording = cancelled;
+        stopRecording();
+      } else if (micOpening) {
+        // The permission prompt may resolve later; the intent check closes that stream.
+        hideLive();
+        setVoiceState('idle');
+      } else if (!intent.started && !cancelled) {
+        input.focus();
+      } else {
+        hideLive();
+        setVoiceState('idle');
+      }
+    }
+    document.addEventListener('pointerup', function (event) { endHold(event, false); });
+    document.addEventListener('pointercancel', function (event) { endHold(event, true); });
+    document.addEventListener('pointermove', function (event) {
+      if (!activeHold || event.pointerId !== activeHold.id) return;
+      if (Math.hypot(event.clientX - activeHold.x, event.clientY - activeHold.y) > 24) {
+        endHold(event, true);
+      }
+    }, { passive: true });
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) endHold(null, true);
+    });
+    form.addEventListener('contextmenu', function (event) {
+      if (activeHold || recorder) event.preventDefault();
+    });
   }
 
   // Finished work comes back into the conversation by itself: ask now and then while the page is open.
