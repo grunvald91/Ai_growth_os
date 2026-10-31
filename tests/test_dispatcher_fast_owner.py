@@ -11,6 +11,7 @@ from app.core.config import Settings
 from app.dispatcher import service
 from app.dispatcher.executors import Context
 from app.dispatcher.fast_routes import quick_capability
+from app.dispatcher.models import DispatcherMessage
 from app.models.domain import Artifact, ArtifactStatus, Product, Task, TaskStatus
 
 
@@ -63,7 +64,7 @@ async def test_asking_for_business_advice_returns_actionable_steps_without_model
     before = list(db.scalars(select(Task).where(Task.product_id == product.id)))
     answer = (await ask(db, product, "Что порекомендуешь сегодня сделать для бизнеса?"))["messages"][1]
     assert answer["intent"] == "execute"
-    assert answer["capability"] == "recommend_today"
+    assert db.scalar(select(DispatcherMessage).where(DispatcherMessage.role == "assistant")).capability == "recommend_today"
     assert "На сегодня" not in answer["text"] or "сегодня" in answer["text"].lower()
     table = blocks(answer, "table")[0]
     assert any("провер" in cell.lower() for row in table["rows"] for cell in row)
@@ -89,7 +90,7 @@ async def test_recent_videos_include_completed_tasks_and_owner_links(db, owner):
     db.commit()
     answer = (await ask(db, product, "Покажи мои последние видео, которые я запустил"))["messages"][1]
     assert answer["intent"] == "execute"
-    assert answer["capability"] == "show_recent_videos"
+    assert db.scalar(select(DispatcherMessage).where(DispatcherMessage.role == "assistant")).capability == "show_recent_videos"
     table = blocks(answer, "table")[0]
     assert len(table["rows"]) == 2
     assert any("Готово к просмотру" in row for row in table["rows"])
