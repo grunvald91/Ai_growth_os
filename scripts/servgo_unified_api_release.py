@@ -1,7 +1,7 @@
 """Guarded, scoped ServGo PWA API rollout; defaults to read-only preflight.
 
 The existing BookingBot frontend deployment does NOT ship web/api/. This tool
-deploys only the eleven reviewed backend files of the integrated Growth/Mail
+deploys only the twelve reviewed backend files of the integrated Growth/Mail
 candidate, refusing any production-only divergence instead of overwriting it.
 Runs only on an explicit manual operator invocation with APPLY=true.
 """
@@ -22,6 +22,7 @@ from scripts.deploy_business_creation_and_reminders import ROOT, WEB_SERVICE, co
 BASE_SHA = "fe6777bf5238559ead8e660157d570dca277fed8"
 FILES = (
     "web/api/main.py",
+    "web/api/routes/client.py",  # Public business blog feed and article routes
     "web/api/routes/studio_sso.py",
     "web/api/routes/owner_mail.py",
     "web/api/routes/mail_pwa.py",
