@@ -1,0 +1,39 @@
+name: Audit Growth v4 desktop/mobile
+
+on:
+  pull_request:
+    paths:
+      - scripts/audit_growth_v4_ui.py
+      - .github/workflows/audit-growth-v4.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-growth-v4-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install isolated UI audit dependencies
+        run: |
+          python -m pip install -e '.[test]' playwright
+          python -m playwright install --with-deps chromium
+      - name: Browse actual v4 pages on desktop and mobile
+        run: |
+          python scripts/audit_growth_v4_ui.py
+      - name: Save screenshots and structured review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: growth-v4-desktop-mobile-audit
+          path: /tmp/growth-v4-audit/
+          retention-days: 7
+          if-no-files-found: warn
