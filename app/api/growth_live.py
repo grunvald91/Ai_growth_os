@@ -167,6 +167,40 @@ def seo_run_card(row: dict, product_id: UUID | None = None) -> str:
             f'<form method="post" action="{base}/{row["id"]}/{operation}" class="seo-run-actions">'
             f'<button class="btn secondary" type="submit">{caption}</button></form>'
         )
+    article_labels = {
+        "queued": "Ожидает генерации", "running": "Создаётся",
+        "completed": "Обработка завершена", "failed": "Ошибка создания",
+        "cancelled": "Отменено",
+    }
+    saved_labels = {
+        "draft": "Черновик", "awaiting_approval": "На согласовании",
+        "approved": "Согласована", "published": "Опубликована",
+        "rejected": "Отклонена",
+    }
+    article_cards = []
+    if base:
+        for article in row.get("articles", []):
+            status = (saved_labels.get(article["article_status"], article["article_status"])
+                      if article["article_status"] else
+                      article_labels.get(article["task_status"], article["task_status"]))
+            target = (f'/studio/products/{product_id}/materials/{article["article_id"]}'
+                      if article["article_id"] else
+                      f'/studio/products/{product_id}/tasks/{article["task_id"]}')
+            extra = ''
+            pub = article.get("publication_path")
+            if pub and pub.startswith("/blog/"):
+                extra = (f'<a href="https://servgo.ru{html.escape(pub, quote=True)}"'
+                         ' target="_blank" rel="noopener noreferrer">Посмотреть в блоге</a>')
+            article_cards.append(
+                '<li class="seo-article-item">'
+                f'<a href="{html.escape(target, quote=True)}">{html.escape(article["title"])}</a>'
+                f'<span>{html.escape(status or "Статус неизвестен")}</span>{extra}</li>'
+            )
+    article_list = (
+        f'<details class="seo-run-articles"><summary>Статьи ({len(article_cards)})</summary>'
+        '<ul>' + ''.join(article_cards) + '</ul></details>'
+        if article_cards else ''
+    )
     return (
         f'<article class="panel seo-run" data-seo-status="{html.escape(row["status"], quote=True)}">'
         f'<div class="seo-run-head"><h3>{html.escape(row["title"])}</h3>'
@@ -183,6 +217,7 @@ def seo_run_card(row: dict, product_id: UUID | None = None) -> str:
            '<p>Количество источников пока не подтверждено.</p>')
         + '<p>Стоимость: нет подтверждённых данных о списании провайдера.</p>'
         + '</details>'
+        + article_list
         + actions
         + ('<p class="seo-run-hint">Запущенное выполнение нельзя прервать этой кнопкой.</p>'
            if row['status'] == 'running' else '')
