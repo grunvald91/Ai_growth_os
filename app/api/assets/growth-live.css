@@ -243,3 +243,33 @@ body[data-growth-design="v4"] .seo-run-hint{
   body[data-growth-design="v4"] .seo-run-actions .btn{width:100%;max-width:100%}
   body[data-growth-design="v4"] .seo-article-item{display:grid}
 }
+
+/* SEO critic and publication destination: owner-visible, never a silent publish button. */
+body[data-growth-design="v4"] .seo-publish-destination{
+  padding:14px 16px;border:1px solid var(--line);border-radius:14px;
+  background:var(--tint);line-height:1.65;font-size:13px
+}
+body[data-growth-design="v4"] .seo-article-copy{
+  display:grid;gap:10px;min-width:0;width:100%;overflow-wrap:anywhere
+}
+body[data-growth-design="v4"] .seo-article-copy>a:first-child{font-weight:650}
+body[data-growth-design="v4"] .seo-critic-result{font-weight:600}
+body[data-growth-design="v4"] .seo-critic-findings summary{
+  cursor:pointer;min-height:44px;color:var(--blue);font-weight:600
+}
+body[data-growth-design="v4"] .seo-critic-findings ul{
+  margin:4px 0 10px;padding-left:20px;line-height:1.6
+}
+body[data-growth-design="v4"] .seo-article-approval{
+  display:grid;gap:10px;max-width:540px;min-width:0
+}
+body[data-growth-design="v4"] .seo-article-approval label{
+  display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:1.6
+}
+body[data-growth-design="v4"] .seo-article-approval label input{
+  margin-top:5px;flex:none
+}
+body[data-growth-design="v4"] .seo-article-approval button{justify-self:start;min-height:44px}
+@media(max-width:400px){
+  body[data-growth-design="v4"] .seo-article-approval button{width:100%}
+}
