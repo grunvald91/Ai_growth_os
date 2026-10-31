@@ -43,6 +43,16 @@ class Handler(SimpleHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if self.path.startswith("/api/admin/prepayments/attention"):
+            self.send_response(503)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"detail":"Temporary payment-check failure"}')
+            return
+        if self.path.startswith("/api/auth/session") and "sg_shared=ok" not in self.headers.get("Cookie", ""):
+            self.send_response(401)
+            self.end_headers()
+            return
         if self.path.startswith("/api/"):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -52,6 +62,11 @@ class Handler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps(BOOKINGS, ensure_ascii=False).encode())
             elif self.path.startswith("/api/auth/me"):
                 self.wfile.write(json.dumps({"id":1,"full_name":"Тестовый пользователь","role":"client"}).encode())
+            elif self.path.startswith("/api/auth/session"):
+                self.wfile.write(json.dumps({
+                    "token": "owner-fixture-token", "role": "owner",
+                    "user": {"id": 42, "full_name": "Тестовый владелец"},
+                }, ensure_ascii=False).encode())
             elif self.path.startswith("/api/studio/businesses"):
                 self.wfile.write(b'[]')
             else:
@@ -61,6 +76,16 @@ class Handler(SimpleHTTPRequestHandler):
         if path not in ("/",) and not (DIST / path.lstrip("/")).is_file():
             self.path = "/index.html"
         super().do_GET()
+
+    def do_POST(self):
+        if self.path.startswith("/api/auth/logout"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Set-Cookie", "sg_shared=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+            self.end_headers()
+            self.wfile.write(b'{"ok":true}')
+            return
+        self.send_error(404)
 
 
 def main():
@@ -132,6 +157,28 @@ def main():
                 "service_worker":"v4","mutations_disabled":True,
             }, ensure_ascii=False), flush=True)
             context.set_offline(False)
+
+            # Isolated owner: failed payment checking must not trap the schedule,
+            # and signing out must invalidate the shared cookie and new-tab auth.
+            owner = browser.new_context(viewport={"width": 390, "height": 844})
+            owner.add_cookies([{"name": "sg_shared", "value": "ok", "url": url, "httpOnly": True}])
+            owner_page = owner.new_page()
+            owner_page.goto(url + "/admin/schedule", wait_until="domcontentloaded")
+            owner_page.get_by_text("Проверка предоплат недоступна", exact=False).first.wait_for(timeout=15000)
+            assert owner_page.locator('[role="alertdialog"]').count() == 0, (
+                "Failed payment check must not trap schedule behind a modal"
+            )
+            owner_page.get_by_role("button", name="Выйти").first.click()
+            owner_page.wait_for_url(url + "/", timeout=15000)
+            assert not any(cookie["name"] == "sg_shared" for cookie in owner.cookies()), (
+                "Logout failed to clear the shared HttpOnly cookie"
+            )
+            second_tab = owner.new_page()
+            second_tab.goto(url + "/admin/schedule", wait_until="domcontentloaded")
+            second_tab.wait_for_url(url + "/login", timeout=15000)
+            assert second_tab.evaluate("localStorage.getItem('token')") is None
+            assert second_tab.evaluate("localStorage.getItem('servgoExplicitLogout')") == "1"
+            print("PWA_BROWSER_LOGOUT_AND_PAYMENT_FAILURE_OK", flush=True)
             browser.close()
     finally:
         server.shutdown()
