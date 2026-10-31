@@ -32,12 +32,12 @@ WIDTHS = (320, 390, 768, 1024, 1440)
 PAGES = (
     "", "/create", "/work", "/review", "/materials", "/plan", "/calendar",
     "/channels", "/analytics", "/whiteboard", "/seo", "/campaigns",
-    "/campaigns/new", "/profile", "/profile/edit", "/accounts", "/comments",
+    "/campaigns/new", "/profile", "/profile/edit", "/profile/delete", "/accounts", "/comments",
     "/speed",
 )
 GLOBAL = (
     "/studio?choose=1", "/studio/team", "/studio/tune",
-    "/studio/tune/work",
+    "/studio/tune/work", "/studio/new", "/intelligence?product_id={product_id}",
 )
 CAPTURE = {
     "", "/create", "/work", "/review", "/materials", "/plan",
@@ -112,6 +112,8 @@ def main():
             with sync_playwright() as p:
                 browser = p.chromium.launch()
                 page = browser.new_page(viewport={"width": 1440, "height": 900})
+                console_errors = []
+                page.on("console", lambda event: console_errors.append({"page": page.url.split("?")[0], "message": event.text[:240]}) if event.type == "error" else None)
                 page.on(
                     "pageerror",
                     lambda exc: errors.append(
@@ -143,16 +145,21 @@ def main():
                                 full_page=True,
                                 animations="disabled",
                             )
+                page.set_viewport_size({"width": 320, "height": 844})
+                page.goto(origin + base + "/create")
+                page.screenshot(path=str(ROOT / "320-create.png"), full_page=True, animations="disabled")
                 for width in (390, 1440):
                     page.set_viewport_size({"width": width, "height": 900})
                     for index, route in enumerate(GLOBAL):
-                        response = page.goto(origin + route + (
-                            "&design=v4" if "?" in route else "?design=v4"
+                        effective = route.replace("{product_id}", str(product.id))
+                        response = page.goto(origin + effective + (
+                            "&design=v4" if "?" in effective else "?design=v4"
                         ), wait_until="load")
                         item = {
                             "width": width,
                             "route": route,
                             "status": response.status if response else None,
+                            "csp": response.headers.get("content-security-policy", "") if response else "",
                             **page.evaluate(METRICS),
                         }
                         cases.append(item)
@@ -184,6 +191,7 @@ def main():
         },
         "problemCases": bad,
         "errors": errors,
+        "consoleErrors": console_errors[:40],
         "legacyFormPagesDesktop": [
             {"route": v["route"], "markers": v["oldFormMarkers"], "fields": v["fields"]}
             for v in old_forms
@@ -213,6 +221,8 @@ def main():
         print("V4_LEGACY_FORM", x["route"], x["oldFormMarkers"], flush=True)
     for x in old_labels:
         print("V4_OLD_LABEL", x["route"], flush=True)
+    for x in console_errors[:15]:
+        print("V4_CONSOLE_ERROR", json.dumps(x, ensure_ascii=False), flush=True)
     for x in errors:
         print("V4_JS_ERROR", json.dumps(x, ensure_ascii=False), flush=True)
     # This script is an audit, not a gate. Review the report before fixing issues.
