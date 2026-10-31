@@ -478,3 +478,62 @@ body[data-growth-design="v4"] .dp-home:not(.has-feed) .command-tools .dp-new{
   body[data-growth-design="v4"] .dp-home .command-tools .dp-new-label{display:none}
   body[data-growth-design="v4"] .dp-home .command-tools .dp-new{width:36px;padding:0}
 }
+
+
+/* Transparent floating composer: conversation scrolls underneath the controls.
+   Do not paint a full-width footer panel over the conversation; only the
+   composer and actual shortcut buttons have their own visible surfaces. */
+body.home-page:not(.home-empty) .dp-home.has-feed{
+  position:relative;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .dp-feed{
+  position:relative;
+  flex:1 1 auto;
+  min-height:0;
+  max-height:none;
+  box-sizing:border-box;
+  margin:0;
+  padding:4px 4px calc(var(--v4-dock-height, 142px) + 12px);
+  scroll-padding-bottom:calc(var(--v4-dock-height, 142px) + 12px);
+  overflow-y:auto;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .command-dock{
+  position:absolute;
+  left:0;
+  right:0;
+  bottom:0;
+  width:100%;
+  z-index:auto; /* do not trap the fixed voice-hold glow below mobile navigation */
+  box-sizing:border-box;
+  margin:0;
+  padding:0 0 8px!important;
+  border:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  pointer-events:none;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .command-tools{
+  position:relative;
+  z-index:1;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .command-bar{
+  z-index:2;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .command-tools,
+body.home-page:not(.home-empty) .dp-home.has-feed .command-hints{
+  background:transparent!important;
+  border:0!important;
+  box-shadow:none!important;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .command-dock
+  :is(.command-bar,.command-tools,.dp-voice-note){
+  pointer-events:auto;
+}
+body.home-page:not(.home-empty) .dp-home.has-feed .command-dock
+  :is(.command-bar,.dp-chip,.dp-new){
+  /* Their individual fills and borders remain; only the parent panel vanishes. */
+  visibility:visible;
+}
+@media(max-width:780px){
+  body.home-page:not(.home-empty) #main{padding-bottom:0!important}
+}

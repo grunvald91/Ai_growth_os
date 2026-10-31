@@ -222,6 +222,6 @@ def render_v4(page, request, pid, switch):
         template = template.replace('</head>', '<style>'+notice_css+'</style></head>')
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
-    template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=8"></head>')
-    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=4"></script></body>')
+    template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=9"></head>')
+    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=5"></script></body>')
     return template
