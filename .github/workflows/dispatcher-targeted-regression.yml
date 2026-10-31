@@ -5,6 +5,11 @@ on:
       - fix/dispatcher-latency-recommendations-videos-20261031
     paths:
       - .github/workflows/dispatcher-targeted-regression.yml
+      - app/dispatcher/fast_routes.py
+      - app/dispatcher/owner_views.py
+      - app/dispatcher/service.py
+      - app/api/dispatcher_assets/dispatcher.js
+      - tests/test_dispatcher_fast_owner.py
 permissions:
   contents: read
 jobs:
