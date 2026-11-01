@@ -427,8 +427,15 @@ async def run_due_telegram_post_once(session_factory, settings, *, api=None, now
                 Publication.id == pub_id, Publication.status == "scheduled"
             ).values(status="cancelled"))
             if cancelled.rowcount == 1:
-                update_plan_delivery(db, data, "cancelled")
+                # Commit the durable cancellation while holding campaign locks,
+                # then update the calendar under its own Product-first lock order.
+                # This avoids a Product <-> Experiment lock inversion.
                 db.commit()
+                try:
+                    update_plan_delivery(db, data, "cancelled")
+                    db.commit()
+                except (ValueError, LookupError, KeyError, TypeError):
+                    db.rollback()
                 return 1
             db.rollback()
             return 0
