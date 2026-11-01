@@ -266,7 +266,7 @@
       syncConversationLayout();
     }
     setBusy(true);
-    post('/messages', body, 35000).then(function (data) {
+    post('/messages', body, 55000).then(function (data) {
       if (echoNode) echoNode.remove();
       applyResult(data);
       if (voiceRequest) showNote('');
