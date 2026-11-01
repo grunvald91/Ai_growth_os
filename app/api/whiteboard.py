@@ -292,6 +292,11 @@ def job_html(state, product_id, *, error=None):
                      f'{esc(entry.get("code", ""))} · вызовов {esc(str(entry.get("calls", "")))}'
                      + (f' · {esc(extra)}' if extra else '') + '</li>')
         body += '</ol></details>'
+    science = state.get('science_review_result')
+    if isinstance(science, dict):
+        summary = esc(science.get('summary', ''))
+        label = 'Научная проверка пройдена' if science.get('status') == 'supported' else 'Научные факты требуют исправления'
+        body += f'<p><strong>{label}</strong>: {summary}</p>'
     if state.get('visual_review_enabled'):
         body += '<p>Один проход визуального критика. Автор выбирает существенные исправления; каждая выбранная сцена перерисовывается максимум один раз.</p>'
     if state.get('image_provider') == 'claudehub':
