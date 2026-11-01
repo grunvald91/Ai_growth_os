@@ -79,8 +79,10 @@ async def show_recent_videos(ctx: Context, params) -> Outcome:
             "href": href,
             "created": artifact.created_at.isoformat() if artifact.created_at else "",
         })
+    # Select the eight most recent, but display oldest first so that
+    # the newest video is immediately above the input field.
     items.sort(key=lambda item: item["created"], reverse=True)
-    items = items[:8]
+    items = list(reversed(items[:8]))
     if not items:
         return Outcome(
             "Не нашёл видео или заданий на видео для этой компании.",
@@ -96,13 +98,10 @@ async def show_recent_videos(ctx: Context, params) -> Outcome:
         text,
         f"Нашёл {len(items)} видео и заданий. Статусы и ссылки уже на экране.",
         [
-            {"type": "table", "columns": ["Видео", "Статус"],
-             "rows": [[item["title"], item["status"]] for item in items]},
-            {"type": "links", "items": [
-                {"label": "Открыть: " + item["title"][:65], "href": item["href"]}
+            {"type": "resource_list", "items": [
+                {"title": item["title"], "status": item["status"], "href": item["href"]}
                 for item in items
             ]},
-            links_block(ctx, "whiteboard", "work"),
         ],
     )
 
