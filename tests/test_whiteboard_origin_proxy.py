@@ -31,7 +31,8 @@ def test_mobile_60_second_whiteboard_form_and_confirmation_behind_nginx(environm
         "Origin": "https://growth.servgo.ru",
         "X-Forwarded-Proto": "https",
         "Sec-Fetch-Site": "same-origin",
-    }, auth=("owner", "test-owner-password")) as browser:
+    }) as browser:
+        browser.auth = ("owner", "test-owner-password")
         url = f"/studio/products/{product_id}/whiteboard"
         page = browser.get(url)
         assert page.status_code == 200
