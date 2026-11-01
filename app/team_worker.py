@@ -95,26 +95,26 @@ def _recover_transient_failed_experiment_tasks(
             Artifact.product_id == parent.product_id, Artifact.task_id == parent.id,
             Artifact.kind == "task_brief",
         ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
-        if brief is None:
-            db.rollback()
-            continue
-        try:
-            payload = json.loads(brief.content)
-        except (TypeError, ValueError):
-            db.rollback()
-            continue
-        if not isinstance(payload, dict):
-            db.rollback()
-            continue
-        # The experiment lock stays held until requeue is committed. A
-        # concurrent stop either wins first, or sees the newly queued task
-        # and cancels it. Never revive an unverified/orphaned experiment task.
-        campaign = task_campaign(db, parent, payload, lock=True)
-        if campaign is None or campaign.status != "running":
-            db.rollback()
-            continue
+        # Preserve the legacy research retry path for old tasks with no
+        # experiment binding. Campaign-linked retries require an exact UUID,
+        # title and product match under the Experiment row lock.
+        campaign = None
+        if brief is not None:
+            try:
+                payload = json.loads(brief.content)
+            except (TypeError, ValueError):
+                db.rollback()
+                continue
+            if not isinstance(payload, dict):
+                db.rollback()
+                continue
+            if payload.get("experiment_id"):
+                campaign = task_campaign(db, parent, payload, lock=True)
+                if campaign is None or campaign.status != "running":
+                    db.rollback()
+                    continue
         parent = db.scalar(select(Task).where(
-            Task.id == parent.id, Task.product_id == campaign.product_id,
+            Task.id == parent.id, Task.product_id == parent.product_id,
         ).with_for_update().execution_options(populate_existing=True))
         if parent is None or parent.status != TaskStatus.FAILED:
             db.rollback()
