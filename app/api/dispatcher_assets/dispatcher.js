@@ -156,7 +156,8 @@
       material: { label: 'Материал', glyph: '▤' }
     };
     block.items.forEach(function (item) {
-      var kind = kinds[item.kind] ? item.kind : 'material';
+      var kind = kinds[item.kind] ? item.kind
+        : /\/whiteboard\//.test(String(item.href || '')) ? 'video' : 'material';
       var meta = kinds[kind];
       var card = el('a', 'dp-resource dp-resource--' + kind);
       card.href = item.href;
@@ -166,7 +167,8 @@
       var content = el('span', 'dp-resource-copy');
       content.appendChild(el('span', 'dp-resource-kind', meta.label));
       content.appendChild(el('strong', 'dp-resource-title',
-        voiceHoldEnabled ? friendlyTitle(item.title) : item.title));
+        kind === 'video' ? legacyVideoTitle(item.title)
+          : voiceHoldEnabled ? friendlyTitle(item.title) : item.title));
       if (item.status) content.appendChild(el('span', 'dp-resource-status', item.status));
       card.appendChild(content);
       var arrow = el('span', 'dp-resource-arrow', '→');
