@@ -92,6 +92,41 @@ def load_resources(db: Session, campaigns: list[Experiment]) -> dict[UUID, Campa
         targets = {a.id: a for a in db.scalars(select(Artifact).where(
             Artifact.product_id == product_id, Artifact.id.in_(wanted),
         ))}
+    # Preparation tasks already carry the experiment UUID in their task_brief.
+    # Resolve only exact titles, then verify the embedded ID and company.
+    # This avoids guessing links from similar names or looking at other tenants.
+    expected = {}
+    for row in campaigns:
+        if row.experiment_key:
+            for suffix in ("prepare experiment", "prepare outreach cohort"):
+                expected[f"{row.experiment_key}: {suffix}"] = row.id
+    task_to_experiment = {}
+    if expected:
+        briefs = db.scalars(select(Artifact).where(
+            Artifact.product_id == product_id,
+            Artifact.kind == "task_brief",
+            Artifact.title.in_(expected),
+        ))
+        for brief in briefs:
+            if not brief.task_id:
+                continue
+            expected_id = expected.get(brief.title)
+            try:
+                payload = json.loads(brief.content)
+            except (ValueError, TypeError):
+                continue
+            if (isinstance(payload, dict) and expected_id is not None
+                    and payload.get("experiment_id") == str(expected_id)):
+                task_to_experiment[brief.task_id] = expected_id
+    generated = {}
+    if task_to_experiment:
+        for artifact in db.scalars(select(Artifact).where(
+            Artifact.product_id == product_id,
+            Artifact.task_id.in_(task_to_experiment),
+            Artifact.kind.in_(MATERIAL_KINDS),
+        ).order_by(Artifact.created_at.desc())):
+            exp_id = task_to_experiment[artifact.task_id]
+            generated.setdefault(exp_id, []).append(artifact)
     telegram_used = any(is_telegram(row) for row in campaigns)
     connections = ()
     if telegram_used:
@@ -114,6 +149,10 @@ def load_resources(db: Session, campaigns: list[Experiment]) -> dict[UUID, Campa
             if record is not None and record.kind in MATERIAL_KINDS and key not in seen:
                 materials.append(record)
                 seen.add(key)
+        for artifact in generated.get(row.id, []):
+            if artifact.id not in seen:
+                materials.append(artifact)
+                seen.add(artifact.id)
         selection = None
         if is_telegram(row):
             try:
