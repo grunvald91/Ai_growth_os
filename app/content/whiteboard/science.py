@@ -118,7 +118,7 @@ async def retrieved_references(request: WhiteboardRequest, *, client=None) -> li
 # allowlist of scientific publishers. Search snippets alone NEVER count as proof.
 SCIENTIFIC_SEARCH_QUERY = "https://api.crossref.org/works"
 DUCKDUCKGO_SEARCH = "https://html.duckduckgo.com/html/"
-DOI_PATTERN = re.compile(r"^10\\.\\d{4,9}/[-._;()/:A-Z0-9]+$", re.I)
+DOI_PATTERN = re.compile(r"^10[.]\\d{4,9}/[-._;()/:A-Z0-9]+$", re.I)
 RUSSIAN_TO_ENGLISH = (
     ("электрон", "electron"), ("заряж", "charged"), ("разряж", "discharged"),
     ("аккумулятор", "battery"), ("температур", "temperature"),

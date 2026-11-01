@@ -223,3 +223,157 @@ def test_model_science_schema_has_no_server_only_fields_and_is_strict():
     finding = schema["properties"]["findings"]["items"]
     assert finding["additionalProperties"] is False
     assert set(finding["required"]) == set(finding["properties"])
+
+
+def test_science_v1_enforced_even_if_general_selected_and_legacy_remains_unchanged():
+    request = science_request(science_mode="general", science_policy_version=1)
+    assert requires_science_review(request)
+    assert required_calls(request) == 15
+    legacy = request.model_copy(update={"science_policy_version": 0})
+    assert not requires_science_review(legacy)
+    assert "science_policy_version" not in legacy.model_dump()
+    assert WhiteboardRequest.model_validate_json(request.model_dump_json()).science_policy_version == 1
+
+
+def test_scientific_general_quote_does_not_bypass_review(environment):
+    _, settings, product_id, _ = environment
+    browser = client()
+    quote = browser.post(f"/studio/products/{product_id}/whiteboard/quote.json", data={
+        "topic": "Почему заряженный аккумулятор обладает большей массой?",
+        "duration_seconds": "30", "science_mode": "general",
+        "max_api_calls": "auto", "visual_review": "off",
+    })
+    assert quote.status_code == 200
+    assert quote.json()["science_review"] is True
+    assert quote.json()["required_calls"] == 15
+
+
+@pytest.mark.asyncio
+async def test_crossref_discovery_fetches_actual_abstract_and_uses_doi_not_snippet():
+    import httpx
+    from app.content.whiteboard.science import retrieved_references
+    hits = []
+    def transport(req):
+        hits.append((req.method, req.url.host))
+        if req.url.host == "api.crossref.org":
+            return httpx.Response(200, json={"message": {"items": [{
+                "type": "journal-article",
+                "DOI": "10.1234/quantum-physics",
+                "title": ["Quantum electron interactions and electromagnetic energy"],
+                "abstract": "<jats:p>Electron interactions produce electromagnetic forces. "
+                            "The published experiment compares the measured effects with "
+                            "theoretical predictions under reproducible conditions and "
+                            "reports a consistent interaction in the observed samples.</jats:p>",
+            }]}})
+        if req.url.host == "html.duckduckgo.com":
+            return httpx.Response(200, text="")
+        pytest.fail("Unapproved network target: " + str(req.url))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as client:
+        result = await retrieved_references(science_request(
+            topic="Как электроны взаимодействуют друг с другом?", science_mode="scientific"
+        ), client=client)
+    assert len(result) == 1
+    assert result[0]["id"] == "CR1"
+    assert result[0]["url"] == "https://doi.org/10.1234/quantum-physics"
+    assert "reproducible conditions" in result[0]["claim"]
+    assert hits[0] == ("GET", "api.crossref.org")
+
+
+@pytest.mark.asyncio
+async def test_science_search_rejects_untrusted_urls_without_contacting_them():
+    import httpx
+    from app.content.whiteboard.science import retrieved_references
+    calls = []
+    def transport(req):
+        calls.append(req.url.host)
+        if req.url.host == "api.crossref.org":
+            return httpx.Response(200, json={"message": {"items": []}})
+        if req.url.host == "html.duckduckgo.com":
+            return httpx.Response(200, text="")
+        pytest.fail("Unapproved outbound host: " + str(req.url))
+    request = science_request(
+        topic="Как работают квантовые взаимодействия?",
+        reference_materials="https://nist.gov.evil.example/private https://127.0.0.1/admin"
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as client:
+        assert await retrieved_references(request, client=client) == []
+    assert all(host in {"api.crossref.org", "html.duckduckgo.com"} for host in calls)
+
+
+@pytest.mark.asyncio
+async def test_no_public_science_evidence_blocks_before_first_paid_call(tmp_path, monkeypatch):
+    from app.content.whiteboard import science
+    from app.content.whiteboard.pipeline import WhiteboardPipeline
+    from app.content.whiteboard.runtime import ReadinessError
+    from app.privacy import PrivacyGateway
+    from test_whiteboard import FakePlanner, FakeImages, FakeSpeech, FakeRegions, FakeRenderer
+    from types import SimpleNamespace
+
+    async def no_evidence(*args, **kwargs):
+        return []
+    monkeypatch.setattr(science, "retrieved_references", no_evidence)
+    class NoService:
+        async def generate(self, _):
+            pytest.fail("Paid scientific call must not start without references")
+    reviewer = science.FactReviewer(NoService(), "gemini-flash-3.8")
+    planner = FakePlanner()
+    pipeline = WhiteboardPipeline(storyboard=planner, science_reviewer=reviewer,
+        images=FakeImages(), speech=FakeSpeech(), regions=FakeRegions(),
+        renderer=FakeRenderer(), sanitizer=PrivacyGateway())
+    with pytest.raises(ReadinessError, match="science_sources_missing"):
+        await pipeline.produce(science_request(
+            topic="Как взаимодействуют электронные облака?", science_mode="scientific",
+            request_generation=True), tmp_path / "video.mp4", approval_verified=True)
+    assert planner.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_science_quote_must_match_retrieved_publication_text():
+    from app.content.whiteboard.science import FactReviewer
+    from test_whiteboard import storyboard
+    from types import SimpleNamespace
+
+    request = science_request(topic="Почему электрон получает энергию?", science_mode="scientific")
+    scene = storyboard()
+    narration = [b.narration for s in scene.scenes for b in s.beats][:-1]
+    sources = [{
+        "id": "CR1", "url": "https://doi.org/10.1234/credible-paper",
+        "claim": "Research reports an increased transfer of energy in the observed process."
+    }]
+    class Provider:
+        async def generate(self, query):
+            return SimpleNamespace(content=json.dumps({
+                "status":"supported", "summary":"Все высказывания подтверждены опубликованным материалом.",
+                "findings":[{
+                    "claim": line, "verdict":"supported",
+                    "explanation":"В тексте научного источника приведено соответствующее утверждение.",
+                    "reference_id":"CR1", "evidence_quote":"This quote is not in the source",
+                } for line in narration]
+            }, ensure_ascii=False))
+    reviewer = FactReviewer(Provider(), "gemini-flash-3.8")
+    reviewer._sources = sources
+    result = await reviewer.review(scene, request)
+    assert result.status == "blocked"
+    assert not evidence_supported(result, request, scene)
+
+
+def test_topics_are_diverse_and_business_grounded(environment):
+    from app.company_profile import parse_company_profile
+    from app.content.whiteboard.topics import suggest_company_video_topics
+    _, settings, product_id, _ = environment
+    _write_profile(settings, "whiteboard-jobs")
+    profile = settings.products_root / "whiteboard-jobs" / "company-profile.json"
+    data = json.loads(profile.read_text(encoding="utf-8"))
+    data["customers"]["jobs_to_be_done"] = ["Выбрать удобную запись"]
+    data["customers"]["pains"] = ["Клиент не понимает доступное время",
+                                   "Возникают вопросы перед визитом"]
+    profile.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    own = suggest_company_video_topics(settings.products_root, Product(
+        name="Салон", slug="whiteboard-jobs"))
+    titles = [item["topic"] for item in own["topics"]]
+    assert len(titles) >= 5
+    assert len(set(titles)) == len(titles)
+    assert any("стрижка" in title for title in titles)
+    assert any("Клиент не понимает" in title for title in titles)
+    assert any("салон" in title for title in titles)
+    assert not any("гарантируем" in title.lower() for title in titles)
