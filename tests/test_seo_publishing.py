@@ -176,3 +176,29 @@ async def test_publication_is_retried_after_transient_failure(env, tmp_path, mon
     assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
     assert module.publish_pending(db) == 0
     assert len(list(db.scalars(select(Publication)))) == 1
+
+
+
+@pytest.mark.asyncio
+async def test_stopped_campaign_blocks_only_its_linked_seo_article(env, tmp_path):
+    from app.models.domain import Experiment
+    from app.services.campaign_readiness import link_resource
+    from app.services.campaign_lifecycle import command
+    db, product = env
+    linked = await make_article(db, product, tmp_path)
+    independent = await make_article(db, product, tmp_path)
+    row = Experiment(product_id=product.id, experiment_key="EXP-SEO-STOP-1",
+                     name="SEO test", hypothesis="Test", status="running")
+    db.add(row)
+    db.commit()
+    link_resource(db, product.id, row.id, linked, relation="material")
+    assert command(db, product_id=product.id, experiment_id=row.id,
+                   action="stop", actor="owner")[0] == "stopped"
+    blocked = publish_if_clear(db, linked)
+    assert blocked.published is False and blocked.reason == "linked_campaign_closed"
+    assert db.get(Artifact, linked).status != ArtifactStatus.PUBLISHED
+    allowed = publish_if_clear(db, independent)
+    assert allowed.published is True
+    assert db.get(Artifact, independent).status == ArtifactStatus.PUBLISHED
+    pubs = list(db.scalars(select(Publication)))
+    assert len(pubs) == 1 and pubs[0].artifact_id == independent

@@ -5,13 +5,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents import AGENT_CONFIGS, AgentRole
 from app.llm.audit import critic_cost_details, persist_critic_audit
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
-from app.models.domain import AgentRun, CostRecord, Product, TaskStatus
+from app.models.domain import AgentRun, CostRecord, Experiment, Product, TaskStatus
 from app.policies import PolicyEvaluator
 from app.privacy import PrivacyGateway
 from app.services.approvals import ApprovalService
@@ -125,6 +126,14 @@ class DailyGrowthReview:
                 kind='growth_review', title='Organic growth review', content=review.model_dump_json())
             result.artifact_ids.extend([analytics_artifact.id, summary.id])
             for strategy in review.decisions:
+                if strategy.experiment_id is not None:
+                    # Stop and follow-up persistence must lock the same row.
+                    campaign = self.db.scalar(select(Experiment).where(
+                        Experiment.product_id == product_id,
+                        Experiment.id == strategy.experiment_id,
+                    ).with_for_update().execution_options(populate_existing=True))
+                    if campaign is None or campaign.status != "running":
+                        continue
                 decision = DecisionService(self.db).create(product_id=product_id,
                     goal_id=strategy.goal_id, experiment_id=strategy.experiment_id, agent_run_id=run_id,
                     decision_type=strategy.decision_type, rationale=strategy.rationale,
@@ -146,7 +155,11 @@ class DailyGrowthReview:
                         status=TaskStatus.WAITING_APPROVAL if needs_approval else TaskStatus.QUEUED)
                     brief = artifacts.create(product_id=product_id, task_id=child.id, agent_run_id=run_id,
                         kind='task_brief', title=proposal.title,
-                        content=json.dumps({'decision_id': str(decision.id), **proposal.model_dump(mode='json')}),
+                        content=json.dumps({
+                            'decision_id': str(decision.id),
+                            'experiment_id': str(strategy.experiment_id) if strategy.experiment_id else None,
+                            **proposal.model_dump(mode='json'),
+                        }),
                         status='awaiting_approval' if needs_approval else 'draft')
                     result.task_ids.append(child.id)
                     result.artifact_ids.append(brief.id)

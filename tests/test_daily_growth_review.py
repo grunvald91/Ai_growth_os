@@ -268,3 +268,22 @@ async def test_active_duplicate_specialist_task_is_not_recreated(db, product, tm
         )
     ))
     assert task_briefs == []
+
+
+@pytest.mark.asyncio
+async def test_cmo_does_not_create_followup_for_stopped_campaign(db, product, tmp_path):
+    campaign = db.scalar(select(Experiment).where(Experiment.product_id == product.id))
+    campaign.status = "stopped"
+    db.commit()
+    stopped = output()["decisions"][0]
+    stopped["experiment_id"] = str(campaign.id)
+    stopped["next_tasks"][0]["title"] = "Stopped campaign task"
+    independent = output()["decisions"][0]
+    independent["next_tasks"][0]["title"] = "Independent company task"
+    data = {"summary": "Check all strategies", "decisions": [stopped, independent]}
+    review, _, _ = setup_review(db, data, tmp_path)
+    result = await review.run(product.id)
+    assert result.status == "completed"
+    assert len(result.decision_ids) == len(result.task_ids) == 1
+    assert db.get(Task, result.task_ids[0]).title == "Independent company task"
+    assert list(db.scalars(select(Task).where(Task.title == "Stopped campaign task"))) == []

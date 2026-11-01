@@ -4,10 +4,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.domain import Experiment, Product, TaskStatus
+from app.models.domain import Artifact, Experiment, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
+from app.services.campaign_lifecycle import task_campaign
 from app.services.decisions import DecisionService
 from app.services.experiments import ExperimentService
 from app.services.prospects import ProspectService
@@ -58,8 +60,17 @@ class ExperimentLaunchService:
         self.db = db
         self.products_root = products_root
 
-    def launch(self, experiment_id: UUID, *, actor: str) -> ExperimentLaunchResult:
-        experiment = self.db.get(Experiment, experiment_id)
+    def launch(
+        self, experiment_id: UUID, *, actor: str, product_id: UUID | None = None,
+    ) -> ExperimentLaunchResult:
+        # A product-scoped, locked read protects both tenant isolation and a
+        # concurrent second launch (including launches from Telegram).
+        query = select(Experiment).where(Experiment.id == experiment_id)
+        if product_id is not None:
+            query = query.where(Experiment.product_id == product_id)
+        experiment = self.db.scalar(
+            query.with_for_update().execution_options(populate_existing=True)
+        )
         if experiment is None:
             raise LookupError("Experiment not found")
         if experiment.status != "draft":
@@ -104,23 +115,64 @@ class ExperimentLaunchService:
             leads=cohort.get("leads", []),
         )
 
-        title = f"{key}: prepare outreach cohort"
+        outreach = experiment.channel == "direct_outreach"
+        title = f"{key}: prepare outreach cohort" if outreach else f"{key}: prepare experiment"
+        description = (
+            "Review the bounded cohort and prepare a decision-ready validation/enrichment plan. "
+            "Do not contact businesses, publish anything, invent missing contact channels, "
+            "or treat stale/public-directory data as current without evidence."
+            if outreach else
+            "Prepare an evidence-based measurement and execution plan for this experiment. "
+            "Internal research only; do not contact anyone, send messages, publish, or spend money."
+        )
+        constraints = [
+            "No outreach or publication.",
+            "No invented email, WhatsApp, Telegram, website, or decision-maker data.",
+        ]
+        if outreach:
+            constraints.append("Every candidate still requires current validation before counting as reached.")
+        # A legacy ServGo-specific exception must not leak into other companies.
+        if product.slug == "servgo" and key == "EXP-SERVGO-001":
+            constraints.append(
+                "Sea SPA remains outside EXP-SERVGO-001 because prior contact predates the experiment."
+            )
         tasks = TaskService(self.db)
         task = tasks.find_active_duplicate(
             product_id=experiment.product_id,
             title=title,
             assigned_agent="research_pmm",
         )
+        if task is not None:
+            # Refuse unverified legacy duplicates rather than claiming them.
+            task = self.db.scalar(select(Task).where(
+                Task.id == task.id, Task.product_id == experiment.product_id,
+            ).with_for_update().execution_options(populate_existing=True))
+            briefs = list(self.db.scalars(select(Artifact).where(
+                Artifact.product_id == experiment.product_id,
+                Artifact.task_id == task.id, Artifact.kind == "task_brief",
+            )))
+            linked = False
+            for brief in briefs:
+                try:
+                    payload = json.loads(brief.content)
+                except (TypeError, ValueError):
+                    continue
+                match = task_campaign(self.db, task, payload)
+                if match is not None and match.id == experiment.id:
+                    linked = True
+                    break
+            if not linked:
+                self.db.rollback()
+                raise ExperimentLaunchError(
+                    "Активная задача с таким названием не имеет подтверждённой "
+                    "связи с кампанией. Устраните конфликт перед запуском."
+                )
         if task is None:
             task = tasks.create(
                 product_id=experiment.product_id,
                 goal_id=experiment.goal_id,
                 title=title,
-                description=(
-                    "Review the bounded cohort and prepare a decision-ready validation/enrichment plan. "
-                    "Do not contact businesses, publish anything, invent missing contact channels, "
-                    "or treat stale/public-directory data as current without evidence."
-                ),
+                description=description,
                 assigned_agent="research_pmm",
                 status=TaskStatus.QUEUED,
                 priority=100,
@@ -144,12 +196,7 @@ class ExperimentLaunchService:
                         "operation": None,
                         "requires_approval": False,
                         "cohort_snapshot": cohort,
-                        "hard_constraints": [
-                            "No outreach or publication.",
-                            "No invented email, WhatsApp, Telegram, website, or decision-maker data.",
-                            "Every candidate still requires current validation before counting as reached.",
-                            "Sea SPA remains outside EXP-SERVGO-001 because prior contact predates the experiment.",
-                        ],
+                        "hard_constraints": constraints,
                     },
                     ensure_ascii=False,
                 ),

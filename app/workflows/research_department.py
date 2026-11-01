@@ -17,6 +17,7 @@ from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task, Tas
 from app.privacy import PrivacyGateway
 from app.services.artifacts import ArtifactService
 from app.services.tasks import TaskService
+from app.services.campaign_lifecycle import task_halted
 from app.workflows.context import load_context
 from app.workflows.research_contracts import (
     ChannelResearchReport,
@@ -63,6 +64,11 @@ class ResearchDepartment:
         self.intelligence = intelligence
 
     async def run(self, product: Product, parent: Task, brief: Artifact, brief_data: dict) -> TeamTaskResult:
+        if task_halted(self.db, parent, brief_data, lock=True):
+            if parent.status == TaskStatus.QUEUED:
+                parent.status = TaskStatus.CANCELLED
+                self.db.commit()
+            return TeamTaskResult(task_id=parent.id, status="skipped", error="campaign_closing")
         claimed = self.db.execute(
             update(Task)
             .where(Task.id == parent.id, Task.status == TaskStatus.QUEUED)
