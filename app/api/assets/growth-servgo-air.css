@@ -212,6 +212,8 @@ body[data-growth-design="v4"] .mobile-nav summary {
     height: 2px;
     background: var(--s-flow-grad);
     background-size: 310% 100%;
+    /* Exact tapered shape from BookingBot .ds-bn::after. */
+    clip-path: polygon(0% 50%, 10% 45%, 24% 36%, 36% 23%, 45% 10%, 55% 10%, 64% 23%, 76% 36%, 90% 45%, 100% 50%, 90% 55%, 76% 64%, 64% 77%, 55% 90%, 45% 90%, 36% 77%, 24% 64%, 10% 55%);
     animation: sgNavFlow 3.7s linear infinite;
     pointer-events: none;
   }
@@ -243,7 +245,7 @@ body[data-growth-design="v4"] .mobile-nav summary {
 
 @keyframes sgNavFlow {
   from { background-position: 0% 50%; }
-  to { background-position: 310% 50%; }
+  to { background-position: 100% 50%; }
 }
 
 
@@ -307,4 +309,73 @@ body[data-growth-design="v4"] .route-content .sg-intake-notice {
 }
 body[data-growth-design="v4"] .route-content .sg-intake-question {
   border-color: var(--s-line-2);
+}
+
+
+/* V4 dark/light readability. These modules retain classic Studio's fixed
+ * blue-grey ink in their nested nodes, so body-level tokens aren't enough.
+ * Keep the scope narrow to V4: native legacy pages are unchanged.
+ */
+body[data-growth-design="v4"] .route-content :is(
+  .sg-surface h2, .sg-surface h3, .sg-surface h4,
+  .sg-choice-copy, .sg-choice-copy b, .sg-choice-copy strong,
+  .sg-choice b, .sg-choice strong, .sg-choice label,
+  .sg-field > span, .sg-field > label, .sg-field legend,
+  .sg-section-head h2, .sg-module-head h2,
+  .panel-title h2, .sg-work-item-main b, .sg-work-empty h3,
+  .sg-rendered-article, .sg-rendered-article p,
+  .sg-work-result b, .sg-work-steps li, .sg-work-steps li b
+) {
+  color: var(--s-text);
+  -webkit-text-fill-color: currentColor;
+}
+body[data-growth-design="v4"] .route-content :is(
+  .sg-choice-copy small, .sg-choice small,
+  .sg-field small, .sg-form-hint, .sg-muted,
+  .sg-work-item-main p, .sg-work-empty p, .sg-overline,
+  .sg-work-steps small, .sg-intake-source span
+) {
+  color: var(--s-muted);
+  -webkit-text-fill-color: currentColor;
+}
+body[data-growth-design="v4"] .route-content .sg-choice,
+body[data-growth-design="v4"] .route-content .sg-format-grid .sg-choice {
+  color: var(--s-text);
+  background: var(--s-surface-2);
+  border-color: var(--s-line-2);
+  opacity: 1;
+}
+body[data-growth-design="v4"] .route-content .sg-choice:has(input:checked) {
+  background: var(--s-accent-soft);
+  border-color: var(--s-accent);
+}
+body[data-growth-design="v4"] .route-content :is(
+  input:not([type=checkbox]):not([type=radio]):not([type=hidden]),
+  textarea, select
+) {
+  color: var(--s-text);
+  background: var(--s-surface-2);
+  border-color: var(--s-line-2);
+  color-scheme: inherit;
+}
+body[data-growth-design="v4"] :is(input, textarea)::placeholder {
+  color: var(--s-muted);
+  opacity: 1;
+}
+body[data-growth-design="v4"] .dp-home :is(.dp-msg, .dp-msg p, .dp-msg b, .dp-msg strong),
+body[data-growth-design="v4"] .dp-home .dp-msg.user :is(p, b, strong) {
+  color: var(--s-text);
+  -webkit-text-fill-color: currentColor;
+}
+body[data-growth-design="v4"] .dp-home .dp-msg {
+  opacity: 1;
+}
+body[data-growth-design="v4"] .dp-home :is(.dp-link, .dp-chip, .dp-new) {
+  color: var(--s-accent);
+}
+body[data-growth-design="v4"] .dp-home .command-hints .dp-chip {
+  color: var(--s-muted);
+}
+body[data-growth-design="v4"] .route-content :is(.sg-warning, .sg-work-result, .sg-work-steps) {
+  color: var(--s-text);
 }
