@@ -7,7 +7,7 @@ from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.domain import AgentRun, Product, Task, TaskStatus
 from app.services.control import ControlService
-from app.services.campaign_lifecycle import task_halted, reconcile_pending
+from app.services.campaign_lifecycle import task_campaign, reconcile_pending
 from app.telegram_control_bot import TelegramAPI
 
 
@@ -95,18 +95,36 @@ def _recover_transient_failed_experiment_tasks(
             Artifact.product_id == parent.product_id, Artifact.task_id == parent.id,
             Artifact.kind == "task_brief",
         ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
-        if brief is not None:
-            try:
-                payload = json.loads(brief.content)
-            except (TypeError, ValueError):
-                payload = {}
-            if isinstance(payload, dict) and task_halted(db, parent, payload):
-                continue
+        if brief is None:
+            db.rollback()
+            continue
+        try:
+            payload = json.loads(brief.content)
+        except (TypeError, ValueError):
+            db.rollback()
+            continue
+        if not isinstance(payload, dict):
+            db.rollback()
+            continue
+        # The experiment lock stays held until requeue is committed. A
+        # concurrent stop either wins first, or sees the newly queued task
+        # and cancels it. Never revive an unverified/orphaned experiment task.
+        campaign = task_campaign(db, parent, payload, lock=True)
+        if campaign is None or campaign.status != "running":
+            db.rollback()
+            continue
+        parent = db.scalar(select(Task).where(
+            Task.id == parent.id, Task.product_id == campaign.product_id,
+        ).with_for_update().execution_options(populate_existing=True))
+        if parent is None or parent.status != TaskStatus.FAILED:
+            db.rollback()
+            continue
         child_tasks = list(
             db.scalars(select(Task).where(Task.parent_id == parent.id))
         )
         child_ids = [task.id for task in child_tasks]
         if not child_ids:
+            db.rollback()
             continue
         runs = list(
             db.scalars(
@@ -116,6 +134,7 @@ def _recover_transient_failed_experiment_tasks(
             )
         )
         if not runs:
+            db.rollback()
             continue
         transient_only = all(
             run.error == "research_worker_failed:HTTPStatusError" for run in runs
@@ -157,9 +176,11 @@ def _recover_transient_failed_experiment_tasks(
             transient_only and (first_generation or model_failover or fallback_recovery)
         ) or repair_recovery or reuse_recovery:
             parent.status = TaskStatus.QUEUED
+            db.commit()
             recovered += 1
-    if recovered:
-        db.commit()
+        else:
+            # Release the experiment row lock for the next company/task.
+            db.rollback()
     return recovered
 
 async def run_once() -> int:
