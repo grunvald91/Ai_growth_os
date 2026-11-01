@@ -10,7 +10,7 @@ from typing import Protocol
 import hashlib
 import json
 
-from app.content.whiteboard.science import FactReview, evidence_supported, reference_anchors, requires_science_review
+from app.content.whiteboard.science import FactReview, evidence_supported, requires_science_review
 from app.content.whiteboard.contracts import (
     WhiteboardOutput, WhiteboardRegionPlan, WhiteboardRequest,
     WhiteboardScene, WhiteboardSceneAssets, WhiteboardStoryboard,
