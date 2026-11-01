@@ -94,6 +94,8 @@ MESSAGES = {
     'interrupted': 'Worker был остановлен. Готовые этапы сохранены; можно продолжить с места остановки.',
     'cancelled': 'Задание остановлено. Начатый API-вызов мог завершиться и быть оплачен; следующие вызовы запрещены.',
     'review_budget': 'В сценарии больше реплик, чем предусмотрено лимитом проверки рисунков. Генерация остановлена до изображений; автоматического повтора нет.',
+    'science_unsupported': 'Научные утверждения не подтверждены надёжными опорными источниками. Производство остановлено до изображений и озвучки; дополните материалы или исправьте сценарий.',
+    'science_reviewer_missing': 'Не удалось подключить научную проверку. Генерация изображений не началась.',
     'repair_source_invalid': 'Исходный сценарий или озвучка не прошли проверку сохранённых файлов. Визуальная правка остановлена; новая озвучка не запускается.',
     'repair_budget': 'В подтверждённом лимите исходного ролика осталось меньше 8 вызовов для визуальной правки. Повтор автоматически не запускается.',
     'image_provider_required': 'Новые рисунки разрешены только через Gemini 3.1 Flash Image в ClaudeHub. Создайте новый запрос с этими настройками; автоматической замены нет.',
@@ -199,9 +201,10 @@ class SingleCallStoryboardLLM:
     One POST per model. When the chosen model does not answer at all (provider 5xx/429, no
     connection) the next configured model is tried, so a provider outage does not stop the job.
     A model that answered (even with a bad result) is never retried or replaced here."""
-    def __init__(self, settings, *, client=None, diagnostic_directory=None):
+    def __init__(self, settings, *, client=None, diagnostic_directory=None, allow_fallback=True):
         self.settings, self.client = settings, client
         self.diagnostic_directory = diagnostic_directory
+        self.allow_fallback = allow_fallback
 
     def record_response(self, response, *, name='storyboard'):
         # Private response capture permits offline diagnosis without repeating a paid call.
@@ -276,7 +279,8 @@ class SingleCallStoryboardLLM:
                                usage=LLMUsage(input_tokens=usage.get('prompt_tokens', 0), output_tokens=usage.get('completion_tokens', 0)))
 
         async def with_fallbacks(connection):
-            candidates = [request.model, *self.fallback_models(request.model)]
+            candidates = ([request.model, *self.fallback_models(request.model)]
+                          if self.allow_fallback else [request.model])
             first_error = None
             for index, model in enumerate(candidates):
                 try:
