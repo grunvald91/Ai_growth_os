@@ -109,6 +109,10 @@ def _first_visit(request: Request, background: BackgroundTasks, db: Session, set
                  claims: tickets.Claims, role: str):
     """First time this business opens the studio: the owner is asked whether to create its company."""
     if role not in ("owner", "co_owner"):
+        if (settings.studio_servgo_gateway_enabled and request.url.scheme == "https"
+                and request.url.netloc.casefold() == "servgo.ru"):
+            return RedirectResponse("/workspace/growth?setup=owner-required",
+                                    status_code=303, headers=HEADERS)
         name = f"{claims.name} (№{claims.business_id})" if claims.name else f"№{claims.business_id}"
         return _message("Сначала откроет владелец", f"Для «{name}» в студии ещё нет компании. Её создаёт владелец "
                         "при первом входе из ServGo — попросите его открыть «Маркетинг» один раз.", 403)
@@ -193,8 +197,14 @@ def sso_create(request: Request, background: BackgroundTasks, c: str = Form(""),
         if not _use_ticket(db, claims, link.product_id):  # this very answer was already used (a second press)
             return _message("Компания уже создана", "Откройте «Маркетинг» в админке ServGo ещё раз — "
                             "студия откроется сразу.", 409, action=("Вернуться в ServGo", ADMIN_URL))
-        return _cookie_redirect(settings, claims, role, link.product_id, f"/studio/products/{link.product_id}", request)
-    return _create_company(request, background, db, settings, claims, role)
+        response = _cookie_redirect(settings, claims, role, link.product_id, f"/studio/products/{link.product_id}", request)
+        if canonical:
+            response.delete_cookie(SETUP_COOKIE, path=SETUP_PATH, secure=True, httponly=True, samesite="lax")
+        return response
+    response = _create_company(request, background, db, settings, claims, role)
+    if canonical and response.status_code == 303:
+        response.delete_cookie(SETUP_COOKIE, path=SETUP_PATH, secure=True, httponly=True, samesite="lax")
+    return response
 
 
 def _create_company(request: Request, background: BackgroundTasks, db: Session, settings: Settings,
