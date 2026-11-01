@@ -92,7 +92,9 @@ class Handler(SimpleHTTPRequestHandler):
                     "token": "owner-fixture-token", "role": "owner",
                     "user": {"id": 42, "full_name": "Тестовый владелец"},
                 }, ensure_ascii=False).encode())
-            elif self.path.startswith("/api/studio/businesses"):
+            elif (self.path.startswith("/api/studio/businesses")
+                  or self.path.startswith("/api/admin/businesses")):
+                # Business selectors must receive arrays, not the generic '{}'.
                 self.wfile.write(b'[]')
             else:
                 self.wfile.write(b'{}')
@@ -188,6 +190,8 @@ def main():
             owner = browser.new_context(viewport={"width": 390, "height": 844})
             owner.add_cookies([{"name": "sg_shared", "value": "slow", "url": url, "httpOnly": True}])
             owner_page = owner.new_page()
+            owner_errors = []
+            owner_page.on("pageerror", lambda exc: owner_errors.append(str(exc)))
             owner_api = []
             owner_page.on("response", lambda response: owner_api.append({
                 "url": response.url.split("?", 1)[0], "status": response.status,
@@ -207,11 +211,13 @@ def main():
                     "logout": owner_page.locator('button[aria-label="Выйти"]').count(),
                     "cookie": [(c["name"], c["value"]) for c in owner.cookies()],
                     "api": owner_api[-20:],
+                    "pageErrors": owner_errors[-10:],
                 }, ensure_ascii=False), flush=True)
                 raise
             assert owner_page.locator('[role="alertdialog"]').count() == 0, (
                 "Failed payment check must not trap schedule behind a modal"
             )
+            assert not owner_errors, "Owner schedule raised a JavaScript error: " + repr(owner_errors)
             owner_page.wait_for_function(
                 "() => localStorage.getItem('userRole') === 'owner' && "
                 "!!document.querySelector('button[aria-label=Выйти]')",
