@@ -54,6 +54,43 @@ def build_intake(db: Session, settings: Settings, provider: LLMProvider | None =
     )
 
 
+def build_dispatcher_provider(settings: Settings) -> LLMProvider:
+    """Dedicated low-latency owner command classifier, separate from team tasks.
+
+    The general model router may be correctly tuned for quality/cost on long
+    creative jobs, but that policy is not suitable for an interactive classifier.
+    Operators can change DISPATCHER_LLM_MODEL without changing the team.
+    """
+    if settings.llm_provider != "xai":
+        return build_llm_provider(settings)
+    if not settings.xai_api_key:
+        raise ValueError("Configure XAI_API_KEY")
+    model = settings.dispatcher_llm_model.strip()
+    if not model:
+        raise ValueError("Configure DISPATCHER_LLM_MODEL")
+    provider = XAIProvider(
+        api_key=settings.xai_api_key, model=model,
+        base_url=settings.xai_base_url, reasoning_effort="low",
+        timeout_seconds=settings.xai_timeout_seconds,
+    )
+    effective = effective_router_settings(settings)
+    if not effective.model_router_enabled:
+        return provider
+    # Preserve the owner's existing router catalog and per-call price ceiling.
+    # Override only this interactive role in memory; all other roles retain
+    # their saved selections. The dedicated model must be enabled in the catalog.
+    import json
+    overrides = json.loads(effective.model_router_overrides or "{}")
+    overrides["dispatcher"] = [model]
+    router = ModelRouter(
+        profiles_json=effective.model_router_profiles,
+        overrides_json=json.dumps(overrides),
+        max_call_usd=effective.model_router_max_call_usd,
+        provider_supports_web_search=False,
+    )
+    return ModelRoutingProvider(provider=provider, router=router)
+
+
 def build_llm_provider(settings: Settings) -> LLMProvider:
     settings = effective_router_settings(settings)
     if settings.llm_provider == "anthropic":

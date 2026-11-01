@@ -41,16 +41,8 @@
   viewport?.addEventListener('resize',fitConversation);
   window.addEventListener('resize',fitConversation);
   fitConversation();
-  // Keep the last message readable above floating controls, regardless of
-  // hint count, keyboard resize or a multi-line typed draft.
-  const dock=root.querySelector('.command-dock');
-  if(dock){
-   const measureDock=()=>root.style.setProperty(
-     '--v4-dock-height',Math.ceil(dock.getBoundingClientRect().height)+'px');
-   const dockObserver=new ResizeObserver(measureDock);
-   dockObserver.observe(dock);
-   requestAnimationFrame(measureDock);
-  }
+  // The command dock follows the message feed in normal document flow,
+  // so resizing the keyboard/composer cannot hide the scrollbar below it.
   const feed=document.getElementById('dp-feed');
   let previousHeight=feed.clientHeight,previousContent=feed.scrollHeight;
   new ResizeObserver(()=>{

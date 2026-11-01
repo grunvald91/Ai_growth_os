@@ -67,6 +67,22 @@ class TableBlock(_Block):
             raise ValueError("Table rows must match the columns")
 
 
+class ResourceItem(_Block):
+    """One clickable resource with its own status, never a detached text/link pair."""
+    title: str = Field(min_length=1, max_length=140)
+    status: str = Field(max_length=80)
+    href: str
+
+    def model_post_init(self, __context) -> None:
+        if not safe_href(self.href):
+            raise ValueError("Resource target is not allowed")
+
+
+class ResourceListBlock(_Block):
+    type: Literal["resource_list"] = "resource_list"
+    items: list[ResourceItem] = Field(min_length=1, max_length=16)
+
+
 class TaskBlock(_Block):
     type: Literal["task"] = "task"
     task_id: str
@@ -108,7 +124,7 @@ class ConfirmBlock(_Block):
 
 
 Block = Annotated[
-    TextBlock | ChipsBlock | LinksBlock | TableBlock | TaskBlock | MaterialBlock | ConfirmBlock,
+    TextBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock,
     Field(discriminator="type"),
 ]
 _adapter: TypeAdapter[Block] = TypeAdapter(Block)

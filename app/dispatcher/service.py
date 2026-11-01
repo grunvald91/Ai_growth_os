@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -20,6 +21,7 @@ from app.dispatcher import executors
 from app.dispatcher.blocks import Chip, clean_blocks
 from app.dispatcher.decision import (CONFIDENCE_TO_ACT, SYSTEM_PROMPT, DispatcherDecision, build_user_message)
 from app.dispatcher.executors import Confirmation, Context, Outcome
+from app.dispatcher.fast_routes import quick_capability
 from app.dispatcher.models import DispatcherConversation, DispatcherMessage
 from app.dispatcher.policy import Verdict, verdict
 from app.dispatcher.readers import snapshot
@@ -33,10 +35,10 @@ from app.tools import ToolOperation
 
 _logger = logging.getLogger(__name__)
 
-# The owner should not stare at a spinner: after this the dispatcher answers with hints and links.
-# The model platforms are slow at times (see app/llm/timeouts.py); a late answer is better than none.
-# Stays below the 300 s the web server waits for the Studio.
-DECISION_TIMEOUT_SECONDS = 180
+# A network-outage safeguard, NOT a response-speed strategy. Normal requests
+# should finish promptly on the dedicated dispatcher model. Other generations
+# retain independent longer time budgets.
+DECISION_TIMEOUT_SECONDS = 45
 # The model sees only the latest messages of the thread (owner's decision, 22.10.2026); the whole
 # thread stays stored and visible on the page.
 HISTORY_FOR_MODEL = 20
@@ -106,7 +108,7 @@ def _add_committed(db: Session, conversation: DispatcherConversation, **values) 
 
 # ---- model ------------------------------------------------------------------------------
 
-def record_llm_cost(db: Session, product_id: UUID, response, provider: str) -> None:
+def record_llm_cost(db: Session, product_id: UUID, response, provider: str, *, latency_ms: int | None = None) -> None:
     usage = response.usage
     db.add(CostRecord(
         product_id=product_id, category="llm", provider=provider, amount=0, currency="USD",
@@ -114,7 +116,8 @@ def record_llm_cost(db: Session, product_id: UUID, response, provider: str) -> N
         output_tokens=usage.output_tokens if usage is not None else None,
         incurred_at=datetime.now(timezone.utc),
         details={**usage_cost_details(response), "task_type": "dispatcher", "model": response.model,
-                 "usage_incomplete": usage is None},
+                 "usage_incomplete": usage is None,
+                 "dispatcher_latency_ms": latency_ms},
     ))
     db.commit()
 
@@ -128,15 +131,19 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
     request = LLMRequest(
         system_prompt=SYSTEM_PROMPT,
         messages=[*turns, LLMMessage(role="user", content=build_user_message(snapshot(ctx.db, ctx.product), text))],
-        model=settings.llm_model, max_tokens=900,
+        model=(settings.dispatcher_llm_model if settings.llm_provider == "xai" else settings.llm_model),
+        max_tokens=900,
         response_schema=DispatcherDecision.model_json_schema(),
         metadata={"team_role": "dispatcher", "task_type": "dispatcher", "reasoning_effort": "low"},
     )
     seen: list[str] = []
+    started = time.monotonic()
 
     def observed(stage, response) -> None:
         seen.append(response.model)
-        record_llm_cost(db, ctx.product.id, response, settings.llm_provider)
+        elapsed_ms = round((time.monotonic() - started) * 1000)
+        record_llm_cost(db, ctx.product.id, response, settings.llm_provider,
+                        latency_ms=elapsed_ms)
 
     try:
         reply = await asyncio.wait_for(llm.generate(request, on_observed=observed), timeout=DECISION_TIMEOUT_SECONDS)
@@ -259,8 +266,12 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             decision = DispatcherDecision(intent="execute", capability=known.id,
                                           params={k: str(v) for k, v in (chip.get("params") or {}).items()},
                                           confidence=1.0)
-    elif llm is not None:
-        decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
+    else:
+        quick = quick_capability(text)
+        if quick is not None:
+            decision = DispatcherDecision(intent="execute", capability=quick, params={}, confidence=1.0)
+        elif llm is not None:
+            decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
 
     outcome: Outcome | None = None
     confirmation: Confirmation | None = None

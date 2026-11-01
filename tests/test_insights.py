@@ -536,8 +536,9 @@ async def test_unknown_topic_asks_instead_of_guessing(db, linked, platform):
     assert platform.calls == [] and "Уточните" in answer["text"]
 
 
-def test_the_model_gets_more_time_but_less_than_the_web_server_waits():
-    assert 120 <= service.DECISION_TIMEOUT_SECONDS < 300
+def test_dispatcher_decision_has_outage_guard_not_used_as_speed_strategy():
+    # Speed depends on the separately selected dispatcher model, not this limit.
+    assert service.DECISION_TIMEOUT_SECONDS == 45
 
 
 # ---- specialists do the tasks the director handed out ---------------------------------------------

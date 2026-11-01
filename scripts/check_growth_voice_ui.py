@@ -249,6 +249,13 @@ def main():
                 page.wait_for_function("() => !document.querySelector('#dp-form').classList.contains('voice-recording')")
                 page.wait_for_function("() => !document.querySelector('#dp-form').classList.contains('voice-processing')")
                 assert len(voice_calls)==2,voice_calls
+                # Voice processing clears immediately before the async dispatch
+                # request reaches the mocked HTTP handler. Wait for that
+                # observable event instead of relying on a browser scheduler race.
+                for _ in range(30):
+                    if len(dispatch_calls) >= 3:
+                        break
+                    page.wait_for_timeout(100)
                 assert len(dispatch_calls)==3,dispatch_calls
                 assert not [error for error in errors if error.startswith('js:')],errors
                 result['checks'].append({'page':'voice-hold-mock','width':390,
@@ -280,8 +287,8 @@ def main():
                 assert geometry['topicParent']=='command-topicbar', geometry
                 assert geometry['topicBottom']<=geometry['composerTop']+2, geometry
                 assert geometry['toolbarTop']>=geometry['composerBottom']-2, geometry
-                # A genuinely transparent dock overlaps the scrollable history;
-                # its children retain their own surfaces and remain clickable.
+                # The feed has its own scroll rail. Neither the rail nor the
+                # latest message may sit beneath the keyboard/voice composer.
                 page.evaluate("""() => {
                   const feed=document.querySelector('#dp-feed');
                   for(let i=0;i<14;i++){
@@ -290,41 +297,44 @@ def main():
                     feed.appendChild(m);
                   }
                 }""")
-                page.wait_for_function("""() => {
-                  const dock=document.querySelector('.command-dock');
-                  return parseFloat(getComputedStyle(document.querySelector('#dp-feed')).paddingBottom)
-                    >=dock.getBoundingClientRect().height+8;
-                }""")
-                overlap=page.evaluate("""() => {
+                separated=page.evaluate("""() => {
                   const feed=document.querySelector('#dp-feed'),
                         dock=document.querySelector('.command-dock'),
                         tools=document.querySelector('.command-tools'),
-                        hints=document.querySelector('.command-hints');
-                  const fr=feed.getBoundingClientRect(), dr=dock.getBoundingClientRect();
-                  const transparent=el=>getComputedStyle(el).backgroundColor;
-                  const reserved=parseFloat(getComputedStyle(feed).paddingBottom);
+                        hints=document.querySelector('.command-hints'),
+                        composer=document.querySelector('#dp-form'),
+                        textarea=document.querySelector('#dp-input');
                   feed.scrollTop=feed.scrollHeight;
+                  const fr=feed.getBoundingClientRect(), dr=dock.getBoundingClientRect();
+                  const cr=composer.getBoundingClientRect();
+                  const transparent=el=>getComputedStyle(el).backgroundColor;
                   return {feedBottom:fr.bottom,dockTop:dr.top,dockBottom:dr.bottom,
                     feedScrollHeight:feed.scrollHeight,feedClientHeight:feed.clientHeight,
-                    dockHeight:dr.height,reserved,
-                    dockBg:transparent(dock),toolsBg:transparent(tools),hintsBg:transparent(hints),
-                    composerBg:transparent(document.querySelector('#dp-form')),
+                    dockBg:transparent(dock),toolsBg:transparent(tools),
+                    hintsBg:transparent(hints),composerBg:transparent(composer),
                     lastBottom:feed.lastElementChild.getBoundingClientRect().bottom,
-                    scrollTop:feed.scrollTop};
+                    composerWidth:cr.width,homeWidth:document.querySelector('.dp-home').getBoundingClientRect().width,
+                    placeholderFont:parseFloat(getComputedStyle(textarea,'::placeholder').fontSize),
+                    placeholderOpacity:getComputedStyle(textarea,'::placeholder').opacity,
+                    screenOverflow:document.documentElement.scrollWidth-innerWidth,
+                    dockPosition:getComputedStyle(dock).position};
                 }""")
-                assert overlap['dockBg']=='rgba(0, 0, 0, 0)',overlap
-                assert overlap['toolsBg']=='rgba(0, 0, 0, 0)',overlap
-                assert overlap['hintsBg']=='rgba(0, 0, 0, 0)',overlap
-                assert overlap['composerBg']!='rgba(0, 0, 0, 0)',overlap
-                assert overlap['feedBottom']>=overlap['dockBottom']-12,overlap
-                assert overlap['dockTop']<overlap['feedBottom']-45,overlap
-                assert overlap['reserved']>=overlap['dockHeight']+8,overlap
-                assert overlap['feedScrollHeight']>overlap['feedClientHeight'],overlap
-                assert overlap['lastBottom']<=overlap['dockTop']+3,overlap
-                page.screenshot(path=str(OUT/'transparent-floating-composer-390.png'),animations='disabled')
-                result['checks'].append({'page':'transparent-floating-composer-390',
-                    'dock_transparent':True,'shortcuts_transparent':True,
-                    'feed_scrolls_behind_dock':True,'last_message_readable':True})
+                assert separated['dockBg']=='rgba(0, 0, 0, 0)',separated
+                assert separated['toolsBg']=='rgba(0, 0, 0, 0)',separated
+                assert separated['hintsBg']=='rgba(0, 0, 0, 0)',separated
+                assert separated['composerBg']!='rgba(0, 0, 0, 0)',separated
+                assert separated['dockPosition']=='relative',separated
+                assert separated['feedBottom']<=separated['dockTop']+3,separated
+                assert separated['feedScrollHeight']>separated['feedClientHeight'],separated
+                assert separated['lastBottom']<=separated['feedBottom']+1,separated
+                assert separated['composerWidth']>=separated['homeWidth']-4,separated
+                assert separated['placeholderFont']>=12.5,separated
+                assert float(separated['placeholderOpacity'])>=.8,separated
+                assert separated['screenOverflow']<=2,separated
+                page.screenshot(path=str(OUT/'composer-above-scrollbar-390.png'),animations='disabled')
+                result['checks'].append({'page':'composer-above-scrollbar-390',
+                    'dock_transparent':True,'scrollbar_not_behind_composer':True,
+                    'latest_message_visible':True,'placeholder_integrated':True})
                 page.route('**/studio/products/*/dispatch/new',
                            lambda route:route.fulfill(status=200,content_type='application/json',
                                body=json.dumps({'hints':[]})))

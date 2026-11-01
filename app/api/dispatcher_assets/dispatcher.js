@@ -24,17 +24,33 @@
     return 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   }
 
-  // Every request is a POST of JSON; the Origin header is added by the browser.
-  function post(path, body) {
-    return fetch(api + path, {
+  // Bound only dispatcher messages: other confirmation requests have different budgets.
+  // Keep the idempotency key in the caller so a mobile retry cannot duplicate an action.
+  function post(path, body, timeoutMs) {
+    var controller = timeoutMs && window.AbortController ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, timeoutMs) : null;
+    var request = fetch(api + path, {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify(body || {})
+      body: JSON.stringify(body || {}),
+      signal: controller ? controller.signal : undefined
     }).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (data) {
         if (!response.ok) throw new Error((data && data.detail) || 'Не получилось. Попробуйте ещё раз.');
         return data;
       });
+    }).catch(function (error) {
+      if (error && error.name === 'AbortError') {
+        throw new Error('Диспетчер отвечает слишком долго. Попробуйте ещё раз — команда не будет выполнена повторно.');
+      }
+      throw error;
+    });
+    return request.then(function (value) {
+      if (timer) clearTimeout(timer);
+      return value;
+    }, function (error) {
+      if (timer) clearTimeout(timer);
+      throw error;
     });
   }
 
@@ -102,6 +118,25 @@
     });
     table.appendChild(body); wrap.appendChild(table);
     return wrap;
+  }
+
+  // One visual item = one accessible link. No duplicate table/link sections.
+  function renderResourceList(block) {
+    var list = el('div', 'dp-resource-list');
+    block.items.forEach(function (item) {
+      var card = el('a', 'dp-resource');
+      card.href = item.href;
+      var content = el('span', 'dp-resource-copy');
+      content.appendChild(el('strong', 'dp-resource-title',
+        voiceHoldEnabled ? friendlyTitle(item.title) : item.title));
+      if (item.status) content.appendChild(el('span', 'dp-resource-status', item.status));
+      card.appendChild(content);
+      var arrow = el('span', 'dp-resource-arrow', '→');
+      arrow.setAttribute('aria-hidden', 'true');
+      card.appendChild(arrow);
+      list.appendChild(card);
+    });
+    return list;
   }
 
   function renderTask(block) {
@@ -174,6 +209,7 @@
       else if (block.type === 'chips') bubble.appendChild(renderChips(block.items, sendChip));
       else if (block.type === 'links') bubble.appendChild(renderLinks(block.items));
       else if (block.type === 'table') bubble.appendChild(renderTable(block));
+      else if (block.type === 'resource_list') bubble.appendChild(renderResourceList(block));
       else if (block.type === 'task') bubble.appendChild(renderTask(block));
       else if (block.type === 'material') bubble.appendChild(renderMaterial(block));
       else if (block.type === 'confirm') bubble.appendChild(renderConfirm(block));
@@ -184,7 +220,19 @@
   function upsert(message) {
     var node = renderMessage(message);
     var existing = feed.querySelector('[data-id="' + message.id + '"]');
-    if (existing) feed.replaceChild(node, existing); else feed.appendChild(node);
+    if (Number.isInteger(message.seq)) node.setAttribute('data-seq', String(message.seq));
+    if (existing) {
+      feed.replaceChild(node, existing);
+      return;
+    }
+    // Requests and update polling can finish out of order. Keep the
+    // conversation oldest -> newest, with the newest next to the composer.
+    var following = Array.from(feed.children).find(function (child) {
+      var seq = Number(child.getAttribute('data-seq'));
+      return child.hasAttribute('data-seq') && Number.isInteger(message.seq) && seq > message.seq;
+    });
+    if (following) feed.insertBefore(node, following);
+    else feed.appendChild(node);
   }
 
   function renderHints() {
@@ -250,7 +298,7 @@
       syncConversationLayout();
     }
     setBusy(true);
-    post('/messages', body).then(function (data) {
+    post('/messages', body, 55000).then(function (data) {
       if (echoNode) echoNode.remove();
       applyResult(data);
       if (voiceRequest) showNote('');
@@ -424,7 +472,7 @@
       if (voiceStatus) {
         voiceStatus.hidden = mode !== 'processing' && mode !== 'sending';
         voiceStatus.textContent = mode === 'processing' ? 'Распознаю и редактирую запись…'
-          : mode === 'sending' ? 'Передаю команду диспетчеру…' : '';
+          : mode === 'sending' ? 'Обрабатываю команду…' : '';
       }
       input.readOnly = mode !== 'idle';
       form.setAttribute('aria-busy', mode === 'processing' || mode === 'sending' ? 'true' : 'false');
@@ -595,7 +643,7 @@
           }
           voiceDispatchPending = true;
           setVoiceState('sending');
-          showLive('Передаю команду диспетчеру…', '', true);
+          showLive('Обрабатываю запрос…', '', true);
           send({ mode: 'text', text: transcript }, transcript, true);
         } else {
           applyDictation(data);
