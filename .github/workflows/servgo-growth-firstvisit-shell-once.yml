@@ -1,0 +1,80 @@
+name: Growth first visit + Air shell — targeted tests and guarded deploy
+on:
+  push:
+    branches: [fix/servgo-first-visit-air-shell-20261101]
+    paths: ['.github/workflows/servgo-growth-firstvisit-shell-once.yml']
+permissions:
+  contents: read
+concurrency:
+  group: growth-production
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Guard tested source
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install existing Growth test dependencies
+        run: python -m pip install -q --disable-pip-version-check -e '.[test]'
+      - name: Run only SSO / Origin / Air shell regression suite
+        run: |
+          python -m pytest -q tests/test_studio_sso.py tests/test_servgo_same_origin_gateway.py tests/test_growth_servgo_air_theme.py tests/test_growth_v4_preview.py
+      - name: Confirm consent and CSS contracts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('app/api/studio_sso.py').read_text()
+          css=Path('app/api/assets/growth-servgo-air.css').read_text()
+          assert 'SETUP_COOKIE = "sg_growth_setup"' in s
+          assert 'request.url.netloc.casefold() == "servgo.ru"' in s
+          assert 'path=SETUP_PATH' in s and 'httponly=True' in s
+          assert 'response.delete_cookie(SETUP_COOKIE' in s
+          assert 'sgNavFlow' in css and '/fonts/servgo-onest-cyrillic.woff2' in css
+          print('SSO_UI_AND_CSS_CONTRACTS=PASS')
+          PY
+      - name: Deploy exact tested Growth source with existing rollback mechanism
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            if ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/scanned
+          test -s ~/.ssh/known_hosts
+          git archive --format=tar.gz "$GITHUB_SHA" app alembic/versions pyproject.toml products |
+            sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+             "set -eu
+              python3 /opt/ai_growth_os/deploy/deploy_growth.py deploy $GITHUB_SHA
+              if ! (
+                docker exec ai-growth-os-api-1 python -c 'from app.core.config import get_settings; assert get_settings().studio_servgo_gateway_enabled'
+                test \"\$(curl -sS -o /dev/null -w '%{http_code}' --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/studio)\" = 401
+                test \"\$(curl -sS -o /dev/null -w '%{http_code}' --resolve growth.servgo.ru:443:127.0.0.1 https://growth.servgo.ru/studio)\" = 401
+                test \"\$(curl -sS -o /dev/null -w '%{http_code}' --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/workspace/growth)\" = 200
+                test \"\$(curl -sS -o /dev/null -w '%{http_code}' --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/fonts/servgo-onest-cyrillic.woff2)\" = 200
+                test \"\$(curl -sS -o /dev/null -w '%{http_code}' --resolve mail.servgo.ru:443:127.0.0.1 https://mail.servgo.ru/api/status)\" = 401
+              ); then
+                echo GROWTH_SMOKE_FAILED_ROLLING_BACK
+                python3 /opt/ai_growth_os/deploy/deploy_growth.py rollback
+                exit 1
+              fi
+              echo GROWTH_FIRST_VISIT_AND_AIR_SHELL_DEPLOY_OK"
