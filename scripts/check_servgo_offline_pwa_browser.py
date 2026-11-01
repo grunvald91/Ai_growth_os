@@ -11,11 +11,27 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import threading
+import time
 
 from playwright.sync_api import sync_playwright
 
 DIST = Path(__file__).resolve().parents[1] / "web" / "frontend" / "dist"
 SERVICE = "Тестовая услуга для офлайн-режима"
+BUSINESS_DETAIL = {
+    "id": 1,
+    "name": "Тестовая компания",
+    "business_type": "salon",
+    "services": [
+        {"id": 11, "name": "Диагностика 11", "is_active": True, "is_additional": False, "duration_minutes": 30, "price": 500},
+        {"id": 12, "name": "Диагностика 12", "is_active": True, "is_additional": False, "duration_minutes": 30, "price": 700},
+    ],
+    "employees": [{"id": 21, "name": "Тестовый мастер", "role": "master",
+                   "is_active": True, "service_ids": [11, 12]}],
+    "booking_flow_order": "service_first",
+    "allow_multiple_services": False,
+    "legal_documents_enabled": False,
+    "prepayment_enabled": False,
+}
 BOOKINGS = [{
     "id": 910001,
     "business_id": 1,
@@ -49,10 +65,15 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'{"detail":"Temporary payment-check failure"}')
             return
-        if self.path.startswith("/api/auth/session") and "sg_shared=ok" not in self.headers.get("Cookie", ""):
-            self.send_response(401)
-            self.end_headers()
-            return
+        if self.path.startswith("/api/auth/session"):
+            cookie = self.headers.get("Cookie", "")
+            if "sg_shared=slow" in cookie:
+                # Slow-cookie login must not be redirected at the 3s public page deadline.
+                time.sleep(4.4)
+            elif "sg_shared=ok" not in cookie:
+                self.send_response(401)
+                self.end_headers()
+                return
         if self.path.startswith("/api/"):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -60,6 +81,10 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             if self.path.startswith("/api/my/bookings"):
                 self.wfile.write(json.dumps(BOOKINGS, ensure_ascii=False).encode())
+            elif self.path.startswith("/api/businesses/1/slots"):
+                self.wfile.write(b'[{"time":"10:00"},{"time":"11:00"}]')
+            elif self.path == "/api/businesses/1":
+                self.wfile.write(json.dumps(BUSINESS_DETAIL, ensure_ascii=False).encode())
             elif self.path.startswith("/api/auth/me"):
                 self.wfile.write(json.dumps({"id":1,"full_name":"Тестовый пользователь","role":"client"}).encode())
             elif self.path.startswith("/api/auth/session"):
@@ -161,9 +186,12 @@ def main():
             # Isolated owner: failed payment checking must not trap the schedule,
             # and signing out must invalidate the shared cookie and new-tab auth.
             owner = browser.new_context(viewport={"width": 390, "height": 844})
-            owner.add_cookies([{"name": "sg_shared", "value": "ok", "url": url, "httpOnly": True}])
+            owner.add_cookies([{"name": "sg_shared", "value": "slow", "url": url, "httpOnly": True}])
             owner_page = owner.new_page()
             owner_page.goto(url + "/admin/schedule", wait_until="domcontentloaded")
+            owner_page.get_by_text("Восстанавливаем вход", exact=False).first.wait_for(timeout=7000)
+            owner_page.wait_for_timeout(3400)
+            assert owner_page.url.endswith("/admin/schedule"), "Slow cookie login redirected prematurely"
             owner_page.get_by_text("Проверка предоплат недоступна", exact=False).first.wait_for(timeout=15000)
             assert owner_page.locator('[role="alertdialog"]').count() == 0, (
                 "Failed payment check must not trap schedule behind a modal"
@@ -207,6 +235,31 @@ def main():
             assert second_tab.evaluate("localStorage.getItem('token')") is None
             assert second_tab.evaluate("localStorage.getItem('servgoExplicitLogout')") == "1"
             print("PWA_BROWSER_LOGOUT_AND_PAYMENT_FAILURE_OK", flush=True)
+
+            # Switching a preselected service inside the same React route must
+            # discard a previously selected date/time and preserve SEO source.
+            client = browser.new_context(viewport={"width": 390, "height": 844})
+            booking_page = client.new_page()
+            booking_page.goto(url + "/book/1?service=11&seo_ref=source.signature",
+                              wait_until="domcontentloaded")
+            booking_page.get_by_text("Выберите удобный день", exact=False).first.wait_for(timeout=15000)
+            booking_page.locator(".bf-day:not([disabled])").first.click()
+            booking_page.locator(".bf-time").first.wait_for(timeout=10000)
+            booking_page.locator(".bf-time").first.click()
+            booking_page.get_by_text("Проверьте запись", exact=False).first.wait_for(timeout=10000)
+            booking_page.evaluate("""() => {
+                window.history.pushState({}, '', '/book/1?service=12&seo_ref=source.signature');
+                window.dispatchEvent(new PopStateEvent('popstate', {state: window.history.state}));
+            }""")
+            booking_page.get_by_text("Выберите удобный день", exact=False).first.wait_for(timeout=15000)
+            booking_page.get_by_text("Диагностика 12", exact=False).first.wait_for(timeout=15000)
+            assert booking_page.locator(".bf-day[aria-pressed=true]").count() == 0, (
+                "Re-entry unexpectedly retained a date from another service"
+            )
+            booking_page.get_by_role("button", name="Назад").first.click()
+            booking_page.wait_for_url(url + "/business/1?seo_ref=source.signature", timeout=10000)
+            print("PWA_BROWSER_BOOKING_REENTRY_AND_SEO_REF_OK", flush=True)
+            client.close()
             browser.close()
     finally:
         server.shutdown()
