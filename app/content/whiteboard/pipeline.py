@@ -122,7 +122,7 @@ class WhiteboardPipeline:
                           if self.checkpoints else await review_facts())
             science_audit = assessment.model_dump()
             science_audit['source_ids'] = [
-                item['id'] for item in reference_anchors(request)
+                item for item in assessment.verified_source_ids
             ]
             science_audit['check_type'] = 'curated_reference_ai_review'
             if self.progress is not None:
