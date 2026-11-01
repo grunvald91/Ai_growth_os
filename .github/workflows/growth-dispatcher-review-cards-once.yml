@@ -1,3 +1,4 @@
+# Recheck after adjusting a test that required exactly one optional hint.
 # Integrated recheck: retain main reverse-proxy CSRF fix and verify forwarded HTTPS setup.
 name: Growth dispatcher video review cards — targeted guarded release
 on:
