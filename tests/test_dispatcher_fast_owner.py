@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -77,9 +78,11 @@ async def test_asking_for_business_advice_returns_actionable_steps_without_model
 async def test_recent_videos_include_completed_tasks_and_owner_links(db, owner):
     product, other = owner
     recent = Task(product_id=product.id, title="Видео: последние новости",
-                  assigned_agent="whiteboard_renderer", status=TaskStatus.COMPLETED)
+                  assigned_agent="whiteboard_renderer", status=TaskStatus.COMPLETED,
+                  created_at=datetime(2026, 10, 31, 21))
     waiting = Task(product_id=product.id, title="Видео про записи",
-                   assigned_agent="whiteboard_renderer", status=TaskStatus.WAITING_APPROVAL)
+                   assigned_agent="whiteboard_renderer", status=TaskStatus.WAITING_APPROVAL,
+                   created_at=datetime(2026, 10, 31, 20))
     hidden = Task(product_id=other.id, title="Private other company",
                   assigned_agent="whiteboard_renderer", status=TaskStatus.COMPLETED)
     db.add_all([recent, waiting, hidden])
@@ -91,14 +94,32 @@ async def test_recent_videos_include_completed_tasks_and_owner_links(db, owner):
     answer = (await ask(db, product, "Покажи мои последние видео, которые я запустил"))["messages"][1]
     assert answer["intent"] == "execute"
     assert db.scalar(select(DispatcherMessage).where(DispatcherMessage.role == "assistant")).capability == "show_recent_videos"
-    table = blocks(answer, "table")[0]
-    assert len(table["rows"]) == 2
-    assert any("Готово к просмотру" in row for row in table["rows"])
-    links = blocks(answer, "links")[0]["items"]
-    assert any(str(recent.id) in item["href"] for item in links)
-    assert any(str(waiting.id) in item["href"] for item in links)
-    assert all(str(other.id) not in item["href"] for item in links)
-    assert not any("Private other company" in str(row) for row in table["rows"])
+    cards = blocks(answer, "resource_list")[0]["items"]
+    assert len(cards) == 2
+    assert [item["title"] for item in cards] == ["Видео про записи", "Видео: последние новости"]
+    assert cards[-1]["status"] == "Готово к просмотру"
+    assert str(recent.id) in cards[-1]["href"]
+    assert str(waiting.id) in cards[0]["href"]
+    assert all(str(other.id) not in item["href"] for item in cards)
+    assert not blocks(answer, "table") and not blocks(answer, "links")
+    assert all("Private other company" not in item["title"] for item in cards)
+
+
+@pytest.mark.asyncio
+async def test_recent_videos_limit_to_eight_but_show_newest_nearest_composer(db, owner):
+    product, _ = owner
+    start = datetime(2026, 10, 30, 9)
+    db.add_all([
+        Task(product_id=product.id, title=f"Видео {i}",
+             assigned_agent="whiteboard_renderer", status=TaskStatus.QUEUED,
+             created_at=start + timedelta(minutes=i))
+        for i in range(12)
+    ])
+    db.commit()
+    answer = (await ask(db, product, "Покажи последние готовые ролики"))["messages"][1]
+    items = blocks(answer, "resource_list")[0]["items"]
+    assert [item["title"] for item in items] == [f"Видео {i}" for i in range(4, 12)]
+    assert not blocks(answer, "table") and not blocks(answer, "links")
 
 
 @pytest.mark.asyncio
