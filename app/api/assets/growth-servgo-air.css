@@ -73,3 +73,146 @@ body[data-growth-design="v4"] .mobile-nav {
     transition-duration: .01ms !important;
   }
 }
+
+
+/* ServGo admin mobile-shell parity (booking_bot: .ds-bottomnav / .ds-bn).
+ * v4 only: old Growth layouts, behavior and navigation destinations stay intact.
+ */
+body[data-growth-design="v4"] {
+  font-family: var(--ds-font);
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: -0.015em;
+  -webkit-font-smoothing: antialiased;
+}
+body[data-growth-design="v4"] .hero-h {
+  color: var(--s-text) !important;
+  -webkit-text-fill-color: var(--s-text) !important;
+  opacity: 1 !important;
+  background: none !important;
+  text-shadow: none !important;
+  font-weight: 550;
+  line-height: 1.12;
+  letter-spacing: -0.038em;
+}
+body[data-growth-design="v4"] .hero-desc {
+  color: var(--s-muted);
+  font-size: 14px;
+  line-height: 1.55;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+body[data-growth-design="v4"] .hero-eyebrow {
+  color: var(--s-accent);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+}
+body[data-growth-design="v4"] .route-page-head h1,
+body[data-growth-design="v4"] .page-head h1,
+body[data-growth-design="v4"] .topbar strong {
+  color: var(--s-text);
+  font-weight: 550;
+  letter-spacing: -0.038em;
+}
+body[data-growth-design="v4"] .route-page-head .subtitle,
+body[data-growth-design="v4"] .hero-intro p,
+body[data-growth-design="v4"] .home-hero-subnote,
+body[data-growth-design="v4"] .crumbs {
+  color: var(--s-muted);
+}
+body[data-growth-design="v4"] .command-bar textarea,
+body[data-growth-design="v4"] .command-hints .dp-chip,
+body[data-growth-design="v4"] .mobile-nav a,
+body[data-growth-design="v4"] .mobile-nav summary {
+  font-family: var(--ds-font);
+}
+
+@media (max-width: 780px) {
+  body[data-growth-design="v4"] .topbar,
+  body[data-growth-design="v4"] .mobile-nav {
+    background: var(--s-bg);
+    border-color: var(--s-line);
+  }
+  body[data-growth-design="v4"] .mobile-nav {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 0;
+    min-height: 0;
+    padding: 3px 8px calc(5px + env(safe-area-inset-bottom, 0px));
+    border-top: 0;
+    box-shadow: 0 -8px 25px rgba(45, 92, 146, 0.018);
+  }
+  body[data-growth-design="v4"] .mobile-nav > a,
+  body[data-growth-design="v4"] .mobile-nav > details > summary {
+    box-sizing: border-box;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 4px;
+    min-height: 54px;
+    height: 100%;
+    padding: 3px 1px 5px;
+    margin: 0;
+    color: var(--s-muted-2);
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1.05;
+    letter-spacing: -0.035em;
+    text-align: center;
+    text-decoration: none;
+    box-shadow: none;
+    cursor: pointer;
+  }
+  body[data-growth-design="v4"] .mobile-nav > a.active,
+  body[data-growth-design="v4"] .mobile-nav > details[open] > summary {
+    color: var(--s-accent);
+    background: transparent;
+    font-weight: 500;
+    border-radius: 0;
+  }
+  body[data-growth-design="v4"] .mobile-nav > a::after {
+    content: "";
+    display: none;
+    position: absolute;
+    left: 22%;
+    right: 22%;
+    bottom: 0;
+    height: 2px;
+    background: var(--s-flow-grad);
+    background-size: 310% 100%;
+    animation: dsFlowLine 3.7s linear infinite;
+    pointer-events: none;
+  }
+  body[data-growth-design="v4"] .mobile-nav > a.active::after {
+    display: block;
+  }
+  body[data-growth-design="v4"] .mobile-nav > a > .icon,
+  body[data-growth-design="v4"] .mobile-nav > details > summary > .icon {
+    width: 21px;
+    height: 21px;
+    stroke-width: 1.65;
+  }
+  body[data-growth-design="v4"] .mobile-nav .v4-more {
+    background: var(--s-surface);
+    border-color: var(--s-line);
+    border-radius: 18px 18px 0 0;
+    box-shadow: var(--sh-pop);
+    padding: 12px;
+  }
+  body[data-growth-design="v4"] .hero-h {
+    font-size: 35px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  body[data-growth-design="v4"] .mobile-nav > a::after {
+    animation: none;
+  }
+}
