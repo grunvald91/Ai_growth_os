@@ -142,3 +142,30 @@ def test_growth_profile_adapter_is_after_legacy_studio_css_in_html_head():
     assert "ServGo: данные заведения" in result
     assert result.index("/studio/assets/studio.css?v=14") < result.index("/studio/assets/growth-servgo-air.css?v=3")
     assert result.count("/studio/assets/growth-servgo-air.css?v=3") == 1
+
+
+
+def test_profile_text_colors_have_sufficient_dark_and_light_contrast():
+    """Check the actual shared token pairs used by the v4 intake bridge."""
+    import re
+
+    theme = (ASSETS / "servgo-air-tokens.css").read_text(encoding="utf-8")
+    def segment(mode):
+        match = re.search(r"\[data-theme=['\"]" + mode + r"['\"]\]\s*\{([^}]+)\}", theme)
+        assert match, mode
+        return match.group(1)
+    def color(css, token):
+        hit = re.search(r"--" + re.escape(token) + r":\s*(#[0-9a-fA-F]{6})\s*;", css)
+        assert hit, token
+        return hit.group(1)
+    def luma(hex_color):
+        rgb = [int(hex_color[pos:pos+2], 16)/255 for pos in (1, 3, 5)]
+        values = [x/12.92 if x <= 0.04045 else ((x+0.055)/1.055)**2.4 for x in rgb]
+        return sum(a*b for a,b in zip(values, (0.2126, 0.7152, 0.0722)))
+    for mode in ("light", "dark"):
+        colors = segment(mode)
+        background = luma(color(colors, "s-surface"))
+        for ink in ("s-text", "s-muted"):
+            foreground = luma(color(colors, ink))
+            ratio = (max(foreground, background)+0.05)/(min(foreground, background)+0.05)
+            assert ratio >= 4.5, f"{mode}: {ink} contrast ratio {ratio:.2f} below 4.5"
