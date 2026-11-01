@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -34,11 +35,10 @@ from app.tools import ToolOperation
 
 _logger = logging.getLogger(__name__)
 
-# Read-only owner requests are routed without an LLM. Other model routing must
-# return a usable fallback before the client and edge proxy time out.
-# Content generation uses its own longer timeouts; this limit only applies to
-# deciding the next dispatcher action.
-DECISION_TIMEOUT_SECONDS = 25
+# A network-outage safeguard, NOT a response-speed strategy. Normal requests
+# should finish promptly on the dedicated dispatcher model. Other generations
+# retain independent longer time budgets.
+DECISION_TIMEOUT_SECONDS = 45
 # The model sees only the latest messages of the thread (owner's decision, 22.10.2026); the whole
 # thread stays stored and visible on the page.
 HISTORY_FOR_MODEL = 20
@@ -108,7 +108,7 @@ def _add_committed(db: Session, conversation: DispatcherConversation, **values) 
 
 # ---- model ------------------------------------------------------------------------------
 
-def record_llm_cost(db: Session, product_id: UUID, response, provider: str) -> None:
+def record_llm_cost(db: Session, product_id: UUID, response, provider: str, *, latency_ms: int | None = None) -> None:
     usage = response.usage
     db.add(CostRecord(
         product_id=product_id, category="llm", provider=provider, amount=0, currency="USD",
@@ -116,7 +116,8 @@ def record_llm_cost(db: Session, product_id: UUID, response, provider: str) -> N
         output_tokens=usage.output_tokens if usage is not None else None,
         incurred_at=datetime.now(timezone.utc),
         details={**usage_cost_details(response), "task_type": "dispatcher", "model": response.model,
-                 "usage_incomplete": usage is None},
+                 "usage_incomplete": usage is None,
+                 "dispatcher_latency_ms": latency_ms},
     ))
     db.commit()
 
@@ -130,15 +131,18 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
     request = LLMRequest(
         system_prompt=SYSTEM_PROMPT,
         messages=[*turns, LLMMessage(role="user", content=build_user_message(snapshot(ctx.db, ctx.product), text))],
-        model=settings.llm_model, max_tokens=900,
+        model=settings.dispatcher_llm_model, max_tokens=900,
         response_schema=DispatcherDecision.model_json_schema(),
         metadata={"team_role": "dispatcher", "task_type": "dispatcher", "reasoning_effort": "low"},
     )
     seen: list[str] = []
+    started = time.monotonic()
 
     def observed(stage, response) -> None:
         seen.append(response.model)
-        record_llm_cost(db, ctx.product.id, response, settings.llm_provider)
+        elapsed_ms = round((time.monotonic() - started) * 1000)
+        record_llm_cost(db, ctx.product.id, response, settings.llm_provider,
+                        latency_ms=elapsed_ms)
 
     try:
         reply = await asyncio.wait_for(llm.generate(request, on_observed=observed), timeout=DECISION_TIMEOUT_SECONDS)
