@@ -147,24 +147,91 @@ def render_v4(page, request, pid, switch):
                    '</div>'
                    '<div class="home-hero-subnote">Результаты и следующие шаги появятся после запроса</div></div></section>')
     if pid and current == base+'/create':
+        # Keep the real, validated Studio form and its JS behavior. Only
+        # reorganize its presentation; do not create a second task path.
         form = original.outer(original.find(ident='sg-create-form'))
         if form:
-            form = form.replace('class="sg-format-grid"', 'class="format-grid sg-format-grid"')
-            form = form.replace('class="sg-choice"', 'class="format-option sg-choice"')
+            form = form.replace('class="sg-format-grid"',
+                                'class="sg-format-grid create-format-grid"', 1)
+            form = form.replace('class="sg-choice"', 'class="sg-choice create-choice"')
+            form = form.replace('Короткое видео · сценарий', 'Сценарий видео')
+            form = form.replace('Сценарий, кадры и озвучка — не MP4',
+                                'Текст и кадры, без готового MP4')
+            form = form.replace('Изображение · бриф', 'Бриф для изображения')
+            form = form.replace('Визуальный бриф — не готовая картинка',
+                                'Описание картинки для дизайнера или ИИ')
+            # The MP4 producer is a separate, existing workflow. Show it as
+            # one of six results, but never pretend it submits this form.
+            video_card = (
+                f'<a class="create-video-choice" href="{base}/whiteboard">'
+                f'<span class="create-video-symbol">{icon("video")}</span>'
+                '<span class="sg-choice-copy"><b>Простое видео</b>'
+                '<small>Анимация, озвучка и готовый MP4</small></span></a>'
+            )
+            form = form.replace('</fieldset>', video_card+'</fieldset>', 1)
+            form = form.replace('<fieldset class="sg-format-grid create-format-grid">',
+                                '<div class="create-step"><h2>Выберите результат</h2></div>'
+                                '<fieldset class="sg-format-grid create-format-grid">', 1)
+            form = form.replace('<div class="sg-fields">',
+                                '<div class="create-step create-step-topic"><h2>О чём расскажем?</h2></div>'
+                                '<div class="sg-fields">', 1)
+
+            # Move optional inputs into a native accessible disclosure.
+            # Their names and values are unchanged, including on 422 errors.
+            form_doc = Document(form)
+            extras = sorted((
+                e for e in form_doc.elements if e[0] == 'label'
+                and any(f'name="{field}"' in form_doc.outer(e)
+                        for field in ('audience', 'editorial_brief'))
+            ), key=lambda e: e[2])
+            if len(extras) == 2:
+                left, right = extras[0][2], extras[1][5]
+                optional = form[left:right]
+                form = (form[:left]
+                        + '<details class="create-advanced"><summary>'
+                          'Дополнительные настройки'
+                          '<span>Аудитория и пожелания</span></summary>'
+                          '<div class="create-advanced-fields">'
+                        + optional + '</div></details>' + form[right:])
+
+            # The default view needs one action and one brief safety note.
+            # Real duration estimates are still available on demand.
+            form_doc = Document(form)
+            footer = form_doc.find(cls='sg-form-bottom')
+            action = form_doc.find(cls='sg-primary-action')
+            estimate = form_doc.find(cls='sg-duration-note')
+            if footer and action:
+                button = form_doc.outer(action)
+                timing = form_doc.outer(estimate) if estimate else ''
+                replacement = (
+                    '<div class="create-footer">'
+                    '<p>Материал не публикуется автоматически. '
+                    f'Проверить результат можно в <a href="{base}/work">заданиях</a>.</p>'
+                    + button + '</div>'
+                    + ('<details class="create-timing"><summary>Сколько ждать результат?</summary>'
+                       + timing + '</details>' if timing else '')
+                )
+                form = form.replace(form_doc.outer(footer), replacement, 1)
+
+            more = ''.join(
+                f'<a href="{href}">{icon(glyph)}<span><b>{name}</b><small>{desc}</small></span></a>'
+                for name, href, glyph, desc in [
+                    ('Контент-план', base+'/plan', 'calendar', 'Темы и публикации по датам'),
+                    ('SEO-статья', base+'?command=seo_factory', 'globe', 'Материалы для блога'),
+                    ('Кампания', base+'/campaigns', 'layers', 'Продвижение под конкретную цель'),
+                    ('Разведка', f'/intelligence?product_id={pid}', 'search',
+                     'Исследование конкурентов')])
             warning = original.outer(original.find(cls='sg-warning'))
-            content = ('<div class="page-head animate-in"><div><div class="eyebrow">Создание</div>'
-                       '<h1 style="margin-top:7px">Что хотите создать?</h1>'
-                       '<p class="subline">Выберите результат — или начните с голосовой команды.</p></div></div>'
-                       '<section class="surface form-card animate-in"><h2>Формат</h2>'+warning+form+'</section>'
-                       '<div class="module-grid mt14">'+''.join(
-                           f'<a class="module-card surface" href="{href}"><div class="module-icon">{icon(glyph)}</div>'
-                           f'<h3>{name}</h3><p>{desc}</p><span class="link">Открыть →</span></a>'
-                           for name,href,glyph,desc in [
-                               ('Простое видео',base+'/whiteboard','video','Объяснения и простая анимированная реклама · MP4'),
-                               ('Контент-план',base+'/plan','calendar','Темы и публикации по датам'),
-                               ('SEO-статья',base+'?command=seo_factory','globe','Поисковые запросы и собственный блог'),
-                               ('Кампания',base+'/campaigns','layers','Цель, аудитория, каналы и показатели'),
-                               ('Разведка',f'/intelligence?product_id={pid}','search','Конкуренты, источники и гипотезы')])+'</div>')
+            content = (
+                '<div class="create-workspace animate-in">'
+                '<header class="create-heading"><h1>Что создадим?</h1>'
+                '<p>Выберите формат и напишите тему. Остальное поможет подготовить ИИ-команда.</p>'
+                '</header><section class="surface create-panel">'
+                + warning + form + '</section>'
+                '<details class="create-toolbox"><summary>Другие инструменты'
+                '<span>Контент-план, SEO, кампании и разведка</span></summary>'
+                '<div class="create-tool-links">' + more + '</div></details></div>'
+            )
     if pid and current == base+'/seo':
         stages = [('Поисковые вопросы','Подсказки Яндекса и Google','search'),
                   ('Семантическое ядро','Группировка по намерениям','layers'),
@@ -221,7 +288,7 @@ def render_v4(page, request, pid, switch):
     template = template.replace('Студия «Мята»',html.escape(company)).replace('<span class="avatar">М</span>',
                      '<span class="avatar">'+html.escape(company[:1])+'</span>')
     template = template.replace('data-page="home"',f'onclick="location.href=\'{base}\'"')
-    template = template.replace('<body>', '<body data-growth-design="v4"'+(' class="home-page home-empty"' if home else '')+'>')
+    template = template.replace('<body>', '<body data-growth-design="v4"'+(' class="home-page home-empty"' if home else ' class="create-page"' if pid and current == base+'/create' else '')+'>')
     # Retain scripts and outside-main dialogs, avoiding duplicate inline scripts.
     extras = ''.join(original.outer(e) for e in original.elements if
                      e[0]=='script' and (not main or not main[3] <= e[2] < main[4]))
@@ -237,7 +304,7 @@ def render_v4(page, request, pid, switch):
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=13">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=14">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=4">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
