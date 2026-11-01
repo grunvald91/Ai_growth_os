@@ -139,12 +139,14 @@ def campaigns_page(product_id: UUID, db: Session = Depends(get_db)):
     cards = ''.join(campaign_list_card(product_id, row) for row in rows)
     base = f'/studio/products/{product_id}'
     return studio_page_shell(product, active='campaigns', title='Кампании',
-        subtitle='Что хотим улучшить, что сделаем и какое действие нужно от вас.', body=
-        f'<p><a class="btn primary" href="{base}/campaigns/new">Новая кампания</a></p>'
-        f'<p><a class="btn primary" href="{base}?design=v4&amp;command=campaign">Спланировать кампанию с командой</a> '
-        f'<a class="btn" href="{base}/plan">Контент-план</a> '
-        '<a class="btn" href="https://servgo.ru/mail">Почтовые кампании</a></p>'+
-        (cards or '<p>Маркетинговых экспериментов пока нет.</p>'))
+        subtitle='Для чего запускаем продвижение, что сделаем и чего ждём.', body=
+        f'<p><a class="btn primary" href="{base}?design=v4&amp;command=campaign">Спланировать с ИИ</a> '
+        f'<a class="btn" href="{base}/campaigns/new">Создать вручную</a></p>'
+        '<details><summary>Другие инструменты продвижения</summary>'
+        f'<p><a href="{base}/plan">Контент-план</a> · '
+        '<a href="https://servgo.ru/mail">Почтовые кампании</a></p></details>'+
+        (cards or '<p>Кампаний пока нет. Начните с планирования цели.</p>'))
+
 
 
 @router.get('/studio/products/{product_id}/v4/data')
