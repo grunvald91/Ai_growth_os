@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://ai_growth:ai_growth@localhost:5432/ai_growth"
     llm_provider: str = "xai"
     llm_model: str = "kimi-2.7"
+    # Routing only the short owner-home command classifier, without changing the
+    # model used by content, strategy, video or the rest of the team.
+    dispatcher_llm_model: str = "deepseek-v4.1-flash"
     anthropic_api_key: str | None = None
     anthropic_base_url: str = "https://api.anthropic.com"
     xai_api_key: str | None = None
