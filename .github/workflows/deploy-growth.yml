@@ -1,8 +1,14 @@
 name: Deploy Growth (production)
 
-# Manual only. The "production" environment should require the owner's approval
-# (Settings -> Environments). Tests run first; the server builds the commit itself.
+# Automatic deployment only after the *main push* CI succeeds.
+# No duplicate full test job for workflow_run; manual deployments keep tests.
+# Production deploy refuses unsupported dependency/schema changes; migration
+# preparation remains manual and requires its own explicit owner action.
 on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       ref:
@@ -24,7 +30,7 @@ concurrency:
 
 jobs:
   test:
-    if: github.actor == github.repository_owner
+    if: github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -56,6 +62,17 @@ jobs:
 
   deploy:
     needs: test
+    if: >-
+      ${{ always() && (
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.head_repository.full_name == github.repository) ||
+        (github.event_name == 'workflow_dispatch' &&
+         github.actor == github.repository_owner &&
+         needs.test.result == 'success')
+      ) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
@@ -63,9 +80,24 @@ jobs:
       # The repository is private: the server gets the tested commit's sources over SSH.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.test.outputs.sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || needs.test.outputs.sha }}
           fetch-depth: 0  # the drift check compares against the commit's history
+      - name: Skip older commits when a newer main CI is running
+        if: github.event_name == 'workflow_run'
+        id: freshness
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          [ -n "$latest" ] || { echo "::error::Cannot verify main HEAD"; exit 1; }
+          if [ "$latest" = "${{ github.event.workflow_run.head_sha }}" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping superseded main commit (a newer main exists)."
+          fi
       - name: Deploy (restricted key, or SERVER_SSH_PASSWORD when no key is set)
+        if: github.event_name == 'workflow_dispatch' || steps.freshness.outputs.deploy == 'true'
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
@@ -73,8 +105,8 @@ jobs:
           HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
           # SHA256 fingerprint of the server host key, pinned like the booking_bot workflows.
           HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
-          SHA: ${{ needs.test.outputs.sha }}
-          PREPARE: ${{ inputs.prepare }}
+          SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || needs.test.outputs.sha }}
+          PREPARE: ${{ github.event_name == 'workflow_dispatch' && inputs.prepare && 'true' || 'false' }}
         run: |
           set -euo pipefail
           install -m 700 -d ~/.ssh
