@@ -86,7 +86,7 @@ def _associated_tasks(db: Session, campaign: Experiment) -> list[Task]:
     return list(db.scalars(select(Task).where(
         Task.product_id == campaign.product_id,
         Task.id.in_(all_ids),
-    ).with_for_update()))
+    ).with_for_update().execution_options(populate_existing=True)))
 
 
 def task_campaign(db: Session, task: Task, brief_data: dict) -> Experiment | None:
@@ -250,11 +250,12 @@ def closing_campaign_for_material(db: Session, product_id: UUID,
     """For scheduled publishing, close the race with a campaign stop request.
 
     Only actual material links (explicit or verified task outputs) count.
-    When locking, both publishers and stoppers order locks Experiment first.
+    When locking, all linked running/closing campaigns are locked before the
+    sender reserves a delivery. This also serializes with a concurrent stop.
     """
     query = select(Experiment).where(
         Experiment.product_id == product_id,
-        Experiment.status.in_({"stopping", "finishing", "stopped", "completed"}),
+        Experiment.status.in_({"running", "stopping", "finishing", "stopped", "completed"}),
     ).order_by(Experiment.id)
     if lock:
         query = query.with_for_update()
@@ -262,5 +263,8 @@ def closing_campaign_for_material(db: Session, product_id: UUID,
     if not campaigns:
         return False
     resources = load_resources(db, campaigns)
-    return any(artifact_id in {a.id for a in resources[row.id].materials}
-               for row in campaigns)
+    return any(
+        row.status in {"stopping", "finishing", "stopped", "completed"}
+        and artifact_id in {a.id for a in resources[row.id].materials}
+        for row in campaigns
+    )
