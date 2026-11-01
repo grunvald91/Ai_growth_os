@@ -188,11 +188,27 @@ def main():
             owner = browser.new_context(viewport={"width": 390, "height": 844})
             owner.add_cookies([{"name": "sg_shared", "value": "slow", "url": url, "httpOnly": True}])
             owner_page = owner.new_page()
+            owner_api = []
+            owner_page.on("response", lambda response: owner_api.append({
+                "url": response.url.split("?", 1)[0], "status": response.status,
+            }) if "/api/" in response.url else None)
             owner_page.goto(url + "/admin/schedule", wait_until="domcontentloaded")
             owner_page.get_by_text("Восстанавливаем вход", exact=False).first.wait_for(timeout=7000)
             owner_page.wait_for_timeout(3400)
             assert owner_page.url.endswith("/admin/schedule"), "Slow cookie login redirected prematurely"
-            owner_page.get_by_text("Проверка предоплат недоступна", exact=False).first.wait_for(timeout=15000)
+            try:
+                owner_page.get_by_text("Проверка предоплат недоступна", exact=False).first.wait_for(timeout=15000)
+            except Exception:
+                print("PWA_BROWSER_OWNER_DIAGNOSTICS", json.dumps({
+                    "url": owner_page.url,
+                    "body": owner_page.locator("body").inner_text()[:1300],
+                    "token": owner_page.evaluate("localStorage.getItem('token')"),
+                    "role": owner_page.evaluate("localStorage.getItem('userRole')"),
+                    "logout": owner_page.locator('button[aria-label="Выйти"]').count(),
+                    "cookie": [(c["name"], c["value"]) for c in owner.cookies()],
+                    "api": owner_api[-20:],
+                }, ensure_ascii=False), flush=True)
+                raise
             assert owner_page.locator('[role="alertdialog"]').count() == 0, (
                 "Failed payment check must not trap schedule behind a modal"
             )
