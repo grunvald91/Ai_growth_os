@@ -245,3 +245,66 @@ body[data-growth-design="v4"] .mobile-nav summary {
   from { background-position: 0% 50%; }
   to { background-position: 310% 50%; }
 }
+
+
+/* Profile/intake contrast bridge: the classic Studio CSS is retained in the
+ * v4 route pages and still uses --sg-navy / hard-coded light-mode inks.
+ * Remap its semantic text tokens only inside v4 (never on the legacy host).
+ * Without this bridge the headings for "Собираю профиль" / "Материалы"
+ * render almost black against the dark card background.
+ */
+body[data-growth-design="v4"] {
+  --sg-navy: var(--s-text);
+  --sg-text: var(--s-text);
+  --sg-muted: var(--s-muted);
+  --sg-line: var(--s-line-2);
+  --sg-bg: var(--s-bg);
+  --sg-card: var(--s-surface);
+}
+
+body[data-growth-design="v4"] .route-content .sg-intake-section {
+  color: var(--s-text);
+  background: var(--s-surface);
+  border-color: var(--s-line-2);
+}
+body[data-growth-design="v4"] .route-content .sg-intake-section :is(h2, h3),
+body[data-growth-design="v4"] .route-content .sg-profile-list dd,
+body[data-growth-design="v4"] .route-content .sg-intake-source b,
+body[data-growth-design="v4"] .route-content .sg-intake-question legend,
+body[data-growth-design="v4"] .route-content .sg-intake-review {
+  color: var(--s-text);
+}
+body[data-growth-design="v4"] .route-content :is(
+  .sg-muted, .sg-footnote, .sg-form-hint, .sg-overline,
+  .sg-profile-list dt, .sg-intake-source span, .sg-field small
+) {
+  color: var(--s-muted);
+}
+body[data-growth-design="v4"] .route-content .sg-intake-source {
+  background: var(--s-surface-2);
+  border-color: var(--s-line-2);
+  color: var(--s-text);
+}
+body[data-growth-design="v4"] .route-content .sg-intake-source small {
+  color: var(--s-warning);
+}
+body[data-growth-design="v4"] .route-content .sg-intake-source:is(
+  .sg-intake-unavailable, .sg-intake-unsupported
+) {
+  background: var(--s-surface-3);
+}
+body[data-growth-design="v4"] .route-content .sg-intake-working {
+  background: var(--s-surface);
+  border-color: var(--s-line-2);
+}
+body[data-growth-design="v4"] .route-content .sg-intake-spinner {
+  border-color: var(--s-line-2);
+  border-top-color: var(--s-accent);
+}
+body[data-growth-design="v4"] .route-content .sg-intake-notice {
+  background: var(--s-surface-3);
+  color: var(--s-success);
+}
+body[data-growth-design="v4"] .route-content .sg-intake-question {
+  border-color: var(--s-line-2);
+}
