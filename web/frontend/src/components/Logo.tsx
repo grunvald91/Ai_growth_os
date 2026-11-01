@@ -9,8 +9,8 @@ interface LogoProps {
 }
 
 export function Logo({ size = 28, withText = true, light = false }: LogoProps) {
-  const ink = light ? '#FFFFFF' : '#0D1B2A'
-  const goCol = light ? '#7FA0FF' : '#2F5BEB'
+  const ink = light ? '#FFFFFF' : 'var(--s-text, #0D1B2A)'
+  const goCol = light ? '#7FA0FF' : 'var(--s-accent, #2F5BEB)'
   const blue = '#2F5BEB'
 
   return (
