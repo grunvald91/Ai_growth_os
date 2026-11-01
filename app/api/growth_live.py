@@ -23,6 +23,7 @@ from app.api.content_studio import MATERIAL_KINDS, _owner_product, studio_page_s
 from app.db.session import get_db
 from app.models.domain import Artifact, Experiment, Task
 from app.api.growth_campaigns import campaign_list_card
+from app.services.campaign_readiness import load_resources
 
 ASSETS = Path(__file__).parent / 'assets'
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -136,7 +137,8 @@ def campaigns_page(product_id: UUID, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
     rows = list(db.scalars(select(Experiment).where(Experiment.product_id == product_id)
                           .order_by(Experiment.created_at.desc()).limit(100)))
-    cards = ''.join(campaign_list_card(product_id, row) for row in rows)
+    resources = load_resources(db, rows)
+    cards = ''.join(campaign_list_card(product_id, row, resources[row.id]) for row in rows)
     base = f'/studio/products/{product_id}'
     return studio_page_shell(product, active='campaigns', title='Кампании',
         subtitle='Для чего запускаем продвижение, что сделаем и чего ждём.', body=
