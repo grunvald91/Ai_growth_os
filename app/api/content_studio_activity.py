@@ -73,7 +73,7 @@ def readable_artifact_title(artifact: Artifact) -> str:
     if artifact.kind == "whiteboard_video":
         # The kind already identifies the video. Don't repeat a pipeline prefix
         # like "Рисованное видео готово: Рисованное видео: <topic>" in the UI.
-        raw = re.sub(r"^(?:(?:рисованное|простое) видео\\s*:\\s*)+", "", raw,
+        raw = re.sub(r"^(?:(?:рисованное|простое) видео\s*:\s*)+", "", raw,
                      flags=re.IGNORECASE).strip() or "Видео без названия"
     normalized = raw.casefold().replace("_", " ").replace("-", " ")
     labels = {
