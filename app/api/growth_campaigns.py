@@ -216,13 +216,22 @@ def campaign_page(product, row: Experiment, error: str = "", *,
     pending = resources.pending_material
     if row.status == "draft":
         if campaign_ready(row):
-            owner_action = (
+            launch_form = (
                 f'<form action="{path}/launch" method="post">'
                 '<button class="btn primary" type="submit">Запустить подготовку</button>'
                 '<p>Запуск ставит внутреннее задание ИИ-команде. '
                 'Возможны расходы на ИИ. Отправка и публикация не запускаются.</p></form>'
                 f'<a class="btn" href="{path}/edit">Редактировать черновик</a>'
             )
+            if pending:
+                owner_action = (
+                    f'<a class="btn primary" href="/studio/products/{product.id}/materials/{pending.id}">'
+                    'Посмотреть материал</a>'
+                    '<details><summary>Другие действия</summary>'
+                    + launch_form + '</details>'
+                )
+            else:
+                owner_action = launch_form
         else:
             owner_action = f'<a class="btn primary" href="{path}/edit">Дополнить план</a>'
     elif row.status == "running":
@@ -257,7 +266,9 @@ def campaign_page(product, row: Experiment, error: str = "", *,
     if resources.needs_telegram:
         if resources.selected_connection:
             channel_section = (
-                f'<p>Telegram: подключён канал <strong>{esc(resources.selected_connection.title)}</strong>.</p>'
+                f'<p>Telegram: выбран ранее проверенный канал '
+                f'<strong>{esc(resources.selected_connection.title)}</strong>. '
+                'Доступ к нему перепроверяется перед отправкой.</p>'
             )
         elif resources.connections:
             channel_section = '<p>Выберите проверенный Telegram-канал для этой кампании.</p>'
