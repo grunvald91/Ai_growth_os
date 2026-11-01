@@ -6,6 +6,15 @@ Build AI Growth OS: a safe, auditable modular monolith that orchestrates an AI g
 
 The first real product context is ServGo.
 
+## Platform-wide SaaS rule (mandatory, owner-approved 2026-11-01)
+
+**Canonical ADR:** [ServGo SaaS architecture rule](https://github.com/grunvald91/booking_bot/blob/main/docs/architecture/SERVGO_SAAS_RULE.md).  
+**Incremental implementation plan:** [docs/architecture/SERVGO_SAAS_ROADMAP.md](docs/architecture/SERVGO_SAAS_ROADMAP.md).
+
+> ServGo — многопользовательская SaaS-платформа с общей масштабируемой инфраструктурой и изолированными рабочими пространствами бизнесов. Все модули, агенты, очереди, интеграции и оркестрационные процессы проектируются так, чтобы параллельная работа множества компаний не приводила к смешиванию данных, неконтролируемому расходованию ресурсов или блокировке работы других клиентов.
+
+Treat this as a **required design and acceptance invariant** for new/modified business features, agents, tools, workers, integrations, caching, artifacts and orchestration; tenant-scoped authorization cannot rely only on a supplied product ID. Keep shared infrastructure fair and resource use bounded; check duplicate execution and tenant-specific costs. **Finish the ongoing UI redesign first**; implement the SaaS roadmap gradually during later related work, except that proven cross-tenant data/security flaws require prompt fixes. Do not add speculative infrastructure or change existing publication/approval business rules as part of unrelated work. No current-scale readiness is implied by this document.
+
 ## Core architecture rules
 
 1. The CMO/orchestrator delegates specialist work. It must not become a monolithic do-everything agent.
