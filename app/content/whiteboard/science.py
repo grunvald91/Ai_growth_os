@@ -18,7 +18,7 @@ from .contracts import Contract, WhiteboardRequest, WhiteboardStoryboard
 
 SCIENCE_TERMS = re.compile(
     r"науч|физик|хими|биолог|математ|температур|молекул|атом|"
-    r"электрон|квант|генет|энерги|аккумулятор|\\bмасс(?:а|ы|е|у|ой)\\b|\\bмассив|"
+    r"электрон|квант|генет|энерги|аккумулятор|\bмасс(?:а|ы|е|у|ой)\b|\bмассив|"
     r"относительност|гравитац|скорост|светов|космос|"
     r"горяч|нагрет|холодн|теплот|излучени", re.I,
 )
@@ -146,7 +146,7 @@ def known_mass_falsehood(request: WhiteboardRequest, storyboard: WhiteboardStory
     for scene in storyboard.scenes:
         for beat in scene.beats:
             sentence = beat.narration.casefold().replace("ё", "е")
-            if re.search(r"\\bмасс(?:а|ы|е|у|ой)\\b", sentence):
+            if re.search(r"\bмасс(?:а|ы|е|у|ой)\b", sentence):
                 categorical = re.search(
                     r"(?:не (?:меня|измен|увелич)|остается (?:такой же|одинаков)|абсолютно одинаков)",
                     sentence,
