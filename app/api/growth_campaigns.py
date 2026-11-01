@@ -121,8 +121,8 @@ def campaign_owner_step(row: Experiment) -> str:
                 if campaign_ready(row) else
                 "Дополните условия кампании перед запуском.")
     if row.status == "running":
-        return ("Пока ждём результат внутренней подготовки. Подключения и "
-                "согласования для этой кампании ещё не отслеживаются автоматически.")
+        return ("Идёт внутренняя подготовка. Если понадобятся подключение канала "
+                "или согласование, проверьте соответствующие разделы.")
     if row.status == "completed":
         return "Посмотрите записанные результаты и выводы, если они уже доступны."
     if row.status in {"stopped", "cancelled", "paused"}:
@@ -203,9 +203,11 @@ def campaign_page(product, row: Experiment, error: str = "", *, metrics=()):
             )
     elif row.status == "running":
         owner_action = (
-            f'<p><a class="btn" href="/studio/products/{product.id}/work">Задания команды</a> '
-            f'<a class="btn" href="/studio/products/{product.id}/channels">Подключения каналов</a> '
-            f'<a class="btn" href="/studio/products/{product.id}/review">Материалы на проверку</a></p>'
+            f'<p><a class="btn primary" href="/studio/products/{product.id}/work">Ход подготовки</a></p>'
+            '<details><summary>Другие действия</summary>'
+            f'<p><a href="/studio/products/{product.id}/channels">Подключения каналов</a> · '
+            f'<a href="/studio/products/{product.id}/review">Материалы на проверку</a></p>'
+            '</details>'
         )
     else:
         owner_action = ""
