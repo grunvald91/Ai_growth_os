@@ -80,7 +80,8 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert 'initialTasks' not in page.text
     assert 'function homeV4' not in page.text
     assert 'Демо · API не подключены' not in page.text
-    assert 'https://servgo.ru/mail' in page.text
+    assert 'https://servgo.ru/mail' not in page.text
+    assert 'Кампании' in page.text
 
 
 def test_live_screens_read_company_records_only(live):
