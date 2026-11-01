@@ -108,3 +108,65 @@ def test_picker_paid_start_rejects_unlisted_topic_without_creating_job(environme
     assert response.status_code == 409
     from app.db.session import get_db
     # The response is rejected by the server before any job is queued.
+
+
+@pytest.mark.asyncio
+async def test_science_disagreement_stops_before_images_and_voice(tmp_path):
+    from app.content.whiteboard.pipeline import WhiteboardPipeline
+    from app.content.whiteboard.runtime import ReadinessError
+    from app.privacy import PrivacyGateway
+    from test_whiteboard import FakePlanner, FakeRenderer, FakeRegions, FakeSpeech
+
+    calls = []
+    class Reviewer:
+        async def review(self, storyboard, request):
+            calls.append("review")
+            return FactReview(
+                status="blocked", summary="Не подтверждено утверждение о постоянной массе.",
+                verified_source_ids=["SEP"],
+                findings=[FactFinding(
+                    claim="При нагревании масса остаётся точно такой же.",
+                    verdict="contradicted",
+                    explanation="Энергия нагрева увеличивает массу тела.",
+                    reference_id="SEP",
+                )])
+    class NoImages:
+        async def generate(self, scene, request):
+            pytest.fail("Image generation must not start before science review")
+    class NoVoice:
+        async def synthesize(self, *args, **kwargs):
+            pytest.fail("Speech generation must not start before science review")
+
+    out = tmp_path / "video.mp4"
+    pipeline = WhiteboardPipeline(storyboard=FakePlanner(), science_reviewer=Reviewer(),
+        images=NoImages(), speech=NoVoice(), regions=FakeRegions(), renderer=FakeRenderer(),
+        sanitizer=PrivacyGateway())
+    with pytest.raises(ReadinessError, match="science_unsupported"):
+        await pipeline.produce(science_request(science_mode="scientific", request_generation=True),
+                               out, approval_verified=True)
+    assert calls == ["review"] and not out.exists()
+
+
+@pytest.mark.asyncio
+async def test_picker_explicit_consent_starts_existing_queue_path(environment, monkeypatch):
+    from app.api import whiteboard as api
+    from sqlalchemy import select
+    from app.models.domain import Task, TaskStatus
+
+    async def ready(*args, **kwargs):
+        return None
+    monkeypatch.setattr(api, "preflight", ready)
+    factory, settings, product_id, _ = environment
+    _write_profile(settings, "whiteboard-jobs")
+    browser = client()
+    topic = browser.get(f"/studio/products/{product_id}/whiteboard/topics.json").json()["topics"][0]["topic"]
+    response = browser.post(f"/studio/products/{product_id}/whiteboard", data={
+        "topic": topic, "duration_seconds": "30", "science_mode": "general",
+        "profile": "gemini_ru", "visual_review": "once", "max_api_calls": "auto",
+        "wb_paid_start": "yes", "wb_paid_consent": "yes", "wb_topic_choice": topic,
+    }, follow_redirects=False)
+    assert response.status_code == 303
+    with factory() as db:
+        jobs = list(db.scalars(select(Task).where(Task.product_id == product_id,
+                         Task.assigned_agent == "whiteboard_renderer")))
+        assert len(jobs) == 1 and jobs[0].status == TaskStatus.QUEUED
