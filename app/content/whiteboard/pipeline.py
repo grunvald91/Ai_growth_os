@@ -84,7 +84,9 @@ class WhiteboardPipeline:
             raise FileExistsError("Refusing to overwrite an existing video")
         if not request.request_generation or not approval_verified:
             raise PermissionError("Verified owner approval is required for paid generation")
-        self._check_text(request.topic)
+        for value in (request.topic, request.source_script, request.background_notes,
+                      request.reference_materials):
+            self._check_text(value)
         if self.checkpoints is not None and bool(self.checkpoints.identity.get('visual_review')) != self.visual_review:
             raise ValueError('Checkpoint visual review policy does not match this job')
         self._report('storyboard', 0)
