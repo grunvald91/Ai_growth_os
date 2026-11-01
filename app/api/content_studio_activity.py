@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -69,6 +70,11 @@ def safe(value) -> str:
 def readable_artifact_title(artifact: Artifact) -> str:
     """Never show internal derivative-brief names to the business owner."""
     raw = str(artifact.title or "").strip()
+    if artifact.kind == "whiteboard_video":
+        # The kind already identifies the video. Don't repeat a pipeline prefix
+        # like "Рисованное видео готово: Рисованное видео: <topic>" in the UI.
+        raw = re.sub(r"^(?:(?:рисованное|простое) видео\\s*:\\s*)+", "", raw,
+                     flags=re.IGNORECASE).strip() or "Видео без названия"
     normalized = raw.casefold().replace("_", " ").replace("-", " ")
     labels = {
         "telegram derivative brief": "Задание для Telegram",
@@ -226,12 +232,18 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
     ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(limit)))
     for row in candidates:
         is_animator = row.kind == "whiteboard_video"
+        readable_title = readable_artifact_title(row)
+        resource_kind = ("video" if row.kind in {"whiteboard_video", "video_render"}
+                         else "post" if row.kind == "channel_text" else "material")
         notes.append({
             "kind": "review", "text": (
-                "Рисованное видео готово: " if is_animator else
+                "Простое видео готово: " if is_animator else
                 "Готов MP4: " if row.kind == "video_render" else
                 "Материал готов к проверке: "
-            ) + readable_artifact_title(row)[:95],
+            ) + readable_title[:95],
+            "resource_kind": resource_kind,
+            "resource_title": readable_title,
+            "resource_status": "Готово · проверить",
             "url": (f"/studio/products/{product_id}/whiteboard/{row.task_id}"
                      if is_animator else f"/studio/products/{product_id}/materials/{row.id}"),
             "id": str(row.id), "created_at": created_stamp(row),
@@ -251,6 +263,10 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
             notes.append({
                 "kind": "review",
                 "text": "Материал подготовлен: " + readable_artifact_title(draft)[:95],
+                "resource_kind": ("video" if draft.kind in {"whiteboard_video", "video_render"}
+                                  else "post" if draft.kind == "channel_text" else "material"),
+                "resource_title": readable_artifact_title(draft),
+                "resource_status": "Черновик",
                 "url": f"/studio/products/{product_id}/materials/{draft.id}",
                 "id": str(draft.id), "created_at": created_stamp(draft),
             })
@@ -265,6 +281,9 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
         if data.get("approval_state") == "draft":
             notes.append({
                 "kind": "review", "text": "Новый контент-план готов к утверждению",
+                "resource_kind": "plan",
+                "resource_title": "Новый контент-план",
+                "resource_status": "Ожидает утверждения",
                 "url": f"/studio/products/{product_id}/plan?view=draft",
                 "id": str(plan.id), "created_at": created_stamp(plan),
             })
@@ -280,6 +299,9 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
         notes.append({
             "kind": "review",
             "text": "Подтвердите создание рисованного видео (платные API)",
+            "resource_kind": "video",
+            "resource_title": "Создание простого видео",
+            "resource_status": "Требует подтверждения",
             "url": f"/studio/products/{product_id}/whiteboard/{task.id}",
             "id": str(task.id), "created_at": created_stamp(task),
         })
@@ -293,6 +315,9 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
             continue
         notes.append({
             "kind": "error", "text": "Не удалось подготовить материал — проверьте задание",
+            "resource_kind": "task",
+            "resource_title": task_title(task),
+            "resource_status": "Ошибка",
             "url": (f"/studio/products/{product_id}/whiteboard/{task.id}"
                      if task.assigned_agent == "whiteboard_renderer"
                      else f"/studio/products/{product_id}/tasks/{task.id}"),
