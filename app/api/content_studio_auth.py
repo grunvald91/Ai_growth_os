@@ -300,12 +300,21 @@ def require_studio_csrf(
     if received.username or received.password:
         _reject_origin(request, 403, "Cross-origin action rejected", configured)
 
+    # TLS terminates at nginx. Uvicorn may see the internal Docker HTTP hop
+    # because its default forwarded-headers trust list excludes the Docker bridge.
+    # nginx *overwrites* X-Forwarded-Proto with $scheme on the public vhosts;
+    # never trust an arbitrary proxy-chain value such as "https,http".
+    # Origin itself must still be the EXACT public HTTPS origin, and Host must
+    # match that origin when the dual-host gateway is enabled.
+    public_https = (
+        request.url.scheme.casefold() == "https"
+        or request.headers.get("x-forwarded-proto", "").strip().casefold() == "https"
+    )
     is_legacy_origin = (
         received.scheme.casefold() == allowed.scheme.casefold()
         and received.netloc.casefold() == allowed.netloc.casefold()
         and (not settings.studio_servgo_gateway_enabled or (
-            request.url.scheme.casefold() == allowed.scheme.casefold()
-            and request.url.netloc.casefold() == allowed.netloc.casefold()
+            public_https and request.url.netloc.casefold() == allowed.netloc.casefold()
         ))
     )
     # This exception is deliberately NOT a blanket allowlist for another site's
@@ -316,7 +325,7 @@ def require_studio_csrf(
         settings.studio_servgo_gateway_enabled
         and received.scheme.casefold() == "https"
         and received.netloc.casefold() == "servgo.ru"
-        and request.url.scheme.casefold() == "https"
+        and public_https
         and request.url.netloc.casefold() == "servgo.ru"
     )
     if not (is_legacy_origin or is_servgo_gateway_origin):
