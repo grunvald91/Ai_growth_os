@@ -21,7 +21,7 @@ from app.dispatcher import executors
 from app.dispatcher.blocks import Chip, clean_blocks
 from app.dispatcher.decision import (CONFIDENCE_TO_ACT, SYSTEM_PROMPT, DispatcherDecision, build_user_message)
 from app.dispatcher.executors import Confirmation, Context, Outcome
-from app.dispatcher.fast_routes import quick_capability
+from app.dispatcher.fast_routes import quick_capability, quick_video_request
 from app.dispatcher.models import DispatcherConversation, DispatcherMessage
 from app.dispatcher.policy import Verdict, verdict
 from app.dispatcher.readers import snapshot
@@ -43,7 +43,7 @@ DECISION_TIMEOUT_SECONDS = 45
 # thread stays stored and visible on the page.
 HISTORY_FOR_MODEL = 20
 
-FALLBACK_TEXT = ("Не получилось разобрать просьбу — попробуйте сказать иначе или выберите готовый вариант ниже.")
+FALLBACK_TEXT = ("Не удалось обработать сообщение: модель диспетчера не ответила или вернула некорректный результат. Попробуйте снова либо выберите действие ниже.")
 
 
 # ---- conversation -----------------------------------------------------------------------
@@ -270,6 +270,11 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         quick = quick_capability(text)
         if quick is not None:
             decision = DispatcherDecision(intent="execute", capability=quick, params={}, confidence=1.0)
+        elif (video_params := quick_video_request(text)) is not None:
+            # Deterministic intent -> existing whiteboard queue -> paid approval card.
+            # Never launch the paid generation directly or infer a missing topic.
+            decision = DispatcherDecision(intent="execute", capability="whiteboard_video",
+                                          params=video_params, confidence=1.0)
         elif llm is not None:
             decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
 
