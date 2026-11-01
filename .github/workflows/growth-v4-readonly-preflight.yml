@@ -1,0 +1,94 @@
+name: Growth V4 production preflight (read only)
+on:
+  push:
+    branches: [ops/growth-v4-preflight-20261101]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: growth-v4-production-preflight
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    environment: production
+    steps:
+      - name: Inspect production server without deploying or changing data
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD not available in production environment"; exit 1; }
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/host-key
+            if ssh-keygen -lf /tmp/host-key 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::SSH server host key mismatch"; exit 1; }
+          command -v sshpass >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq sshpass; }
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          printf '=== Growth V4 production server preflight (READ ONLY) ===\n'
+          cd /opt/ai_growth_os
+          [ -r /opt/ai_growth_os/.env ] || { echo 'BLOCKED: production env missing'; exit 1; }
+          [ -r deploy/deploy.json ] || { echo 'BLOCKED: deploy.json missing'; exit 1; }
+          [ -r deploy/deploy_growth.py ] || { echo 'BLOCKED: deploy script missing'; exit 1; }
+          [ -r deploy/last-good.json ] || { echo 'BLOCKED: rollback manifest missing'; exit 1; }
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/opt/ai_growth_os/deploy/last-good.json').read_text())
+          files = data.get('files', [])
+          assert files and all(Path(name).is_file() for name in files), 'Rollback compose sources missing'
+          config = json.loads(Path('/opt/ai_growth_os/deploy/deploy.json').read_text())
+          assert isinstance(config.get('base_image'), str) and config['base_image']
+          print('rollback_manifest: OK; base_image:', config['base_image'])
+          PY
+
+          for name in ai-growth-os-api-1 ai-growth-os-worker-1 ai-growth-os-telegram-1 ai-growth-os-postgres-1; do
+            state="$(docker inspect --format '{{.State.Running}} {{.State.Restarting}}' "$name")"
+            printf 'container %s: %s\n' "$name" "$state"
+            [ "$state" = 'true false' ] || { echo "BLOCKED: unhealthy container $name"; exit 1; }
+          done
+          status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:8091/health)"
+          [ "$status" = 200 ] || { echo "BLOCKED: health HTTP $status"; exit 1; }
+          echo 'localhost /health: HTTP 200'
+          api=ai-growth-os-api-1
+          db_current="$(docker exec "$api" alembic current | awk '/^[0-9a-z_]+/{print $1}' | tail -1)"
+          db_head="$(docker exec "$api" alembic heads | awk '/^[0-9a-z_]+/{print $1}' | tail -1)"
+          printf 'database migration current=%s image_head=%s\n' "$db_current" "$db_head"
+          [ -n "$db_current" ] && [ "$db_current" = "$db_head" ] || { echo 'BLOCKED: migration mismatch'; exit 1; }
+
+          docker exec -i "$api" python - <<'PY'
+          import os
+          from sqlalchemy import func, select, text
+          from app.core.config import get_settings
+          from app.db.session import SessionLocal
+          from app.models.domain import Task, TaskStatus
+          settings = get_settings()
+          assert settings.app_env.casefold() in {'production', 'prod'}, 'APP_ENV not production'
+          assert settings.studio_public_origin == 'https://growth.servgo.ru', 'Studio CSRF origin mismatch'
+          assert len(os.getenv('SERVGO_SSO_SECRET', '')) >= 32, 'Growth SSO secret not configured'
+          assert len(os.getenv('SERVGO_INTERNAL_KEY', '')) >= 32, 'Growth internal key not configured'
+          print('Growth production env / CSRF origin / SSO key presence: OK')
+          with SessionLocal() as db:
+              assert db.execute(text('select 1')).scalar_one() == 1
+              running = db.scalar(select(func.count()).select_from(Task).where(Task.status == TaskStatus.RUNNING))
+              print('Database connectivity: OK; RUNNING tasks:', running)
+              assert running == 0, 'BLOCKED: tasks running, deploy would interrupt them'
+          PY
+          free_kb="$(df -Pk /opt/ai_growth_os | awk 'NR==2{print $4}')"
+          printf 'available disk: %s KiB\n' "$free_kb"
+          [ "$free_kb" -gt 1048576 ] || { echo 'BLOCKED: less than 1 GiB free disk'; exit 1; }
+          printf 'Preflight checks passed. DB backup freshness and ServGo-side SSO equality not independently verified.\n'
+          REMOTE
