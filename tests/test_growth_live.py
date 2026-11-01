@@ -529,3 +529,161 @@ def test_v4_campaign_description_escapes_persisted_html(live):
         assert '<img src=x onerror=alert(1)>' not in text
         assert '&lt;script&gt;alert(1)&lt;/script&gt;' in text
         assert '<script>alert(1)</script>' not in text
+
+
+
+def test_campaign_real_telegram_connection_requires_selection_and_stays_scoped(live):
+    import json
+    from app.models.domain import ArtifactStatus, Experiment
+    client, db, product = live
+    other = Product(name='Сторонний бизнес', slug='another-owner-channel')
+    db.add(other)
+    db.flush()
+    campaign = Experiment(product_id=product.id, experiment_key='EXP-CHANNEL-LINK-1',
+                          name='Проверяем Telegram', hypothesis='Проверка канала',
+                          channel='telegram', status='running')
+    db.add(campaign)
+    db.flush()
+    own_connection = Artifact(
+        product_id=product.id, kind='telegram_channel_connection',
+        title='Наш проверенный канал', content=json.dumps({'title': 'Наш проверенный канал'}),
+        status=ArtifactStatus.APPROVED)
+    foreign_connection = Artifact(
+        product_id=other.id, kind='telegram_channel_connection',
+        title='Чужой секретный канал', content='{}',
+        status=ArtifactStatus.APPROVED)
+    db.add_all([own_connection, foreign_connection])
+    db.commit()
+    path = f'/studio/products/{product.id}/campaigns/{campaign.id}'
+    index = client.get(f'/studio/products/{product.id}/campaigns')
+    assert 'Выбрать канал' in index.text
+    assert 'Чужой секретный канал' not in index.text
+    detail = client.get(path+'?design=v4')
+    assert detail.status_code == 200
+    assert 'Наш проверенный канал' in detail.text
+    assert 'Чужой секретный канал' not in detail.text
+    action = path+'/resources/channel'
+    assert client.post(action, data={'connection_id': str(foreign_connection.id)}).status_code == 404
+    assert client.post(action, data={'connection_id': 'broken'}).status_code == 422
+    assert client.post(action, data={'connection_id': str(own_connection.id)},
+                       follow_redirects=False).status_code == 303
+    detail = client.get(path)
+    assert 'подключён канал' in detail.text
+    assert 'Наш проверенный канал' in detail.text
+    assert 'Пока ничего не требуется' in detail.text
+    own_connection.status = ArtifactStatus.REJECTED
+    db.commit()
+    detail = client.get(path)
+    assert 'Подключить Telegram' in detail.text
+    assert 'подключён канал' not in detail.text
+
+
+def test_campaign_only_own_linked_material_requires_review_and_link_is_idempotent(live):
+    from sqlalchemy import select
+    from app.models.domain import ArtifactStatus, CostRecord, Experiment, Publication
+    client, db, product = live
+    other = Product(name='Сторонняя фирма', slug='foreign-owner-material')
+    db.add(other)
+    db.flush()
+    campaign = Experiment(product_id=product.id, experiment_key='EXP-REVIEW-LINK-1',
+                          name='Публикация', hypothesis='Рост заявок', status='running')
+    db.add(campaign)
+    db.flush()
+    own = Artifact(product_id=product.id, kind='channel_text',
+                   title='Наш новый материал', content='{}',
+                   status=ArtifactStatus.AWAITING_APPROVAL)
+    foreign = Artifact(product_id=other.id, kind='channel_text',
+                       title='Чужой материал', content='{}',
+                       status=ArtifactStatus.AWAITING_APPROVAL)
+    other_own = Artifact(product_id=product.id, kind='channel_text',
+                         title='Непривязанный материал', content='{}',
+                         status=ArtifactStatus.AWAITING_APPROVAL)
+    db.add_all([own, foreign, other_own])
+    db.commit()
+    path = f'/studio/products/{product.id}/campaigns/{campaign.id}'
+    action = path + '/resources/material'
+    assert 'Готов материал этой кампании' not in client.get(path).text
+    assert client.post(action, data={'artifact_id': str(foreign.id)}).status_code == 404
+    assert client.post(action, data={'artifact_id': 'not-a-uuid'}).status_code == 422
+    for _ in range(2):
+        assert client.post(action, data={'artifact_id': str(own.id)},
+                           follow_redirects=False).status_code == 303
+    detail = client.get(path+'?design=v4')
+    assert 'Готов материал этой кампании' in detail.text
+    assert 'Посмотреть материал' in detail.text
+    assert 'Наш новый материал' in detail.text
+    assert 'Чужой материал' not in detail.text
+    # Unlinked pending material does not create a false campaign-specific approval.
+    assert 'Непривязанный материал</a>' not in detail.text
+    assert detail.text.count(f'href="/studio/products/{product.id}/materials/{own.id}"') >= 1
+    own.status = ArtifactStatus.APPROVED
+    db.commit()
+    assert 'Готов материал этой кампании' not in client.get(path).text
+    links = list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product.id, Artifact.kind == 'campaign_workspace')))
+    assert len(links) == 1
+    import json
+    assert json.loads(links[0].content)['material_ids'] == [str(own.id)]
+    assert list(db.scalars(select(Publication))) == []
+    assert list(db.scalars(select(CostRecord))) == []
+
+
+def test_campaign_auto_associates_only_verified_task_brief_outputs(live):
+    import json
+    from app.models.domain import ArtifactStatus, Experiment, Task
+    client, db, product = live
+    campaign = Experiment(product_id=product.id, experiment_key='EXP-TASK-AUTO-1',
+                          name='Автоматический результат', hypothesis='Тест', status='running')
+    db.add(campaign)
+    db.flush()
+    task = Task(product_id=product.id, title='Подготовка эксперимента')
+    db.add(task)
+    db.flush()
+    db.add_all([
+        Artifact(product_id=product.id, task_id=task.id, kind='task_brief',
+                 title='EXP-TASK-AUTO-1: prepare experiment',
+                 content=json.dumps({'experiment_id': str(campaign.id)})),
+        Artifact(product_id=product.id, task_id=task.id, kind='channel_text',
+                 title='Пост из задания кампании', content='{}',
+                 status=ArtifactStatus.AWAITING_APPROVAL),
+    ])
+    db.commit()
+    path = f'/studio/products/{product.id}/campaigns/{campaign.id}'
+    detail = client.get(path)
+    assert 'Пост из задания кампании' in detail.text
+    assert 'Готов материал этой кампании' in detail.text
+    index = client.get(f'/studio/products/{product.id}/campaigns')
+    assert 'Посмотреть материал' in index.text
+
+
+def test_campaign_resource_post_origin_and_company_guards(live, monkeypatch, tmp_path):
+    from app.models.domain import ArtifactStatus, Experiment
+    from app.core.studio_accounts import create_account
+    client, db, product = live
+    foreign_product = Product(name='Чужая организация', slug='company-campaign-resources')
+    db.add(foreign_product)
+    db.flush()
+    row = Experiment(product_id=product.id, experiment_key='EXP-RESOURCE-CSRF-1',
+                     name='Protected campaign', hypothesis='A', status='running')
+    own = Artifact(product_id=product.id, kind='channel_text',
+                   title='Own draft', content='{}', status=ArtifactStatus.DRAFT)
+    db.add_all([row, own])
+    db.commit()
+    settings = Settings(app_env='production', products_root=tmp_path,
+                        studio_admin_username='owner', studio_admin_password='fixture-only',
+                        studio_public_origin='https://growth.servgo.ru', _env_file=None)
+    create_account(settings, username='campaign-resource-user',
+                   password='local-fixture-password', role='company',
+                   product_ids=[str(product.id)], created_by='test')
+    monkeypatch.setitem(app.dependency_overrides, get_settings, lambda: settings)
+    client.auth = ('campaign-resource-user', 'local-fixture-password')
+    base = f'/studio/products/{product.id}/campaigns/{row.id}/resources/material'
+    assert client.post(base, data={'artifact_id': str(own.id)}).status_code == 403
+    assert client.post(base, data={'artifact_id': str(own.id)},
+                       headers={'Origin': 'https://invalid.example'}).status_code == 403
+    assert client.post(base.replace(str(product.id), str(foreign_product.id)),
+                       data={'artifact_id': str(own.id)},
+                       headers={'Origin': 'https://growth.servgo.ru'}).status_code == 404
+    assert client.post(base, data={'artifact_id': str(own.id)},
+                       headers={'Origin': 'https://growth.servgo.ru'},
+                       follow_redirects=False).status_code == 303
