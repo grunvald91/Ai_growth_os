@@ -89,7 +89,7 @@ def _associated_tasks(db: Session, campaign: Experiment) -> list[Task]:
     ).with_for_update().execution_options(populate_existing=True)))
 
 
-def task_campaign(db: Session, task: Task, brief_data: dict) -> Experiment | None:
+def task_campaign(db: Session, task: Task, brief_data: dict, *, lock: bool = False) -> Experiment | None:
     """Only a verified launch brief can impose a campaign lifecycle gate."""
     raw = brief_data.get("experiment_id")
     if not raw:
@@ -98,10 +98,13 @@ def task_campaign(db: Session, task: Task, brief_data: dict) -> Experiment | Non
         experiment_id = UUID(str(raw))
     except (TypeError, ValueError):
         return None
-    campaign = db.scalar(select(Experiment).where(
+    query = select(Experiment).where(
         Experiment.product_id == task.product_id,
         Experiment.id == experiment_id,
-    ).execution_options(populate_existing=True))
+    )
+    if lock:
+        query = query.with_for_update()
+    campaign = db.scalar(query.execution_options(populate_existing=True))
     if campaign is None:
         return None
     expected = {
@@ -111,8 +114,8 @@ def task_campaign(db: Session, task: Task, brief_data: dict) -> Experiment | Non
     return campaign if task.title in expected else None
 
 
-def task_halted(db: Session, task: Task, brief_data: dict) -> bool:
-    campaign = task_campaign(db, task, brief_data)
+def task_halted(db: Session, task: Task, brief_data: dict, *, lock: bool = False) -> bool:
+    campaign = task_campaign(db, task, brief_data, lock=lock)
     return bool(campaign and campaign.status != "running")
 
 
