@@ -362,7 +362,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         {item("create", base + "/create", "＋", "Создать материал")}
         {item("work", base + "/work", "◴", "В работе")}
         {item("materials", base + "/materials", "▤", "Мои материалы")}
-        <a href="https://servgo.ru/mail"><span class="nav-ico" aria-hidden="true">✉</span>Почта</a>
+        {item("channels", base + "/channels", "↗", "Публикации")}
         {item("accounts", base + "/accounts", "☺", "Аккаунты")}
       </nav>
       <details class="sg-side-extras">
@@ -394,7 +394,6 @@ def more_links(product_id: UUID) -> list[tuple[str, str, str, str]]:
         ("team", "/studio/team", "♧", "ИИ-команда"),
         ("tune", "/studio/tune", "⚙", "Настройка агентов"),
         ("accounts", base + "/accounts", "☺", "Аккаунты"),
-        ("mail", "https://servgo.ru/mail", "✉", "Почта"),
         ("switch", "/studio?choose=1", "⇄", "Другая компания"),
         ("servgo", "https://servgo.ru/admin", "←", "В админку ServGo"),
         ("logout", "/studio/logout", "⎋", "Выйти"),
@@ -993,7 +992,7 @@ def product_dashboard(db: Session, product: Product) -> str:
       <a href="/studio/products/{product.id}/analytics" aria-label="Аналитика">Аналитика</a>
       <a href="/studio/team">ИИ-команда</a>
       <a href="/studio/tune">Настройка агентов</a>
-      <a href="https://servgo.ru/mail">Почта</a>
+      <a href="/studio/products/{product.id}/channels">Публикации</a>
       <a href="/studio?choose=1" aria-label="Выбрать проект">Другой проект</a>
     </nav>
     """
@@ -1216,7 +1215,7 @@ def studio_page_shell(
         <a href="/studio/products/{product.id}/analytics">Аналитика</a>
         <a href="/studio/team">ИИ-команда</a>
         <a href="/studio/tune">Настройка агентов</a>
-        <a href="https://servgo.ru/mail">Почта</a>
+        <a href="/studio/products/{product.id}/channels">Публикации</a>
         <a href="/studio?choose=1">Другой проект</a></div>
       </details>
     </nav>
@@ -1832,8 +1831,12 @@ def studio_product(product_id: UUID, request: Request, db: Session = Depends(get
     # Companies with the dispatcher switched on get the one-line home; the earlier overview stays at /classic.
     from app.api.dispatcher import enabled_for, home_html
     choice = request.query_params.get("design")
+    from app.api.studio_sso import _canonical_pwa
     design = choice if choice in {"v4", "classic"} else request.cookies.get("growth_design")
-    page = home_html(db, product, settings, request) if design == "v4" or enabled_for(settings, product) else product_dashboard(db, product)
+    canonical_v4 = design not in {"v4", "classic"} and _canonical_pwa(request, settings)
+    # An explicit Classic preference must win even for dispatcher-enabled businesses.
+    use_home = design == "v4" or (design != "classic" and (canonical_v4 or enabled_for(settings, product)))
+    page = home_html(db, product, settings, request) if use_home else product_dashboard(db, product)
     response = HTMLResponse(page)
     response.headers["Cache-Control"] = "no-store"
     return response

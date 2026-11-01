@@ -412,9 +412,9 @@ def test_v8_typography_consistent_across_all_studio_views(studio_v5):
         assert "/studio/assets/servgo.svg" in result.text
 
 
-def test_studio_navigation_links_to_servgo_mail(studio_v5):
+def test_tenant_studio_navigation_does_not_expose_platform_owner_mail(studio_v5):
     client, _, company, _ = studio_v5
     dashboard = client.get(f"/studio/products/{company.id}")
     assert dashboard.status_code == 200
-    # Sidebar (main nav, not hidden in extras) and the mobile/quick menus.
-    assert dashboard.text.count('href="https://servgo.ru/mail"') >= 2
+    assert 'href="https://servgo.ru/mail"' not in dashboard.text
+    assert f'href="/studio/products/{company.id}/channels"' in dashboard.text
