@@ -642,9 +642,10 @@ def test_canonical_confirmation_creates_only_selected_company_and_keeps_sso(env)
     assert created.status_code == 303 and created.headers["location"].endswith("/profile")
     link = db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31))
     assert link is not None
+    assert "max-age=0" in created.headers.get("set-cookie", "").lower()
     replay = client.post("/studio/sso/create", data={"business_id":31},
                          headers={"origin":"https://servgo.ru"})
-    assert replay.status_code == 409
+    assert replay.status_code == 400
     assert len(list(db.scalars(select(StudioBusinessLink).where(
         StudioBusinessLink.servgo_business_id == 31)))) == 1
 
@@ -676,4 +677,13 @@ def test_canonical_first_visit_requires_actual_signed_cookie_and_live_owner(env)
     revoked = client.post("/studio/sso/create", data={"business_id":31},
                           headers={"origin":"https://servgo.ru"})
     assert revoked.status_code == 403
+    assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
+
+
+def test_canonical_unlinked_administrator_returns_to_native_servgo(env):
+    db, *_ = env
+    client, page = canonical_first_visit(env, role="administrator")
+    assert page.status_code == 303
+    assert page.headers["location"] == "/workspace/growth?setup=owner-required"
+    assert "set-cookie" not in page.headers
     assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
