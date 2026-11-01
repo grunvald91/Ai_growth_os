@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.domain import (
@@ -186,6 +186,61 @@ def _write_audit(db: Session, campaign: Experiment, actor: str,
     ))
 
 
+def _cancel_queued_telegram(db: Session, campaign: Experiment) -> tuple[UUID, ...]:
+    """Cancel only unsent Telegram intents belonging to this campaign.
+
+    The Experiment row is locked by command() before this function. The
+    Telegram sender takes the same lock before reserving a network send.
+    In-flight and ambiguous attempts are NOT marked cancelled here.
+    """
+    material_ids = {
+        artifact.id for artifact in load_resources(db, [campaign])[campaign.id].materials
+    }
+    if not material_ids:
+        return ()
+    ids = tuple(db.scalars(select(Publication.id).where(
+        Publication.product_id == campaign.product_id,
+        Publication.artifact_id.in_(material_ids),
+        Publication.channel == "telegram",
+        Publication.status.in_(("scheduled", "pending")),
+    ).order_by(Publication.id)))
+    if ids:
+        db.execute(update(Publication).where(
+            Publication.product_id == campaign.product_id,
+            Publication.id.in_(ids),
+            Publication.status.in_(("scheduled", "pending")),
+        ).values(status="cancelled"))
+    return ids
+
+
+def _reconcile_cancelled_calendar(db: Session, product_id: UUID,
+                                  cancelled: tuple[UUID, ...]) -> None:
+    """Best effort calendar projection AFTER the stop transaction commits.
+
+    Never hold the Experiment lock while taking a Product/calendar lock. A
+    failed projection cannot undo the durable publication cancellation.
+    """
+    if not cancelled:
+        return
+    from app.content.telegram_publishing import update_plan_delivery
+
+    titles = ["Telegram schedule " + str(pub_id) for pub_id in cancelled]
+    intents = db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id,
+        Artifact.kind == "telegram_publish_intent",
+        Artifact.title.in_(titles),
+    ))
+    for intent in list(intents):
+        try:
+            data = json.loads(intent.content)
+            if UUID(str(data.get("publication_id"))) not in cancelled:
+                continue
+            update_plan_delivery(db, data, "cancelled")
+            db.commit()
+        except (LookupError, TypeError, ValueError, KeyError):
+            db.rollback()
+
+
 def _reconcile_locked(db: Session, campaign: Experiment, tasks: list[Task]) -> LifecycleBlockers:
     pending = blockers(db, campaign, tasks)
     if campaign.status in FINAL_STATES and pending.clear:
@@ -215,14 +270,19 @@ def command(db: Session, *, product_id: UUID, experiment_id: UUID,
         if action == "finish" and note.strip():
             campaign.conclusion = "Вывод владельца: " + note.strip()
     tasks = _associated_tasks(db, campaign)
+    cancelled: tuple[UUID, ...] = ()
     if campaign.status == desired:
         for task in tasks:
             if task.status in {TaskStatus.QUEUED, TaskStatus.WAITING_APPROVAL}:
                 task.status = TaskStatus.CANCELLED
+        cancelled = _cancel_queued_telegram(db, campaign)
         pending = _reconcile_locked(db, campaign, tasks)
     else:
         pending = blockers(db, campaign, tasks)
     db.commit()
+    # Calendar is a denormalized view. Its locks are Product-first, so update
+    # only after releasing the Experiment row lock.
+    _reconcile_cancelled_calendar(db, product_id, cancelled)
     return campaign.status, pending
 
 
