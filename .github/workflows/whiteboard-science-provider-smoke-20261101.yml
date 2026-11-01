@@ -1,0 +1,122 @@
+name: Whiteboard science provider schema smoke (one paid call, no media)
+
+on:
+  push:
+    branches:
+      - ops/whiteboard-science-provider-smoke-20261101
+
+permissions:
+  contents: read
+
+concurrency:
+  group: science-provider-smoke-20261101
+  cancel-in-progress: true
+
+jobs:
+  science-schema:
+    if: github.repository == 'grunvald91/Ai_growth_os' && github.actor == github.repository_owner
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Execute exactly one bounded science JSON-schema completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::Server login unavailable"; exit 1; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 12 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/keyline
+            ssh-keygen -lf /tmp/keyline 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Pinned SSH fingerprint mismatch"; exit 1; }
+          # No code deployment or modifications. Synthetic public science statement only.
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "root@$HOST" \
+            "docker exec -i ai-growth-os-api-1 python -" <<'PY'
+          import asyncio
+          import json
+          import re
+          import sys
+          import httpx
+          from jsonschema import validate
+          from app.core.config import get_settings
+
+          SCHEMA = {
+            "type": "object", "additionalProperties": False,
+            "properties": {
+              "status": {"type":"string","enum":["supported","blocked"]},
+              "findings": {"type":"array","items":{
+                "type":"object","additionalProperties":False,
+                "properties":{
+                  "claim":{"type":"string"},
+                  "verdict":{"type":"string","enum":["supported","contradicted","unverified","not_factual"]},
+                  "explanation":{"type":"string"},
+                  "reference_id":{"anyOf":[{"type":"string"},{"type":"null"}]},
+                  "evidence_quote":{"anyOf":[{"type":"string"},{"type":"null"}]}
+                },
+                "required":["claim","verdict","explanation","reference_id","evidence_quote"]
+              }},
+              "summary":{"type":"string"}
+            },
+            "required":["status","findings","summary"]
+          }
+          ANCHOR = "The speed of light in vacuum is exactly 299792458 m/s."
+          STATEMENT = "Скорость света в вакууме точно равна 299792458 метрам в секунду."
+
+          async def main():
+            cfg = get_settings()
+            if not cfg.xai_api_key or not cfg.xai_base_url.startswith("https://"):
+              print("SCIENCE_SMOKE_CONFIG_MISSING",flush=True)
+              return 2
+            model = "gemini-flash-3.8"
+            system = (
+              "Review the Russian scientific claim against the provided English evidence. "
+              "Return one JSON object with exactly one finding. The claim MUST equal the entire "
+              "Russian statement. For a supported claim, quote one literal substring of the "
+              "provided anchor in evidence_quote. If unsupported mark blocked. "
+              "Do not include the call to action."
+            )
+            body = {"model":model, "messages":[
+              {"role":"system","content":system},
+              {"role":"user","content":json.dumps({
+                "topic":"скорость света",
+                "narration":[STATEMENT,"Подпишитесь на канал и поставьте лайк."],
+                "trusted_references":[{"id":"NIST","url":"https://physics.nist.gov/cuu/Constants/Value/c.html","claim":ANCHOR}]
+              },ensure_ascii=False)}
+            ], "max_completion_tokens":900,
+            "response_format":{"type":"json_schema","json_schema":{
+              "name":"whiteboard_storyboard","strict":True,"schema":SCHEMA}}}
+            async with httpx.AsyncClient(base_url=cfg.xai_base_url.rstrip("/") + "/",
+                  timeout=httpx.Timeout(115,connect=15),follow_redirects=False) as client:
+              response = await client.post("chat/completions",json=body,
+                headers={"Authorization":"Bearer "+cfg.xai_api_key})
+            if response.status_code != 200:
+              print("SCIENCE_SMOKE_HTTP_"+str(response.status_code),flush=True)
+              return 3
+            data = response.json()
+            content = data.get("choices",[{}])[0].get("message",{}).get("content","")
+            parsed = json.loads(content)
+            validate(parsed,SCHEMA)
+            claim = parsed["findings"][0] if len(parsed["findings"])==1 else {}
+            structurally_valid=(claim.get("claim")==STATEMENT
+               and claim.get("reference_id")=="NIST"
+               and claim.get("evidence_quote") in ANCHOR
+               and bool(claim.get("evidence_quote")))
+            print("SCIENCE_SMOKE "+json.dumps({
+              "http":response.status_code,"model":str(data.get("model") or model)[:90],
+              "finish_reason":str(data["choices"][0].get("finish_reason"))[:35],
+              "strict_schema_valid":True,
+              "source_quote_valid":structurally_valid,
+              "verdict":parsed.get("status"),
+              "usage_tokens":(data.get("usage") or {}).get("total_tokens")
+            },ensure_ascii=False),flush=True)
+            return 0 if structurally_valid else 4
+          sys.exit(asyncio.run(main()))
+          PY
