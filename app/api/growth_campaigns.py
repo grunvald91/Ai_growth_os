@@ -23,6 +23,10 @@ from app.db.session import get_db
 from app.models.domain import Artifact, ArtifactStatus, Experiment
 from app.services.experiments import ExperimentService
 from app.services.experiment_launch import ExperimentLaunchError, ExperimentLaunchService
+from app.services.campaign_performance import (
+    CampaignMeasurementError, add_measurement, comparison_for, metric_text,
+    STAGES,
+)
 from app.services.campaign_readiness import (
     CampaignResources, CampaignResourceError, MATERIAL_KINDS,
     link_resource, load_resources,
@@ -322,17 +326,70 @@ def campaign_page(product, row: Experiment, error: str = "", *,
         '<h2>Каналы и материалы</h2>'
         + channel_section + materials_section + '</section>'
     )
-    results = ''.join(
-        f'<li><strong>{esc(item.name)}:</strong> {esc(item.value)} {esc(item.unit)}'
-        f' <small>({esc(item.source)}, {esc(item.observed_at.date())})</small></li>'
+    comparison = comparison_for(row, list(metrics))
+    if comparison.comparable:
+        first = comparison.baseline
+        last = comparison.result
+        unit = esc(last.unit or "")
+        delta = metric_text(comparison.absolute_change)
+        signed_delta = f"+{delta}" if comparison.absolute_change > 0 else delta
+        percent = (
+            f' ({("+" if comparison.percent_change > 0 else "") + metric_text(comparison.percent_change)}%)'
+            if comparison.percent_change is not None else ""
+        )
+        comparison_html = (
+            f'<p><strong>{esc(row.target_metric)}</strong>: '
+            f'до — {esc(metric_text(first.value))} {unit} ({esc(first.observed_at.date())}); '
+            f'после — {esc(metric_text(last.value))} {unit} ({esc(last.observed_at.date())}).</p>'
+            f'<p>Изменение: <strong>{esc(signed_delta)} {unit}{esc(percent)}</strong>.</p>'
+            '<p>Сравнение показывает разницу измерений, но не доказывает, '
+            'что изменения вызваны именно кампанией.</p>'
+        )
+    else:
+        comparison_html = f'<p>{esc(comparison.explanation)}</p>'
+
+    observations = ''.join(
+        f'<li>{esc(item.name)}: {esc(metric_text(item.value))} {esc(item.unit or "")}'
+        f' — {esc(STAGES.get((item.dimensions or {}).get("stage"), "Измерение"))} '
+        f'({esc(item.observed_at.date())}); источник: {esc(item.source)}'
+        + ('; внесено вручную, источник не проверен автоматически'
+           if isinstance(item.dimensions, dict) and
+              item.dimensions.get("entry_method") == "owner_manual" else '')
+        + '</li>'
         for item in metrics
     )
+    entry_form = ""
+    if row.target_metric:
+        entry_form = (
+            '<details><summary>Добавить измерение вручную</summary>'
+            '<p>Используйте данные из CRM, аналитики или отчёта. '
+            'Значения будут помечены как внесённые вручную.</p>'
+            f'<form method="post" action="{path}/measurements">'
+            f'<label class="field">Период<select name="stage" required>'
+            '<option value="baseline">До кампании</option>'
+            '<option value="result">После запуска</option></select></label>'
+            '<label class="field">Значение'
+            '<input name="value" type="number" step="0.0001" required></label>'
+            '<label class="field">Единица измерения'
+            '<input name="unit" maxlength="50" placeholder="шт., ₽, %"></label>'
+            '<label class="field">Дата измерения'
+            '<input name="observed_on" type="date" required></label>'
+            '<label class="field">Источник'
+            '<input name="source" maxlength="200" required placeholder="CRM, отчёт по записям"></label>'
+            '<button class="btn" type="submit">Добавить измерение</button>'
+            '</form></details>'
+        )
     results_section = (
-        '<section class="surface form-card"><h2>Фактические результаты</h2>'
-        + (f'<ul>{results}</ul>' if results else
-           '<p>Измерений пока нет — оценить эффективность ещё нельзя.</p>')
+        '<section class="surface form-card" id="campaign-results">'
+        '<h2>Эффективность кампании</h2>'
+        + comparison_html
+        + '<details><summary>Все измерения</summary>'
+        + (f'<ul>{observations}</ul>' if observations else
+           '<p>Измерений пока нет.</p>')
+        + '</details>'
         + (f'<p><strong>Записанный вывод:</strong> {esc(row.conclusion)}</p>'
            if row.conclusion else '')
+        + entry_form
         + '</section>'
     )
     warning = f'<p role="alert">{esc(error)}</p>' if error else ""
@@ -373,7 +430,7 @@ def campaign_metrics(db: Session, product_id: UUID, experiment_id: UUID):
     return list(db.scalars(
         select(Metric).where(Metric.product_id == product_id,
                              Metric.experiment_id == experiment_id)
-        .order_by(Metric.observed_at.desc()).limit(12)
+        .order_by(Metric.observed_at.desc(), Metric.created_at.desc(), Metric.id.desc()).limit(200)
     ))
 
 
@@ -523,5 +580,32 @@ async def select_campaign_channel(
         raise HTTPException(409, str(exc)) from None
     return RedirectResponse(
         f"/studio/products/{product_id}/campaigns/{experiment_id}#campaign-connect",
+        status_code=303,
+    )
+
+
+@router.post("/studio/products/{product_id}/campaigns/{experiment_id}/measurements")
+async def add_campaign_measurement(
+    product_id: UUID, experiment_id: UUID, request: Request,
+    db: Session = Depends(get_db),
+):
+    _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    try:
+        add_measurement(
+            db, product_id=product_id, experiment_id=experiment_id,
+            stage=fields.get("stage", ""),
+            value=fields.get("value", ""), unit=fields.get("unit", ""),
+            source=fields.get("source", ""), observed_on=fields.get("observed_on", ""),
+            actor=f"studio:{getattr(request.state, 'studio_login', 'operator')}",
+        )
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(404, str(exc)) from None
+    except CampaignMeasurementError as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc)) from None
+    return RedirectResponse(
+        f"/studio/products/{product_id}/campaigns/{experiment_id}#campaign-results",
         status_code=303,
     )
