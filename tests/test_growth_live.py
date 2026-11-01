@@ -71,9 +71,9 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=12' in page.text
+    assert '/studio/assets/growth-live.css?v=13' in page.text
     assert '/studio/assets/dispatcher.js?v=resource-cards-20261101' in page.text
-    assert '/studio/assets/growth-live.js?v=6' in page.text
+    assert '/studio/assets/growth-live.js?v=7' in page.text
     assert 'Простое видео' in page.text
     assert 'hero-intro' in page.text
     assert 'Добрый день, Марина' not in page.text
@@ -967,3 +967,22 @@ def test_campaign_finish_post_company_auth_and_origin(live, monkeypatch, tmp_pat
     assert "&lt;b&gt;Вывод владельца&lt;/b&gt;" in page.text
     assert "<b>Вывод владельца</b>" not in page.text
     assert list(db.scalars(select(Decision))) == []
+
+
+def test_approved_growth_home_has_floating_transparent_overlay():
+    """Keep the approved #192 layout from regressing to flow/separate grey bands."""
+    from app.api.growth_v4 import ASSETS
+    css = (ASSETS / "growth-live.css").read_text(encoding="utf-8")
+    js = (ASSETS / "growth-live.js").read_text(encoding="utf-8")
+    start = css.index("Approved home-screen geometry")
+    end = css.index("/* New Topic:", start)
+    rules = css[start:end]
+    assert "position:absolute;" in rules
+    assert "padding:4px 8px calc(var(--v4-dock-height,142px) + 16px) 4px;" in rules
+    assert "background:transparent!important;" in rules
+    assert "pointer-events:none;" in rules
+    assert "border-bottom:0!important;" in rules
+    assert "background:var(--card);" in rules
+    assert "ResizeObserver(measureDock)" in js
+    assert "--v4-dock-height" in js
+    assert "position:relative;\n  left:auto;\n  right:auto;" not in rules

@@ -41,8 +41,17 @@
   viewport?.addEventListener('resize',fitConversation);
   window.addEventListener('resize',fitConversation);
   fitConversation();
-  // The command dock follows the message feed in normal document flow,
-  // so resizing the keyboard/composer cannot hide the scrollbar below it.
+  // A transparent, floating dock overlaps the feed. Reserve space *inside*
+  // the scroll pane so the last message can be scrolled above the controls,
+  // including after a keyboard resize, voice-mode switch or multi-line draft.
+  const dock=root.querySelector('.command-dock');
+  if(dock){
+   const measureDock=()=>root.style.setProperty(
+     '--v4-dock-height',Math.ceil(dock.getBoundingClientRect().height)+'px');
+   new ResizeObserver(measureDock).observe(dock);
+   viewport?.addEventListener('resize',measureDock);
+   requestAnimationFrame(measureDock);
+  }
   const feed=document.getElementById('dp-feed');
   let previousHeight=feed.clientHeight,previousContent=feed.scrollHeight;
   new ResizeObserver(()=>{
