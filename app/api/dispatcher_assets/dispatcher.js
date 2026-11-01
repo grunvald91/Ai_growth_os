@@ -120,6 +120,25 @@
     return wrap;
   }
 
+  // One visual item = one accessible link. No duplicate table/link sections.
+  function renderResourceList(block) {
+    var list = el('div', 'dp-resource-list');
+    block.items.forEach(function (item) {
+      var card = el('a', 'dp-resource');
+      card.href = item.href;
+      var content = el('span', 'dp-resource-copy');
+      content.appendChild(el('strong', 'dp-resource-title',
+        voiceHoldEnabled ? friendlyTitle(item.title) : item.title));
+      if (item.status) content.appendChild(el('span', 'dp-resource-status', item.status));
+      card.appendChild(content);
+      var arrow = el('span', 'dp-resource-arrow', '→');
+      arrow.setAttribute('aria-hidden', 'true');
+      card.appendChild(arrow);
+      list.appendChild(card);
+    });
+    return list;
+  }
+
   function renderTask(block) {
     var card = el('a', 'dp-task');
     card.href = block.href;
@@ -190,6 +209,7 @@
       else if (block.type === 'chips') bubble.appendChild(renderChips(block.items, sendChip));
       else if (block.type === 'links') bubble.appendChild(renderLinks(block.items));
       else if (block.type === 'table') bubble.appendChild(renderTable(block));
+      else if (block.type === 'resource_list') bubble.appendChild(renderResourceList(block));
       else if (block.type === 'task') bubble.appendChild(renderTask(block));
       else if (block.type === 'material') bubble.appendChild(renderMaterial(block));
       else if (block.type === 'confirm') bubble.appendChild(renderConfirm(block));
@@ -200,7 +220,19 @@
   function upsert(message) {
     var node = renderMessage(message);
     var existing = feed.querySelector('[data-id="' + message.id + '"]');
-    if (existing) feed.replaceChild(node, existing); else feed.appendChild(node);
+    if (Number.isInteger(message.seq)) node.setAttribute('data-seq', String(message.seq));
+    if (existing) {
+      feed.replaceChild(node, existing);
+      return;
+    }
+    // Requests and update polling can finish out of order. Keep the
+    // conversation oldest -> newest, with the newest next to the composer.
+    var following = Array.from(feed.children).find(function (child) {
+      var seq = Number(child.getAttribute('data-seq'));
+      return child.hasAttribute('data-seq') && Number.isInteger(message.seq) && seq > message.seq;
+    });
+    if (following) feed.insertBefore(node, following);
+    else feed.appendChild(node);
   }
 
   function renderHints() {
