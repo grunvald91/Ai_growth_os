@@ -61,7 +61,8 @@ class GrowthDesignMiddleware(BaseHTTPMiddleware):
             part in path for part in ('/assets/', '/login', '/logout', '/design-preview'))
         from app.api.studio_sso import _canonical_pwa
         from app.core.config import get_settings
-        canonical = _canonical_pwa(request, get_settings())
+        setting_provider = request.app.dependency_overrides.get(get_settings, get_settings)
+        canonical = _canonical_pwa(request, setting_provider())
         choice = request.query_params.get('design')
         preference = choice if choice in {'v4', 'classic'} else request.cookies.get(COOKIE)
         # Canonical ServGo starts on v4, while an explicit Classic choice
