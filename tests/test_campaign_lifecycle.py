@@ -153,3 +153,68 @@ def test_finish_preserves_evidence_and_note_without_inventing_decision(db):
     with pytest.raises(LookupError):
         command(db, product_id=p.id, experiment_id=uuid4(),
                 action="finish", actor="other")
+
+
+
+def test_reconciliation_fairness_when_earlier_campaigns_stay_blocked(db, monkeypatch):
+    from app.services import campaign_lifecycle as lifecycle
+    monkeypatch.setattr(lifecycle, "_RECONCILE_CURSOR", None)
+    company = Product(name="Fair multi-company queue", slug="fair-life-tenant")
+    db.add(company)
+    db.flush()
+    blocked = []
+    for index in range(7):
+        row = Experiment(product_id=company.id,
+                         experiment_key=f"EXP-FAIR-{index:02d}",
+                         name=f"Running task {index}", hypothesis="Test",
+                         status="stopping")
+        db.add(row)
+        db.flush()
+        linked_task(db, company, row, TaskStatus.RUNNING)
+        blocked.append(row)
+    ready = Experiment(product_id=company.id, experiment_key="EXP-FAIR-READY",
+                       name="Ready", hypothesis="Test", status="finishing")
+    db.add(ready)
+    db.commit()
+    # A bounded scan must eventually visit ALL IDs, not just the 3 oldest
+    # campaigns that can remain pending indefinitely.
+    for _ in range(4):
+        lifecycle.reconcile_pending(db, limit=3)
+    db.refresh(ready)
+    assert ready.status == "completed"
+    for item in blocked:
+        db.refresh(item)
+        assert item.status == "stopping"
+
+
+def test_lifecycle_reconciler_never_marks_inflight_telegram_as_cancelled(db):
+    p = Product(name="Network in flight", slug="inflight-telegram")
+    db.add(p)
+    db.flush()
+    row = campaign(db, p)
+    material = Artifact(product_id=p.id, kind="channel_text",
+                        title="Already sending", content="{}")
+    db.add(material)
+    db.flush()
+    db.add(Artifact(product_id=p.id, kind="campaign_workspace",
+                    title=f"Campaign resources {row.id}",
+                    content=json.dumps({"experiment_id": str(row.id),
+                                        "material_ids": [str(material.id)]})))
+    publication = Publication(product_id=p.id, artifact_id=material.id,
+                              channel="telegram", status="sending")
+    db.add(publication)
+    db.commit()
+    status, pending = command(db, product_id=p.id, experiment_id=row.id,
+                              action="finish", actor="owner")
+    assert status == "finishing"
+    assert pending.pending_publications == 1
+    db.refresh(publication)
+    assert publication.status == "sending"
+    publication.status = "delivery_unknown"
+    db.commit()
+    assert reconcile_pending(db) == 0
+    publication.status = "published"
+    db.commit()
+    assert reconcile_pending(db) == 1
+    db.refresh(row)
+    assert row.status == "completed"
