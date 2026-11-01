@@ -11,7 +11,8 @@ from app.api.content_studio_auth import require_studio_csrf
 from app.core.config import Settings
 
 
-def request(*, host="servgo.ru", scheme="https", origin=None, referer=None, fetch_site=None, method="POST"):
+def request(*, host="servgo.ru", scheme="https", origin=None, referer=None, fetch_site=None,
+            forwarded_proto=None, method="POST"):
     headers = [(b"host", host.encode("ascii"))]
     if origin is not None:
         headers.append((b"origin", origin.encode("ascii")))
@@ -19,6 +20,8 @@ def request(*, host="servgo.ru", scheme="https", origin=None, referer=None, fetc
         headers.append((b"referer", referer.encode("ascii")))
     if fetch_site is not None:
         headers.append((b"sec-fetch-site", fetch_site.encode("ascii")))
+    if forwarded_proto is not None:
+        headers.append((b"x-forwarded-proto", forwarded_proto.encode("ascii")))
     return Request({
         "type": "http", "method": method, "scheme": scheme,
         "server": (host, 443), "path": "/studio/products/fake/create",
@@ -90,3 +93,42 @@ def test_bad_or_missing_legacy_origin_fails_closed():
         studio_servgo_gateway_enabled=True, _env_file=None,
     )
     reject(request(origin="https://servgo.ru"), invalid, 503)
+
+
+def test_real_public_https_origin_survives_nginx_internal_http_when_gateway_enabled():
+    """Regression: the browser is on HTTPS growth.servgo.ru, nginx -> Docker is HTTP.
+
+    When the gateway flag is on, the old code rejected *all* such valid writes,
+    even though nginx set X-Forwarded-Proto: https.
+    """
+    gateway = settings(enabled=True)
+    assert require_studio_csrf(request(
+        host="growth.servgo.ru", scheme="http", origin="https://growth.servgo.ru",
+        forwarded_proto="https", fetch_site="same-origin",
+    ), gateway) is None
+    assert require_studio_csrf(request(
+        host="servgo.ru", scheme="http", origin="https://servgo.ru",
+        forwarded_proto="https", fetch_site="same-origin",
+    ), gateway) is None
+
+
+@pytest.mark.parametrize("host,origin,proto,fetch", [
+    ("growth.servgo.ru", "https://servgo.ru", "https", "same-site"),
+    ("servgo.ru", "https://growth.servgo.ru", "https", "same-site"),
+    ("growth.servgo.ru", "https://growth.servgo.ru", "http", "same-origin"),
+    ("growth.servgo.ru", "https://growth.servgo.ru", "https,http", "same-origin"),
+    ("growth.servgo.ru", "https://evil.example", "https", "cross-site"),
+    ("growth.servgo.ru", "null", "https", "same-origin"),
+])
+def test_gateway_reverse_proxy_does_not_accept_unauthorised_origin(host, origin, proto, fetch):
+    reject(request(host=host, scheme="http", origin=origin,
+                   forwarded_proto=proto, fetch_site=fetch), settings(enabled=True))
+
+
+def test_legacy_growth_origin_keeps_same_origin_referer_fallback_via_nginx():
+    gateway = settings(enabled=True)
+    assert require_studio_csrf(request(
+        host="growth.servgo.ru", scheme="http",
+        origin=None, referer="https://growth.servgo.ru/studio/products/demo/whiteboard",
+        forwarded_proto="https", fetch_site="same-origin",
+    ), gateway) is None
