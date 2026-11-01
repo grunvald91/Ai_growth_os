@@ -128,12 +128,33 @@ def task_campaign(db: Session, task: Task, brief_data: dict, *, lock: bool = Fal
     campaign = db.scalar(query.execution_options(populate_existing=True))
     if campaign is None:
         return None
-    # A decisionless experiment_id is reserved for canonical launch tasks.
-    if decision_id is None and task.title not in {
-        f"{campaign.experiment_key}: prepare experiment",
-        f"{campaign.experiment_key}: prepare outreach cohort",
-    }:
-        return None
+    # A decisionless experiment_id requires a canonical launch task OR a
+    # canonical task_brief whose JSON UUID is checked against the campaign.
+    # Older code allowed an arbitrary Task.title with a verified brief.title.
+    if decision_id is None:
+        expected = {
+            f"{campaign.experiment_key}: prepare experiment",
+            f"{campaign.experiment_key}: prepare outreach cohort",
+        }
+        if task.title not in expected:
+            briefs = db.scalars(select(Artifact).where(
+                Artifact.product_id == task.product_id,
+                Artifact.task_id == task.id,
+                Artifact.kind == "task_brief",
+                Artifact.title.in_(expected),
+            ))
+            verified = False
+            for brief in briefs:
+                try:
+                    stored = json.loads(brief.content)
+                except (TypeError, ValueError):
+                    continue
+                if (isinstance(stored, dict) and
+                        stored.get("experiment_id") == str(campaign.id)):
+                    verified = True
+                    break
+            if not verified:
+                return None
     return campaign
 
 
