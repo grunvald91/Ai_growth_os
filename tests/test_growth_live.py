@@ -851,3 +851,119 @@ def test_campaign_measurement_post_company_auth_and_origin(live, monkeypatch, tm
     assert client.post(base, data=data, headers={'Origin': 'https://growth.servgo.ru'},
                        follow_redirects=False).status_code == 303
     assert len(list(db.scalars(select(Metric)))) == 1
+
+
+
+def test_campaign_stop_action_is_real_scoped_and_idempotent(live):
+    import json
+    from sqlalchemy import select
+    from app.models.domain import Experiment, Product, Task, TaskStatus
+    client, db, product = live
+    foreign_product = Product(name="Чужой бизнес", slug="stop-foreign-campaign")
+    db.add(foreign_product)
+    db.flush()
+    row = Experiment(product_id=product.id, experiment_key="EXP-STOP-HTTP-1",
+                     name="Кампания на остановку", hypothesis="Гипотеза", status="running")
+    other = Experiment(product_id=foreign_product.id, experiment_key="EXP-STOP-HTTP-2",
+                       name="Чужая кампания", hypothesis="Тест", status="running")
+    db.add_all([row, other])
+    db.flush()
+    task = Task(product_id=product.id, title="EXP-STOP-HTTP-1: prepare experiment",
+                status=TaskStatus.QUEUED)
+    db.add(task)
+    db.flush()
+    db.add(Artifact(product_id=product.id, task_id=task.id, kind="task_brief",
+                    title=task.title, content=json.dumps({"experiment_id": str(row.id)})))
+    db.commit()
+    base = f"/studio/products/{product.id}/campaigns/{row.id}"
+    page = client.get(base+"?design=v4")
+    assert page.status_code == 200
+    assert f'action="{base}/stop"' in page.text
+    assert f'action="{base}/finish"' in page.text
+    assert client.get(base+"/stop").status_code == 405
+    assert client.post(f"/studio/products/{product.id}/campaigns/{other.id}/stop").status_code == 404
+    assert client.post(base+"/stop", follow_redirects=False).status_code == 303
+    db.refresh(row)
+    db.refresh(task)
+    assert row.status == "stopped"
+    assert task.status == TaskStatus.CANCELLED
+    assert client.post(base+"/stop", follow_redirects=False).status_code == 303
+    assert client.post(base+"/finish").status_code == 409
+    assert db.get(Experiment, other.id).status == "running"
+    result = client.get(base)
+    assert "Остановлена" in result.text
+    assert f'action="{base}/stop"' not in result.text
+
+
+def test_campaign_pending_stop_reports_inflight_status_and_reconciles(live):
+    import json
+    from sqlalchemy import select
+    from app.models.domain import Experiment, Task, TaskStatus
+    from app.services.campaign_lifecycle import reconcile_pending
+    client, db, product = live
+    row = Experiment(product_id=product.id, experiment_key="EXP-STOP-PENDING-1",
+                     name="Ожидание завершения", hypothesis="Тест", status="running")
+    db.add(row)
+    db.flush()
+    task = Task(product_id=product.id, title="EXP-STOP-PENDING-1: prepare experiment",
+                status=TaskStatus.RUNNING)
+    db.add(task)
+    db.flush()
+    db.add(Artifact(product_id=product.id, task_id=task.id, kind="task_brief",
+                    title=task.title, content=json.dumps({"experiment_id": str(row.id)})))
+    db.commit()
+    url = f"/studio/products/{product.id}/campaigns/{row.id}"
+    assert client.post(url+"/stop", follow_redirects=False).status_code == 303
+    db.refresh(row)
+    assert row.status == "stopping"
+    page = client.get(url+"?design=v4")
+    assert "Останавливается" in page.text
+    assert "Активные задания: 1" in page.text
+    assert "Обновить состояние" in page.text
+    task.status = TaskStatus.COMPLETED
+    db.commit()
+    assert reconcile_pending(db) == 1
+    db.refresh(row)
+    assert row.status == "stopped"
+    assert "Остановлена" in client.get(url).text
+
+
+def test_campaign_finish_post_company_auth_and_origin(live, monkeypatch, tmp_path):
+    from app.core.studio_accounts import create_account
+    from sqlalchemy import select
+    from app.models.domain import Experiment, Decision
+    client, db, product = live
+    other = Product(name="Чужая организация", slug="foreign-finalization")
+    db.add(other)
+    db.flush()
+    row = Experiment(product_id=product.id, experiment_key="EXP-FINISH-HTTP-1",
+                     name="Завершаемый эксперимент", hypothesis="Тест",
+                     status="running")
+    db.add(row)
+    db.commit()
+    settings = Settings(app_env="production", products_root=tmp_path,
+                        studio_admin_username="owner", studio_admin_password="fixture-only",
+                        studio_public_origin="https://growth.servgo.ru", _env_file=None)
+    create_account(settings, username="campaign-owner",
+                   password="local-fixture-password", role="company",
+                   product_ids=[str(product.id)], created_by="test")
+    monkeypatch.setitem(app.dependency_overrides, get_settings, lambda: settings)
+    client.auth = ("campaign-owner", "local-fixture-password")
+    url = f"/studio/products/{product.id}/campaigns/{row.id}/finish"
+    payload = {"note": "<b>Вывод владельца</b>"}
+    assert client.post(url, data=payload).status_code == 403
+    assert client.post(url, data=payload,
+                       headers={"Origin": "https://invalid.example"}).status_code == 403
+    assert client.post(url.replace(str(product.id), str(other.id)),
+                       data=payload,
+                       headers={"Origin": "https://growth.servgo.ru"}).status_code == 404
+    assert client.post(url, data=payload,
+                       headers={"Origin": "https://growth.servgo.ru"},
+                       follow_redirects=False).status_code == 303
+    db.refresh(row)
+    assert row.status == "completed"
+    assert row.conclusion == "Вывод владельца: <b>Вывод владельца</b>"
+    page = client.get(f"/studio/products/{product.id}/campaigns/{row.id}")
+    assert "&lt;b&gt;Вывод владельца&lt;/b&gt;" in page.text
+    assert "<b>Вывод владельца</b>" not in page.text
+    assert list(db.scalars(select(Decision))) == []
