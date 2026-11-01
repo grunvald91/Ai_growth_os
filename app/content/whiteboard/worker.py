@@ -31,7 +31,7 @@ def build_pipeline(settings, payload, store):
     service = LLMService(privacy_gateway=privacy, provider=SingleCallStoryboardLLM(settings, diagnostic_directory=store.directory))
     science_service = (LLMService(privacy_gateway=privacy,
         provider=SingleCallStoryboardLLM(settings, diagnostic_directory=store.directory,
-                                         allow_fallback=False))
+                                         allow_fallback=False, allow_ceiling_retry=False))
         if requires_science_review(payload.request) else None)
     if regions_on_claudehub(payload.models):
         regions = ClaudeHubRegionProvider(api_key=settings.xai_api_key, base_url=settings.xai_base_url, model=payload.models.regions)

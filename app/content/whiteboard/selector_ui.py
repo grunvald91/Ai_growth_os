@@ -38,15 +38,20 @@ def topic_picker_html(product_id) -> str:
   const field = name => form.elements.namedItem(name);
   let chosen = "";
   let quoteReady = false;
+  let quoteVersion = 0;
   function resetChoice() {
+    quoteVersion += 1;
     chosen = ""; quoteReady = false; consent.checked = false; consent.disabled = true;
     launch.disabled = true; quote.textContent = "";
   }
   const close = () => dialog.close();
+  dialog.addEventListener("close", () => { quoteVersion += 1; });
   document.getElementById("wb-topic-close").addEventListener("click", close);
   document.getElementById("wb-topic-cancel").addEventListener("click", close);
   consent.addEventListener("change", () => { launch.disabled = !(consent.checked && quoteReady && chosen); });
   async function showQuote() {
+    const version = ++quoteVersion;
+    const selected = chosen;
     quoteReady = false; consent.checked = false; consent.disabled = true; launch.disabled = true;
     if (!chosen) return;
     quote.textContent = "Рассчитываем лимит API-вызовов…";
@@ -54,12 +59,18 @@ def topic_picker_html(product_id) -> str:
       topic: chosen, duration_seconds: field("duration_seconds").value,
       science_mode: field("science_mode").value,
       visual_review: field("visual_review").value,
-      max_api_calls: field("max_api_calls").value
+      max_api_calls: field("max_api_calls").value,
+      source_script: field("source_script").value
     });
     try {
-      const result = await fetch(base + "/quote.json?" + params, {credentials:"same-origin",cache:"no-store"});
+      const result = await fetch(base + "/quote.json", {
+        method:"POST",credentials:"same-origin",cache:"no-store",
+        headers:{"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"},
+        body:params.toString()
+      });
       if (!result.ok) throw new Error("Не удалось получить расчёт");
       const data = await result.json();
+      if (version !== quoteVersion || chosen !== selected || !dialog.open) return;
       if (!data.allowed) {
         quote.textContent = "Выбранный лимит слишком мал: нужно не меньше " + data.required_calls + " вызовов. Измените настройки формы.";
         return;
@@ -71,6 +82,7 @@ def topic_picker_html(product_id) -> str:
       caption.textContent = "Разрешаю платную генерацию выбранной темы: до " + data.limit + " API-вызовов.";
       quoteReady = true; consent.disabled = false;
     } catch (_) {
+      if (version !== quoteVersion || chosen !== selected || !dialog.open) return;
       quote.textContent = "Не удалось проверить лимит. Запуск недоступен до повторной проверки.";
     }
   }

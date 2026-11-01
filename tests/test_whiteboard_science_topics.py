@@ -170,3 +170,44 @@ async def test_picker_explicit_consent_starts_existing_queue_path(environment, m
         jobs = list(db.scalars(select(Task).where(Task.product_id == product_id,
                          Task.assigned_agent == "whiteboard_renderer")))
         assert len(jobs) == 1 and jobs[0].status == TaskStatus.QUEUED
+
+
+def test_science_review_requires_complete_beat_coverage():
+    from test_whiteboard import storyboard
+    req = science_request()
+    story = storyboard()
+    # A single legitimate citation cannot attest all six narration beats.
+    one = FactReview(status="supported", summary="Неполная научная проверка.",
+        verified_source_ids=["SEP"],
+        findings=[FactFinding(claim=story.scenes[0].beats[0].narration,
+                              verdict="supported", explanation="Проверено по источнику.",
+                              reference_id="SEP")])
+    assert not evidence_supported(one, req, story)
+    # A complete review, preserving beat identity, can pass.
+    narrations = [beat.narration for scene in story.scenes for beat in scene.beats][:-1]
+    complete = FactReview(status="supported", summary="Все реплики проверены по источнику.",
+        verified_source_ids=["SEP"],
+        findings=[FactFinding(claim=line, verdict="supported",
+                              explanation="Утверждение подтверждено источником.",
+                              reference_id="SEP") for line in narrations])
+    assert evidence_supported(complete, req, story)
+    assert not evidence_supported(complete.model_copy(update={
+        "findings": [*complete.findings, complete.findings[0]]
+    }), req, story)
+
+
+def test_automatic_science_review_detects_supplied_script_and_quote(environment):
+    from app.content.whiteboard.science import requires_science_review
+    _, settings, product_id, _ = environment
+    req = WhiteboardRequest(product_id=product_id, topic="Короткое объяснение для зрителей",
+        science_mode="auto", source_script="Энергия нагрева увеличивает массу тела.")
+    assert requires_science_review(req)
+    browser = client()
+    quote = browser.post(f"/studio/products/{product_id}/whiteboard/quote.json",
+        data={"topic": req.topic, "science_mode": "auto",
+              "source_script": req.source_script,
+              "duration_seconds": "30", "visual_review": "off",
+              "max_api_calls": "auto"})
+    assert quote.status_code == 200
+    assert quote.json()["science_review"] is True
+    assert quote.json()["required_calls"] == 15

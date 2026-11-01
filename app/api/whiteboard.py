@@ -297,6 +297,14 @@ def job_html(state, product_id, *, error=None):
         summary = esc(science.get('summary', ''))
         label = 'Научная проверка пройдена' if science.get('status') == 'supported' else 'Научные факты требуют исправления'
         body += f'<p><strong>{label}</strong>: {summary}</p>'
+        sources = science.get('source_links') or []
+        if sources:
+            body += '<details><summary>Источники научной проверки</summary><ul>'
+            for item in sources[:5]:
+                url = str(item.get('url', ''))
+                if url.startswith('https://'):
+                    body += f'<li><a href="{esc(url)}" rel="noopener noreferrer" target="_blank">{esc(url)}</a></li>'
+            body += '</ul></details>'
     if state.get('visual_review_enabled'):
         body += '<p>Один проход визуального критика. Автор выбирает существенные исправления; каждая выбранная сцена перерисовывается максимум один раз.</p>'
     if state.get('image_provider') == 'claudehub':
@@ -478,14 +486,16 @@ def studio_topic_suggestions(product_id: UUID, db: Session = Depends(get_db), se
 
 
 @router.get('/studio/products/{product_id}/whiteboard/quote.json')
-def studio_topic_quote(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+@router.post('/studio/products/{product_id}/whiteboard/quote.json')
+async def studio_topic_quote(product_id: UUID, request: Request, db: Session = Depends(get_db)):
     _owner_product(db, product_id)
-    q = request.query_params
+    q = await _studio_form(request) if request.method == 'POST' else request.query_params
     try:
         seconds = int(q.get('duration_seconds', '30'))
         draft = WhiteboardRequest(product_id=product_id, topic=q.get('topic', ''),
             duration_seconds=seconds, scenes=SCENES_FOR_SECONDS[seconds],
-            science_mode=q.get('science_mode', 'auto'))
+            science_mode=q.get('science_mode', 'auto'),
+            source_script=q.get('source_script', ''))
         needed = required_calls(draft, visual_review=q.get('visual_review', 'once') == 'once')
         raw = q.get('max_api_calls', 'auto')
         limit = needed if raw == 'auto' else int(raw)

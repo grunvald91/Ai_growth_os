@@ -201,10 +201,11 @@ class SingleCallStoryboardLLM:
     One POST per model. When the chosen model does not answer at all (provider 5xx/429, no
     connection) the next configured model is tried, so a provider outage does not stop the job.
     A model that answered (even with a bad result) is never retried or replaced here."""
-    def __init__(self, settings, *, client=None, diagnostic_directory=None, allow_fallback=True):
+    def __init__(self, settings, *, client=None, diagnostic_directory=None, allow_fallback=True, allow_ceiling_retry=True):
         self.settings, self.client = settings, client
         self.diagnostic_directory = diagnostic_directory
         self.allow_fallback = allow_fallback
+        self.allow_ceiling_retry = allow_ceiling_retry
 
     def record_response(self, response, *, name='storyboard'):
         # Private response capture permits offline diagnosis without repeating a paid call.
@@ -250,7 +251,7 @@ class SingleCallStoryboardLLM:
             response = await connection.post('chat/completions', json=payload,
                                              headers={'Authorization': 'Bearer ' + settings.xai_api_key})
             self.record_response(response)
-            if (payload['max_completion_tokens'] != request.max_tokens
+            if (self.allow_ceiling_retry and payload['max_completion_tokens'] != request.max_tokens
                     and rejects_ceiling(response.status_code, response.text)):
                 # This model has a smaller output limit: retry once with the caller's value.
                 payload['max_completion_tokens'] = request.max_tokens
