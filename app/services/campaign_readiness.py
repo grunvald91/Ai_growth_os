@@ -180,7 +180,7 @@ def link_resource(db: Session, product_id: UUID, experiment_id: UUID,
     """
     row = db.scalar(select(Experiment).where(
         Experiment.id == experiment_id, Experiment.product_id == product_id,
-    ).with_for_update())
+    ).with_for_update().execution_options(populate_existing=True))
     if row is None:
         raise LookupError("Кампания не найдена")
     if row.status not in {"draft", "running"}:
