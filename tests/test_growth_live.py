@@ -347,7 +347,7 @@ def test_campaign_launch_v4_scoped_once_and_without_external_actions(live, monke
     detail = client.get(f'{own_base}/{own.id}?design=v4')
     assert detail.status_code == 200
     assert f'action="{action}"' in detail.text
-    assert 'Запустить внутреннюю подготовку' in detail.text
+    assert 'Запустить подготовку' in detail.text
     assert client.get(action).status_code == 405
     assert client.post(f'{own_base}/{foreign.id}/launch').status_code == 404
     assert db.get(Experiment, foreign.id).status == 'draft'
@@ -372,7 +372,7 @@ def test_campaign_launch_v4_scoped_once_and_without_external_actions(live, monke
     assert len(list(db.scalars(select(Task)))) == 1
     assert len(list(db.scalars(select(Decision)))) == 1
     assert db.get(Experiment, foreign.id).status == 'draft'
-    assert 'Запустить внутреннюю подготовку' not in client.get(f'{own_base}/{own.id}').text
+    assert 'Запустить подготовку' not in client.get(f'{own_base}/{own.id}').text
 
 
 def test_campaign_launch_v4_incomplete_contract_keeps_draft(live, monkeypatch, tmp_path):
@@ -424,3 +424,108 @@ def test_campaign_launch_v4_requires_company_account_and_csrf(live, monkeypatch,
     assert client.post(action, headers=origin, follow_redirects=False).status_code == 303
     assert db.get(Experiment, experiment.id).status == 'running'
     assert len(list(db.scalars(select(Task)))) == 1
+
+
+
+def test_v4_campaign_owner_brief_has_clear_goal_action_and_single_next_step(live):
+    from sqlalchemy import select
+    from app.models.domain import Experiment
+    client, db, product = live
+    base = f'/studio/products/{product.id}/campaigns'
+    values = _v4_campaign_fields(key='EXP-OWNER-BRIEF-001',
+                                 name='Вернуть клиентов')
+    values.update(target_metric='Повторные записи',
+                  action='Подготовить предложение и рассылку',
+                  hypothesis='Клиенты снова запишутся',
+                  success_condition='20 дополнительных записей',
+                  attribution_method='Сравнить записи до и после')
+    assert client.post(base+'/new', data=values, follow_redirects=False).status_code == 303
+    experiment = db.scalar(select(Experiment).where(
+        Experiment.product_id == product.id,
+        Experiment.experiment_key == 'EXP-OWNER-BRIEF-001'))
+    listing = client.get(base+'?design=v4')
+    assert listing.status_code == 200
+    for expected in ('Вернуть клиентов', 'Повторные записи',
+                     'Подготовить предложение и рассылку',
+                     '20 дополнительных записей', 'Проверить и запустить',
+                     'От вас:'):
+        assert expected in listing.text
+    assert '<script>alert' not in listing.text
+    detail = client.get(f'{base}/{experiment.id}?design=v4')
+    assert detail.status_code == 200
+    for expected in ('Что хотим улучшить', 'Что сделаем', 'Что проверим',
+                     'Какой результат считаем успешным', 'Как измерим',
+                     'Что требуется от вас', 'Сравнить записи до и после',
+                     'Запустить подготовку', 'Подробнее о плане и условиях'):
+        assert expected in detail.text
+    assert f'action="{base}/{experiment.id}/launch"' in detail.text
+    assert 'Измерений пока нет — оценить эффективность ещё нельзя.' in detail.text
+    assert 'Подключить аккаунт' not in detail.text  # no fabricated integration requirement
+
+
+def test_v4_campaign_no_false_ready_state_and_company_scoped_metrics(live):
+    from datetime import datetime, timezone
+    from decimal import Decimal
+    from sqlalchemy import select
+    from app.models.domain import Experiment, Metric, Product
+    client, db, product = live
+    base = f'/studio/products/{product.id}/campaigns'
+    incomplete = Experiment(product_id=product.id, experiment_key='EXP-OWNER-INCOMPLETE-001',
+                            name='Требует уточнения', hypothesis='Проверить', status='draft')
+    db.add(incomplete)
+    db.flush()
+    other = Product(name='Другая организация', slug='owner-brief-foreign')
+    db.add(other)
+    db.flush()
+    valid = Experiment(product_id=product.id, experiment_key='EXP-OWNER-METRIC-001',
+                       name='Реальные показатели', hypothesis='Проверить', status='running',
+                       action='Подготовить рассылку', target_metric='Повторные записи',
+                       success_condition='10 дополнительных записей',
+                       attribution_method='По CRM')
+    db.add(valid)
+    db.flush()
+    ts = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    db.add_all([
+        Metric(product_id=product.id, experiment_id=valid.id,
+               name='Повторные записи', value=Decimal('4'), unit='шт.',
+               source='CRM бизнеса', observed_at=ts),
+        Metric(product_id=other.id, experiment_id=valid.id,
+               name='ЧУЖОЙ ПОКАЗАТЕЛЬ', value=Decimal('999'), unit='шт.',
+               source='ЧУЖОЙ ИСТОЧНИК', observed_at=ts),
+    ])
+    db.commit()
+    index = client.get(base)
+    assert 'Дополнить план' in index.text
+    assert 'ЧУЖОЙ ПОКАЗАТЕЛЬ' not in index.text
+    draft = client.get(f'{base}/{incomplete.id}')
+    assert 'Дополнить план' in draft.text
+    assert f'action="{base}/{incomplete.id}/launch"' not in draft.text
+    running = client.get(f'{base}/{valid.id}?design=v4')
+    assert running.status_code == 200
+    assert 'Подготовка запущена' in running.text
+    assert 'Повторные записи:' in running.text
+    assert 'CRM бизнеса' in running.text
+    assert 'ЧУЖОЙ ПОКАЗАТЕЛЬ' not in running.text
+    assert 'ЧУЖОЙ ИСТОЧНИК' not in running.text
+    assert f'action="{base}/{valid.id}/launch"' not in running.text
+    assert f'/studio/products/{product.id}/channels' in running.text
+    assert f'/studio/products/{product.id}/review' in running.text
+
+
+def test_v4_campaign_description_escapes_persisted_html(live):
+    from app.models.domain import Experiment
+    client, db, product = live
+    row = Experiment(product_id=product.id, experiment_key='EXP-ESCAPE-OWNER-001',
+                     name='<img src=x onerror=alert(1)>',
+                     action='<script>alert(1)</script>',
+                     hypothesis='Демонстрационный тест',
+                     target_metric='<b>Цель</b>', status='draft')
+    db.add(row)
+    db.commit()
+    base = f'/studio/products/{product.id}/campaigns'
+    for path in (base, f'{base}/{row.id}'):
+        text = client.get(path).text
+        assert '&lt;img src=x onerror=alert(1)&gt;' in text
+        assert '<img src=x onerror=alert(1)>' not in text
+        assert '&lt;script&gt;alert(1)&lt;/script&gt;' in text
+        assert '<script>alert(1)</script>' not in text
