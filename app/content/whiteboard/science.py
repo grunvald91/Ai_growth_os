@@ -26,7 +26,7 @@ SCIENCE_TERMS = re.compile(
 def requires_science_review(request: WhiteboardRequest) -> bool:
     return request.science_mode == "scientific" or (
         request.science_mode == "auto"
-        and bool(SCIENCE_TERMS.search(request.topic + " " + request.source_script[:800]))
+        and bool(SCIENCE_TERMS.search(request.topic))
     )
 
 
