@@ -15,6 +15,8 @@ from pydantic import ValidationError
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.content_studio import _owner_product, _studio_form, esc, studio_page_shell
 from app.content.whiteboard.contracts import SCENES_FOR_SECONDS, Contract, WhiteboardRequest
+from app.content.whiteboard.science import requires_science_review
+from app.content.whiteboard.topics import suggest_company_video_topics
 from app.content.whiteboard.jobs import (AGENT, MAX_API_CALLS, TOP_UP_STEP, approve_job, call_limit, can_resume, can_top_up, cancel_job,
                                          digest, job_directory, owner_task, queue_job, records, required_calls, resume_job)
 from app.content.whiteboard.runtime import MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings
@@ -41,6 +43,10 @@ class CreateJob(Contract):
     max_api_calls: int | None = Field(default=None, ge=13, le=MAX_API_CALLS)
     profile: Literal['configured', 'gemini_ru'] = 'gemini_ru'
     visual_review: bool = False
+    source_script: str = Field(default='', max_length=12000)
+    background_notes: str = Field(default='', max_length=6000)
+    reference_materials: str = Field(default='', max_length=6000)
+    science_mode: Literal['general', 'auto', 'scientific'] = 'auto'
 
     @model_validator(mode='after')
     def call_to_action_not_tiny(self):
@@ -87,7 +93,9 @@ def _queue(db, product, body, settings):
         raise HTTPException(503, MESSAGES['configuration_missing']) from None
     request = WhiteboardRequest(product_id=product.id, topic=body.topic, voice=voice,
                                 duration_seconds=body.duration_seconds, scenes=SCENES_FOR_SECONDS[body.duration_seconds],
-                                call_to_action=body.call_to_action)
+                                call_to_action=body.call_to_action,
+                                source_script=body.source_script, background_notes=body.background_notes,
+                                reference_materials=body.reference_materials, science_mode=body.science_mode)
     needed = required_calls(request, visual_review=body.visual_review)
     if body.max_api_calls is not None and body.max_api_calls < needed:
         raise HTTPException(422, f'Для этого видео нужно не меньше {needed} вызовов. Выберите лимит {needed} или больше, либо «Столько, сколько нужно».')
@@ -178,6 +186,12 @@ def approval_card(state, product_id, error=None):
     warning = f'<p class="sg-warning" role="alert">{esc(error)}</p>' if error else ''
     cta = state['request'].get('call_to_action')
     cta_html = f'<p class="wb-cta"><strong>Призыв в конце:</strong> {esc(cta)}</p>' if cta else ''
+    inputs = state['request']
+    source_description = (
+        f'<p>Исходный сценарий: {len(inputs.get("source_script", ""))} символов; '
+        f'дополнительные материалы: {len(inputs.get("background_notes", ""))} символов. '
+        f'Тип проверки: {esc(inputs.get("science_mode", "general"))}.</p>'
+    )
     review = ('<p>Один проход визуального критика. Автор выбирает существенные исправления; '
               'каждая выбранная сцена перерисовывается максимум один раз.</p>' if state.get('visual_review_enabled') else '')
     provider = ('<p>Новые рисунки и перерисовки: Gemini 3.1 Flash Image через API ClaudeHub. '
@@ -209,7 +223,7 @@ def job_html(state, product_id, *, error=None):
     if state['status'] == 'waiting_approval' and not state.get('visual_repair_from'):
         return approval_card(state, product_id, error or MESSAGES.get(state.get('error')))
     base = f'/studio/products/{product_id}/whiteboard/{state["task_id"]}'
-    stages = {'storyboard': 'Сценарий', 'image': 'Рисунок', 'regions': 'Области рисования', 'speech': 'Озвучка',
+    stages = {'storyboard': 'Сценарий', 'science_review': 'Проверка научных утверждений', 'image': 'Рисунок', 'regions': 'Области рисования', 'speech': 'Озвучка',
               'visual_review': 'Критик проверяет рисунки', 'visual_decision': 'Автор разбирает замечания',
               'image_revision': 'Перерисовка выбранной сцены',
               'audio_reuse': 'Использование исходной озвучки без генерации',
