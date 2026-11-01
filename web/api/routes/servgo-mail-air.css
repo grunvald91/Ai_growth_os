@@ -1,0 +1,122 @@
+/* ServGo Mail adapter: legacy mail layout + canonical ServGo Air tokens.
+ * Load after existing Mail page styles and exported servgo-air-tokens.css.
+ * The long-form redesign and one-origin PWA routing are separate follow-up PRs.
+ */
+html[data-theme] {
+  --blue: var(--s-accent);
+  --line: var(--s-line);
+  --border: var(--s-line);
+  --muted: var(--s-muted);
+  --shadow: var(--sh-2);
+  background: var(--s-bg);
+  color: var(--s-text);
+  font-family: var(--ds-font);
+}
+html[data-theme] body { color: var(--s-text); background: var(--s-bg); }
+html[data-theme] aside {
+  color: var(--s-text);
+  background: var(--s-surface);
+  border-color: var(--s-line);
+}
+html[data-theme] .brand,
+html[data-theme] .heading h1,
+html[data-theme] .top h1,
+html[data-theme] .panel h2,
+html[data-theme] .metric strong,
+html[data-theme] .number strong {
+  color: var(--s-text);
+}
+html[data-theme] .sub,
+html[data-theme] .muted,
+html[data-theme] .hint,
+html[data-theme] .heading p,
+html[data-theme] .top p,
+html[data-theme] .little,
+html[data-theme] .field span,
+html[data-theme] .field label,
+html[data-theme] .message span,
+html[data-theme] .detail p,
+html[data-theme] .campaign small,
+html[data-theme] th {
+  color: var(--s-muted);
+}
+html[data-theme] .panel,
+html[data-theme] .metric,
+html[data-theme] .number,
+html[data-theme] .auto,
+html[data-theme] dialog {
+  background: var(--s-surface);
+  color: var(--s-text);
+  border-color: var(--s-line);
+  box-shadow: var(--sh-2);
+}
+html[data-theme] .message,
+html[data-theme] .campaign,
+html[data-theme] .panel h2,
+html[data-theme] .panel-head,
+html[data-theme] th,
+html[data-theme] td,
+html[data-theme] .status-line {
+  border-color: var(--s-line);
+}
+html[data-theme] .message:hover,
+html[data-theme] .message.selected,
+html[data-theme] .campaign:hover,
+html[data-theme] .campaign.selected,
+html[data-theme] .nav button.active,
+html[data-theme] nav a.on,
+html[data-theme] .nav a:hover,
+html[data-theme] nav a:hover {
+  background: var(--s-accent-soft);
+  color: var(--s-accent);
+}
+html[data-theme] .little,
+html[data-theme] .back-admin,
+html[data-theme] .idea,
+html[data-theme] .note,
+html[data-theme] .btn.alt,
+html[data-theme] .secondary,
+html[data-theme] .tag,
+html[data-theme] .label,
+html[data-theme] td button {
+  background: var(--s-surface-2);
+  color: var(--s-text-2);
+  border-color: var(--s-line);
+}
+html[data-theme] .field input,
+html[data-theme] .field textarea,
+html[data-theme] .field select,
+html[data-theme] #search-dialog select,
+html[data-theme] .outline,
+html[data-theme] .btn.light {
+  background: var(--s-surface-2);
+  border-color: var(--s-line);
+  color: var(--s-text);
+}
+html[data-theme] .field input::placeholder,
+html[data-theme] .field textarea::placeholder { color: var(--s-muted-2); }
+html[data-theme] .primary,
+html[data-theme] .btn:not(.alt):not(.light):not(.warn):not(.danger) {
+  color: var(--s-accent-ink);
+  background: var(--s-accent-grad);
+}
+html[data-theme] .stickybar { background: var(--s-surface); border-color: var(--s-line); }
+html[data-theme] .empty { color: var(--s-muted); }
+html[data-theme] .empty strong,
+html[data-theme] .sent-body { color: var(--s-text); }
+
+.servgo-mail-theme-picker {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+  color: var(--s-muted); white-space: nowrap;
+}
+.servgo-mail-theme-picker select {
+  font: inherit; min-height: 39px; border: 1px solid var(--s-line);
+  border-radius: 12px; padding: 6px 8px; color: var(--s-text);
+  background: var(--s-surface-2);
+}
+.servgo-mail-theme-picker select:focus-visible {
+  outline: 2px solid var(--s-accent); outline-offset: 2px;
+}
+@media (max-width: 760px) {
+  .servgo-mail-theme-picker { flex: none; }
+}

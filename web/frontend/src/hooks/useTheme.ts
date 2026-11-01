@@ -1,22 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  SERVGO_THEME_EVENT,
+  resolveServgoTheme,
+  setServgoThemePreference,
+  type ResolvedServgoTheme,
+} from '../utils/servgoTheme'
 
-type Theme = 'light' | 'dark'
-
-function detectInitial(): Theme {
-  const saved = localStorage.getItem('schedTheme')
-  if (saved === 'dark' || saved === 'light') return saved
-  const tg = (window as unknown as { Telegram?: { WebApp?: { colorScheme?: string } } }).Telegram?.WebApp?.colorScheme
-  if (tg === 'dark') return 'dark'
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-/**
- * Светлая/тёмная тема для админ-экранов. Хранит выбор в localStorage
- * (общий ключ schedTheme), по умолчанию следует Telegram colorScheme / системе.
+/** Backward-compatible two-state toggle for existing admin widgets.
+ * The global preference is light/dark/system and is shared with the client shell.
  */
-export function useTheme(): [Theme, () => void] {
-  const [theme, setTheme] = useState<Theme>(detectInitial)
-  useEffect(() => { localStorage.setItem('schedTheme', theme) }, [theme])
-  const toggle = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))
+export function useTheme(): [ResolvedServgoTheme, () => void] {
+  const [theme, setTheme] = useState<ResolvedServgoTheme>(resolveServgoTheme)
+  useEffect(() => {
+    const sync = () => setTheme(resolveServgoTheme())
+    window.addEventListener(SERVGO_THEME_EVENT, sync)
+    return () => window.removeEventListener(SERVGO_THEME_EVENT, sync)
+  }, [])
+  const toggle = useCallback(() => {
+    setServgoThemePreference(resolveServgoTheme() === 'dark' ? 'light' : 'dark')
+  }, [])
   return [theme, toggle]
 }

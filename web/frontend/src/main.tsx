@@ -8,8 +8,10 @@ import '@fontsource-variable/montserrat/index.css'
 import './index.css'
 import App from './App'
 import { initTelegramWebApp } from './utils/telegram'
+import { initializeServgoTheme } from './utils/servgoTheme'
 
 initTelegramWebApp()
+initializeServgoTheme()
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

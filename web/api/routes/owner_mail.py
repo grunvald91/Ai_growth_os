@@ -38,6 +38,34 @@ router = APIRouter(prefix="/owner-mail", tags=["owner-mail"])
 COOKIE = "servgo_owner_mail"
 ADDRESS = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,63}$")
 HOST = "https://mail.servgo.ru"
+CANONICAL_HOST = "https://servgo.ru"
+MAIL_GATEWAY_FLAG = "SERVGO_MAIL_GATEWAY_ENABLED"
+
+
+def mail_gateway_enabled() -> bool:
+    return os.getenv(MAIL_GATEWAY_FLAG, "").casefold() in {"1", "true", "yes"}
+
+
+def canonical_mail_request(request: Request) -> bool:
+    """Only requests genuinely served at the HTTPS PWA origin can use its Mail session."""
+    return (mail_gateway_enabled() and request.url.scheme == "https"
+            and request.url.netloc.casefold() == "servgo.ru")
+
+
+def verify_mail_write_origin(request: Request):
+    """Preserve legacy POST safety and bind new same-origin calls to their actual host."""
+    sent = request.headers.get("origin")
+    if request.headers.get("sec-fetch-site", "").casefold() == "cross-site":
+        raise HTTPException(403, "Недопустимое происхождение запроса")
+    if not mail_gateway_enabled():
+        if sent != HOST:
+            raise HTTPException(403, "Недопустимое происхождение запроса")
+        return
+    host = request.url.netloc.casefold()
+    legacy = (request.url.scheme == "https" and host == "mail.servgo.ru" and sent == HOST)
+    canonical = canonical_mail_request(request) and sent == CANONICAL_HOST
+    if not (legacy or canonical):
+        raise HTTPException(403, "Недопустимое происхождение запроса")
 SESSION_SECONDS = 30 * 24 * 3600
 # Mail login reuses the AI Growth OS password: Growth checks it, this service never stores it.
 GROWTH_AUTH_URL = os.getenv("SERVGO_MAIL_GROWTH_AUTH_URL", "http://127.0.0.1:8091/studio/assets/servgo.svg")
@@ -134,20 +162,30 @@ async def mail_owner(request: Request, session: AsyncSession = Depends(get_db)):
     if not user or not owner(user):
         raise HTTPException(403, "Нет доступа")
     if request.method not in {"GET", "HEAD"}:
-        if request.headers.get("origin") != HOST:
-            raise HTTPException(403, "Недопустимое происхождение запроса")
+        verify_mail_write_origin(request)
     return user
 
 
 @router.post("/entry")
 def entry(user: User = Depends(require_owner)):
-    ticket = sign(user.id, "mail-entry", 60, jti=uuid4().hex)
+    destination = "pwa" if mail_gateway_enabled() else "legacy"
+    ticket = sign(user.id, "mail-entry", 60, jti=uuid4().hex, destination=destination)
+    if destination == "pwa":
+        return {"url": CANONICAL_HOST + "/api/owner-mail/claim?ticket=" + ticket}
     return {"url": HOST + "/claim?ticket=" + ticket}
 
 
 @router.get("/claim")
-async def claim(ticket: str, session: AsyncSession = Depends(get_db)):
+async def claim(ticket: str, request: Request, session: AsyncSession = Depends(get_db)):
     data = verify(ticket, "mail-entry")
+    is_pwa = canonical_mail_request(request)
+    # Tickets minted for a canonical origin must not be accepted at the legacy
+    # mail host, and legacy tickets must not be accepted at the PWA origin.
+    if request.url.netloc.casefold() == "servgo.ru" and not is_pwa:
+        raise HTTPException(403, "Вход через единое приложение не настроен")
+    expected_destination = "pwa" if is_pwa else "legacy"
+    if data.get("destination", "legacy") != expected_destination:
+        raise HTTPException(401, "Ссылка предназначена для другого адреса")
     try:
         user_id = int(data["sub"])
         jti = str(data["jti"])
@@ -161,17 +199,21 @@ async def claim(ticket: str, session: AsyncSession = Depends(get_db)):
             db.execute("INSERT INTO claims VALUES (?)", (jti,))
         except sqlite3.IntegrityError:
             raise HTTPException(401, "Ссылка использована") from None
-    response = RedirectResponse("/", status_code=303)
-    set_session(response, user.id)
+    response = RedirectResponse(
+        "/api/owner-mail/workspace" if is_pwa else "/", status_code=303,
+    )
+    set_session(response, user.id, cookie_path="/api/owner-mail" if is_pwa else "/")
     response.headers.update({"Referrer-Policy": "no-referrer", "Cache-Control": "no-store"})
     return response
 
 
-def set_session(response, user_id):
+def set_session(response, user_id, *, cookie_path="/"):
     # Lax, not Strict: links from Gmail or Telegram must not drop the session. Every write
-    # still requires Origin == HOST in mail_owner. Each device gets its own 30-day session.
+    # still requires strict, host-bound Origin checks for writes. A canonical PWA
+    # session is scoped to the Mail API path and cannot be sent to other services.
     response.set_cookie(COOKIE, sign(user_id, "mail-session", SESSION_SECONDS),
-                        secure=True, httponly=True, samesite="lax", max_age=SESSION_SECONDS)
+                        secure=True, httponly=True, samesite="lax",
+                        path=cookie_path, max_age=SESSION_SECONDS)
 
 
 def too_many_failures(client: str) -> bool:
@@ -196,8 +238,7 @@ class LoginData(BaseModel):
 
 @router.post("/api/login")
 async def login(data: LoginData, request: Request, session: AsyncSession = Depends(get_db)):
-    if request.headers.get("origin") != HOST:
-        raise HTTPException(403, "Недопустимое происхождение запроса")
+    verify_mail_write_origin(request)
     client = request.headers.get("x-real-ip") or (request.client.host if request.client else "?")
     if too_many_failures(client):
         raise HTTPException(429, "Слишком много попыток. Подождите 15 минут")
@@ -227,27 +268,38 @@ async def login(data: LoginData, request: Request, session: AsyncSession = Depen
         raise HTTPException(503, "Владелец почты не настроен")
     LOGIN_FAILURES.pop(client, None)
     response = JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
-    set_session(response, user.id)
+    set_session(response, user.id, cookie_path="/api/owner-mail" if canonical_mail_request(request) else "/")
     return response
 
 
 @router.get("/api/logout")
-def logout():
-    response = RedirectResponse("/", status_code=303)
-    response.delete_cookie(COOKIE, secure=True, httponly=True, samesite="lax")
+def logout(request: Request):
+    is_pwa = canonical_mail_request(request)
+    response = RedirectResponse("/admin" if is_pwa else "/", status_code=303, headers={
+        "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+    })
+    response.delete_cookie(
+        COOKIE, path="/api/owner-mail" if is_pwa else "/",
+        secure=True, httponly=True, samesite="lax",
+    )
     return response
 
 
 LOGIN_PAGE = """<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Почта ServGo</title>
-<style>body{margin:0;font-family:system-ui,sans-serif;background:#f5f5f7;color:#1d1d1f;display:flex;
+<link rel="stylesheet" href="/api/servgo-air-tokens.css?v=1">
+<link rel="stylesheet" href="/api/servgo-mail-air.css?v=1">
+<script src="/api/servgo-air-theme.js?v=1"></script>
+<script src="/api/servgo-mail-theme-picker.js?v=1" defer></script>
+<style>body{margin:0;font-family:var(--ds-font,system-ui),sans-serif;background:var(--s-bg,#fff);color:var(--s-text,#1b2d42);display:flex;
 min-height:100vh;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
-main{background:#fff;border-radius:16px;padding:24px;width:100%;max-width:360px;box-sizing:border-box;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+main{background:var(--s-surface,#fff);border-radius:20px;padding:24px;width:100%;max-width:360px;box-sizing:border-box;box-shadow:0 1px 3px rgba(0,0,0,.08)}
 h1{font-size:20px;margin:0 0 16px}label{display:block;font-size:14px;margin:0 0 12px}
-input{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:10px 12px;font-size:16px;border:1px solid #d2d2d7;border-radius:10px}
-button{width:100%;margin-top:4px;background:#0071e3;color:#fff;border:0;padding:12px;border-radius:999px;font-size:16px;font-weight:600}
+input{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:10px 12px;font-size:16px;border:1px solid var(--s-line,#e5ecf4);background:var(--s-surface-2,#f6f9fd);color:var(--s-text,#1b2d42);border-radius:10px}
+button{width:100%;margin-top:4px;background:var(--s-accent-grad,linear-gradient(110deg,#3174d4,#578fef));color:var(--s-accent-ink,#fff);border:0;padding:12px;border-radius:999px;font-size:16px;font-weight:600}
 #err{color:#c00;font-size:14px;min-height:20px;margin:8px 0 0}
 </style></head><body><main><h1>Почта ServGo</h1>
+<label class="servgo-mail-theme-picker" style="margin:0 0 16px">Тема <select id="servgo-mail-theme" aria-label="Тема оформления"><option value="system">Как в системе</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label>
 <form id="f"><label>Логин<input name="username" autocomplete="username" autocapitalize="none" required></label>
 <label>Пароль<input name="password" type="password" autocomplete="current-password" required></label>
 <button type="submit">Войти</button><p id="err" role="alert"></p></form>
@@ -276,8 +328,8 @@ async def app_page(request: Request, session: AsyncSession = Depends(get_db)):
         if exc.status_code != 401:
             raise
         return HTMLResponse(LOGIN_PAGE, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
-                                                 "Content-Security-Policy": "default-src 'self'; script-src 'unsafe-inline'; "
-                                                 "style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"})
+                                                 "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+                                                 "style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"})
     path = Path(__file__).resolve().parent / "mail_campaign_dashboard.html"
     return FileResponse(path, media_type="text/html", headers={
         "Cache-Control": "no-store",

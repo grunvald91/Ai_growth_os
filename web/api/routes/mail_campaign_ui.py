@@ -12,6 +12,44 @@ from .owner_mail import mail_owner
 router = APIRouter(prefix="/owner-mail", tags=["mail-campaign-ui"])
 
 
+# Public static design resources. No mail/customer data is exposed.
+# Mail HTML itself remains owner-only via mail_owner.
+@router.get("/api/servgo-air-tokens.css", include_in_schema=False)
+def air_tokens():
+    return FileResponse(
+        Path(__file__).with_name("servgo-air-tokens.css"),
+        media_type="text/css",
+        headers={"Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.get("/api/servgo-mail-air.css", include_in_schema=False)
+def mail_air_styles():
+    return FileResponse(
+        Path(__file__).with_name("servgo-mail-air.css"),
+        media_type="text/css",
+        headers={"Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.get("/api/servgo-mail-theme-picker.js", include_in_schema=False)
+def mail_theme_picker():
+    return FileResponse(
+        Path(__file__).with_name("servgo-mail-theme-picker.js"),
+        media_type="text/javascript",
+        headers={"Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.get("/api/servgo-air-theme.js", include_in_schema=False)
+def mail_theme_bootstrap():
+    return FileResponse(
+        Path(__file__).with_name("servgo-air-theme.js"),
+        media_type="text/javascript",
+        headers={"Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.get("/api/campaigns-dashboard")
 async def campaign_dashboard(request: Request, session: AsyncSession = Depends(get_db)):
     # Expired or missing session: back to the login form instead of a bare 401.

@@ -1,5 +1,43 @@
 // === Type definitions ===
 
+export interface SeoConversionSummary {
+  business_id: number
+  tracking_enabled: boolean
+  days: number
+  total_created: number
+  total_confirmed: number
+  articles: { article_slug: string; bookings_created: number; bookings_confirmed: number }[]
+}
+
+export interface BlogArticleSummary {
+  slug: string
+  title: string
+  description: string
+  category: string
+  lead: string
+  published_at: string
+}
+
+export interface BusinessBlogFeed {
+  business_id: number
+  company_url: string
+  booking_url: string
+  articles: BlogArticleSummary[]
+}
+
+export interface BusinessBlogArticle extends BlogArticleSummary {
+  direct_answer: string
+  sections: { title: string; paragraphs: string[]; bullets: string[] }[]
+  company_facts?: string[]
+  closing: string
+  faq: { question: string; answer: string }[]
+  cta: string
+  cta_url: string
+  company_url: string
+  booking_url: string
+}
+
+
 export interface SalesBookingSummary {
   business_name: string;
   service_name: string;
@@ -346,6 +384,7 @@ export interface CreateBookingData {
   personal_data_consent?: boolean;
   booking_terms_accepted?: boolean;
   repeat_weeks?: number;
+  seo_ref?: string;
 }
 
 export interface CRMContact {
@@ -602,6 +641,8 @@ export interface AuthResponse {
 
 // === API Client ===
 
+import { canSaveOffline, loadOfflineSnapshot, publishOfflineSnapshotUsed, saveOfflineSnapshot } from '../utils/offlineStore'
+
 const API = '/api';
 
 export class ApiError extends Error {
@@ -626,20 +667,66 @@ export interface TelegramLoginPayload {
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = localStorage.getItem('token');
   const tgInitData = window.Telegram?.WebApp?.initData || '';
-  const res = await fetch(`${API}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(tgInitData ? { 'X-Telegram-Init-Data': tgInitData } : {}),
-      ...options?.headers,
-    },
-  });
+  const method = (options?.method || 'GET').toUpperCase();
+  const offlineReadable = method === 'GET' && !!token && canSaveOffline(path);
+
+  // Offline writes are never queued or applied optimistically as server state.
+  if (method !== 'GET' && !navigator.onLine) {
+    throw new ApiError(0, 'Для изменения данных необходимо подключение к интернету.');
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${API}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(tgInitData ? { 'X-Telegram-Init-Data': tgInitData } : {}),
+        ...options?.headers,
+      },
+    });
+  } catch (error) {
+    window.dispatchEvent(new Event('servgo-api-offline'))
+    // Only a transport failure can fall back to saved data: never HTTP 401/403.
+    if (offlineReadable && token) {
+      try {
+        const snapshot = await loadOfflineSnapshot<T>(path, token);
+        if (snapshot) {
+          publishOfflineSnapshotUsed(snapshot.savedAt, path);
+          return snapshot.data;
+        }
+      } catch (storageError) {
+        console.warn('ServGo offline snapshot unavailable:', storageError);
+      }
+    }
+    throw error;
+  }
+  // Gateway outage: keep cached schedules readable, but never mask 401/403.
+  if ([502, 503, 504].includes(res.status) && offlineReadable && token) {
+    try {
+      const snapshot = await loadOfflineSnapshot<T>(path, token)
+      if (snapshot) {
+        window.dispatchEvent(new Event('servgo-api-offline'))
+        publishOfflineSnapshotUsed(snapshot.savedAt, path)
+        return snapshot.data
+      }
+    } catch (storageError) {
+      console.warn('ServGo offline fallback unavailable:', storageError)
+    }
+  }
+  window.dispatchEvent(new Event('servgo-api-online'))
   if (!res.ok) {
     const text = await res.text();
     throw new ApiError(res.status, text || `HTTP ${res.status}`);
   }
-  return res.json();
+  const data = await res.json() as T;
+  if (offlineReadable && token) {
+    // Storage failures must not prevent the ordinary online booking workflow.
+    try { await saveOfflineSnapshot(path, data, token) }
+    catch (error) { console.warn('ServGo offline snapshot not saved:', error) }
+  }
+  return data;
 }
 
 export const api = {
@@ -720,6 +807,9 @@ export const api = {
   // Client
   getBusinesses: () => request<Business[]>('/businesses'),
   getBusiness: (id: number) => request<BusinessDetail>(`/businesses/${id}`),
+  getBusinessBlog: (id: number) => request<BusinessBlogFeed>(`/businesses/${id}/blog/articles`),
+  getBusinessBlogArticle: (id: number, slug: string) => request<BusinessBlogArticle>(
+    `/businesses/${id}/blog/articles/${encodeURIComponent(slug)}`),
   getSlots: async (
     bizId: number,
     serviceId: number,
@@ -904,6 +994,8 @@ export const api = {
     ),
   getAnalyticsOverview: (bizId: number, days: number) =>
     request<AnalyticsOverview>(`/admin/analytics/${bizId}/overview?days=${days}`),
+  getSeoConversions: (bizId: number, days: number) =>
+    request<SeoConversionSummary>(`/admin/businesses/${bizId}/seo/conversions?days=${days}`),
   getAdminBusinesses: () =>
     request<Business[]>('/admin/businesses'),
   createBusiness: (data: BusinessCreateData) =>

@@ -38,6 +38,10 @@ dialog{border:1px solid var(--line);border-radius:19px;padding:25px;width:min(64
 @media(max-width:850px){.fab{display:flex;position:fixed;right:14px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:20;border-radius:16px;padding:14px 18px;background:var(--blue);color:#fff;font-weight:800;font-size:15px;text-decoration:none;box-shadow:0 10px 26px #0d78f355}#notice{bottom:calc(84px + env(safe-area-inset-bottom));left:12px;right:12px;max-width:none}main{padding-bottom:96px}}
 @media(max-width:850px){.app{grid-template-columns:1fr}aside{padding:14px 16px}nav{display:flex;gap:6px;overflow:auto}.brand{margin-bottom:12px}main{padding:17px}.panels{grid-template-columns:1fr}.numbers{grid-template-columns:repeat(2,minmax(0,1fr))}.top{align-items:flex-start}}
 </style>
+<link rel="stylesheet" href="/api/servgo-air-tokens.css?v=1">
+<link rel="stylesheet" href="/api/servgo-mail-air.css?v=1">
+<script src="/api/servgo-air-theme.js?v=1"></script>
+<script src="/api/servgo-mail-theme-picker.js?v=1" defer></script>
 </head>
 <body>
 <div class="app">
@@ -47,7 +51,8 @@ dialog{border:1px solid var(--line);border-radius:19px;padding:25px;width:min(64
 </aside>
 <main>
 <div class="top"><div><h1>Рекламные кампании</h1><p>От списка адресов до заинтересованных ответов и заявок</p></div>
-<div class="row"><button id="reload" class="btn light">↻ Обновить</button><a class="btn light" style="text-decoration:none;display:inline-block" href="/api/mailbox-dashboard#compose">✉ Написать письмо</a><button id="create" class="btn">+ Новая кампания</button></div></div>
+<div class="row"><label class="servgo-mail-theme-picker">Тема <select id="servgo-mail-theme" aria-label="Тема оформления">
+<option value="system">Как в системе</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label><button id="reload" class="btn light">↻ Обновить</button><a class="btn light" style="text-decoration:none;display:inline-block" href="/api/mailbox-dashboard#compose">✉ Написать письмо</a><button id="create" class="btn">+ Новая кампания</button></div></div>
 <section class="auto" aria-live="polite"><div><b>Автоматическая рассылка</b><small id="auto-text">Проверяем состояние…</small></div>
 <button type="button" class="switch" id="auto-switch" role="switch" aria-checked="false" aria-label="Автоматическая рассылка" disabled></button></section>
 <div class="panels">

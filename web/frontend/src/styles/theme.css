@@ -1,41 +1,8 @@
-/* ─────────────────────────────────────────────────────────────────────────
-   Общий тёмно/светлый токен-слой ServGo для админ-экранов.
-   Применяется через класс .svg-theme + атрибут data-theme на корне экрана.
-   Скоуп .svg-* / .t-* не задевает остальной SPA.
-   ───────────────────────────────────────────────────────────────────────── */
-
-.svg-theme {
-  --s-bg: #f4f6fa;
-  --s-surface: #ffffff;
-  --s-surface-2: #eef1f6;
-  --s-text: #0d1b2a;
-  --s-muted: #6b7280;
-  --s-line: #e6e9ef;
-  --s-accent: #2f5beb;
-  --s-accent-2: #7c3aed;
-  --s-accent-soft: rgba(47, 91, 235, 0.12);
-  --s-success: #1b9e54;
-  --s-warning: #c98a16;
-  --s-danger: #d6463e;
-
-  color: var(--s-text);
-  background: var(--s-bg);
-}
-
-.svg-theme[data-theme='dark'] {
-  --s-bg: #0f141b;
-  --s-surface: #1a212b;
-  --s-surface-2: #232c38;
-  --s-text: #e8edf4;
-  --s-muted: #93a0b2;
-  --s-line: #2b3543;
-  --s-accent: #4f8cff;
-  --s-accent-2: #a877f5;
-  --s-accent-soft: rgba(79, 140, 255, 0.18);
-  --s-success: #34c878;
-  --s-warning: #e0a93a;
-  --s-danger: #ff6b62;
-}
+/* Legacy svg-* helpers now inherit the canonical ServGo Air tokens from
+ * design-system.css. Do not define a second light/dark palette here.
+ */
+.svg-theme { --s-accent-2: #7c3aed; color: var(--s-text); background: var(--s-bg); }
+.svg-theme[data-theme='dark'] { --s-accent-2: #a877f5; }
 
 /* Helper classes (themed) */
 .t-card { background: var(--s-surface); border: 1px solid var(--s-line); border-radius: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }

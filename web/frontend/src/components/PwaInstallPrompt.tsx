@@ -52,7 +52,7 @@ export function PwaInstallPrompt() {
         margin: '0 auto',
         padding: 14,
         borderRadius: 16,
-        background: 'white',
+        background: 'var(--s-surface)',
         border: '1px solid var(--s-line)',
         boxShadow: '0 10px 30px rgba(0,0,0,.14)',
       }}

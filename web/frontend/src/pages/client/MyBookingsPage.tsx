@@ -14,6 +14,7 @@ import { ClientShell } from '../../components/ClientShell'
 import { NotificationSetup } from '../../components/NotificationSetup'
 import { downloadBookingIcs } from '../../utils/calendar'
 import { useNavigate } from 'react-router-dom'
+import { useConnectivity } from '../../utils/useConnectivity'
 
 // ── Status config ──
 
@@ -395,11 +396,18 @@ function ReschedulePanel({
 
 export function MyBookingsPage() {
   const navigate = useNavigate()
+  const online = useConnectivity()
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [authExpired, setAuthExpired] = useState(false)
   const [reload, setReload] = useState(0)
+  useEffect(() => {
+    const refresh = () => { if (navigator.onLine) setReload(value => value + 1) }
+    window.addEventListener('online', refresh)
+    window.addEventListener('focus', refresh)
+    return () => { window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh) }
+  }, [])
   const [cancellingId, setCancellingId] = useState<number | null>(null)
   const [reschedulingId, setReschedulingId] = useState<number | null>(null)
   const [rescheduleLoading, setRescheduleLoading] = useState(false)
@@ -422,7 +430,7 @@ export function MyBookingsPage() {
         setLoadError(expired
           ? 'Срок действия входа истёк. Войдите в прежний аккаунт, чтобы увидеть свои записи.'
           : 'Не удалось загрузить записи. Попробуйте ещё раз.')
-        if (expired) clearLogin()
+        if (expired) void clearLogin().catch(error => console.warn('Offline cleanup after expired login:', error))
       })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
@@ -554,8 +562,8 @@ export function MyBookingsPage() {
   // ── Booking card renderer ──
   const renderBookingCard = (booking: Booking) => {
     const statusAllowsModify = booking.status === 'confirmed' || booking.status === 'pending'
-    const canCancel = booking.can_cancel !== undefined ? booking.can_cancel : statusAllowsModify
-    const canReschedule = booking.can_reschedule !== undefined ? booking.can_reschedule : statusAllowsModify
+    const canCancel = online && (booking.can_cancel !== undefined ? booking.can_cancel : statusAllowsModify)
+    const canReschedule = online && (booking.can_reschedule !== undefined ? booking.can_reschedule : statusAllowsModify)
     const canModify = canCancel || canReschedule
     const canAddCalendar = booking.status !== 'cancelled' && booking.status !== 'completed' && !isPast(booking.date)
     const isRescheduling = reschedulingId === booking.id

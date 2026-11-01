@@ -1017,3 +1017,133 @@ button.bf-chip { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
 @media (min-width: 1024px) and (max-height: 640px) {
   .bf-screen--review .bf-col--main .bf-review-row { padding-top: 8px; padding-bottom: 8px; }
 }
+
+
+/* ── ServGo Air unified dark skin (client booking journey) ──────────────────
+ * Light appearance remains untouched and is the approved visual reference.
+ * These overrides only apply when the single PWA theme is explicitly dark.
+ */
+html[data-theme='dark'] .bf-root {
+  --bf-ink: var(--s-text);
+  --bf-muted: var(--s-muted);
+  --bf-soft-ink: var(--s-muted-2);
+  --bf-blue: var(--s-accent);
+  --bf-blue-deep: var(--s-accent);
+  --bf-line: var(--s-line);
+  --bf-tint: var(--s-surface-2);
+  background: var(--s-bg);
+  color: var(--s-text);
+  color-scheme: dark;
+}
+html[data-theme='dark'] .bf-device,
+html[data-theme='dark'] .bf-screen,
+html[data-theme='dark'] .bf-topbar,
+html[data-theme='dark'] .bf-panel,
+html[data-theme='dark'] .bf-bottombar,
+html[data-theme='dark'] .bf-tabbar,
+html[data-theme='dark'] .bf-sheet,
+html[data-theme='dark'] .bf-chat-card,
+html[data-theme='dark'] .bf-chat-bar {
+  background: var(--s-surface);
+  color: var(--s-text);
+  border-color: var(--s-line);
+}
+html[data-theme='dark'] .bf-brand-name,
+html[data-theme='dark'] .bf-h1,
+html[data-theme='dark'] .bf-h2,
+html[data-theme='dark'] .bf-monthtitle,
+html[data-theme='dark'] .bf-review-value,
+html[data-theme='dark'] .bf-fields h3,
+html[data-theme='dark'] .bf-option-title,
+html[data-theme='dark'] .bf-choice-name,
+html[data-theme='dark'] .bf-stage-big,
+html[data-theme='dark'] .bf-empty-state strong,
+html[data-theme='dark'] .bf-chat-card-head strong {
+  color: var(--s-text);
+}
+html[data-theme='dark'] .bf-intro,
+html[data-theme='dark'] .bf-stepcount,
+html[data-theme='dark'] .bf-biz-line,
+html[data-theme='dark'] .bf-option-meta,
+html[data-theme='dark'] .bf-option-price,
+html[data-theme='dark'] .bf-choice-details,
+html[data-theme='dark'] .bf-stage-detail,
+html[data-theme='dark'] .bf-stage-metrics,
+html[data-theme='dark'] .bf-address,
+html[data-theme='dark'] .bf-field-label,
+html[data-theme='dark'] .bf-review-label,
+html[data-theme='dark'] .bf-times-sub,
+html[data-theme='dark'] .bf-chat-text,
+html[data-theme='dark'] .bf-chat-note,
+html[data-theme='dark'] .bf-sheet p,
+html[data-theme='dark'] .bf-sheet .details,
+html[data-theme='dark'] .bf-powered,
+html[data-theme='dark'] .bf-time,
+html[data-theme='dark'] .bf-tab {
+  color: var(--s-muted);
+}
+html[data-theme='dark'] .bf-user,
+html[data-theme='dark'] .bf-info-btn,
+html[data-theme='dark'] .bf-top-link,
+html[data-theme='dark'] .bf-call,
+html[data-theme='dark'] .bf-chip,
+html[data-theme='dark'] .bf-sheet-close,
+html[data-theme='dark'] .bf-chat-close,
+html[data-theme='dark'] .bf-chat-input,
+html[data-theme='dark'] .bf-choice-icon,
+html[data-theme='dark'] .bf-mini-icon,
+html[data-theme='dark'] .bf-stage-symbol,
+html[data-theme='dark'] .bf-chat-avatar,
+html[data-theme='dark'] .bf-stepper button,
+html[data-theme='dark'] .bf-info-btn,
+html[data-theme='dark'] .bf-fold {
+  background: var(--s-surface-2);
+  color: var(--s-text-2);
+  border-color: var(--s-line);
+}
+html[data-theme='dark'] .bf-logo {
+  border-color: var(--s-surface);
+}
+html[data-theme='dark'] .bf-biz + .bf-biz,
+html[data-theme='dark'] .bf-chat-head,
+html[data-theme='dark'] .bf-chat-bar,
+html[data-theme='dark'] .bf-tabbar {
+  border-color: var(--s-line);
+}
+html[data-theme='dark'] .bf-option.selected,
+html[data-theme='dark'] .bf-time.selected,
+html[data-theme='dark'] .bf-biz:active,
+html[data-theme='dark'] .bf-choice:active,
+html[data-theme='dark'] .bf-chip[aria-pressed='true'] {
+  background: var(--s-accent-soft);
+  color: var(--s-accent);
+}
+html[data-theme='dark'] .bf-option.selected .bf-option-title,
+html[data-theme='dark'] .bf-choice.is-complete .bf-choice-name,
+html[data-theme='dark'] .bf-time.selected,
+html[data-theme='dark'] .bf-tab.active {
+  color: var(--s-accent);
+}
+html[data-theme='dark'] .bf-primary,
+html[data-theme='dark'] .bf-chat-input button:not(:disabled) {
+  color: var(--s-accent-ink);
+  background: var(--s-accent-grad);
+}
+html[data-theme='dark'] .bf-input,
+html[data-theme='dark'] .bf-chat-input input {
+  color: var(--s-text);
+  border-color: var(--s-line);
+}
+html[data-theme='dark'] .bf-help {
+  background: var(--s-surface-2);
+  border-color: var(--s-line-2);
+  color: var(--s-text);
+}
+html[data-theme='dark'] .bf-help .bf-help-text {
+  color: var(--s-text);
+}
+html[data-theme='dark'] .bf-primary:disabled,
+html[data-theme='dark'] .bf-chat-input button:disabled {
+  background: var(--s-surface-3);
+  color: var(--s-muted);
+}

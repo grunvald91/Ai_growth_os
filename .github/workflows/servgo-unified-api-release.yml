@@ -6,6 +6,8 @@ on:
     branches: [integration/servgo-unified-fixed-20261031]
     paths:
       - 'web/api/**'
+      - 'database/models.py'
+      - 'migrations/add_seo_booking_attributions.sql'
       - 'scripts/servgo_unified_api_release.py'
       - 'tests/test_servgo_unified_api_release.py'
       - '.github/workflows/servgo-unified-api-release.yml'

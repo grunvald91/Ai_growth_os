@@ -1,0 +1,163 @@
+"""Public SEO HTML renders complete, escaped article content without JS or external calls."""
+import os
+os.environ.setdefault("BOT_TOKEN", "test-token")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+
+import unittest
+import json
+import re
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+from xml.etree import ElementTree
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from web.api.database import get_db
+from web.api.routes import seo_pages
+
+
+ARTICLE = {
+    "slug": "kak-uhazhivat-za-volosami",
+    "title": "Как ухаживать за волосами <script>alert(1)</script>",
+    "description": "Советы по уходу за волосами.",
+    "lead": "Уход после окрашивания.",
+    "direct_answer": "Не используйте слишком горячую воду.",
+    "primary_query": "как ухаживать за волосами после окрашивания",
+    "sections": [{"title": "Правила ухода", "paragraphs": ["Бережный шампунь."],
+                  "bullets": ["Защита от солнца"]}],
+    "company_facts": ["В салоне можно заказать консультацию <script>bad()</script>."],
+    "closing": "Записывайтесь на консультацию.",
+    "faq": [{"question": "Как часто?", "answer": "По состоянию волос."}],
+    "cta": "Запись в салон",
+    "published_at": "2026-10-31T12:00:00+00:00",
+    "updated_at": "2026-10-31T12:45:00+00:00",
+}
+FEED = {"business_id": 64, "articles": [ARTICLE]}
+
+
+class FakeDB:
+    def __init__(self, active=True):
+        self.active = active
+
+    async def get(self, model, key):
+        if key != 64:
+            return None
+        return SimpleNamespace(id=64, name="Салон <Мария>", address="Сочи",
+                               phone="+7 (900) 000-00-00", is_active=self.active)
+
+    async def scalars(self, query):
+        return SimpleNamespace(all=lambda: [])
+
+
+class PublicSEOHTMLTests(unittest.TestCase):
+    def setUp(self):
+        self.db = FakeDB()
+        app = FastAPI()
+        app.include_router(seo_pages.router)
+        async def get_test_db():
+            yield self.db
+        app.dependency_overrides[get_db] = get_test_db
+        self.client = TestClient(app)
+
+        async def fake_data(business_id, db, slug=None):
+            if business_id != 64 or (slug is not None and slug != ARTICLE["slug"]):
+                from fastapi import HTTPException
+                raise HTTPException(404, "No published article")
+            return ARTICLE if slug is not None else FEED
+        self.feed_patch = patch.object(seo_pages, "_company_blog_data", fake_data)
+        self.feed_patch.start()
+
+    def tearDown(self):
+        self.feed_patch.stop()
+        self.client.close()
+
+    def test_article_html_is_complete_search_readable_and_escaped(self):
+        response = self.client.get("/seo-pages/business/64/blog/kak-uhazhivat-za-volosami")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.headers["content-type"].startswith("text/html"))
+        body = response.text
+        self.assertIn('<h2>Правила ухода</h2>', body)
+        self.assertIn("Бережный шампунь.", body)
+        self.assertIn("Защита от солнца", body)
+        self.assertIn("Не используйте слишком горячую воду.", body)
+        self.assertIn("В салоне можно заказать консультацию", body)
+        self.assertNotIn("<script>bad()</script>", body)
+        self.assertIn("&lt;script&gt;bad()&lt;/script&gt;", body)
+        self.assertIn('href="/book/64"', body)
+        self.assertIn('href="/business/64"', body)
+        self.assertIn('rel="canonical" href="https://servgo.ru/business/64/blog/kak-uhazhivat-za-volosami"', body)
+        self.assertIn('<script type="application/ld+json">', body)
+        self.assertNotIn("<script>alert(1)</script>", body)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", body)
+        self.assertIn("\\u003cscript>", body)
+        self.assertIn('name="robots" content="index,follow,max-snippet:-1,max-image-preview:large"', body)
+        self.assertNotIn("nosnippet", body)
+        json_ld = re.search(r'<script type="application/ld\+json">(.+?)</script>', body)
+        self.assertIsNotNone(json_ld)
+        article = json.loads(json_ld.group(1))
+        self.assertEqual(article["@id"], "https://servgo.ru/business/64/blog/kak-uhazhivat-za-volosami#article")
+        self.assertEqual(article["about"]["name"], ARTICLE["primary_query"])
+        self.assertEqual(article["publisher"]["name"], "Салон <Мария>")
+        self.assertEqual(article["inLanguage"], "ru")
+        self.assertTrue(article["isAccessibleForFree"])
+        self.assertEqual(article["isPartOf"]["url"], "https://servgo.ru/business/64/blog")
+
+    def test_search_and_ai_crawlers_can_reach_public_blog_without_indexing_private_app(self):
+        robots = (Path(__file__).resolve().parents[1] / "web" / "frontend" / "public" / "robots.txt").read_text(encoding="utf-8")
+        self.assertIn("User-agent: *", robots)
+        self.assertIn("Allow: /", robots)
+        self.assertNotIn("Disallow: /business", robots)
+        self.assertIn("Disallow: /my", robots)
+        self.assertIn("Disallow: /admin", robots)
+        self.assertIn("Sitemap: https://servgo.ru/business-blog-sitemap.xml", robots)
+        # OAI-SearchBot inherits this wildcard rule unless the production
+        # WAF/nginx adds a separate deny; production checks remain required.
+        self.assertNotIn("User-agent: OAI-SearchBot\\nDisallow: /", robots)
+
+    def test_index_page_links_only_to_published_articles(self):
+        response = self.client.get("/seo-pages/business/64/blog")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('href="/business/64/blog/kak-uhazhivat-za-volosami"', response.text)
+        self.assertIn("Салон &lt;Мария&gt;", response.text)
+        self.assertIn('href="/book/64"', response.text)
+
+    def test_unknown_or_inactive_business_is_not_indexed(self):
+        self.assertEqual(self.client.get("/seo-pages/business/65/blog").status_code, 404)
+        self.db.active = False
+        self.assertEqual(self.client.get("/seo-pages/business/64/blog").status_code, 404)
+        self.assertEqual(self.client.get("/seo-pages/business/64/blog/kak-uhazhivat-za-volosami").status_code, 404)
+
+    def test_company_sitemap_uses_public_urls_and_article_lastmod(self):
+        response = self.client.get("/seo-pages/business/64/blog/sitemap.xml")
+        self.assertEqual(response.status_code, 200)
+        root = ElementTree.fromstring(response.content)
+        self.assertTrue(root.tag.endswith("urlset"))
+        locs = [v.text for v in root.iter() if v.tag.endswith("loc")]
+        self.assertEqual(locs, [
+            "https://servgo.ru/business/64/blog",
+            "https://servgo.ru/business/64/blog/kak-uhazhivat-za-volosami"])
+        self.assertIn("<lastmod>2026-10-31</lastmod>", response.text)
+
+    def test_empty_public_blog_is_404_not_an_indexable_thin_page(self):
+        async def empty(business_id, db, slug=None):
+            return {"articles": []}
+        with patch.object(seo_pages, "_company_blog_data", empty):
+            self.assertEqual(self.client.get("/seo-pages/business/64/blog").status_code, 404)
+            self.assertEqual(self.client.get("/seo-pages/business/64/blog/sitemap.xml").status_code, 404)
+
+    def test_sitemap_index_lists_published_active_companies(self):
+        async def ids(db):
+            return [64]
+        with patch.object(seo_pages, "_published_business_ids", ids):
+            response = self.client.get("/seo-pages/sitemap.xml")
+            self.assertEqual(response.status_code, 200)
+            root = ElementTree.fromstring(response.content)
+            self.assertTrue(root.tag.endswith("sitemapindex"))
+            locs = [v.text for v in root.iter() if v.tag.endswith("loc")]
+            self.assertEqual(locs, ["https://servgo.ru/business/64/blog/sitemap.xml"])
+
+
+if __name__ == "__main__":
+    unittest.main()

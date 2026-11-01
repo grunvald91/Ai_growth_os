@@ -23,7 +23,11 @@ export function OwnerMailPage() {
         if (response.status === 403) { setState('denied'); return }
         if (!response.ok) { setState('error'); return }
         const data: { url?: string } = await response.json()
-        if (!data.url || !data.url.startsWith('https://mail.servgo.ru/claim?ticket=')) setState('error')
+        const valid = data.url && (
+          data.url.startsWith('https://mail.servgo.ru/claim?ticket=') ||
+          data.url.startsWith('https://servgo.ru/api/owner-mail/claim?ticket=')
+        )
+        if (!data.url || !valid) setState('error')
         else window.location.assign(data.url)
       })
       .catch(() => { if (active) setState('error') })

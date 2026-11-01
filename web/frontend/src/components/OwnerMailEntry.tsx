@@ -7,7 +7,7 @@ export function OwnerMailEntry() {
   return (
     <button
       type="button"
-      onClick={() => navigate('/mail')}
+      onClick={() => navigate('/workspace/mail')}
       className="ds-icon-btn bordered"
       style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 10px', width: 'auto' }}
       title="Почта ServGo"

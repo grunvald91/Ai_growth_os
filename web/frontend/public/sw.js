@@ -1,16 +1,33 @@
 /*
  * ServGo PWA service worker — shared-origin migration foundation.
  *
- * SECURITY: Never cache HTML navigations, authenticated responses or API data.
- * In particular, future /workspace/growth/* and /workspace/mail/* pages must
- * not be stored under the public SPA shell key (the previous v2 did that).
+ * Keep authenticated network responses out of CacheStorage. Only the static,
+ * user-independent Vite /index.html app shell is precached for offline launch.
+ * Live booking data is stored separately (seven days) in account-scoped IndexedDB.
+ * Growth/Mail HTML and every API response remain network-only.
  *
  * This worker owns only caches matching servgo-pwa-v<number>.
  * Do not delete push subscriptions or other apps' CacheStorage namespaces.
  */
-const CACHE_NAME = 'servgo-pwa-v3'
-const PRECACHE = ['/offline.html', '/favicon.svg', '/icon-192.png', '/icon-512.png']
-const PUBLIC_ICONS = new Set(PRECACHE.filter((path) => path !== '/offline.html'))
+const CACHE_NAME = 'servgo-pwa-v4'
+const CACHE_PREFIX = CACHE_NAME + '-install-'
+const META_CACHE = 'servgo-pwa-cache-meta'
+const ACTIVE_CACHE_KEY = '/__servgo-active-cache__'
+const NEXT_CACHE_KEY = '/__servgo-next-cache__'
+const READY_KEY = '/__servgo-install-ready__'
+const PRECACHE = ['/index.html', '/offline.html', '/favicon.svg', '/icon-192.png', '/icon-512.png']
+const PUBLIC_ICONS = new Set(['/favicon.svg', '/icon-192.png', '/icon-512.png'])
+
+function offlineAppRoute(path) {
+  // Only same-origin BookingBot PWA screens. Growth and Mail keep their own auth.
+  return path === '/' || path === '/admin' || path.startsWith('/admin/')
+    || path === '/my' || path === '/master' || path === '/account'
+    || path === '/login' || path.startsWith('/login/')
+    || path.startsWith('/book/') || path.startsWith('/business/')
+    || path === '/subscriptions' || path === '/schedule' || path === '/calendar'
+    || path === '/analytics'
+}
+
 
 function publicStaticAsset(path) {
   // /assets/ is reserved for Vite-built, publicly served static resources.
@@ -26,25 +43,70 @@ function cacheableStaticResponse(response) {
     && !/\btext\/html\b/i.test(contentType)
 }
 
+// Every install stages into its own namespace. A failed upgrade must never
+// mutate a functioning offline cache, even if both workers use SW v4.
+async function activeOfflineCache() {
+  const meta = await caches.open(META_CACHE)
+  const pointer = await meta.match(ACTIVE_CACHE_KEY)
+  const name = pointer ? await pointer.text() : CACHE_NAME
+  return caches.open(name.startsWith(CACHE_PREFIX) ? name : CACHE_NAME)
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
+    const staging = CACHE_PREFIX + Date.now() + '-' + Math.random().toString(36).slice(2)
     try {
-      const cache = await caches.open(CACHE_NAME)
+      const cache = await caches.open(staging)
       await cache.addAll(PRECACHE)
-    } catch (_) {
-      // Installation must not prevent network-only navigation if offline assets fail.
+      const manifest = await fetch('/offline-assets.json', { cache: 'no-store' })
+      if (!manifest.ok) throw new Error('Offline asset manifest unavailable')
+      const assetPaths = await manifest.json()
+      if (!Array.isArray(assetPaths) || assetPaths.length === 0 ||
+          !assetPaths.every((path) => typeof path === 'string' && publicStaticAsset(path)) ||
+          !assetPaths.some((path) => /\.js$/i.test(path)) ||
+          !assetPaths.some((path) => /\.css$/i.test(path))) {
+        throw new Error('Invalid offline asset manifest')
+      }
+      await cache.addAll(assetPaths)
+      await cache.put(READY_KEY, new Response('ready'))
+      const meta = await caches.open(META_CACHE)
+      await meta.put(NEXT_CACHE_KEY, new Response(staging))
+      await self.skipWaiting()
+    } catch (error) {
+      await caches.delete(staging)
+      throw error
     }
-    await self.skipWaiting()
   })())
 })
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const names = await caches.keys()
-    await Promise.all(names
-      .filter((name) => /^servgo-pwa-v\d+$/.test(name) && name !== CACHE_NAME)
-      .map((name) => caches.delete(name)))
+    const meta = await caches.open(META_CACHE)
+    const next = await meta.match(NEXT_CACHE_KEY)
+    const staged = next ? await next.text() : ''
+    if (!staged.startsWith(CACHE_PREFIX)) {
+      // A storage eviction or unusual restart must not remove old offline data.
+      await self.clients.claim()
+      return
+    }
+    const cache = await caches.open(staged)
+    if (!(await cache.match(READY_KEY)) || !(await cache.match('/index.html'))
+        || !(await cache.match('/offline.html'))) {
+      throw new Error('Incomplete ServGo offline cache: old cache preserved')
+    }
+    const oldPointer = await meta.match(ACTIVE_CACHE_KEY)
+    const previous = oldPointer ? await oldPointer.text() : CACHE_NAME
+    // Publish only the fully built cache after validation.
+    await meta.put(ACTIVE_CACHE_KEY, new Response(staged))
+    await meta.delete(NEXT_CACHE_KEY)
     await self.clients.claim()
+    // Retain the previous complete generation for rollback; remove v2/v3
+    // legacy private HTML caches and orphaned staging caches.
+    await Promise.all(names
+      .filter((name) => /^servgo-pwa-v\d+(?:-|$)/.test(name) &&
+        name !== staged && name !== previous)
+      .map((name) => caches.delete(name)))
   })())
 })
 
@@ -56,11 +118,16 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return
 
   if (request.mode === 'navigate') {
-    // Network-only for *every* navigation, including public and private pages.
-    // Never cache a signed-in HTML response as / or /index.html.
+    // Always fetch live pages when online. Offline only: serve the prebuilt,
+    // user-independent shell for BookingBot SPA routes. Never cache live HTML.
     event.respondWith(fetch(request).catch(async () => {
-      const cached = await caches.open(CACHE_NAME).then((cache) => cache.match('/offline.html'))
-      return cached || new Response('ServGo: нет соединения', {
+      const cache = await activeOfflineCache()
+      if (offlineAppRoute(url.pathname)) {
+        const appShell = await cache.match('/index.html')
+        if (appShell) return appShell
+      }
+      const fallback = await cache.match('/offline.html')
+      return fallback || new Response('ServGo: нет соединения', {
         status: 503,
         headers: { 'Content-Type': 'text/plain; charset=utf-8' },
       })
@@ -74,7 +141,7 @@ self.addEventListener('fetch', (event) => {
       (!PUBLIC_ICONS.has(url.pathname) && !publicStaticAsset(url.pathname))) return
 
   event.respondWith((async () => {
-    const cache = await caches.open(CACHE_NAME)
+    const cache = await activeOfflineCache()
     const cached = await cache.match(request)
     if (cached) return cached
 

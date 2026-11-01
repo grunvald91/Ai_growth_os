@@ -22,7 +22,9 @@ import {
 } from 'lucide-react'
 import { api, type AdminBooking, type Service, type Employee } from '../../api/client'
 import { useAdminBusiness } from '../../hooks/useAdminBusiness'
+import { clearLogin } from '../../authUtils'
 import { useTheme } from '../../hooks/useTheme'
+import { useConnectivity } from '../../utils/useConnectivity'
 import { AdminBottomNav } from '../../components/AdminShell'
 import { BusinessSelector } from '../../components/BusinessSelector'
 import './schedule.css'
@@ -538,11 +540,15 @@ function ConfirmMoveDialog({ clientName, fromLabel, toLabel, submitting, onCance
 export function SchedulePage() {
   const { businesses, selectedId: businessId, selectBusiness } = useAdminBusiness()
   const [theme, toggleTheme] = useTheme()
+  const online = useConnectivity()
   const navigate = useNavigate()
   const [viewMode, setViewMode] = useState<'week' | 'day'>('day')
   const [weekOffset, setWeekOffset] = useState(0)
   const [dayOffset, setDayOffset] = useState(0)
   const [bookings, setBookings] = useState<AdminBooking[]>([])
+  const [loadedQuery, setLoadedQuery] = useState('')
+  const [scheduleError, setScheduleError] = useState('')
+  const requestSequence = useRef(0)
   const [loading, setLoading] = useState(false)
   const [selectedBooking, setSelectedBooking] = useState<AdminBooking | null>(null)
   const [groupEntries, setGroupEntries] = useState<AdminBooking[] | null>(null)
@@ -585,11 +591,10 @@ export function SchedulePage() {
     return () => clearTimeout(t)
   }, [toast])
 
-  const handleLogout = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('userRole')
-    localStorage.removeItem('userName')
+  const handleLogout = async () => {
     sessionStorage.setItem('servgoExplicitLogout', '1')
+    try { await clearLogin() }
+    catch { alert('Не удалось удалить офлайн-данные. Закройте другие вкладки ServGo и повторите выход.'); return }
     navigate('/login', { replace: true })
   }
 
@@ -672,33 +677,84 @@ export function SchedulePage() {
     return dayDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', weekday: 'short' })
   }, [viewMode, weekOffset, dayOffset, weekDates, dayDate])
 
-  const fetchBookings = useCallback(async () => {
-    if (!businessId) return
-    setLoading(true)
-    try {
-      let params = `business_id=${businessId}`
-      if (viewMode === 'week') params += `&start_date=${formatDateISO(weekDates[0])}&end_date=${formatDateISO(weekDates[6])}`
-      else params += `&date=${formatDateISO(dayDate)}`
-      setBookings(await api.getAdminBookings(params))
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false)
-    }
+  // The displayed data must belong to the selected business and date range.
+  const scheduleQuery = useMemo(() => {
+    if (!businessId) return ''
+    const period = viewMode === 'week'
+      ? `&start_date=${formatDateISO(weekDates[0])}&end_date=${formatDateISO(weekDates[6])}`
+      : `&date=${formatDateISO(dayDate)}`
+    return `business_id=${businessId}${period}`
   }, [businessId, viewMode, weekDates, dayDate])
 
-  useEffect(() => { fetchBookings() }, [fetchBookings])
+  const fetchBookings = useCallback(async () => {
+    if (!scheduleQuery) return
+    const sequence = ++requestSequence.current
+    setLoading(true)
+    try {
+      const result = await api.getAdminBookings(scheduleQuery)
+      if (sequence !== requestSequence.current) return
+      setBookings(result)
+      setLoadedQuery(scheduleQuery)
+      setScheduleError('')
+    } catch {
+      if (sequence !== requestSequence.current) return
+      // Never show a different date/business's cached list as this one.
+      if (loadedQuery !== scheduleQuery) {
+        setBookings([])
+        setLoadedQuery('')
+      }
+      setScheduleError('Не удалось загрузить записи за выбранный период. Если интернета нет, этот период ещё не сохранён.')
+    } finally {
+      if (sequence === requestSequence.current) setLoading(false)
+    }
+  }, [scheduleQuery, loadedQuery])
+
+  useEffect(() => {
+    // Invalidate all previous responses immediately when selection changes.
+    requestSequence.current += 1
+    window.dispatchEvent(new Event('servgo-offline-context-reset'))
+    setSelectedBooking(null)
+    setGroupEntries(null)
+    setManual(null)
+    setPendingMove(null)
+    setScheduleError('')
+    if (!scheduleQuery) { setBookings([]); setLoadedQuery(''); setLoading(false); return }
+    void fetchBookings()
+    // Invalidation belongs to the selected key, not to periodic refreshes.
+  }, [scheduleQuery]) // eslint-disable-line react-hooks/exhaustive-deps
+
+
+  // Keep the current week's days available offline, even if the user only opened
+  // today's schedule. The API snapshot store splits this weekly response by day.
+  useEffect(() => {
+    if (!businessId || !online) return
+    const monday = getMonday(new Date())
+    const sunday = new Date(monday)
+    sunday.setDate(sunday.getDate() + 6)
+    const period = `business_id=${businessId}&start_date=${formatDateISO(monday)}&end_date=${formatDateISO(sunday)}`
+    void api.getAdminBookings(period).catch(() => { /* background prefetch is optional */ })
+  }, [businessId, online])
+
   useEffect(() => {
     const timer = setInterval(fetchBookings, 15000)
     return () => clearInterval(timer)
   }, [fetchBookings])
 
+  const catalogueSequence = useRef(0)
   useEffect(() => {
-    if (!businessId) return
+    const sequence = ++catalogueSequence.current
     setSelectedEmployeeId(null)
+    setServices([])
+    setAllEmployees([])
+    if (!businessId) return
     Promise.all([api.getServices(businessId), api.getEmployees(businessId)])
-      .then(([svc, emp]) => { setServices(svc); setAllEmployees(emp) })
-      .catch(() => {})
+      .then(([svc, emp]) => {
+        if (sequence !== catalogueSequence.current) return
+        setServices(svc)
+        setAllEmployees(emp)
+      })
+      .catch(() => { /* records remain readable with the cached booking details */ })
+    return () => { catalogueSequence.current += 1 }
   }, [businessId])
 
   const replaceBooking = (updated: AdminBooking) => setBookings((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
@@ -791,7 +847,7 @@ export function SchedulePage() {
 
   // Filtering: by employee + search
   const visibleBookings = useMemo(() => {
-    let list = bookings.filter(isActive)
+    let list = (loadedQuery === scheduleQuery ? bookings : []).filter(isActive)
     if (selectedEmployeeId) list = list.filter((b) => b.employee_id === selectedEmployeeId)
     const q = search.trim().toLowerCase()
     if (q) {
@@ -800,7 +856,7 @@ export function SchedulePage() {
       )
     }
     return list
-  }, [bookings, selectedEmployeeId, search])
+  }, [bookings, loadedQuery, scheduleQuery, selectedEmployeeId, search])
 
   // Day columns = masters (or single column)
   const dayColumns = useMemo(() => {
@@ -852,7 +908,7 @@ export function SchedulePage() {
 
   // ── Перетаскивание одиночной записи (день): long-press на тач, сразу — мышью ──
   const beginDrag = (e: React.PointerEvent, b: AdminBooking) => {
-    if (viewMode !== 'day') return
+    if (!online || viewMode !== 'day') return
     if (e.pointerType === 'mouse' && e.button !== 0) return
     const startX = e.clientX
     const startY = e.clientY
@@ -960,6 +1016,7 @@ export function SchedulePage() {
   }
 
   const tapFreeSlot = (e: React.MouseEvent<HTMLDivElement>, date: Date, employeeId: number | null) => {
+    if (!online) return
     if (e.target !== e.currentTarget || Date.now() < suppressClickUntil.current) return
     const rect = e.currentTarget.getBoundingClientRect()
     const min = DAY_START_H * 60 + Math.round(((e.clientY - rect.top) / pxPerMin) / 15) * 15
@@ -1126,7 +1183,9 @@ export function SchedulePage() {
               {pull.refreshing ? 'Обновляем…' : pull.dist > 70 ? 'Отпустите для обновления' : 'Потяните вниз для обновления'}
             </div>
           )}
-          {loading && bookings.length === 0 && !businessId ? null : loading && bookings.length === 0 ? (
+          {scheduleError && loadedQuery !== scheduleQuery ? (
+            <div className="sched-empty" role="status">{scheduleError}</div>
+          ) : loading && loadedQuery !== scheduleQuery ? (
             <div className="sched-empty"><Loader2 size={20} className="animate-spin" /> Загрузка…</div>
           ) : (
             <div className="sched-timeline" style={{ height: colHeight, '--hour': `${hourPx}px` } as CSSProperties}>
@@ -1163,7 +1222,7 @@ export function SchedulePage() {
             <button className="sched-zoom-reset" onClick={() => setHourPx(DEFAULT_HOUR_PX)} aria-label="Вернуть масштаб 100%" title="Сбросить масштаб"><RotateCcw size={18} /></button>
           )}
           {businessId && (
-            <button className="sched-fab" onClick={() => {
+            <button className="sched-fab" disabled={!online} title={online ? 'Записать клиента' : 'Изменения доступны только при подключении'} onClick={() => {
               // Сегодня — сразу подставляем ближайшее время от текущей минуты (округляем вверх до 5 минут).
               const date = viewMode === 'week' ? new Date() : dayDate
               const isToday = formatDateISO(date) === todayISO
@@ -1275,7 +1334,7 @@ export function SchedulePage() {
           onQuote={handleRentalQuote}
           error={bookingError}
           onReschedule={(b) => { setRescheduleError(''); setRescheduleBooking(b) }}
-          updating={updating}
+          updating={updating || !online}
         />
       )}
 

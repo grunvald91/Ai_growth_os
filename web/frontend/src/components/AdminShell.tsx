@@ -1,3 +1,4 @@
+import { clearLogin } from '../authUtils'
 import { OwnerMailEntry } from './OwnerMailEntry'
 import { useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -54,11 +55,10 @@ export function AdminShell({
   const [theme, toggleTheme] = useTheme()
   const navigate = useNavigate()
 
-  const handleLogout = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('userRole')
-    localStorage.removeItem('userName')
+  const handleLogout = async () => {
     sessionStorage.setItem('servgoExplicitLogout', '1')
+    try { await clearLogin() }
+    catch { alert('Не удалось удалить офлайн-данные. Закройте другие вкладки ServGo и повторите выход.'); return }
     navigate('/login', { replace: true })
   }
   return createPortal(

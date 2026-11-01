@@ -22,6 +22,29 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="ServGo" />
+    <!-- Resolve selected theme before loading the React bundle, preventing a light flash. -->
+    <script>
+      (function () {
+        try {
+          var value = localStorage.getItem('servgo-theme')
+            || localStorage.getItem('schedTheme')
+            || localStorage.getItem('servgo-desktop-theme')
+            || 'system';
+          if (value !== 'dark' && value !== 'light') value = 'system';
+          var telegram = window.Telegram && window.Telegram.WebApp
+            && window.Telegram.WebApp.colorScheme;
+          var dark = value === 'dark' || (value === 'system'
+            && ((telegram === 'dark' || telegram === 'light')
+              ? telegram === 'dark'
+              : window.matchMedia('(prefers-color-scheme: dark)').matches));
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+          document.documentElement.dataset.themePreference = value;
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.content = dark ? '#111a29' : '#ffffff';
+        } catch (_) { /* Storage can be disabled without blocking render. */ }
+      })();
+    </script>
     <link rel="manifest" href="/manifest.webmanifest" />
     <!-- Не блокируем первую отрисовку, если Google Fonts медленный или недоступен. -->
     <title>ServGo — ИИ-платформа роста для бизнеса услуг и онлайн-запись</title>

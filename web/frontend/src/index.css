@@ -219,3 +219,63 @@ html.tg-webapp body {
 button, a, [role="button"] {
   touch-action: manipulation;
 }
+
+/* ServGo Air theme: shared by client journey, admin shell and installed PWA.
+ * Existing React utility classes remain source-compatible during the migration.
+ */
+:root[data-theme='dark'] {
+  --color-apple-bg: var(--s-bg);
+  --color-apple-card: var(--s-surface);
+  --color-apple-text: var(--s-text);
+  --color-apple-gray: var(--s-muted);
+  --color-apple-border: var(--s-line);
+  --color-apple-blue: var(--s-accent);
+  --color-apple-blue-hover: var(--s-accent-press);
+  --color-apple-success: var(--s-success);
+  --color-apple-warning: var(--s-warning);
+  --color-apple-danger: var(--s-danger);
+}
+html[data-theme='dark'], html[data-theme='dark'] body {
+  background: var(--s-bg);
+  color: var(--s-text);
+}
+html[data-theme='dark'] .bg-white { background-color: var(--s-surface); }
+.servgo-shell-header, .servgo-shell-bottom {
+  color: var(--s-text);
+  background: color-mix(in srgb, var(--s-surface) 94%, transparent);
+  border-color: var(--s-line);
+}
+.servgo-shell-popover {
+  color: var(--s-text);
+  background: var(--s-surface);
+  border-color: var(--s-line);
+}
+.servgo-theme-control { position: relative; display: inline-flex; align-items: center; }
+.servgo-theme-trigger {
+  display: grid; place-items: center; width: 38px; height: 38px;
+  border: 0; border-radius: 13px; cursor: pointer; color: var(--s-muted);
+  background: var(--s-surface-2);
+}
+.servgo-theme-trigger:hover, .servgo-theme-trigger[aria-expanded='true'] {
+  color: var(--s-accent);
+  background: var(--s-surface-3);
+}
+.servgo-theme-trigger:focus-visible, .servgo-theme-option:focus-visible {
+  outline: 2px solid var(--s-accent); outline-offset: 2px;
+}
+.servgo-theme-menu {
+  position: absolute; z-index: 200; top: calc(100% + 9px); right: 0;
+  min-width: 210px; padding: 10px; border: 1px solid var(--s-line);
+  border-radius: 18px; background: var(--s-surface); color: var(--s-text);
+  box-shadow: var(--sh-pop);
+}
+.servgo-theme-menu-title { margin: 3px 8px 8px; font: 600 12px/1.4 var(--ds-font); color: var(--s-muted); }
+.servgo-theme-option {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 43px;
+  padding: 10px; border: 0; border-radius: 11px; background: none;
+  color: var(--s-text); text-align: left; cursor: pointer;
+}
+.servgo-theme-option span { flex: 1; }
+.servgo-theme-option:hover, .servgo-theme-option[aria-pressed='true'] {
+  background: var(--s-surface-2); color: var(--s-accent);
+}

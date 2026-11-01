@@ -33,6 +33,20 @@ TICKET_TTL_SECONDS = 60
 AUDIENCE = "growth-studio"
 MIN_SECRET_LENGTH = 32
 STUDIO_URL = "https://growth.servgo.ru"
+CANONICAL_STUDIO_URL = "https://servgo.ru"
+
+
+def studio_public_url() -> str:
+    """Feature-gated same-origin sign-in endpoint for the installed ServGo PWA.
+
+    Never accept a caller-provided URL, Host header, or unvalidated environment
+    origin here: the one-time ticket must land at a fixed trusted destination.
+    Leave disabled until nginx /studio routing, Growth Origin validation,
+    SSO and PWA cache upgrade have passed staging smoke tests.
+    """
+    enabled = os.getenv("SERVGO_GROWTH_GATEWAY_ENABLED", "").casefold() in {"1", "true", "yes"}
+    return CANONICAL_STUDIO_URL if enabled else STUDIO_URL
+
 
 
 def _secret(name: str) -> bytes:
@@ -124,7 +138,7 @@ async def studio_ticket(data: TicketIn, user: User = Depends(get_current_user),
         raise HTTPException(status_code=403, detail="No access to the marketing studio for this business")
     business = await db.get(Business, data.business_id)
     ticket = make_ticket(user_id=user.id, business_id=business.id, role=role, name=business.name or "")
-    return TicketOut(url=f"{STUDIO_URL}/studio/sso?t={ticket}")
+    return TicketOut(url=f"{studio_public_url()}/studio/sso?t={ticket}")
 
 
 class AccessOut(BaseModel):

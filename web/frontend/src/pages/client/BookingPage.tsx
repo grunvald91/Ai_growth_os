@@ -42,6 +42,7 @@ import { HeroArt } from './AirFrame'
 import { photoSrc, photoThumbSrc } from './airPhotos'
 import { ACCUSATIVE, choosePhrase } from '../../utils/bookingLabels'
 import { resolveBookingEntry, resourceSupportsService, getAvailableResources, getAvailableServices, type BookingFlowOrder } from './bookingEntry'
+import { withSeoRef } from '../../utils/seoReferral'
 import './booking-flow.css'
 
 // ── Helpers ──
@@ -324,6 +325,9 @@ function BookingPageInner() {
 
   const preselectedServiceId = searchParams.get('service') ? Number(searchParams.get('service')) : null
   const preselectedEmployeeId = searchParams.get('employee') ? Number(searchParams.get('employee')) : null
+  const seoRefCandidate = searchParams.get('seo_ref')
+  const seoRef = seoRefCandidate && /^[A-Za-z0-9_.-]{1,512}$/.test(seoRefCandidate)
+    ? seoRefCandidate : undefined
 
   // Business data
   const [business, setBusiness] = useState<BusinessDetail | null>(null)
@@ -482,6 +486,40 @@ function BookingPageInner() {
   useEffect(() => {
     let cancelled = false
     const bizId = Number(businessId)
+    // Invalidate the previous visit BEFORE the network request resolves:
+    // switching ?service=, ?employee= or business must not leave old details
+    // actionable while the next company's catalogue is still loading.
+    setBusiness(null)
+    setLoadError(false)
+    setServices([])
+    setAdditionalServices([])
+    setEmployees([])
+    setEntryFlowOrder(null)
+    setSelectedServices([])
+    setSelectedResource(null)
+    setAnyResource(false)
+    setSelectedDate(null)
+    setSelectedTime(null)
+    setSlots([])
+    setSlotsKey('')
+    setPriceData(null)
+    setExtrasSeen(false)
+    setIsSoloPricing(false)
+    setSelectedAddons(new Set())
+    setAddonHours({})
+    const now = new Date()
+    setMonth(new Date(now.getFullYear(), now.getMonth(), 1))
+    setBookingError(null)
+    setFieldErrors({})
+    setRepeatEnabled(false)
+    setCreatedBookingId(null)
+    setCreatedNotifyToken(null)
+    setCreatedPrepayment(null)
+    setCreatedDates([])
+    setPaymentSent(false)
+    setReceiptUploaded(false)
+    historyRef.current = []
+    setScreen('home')
     api
       .getBusiness(bizId)
       .then((biz: BusinessDetail) => {
@@ -660,7 +698,7 @@ function BookingPageInner() {
   function back() {
     if (historyRef.current.length > 0) window.history.back()
     else if (screen !== 'home' && preselectedServiceId === null && preselectedEmployeeId === null) setScreen('home')
-    else navigate(`/business/${businessId}`)
+    else navigate(withSeoRef(`/business/${businessId}`, seoRef))
   }
 
   useEffect(() => {
@@ -853,6 +891,7 @@ function BookingPageInner() {
         personal_data_consent: business?.legal_documents_enabled ? personalDataConsent : undefined,
         booking_terms_accepted: business?.legal_documents_enabled ? bookingTermsAccepted : undefined,
         repeat_weeks: repeatEnabled ? repeatWeeks : undefined,
+        seo_ref: seoRef,
       })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const firstResult: any = Array.isArray(result) && result.length > 0

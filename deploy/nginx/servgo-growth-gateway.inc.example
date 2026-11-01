@@ -1,0 +1,93 @@
+# ServGo unified-PWA Growth gateway — REVIEW TEMPLATE, NOT DEPLOYED
+# Include ONLY inside the TLS server { server_name servgo.ru; } block,
+# AFTER inspection of actual /etc/nginx sites and nginx -t.
+#
+# Preconditions:
+#   1. BookingBot PWA service worker v3 (PR #102) is deployed and verified.
+#   2. Growth origin is running on LOCAL loopback 127.0.0.1:8091.
+#   3. Growth STUDIO_SERVGO_GATEWAY_ENABLED=true and
+#      STUDIO_PUBLIC_ORIGIN=https://growth.servgo.ru keep legacy links working.
+#   4. BookingBot SERVGO_GROWTH_GATEWAY_ENABLED=true is enabled only AFTER this
+#      snippet and smoke tests are ready.
+#   5. Both apps share existing SSO secrets; do not expose them in nginx.
+#
+# This is NOT a generic /api or / proxy. BookingBot retains its own /api,
+# /admin, /book, /my, /mail and other routes.
+#
+# All upstream protections (Growth cookie, owner/tenant scope, CSRF, CSP)
+# remain enabled. The gateway does NOT grant access by itself.
+#
+# Landing aliases for the canonical PWA; application still uses /studio/*.
+location = /workspace/growth {
+    return 302 /studio;
+}
+location = /workspace/growth/ {
+    return 302 /studio;
+}
+
+# Avoid matching /studio-something or widening to an arbitrary Growth path.
+location = /studio {
+    proxy_pass http://127.0.0.1:8091;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 300s;
+}
+# One-time SSO tickets arrive in query strings. Never write them to
+# nginx access logs; the Growth handler also responds with no-referrer.
+location = /studio/sso {
+    access_log off;
+    proxy_pass http://127.0.0.1:8091;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 300s;
+}
+location ^~ /studio/ {
+    proxy_pass http://127.0.0.1:8091;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 300s;
+}
+
+# Growth v4 references a few legacy paths outside /studio. Keep an explicit
+# allowlist, never proxy generic /api/* or /products/* to Growth.
+location = /intelligence {
+    proxy_pass http://127.0.0.1:8091;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 120s;
+}
+location = /competitive-intelligence/runs {
+    proxy_pass http://127.0.0.1:8091;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 120s;
+}
+location ^~ /competitive-intelligence/runs/ {
+    proxy_pass http://127.0.0.1:8091;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 120s;
+}
+location ~ "^/products/[0-9a-fA-F-]{36}/comments(?:/|$)" {
+    proxy_pass http://127.0.0.1:8091;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 120s;
+}

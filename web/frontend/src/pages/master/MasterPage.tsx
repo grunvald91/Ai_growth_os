@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Phone, ChevronLeft, ChevronRight, CalendarOff } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useConnectivity } from '../../utils/useConnectivity'
 import { api, ApiError, type MasterBooking, type MasterSchedule } from '../../api/client'
 import { ClientShell } from '../../components/ClientShell'
 
@@ -56,10 +57,15 @@ function phoneHref(phone: string) {
 /** Личное расписание мастера: только его записи, без цен, аналитики и настроек. */
 export function MasterPage() {
   const navigate = useNavigate()
+  const online = useConnectivity()
   const today = useMemo(() => toKey(new Date()), [])
   const nowHHMM = `${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`
   const [from, setFrom] = useState(today)
-  const [data, setData] = useState<MasterSchedule | null>(null)
+  const [rawData, setRawData] = useState<MasterSchedule | null>(null)
+  const [loadedFrom, setLoadedFrom] = useState('')
+  const data = loadedFrom === from ? rawData : null
+  const latestRequest = useRef(0)
+  const lastLoadedFrom = useRef('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [changingId, setChangingId] = useState<number | null>(null)
@@ -68,20 +74,36 @@ export function MasterPage() {
   const [actionError, setActionError] = useState('')
 
   const load = useCallback(async (start: string) => {
+    const sequence = ++latestRequest.current
     setLoading(true)
     setError('')
     try {
-      setData(await api.masterSchedule(start, addDays(start, WINDOW_DAYS - 1)))
+      const result = await api.masterSchedule(start, addDays(start, WINDOW_DAYS - 1))
+      if (sequence !== latestRequest.current) return
+      setRawData(result)
+      lastLoadedFrom.current = start
+      setLoadedFrom(start)
     } catch (e) {
+      if (sequence !== latestRequest.current) return
       if (e instanceof ApiError && e.status === 401) { navigate('/login', { replace: true }); return }
       if (e instanceof ApiError && e.status === 403) { navigate('/my', { replace: true }); return }
-      setError('Не удалось загрузить расписание. Проверьте интернет и попробуйте ещё раз.')
+      if (lastLoadedFrom.current !== start) { setRawData(null); setLoadedFrom('') }
+      setError('Записи за этот период не сохранены для офлайн-просмотра. Подключитесь к интернету и повторите.')
     } finally {
-      setLoading(false)
+      if (sequence === latestRequest.current) setLoading(false)
     }
   }, [navigate])
 
-  useEffect(() => { void load(from) }, [from, load])
+  useEffect(() => {
+    window.dispatchEvent(new Event('servgo-offline-context-reset'))
+    void load(from)
+  }, [from, load])
+  useEffect(() => {
+    const refresh = () => { if (navigator.onLine) void load(from) }
+    window.addEventListener('online', refresh)
+    window.addEventListener('focus', refresh)
+    return () => { window.removeEventListener('online', refresh); window.removeEventListener('focus', refresh) }
+  }, [from, load])
 
   const runAction = async (bookingId: number, action: () => Promise<unknown>, failText: string) => {
     setBusyId(bookingId)
@@ -176,11 +198,11 @@ export function MasterPage() {
                       {b.notes && <div className="ds-sub">Комментарий: {b.notes}</div>}
                       {CHANGEABLE.includes(b.status) && (
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
-                          {FINISHABLE.includes(b.status) && <button className="ds-btn ds-btn--sm" disabled={busyId === b.id}
+                          {FINISHABLE.includes(b.status) && <button className="ds-btn ds-btn--sm" disabled={!online || busyId === b.id}
                             onClick={() => void runAction(b.id, () => api.masterFinishBooking(b.id), 'Не удалось завершить')}>
                             {b.date === today && b.time <= nowHHMM ? 'Завершить сейчас' : 'Завершить'}
                           </button>}
-                          <button className="ds-btn ds-btn--sm" disabled={busyId === b.id}
+                          <button className="ds-btn ds-btn--sm" disabled={!online || busyId === b.id}
                             onClick={() => { setChangingId(changingId === b.id ? null : b.id); setNewServiceId(''); setActionError('') }}>
                             Сменить услугу
                           </button>
@@ -196,7 +218,7 @@ export function MasterPage() {
                               .map((sv) => <option key={sv.id} value={sv.id}>{sv.name}{sv.duration_minutes ? ` · ${sv.duration_minutes} мин` : ''}</option>)}
                           </select>
                           <button className="ds-btn ds-btn--primary ds-btn--sm" style={{ justifySelf: 'start' }}
-                            disabled={!newServiceId || busyId === b.id}
+                            disabled={!online || !newServiceId || busyId === b.id}
                             onClick={() => void runAction(b.id, () => api.masterChangeService(b.id, Number(newServiceId)), 'Не удалось заменить услугу')}>
                             Заменить
                           </button>

@@ -57,6 +57,10 @@ dialog{padding:18px;border-radius:18px}dialog .row{justify-content:stretch!impor
 }
 .back-admin{display:inline-flex;align-items:center;gap:4px;margin:0 0 8px;padding:6px 11px;border-radius:12px;background:#eef5ff;color:#176edb;font-size:12px;font-weight:750;text-decoration:none}
 </style>
+<link rel="stylesheet" href="/api/servgo-air-tokens.css?v=1">
+<link rel="stylesheet" href="/api/servgo-mail-air.css?v=1">
+<script src="/api/servgo-air-theme.js?v=1"></script>
+<script src="/api/servgo-mail-theme-picker.js?v=1" defer></script>
 </head>
 <body>
 <main>
@@ -74,7 +78,8 @@ dialog{padding:18px;border-radius:18px}dialog .row{justify-content:stretch!impor
 <section class="main">
   <div class="heading">
     <div><a class="back-admin" href="https://servgo.ru/admin">← В админку ServGo</a><h1 id="page-title">ИИ-предложения</h1><p id="page-subtitle">Подготовка персональных писем компаниям — основной сценарий ServGo Mail</p></div>
-    <div class="row"><button id="refresh" class="outline">↻ Обновить</button><button id="bulk" class="secondary">⇪ Загрузить адреса</button><button id="prepare-all" class="secondary">✦ Создать предложения</button><button id="new" class="secondary">+ Адресат</button><button id="compose" class="primary">✉ Написать</button></div>
+    <div class="row"><label class="servgo-mail-theme-picker">Тема <select id="servgo-mail-theme" aria-label="Тема оформления">
+<option value="system">Как в системе</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label><button id="refresh" class="outline">↻ Обновить</button><button id="bulk" class="secondary">⇪ Загрузить адреса</button><button id="prepare-all" class="secondary">✦ Создать предложения</button><button id="new" class="secondary">+ Адресат</button><button id="compose" class="primary">✉ Написать</button></div>
   </div>
   <div class="cards">
     <div class="metric"><small>Адресатов в списке</small><strong id="m-companies">—</strong></div>

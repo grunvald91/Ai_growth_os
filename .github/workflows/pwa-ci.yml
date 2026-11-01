@@ -5,6 +5,18 @@ on:
     paths:
       - 'web/frontend/**'
       - 'web/api/**'
+      - 'deploy/nginx/**'
+      - 'tests/test_studio_sso.py'
+      - 'tests/test_public_company_seo_pages.py'
+      - 'tests/test_seo_public_release_smoke.py'
+      - 'scripts/seo_public_release_smoke.py'
+      - 'tests/test_public_company_blog.py'
+      - 'tests/test_seo_referrals.py'
+      - 'web/api/seo_referrals.py'
+      - 'web/api/routes/seo_reporting.py'
+      - 'migrations/add_seo_booking_attributions.sql'
+      - 'tests/test_growth_gateway_contract.py'
+      - 'tests/test_mail_same_origin.py'
       - 'bot/services/notifications.py'
       - 'bot/services/webpush.py'
       - 'bot/services/notification_events.py'
@@ -26,7 +38,15 @@ on:
       - 'migrations/add_configurable_staff_notifications.sql'
       - 'migrations/add_user_email.sql'
       - '.github/workflows/pwa-ci.yml'
+      - '.github/workflows/servgo-offline-browser.yml'
+      - 'scripts/check_servgo_offline_pwa_browser.py'
   workflow_dispatch:
+
+# Cancel only superseded PR test runs. Never cancel explicit manual runs,
+# and never share this group with production deployment concurrency.
+concurrency:
+  group: servgo-pwa-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate:
@@ -49,13 +69,34 @@ jobs:
         working-directory: web/frontend
         run: npm ci --legacy-peer-deps
 
-      - name: Test PWA and booking preselection
+      - name: Test PWA, booking preselection and offline safety
         working-directory: web/frontend
-        run: node --test tests/sw-security.test.mjs tests/booking-entry.test.mjs
+        run: node --test tests/sw-security.test.mjs tests/offline-store.test.mjs tests/prepayment-modal.test.mjs tests/booking-entry.test.mjs tests/auth-route.test.mjs tests/seo-referral-link.test.mjs
+
+      - name: Verify ServGo theme migration and synchronization
+        working-directory: web/frontend
+        run: node --test tests/servgo-theme.test.mjs tests/servgo-air-export.test.mjs
 
       - name: Build frontend
         working-directory: web/frontend
         run: npm run build
+
+      - name: Verify offline asset manifest includes deployable app bundles
+        working-directory: web/frontend
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, existsSync } from "node:fs";
+            const assets = JSON.parse(readFileSync("dist/offline-assets.json", "utf8"));
+            if (!Array.isArray(assets) || !assets.some(p => p.endsWith(".js")) ||
+                !assets.some(p => p.endsWith(".css"))) throw Error("Missing offline JS/CSS");
+            for (const url of assets) {
+              if (!url.startsWith("/assets/") || !existsSync("dist" + url)) {
+                throw Error("Offline manifest contains missing or untrusted path");
+              }
+            }
+            if (!existsSync("dist/index.html")) throw Error("Missing static app shell");
+            console.log("Offline app shell and " + assets.length + " bundle assets verified");
+          '
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -88,12 +129,52 @@ jobs:
             web/api/routes/admin.py \
             web/api/routes/notifications.py \
             web/api/routes/client.py \
+            web/api/routes/seo_pages.py \
+            web/api/routes/seo_reporting.py \
+            web/api/seo_referrals.py \
             web/api/schemas.py
+
+      - name: Install API dependencies for protected Mail PWA tests
+        run: python -m pip install --disable-pip-version-check -r web/api/requirements.txt aiosqlite
+
+      - name: Verify canonical Mail SSO, owner-only access and API URL rewrites
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python tests/test_mail_same_origin.py
+
+      - name: Verify signed Growth SSO and role restrictions
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python tests/test_studio_sso.py
+
+      - name: Install nginx for an isolated staging syntax check
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nginx >/dev/null
+
+      - name: Validate narrow Growth reverse-proxy routes
+        run: python tests/test_growth_gateway_contract.py
+
+      - name: Verify offline SEO release smoke contract
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m unittest discover -s tests -p test_seo_public_release_smoke.py -v
 
       - name: Run regression tests
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
+          python tests/test_public_company_blog.py
+          python tests/test_public_company_seo_pages.py
+          python tests/test_seo_referrals.py
           python tests/test_booking_safety.py
           python tests/test_notification_rules.py
           python tests/test_email_utils.py
+
+      # Reuse the frontend dist built earlier in THIS job.
+      # Previously the separate browser workflow rebuilt it unnecessarily.
+      - name: Install isolated Chromium browser dependencies
+        run: |
+          python -m pip install --disable-pip-version-check playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Verify installed PWA offline, owner login/logout, and booking SEO referral
+        run: python scripts/check_servgo_offline_pwa_browser.py

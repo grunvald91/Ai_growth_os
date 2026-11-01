@@ -10,19 +10,22 @@ import asyncio
 import json
 import logging
 import os
+import re
 import httpx
 import uuid
 
 logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select, func, and_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select, func, and_, or_
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..photo_transport import create_photo_client
 from ..database import get_db, Business, Service, Employee, EmployeeService, Booking, User, VenueTimePricing
+from database.models import SeoBookingAttribution
+from ..seo_referrals import article_booking_link, read_reference
 from ..deps import get_current_user, get_current_user_optional
 from database.crud import get_or_create_guest_user
 from database.prepayment import payment_deadline
@@ -438,6 +441,8 @@ async def get_slots(
             raise HTTPException(status_code=404, detail="Employee/resource not found")
         if emp.booking_interval_minutes:
             interval = emp.booking_interval_minutes
+        if service_id and await _incompatible_resource_services(db, business_id, employee_id, [service_id]):
+            raise HTTPException(422, "Selected resource does not provide this service")
 
     requested_duration = duration_minutes
     if requested_duration is None and service_id:
@@ -668,6 +673,35 @@ async def _visit_base_price(
     return services_total
 
 
+async def _incompatible_resource_services(
+    db: AsyncSession, business_id: int, employee_id: int, service_ids: list[int],
+) -> list[int]:
+    """Match the client catalogue: explicit per-service assignments take priority.
+
+    A resource without any bindings can handle an otherwise unassigned service,
+    but cannot bypass an explicit assignment to another active visible resource.
+    Only active non-admin staff from THIS business count.
+    """
+    rows = (await db.execute(
+        select(EmployeeService.employee_id, EmployeeService.service_id)
+        .join(Employee, Employee.id == EmployeeService.employee_id)
+        .where(
+            Employee.business_id == business_id,
+            Employee.is_active.is_(True),
+            Employee.role != "admin",
+            or_(
+                EmployeeService.employee_id == employee_id,
+                EmployeeService.service_id.in_(service_ids),
+            ),
+        )
+    )).all()
+    own = {sid for eid, sid in rows if eid == employee_id}
+    explicit = {sid for _, sid in rows if sid in service_ids}
+    return [sid for sid in service_ids
+            if (sid in explicit and sid not in own)
+            or (sid not in explicit and bool(own))]
+
+
 # ---------- POST /bookings ----------
 
 @router.post("/bookings", response_model=List[BookingOut])
@@ -687,6 +721,10 @@ async def create_booking_visit(
     business = biz_result.scalar_one_or_none()
     if not business:
         raise HTTPException(status_code=404, detail="Business not found")
+
+    # Only a signed reference minted for this active business is counted.
+    # Invalid/absent SEO referrals do not interfere with customer booking.
+    seo_article_slug = read_reference(getattr(body, "seo_ref", None), body.business_id)
 
     legal_enabled = bool(getattr(business, "legal_documents_enabled", False))
     legal_accepted_at = None
@@ -769,15 +807,9 @@ async def create_booking_visit(
         selected_employee = emp_result.scalar_one_or_none()
         if not selected_employee:
             raise HTTPException(status_code=404, detail="Employee/resource not found")
-        links_result = await db.execute(
-            select(EmployeeService.service_id).where(EmployeeService.employee_id == body.employee_id)
+        incompatible = await _incompatible_resource_services(
+            db, body.business_id, body.employee_id, svc_ids,
         )
-        linked_service_ids = {row[0] for row in links_result.all()}
-        incompatible = [
-            service_id
-            for service_id in svc_ids
-            if linked_service_ids and service_id not in linked_service_ids
-        ]
         if incompatible:
             raise HTTPException(
                 status_code=422,
@@ -896,6 +928,20 @@ async def create_booking_visit(
             current_time += timedelta(minutes=resource_duration)
 
     try:
+        if seo_article_slug and created_bookings:
+            # One reference per visit. A failure in optional marketing storage
+            # must not roll back the customer's real booking transaction.
+            await db.flush()
+            try:
+                async with db.begin_nested():
+                    db.add(SeoBookingAttribution(
+                        business_id=body.business_id,
+                        booking_id=created_bookings[0].id,
+                        article_slug=seo_article_slug,
+                    ))
+                    await db.flush()
+            except SQLAlchemyError as exc:
+                logger.warning("SEO referral attribution skipped: %s", type(exc).__name__)
         if commit:
             await db.commit()
         else:
@@ -1604,3 +1650,51 @@ async def get_booking_by_token(token: str, db: AsyncSession = Depends(get_db)):
         cancellation_policy_text=getattr(business, "cancellation_policy_text", None),
         cancellation_policy_photo=getattr(business, "cancellation_policy_photo", None),
     )
+
+
+# ---------- ServGo-hosted SEO articles (public, read-only) ----------
+# Growth owns the content; BookingBot owns the company profile and booking links.
+# Never accept an upstream URL from the caller (avoids SSRF/open-proxy behaviour).
+
+async def _company_blog_data(business_id: int, db: AsyncSession, slug: str | None = None) -> dict:
+    if business_id <= 0 or (slug is not None and not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug)):
+        raise HTTPException(status_code=404, detail="Article not found")
+    business = await db.get(Business, business_id)
+    if business is None or not business.is_active:
+        raise HTTPException(status_code=404, detail="Business not found")
+
+    origin = os.getenv("GROWTH_PUBLIC_BLOG_URL", "https://growth.servgo.ru").rstrip("/")
+    url = f"{origin}/public/blog/businesses/{business_id}/articles"
+    if slug is not None:
+        url += f"/{slug}"
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
+            upstream = await client.get(url, headers={"Accept": "application/json"})
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Articles temporarily unavailable") from None
+
+    if upstream.status_code == 404:
+        raise HTTPException(status_code=404, detail="Article not found")
+    if upstream.status_code != 200:
+        raise HTTPException(status_code=502, detail="Article feed unavailable")
+    try:
+        payload = upstream.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Article feed returned invalid data") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="Article feed returned invalid data")
+    return payload
+
+
+@router.get("/businesses/{business_id}/blog/articles")
+async def business_blog_articles(business_id: int, db: AsyncSession = Depends(get_db)):
+    """Public list with a verified ServGo business profile, no client records or credentials."""
+    return await _company_blog_data(business_id, db)
+
+
+@router.get("/businesses/{business_id}/blog/articles/{slug}")
+async def business_blog_article(business_id: int, slug: str, db: AsyncSession = Depends(get_db)):
+    """Published SEO article for the active business, with its own company/booking CTA."""
+    article = await _company_blog_data(business_id, db, slug)
+    # Server-side service verification is shared with the HTML renderer.
+    return {**article, **await article_booking_link(db, business_id, article)}

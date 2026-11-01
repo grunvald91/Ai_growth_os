@@ -1,4 +1,6 @@
+import { clearLogin } from '../authUtils'
 import { OwnerMailEntry } from './OwnerMailEntry'
+import { ThemeControl } from './ThemeControl'
 import { useState, useEffect, useRef } from 'react'
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import {
@@ -76,17 +78,17 @@ export function Layout() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [profileOpen])
 
-  const handleLogout = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('userRole')
-    localStorage.removeItem('userName')
+  const handleLogout = async () => {
+    sessionStorage.setItem('servgoExplicitLogout', '1')
+    try { await clearLogin() }
+    catch { alert('Не удалось удалить офлайн-данные. Закройте другие вкладки ServGo и повторите выход.'); return }
     window.location.href = '/'
   }
 
   return (
     <div className="min-h-screen bg-apple-bg">
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/85 backdrop-blur-xl border-b border-apple-border/30 shadow-sm">
+      <header className="servgo-shell-header sticky top-0 z-50 backdrop-blur-xl border-b shadow-sm">
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <div className="flex items-center justify-between h-14">
             {/* Logo */}
@@ -147,6 +149,7 @@ export function Layout() {
                 </>
               )}
 
+              <ThemeControl />
               <OwnerMailEntry />
               {isLoggedIn ? (
                 <div className="flex items-center gap-2 ml-2">
@@ -179,6 +182,7 @@ export function Layout() {
 
             {/* Mobile: admin exit + client login */}
             <div className="md:hidden flex items-center gap-2">
+              <ThemeControl />
               {isAdmin && isAdminUser && (
                 <Link
                   to="/"
@@ -216,7 +220,7 @@ export function Layout() {
         {!isAdmin && profileOpen && (
           <div
             ref={profilePanelRef}
-            className="absolute bottom-full right-3 mb-2 w-56 bg-white rounded-2xl shadow-lg border border-apple-border/30 overflow-hidden animate-fade-in"
+            className="servgo-shell-popover absolute bottom-full right-3 mb-2 w-56 rounded-2xl shadow-lg border overflow-hidden animate-fade-in"
           >
             <div className="px-4 py-3 border-b border-apple-border/20">
               <div className="flex items-center gap-3">
@@ -254,7 +258,7 @@ export function Layout() {
           </div>
         )}
 
-        <nav className="bg-white/95 backdrop-blur-xl border-t border-apple-border/30 shadow-[0_-1px_3px_rgba(0,0,0,0.05)]">
+        <nav className="servgo-shell-bottom backdrop-blur-xl border-t shadow-[0_-1px_3px_rgba(0,0,0,0.05)]">
           <div className="flex items-center justify-around py-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             {(isAdmin ? adminBottomNav : mobileBottomNav).map((item) => {
               const Icon = item.icon

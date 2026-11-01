@@ -35,6 +35,10 @@ concurrency:
 
 jobs:
   deploy:
+    # Integration PR #109 merges source before the coordinated API/Growth/nginx
+    # rollout. Only that explicitly marked merge commit defers frontend release.
+    # Ordinary subsequent main pushes and manual dispatch remain unchanged.
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[defer-servgo-frontend-release]') }}
     runs-on: ubuntu-latest
     env:
       SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
@@ -134,14 +138,14 @@ jobs:
           if [ "$ANY" = "0" ]; then echo "Нет файлов для заливки — деплой не требуется."; fi
           echo "ANY=$ANY" >> "$GITHUB_ENV"
 
-      - name: Upload frontend dist
+      - name: Upload verified frontend release with rollback
         if: steps.pick.outputs.frontend_changed == '1'
+        env:
+          SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+          APPLY: 'true'
         run: |
-          set -euo pipefail
-          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-          sshpass -e ssh -n $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "mkdir -p '$REMOTE_PATH/web/frontend/dist'"
-          sshpass -e scp -r $SSH_OPTS -P "$SERVER_PORT" web/frontend/dist/. "$SERVER_USER@$SERVER_HOST:$REMOTE_PATH/web/frontend/dist/"
-          sshpass -e ssh -n $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "grep -R -q 'grunvaldlab@gmail.com' '$REMOTE_PATH/web/frontend/dist/assets' && echo 'frontend footer marker: ok'"
+          python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+          python scripts/deploy_servgo_frontend_atomic.py
 
       - name: Restart service and verify
         if: env.ANY == '1'

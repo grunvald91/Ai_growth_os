@@ -5,7 +5,7 @@ Works with the same PostgreSQL database as the Telegram bot.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import client, admin, auth, ai, subscriptions, notifications, email_auth, payments, telegram_link, studio_sso, studio_schedule, yandex_auth, master, crm
+from .routes import client, admin, auth, ai, subscriptions, notifications, email_auth, payments, telegram_link, studio_sso, studio_schedule, yandex_auth, master, crm, seo_pages, seo_reporting
 from . import rental
 
 app = FastAPI(
@@ -29,6 +29,8 @@ app.include_router(telegram_link.router, prefix="/auth", tags=["auth"])
 app.include_router(yandex_auth.router, prefix="/auth", tags=["auth"])
 app.include_router(payments.router, prefix="/admin", tags=["admin"])
 app.include_router(client.router, tags=["client"])
+app.include_router(seo_pages.router)
+app.include_router(seo_reporting.router)
 app.include_router(rental.router, tags=["rental"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(crm.router, prefix="/admin", tags=["crm"])
@@ -45,7 +47,7 @@ async def health():
     return {"status": "ok"}
 
 # Platform-owner mail console (preserve existing auth and payment routers).
-from .routes import owner_mail, mail_campaign_api, mail_campaign_review, mail_campaign_analytics, mail_campaign_unsubscribe, mail_campaign_ui, mail_company_search
+from .routes import owner_mail, mail_campaign_api, mail_campaign_review, mail_campaign_analytics, mail_campaign_unsubscribe, mail_campaign_ui, mail_company_search, mail_pwa
 app.include_router(owner_mail.router)
 app.include_router(mail_campaign_api.router)
 app.include_router(mail_campaign_review.router)
@@ -53,3 +55,4 @@ app.include_router(mail_campaign_analytics.router)
 app.include_router(mail_campaign_unsubscribe.router)
 app.include_router(mail_campaign_ui.router)
 app.include_router(mail_company_search.router)
+app.include_router(mail_pwa.router)

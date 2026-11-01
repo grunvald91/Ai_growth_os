@@ -19,8 +19,8 @@ export function AccountPage() {
   const isAdmin = role === 'admin' || role === 'owner'
   const logout = async () => {
     sessionStorage.setItem('servgoExplicitLogout', '1')
-    clearLogin()
-    try { await api.logout() } catch { /* локальный выход действует и без сети */ }
+    try { await clearLogin() }
+    catch { alert('Не удалось удалить офлайн-данные. Закройте другие вкладки ServGo и повторите выход.'); return }
     window.location.href = '/'
   }
   return <ClientShell title="Профиль" subtitle={localStorage.getItem('userName') || undefined}
