@@ -72,6 +72,8 @@ def quick_video_request(text: str) -> dict[str, str] | None:
     else:
         topic = match.group(1)
     topic = topic.strip().strip(' «»"\t\r\n').rstrip(" .")
+    # Duration is a render option, not part of the scientific topic.
+    topic = re.sub(r"[,;]?\s*\b(?:30|60)\s*секунд\w*\s*$", "", topic, flags=re.I).strip()
     if not 8 <= len(topic) <= 400:
         return None
 
