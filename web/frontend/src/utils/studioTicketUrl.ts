@@ -3,6 +3,7 @@ export function isTrustedStudioTicketUrl(raw: string): boolean {
   try {
     const parsed = new URL(raw)
     if (parsed.origin !== 'https://servgo.ru' && parsed.origin !== 'https://growth.servgo.ru') return false
+    if (parsed.username || parsed.password) return false
     if (parsed.pathname !== '/studio/sso' || parsed.hash) return false
     const ticket = parsed.searchParams.getAll('t')
     if (ticket.length !== 1 || !ticket[0]) return false

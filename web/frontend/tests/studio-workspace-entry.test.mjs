@@ -14,6 +14,7 @@ test('accepts only fixed trusted one-time Studio ticket destinations', () => {
     'http://servgo.ru/studio/sso?t=abc',
     'https://servgo.ru.evil.example/studio/sso?t=abc',
     'https://servgo.ru@evil.example/studio/sso?t=abc',
+    'https://user@servgo.ru/studio/sso?t=abc',
     'https://mail.servgo.ru/studio/sso?t=abc',
     'https://servgo.ru/studio/login?t=abc',
     'https://servgo.ru/studio/sso?next=https://evil.example&t=abc',
