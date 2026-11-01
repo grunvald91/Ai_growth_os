@@ -106,7 +106,16 @@ def comparison_for(campaign: Experiment, observations: list[Metric]) -> Performa
         return PerformanceComparison(explanation="В плане ещё не указан измеримый показатель.")
     matched = [m for m in observations if m.name == target and
                isinstance(m.dimensions, dict)]
-    # Most recent measurements of each explicitly labeled period.
+    # Two entries for the same measurement date can have identical SQL
+    # created_at values (SQLite/PostgreSQL NOW() may have second precision).
+    # Use the user-entry timestamp saved with manual measurements to pick the
+    # latest correction deterministically instead of ordering by random UUID.
+    matched.sort(key=lambda m: (
+        m.observed_at.date().isoformat(),
+        str(m.dimensions.get("recorded_at") or ""),
+        m.created_at.isoformat() if m.created_at else "",
+        str(m.id),
+    ), reverse=True)
     baseline = next((m for m in matched if m.dimensions.get("stage") == "baseline"), None)
     result = next((m for m in matched if m.dimensions.get("stage") == "result"), None)
     if baseline is None or result is None:
