@@ -9,6 +9,7 @@ import { StudioEntry } from '../../components/StudioEntry'
 export function GrowthWorkspacePage() {
   const [searchParams] = useSearchParams()
   const setup = searchParams.get('setup') === '1'
+  const ownerRequired = searchParams.get('setup') === 'owner-required'
   const idParam = searchParams.get('business_id') ?? ''
   const businessId = /^\d+$/.test(idParam) && Number.isSafeInteger(Number(idParam)) && Number(idParam) > 0
     ? Number(idParam) : null
@@ -16,7 +17,19 @@ export function GrowthWorkspacePage() {
   return (
     <ClientShell title="Маркетинг" backTo="/admin">
       <div className="ds-form-narrow" style={{ paddingTop: 16 }}>
-        {setup ? (
+        {ownerRequired ? (
+          <div className="ds-card" style={{ padding: 18 }}>
+            <h2 className="ds-h2">Сначала откроет владелец</h2>
+            <p className="ds-sub" style={{ marginTop: 10, lineHeight: 1.55 }}>
+              Для этого бизнеса маркетинговое пространство ещё не создано.
+              Попросите владельца или совладельца один раз открыть AI Growth OS из админки ServGo.
+            </p>
+            <Link to="/admin" className="ds-btn ds-btn--ghost"
+              style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+              Вернуться в админку
+            </Link>
+          </div>
+        ) : setup ? (
           <div className="ds-card" style={{ padding: 18 }}>
             <h2 className="ds-h2">Подготовить маркетинг для этого бизнеса?</h2>
             <p className="ds-sub" style={{ marginTop: 10, fontSize: 13.5, lineHeight: 1.55 }}>
