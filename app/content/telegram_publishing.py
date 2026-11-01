@@ -19,6 +19,7 @@ from sqlalchemy import select, update
 
 from app.models.domain import Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
 from app.services.artifacts import ArtifactService
+from app.services.campaign_lifecycle import closing_campaign_for_material
 from app.content.revisions import source_fingerprint
 
 CHANNEL_PATTERN = re.compile(r"^@[a-zA-Z][a-zA-Z0-9_]{4,31}$")
@@ -113,6 +114,8 @@ def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now
         Artifact.id == post_id, Artifact.product_id == source.product_id,
         Artifact.kind == "channel_text",
     ).with_for_update().execution_options(populate_existing=True))
+    if closing_campaign_for_material(db, source.product_id, source.id):
+        raise ValueError("Эта публикация относится к остановленной или завершённой кампании")
     connection = db.get(Artifact, connection_id)
     if (connection is None or connection.product_id != source.product_id or
             connection.kind != "telegram_channel_connection" or
@@ -416,6 +419,19 @@ async def run_due_telegram_post_once(session_factory, settings, *, api=None, now
             update_plan_delivery(db, data, "failed")
             db.commit()
             return 1
+        # Serialize with campaign stop before the durable send lease is
+        # established. A later stop sees status=sending and cannot claim the
+        # network call has ended. An earlier stop blocks this publication.
+        if closing_campaign_for_material(db, pub.product_id, source.id):
+            cancelled = db.execute(update(Publication).where(
+                Publication.id == pub_id, Publication.status == "scheduled"
+            ).values(status="cancelled"))
+            if cancelled.rowcount == 1:
+                update_plan_delivery(db, data, "cancelled")
+                db.commit()
+                return 1
+            db.rollback()
+            return 0
         claimed = db.execute(update(Publication).where(
             Publication.id == pub_id, Publication.status == "scheduled"
         ).values(status="sending", sending_started_at=now))
