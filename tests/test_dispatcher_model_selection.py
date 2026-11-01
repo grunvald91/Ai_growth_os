@@ -4,7 +4,6 @@ These tests do not use the upstream API. They protect independent model
 selection without changing the other AI-team roles or their model router.
 """
 import json
-from uuid import uuid4
 from types import SimpleNamespace
 
 import pytest
@@ -20,10 +19,10 @@ from app.models.domain import Product
 
 
 def fast_settings(**updates):
-    return Settings(_env_file=None, xai_api_key="placeholder",
-                    llm_provider="xai", llm_model="grok-4.7",
-                    dispatcher_llm_model="deepseek-v4.1-flash",
-                    model_router_enabled=False, **updates)
+    values = dict(xai_api_key="placeholder", llm_provider="xai", llm_model="grok-4.7",
+                  dispatcher_llm_model="deepseek-v4.1-flash", model_router_enabled=False)
+    values.update(updates)
+    return Settings(_env_file=None, **values)
 
 
 def test_dispatcher_uses_separate_verified_candidate():
