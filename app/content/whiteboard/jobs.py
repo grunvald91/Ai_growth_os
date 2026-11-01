@@ -14,6 +14,7 @@ from sqlalchemy import select
 from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Product, Task, TaskStatus
 from app.privacy import PrivacyGateway
 from .contracts import Contract, WhiteboardRequest
+from .science import requires_science_review
 from .runtime import TRANSIENT_STATUSES, ReadinessError, WhiteboardModels
 from pydantic import Field, model_validator
 
@@ -30,7 +31,7 @@ def required_calls(request: WhiteboardRequest, *, visual_review: bool = False) -
     at worst, one redrawn picture per scene."""
     beats = 2 * request.scenes + 1
     calls = 1 + 2 * request.scenes + beats
-    return calls + (2 + request.scenes if visual_review else 0)
+    return calls + (2 + request.scenes if visual_review else 0) + (1 if requires_science_review(request) else 0)
 
 
 class JobRequest(Contract):
@@ -339,7 +340,7 @@ class CallLedger:
             value = json.loads(state.content)
             if value['calls'] >= call_limit(value, payload):
                 raise ReadinessError('call_limit')
-            model_stage = {'visual_review': 'regions', 'visual_decision': 'storyboard', 'image_revision': 'image'}.get(stage, stage)
+            model_stage = {'visual_review': 'regions', 'visual_decision': 'storyboard', 'image_revision': 'image', 'science_review': 'regions'}.get(stage, stage)
             run = AgentRun(task_id=task.id, agent_name='whiteboard_' + stage,
                            provider='configured_text' if model_stage == 'storyboard' else
                                payload.image_provider if model_stage == 'image' else 'openrouter',
