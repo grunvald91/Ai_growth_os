@@ -22,6 +22,7 @@ from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.content_studio import MATERIAL_KINDS, _owner_product, studio_page_shell
 from app.db.session import get_db
 from app.models.domain import Artifact, Experiment, Task
+from app.api.growth_campaigns import campaign_list_card
 
 ASSETS = Path(__file__).parent / 'assets'
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -135,19 +136,10 @@ def campaigns_page(product_id: UUID, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
     rows = list(db.scalars(select(Experiment).where(Experiment.product_id == product_id)
                           .order_by(Experiment.created_at.desc()).limit(100)))
-    cards = ''.join(
-        f'<article class="panel"><h2>{html.escape(row.name)}</h2>'
-        f'<p>{html.escape(row.status)} · {html.escape(row.channel or "Канал не задан")}</p>'
-        f'<p>{html.escape(row.hypothesis)}</p><p>Бюджет: '
-        f'{html.escape(str(row.budget)) if row.budget is not None else "не задан"} '
-        f'{html.escape(row.currency or "")}</p>'
-        f'<a class="btn" href="/studio/products/{product_id}/campaigns/{row.id}">'
-        'Открыть кампанию</a></article>'
-        for row in rows
-    )
+    cards = ''.join(campaign_list_card(product_id, row) for row in rows)
     base = f'/studio/products/{product_id}'
     return studio_page_shell(product, active='campaigns', title='Кампании',
-        subtitle='Эксперименты и планы вашей компании.', body=
+        subtitle='Что хотим улучшить, что сделаем и какое действие нужно от вас.', body=
         f'<p><a class="btn primary" href="{base}/campaigns/new">Новая кампания</a></p>'
         f'<p><a class="btn primary" href="{base}?design=v4&amp;command=campaign">Спланировать кампанию с командой</a> '
         f'<a class="btn" href="{base}/plan">Контент-план</a> '
