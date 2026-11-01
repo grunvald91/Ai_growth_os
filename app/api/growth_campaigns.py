@@ -662,13 +662,12 @@ async def stop_campaign(
     db: Session = Depends(get_db),
 ):
     _owner_product(db, product_id)
-    fields = await _studio_form(request)
     try:
         lifecycle_command(
             db, product_id=product_id, experiment_id=experiment_id,
             action="stop",
             actor=f"studio:{getattr(request.state, 'studio_login', 'operator')}",
-            note=fields.get("note", ""),
+            note="",
         )
     except LookupError as exc:
         db.rollback()
