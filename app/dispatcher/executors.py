@@ -393,8 +393,9 @@ from app.dispatcher import materials  # noqa: E402
 
 EXECUTORS.update(materials.EXECUTORS)
 
-from app.dispatcher.owner_views import recommend_today, show_recent_videos  # noqa: E402
+from app.dispatcher.owner_views import recommend_today, show_next_steps, show_recent_videos  # noqa: E402
 
-EXECUTORS.update({"recommend_today": recommend_today, "show_recent_videos": show_recent_videos})
+EXECUTORS.update({"recommend_today": recommend_today, "show_next_steps": show_next_steps,
+                  "show_recent_videos": show_recent_videos})
 DESCRIBERS.update(materials.DESCRIBERS)
 CONFIRMERS.update(materials.CONFIRMERS)
