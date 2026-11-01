@@ -133,13 +133,24 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get('/studio/products/{product_id}/campaigns', response_class=HTMLResponse)
-def campaigns_page(product_id: UUID, db: Session = Depends(get_db)):
+def campaigns_page(product_id: UUID, page: int = 1, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
+    page = max(1, min(page, 1000000))
+    page_size = 50
     rows = list(db.scalars(select(Experiment).where(Experiment.product_id == product_id)
-                          .order_by(Experiment.created_at.desc()).limit(100)))
+                          .order_by(Experiment.created_at.desc(), Experiment.id.desc())
+                          .offset((page - 1) * page_size).limit(page_size + 1)))
+    has_next = len(rows) > page_size
+    rows = rows[:page_size]
     resources = load_resources(db, rows)
     cards = ''.join(campaign_list_card(product_id, row, resources[row.id]) for row in rows)
     base = f'/studio/products/{product_id}'
+    previous = (f'<a class="btn" href="{base}/campaigns?page={page - 1}">Предыдущая</a>'
+                if page > 1 else '')
+    following = (f'<a class="btn" href="{base}/campaigns?page={page + 1}">Следующая</a>'
+                 if has_next else '')
+    pager = (f'<nav aria-label="Страницы кампаний">{previous} '
+             f'Страница {page} {following}</nav>' if previous or following else '')
     return studio_page_shell(product, active='campaigns', title='Кампании',
         subtitle='Для чего запускаем продвижение, что сделаем и чего ждём.', body=
         f'<p><a class="btn primary" href="{base}?design=v4&amp;command=campaign">Спланировать с ИИ</a> '
@@ -147,7 +158,7 @@ def campaigns_page(product_id: UUID, db: Session = Depends(get_db)):
         '<details><summary>Другие инструменты продвижения</summary>'
         f'<p><a href="{base}/plan">Контент-план</a> · '
         '<a href="https://servgo.ru/mail">Почтовые кампании</a></p></details>'+
-        (cards or '<p>Кампаний пока нет. Начните с планирования цели.</p>'))
+        (cards or '<p>На этой странице кампаний нет.</p>') + pager)
 
 
 

@@ -188,7 +188,12 @@ async def run_once() -> int:
     # Reconcile pending stop/finish after a worker acknowledgement. This is
     # read-only for running campaigns and does not authorize any publication.
     with SessionLocal() as db:
-        reconcile_pending(db)
+        try:
+            reconcile_pending(db)
+        except Exception:
+            import logging
+            db.rollback()
+            logging.getLogger(__name__).warning("campaign_reconcile_failed", exc_info=True)
     from app.content.whiteboard.worker import run_whiteboard_once
     if await run_whiteboard_once(SessionLocal, settings):
         return 1
@@ -292,7 +297,12 @@ async def main() -> None:
     calendar_task = asyncio.create_task(_calendar_loop(settings))
     try:
         while True:
-            count = await run_once()
+            try:
+                count = await run_once()
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception("team_worker_cycle_failed")
+                count = 0
             await asyncio.sleep(
                 settings.team_worker_busy_poll_seconds
                 if count

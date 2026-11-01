@@ -7,8 +7,9 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.domain import Experiment, Product, TaskStatus
+from app.models.domain import Artifact, Experiment, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
+from app.services.campaign_lifecycle import task_campaign
 from app.services.decisions import DecisionService
 from app.services.experiments import ExperimentService
 from app.services.prospects import ProspectService
@@ -141,6 +142,31 @@ class ExperimentLaunchService:
             title=title,
             assigned_agent="research_pmm",
         )
+        if task is not None:
+            # Refuse unverified legacy duplicates rather than claiming them.
+            task = self.db.scalar(select(Task).where(
+                Task.id == task.id, Task.product_id == experiment.product_id,
+            ).with_for_update().execution_options(populate_existing=True))
+            briefs = list(self.db.scalars(select(Artifact).where(
+                Artifact.product_id == experiment.product_id,
+                Artifact.task_id == task.id, Artifact.kind == "task_brief",
+            )))
+            linked = False
+            for brief in briefs:
+                try:
+                    payload = json.loads(brief.content)
+                except (TypeError, ValueError):
+                    continue
+                match = task_campaign(self.db, task, payload)
+                if match is not None and match.id == experiment.id:
+                    linked = True
+                    break
+            if not linked:
+                self.db.rollback()
+                raise ExperimentLaunchError(
+                    "Активная задача с таким названием не имеет подтверждённой "
+                    "связи с кампанией. Устраните конфликт перед запуском."
+                )
         if task is None:
             task = tasks.create(
                 product_id=experiment.product_id,

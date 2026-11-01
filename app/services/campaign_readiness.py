@@ -72,7 +72,7 @@ def load_resources(db: Session, campaigns: list[Experiment]) -> dict[UUID, Campa
     records = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.kind == WORKSPACE_KIND,
         Artifact.title.in_(names),
-    )))
+    ).execution_options(populate_existing=True)))
     by_id = {names[row.title]: _decode(row, names[row.title])
              for row in records if row.title in names}
     wanted: set[UUID] = set()
@@ -92,7 +92,7 @@ def load_resources(db: Session, campaigns: list[Experiment]) -> dict[UUID, Campa
     if wanted:
         targets = {a.id: a for a in db.scalars(select(Artifact).where(
             Artifact.product_id == product_id, Artifact.id.in_(wanted),
-        ))}
+        ).execution_options(populate_existing=True))}
     # Preparation tasks already carry the experiment UUID in their task_brief.
     # Resolve only exact titles, then verify the embedded ID and company.
     # This avoids guessing links from similar names or looking at other tenants.
@@ -187,7 +187,7 @@ def link_resource(db: Session, product_id: UUID, experiment_id: UUID,
         raise CampaignResourceError("Менять связи можно только при подготовке кампании")
     target = db.scalar(select(Artifact).where(
         Artifact.id == target_id, Artifact.product_id == product_id,
-    ))
+    ).execution_options(populate_existing=True))
     if target is None:
         raise LookupError("Ресурс не найден у выбранной компании")
     if relation == "telegram":
@@ -206,7 +206,7 @@ def link_resource(db: Session, product_id: UUID, experiment_id: UUID,
         Artifact.product_id == product_id,
         Artifact.kind == WORKSPACE_KIND,
         Artifact.title == workspace_title(experiment_id),
-    ).with_for_update())
+    ).with_for_update().execution_options(populate_existing=True))
     data = _decode(workspace, experiment_id)
     if not data:
         data = {"experiment_id": str(experiment_id), "material_ids": []}

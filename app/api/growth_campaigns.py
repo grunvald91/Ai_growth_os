@@ -1,7 +1,7 @@
 """Growth V4: safe company-scoped campaign draft editor and read-only details.
 
 Launch uses the existing preparation service: no direct messages or publication.
-Queued AI tasks can consume model budget. Stop/finalize need a worker-safe API.
+Queued AI tasks can consume model budget. Stop/finish use durable lifecycle gates.
 """
 from __future__ import annotations
 
@@ -427,7 +427,7 @@ def campaign_page(product, row: Experiment, error: str = "", *,
         '<h2>Эффективность кампании</h2>'
         + comparison_html
         + ('<p>Измерений пока нет — оценить эффективность ещё нельзя.</p>' if not metrics else '')
-        + '<details><summary>Все измерения</summary>'
+        + '<details><summary>Последние измерения и значения для сравнения</summary>'
         + (f'<ul>{observations}</ul>' if observations else
            '<p>Измерений пока нет.</p>')
         + '</details>'
@@ -470,13 +470,38 @@ def campaign_detail_context(db: Session, row: Experiment):
 
 
 def campaign_metrics(db: Session, product_id: UUID, experiment_id: UUID):
-    """Only measurements belonging to both this company and this campaign."""
+    """Bound UI history independently of the exact baseline/result comparison.
+
+    The comparison needs its latest observation PER STAGE, even when the
+    baseline is older than 200 newer result entries.
+    """
     from app.models.domain import Metric
-    return list(db.scalars(
+    rows = list(db.scalars(
         select(Metric).where(Metric.product_id == product_id,
                              Metric.experiment_id == experiment_id)
         .order_by(Metric.observed_at.desc(), Metric.created_at.desc(), Metric.id.desc()).limit(200)
     ))
+    metric_name = db.scalar(select(Experiment.target_metric).where(
+        Experiment.product_id == product_id, Experiment.id == experiment_id,
+    ))
+    if not metric_name:
+        return rows
+    known = {item.id for item in rows}
+    for stage in STAGES:
+        latest = db.scalar(select(Metric).where(
+            Metric.product_id == product_id,
+            Metric.experiment_id == experiment_id,
+            Metric.name == metric_name,
+            Metric.dimensions["stage"].as_string() == stage,
+        ).order_by(
+            Metric.observed_at.desc(),
+            Metric.dimensions["recorded_at"].as_string().desc(),
+            Metric.created_at.desc(), Metric.id.desc(),
+        ).limit(1))
+        if latest is not None and latest.id not in known:
+            rows.append(latest)
+            known.add(latest.id)
+    return rows
 
 
 @router.get("/studio/products/{product_id}/campaigns/new", response_class=HTMLResponse)

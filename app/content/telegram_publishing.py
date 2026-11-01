@@ -109,7 +109,7 @@ def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now
     source = db.get(Artifact, post_id)
     if source is None or source.kind != "channel_text":
         raise LookupError("Пост не найден")
-    db.scalar(select(Product).where(Product.id == source.product_id).with_for_update())
+    db.scalar(select(Product).where(Product.id == source.product_id).with_for_update(key_share=True))
     source = db.scalar(select(Artifact).where(
         Artifact.id == post_id, Artifact.product_id == source.product_id,
         Artifact.kind == "channel_text",
@@ -210,7 +210,7 @@ def cancel_scheduled_post(db, publication_id: UUID) -> Publication:
     pub = db.get(Publication, publication_id)
     if pub is None:
         raise LookupError("Публикация не найдена")
-    db.scalar(select(Product).where(Product.id == pub.product_id).with_for_update())
+    db.scalar(select(Product).where(Product.id == pub.product_id).with_for_update(key_share=True))
     pub = db.scalar(select(Publication).where(
         Publication.id == publication_id,
         Publication.product_id == pub.product_id,
@@ -255,7 +255,7 @@ def update_plan_delivery(db, data: dict, state: str, message_id: int | None = No
     source = db.get(Artifact, product_id)
     if source is None:
         return
-    db.scalar(select(Product).where(Product.id == source.product_id).with_for_update())
+    db.scalar(select(Product).where(Product.id == source.product_id).with_for_update(key_share=True))
     plan = db.scalar(select(Artifact).where(
         Artifact.id == UUID(data["plan_id"]), Artifact.product_id == source.product_id,
         Artifact.kind == "editorial_plan",

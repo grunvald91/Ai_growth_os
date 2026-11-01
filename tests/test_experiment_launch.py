@@ -142,3 +142,46 @@ def test_launch_is_not_repeatable(db, tmp_path):
             experiment.id,
             actor="telegram:123",
         )
+
+
+@pytest.mark.parametrize("status", [TaskStatus.QUEUED, TaskStatus.RUNNING])
+def test_unbound_legacy_duplicate_blocks_launch_without_state_change(db, tmp_path, status):
+    product = Product(name="ServGo legacy", slug="servgo")
+    db.add(product)
+    db.commit()
+    experiment = _experiment(db, product.id)
+    old = Task(product_id=product.id, title="EXP-SERVGO-001: prepare outreach cohort",
+               assigned_agent="research_pmm", status=status)
+    db.add(old)
+    db.commit()
+    with pytest.raises(ExperimentLaunchError, match="не имеет подтверждённой"):
+        ExperimentLaunchService(db, tmp_path).launch(experiment.id, actor="audit")
+    db.refresh(experiment)
+    db.refresh(old)
+    assert experiment.status == "draft"
+    assert old.status == status
+    assert list(db.scalars(select(Decision))) == []
+
+
+def test_confirmed_existing_duplicate_can_be_reused(db, tmp_path):
+    product = Product(name="ServGo verified", slug="servgo")
+    db.add(product)
+    db.commit()
+    experiment = _experiment(db, product.id)
+    task = Task(product_id=product.id, title="EXP-SERVGO-001: prepare outreach cohort",
+                assigned_agent="research_pmm", status=TaskStatus.QUEUED)
+    db.add(task)
+    db.flush()
+    previous = Decision(product_id=product.id, experiment_id=experiment.id,
+                        decision_type=DecisionType.TEST, rationale="Original launch")
+    db.add(previous)
+    db.flush()
+    db.add(Artifact(product_id=product.id, task_id=task.id, kind="task_brief",
+                    title=task.title, content=json.dumps({
+                        "experiment_id": str(experiment.id), "decision_id": str(previous.id),
+                    })))
+    db.commit()
+    result = ExperimentLaunchService(db, tmp_path).launch(experiment.id, actor="audit")
+    assert result.task_id == task.id
+    assert db.get(Experiment, experiment.id).status == "running"
+    assert len(list(db.scalars(select(Task)))) == 1

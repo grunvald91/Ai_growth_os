@@ -195,3 +195,142 @@ def test_stop_serializes_with_telegram_send_lease(pg_sessions):
         session.commit()
         assert reconcile_pending(session) == 1
         assert session.get(Experiment, experiment_id).status == "stopped"
+
+
+def test_preloaded_workspace_preserves_concurrent_material_links(pg_sessions):
+    Session = pg_sessions
+    with Session() as setup:
+        company, campaign = _company(setup, slug="pg-stale-workspace")
+        ids = []
+        for name in ("A", "B", "C"):
+            item = Artifact(product_id=company, kind="channel_text",
+                            title=name, content="{}")
+            setup.add(item)
+            setup.flush()
+            ids.append(item.id)
+        setup.commit()
+        link_resource(setup, company, campaign, ids[0], relation="material")
+
+    with Session() as stale:
+        cached = stale.scalar(select(Artifact).where(
+            Artifact.product_id == company, Artifact.kind == "campaign_workspace",
+        ))
+        assert str(ids[0]) in cached.content
+        with Session() as concurrent:
+            link_resource(concurrent, company, campaign, ids[1], relation="material")
+        link_resource(stale, company, campaign, ids[2], relation="material")
+
+    with Session() as verify:
+        workspace = verify.scalar(select(Artifact).where(
+            Artifact.product_id == company, Artifact.kind == "campaign_workspace",
+        ))
+        assert set(json.loads(workspace.content)["material_ids"]) == {
+            str(key) for key in ids
+        }
+
+
+def test_locked_campaign_does_not_stall_another_company_reconcile(pg_sessions, monkeypatch):
+    from app.services import campaign_lifecycle
+    monkeypatch.setattr(campaign_lifecycle, "_RECONCILE_CURSOR", None)
+    Session = pg_sessions
+    with Session() as setup:
+        first_product, first = _company(setup, slug="pg-locked-tenant")
+        second_product, second = _company(setup, slug="pg-free-tenant")
+        setup.get(Experiment, first).status = "stopping"
+        setup.get(Experiment, second).status = "finishing"
+        setup.commit()
+
+    with Session() as locked, ThreadPoolExecutor(max_workers=1) as pool:
+        locked.scalar(select(Experiment).where(
+            Experiment.id == first,
+        ).with_for_update())
+        def reconcile():
+            with Session() as concurrent:
+                return reconcile_pending(concurrent, limit=500)
+        result = pool.submit(reconcile).result(timeout=8)
+        assert result >= 1
+        with Session() as verify:
+            assert verify.get(Experiment, second).status == "completed"
+            assert verify.get(Experiment, first).status == "stopping"
+        locked.rollback()
+
+
+def test_unrelated_campaign_lock_does_not_block_material_gate(pg_sessions):
+    Session = pg_sessions
+    with Session() as setup:
+        company, related = _company(setup, slug="pg-material-gate")
+        unrelated = Experiment(product_id=company, experiment_key="EXP-PG-OTHER-" + uuid4().hex[:12],
+                               name="Unrelated", hypothesis="Check", status="running")
+        source = Artifact(product_id=company, kind="channel_text",
+                          title="Linked material", content="{}")
+        setup.add_all([unrelated, source])
+        setup.commit()
+        link_resource(setup, company, related, source.id, relation="material")
+        unrelated_id, material_id = unrelated.id, source.id
+
+    with Session() as locked, ThreadPoolExecutor(max_workers=1) as pool:
+        locked.scalar(select(Experiment).where(
+            Experiment.id == unrelated_id,
+        ).with_for_update())
+        def gate():
+            from sqlalchemy import text as sql_text
+            with Session() as independent:
+                independent.execute(sql_text("SET LOCAL lock_timeout = '500ms'"))
+                return closing_campaign_for_material(independent, company, material_id)
+        assert pool.submit(gate).result(timeout=5) is False
+        locked.rollback()
+
+
+def test_actual_schedule_does_not_deadlock_with_stop(pg_sessions, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    import app.content.telegram_publishing as telegram
+    Session = pg_sessions
+    with Session() as setup:
+        company, campaign = _company(setup, slug="pg-actual-schedule")
+        source = Artifact(product_id=company, kind="channel_text",
+                          title="Campaign-independent post",
+                          content=json.dumps({"channel": "telegram", "body": "A verified post for subscribers"}),
+                          status="approved")
+        channel = Artifact(product_id=company, kind="telegram_channel_connection",
+                           title="Connected", content=json.dumps({"chat_id": -10012345}),
+                           status="approved")
+        setup.add_all([source, channel])
+        setup.commit()
+        post_id, channel_id = source.id, channel.id
+    entered = threading.Event()
+    release = threading.Event()
+    real_gate = telegram.closing_campaign_for_material
+
+    def pause_after_product_and_artifact_locks(db, product_id, artifact_id, **kwargs):
+        entered.set()
+        assert release.wait(8)
+        return real_gate(db, product_id, artifact_id, **kwargs)
+
+    monkeypatch.setattr(telegram, "closing_campaign_for_material", pause_after_product_and_artifact_locks)
+
+    def schedule():
+        with Session() as session:
+            try:
+                telegram.schedule_post(
+                    session, post_id, channel_id,
+                    datetime.now(timezone.utc) + timedelta(hours=2),
+                )
+                return "scheduled"
+            except ValueError:
+                session.rollback()
+                return "blocked_after_stop"
+
+    def stop():
+        with Session() as session:
+            return command(session, product_id=company, experiment_id=campaign,
+                           action="stop", actor="pg-audit")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        scheduled = pool.submit(schedule)
+        assert entered.wait(5)
+        stopped = pool.submit(stop)
+        try:
+            assert stopped.result(timeout=5)[0] == "stopped"
+        finally:
+            release.set()
+        assert scheduled.result(timeout=8) == "blocked_after_stop"
