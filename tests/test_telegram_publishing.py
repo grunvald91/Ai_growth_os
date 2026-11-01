@@ -320,7 +320,7 @@ async def test_campaign_stop_blocks_due_and_future_telegram_sends_without_harmin
     settings = Settings(telegram_bot_token="unit-test-only",
                         content_telegram_autopost_enabled=True, _env_file=None)
     assert await run_due_telegram_post_once(
-        sessions(db), settings, api=fake, now=now+timedelta(minutes=3),
+        sessions(db), settings, api=fake, now=now+timedelta(minutes=2, seconds=30),
     ) == 0
     assert not any(method == "sendMessage" for method, _ in fake.calls)
     assert await run_due_telegram_post_once(
