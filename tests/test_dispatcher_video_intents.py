@@ -21,7 +21,7 @@ from app.models.domain import Product, Task, TaskStatus
     ("Подготовь минутное видеообъяснение: почему заряженная батарея массивнее",
      "Почему заряженная батарея массивнее", "60"),
     ("Сделай объясняющее видео на тему тепловой энергии, 60 секунд",
-     "тепловой энергии, 60 секунд", "60"),
+     "тепловой энергии", "60"),
 ])
 def test_explicit_video_explanations_have_an_exact_topic(utterance, topic, length):
     assert quick_video_request(utterance) == {"topic": topic, "length": length}
