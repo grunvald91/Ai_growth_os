@@ -1,7 +1,56 @@
 # ServGo — единый вход в Growth и возврат из Mail
 
-**Дата:** 01.11.2026. **Статус:** код в отдельной ветке BookingBot,
-gateway-флаги отключены, production не изменён этим этапом.
+**Дата:** 01.11.2026. **Статус:** backend и frontend этапа выпущены,
+Growth-bridge выпущен; canonical nginx gateway **не активирован**.
+Флаги `SERVGO_GROWTH_GATEWAY_ENABLED`, `SERVGO_MAIL_GATEWAY_ENABLED`,
+`STUDIO_SERVGO_GATEWAY_ENABLED` оставлены выключенными.
+Полноценный same-origin SSO/E2E на реальных ролях ещё не подтверждён.
+
+
+## Фактический выпуск совместимых компонентов (01.11.2026)
+
+Все ссылки ведут к конкретным GitHub Actions run. Production-действия
+выполнены только на соответствующих целевых сервисах, без включения
+межсервисного шлюза.
+
+| Этап | Подтверждение | Факт |
+|---|---|---|
+| Совмещённый кандидат | [PR #119](https://github.com/grunvald91/booking_bot/pull/119), [CI](https://github.com/grunvald91/booking_bot/actions/runs/41317979607) | Содержимое #117 и #118 проверено вместе, объединено в BookingBot main `851e2eee891b28b026fb1ca72037470f620c44bf` |
+| Серверные контрольные версии и SSO | [preflight](https://github.com/grunvald91/booking_bot/actions/runs/41317945124) | Все 16 файлов backend допускали безопасное обновление, оба пары SSO-секретов `MATCH` |
+| BookingBot API | [release](https://github.com/grunvald91/booking_bot/actions/runs/41318261158) | Обновлены 16 файлов; `api_release_ok=true`, service active, API HTTP 200; backup `/opt/booking_bot/.servgo-pwa-api-releases/1793544706`, откат не потребовался |
+| Growth Air + canonical origin guard | [PR #205](https://github.com/grunvald91/Ai_growth_os/pull/205), [deploy](https://github.com/grunvald91/Ai_growth_os/actions/runs/41318779547) | Growth main `1abb79287b825a47617f58559e26f0ddac8f91a9`, `DEPLOY_OK`, HTTP 200; автошлюз выключен |
+| Canonical nginx candidate | [syntax + backup](https://github.com/grunvald91/booking_bot/actions/runs/41318887929) | 7 точечных locations проверены через `nginx -t` в копии фактической TLS-конфигурации; оригинал не изменён |
+| BookingBot React PWA | [frontend release](https://github.com/grunvald91/booking_bot/actions/runs/41319068062) | `frontend_release_ok=true`, `backend_ready=true`, 37 assets проверены, SHA `851e2eee` |
+
+**Откат nginx:** сохранена проверенная копия активного
+`/etc/nginx/sites-enabled/webapp` по адресу
+`/opt/booking_bot/.servgo-gateway-backups/servgo-443-pre-gateway-20261101T145932Z.conf`.
+`ROLLBACK_BACKUP_SHA256_MATCH=YES`, `PRODUCTION_NGINX_UNCHANGED=YES`.
+Рабочий nginx **не перезагружался** в этом этапе; backup только подготовлен.
+
+**После API-релиза** проверены: `servgo.ru/api/health` 200,
+`growth.servgo.ru/studio` 401 (без сессии),
+`mail.servgo.ru/api/status` 401 (без сессии),
+`servgo.ru/api/owner-mail/workspace` 404 (флаг выключен).
+Эти анонимные пробы не равны успешной пользовательской авторизации.
+
+### Оставшийся gate для фактического объединения PWA
+
+1. Проверка работающей в браузере версии Mail V2 и Growth Air на телефоне,
+   включая тему и плавную главную. Тестовые письма — только mock.
+2. Нужен **положительный** тест SSO для реально авторизованного владельца и
+   администратора, отрицательный для отсутствия роли и чужого бизнеса;
+   проверка replay, CSRF/Origin, logout, cookies и session persistence.
+   Сами совпадающие секреты и unit-тесты не заменяют этот тест.
+3. Только после этого установить проверенный nginx include в реальном
+   TLS-vhost с атомарным откатом и выполнить `nginx -t` + безопасный reload,
+   smoke GET/POST и MIME.
+4. Включить принимающий Growth gateway, проверить новую origin-ветку,
+   затем отдельно Mail (`mail_owner`) и только последним BookingBot issuer.
+   Старые хосты оставить в работе без редиректа.
+5. Физические Android/iOS/desktop standalone проверки, 7-дневное offline
+   расписание (только чтение), logout, back/forward/deep links и отсутствие
+   приватного кэша Mail/Growth.
 
 ## Результат read-only аудита действующего сервера
 
@@ -36,7 +85,7 @@ gateway-флаги отключены, production не изменён этим �
 - Права `mail_owner` не расширяются, почтовые API и отправка писем не меняются.
   Обновлены регрессионные тесты и существующий PWA CI без отдельного job.
 
-## Порядок запуска (пока НЕ выполнен)
+## Исторический план запуска (частично выполнен; актуальные статусы выше)
 
 1. Принимать Mail Air V2 #117 и Growth bridge #205 как отдельные проверенные
    срезы. Прежде чем объединять, проверить их с новым экраном и CSS.
