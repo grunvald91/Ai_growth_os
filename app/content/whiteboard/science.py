@@ -21,7 +21,7 @@ SCIENCE_TERMS = re.compile(
     r"науч|физик|хими|биолог|математ|температур|молекул|атом|"
     r"электрон|квант|генет|энерги|аккумулятор|\bмасс(?:а|ы|е|у|ой)\b|\bмассив|"
     r"относительност|гравитац|скорост|светов|космос|"
-    r"горяч|нагрет|холодн|теплот|излучени", re.I,
+    r"горяч|нагрет|холодн|теплот|излучени|заряженн|разряженн|магнит", re.I,
 )
 
 
@@ -245,6 +245,11 @@ async def _trusted_web_discover(client: httpx.AsyncClient, request: WhiteboardRe
     return result
 
 
+class ScienceSources(Contract):
+    """Bounded public evidence snapshot, checkpointed for safe paid-stage resumes."""
+    sources: list[dict[str, str]] = Field(default_factory=list, max_length=5)
+
+
 class FactFinding(Contract):
     claim: str = Field(min_length=6, max_length=320)
     verdict: Literal["supported", "contradicted", "unverified", "not_factual"]
@@ -369,9 +374,16 @@ class FactReviewer:
         self.service, self.model = service, model
         self._sources: list[dict[str, str]] | None = None
 
-    async def prepare_sources(self, request: WhiteboardRequest) -> None:
+    async def prepare_sources(self, request: WhiteboardRequest, *, checkpoints=None) -> None:
         from .runtime import ReadinessError
-        self._sources = await retrieved_references(request)
+
+        async def gather():
+            return ScienceSources(sources=await retrieved_references(request))
+        # Evidence lookup is free of model calls, but its result is immutable
+        # and reused after interruption: no dependency on a second live search.
+        result = (await checkpoints.json_stage("science-sources", gather, ScienceSources)
+                  if checkpoints is not None else await gather())
+        self._sources = result.sources
         if not self._sources:
             raise ReadinessError("science_sources_missing")
 

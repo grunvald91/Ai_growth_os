@@ -399,3 +399,30 @@ async def test_crossref_discards_unrelated_abstract_even_with_real_doi():
             topic="Почему электроны двигаются и взаимодействуют?", science_mode="scientific"),
             client=client)
     assert not refs
+
+
+@pytest.mark.asyncio
+async def test_cached_science_sources_survive_resume_without_network_lookup(tmp_path, monkeypatch):
+    from app.content.whiteboard import science
+    from app.content.whiteboard.checkpoints import CheckpointStore
+    count = 0
+
+    async def discovery(request):
+        nonlocal count
+        count += 1
+        return [{"id":"CR1", "url":"https://doi.org/10.9999/record",
+                 "claim":"The scientific abstract discusses electron energy and motion."}]
+    monkeypatch.setattr(science, "retrieved_references", discovery)
+    req = science_request(topic="Почему движутся электроны?", science_policy_version=1,
+                          request_generation=True)
+    stage = CheckpointStore(tmp_path/"test-job", req,
+        models={"storyboard":"test", "image":"test", "speech":"test", "regions":"test"})
+    class NoCalls:
+        async def generate(self, request):
+            pytest.fail("Evidence lookup must never make model calls")
+    first = science.FactReviewer(NoCalls(), "test")
+    await first.prepare_sources(req, checkpoints=stage)
+    second = science.FactReviewer(NoCalls(), "test")
+    await second.prepare_sources(req, checkpoints=stage)
+    assert count == 1
+    assert second._sources == first._sources

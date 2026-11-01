@@ -94,7 +94,7 @@ class WhiteboardPipeline:
             reviewer = getattr(self.science_reviewer, 'provider', self.science_reviewer)
             prepare = getattr(reviewer, 'prepare_sources', None)
             if callable(prepare):
-                await prepare(request)  # Zero paid model calls; public evidence only.
+                await prepare(request, checkpoints=self.checkpoints)  # Zero paid model calls.
         self._report('storyboard', 0)
         if self.checkpoints is not None:
             if self.checkpoints.identity['request'] != request.model_dump(mode='json'):
