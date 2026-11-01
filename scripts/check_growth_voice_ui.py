@@ -287,8 +287,8 @@ def main():
                 assert geometry['topicParent']=='command-topicbar', geometry
                 assert geometry['topicBottom']<=geometry['composerTop']+2, geometry
                 assert geometry['toolbarTop']>=geometry['composerBottom']-2, geometry
-                # The feed has its own scroll rail. Neither the rail nor the
-                # latest message may sit beneath the keyboard/voice composer.
+                # Regression for the owner-approved overlay: transparent
+                # dock over the scrolling feed, with the final card accessible.
                 page.evaluate("""() => {
                   const feed=document.querySelector('#dp-feed');
                   for(let i=0;i<14;i++){
@@ -297,21 +297,31 @@ def main():
                     feed.appendChild(m);
                   }
                 }""")
-                separated=page.evaluate("""() => {
+                page.wait_for_function("""() => {
+                  const dock=document.querySelector('.command-dock');
+                  return parseFloat(getComputedStyle(document.querySelector('#dp-feed')).paddingBottom)
+                    >=dock.getBoundingClientRect().height+12;
+                }""")
+                overlay=page.evaluate("""() => {
                   const feed=document.querySelector('#dp-feed'),
                         dock=document.querySelector('.command-dock'),
                         tools=document.querySelector('.command-tools'),
                         hints=document.querySelector('.command-hints'),
                         composer=document.querySelector('#dp-form'),
-                        textarea=document.querySelector('#dp-input');
+                        textarea=document.querySelector('#dp-input'),
+                        bar=document.querySelector('.topbar');
                   feed.scrollTop=feed.scrollHeight;
                   const fr=feed.getBoundingClientRect(), dr=dock.getBoundingClientRect();
                   const cr=composer.getBoundingClientRect();
                   const transparent=el=>getComputedStyle(el).backgroundColor;
                   return {feedBottom:fr.bottom,dockTop:dr.top,dockBottom:dr.bottom,
                     feedScrollHeight:feed.scrollHeight,feedClientHeight:feed.clientHeight,
+                    dockHeight:dr.height,reserved:parseFloat(getComputedStyle(feed).paddingBottom),
                     dockBg:transparent(dock),toolsBg:transparent(tools),
                     hintsBg:transparent(hints),composerBg:transparent(composer),
+                    mainBg:transparent(document.querySelector('#main')),
+                    workspaceBg:transparent(document.querySelector('.workspace')),
+                    headerBorder:getComputedStyle(bar).borderBottomWidth,
                     lastBottom:feed.lastElementChild.getBoundingClientRect().bottom,
                     composerWidth:cr.width,homeWidth:document.querySelector('.dp-home').getBoundingClientRect().width,
                     placeholderFont:parseFloat(getComputedStyle(textarea,'::placeholder').fontSize),
@@ -319,22 +329,27 @@ def main():
                     screenOverflow:document.documentElement.scrollWidth-innerWidth,
                     dockPosition:getComputedStyle(dock).position};
                 }""")
-                assert separated['dockBg']=='rgba(0, 0, 0, 0)',separated
-                assert separated['toolsBg']=='rgba(0, 0, 0, 0)',separated
-                assert separated['hintsBg']=='rgba(0, 0, 0, 0)',separated
-                assert separated['composerBg']!='rgba(0, 0, 0, 0)',separated
-                assert separated['dockPosition']=='relative',separated
-                assert separated['feedBottom']<=separated['dockTop']+3,separated
-                assert separated['feedScrollHeight']>separated['feedClientHeight'],separated
-                assert separated['lastBottom']<=separated['feedBottom']+1,separated
-                assert separated['composerWidth']>=separated['homeWidth']-4,separated
-                assert separated['placeholderFont']>=12.5,separated
-                assert float(separated['placeholderOpacity'])>=.8,separated
-                assert separated['screenOverflow']<=2,separated
-                page.screenshot(path=str(OUT/'composer-above-scrollbar-390.png'),animations='disabled')
-                result['checks'].append({'page':'composer-above-scrollbar-390',
-                    'dock_transparent':True,'scrollbar_not_behind_composer':True,
-                    'latest_message_visible':True,'placeholder_integrated':True})
+                assert overlay['dockBg']=='rgba(0, 0, 0, 0)',overlay
+                assert overlay['toolsBg']=='rgba(0, 0, 0, 0)',overlay
+                assert overlay['hintsBg']=='rgba(0, 0, 0, 0)',overlay
+                assert overlay['composerBg']!='rgba(0, 0, 0, 0)',overlay
+                assert overlay['dockPosition']=='absolute',overlay
+                assert overlay['headerBorder']=='0px',overlay
+                assert overlay['mainBg']==overlay['workspaceBg'],overlay
+                assert overlay['feedBottom']>=overlay['dockBottom']-12,overlay
+                assert overlay['dockTop']<overlay['feedBottom']-45,overlay
+                assert overlay['reserved']>=overlay['dockHeight']+12,overlay
+                assert overlay['feedScrollHeight']>overlay['feedClientHeight'],overlay
+                assert overlay['lastBottom']<=overlay['dockTop']+3,overlay
+                assert overlay['composerWidth']>=overlay['homeWidth']-4,overlay
+                assert overlay['placeholderFont']>=12.5,overlay
+                assert float(overlay['placeholderOpacity'])>=.8,overlay
+                assert overlay['screenOverflow']<=2,overlay
+                page.screenshot(path=str(OUT/'transparent-floating-composer-390.png'),animations='disabled')
+                result['checks'].append({'page':'transparent-floating-composer-390',
+                    'dock_transparent':True,'feed_scrolls_behind_dock':True,
+                    'latest_message_readable':True,'no_header_strip':True,
+                    'placeholder_integrated':True})
                 page.route('**/studio/products/*/dispatch/new',
                            lambda route:route.fulfill(status=200,content_type='application/json',
                                body=json.dumps({'hints':[]})))
