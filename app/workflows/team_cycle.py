@@ -168,7 +168,7 @@ class TeamCycle:
         task_type = brief_data.get("task_type")
         if task_type not in TASK_SCHEMAS:
             return TeamTaskResult(task_id=task.id, status="skipped", error="unsupported_task_type")
-        if task_halted(self.db, task, brief_data):
+        if task_halted(self.db, task, brief_data, lock=True):
             if task.status == TaskStatus.QUEUED:
                 task.status = TaskStatus.CANCELLED
                 self.db.commit()
