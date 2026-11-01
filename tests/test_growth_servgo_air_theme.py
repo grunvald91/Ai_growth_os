@@ -24,7 +24,7 @@ def test_growth_v4_loads_canonical_css_and_theme_script():
         "/studio/team?design=classic",
     )
     assert "/studio/assets/servgo-air-tokens.css?v=1" in html
-    assert "/studio/assets/growth-servgo-air.css?v=3" in html
+    assert "/studio/assets/growth-servgo-air.css?v=4" in html
     assert "/studio/assets/servgo-air-theme.js?v=1" in html
     assert 'action="/studio/team/apply"' in html
     assert 'name="role"' in html
@@ -140,8 +140,8 @@ def test_growth_profile_adapter_is_after_legacy_studio_css_in_html_head():
     result = render_v4(legacy, request, None, "/studio?design=classic")
     assert "Материалы · 1" in result
     assert "ServGo: данные заведения" in result
-    assert result.index("/studio/assets/studio.css?v=14") < result.index("/studio/assets/growth-servgo-air.css?v=3")
-    assert result.count("/studio/assets/growth-servgo-air.css?v=3") == 1
+    assert result.index("/studio/assets/studio.css?v=14") < result.index("/studio/assets/growth-servgo-air.css?v=4")
+    assert result.count("/studio/assets/growth-servgo-air.css?v=4") == 1
 
 
 
@@ -169,3 +169,36 @@ def test_profile_text_colors_have_sufficient_dark_and_light_contrast():
             foreground = luma(color(colors, ink))
             ratio = (max(foreground, background)+0.05)/(min(foreground, background)+0.05)
             assert ratio >= 4.5, f"{mode}: {ink} contrast ratio {ratio:.2f} below 4.5"
+
+
+def test_v4_mobile_indicator_matches_tapered_servgo_air_client_shape():
+    """The client/admin indicator has pointed ends, not the old flat rectangle."""
+    source = (ASSETS / "growth-servgo-air.css").read_text(encoding="utf-8")
+    import re
+    selector = re.search(
+        r'body\[data-growth-design="v4"\] \.mobile-nav > a::after\s*\{([^}]+)\}',
+        source,
+    )
+    assert selector, "Growth mobile indicator selector missing"
+    properties = selector.group(1)
+    assert "clip-path: polygon(0% 50%, 10% 45%, 24% 36%, 36% 23%" in properties
+    assert "90% 55%, 76% 64%, 64% 77%, 55% 90%" in properties
+    assert "left: 22%;" in properties and "right: 22%;" in properties
+    assert "height: 2px;" in properties and "bottom: 0;" in properties
+    assert "background-size: 310% 100%;" in properties
+    assert "animation: sgNavFlow 3.7s linear infinite;" in properties
+    assert "to { background-position: 100% 50%; }" in source
+
+
+def test_v4_dark_forms_and_dispatcher_messages_use_theme_text_not_fixed_ink():
+    css = (ASSETS / "growth-servgo-air.css").read_text(encoding="utf-8")
+    assert ".sg-choice-copy b" in css
+    assert ".sg-surface h2" in css
+    assert ".sg-field > span" in css
+    assert ".sg-work-item-main b" in css
+    assert ".dp-home .dp-msg" in css
+    assert "color: var(--s-text);" in css
+    assert "color: var(--s-muted);" in css
+    assert ":is(input, textarea)::placeholder" in css
+    assert "opacity: 1;" in css
+    assert ".sg-choice:has(input:checked)" in css
