@@ -28,6 +28,8 @@ from app.sso.company import MIN_ABOUT, about_text
 from app.sso.models import StudioBusinessLink, StudioSsoTicket
 
 router = APIRouter()
+SETUP_COOKIE = "sg_growth_setup"
+SETUP_PATH = "/studio/sso/create"
 HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY"}
 
 
@@ -110,6 +112,19 @@ def _first_visit(request: Request, background: BackgroundTasks, db: Session, set
         name = f"{claims.name} (№{claims.business_id})" if claims.name else f"№{claims.business_id}"
         return _message("Сначала откроет владелец", f"Для «{name}» в студии ещё нет компании. Её создаёт владелец "
                         "при первом входе из ServGo — попросите его открыть «Маркетинг» один раз.", 403)
+    # On the unified HTTPS origin, keep the confirmation inside the native
+    # ServGo React workspace. The signed intent never enters URL, HTML or JS.
+    if (settings.studio_servgo_gateway_enabled and request.url.scheme == "https"
+            and request.url.netloc.casefold() == "servgo.ru"):
+        response = RedirectResponse(
+            f"/workspace/growth?setup=1&business_id={claims.business_id}",
+            status_code=303, headers=HEADERS,
+        )
+        response.set_cookie(SETUP_COOKIE, tickets.issue_intent(settings, claims),
+                            max_age=tickets.INTENT_TTL, path=SETUP_PATH,
+                            secure=True, httponly=True, samesite="lax")
+        return response
+    # The old growth.servgo.ru entry retains its working form.
     return _ask_to_create(settings, claims)
 
 
@@ -143,12 +158,33 @@ def _ask_to_create(settings: Settings, claims: tickets.Claims) -> HTMLResponse:
 
 @router.post("/studio/sso/create", response_class=HTMLResponse)
 def sso_create(request: Request, background: BackgroundTasks, c: str = Form(""),
-               db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
-    """The owner said yes. ServGo is asked again, so the answer is only as good as the access right now."""
+               business_id: int = Form(0), db: Session = Depends(get_db),
+               settings: Settings = Depends(get_settings)):
+    """Confirm first visit; live ServGo owner permissions are checked again before creation."""
+    canonical = (settings.studio_servgo_gateway_enabled and request.url.scheme == "https"
+                 and request.url.netloc.casefold() == "servgo.ru")
+    if canonical:
+        # A host-only HttpOnly setup cookie is not a CSRF exemption. Verify the
+        # real proxy Host and form's Origin/Referer before accepting the intent.
+        from app.api.content_studio_auth import require_studio_csrf
+        try:
+            require_studio_csrf(request, settings=settings)
+        except Exception as error:
+            from fastapi import HTTPException
+            if isinstance(error, HTTPException):
+                return _message("Неверный источник запроса", "Вернитесь в ServGo и повторите вход.", 403)
+            raise
+        if c or business_id < 1:
+            return _message("Ссылка устарела", "Откройте маркетинг из ServGo ещё раз.", 400)
+        intent = request.cookies.get(SETUP_COOKIE, "")
+    else:
+        intent = c
     try:
-        claims = tickets.read_intent(settings, c)
+        claims = tickets.read_intent(settings, intent)
     except tickets.SsoError:
-        return _message(*EXPIRED, action=("Войти по логину", "/studio/login"))
+        return _message(*EXPIRED, action=("Вернуться в ServGo", ADMIN_URL))
+    if canonical and claims.business_id != business_id:
+        return _message("Выбран другой бизнес", "Вернитесь в ServGo и выберите бизнес ещё раз.", 409)
     access.forget(claims.user_id, claims.business_id)
     role = access.servgo_role(settings, claims.user_id, claims.business_id)
     if role not in ("owner", "co_owner"):
