@@ -195,6 +195,7 @@ def campaign_page(product, row: Experiment, error: str = "", *, metrics=()):
                 '<button class="btn primary" type="submit">Запустить подготовку</button>'
                 '<p>Запуск поставит задачу ИИ-команде и начнёт период наблюдения. '
                 'Возможны расходы на ИИ. Рассылки и публикации не запускаются.</p></form>'
+                f'<a class="btn" href="{base}/{row.id}/edit">Редактировать черновик</a>'
             )
         else:
             owner_action = (
