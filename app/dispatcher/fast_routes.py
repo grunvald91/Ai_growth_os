@@ -53,8 +53,10 @@ def quick_video_request(text: str) -> dict[str, str] | None:
         return None
     if not re.search(r"\b(?:видео[\w-]*|видеоролик\w*|ролик\w*)\b", words):
         return None
-    if not re.search(r"\b(?:объясн\w*|объясня\w*|рисован\w*|рисунк\w*|анимац\w*|"
-                     r"разбор\w*|объяснялк\w*|почему|whiteboard)\b|на\s+доске", words):
+    explainer = re.search(r"\b(?:объясн\w*|объясня\w*|рисован\w*|рисунк\w*|анимац\w*|"
+                          r"разбор\w*|объяснялк\w*|почему|whiteboard)\b|на\s+доске", words)
+    compound = re.search(r"\bвидео-?(?:объясн|разбор)\w*\b", words)
+    if not (explainer or compound):
         return None
 
     # The subject is taken from the user's original words, not invented by a model.
@@ -69,7 +71,7 @@ def quick_video_request(text: str) -> dict[str, str] | None:
             return None
     else:
         topic = match.group(1)
-    topic = topic.strip().strip("«»\\\"' \\t\\r\\n").rstrip(" .")
+    topic = topic.strip().strip(' «»"\t\r\n').rstrip(" .")
     if not 8 <= len(topic) <= 400:
         return None
 
