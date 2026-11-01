@@ -377,3 +377,25 @@ def test_topics_are_diverse_and_business_grounded(environment):
     assert any("Клиент не понимает" in title for title in titles)
     assert any("салон" in title for title in titles)
     assert not any("гарантируем" in title.lower() for title in titles)
+
+
+@pytest.mark.asyncio
+async def test_crossref_discards_unrelated_abstract_even_with_real_doi():
+    import httpx
+    from app.content.whiteboard.science import retrieved_references
+    def handler(req):
+        if req.url.host == "api.crossref.org":
+            return httpx.Response(200, json={"message":{"items":[{
+                "DOI":"10.1987/unrelated", "type":"journal-article",
+                "title":["A clinical discussion of gardening and ancient agriculture"],
+                "abstract":"This unrelated research abstract discusses gardening, soil, "
+                            "crop production and ancient agriculture. It provides "
+                            "historical evidence about agriculture in several "
+                            "different cultures and periods, not quantum mechanics.",
+            }]}})
+        return httpx.Response(200, text="")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        refs = await retrieved_references(science_request(
+            topic="Почему электроны двигаются и взаимодействуют?", science_mode="scientific"),
+            client=client)
+    assert not refs

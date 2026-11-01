@@ -118,7 +118,7 @@ async def retrieved_references(request: WhiteboardRequest, *, client=None) -> li
 # allowlist of scientific publishers. Search snippets alone NEVER count as proof.
 SCIENTIFIC_SEARCH_QUERY = "https://api.crossref.org/works"
 DUCKDUCKGO_SEARCH = "https://html.duckduckgo.com/html/"
-DOI_PATTERN = re.compile(r"^10[.]\\d{4,9}/[-._;()/:A-Z0-9]+$", re.I)
+DOI_PATTERN = re.compile(r"^10[.]\d{4,9}/[-._;()/:A-Z0-9]+$", re.I)
 RUSSIAN_TO_ENGLISH = (
     ("электрон", "electron"), ("заряж", "charged"), ("разряж", "discharged"),
     ("аккумулятор", "battery"), ("температур", "temperature"),
@@ -199,6 +199,12 @@ async def _crossref_discover(client: httpx.AsyncClient, request: WhiteboardReque
             abstract = _source_plain_text(str(item.get("abstract", "")))
             if len(title) < 10 or len(abstract) < 140:
                 continue  # metadata without a usable abstract is not evidence.
+            # Crossref's ranking is not a proof of topical relevance. Require a
+            # matching concept in the paper title/abstract when a glossary mapping exists.
+            gloss = [en for ru, en in RUSSIAN_TO_ENGLISH if ru in request.topic.casefold()]
+            evidence = (title + " " + abstract).casefold()
+            if gloss and not any(word in evidence for word in gloss):
+                continue
             # Crossref search is rank-based, not independent fact verification.
             seen.add(doi.casefold())
             found.append({"id": f"CR{len(found) + 1}",
@@ -384,6 +390,8 @@ class FactReviewer:
             "Если в реплике нет фактического утверждения, verdict=not_factual и reference_id=null. "
             "Нельзя пропускать реплики или считать научный тезис not_factual. "
             "Для supported приведи evidence_quote: короткую дословную выдержку из trusted_references.claim. "
+            "Выдержка должна логически доказывать утверждение, а не просто содержать похожие слова; "
+            "не цитируй отдельные слова без контекста и не приписывай источникам неуказанные выводы. "
             "Для not_factual укажи evidence_quote=null. "
 
             "Если утверждение противоречит источнику или не подтверждено, "
