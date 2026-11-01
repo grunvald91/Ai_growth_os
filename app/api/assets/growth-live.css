@@ -212,8 +212,8 @@ body[data-growth-design="v4"] .command-bar{
   min-height:62px!important;
   border-radius:23px!important;
   margin-bottom:0!important;
-  padding:8px 10px 8px 16px!important;
-  gap:8px!important;
+  padding:8px 8px 8px 12px!important;
+  gap:6px!important;
   background:var(--card);
   border:1px solid rgba(119,159,211,.42);
   box-shadow:0 5px 18px rgba(41,95,164,.09);
@@ -227,16 +227,16 @@ body[data-growth-design="v4"] .command-bar textarea{
   min-height:23px;
   max-height:125px;
   padding:6px 0;
-  font-size:13px!important;
+  font-size:14px!important;
   line-height:1.35;
   font-weight:400;
   text-align:center;
 }
 body[data-growth-design="v4"] .command-bar textarea::placeholder{
   color:var(--muted);
-  opacity:.63;
-  font-size:12.5px;
-  font-weight:400;
+  opacity:.88;
+  font-size:13px;
+  font-weight:500;
   text-align:center;
 }
 body[data-growth-design="v4"] .command-bar textarea:not(:placeholder-shown){
@@ -474,9 +474,9 @@ body[data-growth-design="v4"] .dp-home:not(.has-feed) .command-tools .dp-new{
 }
 
 
-/* Transparent floating composer: conversation scrolls underneath the controls.
-   Do not paint a full-width footer panel over the conversation; only the
-   composer and actual shortcut buttons have their own visible surfaces. */
+/* Transparent composer in normal layout flow: the scrollbar and messages end
+   ABOVE the controls, rather than disappearing behind a floating input.
+   Only the composer and shortcut buttons have painted surfaces. */
 body.home-page:not(.home-empty) .dp-home.has-feed{
   position:relative;
 }
@@ -487,15 +487,17 @@ body.home-page:not(.home-empty) .dp-home.has-feed .dp-feed{
   max-height:none;
   box-sizing:border-box;
   margin:0;
-  padding:4px 4px calc(var(--v4-dock-height, 142px) + 12px);
-  scroll-padding-bottom:calc(var(--v4-dock-height, 142px) + 12px);
+  padding:4px 8px 12px 4px;
+  scroll-padding-bottom:12px;
+  scrollbar-gutter:stable;
   overflow-y:auto;
 }
 body.home-page:not(.home-empty) .dp-home.has-feed .command-dock{
-  position:absolute;
-  left:0;
-  right:0;
-  bottom:0;
+  position:relative;
+  left:auto;
+  right:auto;
+  bottom:auto;
+  flex:0 0 auto;
   width:100%;
   z-index:auto; /* do not trap the fixed voice-hold glow below mobile navigation */
   box-sizing:border-box;
@@ -594,13 +596,42 @@ body[data-growth-design="v4"] .command-bar.voice-text-editing textarea::placehol
   text-align:left;
 }
 body[data-growth-design="v4"] .command-bar textarea::placeholder{
-  font-size:11.5px;
+  font-size:13px;
 }
 @media(max-width:360px){
-  body[data-growth-design="v4"] .command-bar textarea::placeholder{font-size:10.5px}
+  body[data-growth-design="v4"] .command-bar textarea::placeholder{font-size:11.5px}
 }
 
 /* No supported recorder: the user must still be able to select/edit text. */
 body[data-growth-design="v4"] .command-bar.voice-unavailable .voice-hold-hitbox{
   pointer-events:none;
+}
+
+/* Compact one-click resource rows: video title and status share one card. */
+body[data-growth-design="v4"] .dp-resource-list{
+  display:grid;gap:8px;min-width:0;width:100%;
+}
+body[data-growth-design="v4"] .dp-resource{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  min-height:64px;box-sizing:border-box;
+  padding:12px 14px;border:1px solid var(--line);border-radius:14px;
+  background:var(--card);color:var(--text);text-decoration:none;
+}
+body[data-growth-design="v4"] .dp-resource:hover{
+  border-color:rgba(76,137,218,.5);background:var(--blue-soft);
+}
+body[data-growth-design="v4"] .dp-resource:focus-visible{
+  outline:2px solid var(--blue);outline-offset:2px;
+}
+body[data-growth-design="v4"] .dp-resource-copy{
+  display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;
+}
+body[data-growth-design="v4"] .dp-resource-title{
+  font-size:14px;font-weight:600;line-height:1.4;overflow-wrap:anywhere;
+}
+body[data-growth-design="v4"] .dp-resource-status{
+  font-size:12px;line-height:1.3;color:var(--muted);
+}
+body[data-growth-design="v4"] .dp-resource-arrow{
+  color:var(--blue);font-size:18px;flex:none;
 }
