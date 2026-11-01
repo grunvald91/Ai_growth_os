@@ -721,3 +721,46 @@ def test_native_setup_recognises_proxy_https_without_allowing_cross_host(env, tm
     assert response.status_code == 303
     assert response.headers["location"] == "/workspace/growth?setup=1&business_id=31"
     assert "httponly" in response.headers["set-cookie"].lower()
+
+
+
+def test_canonical_browser_errors_return_to_admin_shell_without_cookies(env):
+    db, settings, _, _, servgo = env
+    client, page = canonical_first_visit(env)
+    assert page.status_code == 303
+    browser_headers = {"accept": "text/html,application/xhtml+xml", "origin": "https://servgo.ru"}
+    wrong_business = client.post("/studio/sso/create", data={"business_id": 12},
+                                 headers=browser_headers)
+    assert wrong_business.status_code == 303
+    assert wrong_business.headers["location"] == "/workspace/growth?setup=error&code=business"
+    assert "max-age=0" in wrong_business.headers.get("set-cookie", "").lower()
+    assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
+
+    fresh_client, page = canonical_first_visit(env, jti="y" * 16)
+    servgo.allowed.clear()
+    blocked = fresh_client.post("/studio/sso/create", data={"business_id":31},
+                                headers=browser_headers)
+    assert blocked.status_code == 303
+    assert blocked.headers["location"] == "/workspace/growth?setup=error&code=denied"
+    assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
+
+
+def test_canonical_sso_bad_link_browser_returns_to_admin_shell(env):
+    client, page = canonical_first_visit(env)
+    expired = client.get("/studio/sso?t=bad", headers={"accept":"text/html"})
+    assert expired.status_code == 303
+    assert expired.headers["location"] == "/workspace/growth?setup=error&code=expired"
+
+
+def test_legacy_first_visit_form_never_enters_v4_transform(env):
+    # The standalone old-domain consent page must remain intact even when
+    # a browser has explicitly opted into Growth v4 elsewhere.
+    db, settings, _, _, servgo = env
+    servgo.allowed[(7, 31)] = "owner"
+    servgo.businesses[31] = {**servgo.businesses[12], "name":"Баня Парная"}
+    client = browser()
+    client.cookies.set("growth_design", "v4")
+    page = client.get("/studio/sso", params={"t":make_ticket(biz=31, jti="q"*16)})
+    assert page.status_code == 200
+    assert 'name="c"' in page.text
+    assert 'data-growth-design="v4"' not in page.text
