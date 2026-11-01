@@ -190,7 +190,7 @@ def campaigns_page(product_id: UUID, page: int = 1, db: Session = Depends(get_db
         f'<a class="btn" href="{base}/campaigns/new">Создать вручную</a></p>'
         '<details><summary>Другие инструменты продвижения</summary>'
         f'<p><a href="{base}/plan">Контент-план</a> · '
-        '<a href="https://servgo.ru/mail">Почтовые кампании</a></p></details>'+
+        f'<a href="{base}/channels">Публикации</a></p></details>'+
         (cards or '<p>На этой странице кампаний нет.</p>') + pager)
 
 
