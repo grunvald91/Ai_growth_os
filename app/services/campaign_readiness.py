@@ -77,7 +77,8 @@ def load_resources(db: Session, campaigns: list[Experiment]) -> dict[UUID, Campa
              for row in records if row.title in names}
     wanted: set[UUID] = set()
     for data in by_id.values():
-        for raw in (data.get("material_ids") or [])[:MAX_LINKED_MATERIALS]:
+        links = data.get("material_ids")
+        for raw in (links if isinstance(links, list) else [])[:MAX_LINKED_MATERIALS]:
             try:
                 wanted.add(UUID(str(raw)))
             except (ValueError, TypeError, AttributeError):
@@ -140,7 +141,8 @@ def load_resources(db: Session, campaigns: list[Experiment]) -> dict[UUID, Campa
         data = by_id.get(row.id, {})
         materials = []
         seen = set()
-        for raw in (data.get("material_ids") or [])[:MAX_LINKED_MATERIALS]:
+        links = data.get("material_ids")
+        for raw in (links if isinstance(links, list) else [])[:MAX_LINKED_MATERIALS]:
             try:
                 key = UUID(str(raw))
             except (ValueError, TypeError, AttributeError):
