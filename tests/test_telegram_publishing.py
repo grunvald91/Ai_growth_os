@@ -310,7 +310,9 @@ async def test_campaign_stop_blocks_due_and_future_telegram_sends_without_harmin
     status, pending = command(db, product_id=product.id,
                               experiment_id=experiment.id,
                               action="stop", actor="owner")
-    assert status == "stopping" and pending.pending_publications == 1
+    assert status == "stopped" and pending.clear
+    db.refresh(linked_pub)
+    assert linked_pub.status == "cancelled"  # No need to wait for due time.
     with pytest.raises(ValueError, match="остановленной|завершённой"):
         schedule_post(db, post.id, connection.id, now+timedelta(minutes=4), now=now)
     db.rollback()
@@ -319,9 +321,7 @@ async def test_campaign_stop_blocks_due_and_future_telegram_sends_without_harmin
                         content_telegram_autopost_enabled=True, _env_file=None)
     assert await run_due_telegram_post_once(
         sessions(db), settings, api=fake, now=now+timedelta(minutes=3),
-    ) == 1
-    db.refresh(linked_pub)
-    assert linked_pub.status == "cancelled"
+    ) == 0
     assert not any(method == "sendMessage" for method, _ in fake.calls)
     assert await run_due_telegram_post_once(
         sessions(db), settings, api=fake, now=now+timedelta(minutes=4),
@@ -329,6 +329,6 @@ async def test_campaign_stop_blocks_due_and_future_telegram_sends_without_harmin
     db.refresh(independent_pub)
     assert independent_pub.status == "published"
     assert len([method for method, _ in fake.calls if method == "sendMessage"]) == 1
-    assert reconcile_pending(db) == 1
+    assert reconcile_pending(db) == 0
     db.refresh(experiment)
     assert experiment.status == "stopped"
