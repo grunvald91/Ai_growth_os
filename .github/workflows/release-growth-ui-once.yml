@@ -1,0 +1,74 @@
+name: Release merged Growth dispatcher UI once
+
+on:
+  push:
+    branches:
+      - ops/growth-dispatcher-ui-release-20261101
+    paths:
+      - '.github/workflows/release-growth-ui-once.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: growth-production
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4df11eaebd638cc98ac5c125a89ee6b058c2869a
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[test]'
+      - name: Check dispatcher and mobile UI regressions
+        run: |
+          python -m pytest -q tests/test_dispatcher_fast_owner.py tests/test_dispatcher_model_selection.py tests/test_dispatcher.py tests/test_growth_live.py
+          node --check app/api/dispatcher_assets/dispatcher.js
+
+  release:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production
+    env:
+      SERVER_SSH_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4df11eaebd638cc98ac5c125a89ee6b058c2869a
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'paramiko==3.5.1'
+      - name: Prepare pinned prior release script with updated baseline and UI scope
+        shell: bash
+        run: |
+          git show 0832c9caf79f18e661c8666462004ce250010707:scripts/deploy_dispatcher_fast_model_release.py > scripts/release_ui_once_runtime.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("scripts/release_ui_once_runtime.py")
+          source = p.read_text()
+          changes = [
+              ('deployed_base = "ef19266fcde87751dd55d4e7bd895064e2e1bd3c"',
+               'deployed_base = "0832c9caf79f18e661c8666462004ce250010707"'),
+              ('if "app/core/composition.py" not in changed or "app/core/config.py" not in changed:',
+               'if "app/api/assets/growth-live.css" not in changed or "app/dispatcher/owner_views.py" not in changed:'),
+              ('raise RuntimeError("Missing dedicated model implementation")',
+               'raise RuntimeError("Missing required UI changes")'),
+              ('DISPATCHER_MODEL_DEPLOYED=true', 'DISPATCHER_UI_DEPLOYED=true'),
+          ]
+          for old, new in changes:
+              if source.count(old) != 1:
+                  raise RuntimeError("Unexpected release-script version")
+              source = source.replace(old, new)
+          p.write_text(source)
+          PY
+      - name: Check deployed code hashes and running tasks, deploy with rollback, smoke test
+        run: python scripts/release_ui_once_runtime.py
