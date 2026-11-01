@@ -55,10 +55,18 @@ class GrowthDesignMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
         path = request.url.path
-        eligible = (path == '/intelligence' or path.startswith('/studio')) and not any(
-            part in path for part in ('/assets/', '/login', '/logout', '/sso/', '/design-preview'))
+        # SSO landing and consent are protocol endpoints, not studio pages.
+        is_sso = path == '/studio/sso' or path.startswith('/studio/sso/')
+        eligible = (path == '/intelligence' or path.startswith('/studio')) and not is_sso and not any(
+            part in path for part in ('/assets/', '/login', '/logout', '/design-preview'))
+        from app.api.studio_sso import _canonical_pwa
+        from app.core.config import get_settings
+        canonical = _canonical_pwa(request, get_settings())
         choice = request.query_params.get('design')
-        new = (choice if choice in {'v4', 'classic'} else request.cookies.get(COOKIE)) == 'v4'
+        preference = choice if choice in {'v4', 'classic'} else request.cookies.get(COOKIE)
+        # Canonical ServGo starts on v4, while an explicit Classic choice
+        # and the old Growth domain both retain their existing behavior.
+        new = preference == 'v4' or (preference not in {'v4', 'classic'} and canonical)
         if eligible and request.method in {'GET', 'POST'}:
             if response.status_code in {200, 409, 422} and 'text/html' in response.headers.get('content-type', ''):
                 body = b''.join([chunk async for chunk in response.body_iterator])
