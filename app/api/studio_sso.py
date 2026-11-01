@@ -65,6 +65,24 @@ def _message(title: str, text: str, status: int, *, action: tuple[str, str] | No
     return HTMLResponse(body, status_code=status, headers=HEADERS)
 
 
+def _native_error(request: Request, settings: Settings, code: str,
+                  title: str, message: str, status: int, *,
+                  action: tuple[str, str] | None = None):
+    """HTML navigation errors return to the canonical ServGo admin shell.
+
+    Non-browser/API requests keep original HTTP 4xx/5xx responses. Legacy
+    growth.servgo.ru retains its standalone error page and status codes.
+    """
+    if (_canonical_pwa(request, settings)
+            and "text/html" in request.headers.get("accept", "").casefold()):
+        result = RedirectResponse(f"/workspace/growth?setup=error&code={code}",
+                                  status_code=303, headers=HEADERS)
+        result.delete_cookie(SETUP_COOKIE, path=SETUP_PATH, secure=True,
+                             httponly=True, samesite="lax")
+        return result
+    return _message(title, message, status, action=action)
+
+
 EXPIRED = ("Ссылка устарела", "Ссылка из ServGo действует одну минуту и срабатывает один раз. "
            "Вернитесь в админку ServGo и нажмите «Маркетинг» ещё раз.", 400)
 
@@ -185,27 +203,27 @@ def sso_create(request: Request, background: BackgroundTasks, c: str = Form(""),
         try:
             require_studio_csrf(request, settings=settings)
         except HTTPException:
-            return _message("Неверный источник запроса", "Вернитесь в ServGo и повторите вход.", 403)
+            return _native_error(request, settings, "origin", "Неверный источник запроса", "Вернитесь в ServGo и повторите вход.", 403)
         if c or business_id < 1:
-            return _message("Ссылка устарела", "Откройте маркетинг из ServGo ещё раз.", 400)
+            return _native_error(request, settings, "expired", "Ссылка устарела", "Откройте маркетинг из ServGo ещё раз.", 400)
         intent = request.cookies.get(SETUP_COOKIE, "")
     else:
         intent = c
     try:
         claims = tickets.read_intent(settings, intent)
     except tickets.SsoError:
-        return _message(*EXPIRED, action=("Вернуться в ServGo", ADMIN_URL))
+        return _native_error(request, settings, "expired", *EXPIRED, action=("Вернуться в ServGo", ADMIN_URL))
     if canonical and claims.business_id != business_id:
-        return _message("Выбран другой бизнес", "Вернитесь в ServGo и выберите бизнес ещё раз.", 409)
+        return _native_error(request, settings, "business", "Выбран другой бизнес", "Вернитесь в ServGo и выберите бизнес ещё раз.", 409)
     access.forget(claims.user_id, claims.business_id)
     role = access.servgo_role(settings, claims.user_id, claims.business_id)
     if role not in ("owner", "co_owner"):
-        return _message("Нет доступа", "ServGo не подтвердил, что вы владелец этого заведения.", 403,
+        return _native_error(request, settings, "denied", "Нет доступа", "ServGo не подтвердил, что вы владелец этого заведения.", 403,
                         action=("Войти по логину", "/studio/login"))
     link = _link_for(db, claims.business_id)
     if link is not None:  # Another tab created it meanwhile: just go there.
         if not _use_ticket(db, claims, link.product_id):  # this very answer was already used (a second press)
-            return _message("Компания уже создана", "Откройте «Маркетинг» в админке ServGo ещё раз — "
+            return _native_error(request, settings, "conflict", "Компания уже создана", "Откройте «Маркетинг» в админке ServGo ещё раз — "
                             "студия откроется сразу.", 409, action=("Вернуться в ServGo", ADMIN_URL))
         response = _cookie_redirect(settings, claims, role, link.product_id, f"/studio/products/{link.product_id}", request)
         if canonical:
@@ -223,7 +241,7 @@ def _create_company(request: Request, background: BackgroundTasks, db: Session, 
     from app.api.content_studio_company import ACTOR, _service, _start_job
     data = access.servgo_business(settings, claims.user_id, claims.business_id)
     if data is None:
-        return _message("Не удалось получить данные заведения", "ServGo не ответил. Подождите минуту и откройте "
+        return _native_error(request, settings, "unavailable", "Не удалось получить данные заведения", "ServGo не ответил. Подождите минуту и откройте "
                         "«Маркетинг» из админки ещё раз.", 502)
     about = about_text(data)
     if len(about) < MIN_ABOUT:
@@ -240,7 +258,7 @@ def _create_company(request: Request, background: BackgroundTasks, db: Session, 
         db.rollback()  # Another tab created the company first, or this link was already used.
         link = _link_for(db, claims.business_id)
         if link is None or not _use_ticket(db, claims, link.product_id):
-            return _message(*EXPIRED, action=("Войти по логину", "/studio/login"))
+            return _native_error(request, settings, "expired", *EXPIRED, action=("Войти по логину", "/studio/login"))
         return _cookie_redirect(settings, claims, role, link.product_id, f"/studio/products/{link.product_id}", request)
     target = f"/studio/products/{product.id}/profile"
     try:
@@ -259,22 +277,22 @@ def _create_company(request: Request, background: BackgroundTasks, db: Session, 
 def sso_landing(request: Request, background: BackgroundTasks, t: str | None = None,
                 db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
     if not tickets.configured(settings):
-        return _message("Вход из ServGo не настроен", "Откройте студию через обычный вход.", 503,
+        return _native_error(request, settings, "unavailable", "Вход из ServGo не настроен", "Откройте студию через обычный вход.", 503,
                         action=("Войти по логину", "/studio/login"))
     try:
         claims = tickets.verify_ticket(settings, t)
     except tickets.SsoError:
-        return _message(*EXPIRED, action=("Войти по логину", "/studio/login"))
+        return _native_error(request, settings, "expired", *EXPIRED, action=("Войти по логину", "/studio/login"))
     # ServGo confirms access right now: the link alone is not enough.
     access.forget(claims.user_id, claims.business_id)
     role = access.servgo_role(settings, claims.user_id, claims.business_id)
     if role is None:
-        return _message("Нет доступа", "ServGo не подтвердил доступ к маркетингу для этого заведения. "
+        return _native_error(request, settings, "denied", "Нет доступа", "ServGo не подтвердил доступ к маркетингу для этого заведения. "
                         "Владелец может открыть его в настройках заведения.", 403,
                         action=("Войти по логину", "/studio/login"))
     link = _link_for(db, claims.business_id)
     if link is None:
         return _first_visit(request, background, db, settings, claims, role)
     if not _use_ticket(db, claims, link.product_id):
-        return _message(*EXPIRED, action=("Войти по логину", "/studio/login"))
+        return _native_error(request, settings, "expired", *EXPIRED, action=("Войти по логину", "/studio/login"))
     return _cookie_redirect(settings, claims, role, link.product_id, f"/studio/products/{link.product_id}", request)
