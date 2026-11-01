@@ -110,6 +110,7 @@ def topic_picker_html(product_id) -> str:
     field("topic").value = chosen;
     field("wb_topic_choice").value = chosen;
     field("wb_paid_start").value = "yes";
+    field("wb_paid_consent").value = "yes";
     form.requestSubmit();
   });
 })();
