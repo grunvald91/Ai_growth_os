@@ -51,14 +51,31 @@ def adapt_mail_html(page: str, *, mailbox: bool = False) -> str:
     if mailbox:
         page = page.replace('href="/"', 'href="/api/owner-mail/workspace"')
         page = page.replace('location.replace("/")', 'location.replace("/mail")')
-    # An explicit way back to the same PWA shell. Never send the private
-    # Mail API cookie to unrelated paths; logout is separate from BookingBot.
-    marker = "</body>"
-    logout = ('<a href="/api/owner-mail/workspace/logout" '
-              'style="position:fixed;bottom:8px;left:8px;z-index:99;'
-              'font-size:11px;opacity:.8;color:var(--s-muted,#62778b)">'
-              'Выйти из почты</a>')
-    return page.replace(marker, logout + marker)
+    # Same-origin workspace transitions belong in the existing mail heading,
+    # not in a fixed footer that overlaps the mobile navigation. Growth entry
+    # returns through ServGo's server-checked business/SSO flow.
+    navigation = (
+        '<nav class="sg-pwa-workspace-nav" aria-label="Разделы ServGo">'
+        '<a href="/admin">← ServGo</a>'
+        '<a href="/workspace/growth">Маркетинг</a>'
+        '<a href="/api/owner-mail/workspace/logout">Выйти из почты</a>'
+        '</nav>'
+    )
+    style = (
+        '<style>'
+        '.sg-pwa-workspace-nav{display:flex;align-items:center;flex-wrap:wrap;'
+        'gap:6px 14px;margin:0 0 10px;color:var(--s-muted,#62778b);'
+        'font-size:12px;line-height:1.3}'
+        '.sg-pwa-workspace-nav a{color:inherit;text-decoration:none;'
+        'padding:6px 0;min-height:30px;display:inline-flex;align-items:center}'
+        '.sg-pwa-workspace-nav a:hover,.sg-pwa-workspace-nav a:focus-visible{'
+        'color:var(--s-accent,#2465bd);text-decoration:underline}'
+        '</style>'
+    )
+    # Both trusted templates have a heading. This adds inline breadcrumbs,
+    # leaving all original controls and JS IDs unchanged.
+    page = page.replace('<h1', navigation + '<h1', 1)
+    return page.replace('</head>', style + '</head>', 1)
 
 
 async def _workspace(request: Request, session: AsyncSession, template: str, *, mailbox=False):

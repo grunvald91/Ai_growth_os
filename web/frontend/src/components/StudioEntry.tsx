@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Sparkles } from 'lucide-react'
 import { api } from '../api/client'
+import { isTrustedStudioTicketUrl } from '../utils/studioTicketUrl'
 
 type Entry = { id: number; name: string; role: string }
 
@@ -8,20 +9,31 @@ type Entry = { id: number; name: string; role: string }
  * Вход в маркетинговую студию (AI Growth OS) для тех, у кого он открыт: владельцев и администраторов,
  * которым владелец включил доступ. Ничего не показывает, пока доступа нет или вход не настроен.
  */
-export function StudioEntry() {
+export function StudioEntry({ showUnavailable = false }: { showUnavailable?: boolean } = {}) {
   const [items, setItems] = useState<Entry[]>([])
   const [busy, setBusy] = useState<number | null>(null)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
   useEffect(() => {
-    if (!localStorage.getItem('token')) return
-    api.studioBusinesses().then(setItems).catch(() => setItems([]))
+    let active = true
+    if (!localStorage.getItem('token')) { setLoading(false); return }
+    api.studioBusinesses()
+      .then(result => { if (active) setItems(result) })
+      .catch(() => { if (active) setItems([]) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
   }, [])
-  if (items.length === 0) return null
+  if (items.length === 0) return showUnavailable ? (
+    <p role="status" className="ds-caption">
+      {loading ? 'Проверяем доступ к маркетингу…' : 'Пока нет доступных бизнесов или вход в маркетинг не настроен.'}
+    </p>
+  ) : null
   const open = async (id: number) => {
     if (busy !== null) return
     setBusy(id); setError('')
     try {
       const { url } = await api.studioTicket(id)
+      if (!isTrustedStudioTicketUrl(url)) throw new Error('Unexpected Studio SSO destination')
       window.location.assign(url)
     } catch {
       setBusy(null)

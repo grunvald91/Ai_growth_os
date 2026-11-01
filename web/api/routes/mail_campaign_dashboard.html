@@ -39,18 +39,19 @@ dialog{border:1px solid var(--line);border-radius:19px;padding:25px;width:min(64
 @media(max-width:850px){.app{grid-template-columns:1fr}aside{padding:14px 16px}nav{display:flex;gap:6px;overflow:auto}.brand{margin-bottom:12px}main{padding:17px}.panels{grid-template-columns:1fr}.numbers{grid-template-columns:repeat(2,minmax(0,1fr))}.top{align-items:flex-start}}
 </style>
 <link rel="stylesheet" href="/api/servgo-air-tokens.css?v=1">
-<link rel="stylesheet" href="/api/servgo-mail-air.css?v=1">
+<link rel="stylesheet" href="/api/servgo-mail-air.css?v=2">
 <script src="/api/servgo-air-theme.js?v=1"></script>
 <script src="/api/servgo-mail-theme-picker.js?v=1" defer></script>
 </head>
-<body>
+<body class="servgo-mail-v2 servgo-mail-campaigns">
+<a class="mail-skip-link" href="#mail-main-content">Перейти к кампаниям</a>
 <div class="app">
 <aside><div class="brand">ServGo <small>ИИ-маркетинг · Email-кампании</small></div>
-<nav><a class="on" href="/api/campaigns-dashboard">✦ Кампании</a><a href="/api/mailbox-dashboard">✉ Почта и ответы</a><a href="https://servgo.ru/admin">← Панель ServGo</a></nav>
+<nav aria-label="Разделы почты"><a class="on" href="/api/campaigns-dashboard">✦ Кампании</a><a href="/api/mailbox-dashboard">✉ Почта и ответы</a><a href="https://servgo.ru/admin">← Панель ServGo</a></nav>
 <p class="hint">Личный кабинет владельца ServGo. Адресаты, персональные предложения, очередь и результаты.</p>
 </aside>
-<main>
-<div class="top"><div><h1>Рекламные кампании</h1><p>От списка адресов до заинтересованных ответов и заявок</p></div>
+<main id="mail-main-content">
+<div class="top"><div><div class="mail-eyebrow">Рабочее пространство · Почта</div><h1>Почтовые кампании</h1><p>Адресаты, персональные предложения и результаты отправок</p></div>
 <div class="row"><label class="servgo-mail-theme-picker">Тема <select id="servgo-mail-theme" aria-label="Тема оформления">
 <option value="system">Как в системе</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label><button id="reload" class="btn light">↻ Обновить</button><a class="btn light" style="text-decoration:none;display:inline-block" href="/api/mailbox-dashboard#compose">✉ Написать письмо</a><button id="create" class="btn">+ Новая кампания</button></div></div>
 <section class="auto" aria-live="polite"><div><b>Автоматическая рассылка</b><small id="auto-text">Проверяем состояние…</small></div>
@@ -89,7 +90,7 @@ dialog{border:1px solid var(--line);border-radius:19px;padding:25px;width:min(64
 <p class="hint" id="edit-critique"></p>
 <div class="row" style="justify-content:flex-end"><button type="button" class="btn light" id="edit-cancel">Закрыть</button><button type="submit" class="btn">Сохранить и отправить на проверку</button></div></form></dialog>
 <a class="fab" href="/api/mailbox-dashboard#compose">✉ Написать</a>
-<div id="notice"></div>
+<div id="notice" role="status" aria-live="polite"></div>
 <script>
 const state={campaigns:[],selected:null,detail:null,checked:new Set(),editing:null};
 const el=id=>document.getElementById(id);

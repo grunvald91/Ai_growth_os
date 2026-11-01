@@ -159,6 +159,10 @@ class MailPwaTests(unittest.TestCase):
         self.assertNotIn('href="/api/mailbox-dashboard', campaigns)
         for page in (campaigns, mailbox):
             self.assertIn("Выйти из почты", page)
+            self.assertIn('href="/workspace/growth"', page)
+            self.assertIn('href="/admin"', page)
+            self.assertIn('aria-label="Разделы ServGo"', page)
+            self.assertNotIn('style="position:fixed;bottom:8px', page)
             self.assertNotIn("https://mail.servgo.ru/claim", page)
 
     def test_workspace_protected_by_mail_owner_and_excludes_other_businesses(self):

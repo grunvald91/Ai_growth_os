@@ -120,3 +120,472 @@ html[data-theme] .sent-body { color: var(--s-text); }
 @media (max-width: 760px) {
   .servgo-mail-theme-picker { flex: none; }
 }
+
+
+/* ================================================================
+   ServGo Mail Air V2 — real inbox and campaign UI, no demo actions.
+   Shared canonical ServGo Air tokens. Both legacy and PWA origins.
+   Scoped by body class so existing mail owner pages remain stable.
+   ================================================================ */
+html[data-theme] body.servgo-mail-v2 {
+  --mail-nav-width: 244px;
+  --mail-bottom-safe: env(safe-area-inset-bottom, 0px);
+  color: var(--s-text);
+  background: var(--s-bg);
+  font-family: var(--ds-font);
+  min-width: 280px;
+  overflow-x: clip;
+}
+html[data-theme] body.servgo-mail-v2 :is(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid var(--s-accent);
+  outline-offset: 3px;
+}
+body.servgo-mail-v2 .mail-skip-link {
+  position: fixed;
+  z-index: 100;
+  top: -80px;
+  left: 18px;
+  border-radius: var(--r-sm);
+  padding: 12px 16px;
+  color: var(--s-accent-ink);
+  background: var(--s-accent);
+  font-weight: 750;
+  text-decoration: none;
+}
+body.servgo-mail-v2 .mail-skip-link:focus { top: 12px; }
+body.servgo-mail-v2 .mail-eyebrow {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  margin: 3px 0 8px;
+  padding: 6px 10px;
+  border-radius: var(--r-pill);
+  background: var(--s-accent-soft);
+  color: var(--s-accent);
+  font-size: 11px;
+  line-height: 1.2;
+  letter-spacing: .02em;
+  font-weight: 780;
+}
+body.servgo-mail-v2 .mail-eyebrow::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  background: currentColor;
+  border-radius: 50%;
+}
+html[data-theme] body.servgo-mail-v2 :is(main, .app) { min-width: 0; }
+html[data-theme] body.servgo-mail-v2 > main,
+html[data-theme] body.servgo-mail-v2 > .app {
+  max-width: 1740px;
+  margin-inline: auto;
+  min-height: 100dvh;
+}
+html[data-theme] body.servgo-mail-inbox > main {
+  grid-template-columns: var(--mail-nav-width) minmax(0, 1fr);
+}
+html[data-theme] body.servgo-mail-campaigns > .app {
+  grid-template-columns: var(--mail-nav-width) minmax(0, 1fr);
+}
+html[data-theme] body.servgo-mail-v2 :is(main > aside, .app > aside) {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100dvh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding: 24px 14px;
+  border-right: 1px solid var(--s-line);
+  background: var(--s-surface-2);
+  box-shadow: none;
+}
+html[data-theme] body.servgo-mail-v2 .brand {
+  margin: 0 0 16px;
+  padding: 0 12px 18px;
+  color: var(--s-text);
+  line-height: 1.15;
+  font-size: 23px;
+  font-weight: 850;
+  letter-spacing: -.6px;
+}
+html[data-theme] body.servgo-mail-v2 .brand small,
+html[data-theme] body.servgo-mail-v2 .brand .sub {
+  color: var(--s-muted);
+  font-size: 11px;
+  font-weight: 560;
+  margin-top: 6px;
+  letter-spacing: 0;
+}
+html[data-theme] body.servgo-mail-v2 .brand-mark {
+  border-radius: 14px;
+  background: var(--s-accent-grad);
+  color: var(--s-accent-ink);
+  box-shadow: var(--sh-2);
+}
+html[data-theme] body.servgo-mail-v2 :is(.nav button, .nav a, aside nav a) {
+  min-height: 46px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--r-md);
+  color: var(--s-text-2);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 670;
+  text-align: left;
+  text-decoration: none;
+  transition: background .17s ease, color .17s ease, transform .17s ease;
+}
+html[data-theme] body.servgo-mail-v2 :is(.nav button.active, .nav a.active, aside nav a.on) {
+  background: var(--s-accent-soft);
+  color: var(--s-accent);
+}
+html[data-theme] body.servgo-mail-v2 :is(.nav button:hover, .nav a:hover, aside nav a:hover) {
+  background: var(--s-surface-3);
+  color: var(--s-accent);
+}
+html[data-theme] body.servgo-mail-v2 .little,
+html[data-theme] body.servgo-mail-v2 aside > .hint {
+  border: 1px solid var(--s-line-2);
+  background: var(--s-surface);
+  color: var(--s-muted);
+  padding: 15px;
+  border-radius: var(--r-lg);
+  line-height: 1.55;
+  margin-top: auto;
+}
+html[data-theme] body.servgo-mail-v2 .little b { color: var(--s-text); }
+html[data-theme] body.servgo-mail-v2 :is(.main, .app > main) {
+  min-width: 0;
+  padding: clamp(18px, 2.8vw, 40px);
+}
+html[data-theme] body.servgo-mail-v2 :is(.heading, .top) {
+  align-items: flex-start;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+html[data-theme] body.servgo-mail-v2 :is(.heading h1, .top h1) {
+  margin: 0 0 6px;
+  font-size: clamp(25px, 2.6vw, 34px);
+  line-height: 1.12;
+  color: var(--s-text);
+  letter-spacing: -.8px;
+}
+html[data-theme] body.servgo-mail-v2 :is(.heading p, .top p) {
+  max-width: 560px;
+  color: var(--s-muted);
+  line-height: 1.5;
+}
+html[data-theme] body.servgo-mail-v2 :is(.heading .row, .top .row) {
+  justify-content: flex-end;
+  align-self: center;
+  min-width: 0;
+  gap: 8px;
+}
+html[data-theme] body.servgo-mail-v2 :is(.btn, .primary, .secondary, .outline, .danger, .back-admin) {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-md);
+  font-weight: 720;
+  box-shadow: none;
+  line-height: 1.25;
+  transition: background .17s ease, transform .17s ease;
+}
+html[data-theme] body.servgo-mail-v2 :is(.btn, .primary, .secondary, .outline):not(:disabled):active {
+  transform: scale(.985);
+}
+html[data-theme] body.servgo-mail-v2 :is(.btn.alt, .btn.light, .secondary, .outline, .back-admin) {
+  background: var(--s-surface-3);
+  color: var(--s-text-2);
+  border: 1px solid var(--s-line-2);
+}
+html[data-theme] body.servgo-mail-v2 :is(.btn:not(.alt):not(.light):not(.warn):not(.danger), .primary) {
+  color: var(--s-accent-ink);
+  background: var(--s-accent-grad);
+}
+html[data-theme] body.servgo-mail-v2 :is(.cards, .numbers) { gap: 12px; }
+html[data-theme] body.servgo-mail-v2 :is(.metric, .number, .panel, .auto) {
+  border: 1px solid var(--s-line);
+  border-radius: var(--r-xl);
+  background: var(--s-surface);
+  box-shadow: var(--sh-2);
+}
+html[data-theme] body.servgo-mail-v2 :is(.metric, .number) {
+  background: var(--s-surface-2);
+  padding: clamp(13px, 1.3vw, 20px);
+}
+html[data-theme] body.servgo-mail-v2 :is(.metric small, .number small) {
+  color: var(--s-muted);
+  line-height: 1.35;
+  font-weight: 600;
+}
+html[data-theme] body.servgo-mail-v2 :is(.metric strong, .number strong) {
+  color: var(--s-text);
+  font-size: clamp(23px, 2.3vw, 31px);
+  font-variant-numeric: tabular-nums;
+}
+html[data-theme] body.servgo-mail-v2 .workspace,
+html[data-theme] body.servgo-mail-v2 .panels {
+  gap: 16px;
+  align-items: start;
+}
+html[data-theme] body.servgo-mail-v2 .workspace { grid-template-columns: minmax(245px, 37%) minmax(0, 1fr); }
+html[data-theme] body.servgo-mail-v2 .panels { grid-template-columns: minmax(250px, 35%) minmax(0, 1fr); }
+html[data-theme] body.servgo-mail-v2 .panel { min-width: 0; overflow: hidden; }
+html[data-theme] body.servgo-mail-v2 :is(.panel-head, .panel h2) {
+  border-color: var(--s-line);
+  background: var(--s-surface);
+  padding: 17px 20px;
+  color: var(--s-text);
+}
+html[data-theme] body.servgo-mail-v2 :is(.message, .campaign) {
+  position: relative;
+  border-color: var(--s-line);
+  padding: 16px 20px;
+  background: var(--s-surface);
+  transition: background .15s ease;
+}
+html[data-theme] body.servgo-mail-v2 :is(.message, .campaign):hover {
+  background: var(--s-surface-2);
+}
+html[data-theme] body.servgo-mail-v2 :is(.message.selected, .campaign.selected) {
+  background: var(--s-accent-soft);
+  color: var(--s-text);
+}
+html[data-theme] body.servgo-mail-v2 :is(.message.selected, .campaign.selected)::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 0;
+  bottom: 8px;
+  width: 3px;
+  border-radius: var(--r-pill);
+  background: var(--s-accent);
+}
+html[data-theme] body.servgo-mail-v2 .message strong,
+html[data-theme] body.servgo-mail-v2 .campaign b {
+  color: var(--s-text);
+  font-size: 13px;
+  line-height: 1.35;
+}
+html[data-theme] body.servgo-mail-v2 .message :is(span, .meta),
+html[data-theme] body.servgo-mail-v2 .campaign small,
+html[data-theme] body.servgo-mail-v2 .detail p {
+  color: var(--s-muted);
+}
+html[data-theme] body.servgo-mail-v2 .message-list {
+  min-height: 240px;
+  max-height: min(72dvh, 950px);
+  scrollbar-width: thin;
+}
+html[data-theme] body.servgo-mail-v2 .detail {
+  min-height: 360px;
+  padding: clamp(17px, 2vw, 26px);
+  overflow-wrap: anywhere;
+}
+html[data-theme] body.servgo-mail-v2 :is(.field input, .field textarea, .field select) {
+  min-height: 44px;
+  border: 1px solid var(--s-line-2);
+  background: var(--s-surface-2);
+  color: var(--s-text);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+}
+html[data-theme] body.servgo-mail-v2 :is(.field input, .field textarea, .field select):focus {
+  border-color: var(--s-accent);
+  box-shadow: 0 0 0 3px var(--s-accent-soft);
+}
+html[data-theme] body.servgo-mail-v2 :is(dialog, .stickybar) {
+  background: var(--s-surface);
+  color: var(--s-text);
+  border-color: var(--s-line-2);
+}
+html[data-theme] body.servgo-mail-v2 dialog {
+  width: min(660px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: clamp(18px, 2.5vw, 28px);
+  border-radius: var(--r-xl);
+}
+html[data-theme] body.servgo-mail-v2 dialog::backdrop { background: rgba(8, 19, 35, .65); }
+html[data-theme] body.servgo-mail-v2 .auto {
+  padding: 18px 20px;
+  gap: 18px;
+}
+html[data-theme] body.servgo-mail-v2 .auto small {
+  color: var(--s-muted);
+}
+html[data-theme] body.servgo-mail-v2 :is(.toast, #notice) {
+  background: var(--s-text);
+  color: var(--s-bg);
+  border-radius: var(--r-lg);
+}
+html[data-theme] body.servgo-mail-v2 .fab {
+  color: var(--s-accent-ink);
+  background: var(--s-accent-grad);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-pop);
+}
+
+/* Responsive hierarchy: action row scrolls rather than clipping controls.
+ * All forms and tables retain their existing IDs, actions and validation. */
+@media (min-width: 761px) and (max-width: 1220px) {
+  html[data-theme] body.servgo-mail-inbox .workspace { grid-template-columns: 1fr; }
+  html[data-theme] body.servgo-mail-inbox .message-list { max-height: 310px; min-height: 140px; }
+  html[data-theme] body.servgo-mail-v2 :is(.heading, .top) { flex-direction: column; align-items: stretch; }
+  html[data-theme] body.servgo-mail-v2 :is(.heading .row, .top .row) {
+    align-self: stretch; justify-content: flex-start;
+  }
+}
+@media (max-width: 850px) {
+  html[data-theme] body.servgo-mail-campaigns > .app { display: block; }
+  html[data-theme] body.servgo-mail-campaigns .app > aside {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 25;
+    height: auto;
+    min-height: 64px;
+    padding: 7px 8px calc(7px + var(--mail-bottom-safe));
+    overflow: visible;
+    border: 0;
+    border-top: 1px solid var(--s-line-2);
+    box-shadow: var(--sh-pop);
+    background: var(--s-surface);
+  }
+  html[data-theme] body.servgo-mail-campaigns .app > aside > :is(.brand, .hint) { display: none; }
+  html[data-theme] body.servgo-mail-campaigns .app > aside nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    overflow: visible;
+  }
+  html[data-theme] body.servgo-mail-campaigns .app > aside nav a {
+    min-width: 0;
+    min-height: 51px;
+    padding: 9px 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 11px;
+    line-height: 1.25;
+    margin: 0;
+  }
+  html[data-theme] body.servgo-mail-campaigns .app > main {
+    max-width: 100%;
+    padding: 18px 15px calc(122px + var(--mail-bottom-safe));
+  }
+  html[data-theme] body.servgo-mail-campaigns .panels { grid-template-columns: 1fr; }
+  html[data-theme] body.servgo-mail-campaigns .fab {
+    bottom: calc(82px + var(--mail-bottom-safe));
+    right: 14px;
+  }
+  html[data-theme] body.servgo-mail-campaigns #notice {
+    bottom: calc(149px + var(--mail-bottom-safe));
+  }
+  html[data-theme] body.servgo-mail-campaigns .top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  html[data-theme] body.servgo-mail-campaigns .top .row {
+    flex-wrap: nowrap;
+    align-self: stretch;
+    justify-content: flex-start;
+    max-width: calc(100vw - 30px);
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scrollbar-width: none;
+  }
+  html[data-theme] body.servgo-mail-campaigns .top .row > * { flex: none; }
+}
+@media (max-width: 760px) {
+  html[data-theme] body.servgo-mail-inbox > main { display: block; }
+  html[data-theme] body.servgo-mail-inbox main > aside {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 25;
+    height: auto;
+    padding: 7px 5px calc(7px + var(--mail-bottom-safe));
+    overflow: visible;
+    border: 0;
+    border-top: 1px solid var(--s-line-2);
+    box-shadow: var(--sh-pop);
+    background: var(--s-surface);
+  }
+  html[data-theme] body.servgo-mail-inbox aside :is(.brand, .little) { display: none; }
+  html[data-theme] body.servgo-mail-inbox .nav { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 2px; }
+  html[data-theme] body.servgo-mail-inbox :is(.nav button, .nav a) {
+    min-width: 0;
+    min-height: 52px;
+    padding: 6px 2px;
+    border-radius: var(--r-md);
+    gap: 4px;
+    flex-direction: column;
+    text-align: center;
+    justify-content: center;
+    font-size: 10px;
+    line-height: 1.1;
+  }
+  html[data-theme] body.servgo-mail-inbox .nav b { font-size: 18px; }
+  html[data-theme] body.servgo-mail-inbox .nav span {
+    max-width: 100%;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+  html[data-theme] body.servgo-mail-inbox .main {
+    padding: 18px 14px calc(130px + var(--mail-bottom-safe));
+  }
+  html[data-theme] body.servgo-mail-inbox .heading {
+    flex-direction: column; align-items: stretch; gap: 14px;
+  }
+  html[data-theme] body.servgo-mail-inbox .heading .row {
+    justify-content: flex-start;
+    align-self: stretch;
+    flex-wrap: nowrap;
+    max-width: calc(100vw - 28px);
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 3px 0 7px;
+    margin: 0;
+  }
+  html[data-theme] body.servgo-mail-inbox .heading .row > * { flex: none; }
+  html[data-theme] body.servgo-mail-inbox .cards {
+    grid-template-columns: repeat(3,minmax(0,1fr));
+    gap: 7px;
+  }
+  html[data-theme] body.servgo-mail-inbox .metric { padding: 11px; border-radius: var(--r-lg); }
+  html[data-theme] body.servgo-mail-inbox .metric small { font-size: 10px; }
+  html[data-theme] body.servgo-mail-inbox .metric strong { font-size: clamp(19px,5vw,24px); }
+  html[data-theme] body.servgo-mail-inbox .workspace { grid-template-columns: 1fr; gap: 13px; }
+  html[data-theme] body.servgo-mail-inbox .message-list { min-height: 110px; max-height: 48dvh; }
+  html[data-theme] body.servgo-mail-inbox .detail { min-height: 180px; padding: 18px 15px; }
+  html[data-theme] body.servgo-mail-inbox .fab {
+    right: 14px; bottom: calc(83px + var(--mail-bottom-safe));
+  }
+  html[data-theme] body.servgo-mail-inbox .toast {
+    bottom: calc(148px + var(--mail-bottom-safe));
+  }
+  html[data-theme] body.servgo-mail-v2 dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 18px 15px;
+  }
+  html[data-theme] body.servgo-mail-v2 dialog .row {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 370px) {
+  html[data-theme] body.servgo-mail-v2 .mail-eyebrow { font-size: 10px; }
+  html[data-theme] body.servgo-mail-inbox .metric { padding: 9px 7px; }
+  html[data-theme] body.servgo-mail-inbox .metric strong { font-size: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme] body.servgo-mail-v2 :is(button, a, .message, .campaign) {
+    transition: none !important;
+    animation: none !important;
+  }
+}
