@@ -17,6 +17,7 @@ from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Publ
 from app.policies import PolicyEvaluator
 from app.seo.clustering import normalize
 from app.services.approvals import ApprovalService
+from app.services.campaign_lifecycle import closing_campaign_for_material
 from app.tools import ToolOperation
 from app.workflows.article_contracts import ArticleArtifact
 
@@ -103,6 +104,10 @@ def publish_if_clear(db: Session, article_id) -> Outcome:
         raise LookupError("Article not found")
     if row.status == ArtifactStatus.PUBLISHED:
         return Outcome(True, "already_published")
+    # Only content explicitly linked to a closing campaign is paused.
+    # Independent SEO factory articles keep their automatic publication policy.
+    if closing_campaign_for_material(db, row.product_id, row.id):
+        return Outcome(False, "linked_campaign_closed")
     article = ArticleArtifact.model_validate_json(row.content)
     problems = static_problems(article)
     verdict = critic_verdict(db, row.task_id, article.reader_article)
@@ -150,6 +155,8 @@ def publish_owner_approved(db: Session) -> int:
             continue
         owner_said_yes = approval.status == "approved" or row.status == ArtifactStatus.APPROVED
         if not owner_said_yes or db.scalar(select(Publication.id).where(Publication.artifact_id == row.id).limit(1)):
+            continue
+        if closing_campaign_for_material(db, row.product_id, row.id):
             continue
         now = datetime.now(timezone.utc)
         if approval.status == "pending":
