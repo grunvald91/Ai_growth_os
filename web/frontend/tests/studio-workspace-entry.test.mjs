@@ -35,3 +35,16 @@ test('PWA Growth entry issues fresh ticket, not an unauthenticated /studio redir
   assert.match(entry, /isTrustedStudioTicketUrl\(url\)/)
   assert.match(entry, /window\.location\.assign\(url\)/)
 })
+
+
+test('first visit uses native ServGo confirmation, no ticket or personal data in URL', () => {
+  const screen = readFileSync(new URL('pages/client/GrowthWorkspacePage.tsx', root), 'utf8')
+  assert.match(screen, /searchParams\.get\('setup'\) === '1'/)
+  assert.match(screen, /Подготовить маркетинг для этого бизнеса\?/)
+  assert.match(screen, /method="post" action="\/studio\/sso\/create"/)
+  assert.match(screen, /name="business_id" value=\{businessId\}/)
+  assert.match(screen, /Создать и открыть/)
+  assert.match(screen, /to="\/admin"/)
+  assert.doesNotMatch(screen, /searchParams\.get\('(c|ticket|t)'\)/)
+  assert.doesNotMatch(screen, /localStorage\.setItem\(['"]sg_growth_setup/)
+})
