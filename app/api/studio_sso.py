@@ -30,6 +30,19 @@ from app.sso.models import StudioBusinessLink, StudioSsoTicket
 router = APIRouter()
 SETUP_COOKIE = "sg_growth_setup"
 SETUP_PATH = "/studio/sso/create"
+
+
+def _canonical_pwa(request: Request, settings: Settings) -> bool:
+    """Canonical HTTPS host behind the nginx TLS terminator.
+
+    Nginx overwrites X-Forwarded-Proto with $scheme; reject chained values.
+    """
+    public_https = (request.url.scheme.casefold() == "https"
+                    or request.headers.get("x-forwarded-proto", "").strip().casefold() == "https")
+    return (settings.studio_servgo_gateway_enabled and public_https
+            and request.url.netloc.casefold() == "servgo.ru")
+
+
 HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY"}
 
 
@@ -109,8 +122,7 @@ def _first_visit(request: Request, background: BackgroundTasks, db: Session, set
                  claims: tickets.Claims, role: str):
     """First time this business opens the studio: the owner is asked whether to create its company."""
     if role not in ("owner", "co_owner"):
-        if (settings.studio_servgo_gateway_enabled and request.url.scheme == "https"
-                and request.url.netloc.casefold() == "servgo.ru"):
+        if _canonical_pwa(request, settings):
             return RedirectResponse("/workspace/growth?setup=owner-required",
                                     status_code=303, headers=HEADERS)
         name = f"{claims.name} (№{claims.business_id})" if claims.name else f"№{claims.business_id}"
@@ -118,8 +130,7 @@ def _first_visit(request: Request, background: BackgroundTasks, db: Session, set
                         "при первом входе из ServGo — попросите его открыть «Маркетинг» один раз.", 403)
     # On the unified HTTPS origin, keep the confirmation inside the native
     # ServGo React workspace. The signed intent never enters URL, HTML or JS.
-    if (settings.studio_servgo_gateway_enabled and request.url.scheme == "https"
-            and request.url.netloc.casefold() == "servgo.ru"):
+    if _canonical_pwa(request, settings):
         response = RedirectResponse(
             f"/workspace/growth?setup=1&business_id={claims.business_id}",
             status_code=303, headers=HEADERS,
@@ -165,8 +176,7 @@ def sso_create(request: Request, background: BackgroundTasks, c: str = Form(""),
                business_id: int = Form(0), db: Session = Depends(get_db),
                settings: Settings = Depends(get_settings)):
     """Confirm first visit; live ServGo owner permissions are checked again before creation."""
-    canonical = (settings.studio_servgo_gateway_enabled and request.url.scheme == "https"
-                 and request.url.netloc.casefold() == "servgo.ru")
+    canonical = _canonical_pwa(request, settings)
     if canonical:
         # A host-only HttpOnly setup cookie is not a CSRF exemption. Verify the
         # real proxy Host and form's Origin/Referer before accepting the intent.
