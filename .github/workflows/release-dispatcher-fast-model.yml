@@ -1,0 +1,44 @@
+name: Release dedicated fast dispatcher model (one-time)
+on:
+  push:
+    branches:
+      - fix/dispatcher-latency-recommendations-videos-20261031
+    paths:
+      - .github/workflows/release-dispatcher-fast-model.yml
+permissions:
+  contents: read
+concurrency:
+  group: growth-production
+  cancel-in-progress: false
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e '.[test]'
+      - name: Focused dispatcher regressions
+        run: |
+          python -m pytest -q tests/test_dispatcher_model_selection.py tests/test_dispatcher_fast_owner.py tests/test_dispatcher.py tests/test_dispatcher_api.py tests/test_model_router_composition.py
+          node --check app/api/dispatcher_assets/dispatcher.js
+  release:
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production
+    env:
+      SERVER_SSH_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'paramiko==3.5.1'
+      - name: Check running release and active jobs, deploy with rollback, verify model
+        run: python -m scripts.deploy_dispatcher_fast_model_release
