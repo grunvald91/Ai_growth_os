@@ -211,3 +211,15 @@ def test_automatic_science_review_detects_supplied_script_and_quote(environment)
     assert quote.status_code == 200
     assert quote.json()["science_review"] is True
     assert quote.json()["required_calls"] == 15
+
+
+def test_model_science_schema_has_no_server_only_fields_and_is_strict():
+    from app.content.whiteboard.science import science_response_schema
+    schema = science_response_schema()
+    assert set(schema["required"]) == set(schema["properties"])
+    assert schema["additionalProperties"] is False
+    assert "source_links" not in schema["properties"]
+    assert "verified_source_ids" not in schema["properties"]
+    finding = schema["properties"]["findings"]["items"]
+    assert finding["additionalProperties"] is False
+    assert set(finding["required"]) == set(finding["properties"])

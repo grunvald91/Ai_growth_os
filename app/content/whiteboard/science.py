@@ -214,6 +214,33 @@ def evidence_supported(review: FactReview, request: WhiteboardRequest,
                 for f in review.findings))
 
 
+
+def science_response_schema() -> dict:
+    """Only model-owned fields; all properties required for strict JSON output.
+
+    Provenance is assigned by the server AFTER validating the model's reply.
+    """
+    return {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "status": {"type": "string", "enum": ["supported", "blocked"]},
+            "findings": {"type": "array", "items": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "claim": {"type": "string"},
+                    "verdict": {"type": "string", "enum": [
+                        "supported", "contradicted", "unverified", "not_factual"]},
+                    "explanation": {"type": "string"},
+                    "reference_id": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                },
+                "required": ["claim", "verdict", "explanation", "reference_id"],
+            }},
+            "summary": {"type": "string"},
+        },
+        "required": ["status", "findings", "summary"],
+    }
+
+
 class FactReviewer:
     def __init__(self, service, model: str):
         self.service, self.model = service, model
@@ -241,7 +268,7 @@ class FactReviewer:
         response = await self.service.generate(LLMRequest(
             model=self.model, system_prompt=prompt,
             messages=[LLMMessage(role="user", content=json.dumps(data, ensure_ascii=False))],
-            max_tokens=3800, response_schema=FactReview.model_json_schema(),
+            max_tokens=3800, response_schema=science_response_schema(),
         ))
         assessment = FactReview.model_validate_json(response.content)
         return assessment.model_copy(update={
