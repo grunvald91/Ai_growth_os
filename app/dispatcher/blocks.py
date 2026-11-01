@@ -69,6 +69,7 @@ class TableBlock(_Block):
 
 class ResourceItem(_Block):
     """One clickable resource with its own status, never a detached text/link pair."""
+    kind: Literal["video", "post", "plan", "material", "task"] = "material"
     title: str = Field(min_length=1, max_length=140)
     status: str = Field(max_length=80)
     href: str
