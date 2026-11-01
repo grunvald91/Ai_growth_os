@@ -24,7 +24,7 @@ def test_growth_v4_loads_canonical_css_and_theme_script():
         "/studio/team?design=classic",
     )
     assert "/studio/assets/servgo-air-tokens.css?v=1" in html
-    assert "/studio/assets/growth-servgo-air.css?v=4" in html
+    assert "/studio/assets/growth-servgo-air.css?v=5" in html
     assert "/studio/assets/servgo-air-theme.js?v=1" in html
     assert 'action="/studio/team/apply"' in html
     assert 'name="role"' in html
@@ -140,8 +140,8 @@ def test_growth_profile_adapter_is_after_legacy_studio_css_in_html_head():
     result = render_v4(legacy, request, None, "/studio?design=classic")
     assert "Материалы · 1" in result
     assert "ServGo: данные заведения" in result
-    assert result.index("/studio/assets/studio.css?v=14") < result.index("/studio/assets/growth-servgo-air.css?v=4")
-    assert result.count("/studio/assets/growth-servgo-air.css?v=4") == 1
+    assert result.index("/studio/assets/studio.css?v=14") < result.index("/studio/assets/growth-servgo-air.css?v=5")
+    assert result.count("/studio/assets/growth-servgo-air.css?v=5") == 1
 
 
 
@@ -202,3 +202,33 @@ def test_v4_dark_forms_and_dispatcher_messages_use_theme_text_not_fixed_ink():
     assert ":is(input, textarea)::placeholder" in css
     assert "opacity: 1;" in css
     assert ".sg-choice:has(input:checked)" in css
+
+
+
+def test_dispatcher_review_cards_keep_video_subjects_and_material_status_separate():
+    adapter = (ASSETS / "growth-servgo-air.css").read_text(encoding="utf-8")
+    renderer = (ASSETS.parent / "dispatcher_assets/dispatcher.js").read_text(encoding="utf-8")
+    v4 = (ASSETS.parent / "growth_v4.py").read_text(encoding="utf-8")
+    assert 'function renderResourceList(block)' in renderer
+    assert "dp-resource-visual" in renderer
+    assert "dp-resource-kind" in renderer
+    assert "function legacyVideoTitle(label)" in renderer
+    assert "videoCards.push({ kind: 'video'" in renderer
+    assert 'renderResourceList({ items: videoCards })' in renderer
+    assert 'renderMaterial(block)' in renderer
+    assert "dp-material-top" in renderer
+    for fragment in (
+        '.dp-resource--video .dp-resource-visual',
+        '.dp-resource-title',
+        '-webkit-line-clamp: 3',
+        '.dp-resource-status',
+        '.dp-material-top',
+        'display: flex;',
+        'flex-wrap: wrap;',
+        '.dp-material-status',
+        '.dp-material-text',
+        '-webkit-line-clamp: 5',
+    ):
+        assert fragment in adapter, fragment
+    assert 'growth-servgo-air.css?v=5' in v4
+    assert 'review-cards-20261101' in v4

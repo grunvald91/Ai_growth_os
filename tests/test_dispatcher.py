@@ -505,3 +505,68 @@ async def test_bad_video_length_or_call_asks_to_clarify_and_creates_nothing(db, 
     result = await send(db, product, chip=chip)
     assert result["messages"][1]["blocks"][0]["text"].startswith("Уточните")
     assert tasks(db, "whiteboard_renderer") == []
+
+
+
+@pytest.mark.asyncio
+async def test_review_shows_typed_video_resource_not_truncated_duplicate_links(db, product):
+    from app.models.domain import ArtifactStatus
+    task = Task(product_id=product.id, title="WHITEBOARD",
+                assigned_agent="whiteboard_renderer", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    topic = "Горячий предмет тяжелее холодного — полное научное объяснение"
+    video = Artifact(
+        product_id=product.id, task_id=task.id, kind="whiteboard_video",
+        title="Рисованное видео: " + topic,
+        status=ArtifactStatus.AWAITING_APPROVAL, content="{}",
+    )
+    post = Artifact(
+        product_id=product.id, kind="channel_text", title="Пост о записи",
+        status=ArtifactStatus.AWAITING_APPROVAL,
+        content='{"channel":"telegram","body":"Черновик поста"}',
+    )
+    db.add_all([video, post])
+    db.commit()
+    result = await send(db, product, chip={"label":"Проверить готовое",
+                                             "capability":"show_review","params":{}})
+    answer = result["messages"][1]
+    resources = [b for b in answer["blocks"] if b["type"] == "resource_list"]
+    assert len(resources) == 1
+    card = resources[0]["items"][0]
+    assert card["kind"] == "video"
+    assert card["title"] == topic
+    assert card["status"] == "Готово · проверить"
+    assert card["href"] == f"/studio/products/{product.id}/whiteboard/{task.id}"
+    assert not [b for b in answer["blocks"] if b["type"] == "links"]
+    assert len([b for b in answer["blocks"] if b["type"] == "material"]) == 1
+    assert any(chip["capability"] == "approve_material"
+               for block in answer["blocks"] if block["type"] == "chips"
+               for chip in block["items"])
+
+
+@pytest.mark.asyncio
+async def test_review_many_videos_is_compact_and_keeps_full_review_route(db, product):
+    from app.models.domain import ArtifactStatus
+    for idx in range(12):
+        task = Task(product_id=product.id, title=f"WHITEBOARD: {idx}",
+                    assigned_agent="whiteboard_renderer", status=TaskStatus.COMPLETED)
+        db.add(task)
+        db.flush()
+        db.add(Artifact(
+            product_id=product.id, task_id=task.id, kind="whiteboard_video",
+            title=f"Рисованное видео: Проверка темы {idx}", content="{}",
+            status=ArtifactStatus.AWAITING_APPROVAL,
+        ))
+    db.commit()
+    result = await send(db, product, chip={"label":"Проверить готовое",
+                                             "capability":"show_review","params":{}})
+    answer = result["messages"][1]
+    resources = [b for b in answer["blocks"] if b["type"] == "resource_list"]
+    assert len(resources) == 1
+    assert len(resources[0]["items"]) == 8
+    assert all(item["kind"] == "video" for item in resources[0]["items"])
+    assert all(item["title"].startswith("Проверка темы ") for item in resources[0]["items"])
+    links = [b for b in answer["blocks"] if b["type"] == "links"]
+    assert len(links) == 1
+    assert links[0]["items"][0]["href"] == f"/studio/products/{product.id}/review"

@@ -379,3 +379,181 @@ body[data-growth-design="v4"] .dp-home .command-hints .dp-chip {
 body[data-growth-design="v4"] .route-content :is(.sg-warning, .sg-work-result, .sg-work-steps) {
   color: var(--s-text);
 }
+
+
+/* Dispatcher review: a video is a real action card, not an 80-character link.
+ * The image-like glyph is decorative; we do NOT pretend to have a thumbnail.
+ * This also restyles cards in already-saved dispatcher conversations.
+ */
+body[data-growth-design="v4"] .dp-resource-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+body[data-growth-design="v4"] .dp-resource {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 92px;
+  padding: 12px 13px;
+  border: 1px solid var(--s-line-2);
+  border-radius: 17px;
+  background: var(--s-surface-2);
+  color: var(--s-text);
+  text-decoration: none;
+  box-shadow: none;
+  transition: border-color .18s, background-color .18s;
+}
+body[data-growth-design="v4"] .dp-resource:hover,
+body[data-growth-design="v4"] .dp-resource:focus-visible {
+  background: var(--s-surface-3);
+  border-color: var(--s-accent);
+}
+body[data-growth-design="v4"] .dp-resource:focus-visible {
+  outline: 2px solid var(--s-accent);
+  outline-offset: 2px;
+}
+body[data-growth-design="v4"] .dp-resource-visual {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  background: var(--s-accent-soft);
+  color: var(--s-accent);
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 700;
+}
+body[data-growth-design="v4"] .dp-resource--video .dp-resource-visual {
+  background: linear-gradient(135deg, var(--s-surface-3), var(--s-accent-soft));
+  border: 1px solid var(--s-line-2);
+}
+body[data-growth-design="v4"] .dp-resource-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+}
+body[data-growth-design="v4"] .dp-resource-kind {
+  color: var(--s-accent);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: .015em;
+}
+body[data-growth-design="v4"] .dp-resource-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--s-text);
+  -webkit-text-fill-color: currentColor;
+  font-size: 14px;
+  font-weight: 560;
+  line-height: 1.43;
+  overflow-wrap: anywhere;
+}
+body[data-growth-design="v4"] .dp-resource-status {
+  color: var(--s-muted);
+  -webkit-text-fill-color: currentColor;
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+body[data-growth-design="v4"] .dp-resource-arrow {
+  color: var(--s-accent);
+  font-size: 18px;
+  font-weight: 500;
+  align-self: center;
+}
+@media (max-width: 380px) {
+  body[data-growth-design="v4"] .dp-resource {
+    grid-template-columns: 38px minmax(0, 1fr) 14px;
+    gap: 9px;
+    padding: 11px;
+  }
+  body[data-growth-design="v4"] .dp-resource-visual {
+    width: 38px;
+    height: 38px;
+  }
+}
+
+/* Dispatcher CSS is intentionally not loaded by the v4 renderer.
+ * Restore the material card's row layout here; otherwise adjacent spans
+ * render "ПостЖдёт вашего решения" without separation.
+ */
+body[data-growth-design="v4"] .dp-material {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--s-line-2);
+  border-radius: 17px;
+  background: var(--s-surface-2);
+  color: var(--s-text);
+}
+body[data-growth-design="v4"] .dp-material-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+  min-width: 0;
+}
+body[data-growth-design="v4"] .dp-material-kind {
+  color: var(--s-text-2);
+  font-size: 12px;
+  font-weight: 650;
+}
+body[data-growth-design="v4"] .dp-material-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border: 1px solid var(--s-line-2);
+  border-radius: 999px;
+  background: var(--s-surface-3);
+  color: var(--s-accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+body[data-growth-design="v4"] .dp-material-title {
+  color: var(--s-text);
+  -webkit-text-fill-color: currentColor;
+  font-size: 15px;
+  line-height: 1.45;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+body[data-growth-design="v4"] .dp-material-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  overflow: hidden;
+  max-height: none;
+  margin: 0;
+  color: var(--s-text-2);
+  -webkit-text-fill-color: currentColor;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+body[data-growth-design="v4"] .dp-material > .dp-link {
+  align-self: flex-start;
+  color: var(--s-accent);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 12px;
+  min-height: 36px;
+  border: 1px solid var(--s-line-2);
+  border-radius: 11px;
+  background: var(--s-surface);
+}

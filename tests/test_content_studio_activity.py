@@ -259,3 +259,32 @@ def test_business_review_task_opens_its_own_page_not_an_empty_material_page(owne
     assert page.status_code == 200
     assert "Вечер пустой" in page.text and "готовый материал пока не найден" not in page.text
     assert client.get(f"/studio/products/{other.id}/tasks/{task.id}").status_code == 404
+
+
+
+def test_video_review_notice_has_unrepeated_title_and_real_safe_destination(owner_studio):
+    from app.api.content_studio_activity import notice_items, readable_artifact_title
+    from app.models.domain import ArtifactStatus
+    client, db, company, other = owner_studio
+    task = Task(product_id=company.id, title="WHITEBOARD: science",
+                assigned_agent="whiteboard_renderer", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    video = Artifact(
+        product_id=company.id, task_id=task.id, kind="whiteboard_video",
+        title="Рисованное видео: Рисованное видео: Горячий предмет тяжелее холодного",
+        status=ArtifactStatus.AWAITING_APPROVAL, content="{}",
+    )
+    db.add(video)
+    db.commit()
+    assert readable_artifact_title(video) == "Горячий предмет тяжелее холодного"
+    notes = notice_items(db, company.id)
+    assert len(notes) == 1
+    item = notes[0]
+    assert item["resource_kind"] == "video"
+    assert item["resource_title"] == "Горячий предмет тяжелее холодного"
+    assert item["resource_status"] == "Готово · проверить"
+    assert item["text"].count("Простое видео готово:") == 1
+    assert "Рисованное видео: Рисованное видео:" not in item["text"]
+    assert item["url"] == f"/studio/products/{company.id}/whiteboard/{task.id}"
+    assert notice_items(db, other.id) == []

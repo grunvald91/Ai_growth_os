@@ -68,17 +68,42 @@
     return row;
   }
 
+  // Older conversations store review videos as ordinary link blocks.
+  // Keep those messages readable after deployment without changing history.
+  function legacyVideoTitle(label) {
+    var title = String(label || '')
+      .replace(/^(?:(?:Рисованное|Простое) видео готово:\s*)+/i, '')
+      .replace(/^(?:(?:Рисованное|Простое) видео:\s*)+/i, '')
+      .trim();
+    return title || 'Видео без названия';
+  }
+
   function renderLinks(items) {
     var list = el('div', 'dp-links');
-    // Chronological ordering is decided by the executor from real timestamps.
+    var videoCards = [];
+    function flushVideos() {
+      if (!videoCards.length) return;
+      list.appendChild(renderResourceList({ items: videoCards }));
+      videoCards = [];
+    }
+    // Chronology is decided by the executor. Do not invent missing previews.
     items.forEach(function (item) {
       var raw = String(item.label || '');
+      if (/^(?:(?:Рисованное|Простое) видео готово:|Готов MP4:)/i.test(raw)) {
+        var topic = /^Готов MP4:/i.test(raw)
+          ? raw.replace(/^Готов MP4:\s*/i, '').trim() : legacyVideoTitle(raw);
+        videoCards.push({ kind: 'video', title: topic || 'Видео без названия',
+                          status: 'Готово · проверить', href: item.href });
+        return;
+      }
+      flushVideos();
       var caption = voiceHoldEnabled && raw.indexOf('Открыть: ') === 0
         ? 'Открыть: ' + friendlyTitle(raw.slice(9)) : raw;
       var link = el('a', 'dp-link', caption);
       link.href = item.href;
       list.appendChild(link);
     });
+    flushVideos();
     return list;
   }
 
@@ -123,12 +148,27 @@
   // One visual item = one accessible link. No duplicate table/link sections.
   function renderResourceList(block) {
     var list = el('div', 'dp-resource-list');
+    var kinds = {
+      video: { label: 'Простое видео', glyph: '▶' },
+      post: { label: 'Пост', glyph: '✎' },
+      plan: { label: 'Контент-план', glyph: '▦' },
+      task: { label: 'Задание', glyph: '◷' },
+      material: { label: 'Материал', glyph: '▤' }
+    };
     block.items.forEach(function (item) {
-      var card = el('a', 'dp-resource');
+      var kind = kinds[item.kind] ? item.kind
+        : /\/whiteboard\//.test(String(item.href || '')) ? 'video' : 'material';
+      var meta = kinds[kind];
+      var card = el('a', 'dp-resource dp-resource--' + kind);
       card.href = item.href;
+      var visual = el('span', 'dp-resource-visual', meta.glyph);
+      visual.setAttribute('aria-hidden', 'true');
+      card.appendChild(visual);
       var content = el('span', 'dp-resource-copy');
+      content.appendChild(el('span', 'dp-resource-kind', meta.label));
       content.appendChild(el('strong', 'dp-resource-title',
-        voiceHoldEnabled ? friendlyTitle(item.title) : item.title));
+        kind === 'video' ? legacyVideoTitle(item.title)
+          : voiceHoldEnabled ? friendlyTitle(item.title) : item.title));
       if (item.status) content.appendChild(el('span', 'dp-resource-status', item.status));
       card.appendChild(content);
       var arrow = el('span', 'dp-resource-arrow', '→');

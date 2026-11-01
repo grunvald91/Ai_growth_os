@@ -47,15 +47,31 @@ async def show_review(ctx: Context, params) -> Outcome:
                    key=lambda note: (note.get("created_at") or "", note["id"]))
     if not notes:
         return Outcome("Ничего не ждёт вашего решения.", "Ничего не ждёт вашего решения.", [_links(ctx, "review")])
-    # Everything above the bottom composer runs oldest -> newest.
-    links = {"type": "links", "items": [{"label": note["text"][:80], "href": note["url"]} for note in notes]}
-    blocks = [links]
+    # A compact, typed card is more useful than a long wall of 80-character
+    # blue links. Preserve the underlying URLs and the original chronology.
     newest = materials.find_material(ctx, None)
-    if newest is not None:  # Keep the actionable card beside the composer.
+    pending_id = str(newest.id) if newest is not None else None
+    candidates = [note for note in notes if note["id"] != pending_id]
+    shown = candidates[-8:]  # the newest eight, oldest -> newest
+    resources = [{
+        "kind": note.get("resource_kind", "material"),
+        "title": str(note.get("resource_title") or note["text"]).strip()[:140],
+        "status": str(note.get("resource_status") or "Требует внимания")[:80],
+        "href": note["url"],
+    } for note in shown]
+    blocks: list[dict] = []
+    if resources:
+        blocks.append({"type": "resource_list", "items": resources})
+    # Older records aren't lost: the full read-only review list is still here.
+    if len(candidates) > len(shown):
+        blocks.append({"type": "links", "items": [
+            {"label": "Посмотреть все материалы", "href": f"/studio/products/{ctx.product.id}/review"}]})
+    if newest is not None:  # Keep the actionable approval card near the composer.
         blocks += [materials.card(ctx, newest),
                    {"type": "chips", "items": [{"label": "Утвердить", "capability": "approve_material",
                                                 "params": {"material_id": str(newest.id)}}]}]
-    return Outcome(f"Требует внимания: {len(notes)}.", f"Требует внимания: {len(notes)}. Они на экране.", blocks)
+    return Outcome(f"Требует внимания: {len(notes)}.",
+                   f"Требует внимания: {len(notes)}. Материалы на экране.", blocks)
 
 
 async def show_plan(ctx: Context, params) -> Outcome:
