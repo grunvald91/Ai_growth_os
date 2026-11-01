@@ -52,6 +52,59 @@ def test_switch_both_ways_preserves_query_and_real_forms(live):
     assert 'Новый дизайн' in back.text
 
 
+
+def test_v4_create_is_one_compact_real_workflow(live):
+    from app.api.growth_v4 import Document
+
+    client, db, product = live
+    base = f'/studio/products/{product.id}'
+    page = client.get(base + '/create?design=v4')
+    assert page.status_code == 200
+    assert 'class="create-page"' in page.text
+    assert 'Что создадим?' in page.text
+    assert 'create-workspace' in page.text
+    assert 'или начните с голосовой команды' not in page.text
+
+    document = Document(page.text)
+    form = document.outer(document.find(ident='sg-create-form'))
+    assert f'action="{base}/create"' in form
+    assert form.count('name="format"') == 5
+    assert 'name="topic"' in form
+    assert 'name="channel"' in form
+    assert 'name="audience"' in form
+    assert 'name="editorial_brief"' in form
+    assert '<details class="create-advanced">' in form
+    assert '<details class="create-timing">' in form
+    assert f'href="{base}/whiteboard"' in form
+    assert form.count('class="create-video-choice"') == 1
+    assert 'готового MP4' in form and 'готовый MP4' in form
+    assert page.text.count('class="create-toolbox"') == 1
+    assert 'class="module-grid mt14"' not in page.text
+    for path in ('/plan', '/campaigns'):
+        assert f'href="{base}{path}"' in page.text
+    assert f'href="{base}?command=seo_factory"' in page.text
+    assert f'href="/intelligence?product_id={product.id}"' in page.text
+
+    classic = client.get(base + '/create?design=classic')
+    assert 'create-workspace' not in classic.text
+    assert 'data-studio-create' in classic.text
+
+
+def test_v4_create_retains_optional_values_on_validation_failure(live):
+    client, db, product = live
+    url = f'/studio/products/{product.id}/create'
+    client.get(url + '?design=v4')
+    invalid = client.post(url, data={
+        'format': 'post', 'channel': 'telegram', 'topic': 'x',
+        'audience': 'Малый бизнес', 'editorial_brief': 'Без неподтверждённых обещаний',
+    })
+    assert invalid.status_code == 422
+    assert 'create-advanced' in invalid.text
+    assert 'value="Малый бизнес"' in invalid.text
+    assert 'Без неподтверждённых обещаний' in invalid.text
+    assert 'role="alert"' in invalid.text
+
+
 def test_home_keeps_real_dispatcher_and_voice(live):
     client, db, product = live
     page = client.get(f'/studio/products/{product.id}?design=v4')
@@ -71,7 +124,7 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=13' in page.text
+    assert '/studio/assets/growth-live.css?v=14' in page.text
     assert '/studio/assets/dispatcher.js?v=resource-cards-20261101' in page.text
     assert '/studio/assets/growth-live.js?v=8' in page.text
     assert 'Простое видео' in page.text
