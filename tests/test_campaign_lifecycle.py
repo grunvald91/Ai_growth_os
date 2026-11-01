@@ -147,15 +147,7 @@ def test_finish_preserves_evidence_and_note_without_inventing_decision(db):
     import pytest
     with pytest.raises(CampaignLifecycleError):
         command(db, product_id=p.id, experiment_id=row.id, action="stop", actor="owner")
-    with pytest.raises(LookupError):
-        command(db, product_id=p.id, experiment_id=row.id,
-                action="finish", actor="other",
-                note="", ) if False else command(
-                    db, product_id=p.id, experiment_id=other_uuid(),
-                    action="finish", actor="other",
-                )
-
-
-def other_uuid():
     from uuid import uuid4
-    return uuid4()
+    with pytest.raises(LookupError):
+        command(db, product_id=p.id, experiment_id=uuid4(),
+                action="finish", actor="other")
