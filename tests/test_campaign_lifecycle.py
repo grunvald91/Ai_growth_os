@@ -106,7 +106,9 @@ def test_running_tasks_smtp_and_publication_keep_stop_pending_until_resolved(db)
     assert status == "stopping"
     assert pending.active_tasks == 2
     assert pending.sending_emails == 1
-    assert pending.pending_publications == 1
+    assert pending.pending_publications == 0
+    db.refresh(post)
+    assert post.status == "cancelled"
     assert reconcile_pending(db) == 0
 
     parent.status = child.status = TaskStatus.COMPLETED
