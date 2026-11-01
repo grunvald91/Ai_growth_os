@@ -350,7 +350,7 @@ def campaign_page(product, row: Experiment, error: str = "", *,
 
     observations = ''.join(
         f'<li>{esc(item.name)}: {esc(metric_text(item.value))} {esc(item.unit or "")}'
-        f' — {esc(STAGES.get((item.dimensions or {}).get("stage"), "Измерение"))} '
+        f' — {esc(STAGES.get((item.dimensions if isinstance(item.dimensions, dict) else {}).get("stage"), "Измерение"))} '
         f'({esc(item.observed_at.date())}); источник: {esc(item.source)}'
         + ('; внесено вручную, источник не проверен автоматически'
            if isinstance(item.dimensions, dict) and
@@ -383,6 +383,7 @@ def campaign_page(product, row: Experiment, error: str = "", *,
         '<section class="surface form-card" id="campaign-results">'
         '<h2>Эффективность кампании</h2>'
         + comparison_html
+        + ('<p>Измерений пока нет — оценить эффективность ещё нельзя.</p>' if not metrics else '')
         + '<details><summary>Все измерения</summary>'
         + (f'<ul>{observations}</ul>' if observations else
            '<p>Измерений пока нет.</p>')
