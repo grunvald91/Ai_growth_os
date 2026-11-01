@@ -768,7 +768,9 @@ def test_campaign_comparison_requires_matching_unit_and_known_baseline(live):
     assert '+5' in output
     assert 'не доказывает' in output
     assert '+Infinity%' not in output
-    assert '0%' not in output  # division by a baseline of zero is not presented
+    # The CSS contains percentages; inspect the computed result, not arbitrary page text.
+    assert 'Изменение: <strong>+5 шт.</strong>' in output
+    assert 'Infinity%' not in output
 
 
 def test_campaign_measurement_validation_company_isolation_and_no_side_effects(live):
