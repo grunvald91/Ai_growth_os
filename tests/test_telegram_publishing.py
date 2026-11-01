@@ -332,3 +332,55 @@ async def test_campaign_stop_blocks_due_and_future_telegram_sends_without_harmin
     assert reconcile_pending(db) == 0
     db.refresh(experiment)
     assert experiment.status == "stopped"
+
+
+
+@pytest.mark.asyncio
+async def test_campaign_stop_cancels_future_calendar_post_and_updates_slot(db):
+    from app.models.domain import Experiment
+    from app.services.campaign_readiness import link_resource
+    from app.services.campaign_lifecycle import command
+    company = Product(name="Campaign calendar", slug="campaign-calendar-stop")
+    db.add(company)
+    db.flush()
+    task = Task(product_id=company.id, title="calendar:marketing",
+                status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    post = Artifact(product_id=company.id, task_id=task.id,
+                    kind="channel_text", title="Future marketing post",
+                    status="approved",
+                    content=json.dumps({"channel": "telegram", "body": "Marketing"}))
+    db.add(post)
+    db.flush()
+    when = datetime.now(timezone.utc) + timedelta(days=2)
+    plan = Artifact(product_id=company.id, kind="editorial_plan",
+                    title="Campaign editorial calendar", status="approved",
+                    content=json.dumps({
+                        "approval_state": "active",
+                        "slots": [{"slot_id": "one", "platform": "telegram",
+                                   "task_id": str(task.id),
+                                   "publish_at": when.isoformat(),
+                                   "state": "ready_for_review"}],
+                    }))
+    db.add(plan)
+    experiment = Experiment(product_id=company.id, experiment_key="EXP-CAL-STOP",
+                            name="Future posting", hypothesis="A",
+                            channel="telegram", status="running")
+    db.add(experiment)
+    db.commit()
+    link_resource(db, company.id, experiment.id, post.id, relation="material")
+    conn = save_verified_channel(
+        db, company.id, await verify_channel(FakeTelegram(), "@craft_studio"),
+    )
+    publication = schedule_post(
+        db, post.id, conn.id, when, plan_id=plan.id, slot_id="one",
+    )
+    status, blockers = command(db, product_id=company.id,
+                               experiment_id=experiment.id,
+                               action="stop", actor="owner")
+    assert status == "stopped" and blockers.clear
+    db.refresh(publication)
+    db.refresh(plan)
+    assert publication.status == "cancelled"
+    assert json.loads(plan.content)["slots"][0]["state"] == "cancelled"
