@@ -687,3 +687,37 @@ def test_canonical_unlinked_administrator_returns_to_native_servgo(env):
     assert page.headers["location"] == "/workspace/growth?setup=owner-required"
     assert "set-cookie" not in page.headers
     assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
+
+
+def test_native_setup_recognises_proxy_https_without_allowing_cross_host(env, tmp_path):
+    from starlette.requests import Request
+    from app.api.studio_sso import _canonical_pwa
+
+    settings = make_settings(tmp_path, studio_servgo_gateway_enabled=True,
+                             studio_public_origin="https://growth.servgo.ru")
+    def make_request(host, proto, scheme="http"):
+        return Request({
+            "type":"http", "method":"GET", "scheme":scheme,
+            "server":(host,443), "path":"/studio/sso", "query_string":b"",
+            "headers":[(b"host",host.encode()), (b"x-forwarded-proto",proto.encode())],
+        })
+    assert _canonical_pwa(make_request("servgo.ru", "https"), settings)
+    assert not _canonical_pwa(make_request("growth.servgo.ru", "https"), settings)
+    assert not _canonical_pwa(make_request("servgo.ru", "https,http"), settings)
+    assert not _canonical_pwa(make_request("servgo.ru", "http"), settings)
+
+    # nginx->Docker is HTTP but the externally visible host was HTTPS.
+    _, _, _, _, servgo = env
+    servgo.allowed[(7, 31)] = "owner"
+    servgo.businesses[31] = {**servgo.businesses[12], "name":"Баня Парная"}
+    from app.core.config import get_settings
+    app.dependency_overrides[get_settings] = lambda: settings
+    browser = TestClient(app, base_url="http://servgo.ru",
+                         headers={"x-forwarded-proto":"https"},
+                         follow_redirects=False)
+    response = browser.get("/studio/sso", params={
+        "t": make_ticket(biz=31, jti="n" * 16),
+    })
+    assert response.status_code == 303
+    assert response.headers["location"] == "/workspace/growth?setup=1&business_id=31"
+    assert "httponly" in response.headers["set-cookie"].lower()
