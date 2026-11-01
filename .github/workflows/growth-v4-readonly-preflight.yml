@@ -1,4 +1,4 @@
-name: Growth V4 production preflight (read only)
+name: Growth V4 production health audit (read only)
 on:
   push:
     branches: [ops/growth-v4-preflight-20261101]
@@ -11,84 +11,148 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  preflight:
+  server-health:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     environment: production
     steps:
-      - name: Inspect production server without deploying or changing data
+      - name: Inspect production release, service health, DB and recent error logs
+        shell: bash
         env:
           SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
           HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
           HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
-        shell: bash
         run: |
           set -euo pipefail
-          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD not available in production environment"; exit 1; }
+          [ -n "$SSHPASS" ] || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
           install -m 700 -d ~/.ssh
-          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/growth-scan
           while IFS= read -r line; do
-            printf '%s\n' "$line" > /tmp/host-key
-            if ssh-keygen -lf /tmp/host-key 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+            printf '%s\n' "$line" > /tmp/growth-one
+            if ssh-keygen -lf /tmp/growth-one 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
               printf '%s\n' "$line" >> ~/.ssh/known_hosts
             fi
-          done < /tmp/scanned
-          [ -s ~/.ssh/known_hosts ] || { echo "::error::SSH server host key mismatch"; exit 1; }
-          command -v sshpass >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq sshpass; }
+          done < /tmp/growth-scan
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::SSH host-key mismatch"; exit 1; }
+          if ! command -v sshpass >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq sshpass
+          fi
           sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'bash -se' <<'REMOTE'
           set -euo pipefail
-          printf '=== Growth V4 production server preflight (READ ONLY) ===\n'
-          cd /opt/ai_growth_os
-          [ -r /opt/ai_growth_os/.env ] || { echo 'BLOCKED: production env missing'; exit 1; }
-          [ -r deploy/deploy.json ] || { echo 'BLOCKED: deploy.json missing'; exit 1; }
-          [ -r deploy/deploy_growth.py ] || { echo 'BLOCKED: deploy script missing'; exit 1; }
-          [ -r deploy/last-good.json ] || { echo 'BLOCKED: rollback manifest missing'; exit 1; }
-
+          echo '=== LIVE PRODUCTION HEALTH AUDIT (READ ONLY) ==='
+          date -u '+server_utc=%Y-%m-%dT%H:%M:%SZ'
           python3 - <<'PY'
-          import json
-          from pathlib import Path
-          data = json.loads(Path('/opt/ai_growth_os/deploy/last-good.json').read_text())
-          files = data.get('files', [])
-          assert files and all(Path(name).is_file() for name in files), 'Rollback compose sources missing'
-          config = json.loads(Path('/opt/ai_growth_os/deploy/deploy.json').read_text())
-          assert isinstance(config.get('base_image'), str) and config['base_image']
-          print('rollback_manifest: OK; base_image:', config['base_image'])
+          import json, re, subprocess, sys
+          from collections import Counter
+          from datetime import datetime, timedelta, timezone
+          services = ['api', 'worker', 'telegram', 'postgres']
+          issues = []
+          since = (datetime.now(timezone.utc) - timedelta(minutes=90)).isoformat()
+          for svc in services:
+              name = 'ai-growth-os-' + svc + '-1'
+              try:
+                  state = json.loads(subprocess.check_output(
+                      ['docker', 'inspect', '--format', '{{json .State}}', name],
+                      text=True, timeout=15
+                  ))
+                  image = subprocess.check_output(
+                      ['docker', 'inspect', '--format', '{{.Config.Image}}', name],
+                      text=True, timeout=15
+                  ).strip()
+                  health = state.get('Health', {}).get('Status', 'not_configured')
+                  print(f'CONTAINER {svc}: running={state["Running"]} restarting={state["Restarting"]} '
+                        f'health={health} oom_killed={state["OOMKilled"]} exit={state["ExitCode"]} '
+                        f'image={image} started={state.get("StartedAt")} ', flush=True)
+                  if not state['Running'] or state['Restarting'] or state['OOMKilled'] or health == 'unhealthy':
+                      issues.append('container_' + svc)
+                  if svc != 'postgres' and not image.endswith('4575b4175adf'):
+                      issues.append('unexpected_image_' + svc)
+                  logs = subprocess.run(
+                      ['docker', 'logs', '--since', since, '--tail', '3000', name],
+                      text=True, capture_output=True, timeout=22
+                  )
+                  if logs.returncode:
+                      issues.append('logs_unavailable_' + svc)
+                      continue
+                  lines = (logs.stdout + '\n' + logs.stderr).splitlines()
+                  severity = re.compile(r'\b(?:ERROR|CRITICAL|FATAL|PANIC)\b|Traceback \(most recent call last\)', re.I)
+                  matches = [line for line in lines if severity.search(line)]
+                  exception_classes = Counter(re.findall(r'\b[A-Za-z_]\w*(?:Error|Exception)\b',
+                                                          '\n'.join(matches)))
+                  print('LOG_SCAN ' + svc + f': sampled_lines={len(lines)} '
+                        f'severity_matches={len(matches)} exception_classes={dict(exception_classes.most_common(5))}')
+                  if matches:
+                      print('LOG_WARNING ' + svc + ': error markers exist; counts only (no raw logs printed)')
+              except Exception as exc:
+                  print('CHECK_FAILED '+svc+': '+type(exc).__name__)
+                  issues.append('inspect_' + svc)
+          if issues:
+              print('CONTAINER_CHECK_ISSUES: ' + ','.join(issues))
+              sys.exit(1)
+          print('CONTAINER_CHECKS: PASS')
           PY
-
-          for name in ai-growth-os-api-1 ai-growth-os-worker-1 ai-growth-os-telegram-1 ai-growth-os-postgres-1; do
-            state="$(docker inspect --format '{{.State.Running}} {{.State.Restarting}}' "$name")"
-            printf 'container %s: %s\n' "$name" "$state"
-            [ "$state" = 'true false' ] || { echo "BLOCKED: unhealthy container $name"; exit 1; }
+          
+          echo '=== HTTP SMOKE ==='
+          http_failed=0
+          for check in 'http://127.0.0.1:8091/health' \
+                       'http://127.0.0.1:8091/studio/team' \
+                       'https://growth.servgo.ru/' \
+                       'https://growth.servgo.ru/studio/team'; do
+            code="$(curl --silent --show-error --output /dev/null --max-time 12 --write-out '%{http_code}' "$check" 2>/dev/null)" || code=000
+            echo "HTTP $check = $code"
+            case "$code" in 200|301|302|303|307|308|401|403) ;; *) http_failed=1 ;; esac
           done
-          status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 http://127.0.0.1:8091/health)"
-          [ "$status" = 200 ] || { echo "BLOCKED: health HTTP $status"; exit 1; }
-          echo 'localhost /health: HTTP 200'
-          api=ai-growth-os-api-1
-          db_current="$(docker exec "$api" alembic current | awk '/^[0-9a-z_]+/{print $1}' | tail -1)"
-          db_head="$(docker exec "$api" alembic heads | awk '/^[0-9a-z_]+/{print $1}' | tail -1)"
-          printf 'database migration current=%s image_head=%s\n' "$db_current" "$db_head"
-          [ -n "$db_current" ] && [ "$db_current" = "$db_head" ] || { echo 'BLOCKED: migration mismatch'; exit 1; }
-
-          docker exec -i "$api" python - <<'PY'
+          [ "$http_failed" -eq 0 ] || echo 'HTTP_CHECKS: WARNING (one or more endpoints unavailable or unexpected code)'
+          
+          echo '=== DATABASE, RELEASE AND CONFIG CHECKS ==='
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          from collections import Counter
+          from datetime import datetime, timedelta, timezone
           import os
-          from sqlalchemy import func, select, text
+          from sqlalchemy import select, func, text
           from app.core.config import get_settings
           from app.db.session import SessionLocal
-          from app.models.domain import Task, TaskStatus
+          from app.models.domain import Task, AgentRun, Publication, Experiment
+          release = os.getenv('RELEASE_SHA', '')
           settings = get_settings()
-          assert settings.app_env.casefold() in {'production', 'prod'}, 'APP_ENV not production'
-          assert settings.studio_public_origin == 'https://growth.servgo.ru', 'Studio CSRF origin mismatch'
-          assert len(os.getenv('SERVGO_SSO_SECRET', '')) >= 32, 'Growth SSO secret not configured'
-          assert len(os.getenv('SERVGO_INTERNAL_KEY', '')) >= 32, 'Growth internal key not configured'
-          print('Growth production env / CSRF origin / SSO key presence: OK')
+          assert release == '4575b4175adf1b34a6b40ab10b3e445062c5aa2d', 'unexpected release SHA'
+          print('RUNNING_RELEASE_SHA:', release)
+          assert settings.app_env.casefold() in ('production', 'prod'), 'nonproduction APP_ENV'
+          print('APP_ENV: production')
+          assert settings.studio_public_origin == 'https://growth.servgo.ru', 'wrong studio origin'
+          print('STUDIO_ORIGIN: OK')
           with SessionLocal() as db:
               assert db.execute(text('select 1')).scalar_one() == 1
-              running = db.scalar(select(func.count()).select_from(Task).where(Task.status == TaskStatus.RUNNING))
-              print('Database connectivity: OK; RUNNING tasks:', running)
-              assert running == 0, 'BLOCKED: tasks running, deploy would interrupt them'
+              print('DB_QUERY: OK')
+              def counts(model, column):
+                  return {str(getattr(key, 'value', key)): n for key, n in
+                          db.execute(select(column, func.count()).group_by(column)).all()}
+              print('TASK_STATUS_COUNTS:', counts(Task, Task.status))
+              print('AGENT_RUN_STATUS_COUNTS:', counts(AgentRun, AgentRun.status))
+              print('PUBLICATION_STATUS_COUNTS:', counts(Publication, Publication.status))
+              print('CAMPAIGN_STATUS_COUNTS:', counts(Experiment, Experiment.status))
+              since = datetime.now(timezone.utc) - timedelta(minutes=90)
+              failed_recent = db.scalar(select(func.count()).select_from(AgentRun).where(
+                  AgentRun.status == 'failed', AgentRun.finished_at >= since))
+              print('AGENT_RUN_FAILED_LAST_90M:', failed_recent)
+              unknown = db.scalar(select(func.count()).select_from(Publication).where(
+                  Publication.status == 'delivery_unknown'))
+              print('PUBLICATIONS_DELIVERY_UNKNOWN_TOTAL:', unknown)
           PY
-          free_kb="$(df -Pk /opt/ai_growth_os | awk 'NR==2{print $4}')"
-          printf 'available disk: %s KiB\n' "$free_kb"
-          [ "$free_kb" -gt 1048576 ] || { echo 'BLOCKED: less than 1 GiB free disk'; exit 1; }
-          printf 'Preflight checks passed. DB backup freshness and ServGo-side SSO equality not independently verified.\n'
+          current="$(docker exec ai-growth-os-api-1 alembic current | awk '/^[0-9a-z_]+/{print $1}' | tail -1)"
+          head="$(docker exec ai-growth-os-api-1 alembic heads | awk '/^[0-9a-z_]+/{print $1}' | tail -1)"
+          printf 'ALEMBIC current=%s head=%s\n' "$current" "$head"
+          [ -n "$current" ] && [ "$current" = "$head" ] || { echo 'DB_MIGRATION_CHECK: FAIL'; exit 1; }
+          echo '=== CAPACITY ==='
+          df -Ph /opt/ai_growth_os | tail -1
+          free -m | awk 'NR==2 {printf "MEMORY total=%sMB used=%sMB free=%sMB available=%sMB\n",$2,$3,$4,$7}'
+          echo '=== NGINX ==='
+          if command -v nginx >/dev/null; then
+            nginx -t 2>&1 | grep -E 'syntax is ok|test is successful|emerg|error' || true
+          else
+            echo 'NGINX_BINARY: not on host'
+          fi
+          [ "$http_failed" -eq 0 ] || exit 2
+          echo 'HEALTH_AUDIT_COMPLETE: PASS (log warning counts above must be reviewed separately)'
           REMOTE
