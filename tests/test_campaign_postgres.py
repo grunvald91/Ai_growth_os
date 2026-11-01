@@ -288,7 +288,7 @@ def test_actual_schedule_does_not_deadlock_with_stop(pg_sessions, monkeypatch):
     with Session() as setup:
         company, campaign = _company(setup, slug="pg-actual-schedule")
         source = Artifact(product_id=company, kind="channel_text",
-                          title="Campaign-independent post",
+                          title="Campaign-linked post",
                           content=json.dumps({"channel": "telegram", "body": "A verified post for subscribers"}),
                           status="approved")
         channel = Artifact(product_id=company, kind="telegram_channel_connection",
@@ -297,6 +297,7 @@ def test_actual_schedule_does_not_deadlock_with_stop(pg_sessions, monkeypatch):
         setup.add_all([source, channel])
         setup.commit()
         post_id, channel_id = source.id, channel.id
+        link_resource(setup, company, campaign, post_id, relation="material")
     entered = threading.Event()
     release = threading.Event()
     real_gate = telegram.closing_campaign_for_material

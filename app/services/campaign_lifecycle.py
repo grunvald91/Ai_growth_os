@@ -60,7 +60,7 @@ def _associated_tasks(db: Session, campaign: Experiment, *, nowait: bool = False
         Task.product_id == campaign.product_id,
         Artifact.kind == "task_brief",
         or_(*(Artifact.content.contains(token) for token in tokens)),
-    ))
+    ).execution_options(populate_existing=True))
     ids: set[UUID] = set()
     for brief in briefs:
         try:
@@ -292,6 +292,9 @@ def command(db: Session, *, product_id: UUID, experiment_id: UUID,
         _write_audit(db, campaign, actor, action, note)
         if action == "finish" and note.strip():
             campaign.conclusion = "Вывод владельца: " + note.strip()
+    # SessionLocal disables autoflush. Re-reading the same Experiment through
+    # task_campaign(populate_existing=True) must not restore the old status.
+    db.flush()
     tasks = _associated_tasks(db, campaign)
     cancelled: tuple[UUID, ...] = ()
     if campaign.status == desired:

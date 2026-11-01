@@ -12,7 +12,8 @@ from app.models.domain import (
     AgentRun, Artifact, Decision, Experiment, Metric, Product, Task, TaskStatus,
 )
 from app.services.campaign_lifecycle import (
-    CampaignLifecycleError, command, recover_orphaned_research, task_halted,
+    CampaignLifecycleError, closing_campaign_for_material, command,
+    recover_orphaned_research, task_halted,
 )
 from app.services.campaign_performance import comparison_for
 
@@ -56,14 +57,25 @@ def test_legacy_cmo_decision_followup_is_cancelled_and_tenant_isolated(db):
     data = {"decision_id": str(decision.id), "task_type": "research"}
     db.add(Artifact(product_id=owner.id, task_id=followup.id,
                     kind="task_brief", title=followup.title, content=json.dumps(data)))
+    result_material = Artifact(product_id=owner.id, task_id=followup.id,
+                               kind="channel_text", title="CMO campaign material",
+                               content="{}")
+    db.add(result_material)
     db.commit()
+    assert not closing_campaign_for_material(db, owner.id, result_material.id)
 
-    status, remaining = command(db, product_id=owner.id, experiment_id=campaign.id,
-                                action="stop", actor="audit")
+    previous_autoflush = db.autoflush
+    db.autoflush = False  # Match the production SessionLocal configuration.
+    try:
+        status, remaining = command(db, product_id=owner.id, experiment_id=campaign.id,
+                                    action="stop", actor="audit")
+    finally:
+        db.autoflush = previous_autoflush
     assert status == "stopped" and remaining.clear
     db.refresh(followup)
     assert followup.status == TaskStatus.CANCELLED
     assert task_halted(db, followup, data)
+    assert closing_campaign_for_material(db, owner.id, result_material.id)
     db.refresh(independent)
     assert independent.status == TaskStatus.QUEUED
     db.refresh(foreign)

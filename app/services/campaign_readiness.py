@@ -9,10 +9,10 @@ import json
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models.domain import Artifact, ArtifactStatus, Experiment
+from app.models.domain import Artifact, ArtifactStatus, Decision, Experiment, Task
 
 WORKSPACE_KIND = "campaign_workspace"
 MATERIAL_KINDS = frozenset({
@@ -62,7 +62,7 @@ def _decode(row: Artifact | None, experiment_id: UUID) -> dict:
 
 
 def load_resources(db: Session, campaigns: list[Experiment]) -> dict[UUID, CampaignResources]:
-    """Fixed number of company-scoped queries for an entire campaign list."""
+    """Load verified material/channel links for one company-scoped page."""
     if not campaigns:
         return {}
     product_id = campaigns[0].product_id
@@ -93,32 +93,35 @@ def load_resources(db: Session, campaigns: list[Experiment]) -> dict[UUID, Campa
         targets = {a.id: a for a in db.scalars(select(Artifact).where(
             Artifact.product_id == product_id, Artifact.id.in_(wanted),
         ).execution_options(populate_existing=True))}
-    # Preparation tasks already carry the experiment UUID in their task_brief.
-    # Resolve only exact titles, then verify the embedded ID and company.
-    # This avoids guessing links from similar names or looking at other tenants.
-    expected = {}
-    for row in campaigns:
-        if row.experiment_key:
-            for suffix in ("prepare experiment", "prepare outreach cohort"):
-                expected[f"{row.experiment_key}: {suffix}"] = row.id
+    # Use the SAME verified campaign/task resolver as claim, stop and recovery.
+    # CMO follow-up briefs can reference Decision without a canonical launch title.
+    from app.services.campaign_lifecycle import task_campaign
+
+    selected_ids = {row.id for row in campaigns}
+    decisions = list(db.scalars(select(Decision.id).where(
+        Decision.product_id == product_id,
+        Decision.experiment_id.in_(selected_ids),
+    )))
+    tokens = [*(str(value) for value in selected_ids),
+              *(str(value) for value in decisions)]
     task_to_experiment = {}
-    if expected:
-        briefs = db.scalars(select(Artifact).where(
+    if tokens:
+        briefs = list(db.execute(select(Artifact, Task).join(
+            Task, Task.id == Artifact.task_id,
+        ).where(
             Artifact.product_id == product_id,
+            Task.product_id == product_id,
             Artifact.kind == "task_brief",
-            Artifact.title.in_(expected),
-        ))
-        for brief in briefs:
-            if not brief.task_id:
-                continue
-            expected_id = expected.get(brief.title)
+            or_(*(Artifact.content.contains(token) for token in tokens)),
+        ).execution_options(populate_existing=True)))
+        for brief, task in briefs:
             try:
                 payload = json.loads(brief.content)
             except (ValueError, TypeError):
                 continue
-            if (isinstance(payload, dict) and expected_id is not None
-                    and payload.get("experiment_id") == str(expected_id)):
-                task_to_experiment[brief.task_id] = expected_id
+            match = task_campaign(db, task, payload)
+            if match is not None and match.id in selected_ids:
+                task_to_experiment[task.id] = match.id
     generated = {}
     if task_to_experiment:
         for artifact in db.scalars(select(Artifact).where(
