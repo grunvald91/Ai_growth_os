@@ -10,6 +10,7 @@ from .checkpoints import CheckpointStore
 from .contracts import WhiteboardStoryboard
 from .jobs import AGENT, ACTION, JobRequest, digest, records, owner_task, job_directory
 from .runtime import ReadinessError
+from .science import FactReview, ScienceSources, evidence_supported, requires_science_review
 
 
 def source_store(db, settings, product_id, source_id):
@@ -66,6 +67,33 @@ def queue_visual_repair(db, settings, product_id, source_id):
     return task
 
 
+async def reuse_verified_science(original_store, destination, *, request, storyboard,
+                                 source_job_id, source_model_id):
+    """Import verified review and public evidence without recontacting any providers.
+
+    The source is a completed, immutable, owner-approved video (checked by
+    source_store). The science review was part of its original paid approval.
+    """
+    if not requires_science_review(request):
+        return
+    original_sources = ScienceSources.model_validate_json(
+        original_store.load('science-sources', limit=64_000))
+    original_review = FactReview.model_validate_json(
+        original_store.load('science-review', limit=64_000))
+    if not original_sources.sources or not evidence_supported(original_review, request, storyboard):
+        raise ReadinessError('repair_source_invalid')
+    async def cached_sources():
+        return original_sources
+    async def cached_review():
+        return original_review
+    await destination.json_stage('science-sources', cached_sources, ScienceSources)
+    destination.record_import('science-sources', source_job_id=source_job_id,
+                              source_model_id='public-evidence')
+    await destination.json_stage('science-review', cached_review, FactReview)
+    destination.record_import('science-review', source_job_id=source_job_id,
+                              source_model_id=source_model_id)
+
+
 async def prime_visual_repair(session_factory, settings, product_id, payload, destination):
     with session_factory() as db:
         source, value, original, store = source_store(db, settings, product_id, payload.visual_repair_from)
@@ -80,6 +108,9 @@ async def prime_visual_repair(session_factory, settings, product_id, payload, de
         async def saved_story():return story
         await destination.json_stage('storyboard',saved_story,WhiteboardStoryboard)
         destination.record_import('storyboard',source_job_id=payload.visual_repair_from,source_model_id=original.models.storyboard)
+        await reuse_verified_science(store, destination, request=payload.request, storyboard=story,
+                                     source_job_id=payload.visual_repair_from,
+                                     source_model_id=original.models.regions)
         for index,scene in enumerate(story.scenes):
             for name,limit in [(f'scene-{index:02}-image',12_000_000),
                                *[(f'scene-{index:02}-beat-{beat:02}-speech',10_000_000) for beat in range(len(scene.beats))]]:

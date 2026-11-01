@@ -426,3 +426,53 @@ async def test_cached_science_sources_survive_resume_without_network_lookup(tmp_
     await second.prepare_sources(req, checkpoints=stage)
     assert count == 1
     assert second._sources == first._sources
+
+
+@pytest.mark.asyncio
+async def test_scientific_visual_repair_imports_factcheck_and_never_rebuys_it(tmp_path, monkeypatch):
+    from app.content.whiteboard.checkpoints import CheckpointStore
+    from app.content.whiteboard.science import FactReview, FactFinding, ScienceSources, FactReviewer
+    from app.content.whiteboard.repair import reuse_verified_science
+    from app.content.whiteboard import science
+    from test_whiteboard import storyboard
+
+    req = science_request(science_policy_version=1, request_generation=True)
+    story = storyboard()
+    model_ids = {"storyboard":"test-author", "image":"test-image",
+                 "speech":"test-speech", "regions":"test-critic"}
+    original = CheckpointStore(tmp_path/"original", req, models=model_ids)
+    destination = CheckpointStore(tmp_path/"visual-repair", req, models=model_ids, visual_review=True)
+    sources = ScienceSources(sources=[{
+        "id":"SEP", "url":"https://plato.stanford.edu/entries/equivME/",
+        "claim":"For a closed system, receiving energy raises its rest mass."
+    }])
+    all_lines = [b.narration for s in story.scenes for b in s.beats][:-1]
+    assessment = FactReview(status="supported",
+        summary="Все шесть реплик проверены по физическим источникам.",
+        verified_source_ids=["SEP"],
+        source_links=[{"id":"SEP","url":"https://plato.stanford.edu/entries/equivME/"}],
+        findings=[FactFinding(claim=line, verdict="supported",
+            explanation="Энергетический баланс подтверждает формулировку.",
+            reference_id="SEP") for line in all_lines])
+    async def source():
+        return sources
+    async def review():
+        return assessment
+    await original.json_stage("science-sources", source, ScienceSources)
+    await original.json_stage("science-review", review, FactReview)
+    from uuid import uuid4
+    await reuse_verified_science(original, destination, request=req, storyboard=story,
+                                 source_job_id=uuid4(), source_model_id="gemini-flash-3.8")
+    async def no_web(*args, **kwargs):
+        pytest.fail("Scientific visual repair must reuse checkpointed evidence")
+    monkeypatch.setattr(science, "retrieved_references", no_web)
+    class NoLLM:
+        async def generate(self, request):
+            pytest.fail("Scientific visual repair must reuse checkpointed LLM verdict")
+    new_reviewer = FactReviewer(NoLLM(), "gemini-flash-3.8")
+    await new_reviewer.prepare_sources(req, checkpoints=destination)
+    assert new_reviewer._sources == sources.sources
+    async def must_not_run():
+        pytest.fail("No second paid scientific call")
+    result = await destination.json_stage("science-review", must_not_run, FactReview)
+    assert result.model_dump() == assessment.model_dump()
