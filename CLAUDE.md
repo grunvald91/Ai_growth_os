@@ -9,6 +9,16 @@ Primary production service:
 - production path: /opt/booking_bot
 - production systemd service: booking-bot
 
+## Обязательная SaaS-архитектура ServGo (ADR-SERVGO-001)
+
+**Нормативный документ:** [docs/architecture/SERVGO_SAAS_RULE.md](docs/architecture/SERVGO_SAAS_RULE.md).
+
+> ServGo — многопользовательская SaaS-платформа с общей масштабируемой инфраструктурой и изолированными рабочими пространствами бизнесов. Все модули, агенты, очереди, интеграции и оркестрационные процессы проектируются так, чтобы параллельная работа множества компаний не приводила к смешиванию данных, неконтролируемому расходованию ресурсов или блокировке работы других клиентов.
+
+Перед изменениями функций для бизнеса проверяй tenant scope, права, идемпотентность, справедливость общей очереди и учёт ресурсов по релевантности. Правило действует для всех модулей ServGo и не подтверждает готовность текущего кода к конкретному числу компаний.
+
+**Очередность:** сначала завершить текущий редизайн; SaaS-доработки делать по мере затрагивания соответствующих компонентов. Выявленные нарушения межарендного доступа исправлять немедленно. [Поэтапный план](https://github.com/grunvald91/Ai_growth_os/blob/main/docs/architecture/SERVGO_SAAS_ROADMAP.md). Документационные изменения не разрешают деплой.
+
 ## Critical production rule
 Production source and GitHub were synchronized by the owner. The source audit of 2026-10-23 (workflow "Audit production source against GitHub") found the server backend byte-identical to `main` at the time: `database/models.py`, `web/api/schemas.py`, `web/api/main.py` and the mail routes matched, and there was no server-only source. The remaining differences were repository-only files (docs, dev scripts) that are not deployed.
 
