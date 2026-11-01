@@ -20,9 +20,13 @@ from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.schemas import ExperimentCreate
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.domain import Experiment
+from app.models.domain import Artifact, ArtifactStatus, Experiment
 from app.services.experiments import ExperimentService
 from app.services.experiment_launch import ExperimentLaunchError, ExperimentLaunchService
+from app.services.campaign_readiness import (
+    CampaignResources, CampaignResourceError, MATERIAL_KINDS,
+    link_resource, load_resources,
+)
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 FIELDS = [
@@ -114,15 +118,21 @@ def campaign_facts(row: Experiment, *, compact: bool = False) -> str:
     ) + '</dl>'
 
 
-def campaign_owner_step(row: Experiment) -> str:
-    """A single truthful next step. External actions are not inferred."""
+def campaign_owner_step(row: Experiment, resources: CampaignResources | None = None) -> str:
+    """Only request actions backed by this specific campaign's records."""
+    resources = resources or CampaignResources()
+    if row.status == "draft" and not campaign_ready(row):
+        return "Дополните условия кампании перед запуском."
+    if row.status in {"draft", "running"} and resources.pending_material:
+        return "Готов материал этой кампании — посмотрите его перед публикацией."
+    if row.status == "running" and resources.needs_telegram and not resources.selected_connection:
+        return ("Выберите один из подключённых Telegram-каналов."
+                if resources.connections else
+                "Подключите Telegram-канал для будущих публикаций.")
     if row.status == "draft":
-        return ("Проверьте условия и запустите подготовку."
-                if campaign_ready(row) else
-                "Дополните условия кампании перед запуском.")
+        return "Проверьте условия и запустите подготовку."
     if row.status == "running":
-        return ("Идёт внутренняя подготовка. Если понадобятся подключение канала "
-                "или согласование, проверьте соответствующие разделы.")
+        return "Пока ничего не требуется. Идёт внутренняя подготовка."
     if row.status == "completed":
         return "Посмотрите записанные результаты и выводы, если они уже доступны."
     if row.status in {"stopped", "cancelled", "paused"}:
@@ -130,17 +140,28 @@ def campaign_owner_step(row: Experiment) -> str:
     return "Проверьте сведения о кампании."
 
 
-def campaign_list_card(product_id: UUID, row: Experiment) -> str:
+def campaign_list_card(product_id: UUID, row: Experiment,
+                       resources: CampaignResources | None = None) -> str:
+    resources = resources or CampaignResources()
     base = f"/studio/products/{product_id}/campaigns/{row.id}"
-    action = ("Дополнить план" if not campaign_ready(row) else "Проверить и запустить") if row.status == "draft" else (
-        "Посмотреть ход подготовки" if row.status == "running" else "Открыть кампанию"
-    )
-    destination = f"{base}/edit" if row.status == "draft" and not campaign_ready(row) else base
+    if row.status == "draft" and not campaign_ready(row):
+        action, destination = "Дополнить план", f"{base}/edit"
+    elif row.status in {"draft", "running"} and resources.pending_material:
+        action = "Посмотреть материал"
+        destination = f"/studio/products/{product_id}/materials/{resources.pending_material.id}"
+    elif row.status == "running" and resources.needs_telegram and not resources.selected_connection:
+        action = "Выбрать канал" if resources.connections else "Подключить Telegram"
+        destination = f"{base}#campaign-connect" if resources.connections else f"/studio/products/{product_id}/channels"
+    elif row.status == "draft":
+        action, destination = "Проверить и запустить", base
+    else:
+        action, destination = ("Посмотреть ход подготовки" if row.status == "running"
+                               else "Открыть кампанию"), base
     return (
         f'<article class="panel"><h2>{esc(row.name)}</h2>'
         f'<p><strong>{esc(campaign_status(row))}</strong></p>'
         + campaign_facts(row, compact=True)
-        + f'<p><strong>От вас:</strong> {esc(campaign_owner_step(row))}</p>'
+        + f'<p><strong>От вас:</strong> {esc(campaign_owner_step(row, resources))}</p>'
           f'<a class="btn primary" href="{esc(destination)}">{esc(action)}</a>'
           '</article>'
     )
@@ -178,8 +199,12 @@ def form_page(product, values, error="", *, row=None):
     )
 
 
-def campaign_page(product, row: Experiment, error: str = "", *, metrics=()):
+def campaign_page(product, row: Experiment, error: str = "", *,
+                  metrics=(), resources: CampaignResources | None = None,
+                  candidates=()):
+    resources = resources or CampaignResources()
     base = f"/studio/products/{product.id}/campaigns"
+    path = f"{base}/{row.id}"
     detailed = "".join(
         f'<div><dt>{esc(label)}</dt><dd>{esc(getattr(row, key))}</dd></div>'
         for key, label in FIELDS if key not in DETAIL_KEYS
@@ -188,23 +213,39 @@ def campaign_page(product, row: Experiment, error: str = "", *, metrics=()):
         '<details><summary>Подробнее о плане и условиях</summary>'
         f'<dl class="campaign-details">{detailed}</dl></details>'
     )
+    pending = resources.pending_material
     if row.status == "draft":
         if campaign_ready(row):
             owner_action = (
-                f'<form action="{base}/{row.id}/launch" method="post">'
+                f'<form action="{path}/launch" method="post">'
                 '<button class="btn primary" type="submit">Запустить подготовку</button>'
-                '<p>Запуск поставит задачу ИИ-команде и начнёт период наблюдения. '
-                'Возможны расходы на ИИ. Рассылки и публикации не запускаются.</p></form>'
-                f'<a class="btn" href="{base}/{row.id}/edit">Редактировать черновик</a>'
+                '<p>Запуск ставит внутреннее задание ИИ-команде. '
+                'Возможны расходы на ИИ. Отправка и публикация не запускаются.</p></form>'
+                f'<a class="btn" href="{path}/edit">Редактировать черновик</a>'
             )
         else:
-            owner_action = (
-                f'<a class="btn primary" href="{base}/{row.id}/edit">Дополнить план</a>'
-            )
+            owner_action = f'<a class="btn primary" href="{path}/edit">Дополнить план</a>'
     elif row.status == "running":
-        owner_action = (
-            f'<p><a class="btn primary" href="/studio/products/{product.id}/work">Ход подготовки</a></p>'
-            '<details><summary>Другие действия</summary>'
+        if pending:
+            owner_action = (
+                f'<a class="btn primary" href="/studio/products/{product.id}/materials/{pending.id}">'
+                'Посмотреть материал</a>'
+            )
+        elif resources.needs_telegram and not resources.selected_connection:
+            if resources.connections:
+                owner_action = '<a class="btn primary" href="#campaign-connect">Выбрать канал</a>'
+            else:
+                owner_action = (
+                    f'<a class="btn primary" href="/studio/products/{product.id}/channels">'
+                    'Подключить Telegram</a>'
+                )
+        else:
+            owner_action = (
+                f'<a class="btn primary" href="/studio/products/{product.id}/work">'
+                'Ход подготовки</a>'
+            )
+        owner_action += (
+            '<details><summary>Другие инструменты</summary>'
             f'<p><a href="/studio/products/{product.id}/channels">Подключения каналов</a> · '
             f'<a href="/studio/products/{product.id}/review">Материалы на проверку</a></p>'
             '</details>'
@@ -212,6 +253,64 @@ def campaign_page(product, row: Experiment, error: str = "", *, metrics=()):
     else:
         owner_action = ""
 
+    channel_section = ""
+    if resources.needs_telegram:
+        if resources.selected_connection:
+            channel_section = (
+                f'<p>Telegram: подключён канал <strong>{esc(resources.selected_connection.title)}</strong>.</p>'
+            )
+        elif resources.connections:
+            channel_section = '<p>Выберите проверенный Telegram-канал для этой кампании.</p>'
+        else:
+            channel_section = (
+                f'<p>Telegram-канал пока не выбран и не подключён. '
+                f'<a href="/studio/products/{product.id}/channels">Подключить канал</a>.</p>'
+            )
+        if row.status in {"draft", "running"} and resources.connections:
+            options = "".join(
+                f'<option value="{esc(item.id)}"'
+                f'{" selected" if resources.selected_connection and resources.selected_connection.id == item.id else ""}>'
+                f'{esc(item.title)}</option>' for item in resources.connections
+            )
+            channel_section += (
+                f'<form method="post" action="{path}/resources/channel">'
+                '<label class="field">Канал для публикаций'
+                f'<select name="connection_id" required>{options}</select></label>'
+                '<button class="btn" type="submit">Выбрать канал</button></form>'
+            )
+    material_items = "".join(
+        f'<li><a href="/studio/products/{product.id}/materials/{item.id}">'
+        f'{esc(item.title)}</a> — '
+        + {ArtifactStatus.DRAFT: "Черновик", ArtifactStatus.AWAITING_APPROVAL: "Нужно посмотреть",
+           ArtifactStatus.APPROVED: "Одобрен", ArtifactStatus.PUBLISHED: "Опубликован",
+           ArtifactStatus.REJECTED: "Отклонён"}.get(item.status, "Статус не определён")
+        + '</li>' for item in resources.materials
+    )
+    materials_section = (
+        '<p>Материалы этой кампании:</p>'
+        + (f'<ul>{material_items}</ul>' if material_items else
+           '<p>Привязанных материалов пока нет.</p>')
+    )
+    if row.status in {"draft", "running"}:
+        choices = "".join(
+            f'<option value="{esc(item.id)}">{esc(item.title)} '
+            f'({esc(item.kind)})</option>'
+            for item in candidates if item.id not in {a.id for a in resources.materials}
+        )
+        if choices:
+            materials_section += (
+                f'<details><summary>Добавить существующий материал</summary>'
+                f'<form action="{path}/resources/material" method="post">'
+                f'<label class="field">Материал вашей организации'
+                f'<select name="artifact_id" required>{choices}</select></label>'
+                '<button class="btn" type="submit">Привязать к кампании</button>'
+                '</form></details>'
+            )
+    resources_section = (
+        '<section class="surface form-card" id="campaign-connect">'
+        '<h2>Каналы и материалы</h2>'
+        + channel_section + materials_section + '</section>'
+    )
     results = ''.join(
         f'<li><strong>{esc(item.name)}:</strong> {esc(item.value)} {esc(item.unit)}'
         f' <small>({esc(item.source)}, {esc(item.observed_at.date())})</small></li>'
@@ -231,13 +330,30 @@ def campaign_page(product, row: Experiment, error: str = "", *, metrics=()):
         f'<section class="surface form-card"><h2>{esc(row.name)}</h2>'
         f'<p><strong>{esc(campaign_status(row))}</strong></p>'
         + warning + campaign_facts(row)
-        + f'<h3>Что требуется от вас</h3><p>{esc(campaign_owner_step(row))}</p>'
+        + f'<h3>Что требуется от вас</h3><p>{esc(campaign_owner_step(row, resources))}</p>'
         + owner_action + technical + '</section>'
-        + results_section
+        + resources_section + results_section
     )
-    return studio_page_shell(product, active="campaigns", title="Маркетинговая кампания",
-                             subtitle="Цель, действия и фактический результат — без технических деталей.",
-                             body=page)
+    return studio_page_shell(
+        product, active="campaigns", title="Маркетинговая кампания",
+        subtitle="Задача, необходимые действия и реальный результат.",
+        body=page,
+    )
+
+
+def campaign_candidates(db: Session, product_id: UUID):
+    return list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id,
+        Artifact.kind.in_(MATERIAL_KINDS),
+    ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(100)))
+
+
+def campaign_detail_context(db: Session, row: Experiment):
+    return {
+        "metrics": campaign_metrics(db, row.product_id, row.id),
+        "resources": load_resources(db, [row])[row.id],
+        "candidates": campaign_candidates(db, row.product_id),
+    }
 
 
 def campaign_metrics(db: Session, product_id: UUID, experiment_id: UUID):
@@ -276,8 +392,8 @@ async def save_campaign(product_id: UUID, request: Request, db: Session = Depend
 @router.get("/studio/products/{product_id}/campaigns/{experiment_id}", response_class=HTMLResponse)
 def detail_campaign(product_id: UUID, experiment_id: UUID, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
-    return campaign_page(product, find_campaign(db, product_id, experiment_id),
-                         metrics=campaign_metrics(db, product_id, experiment_id))
+    row = find_campaign(db, product_id, experiment_id)
+    return campaign_page(product, row, **campaign_detail_context(db, row))
 
 
 @router.get("/studio/products/{product_id}/campaigns/{experiment_id}/edit",
@@ -341,10 +457,60 @@ def launch_campaign(
         row = find_campaign(db, product_id, experiment_id)
         return HTMLResponse(
             campaign_page(product, row, f"Запуск недоступен: {exc}",
-                          metrics=campaign_metrics(db, product_id, experiment_id)),
+                          **campaign_detail_context(db, row)),
             status_code=409,
         )
     return RedirectResponse(
         f"/studio/products/{product_id}/campaigns/{experiment_id}",
+        status_code=303,
+    )
+
+
+@router.post("/studio/products/{product_id}/campaigns/{experiment_id}/resources/material")
+async def attach_campaign_material(
+    product_id: UUID, experiment_id: UUID, request: Request,
+    db: Session = Depends(get_db),
+):
+    _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    try:
+        target_id = UUID(fields.get("artifact_id", ""))
+    except (ValueError, TypeError):
+        raise HTTPException(422, "Выберите существующий материал") from None
+    try:
+        link_resource(db, product_id, experiment_id, target_id, relation="material")
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(404, str(exc)) from None
+    except CampaignResourceError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(
+        f"/studio/products/{product_id}/campaigns/{experiment_id}#campaign-connect",
+        status_code=303,
+    )
+
+
+@router.post("/studio/products/{product_id}/campaigns/{experiment_id}/resources/channel")
+async def select_campaign_channel(
+    product_id: UUID, experiment_id: UUID, request: Request,
+    db: Session = Depends(get_db),
+):
+    _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    try:
+        target_id = UUID(fields.get("connection_id", ""))
+    except (ValueError, TypeError):
+        raise HTTPException(422, "Выберите проверенный Telegram-канал") from None
+    try:
+        link_resource(db, product_id, experiment_id, target_id, relation="telegram")
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(404, str(exc)) from None
+    except CampaignResourceError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(
+        f"/studio/products/{product_id}/campaigns/{experiment_id}#campaign-connect",
         status_code=303,
     )
