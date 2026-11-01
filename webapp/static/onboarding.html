@@ -229,7 +229,7 @@
       const button=$('submitBtn');button.disabled=true;button.textContent='Сохраняем заявку…';
       resultStatus('Сохраняем сведения в ServGo и отправляем уведомление…');
       try{
-        const response=await fetch('/api/onboarding/requests',{
+        const response=await fetch('/api/landing/connect-request?onboarding=submit',{
           method:'POST',credentials:'omit',
           headers:{'Content-Type':'application/json','Accept':'application/json'},
           body:JSON.stringify({consent:true,idempotency_key:key,form})

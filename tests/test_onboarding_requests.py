@@ -1,4 +1,5 @@
 """Focused regression coverage for ServGo business-intake persistence and privacy."""
+import ast
 import json
 import unittest
 from uuid import uuid4
@@ -84,7 +85,7 @@ class ValidationTests(unittest.TestCase):
 
     def test_link_has_trusted_origin_not_host(self):
         message = _email_body("a" * 32, example_form())
-        self.assertIn("https://promo.servgo.ru/onboarding/request/" + "a" * 32, message)
+        self.assertIn("https://promo.servgo.ru/static/onboarding-request.html?request_id=" + "a" * 32, message)
         self.assertNotIn("localhost", message)
 
 
@@ -106,6 +107,34 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         register_onboarding_routes(
             app, engine=self.engine, get_user=user, admin_ids=[42], send_email=mail_sender
         )
+        # Test the *real* public dispatcher without importing the whole bot:
+        # the production server module needs live BOT_TOKEN and other services.
+        server_source = Path(__file__).resolve().parents[1] / "webapp" / "server.py"
+        server_ast = ast.parse(server_source.read_text(encoding="utf-8"))
+        dispatch_node = next(
+            node for node in server_ast.body
+            if isinstance(node, ast.AsyncFunctionDef)
+            and node.name == "api_landing_connect_request"
+        )
+        async def fake_persist(data):
+            return 912
+
+        async def fake_telegram(data):
+            return False
+
+        namespace = {
+            "web": web, "asyncio": __import__("asyncio"),
+            "logger": __import__("logging").getLogger("onboarding-test"),
+            "validate_landing_request_payload": lambda data: data,
+            "persist_landing_marketing_lead": fake_persist,
+            "send_landing_request_email": lambda data: True,
+            "send_landing_request_telegram": fake_telegram,
+            "is_landing_request_telegram_required": lambda: False,
+        }
+        exec(compile(ast.Module(body=[dispatch_node], type_ignores=[]),
+                     str(server_source), "exec"), namespace)
+        app.router.add_post("/api/landing/connect-request",
+                            namespace["api_landing_connect_request"])
         self.client = TestClient(TestServer(app))
         await self.client.start_server()
         self.assertTrue(app["onboarding_table_ready"])
@@ -116,24 +145,28 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_submission_and_private_review(self):
         body = payload()
-        resp = await self.client.post("/api/onboarding/requests", json=body)
+        resp = await self.client.post("/api/landing/connect-request?onboarding=submit", json=body)
         self.assertEqual(resp.status, 201)
         result = await resp.json()
         self.assertTrue(result["saved"])
         self.assertTrue(result["email_sent"])
         self.assertEqual(len(self.mails), 1)
         message = self.mails[0][2]
-        self.assertIn("/onboarding/request/", message)
-        application_id = message.split("/onboarding/request/")[1].split("\n")[0]
+        self.assertIn("/static/onboarding-request.html?request_id=", message)
+        application_id = message.split("request_id=")[1].split("\n")[0]
         self.assertEqual(result["request_id"], application_id[:8].upper())
 
-        public = await self.client.get("/api/onboarding/requests/" + application_id)
+        public = await self.client.post(
+            "/api/landing/connect-request?onboarding=view&request_id=" + application_id,
+            json={}
+        )
         self.assertEqual(public.status, 403)
         public_page = await self.client.get("/onboarding/request/" + application_id)
         self.assertEqual(public_page.status, 403)
 
-        secure = await self.client.get(
-            "/api/onboarding/requests/" + application_id,
+        secure = await self.client.post(
+            "/api/landing/connect-request?onboarding=view&request_id=" + application_id,
+            json={},
             headers={"X-Test-Admin": "yes"},
         )
         self.assertEqual(secure.status, 200)
@@ -149,32 +182,49 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(html.status, 200)
         self.assertIn("noindex", html.headers["X-Robots-Tag"])
         self.assertNotIn("Тестовая студия", await html.text())
+        shell = (Path(__file__).resolve().parents[1] /
+                 "webapp" / "static" / "onboarding-request.html").read_text()
+        self.assertIn("onboarding=view&request_id=", shell)
+        self.assertNotIn("Тестовая студия", shell)
+
+    async def test_original_promo_contact_submission_still_works(self):
+        # Normal landing leads without the onboarding query parameter must
+        # continue down the existing SMTP/Telegram funnel unchanged.
+        response = await self.client.post(
+            "/api/landing/connect-request",
+            json={"name": "Пробная заявка", "phone": "+79990000000"},
+        )
+        self.assertEqual(response.status, 200)
+        reply = await response.json()
+        self.assertTrue(reply["success"])
+        self.assertTrue(reply["email_sent"])
+        self.assertEqual(reply["lead_id"], 912)
 
     async def test_double_submit_does_not_double_email(self):
         body = payload()
-        r1 = await self.client.post("/api/onboarding/requests", json=body)
-        r2 = await self.client.post("/api/onboarding/requests", json=body)
+        r1 = await self.client.post("/api/landing/connect-request?onboarding=submit", json=body)
+        r2 = await self.client.post("/api/landing/connect-request?onboarding=submit", json=body)
         self.assertEqual((await r1.json())["request_id"], (await r2.json())["request_id"])
         self.assertEqual(len(self.mails), 1)
 
     async def test_email_failure_does_not_lose_saved_data(self):
         self.smtp_works = False
         body = payload()
-        first = await self.client.post("/api/onboarding/requests", json=body)
+        first = await self.client.post("/api/landing/connect-request?onboarding=submit", json=body)
         self.assertEqual(first.status, 202)
         result = await first.json()
         self.assertTrue(result["saved"])
         self.assertFalse(result["email_sent"])
         self.smtp_works = True
-        second = await self.client.post("/api/onboarding/requests", json=body)
+        second = await self.client.post("/api/landing/connect-request?onboarding=submit", json=body)
         self.assertEqual(second.status, 201)
         self.assertTrue((await second.json())["email_sent"])
 
     async def test_invalid_consent_and_origin_cannot_write(self):
-        resp = await self.client.post("/api/onboarding/requests", json=payload(consent=False))
+        resp = await self.client.post("/api/landing/connect-request?onboarding=submit", json=payload(consent=False))
         self.assertEqual(resp.status, 400)
         resp = await self.client.post(
-            "/api/onboarding/requests",
+            "/api/landing/connect-request?onboarding=submit",
             json=payload(),
             headers={"Origin": "https://evil.example"},
         )
@@ -182,7 +232,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_size_limit(self):
         resp = await self.client.post(
-            "/api/onboarding/requests",
+            "/api/landing/connect-request?onboarding=submit",
             data=json.dumps({"payload": "a" * 140000}),
             headers={"Content-Type": "application/json"},
         )

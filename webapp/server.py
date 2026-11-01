@@ -297,7 +297,17 @@ async def send_landing_request_telegram(payload: dict) -> bool:
 
 
 async def api_landing_connect_request(request: web.Request) -> web.Response:
-    """Receive a public connection request from the promo landing page."""
+    """Receive the normal promo lead or an explicitly routed onboarding operation.
+
+    Promo's existing public endpoint is already published through nginx.
+    Reuse exactly that URL for the onboarding submit and admin-only read API,
+    so no new nginx route or catch-all changes are required.
+    """
+    onboarding_operation = request.query.get("onboarding")
+    if onboarding_operation == "submit":
+        return await request.app["onboarding_submit_handler"](request)
+    if onboarding_operation == "view":
+        return await request.app["onboarding_review_handler"](request)
     try:
         payload = validate_landing_request_payload(await request.json())
     except ValueError as exc:

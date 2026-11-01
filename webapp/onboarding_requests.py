@@ -178,7 +178,7 @@ def _email_body(application_id: str, payload: dict) -> str:
     # This is a deployment setting, never the untrusted Host header.
     if not re.fullmatch(r"https://[a-zA-Z0-9.-]+(?::\d{2,5})?", public_base):
         raise ValueError("ONBOARDING_PUBLIC_BASE_URL must be a trusted HTTPS origin")
-    link = public_base + "/onboarding/request/" + application_id
+    link = public_base + "/static/onboarding-request.html?request_id=" + application_id
     return "\n".join([
         "Новая анкета подключения бизнеса в ServGo",
         "",
@@ -344,7 +344,10 @@ def register_onboarding_routes(app, *, engine, get_user, admin_ids, send_email):
             return _no_store(web.json_response({"error": "Нет доступа"}, status=403))
         if not request.app["onboarding_table_ready"]:
             return _no_store(web.json_response({"error": "Данные недоступны"}, status=503))
-        application_id = request.match_info["application_id"]
+        application_id = (request.match_info.get("application_id") or
+                          request.query.get("request_id", ""))
+        if not re.fullmatch(r"[0-9a-f]{32}", application_id):
+            return _no_store(web.json_response({"error": "Заявка не найдена"}, status=404))
         async with engine.connect() as conn:
             row = (await conn.execute(select(applications).where(
                 applications.c.id == application_id
@@ -359,6 +362,13 @@ def register_onboarding_routes(app, *, engine, get_user, admin_ids, send_email):
             "form": row["payload"],
         }))
 
+    # Reuse the existing /api/landing/connect-request public route on promo.
+    # nginx currently does not publish /api/onboarding/* or /onboarding/request/*.
+    # The dispatcher in webapp.server invokes these handlers explicitly.
+    app["onboarding_submit_handler"] = submit
+    app["onboarding_review_handler"] = view_data
+
+    # Preserve direct internal routes for API consumers with an appropriate proxy.
     app.router.add_post("/api/onboarding/requests", submit)
     app.router.add_get("/api/onboarding/requests/{application_id:[0-9a-f]{32}}", view_data)
     app.router.add_get("/onboarding/request/{application_id:[0-9a-f]{32}}", view_page)

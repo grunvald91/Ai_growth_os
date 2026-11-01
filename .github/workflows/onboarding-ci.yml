@@ -6,6 +6,7 @@ on:
       - 'webapp/server.py'
       - 'webapp/static/onboarding.html'
       - 'webapp/templates/onboarding_request.html'
+      - 'webapp/static/onboarding-request.html'
       - 'tests/test_onboarding_requests.py'
       - '.github/workflows/onboarding-ci.yml'
   workflow_dispatch:
@@ -35,7 +36,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re, subprocess, tempfile
-          for path in [Path('webapp/static/onboarding.html'), Path('webapp/templates/onboarding_request.html')]:
+          for path in [Path('webapp/static/onboarding.html'), Path('webapp/static/onboarding-request.html'), Path('webapp/templates/onboarding_request.html')]:
               s = path.read_text()
               scripts = re.findall(r'<script>(.*?)</script>', s, re.DOTALL)
               assert len(scripts) == 1, (path, len(scripts))
@@ -48,7 +49,7 @@ jobs:
 
 
   production-readonly-preflight:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'workflow_dispatch'  # manual only; avoid repeated SSH preflights on each PR
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
