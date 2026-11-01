@@ -1,6 +1,7 @@
 """Growth V4: safe company-scoped campaign draft editor and read-only details.
 
-No actions on this page can launch tasks, publish, send mail, or spend money.
+Launch uses the existing internal preparation service. It never publishes,
+sends messages, or spends money; stop/finalize require a separate worker-safe API.
 """
 from __future__ import annotations
 
@@ -17,9 +18,11 @@ from sqlalchemy.orm import Session
 from app.api.content_studio import _owner_product, _studio_form, studio_page_shell
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.schemas import ExperimentCreate
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import Experiment
 from app.services.experiments import ExperimentService
+from app.services.experiment_launch import ExperimentLaunchError, ExperimentLaunchService
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 FIELDS = [
@@ -101,7 +104,7 @@ def form_page(product, values, error="", *, row=None):
     )
 
 
-def campaign_page(product, row: Experiment):
+def campaign_page(product, row: Experiment, error: str = ""):
     base = f"/studio/products/{product.id}/campaigns"
     fields = "".join(
         f'<div><dt>{esc(label)}</dt><dd>{esc(getattr(row, key))}</dd></div>'
@@ -112,14 +115,22 @@ def campaign_page(product, row: Experiment):
         if row.status == "draft"
         else '<p>Изменение запущенной или завершённой кампании здесь недоступно.</p>'
     )
+    launch = (
+        f'<form action="{base}/{row.id}/launch" method="post">'
+        '<button class="btn primary" type="submit">Запустить внутреннюю подготовку</button>'
+        '<p>Создаст задание ИИ-команде и начнёт период наблюдения. '
+        'Без публикаций, рассылок и расходов.</p></form>'
+        if row.status == "draft" else ""
+    )
     conclusion = f'<p><b>Заключение:</b> {esc(row.conclusion)}</p>' if row.conclusion else ""
+    warning = f'<p role="alert">{esc(error)}</p>' if error else ""
     page = (
         f'<p><a href="{base}">← Все кампании</a></p>'
         f'<section class="surface form-card"><h2>{esc(row.name)}</h2>'
-        f'<p>Статус: <b>{esc(row.status)}</b></p>'
-        f'<dl class="campaign-details">{fields}</dl>{conclusion}{edit}</section>'
-        '<p>Данные из базы. Изменение статуса, запуск заданий и рассылок '
-        'этой страницей не выполняются.</p>'
+        f'<p>Статус: <b>{esc(row.status)}</b></p>{warning}'
+        f'<dl class="campaign-details">{fields}</dl>{conclusion}{edit}{launch}</section>'
+        '<p>Остановка и завершение кампании появятся после реализации безопасного '
+        'управления её заданиями. Простое изменение статуса не останавливает worker.</p>'
     )
     return studio_page_shell(product, active="campaigns", title="Кампания",
                              subtitle="Данные выбранной компании.", body=page)
@@ -191,3 +202,33 @@ async def update_campaign(
                                       row=row), status_code=409)
     return RedirectResponse(f"/studio/products/{product_id}/campaigns/{experiment_id}",
                             status_code=303)
+
+
+@router.post("/studio/products/{product_id}/campaigns/{experiment_id}/launch")
+def launch_campaign(
+    product_id: UUID, experiment_id: UUID, request: Request,
+    db: Session = Depends(get_db), settings=Depends(get_settings),
+):
+    product = _owner_product(db, product_id)
+    # The existing service owns validation, state, decision, task and commit.
+    # Its locked SELECT applies the company filter *before* any side effects.
+    try:
+        ExperimentLaunchService(db, settings.products_root).launch(
+            experiment_id,
+            product_id=product_id,
+            actor=f"studio:{getattr(request.state, 'studio_login', 'operator')}",
+        )
+    except LookupError:
+        db.rollback()
+        raise HTTPException(404, "Кампания не найдена у выбранной компании") from None
+    except ExperimentLaunchError as exc:
+        db.rollback()
+        row = find_campaign(db, product_id, experiment_id)
+        return HTMLResponse(
+            campaign_page(product, row, f"Запуск недоступен: {exc}"),
+            status_code=409,
+        )
+    return RedirectResponse(
+        f"/studio/products/{product_id}/campaigns/{experiment_id}",
+        status_code=303,
+    )
