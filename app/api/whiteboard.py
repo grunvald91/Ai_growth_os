@@ -17,6 +17,7 @@ from app.api.content_studio import _owner_product, _studio_form, esc, studio_pag
 from app.content.whiteboard.contracts import SCENES_FOR_SECONDS, Contract, WhiteboardRequest
 from app.content.whiteboard.science import requires_science_review
 from app.content.whiteboard.topics import suggest_company_video_topics
+from app.content.whiteboard.selector_ui import topic_picker_html
 from app.content.whiteboard.jobs import (AGENT, MAX_API_CALLS, TOP_UP_STEP, approve_job, call_limit, can_resume, can_top_up, cancel_job,
                                          digest, job_directory, owner_task, queue_job, records, required_calls, resume_job)
 from app.content.whiteboard.runtime import MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings
@@ -203,7 +204,7 @@ def approval_card(state, product_id, error=None):
             f'<h2>{esc(state["request"]["topic"])}</h2></header>{warning}'
             '<div class="wb-facts"><div><span>Длительность</span>'
             f'<strong>{duration}</strong></div><div><span>Сценарий</span><strong>{scenes} сцен</strong></div>'
-            f'<div><span>Лимит генерации</span><strong>До {state["max_api_calls"]} API-вызовов</strong></div></div>{cta_html}'
+            f'<div><span>Лимит генерации</span><strong>До {state["max_api_calls"]} API-вызовов</strong></div></div>{cta_html}{source_description}'
             '<section class="wb-cost"><h3>Платная генерация</h3><p>Точная стоимость в долларах пока неизвестна. '
             'Лимит ограничивает число API-вызовов, а не сумму списаний.</p>'
             '<p>После временного сбоя генерация продолжается автоматически в пределах подтверждённого лимита.</p></section>'
@@ -355,13 +356,29 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
     maximum = str(fields.get('max_api_calls') or 'auto')
     visual_review = fields.get('visual_review', 'once')
     length = str(fields.get('duration_seconds', '30'))
+    science_mode = fields.get('science_mode', 'auto')
     body = '<section class="sg-surface"><h2>Создать анимацию с озвучкой</h2><p>Вертикальное видео на 30 секунд или на минуту: русская озвучка, MP4, обложка и субтитры. В конце видео зовёт подписаться, поставить лайк или сделать то, что вы напишете. Перед запуском вы подтвердите платную генерацию. Доступ к моделям проверяется перед платным запуском.</p>'
     body += f'<p class="sg-notice sg-duration-note" role="note">⏱ {esc(duration_notice(durations or {}, "whiteboard"))}</p>'
     if error:
         body += f'<p class="sg-warning" role="alert">{esc(error)}</p>'
-    body += (f'<form method="post" action="{base}" class="sg-form">'
+    body += (f'<form method="post" action="{base}" class="sg-form" id="wb-create-form">'
+             '<input type="hidden" name="wb_topic_choice" value="">'
+             '<input type="hidden" name="wb_paid_start" value="">'
              '<label class="sg-field"><span>Что объяснить в видео?</span><textarea name="topic" minlength="8" maxlength="400" rows="3" required '
              f'placeholder="Например: почему пилот добавляет тягу при посадке на авианосец">{esc(fields.get("topic", ""))}</textarea></label>'
+             '<button class="btn secondary" type="button" id="wb-suggest-btn">Предложить темы для моей компании</button>'
+             '<label class="sg-field"><span>Готовый сценарий (необязательно)</span>'
+             f'<textarea name="source_script" rows="6" maxlength="12000" placeholder="Вставьте исходный текст ролика">{esc(fields.get("source_script", ""))}</textarea>'
+             '<small>Сценарист сохранит смысл и адаптирует текст под длительность. Важные утверждения не должны изменяться.</small></label>'
+             '<label class="sg-field"><span>Дополнительная информация (необязательно)</span>'
+             f'<textarea name="background_notes" rows="4" maxlength="6000" placeholder="Целевая аудитория, контекст, ограничения">{esc(fields.get("background_notes", ""))}</textarea></label>'
+             '<label class="sg-field"><span>Материалы для проверки фактов (необязательно)</span>'
+             f'<textarea name="reference_materials" rows="4" maxlength="6000" placeholder="Названия источников, ссылки, выдержки">{esc(fields.get("reference_materials", ""))}</textarea>'
+             '<small>Материалы пользователя сами по себе не считаются независимым подтверждением фактов.</small></label>'
+             '<label class="sg-field"><span>Научная проверка</span><select name="science_mode">' + ''.join(
+                 f'<option value="{value}"' + (' selected' if science_mode == value else '') + f'>{label}</option>'
+                 for value, label in [('auto', 'Автоматически по теме'), ('scientific', 'Научный сюжет — обязательно проверять'), ('general', 'Обычный сюжет')]) +
+             '</select><small>Неподтверждённые научные утверждения остановят производство до рисунков и озвучки.</small></label>'
              '<label class="sg-field"><span>Длина видео</span><select name="duration_seconds">' + ''.join(
                  f'<option value="{value}"' + (' selected' if length == str(value) else '') + f'>{label}</option>'
                  for value, label in [(30, 'Около 30 секунд — 3 сцены'), (60, 'Около минуты — 6 сцен, объяснение подробнее')]) +
@@ -384,6 +401,7 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
                                       (19, '19'), (25, '25'), (34, '34'), (45, '45')]) +
              '</select><small>Это лимит обращений к моделям; точная сумма списаний неизвестна. Для видео на 30 секунд без проверки рисунков нужно 14 вызовов, с проверкой 19; для минуты 26 и 34.</small></label></details>'
              '<button class="btn primary">Сохранить и перейти к подтверждению</button></form></section>')
+    body += topic_picker_html(product_id)
     return body
 
 
