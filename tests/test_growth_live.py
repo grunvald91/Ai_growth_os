@@ -238,3 +238,87 @@ def test_campaign_form_creates_real_draft_and_validates(live):
     duplicate=client.post(url,data=fields)
     assert duplicate.status_code==409
     assert 'data-growth-design="v4"' in duplicate.text
+
+
+def _v4_campaign_fields(key='EXP-EDIT-001', name='Черновик', budget='100'):
+    from app.api.growth_campaigns import FIELDS
+    fields = {key: 'Проверка' for key, _ in FIELDS}
+    fields.update(experiment_key=key, name=name, budget=budget,
+                  observation_window_days='7', time_budget_minutes='45', currency='RUB')
+    return fields
+
+
+def test_v4_campaign_detail_and_draft_editor_preserve_non_form_fields(live):
+    from sqlalchemy import select
+    from app.models.domain import Experiment, CostRecord, Publication, Task
+    client, db, product = live
+    base = f'/studio/products/{product.id}/campaigns'
+    assert client.post(base+'/new', data=_v4_campaign_fields(),
+                       follow_redirects=False).status_code == 303
+    record = db.scalar(select(Experiment).where(Experiment.product_id == product.id))
+    record.secondary_signals = ['Клиенты']
+    db.commit()
+    assert f'/campaigns/{record.id}' in client.get(base).text
+    detail = client.get(f'{base}/{record.id}?design=v4')
+    assert detail.status_code == 200
+    assert 'data-growth-design="v4"' in detail.text
+    assert 'Редактировать черновик' in detail.text
+    edit = client.get(f'{base}/{record.id}/edit?design=v4')
+    assert edit.status_code == 200 and 'name="hypothesis"' in edit.text
+    edited = client.post(f'{base}/{record.id}/edit',
+                         data=_v4_campaign_fields(name='Тест <безопасно>', budget='250'),
+                         follow_redirects=False)
+    assert edited.status_code == 303
+    assert edited.headers['location'].endswith(f'/campaigns/{record.id}')
+    db.refresh(record)
+    assert record.name == 'Тест <безопасно>'
+    assert record.budget == 250
+    assert record.secondary_signals == ['Клиенты'] and record.status == 'draft'
+    html = client.get(f'{base}/{record.id}?design=v4').text
+    assert 'Тест &lt;безопасно&gt;' in html and 'Тест <безопасно>' not in html
+    for cls in (Task, CostRecord, Publication):
+        assert list(db.scalars(select(cls))) == []
+
+
+def test_v4_campaign_edit_keeps_record_on_validation_and_key_conflict(live):
+    from sqlalchemy import select
+    from app.models.domain import Experiment
+    client, db, product = live
+    base = f'/studio/products/{product.id}/campaigns'
+    for key in ('EXP-EDIT-001', 'EXP-EDIT-002'):
+        assert client.post(base+'/new', data=_v4_campaign_fields(key),
+                           follow_redirects=False).status_code == 303
+    records = list(db.scalars(select(Experiment).where(Experiment.product_id == product.id)
+                              .order_by(Experiment.experiment_key)))
+    first, second = records
+    path = f'{base}/{first.id}/edit'
+    assert client.post(path, data=_v4_campaign_fields(budget='-3')).status_code == 422
+    duplicate = client.post(path, data=_v4_campaign_fields(key=second.experiment_key))
+    assert duplicate.status_code == 409
+    db.refresh(first)
+    assert first.experiment_key == 'EXP-EDIT-001' and first.budget == 100
+
+
+def test_v4_campaign_scope_and_non_draft_protection(live):
+    from sqlalchemy import select
+    from app.models.domain import Experiment, Product
+    client, db, product = live
+    other = Product(name='Чужая компания', slug='other-campaign-v4')
+    db.add(other)
+    db.commit()
+    other_base = f'/studio/products/{other.id}/campaigns'
+    assert client.post(other_base+'/new', data=_v4_campaign_fields(key='EXP-OTHER-123'),
+                       follow_redirects=False).status_code == 303
+    foreign = db.scalar(select(Experiment).where(Experiment.product_id == other.id))
+    own_base = f'/studio/products/{product.id}/campaigns/{foreign.id}'
+    assert client.get(own_base).status_code == 404
+    assert client.get(own_base+'/edit').status_code == 404
+    assert client.post(own_base+'/edit', data=_v4_campaign_fields()).status_code == 404
+    foreign.status = 'running'
+    db.commit()
+    assert 'Редактировать черновик' not in client.get(f'{other_base}/{foreign.id}').text
+    assert client.get(f'{other_base}/{foreign.id}/edit').status_code == 409
+    assert client.post(f'{other_base}/{foreign.id}/edit',
+                       data=_v4_campaign_fields(name='Не сохранять')).status_code == 409
+    db.refresh(foreign)
+    assert foreign.status == 'running' and foreign.name == 'Черновик'

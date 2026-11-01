@@ -135,11 +135,16 @@ def campaigns_page(product_id: UUID, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
     rows = list(db.scalars(select(Experiment).where(Experiment.product_id == product_id)
                           .order_by(Experiment.created_at.desc()).limit(100)))
-    cards = ''.join(f'<article class="panel"><h2>{html.escape(row.name)}</h2>'
-                    f'<p>{html.escape(row.status)} · {html.escape(row.channel or "Канал не задан")}</p>'
-                    f'<p>{html.escape(row.hypothesis)}</p><p>Бюджет: '
-                    f'{html.escape(str(row.budget)) if row.budget is not None else "не задан"}</p></article>'
-                    for row in rows)
+    cards = ''.join(
+        f'<article class="panel"><h2>{html.escape(row.name)}</h2>'
+        f'<p>{html.escape(row.status)} · {html.escape(row.channel or "Канал не задан")}</p>'
+        f'<p>{html.escape(row.hypothesis)}</p><p>Бюджет: '
+        f'{html.escape(str(row.budget)) if row.budget is not None else "не задан"} '
+        f'{html.escape(row.currency or "")}</p>'
+        f'<a class="btn" href="/studio/products/{product_id}/campaigns/{row.id}">'
+        'Открыть кампанию</a></article>'
+        for row in rows
+    )
     base = f'/studio/products/{product_id}'
     return studio_page_shell(product, active='campaigns', title='Кампании',
         subtitle='Эксперименты и планы вашей компании.', body=
