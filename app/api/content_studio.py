@@ -1834,7 +1834,9 @@ def studio_product(product_id: UUID, request: Request, db: Session = Depends(get
     from app.api.studio_sso import _canonical_pwa
     design = choice if choice in {"v4", "classic"} else request.cookies.get("growth_design")
     canonical_v4 = design not in {"v4", "classic"} and _canonical_pwa(request, settings)
-    page = home_html(db, product, settings, request) if design == "v4" or canonical_v4 or enabled_for(settings, product) else product_dashboard(db, product)
+    # An explicit Classic preference must win even for dispatcher-enabled businesses.
+    use_home = design == "v4" or (design != "classic" and (canonical_v4 or enabled_for(settings, product)))
+    page = home_html(db, product, settings, request) if use_home else product_dashboard(db, product)
     response = HTMLResponse(page)
     response.headers["Cache-Control"] = "no-store"
     return response
