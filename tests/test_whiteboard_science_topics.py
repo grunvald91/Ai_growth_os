@@ -41,6 +41,7 @@ def test_hot_mass_reference_is_grounded_and_unsupported_claim_blocks():
     req = science_request()
     assert [r["id"] for r in reference_anchors(req)] == ["SEP", "NIST"]
     approved = FactReview(status="supported", summary="Подтверждено заявленными источниками.",
+        verified_source_ids=["SEP", "NIST"],
         findings=[FactFinding(claim="Нагретое тело получает дополнительную энергию.",
                               verdict="supported", explanation="Дополнительная энергия меняет массу.",
                               reference_id="SEP")])
