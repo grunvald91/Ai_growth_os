@@ -1,23 +1,33 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { isTrustedStudioTicketUrl } from '../utils/studioTicketUrl'
 
-/**
- * Открывает маркетинговую студию для выбранного заведения по одноразовой ссылке: студия узнаёт, кто вы и какое
- * заведение открыто, и при первом входе сама создаёт компанию из данных заведения.
- * Если вход не настроен или не получился — обычный вход в студию, как раньше.
+/** Open only a freshly issued, server-authorized Growth SSO link.
+ * On failures stay in the ServGo admin; never fall back to Growth's login.
  */
 export function useOpenStudio(businessId: number | null | undefined) {
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => { setError('') }, [businessId])
+
   const open = async () => {
     if (busy) return
+    if (!businessId || !Number.isSafeInteger(businessId) || businessId < 1) {
+      setError('Сначала выберите бизнес в админке.')
+      return
+    }
     setBusy(true)
+    setError('')
     try {
-      if (businessId == null) throw new Error('no business')
       const { url } = await api.studioTicket(businessId)
+      if (!isTrustedStudioTicketUrl(url)) throw new Error('Untrusted Growth SSO destination')
       window.location.assign(url)
     } catch {
-      window.location.assign('https://growth.servgo.ru/studio')
+      setError('Не удалось открыть маркетинг. Проверьте доступ и попробуйте снова.')
+      setBusy(false)
     }
   }
-  return { open, busy }
+
+  return { open, busy, error, clearError: () => setError('') }
 }

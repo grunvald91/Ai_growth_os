@@ -191,7 +191,7 @@ function App() {
         <Route path="/login/yandex" element={<YandexLoginPage />} />
         <Route path="/mail" element={<OwnerMailPage />} />
         <Route path="/workspace/mail" element={<OwnerMailPage />} />
-        <Route path="/workspace/growth" element={<ProtectedRoute restorationPending={authRestoring}><GrowthWorkspacePage /></ProtectedRoute>} />
+        <Route path="/workspace/growth" element={<AdminRoute restorationPending={authRestoring}><GrowthWorkspacePage /></AdminRoute>} />
         <Route path="/account" element={<ProtectedRoute restorationPending={authRestoring}><AccountPage /></ProtectedRoute>} />
         <Route path="/master" element={<ProtectedRoute restorationPending={authRestoring}><MasterPage /></ProtectedRoute>} />
         <Route path="/admin/prepayments" element={<AdminRoute restorationPending={authRestoring}><PrepaymentsPage /></AdminRoute>} />

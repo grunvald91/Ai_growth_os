@@ -28,7 +28,7 @@ const statusWord = (status: string) => STATUS_WORDS[status] ?? 'Ожидает'
 
 export function AdminDashboard() {
   const { businesses, selectedId: businessId, selectBusiness } = useAdminBusiness()
-  const { open: openStudio, busy: studioBusy } = useOpenStudio(businessId)
+  const { open: openStudio, busy: studioBusy, error: studioError } = useOpenStudio(businessId)
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [bizPhotos, setBizPhotos] = useState<string[]>([])
@@ -167,6 +167,7 @@ export function AdminDashboard() {
         </div>
         <ChevronRight size={18} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--s-accent)' }} />
       </button>
+      {studioError && <p role="alert" className="ds-sub" style={{ color: 'var(--s-danger)', padding: '0 12px 8px' }}>{studioError}</p>}
       {/* Статистика */}
       <div className="ds-stats-grid dash-stats" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
         {loading

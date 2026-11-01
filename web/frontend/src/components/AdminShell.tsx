@@ -1,6 +1,6 @@
 import { clearLogin } from '../authUtils'
 import { OwnerMailEntry } from './OwnerMailEntry'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
@@ -54,6 +54,23 @@ export function AdminShell({
 }) {
   const [theme, toggleTheme] = useTheme()
   const navigate = useNavigate()
+  // Platform Mail belongs to the platform owner, not to tenant owners.
+  // Check on the server; never infer authorization from localStorage.userRole.
+  const [mailAllowed, setMailAllowed] = useState(false)
+  const accessToken = localStorage.getItem('token')
+  useEffect(() => {
+    let active = true
+    setMailAllowed(false)
+    if (accessToken) {
+      fetch('/api/owner-mail/permission', {
+        headers: { Authorization: 'Bearer ' + accessToken },
+        cache: 'no-store',
+      }).then(async (res) => {
+        if (active) setMailAllowed(res.ok && (await res.json()).allowed === true)
+      }).catch(() => { if (active) setMailAllowed(false) })
+    }
+    return () => { active = false }
+  }, [accessToken])
 
   const handleLogout = async () => {
     sessionStorage.setItem('servgoExplicitLogout', '1')
@@ -69,7 +86,7 @@ export function AdminShell({
         <h1 className="ds-h1 ds-shell-title">{title}</h1>
         <div className="ds-shell-header-extra">{headerExtra}</div>
         <div className="ds-shell-header-desktop">
-          <OwnerMailEntry />
+          {mailAllowed && <OwnerMailEntry />}
           <button className="ds-icon-btn bordered" onClick={toggleTheme} aria-label="Тема">
             {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
           </button>
@@ -85,7 +102,7 @@ export function AdminShell({
         <div className={`ds-page${pageClassName ? ` ${pageClassName}` : ''}`}>{children}</div>
       </div>
 
-      <AdminBottomNav theme={theme} toggleTheme={toggleTheme} onLogout={handleLogout} />
+      <AdminBottomNav theme={theme} toggleTheme={toggleTheme} onLogout={handleLogout} mailAllowed={mailAllowed} />
     </div>,
     document.body
   )
@@ -93,18 +110,19 @@ export function AdminShell({
 
 
 /** Нижняя навигация админки: четыре раздела и «Ещё» со всеми остальными. */
-export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
+export function AdminBottomNav({ theme, toggleTheme, onLogout, mailAllowed = false }: {
   theme: 'light' | 'dark'
   toggleTheme: () => void
   onLogout: () => void
+  mailAllowed?: boolean
 }) {
   const { pathname } = useLocation()
   const [moreOpen, setMoreOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
-  const moreActive = MORE.some(item => item.to === pathname)
+  const moreActive = MORE.some(item => item.to === pathname) || pathname === '/workspace/growth'
   const handleLogout = onLogout
   const { selectedId } = useAdminBusiness()
-  const { open: openStudio, busy: studioBusy } = useOpenStudio(selectedId)
+  const { open: openStudio, busy: studioBusy, error: studioError } = useOpenStudio(selectedId)
   return (
     <>
         <nav className="ds-bottomnav">
@@ -116,7 +134,7 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
           ))}
           {/* Десктоп: все разделы сразу в боковом меню, без «Ещё» — любой экран в один клик. */}
           <div className="ds-bn-group ds-desk-only">Управление</div>
-          {MORE.map(({ to, label, Icon }) => (
+          {MORE.filter(item => mailAllowed || item.to !== '/mail').map(({ to, label, Icon }) => (
             <Link key={to} to={to} className={`ds-bn ds-desk-only${pathname === to ? ' active' : ''}`}>
               <Icon size={21} />
               <span>{label}</span>
@@ -146,7 +164,7 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
                 <button className="ds-icon-btn" onClick={() => setMoreOpen(false)} aria-label="Закрыть"><X size={18} /></button>
               </div>
               <nav className="ds-more-list">
-                {MORE.map(({ to, label, Icon }) => (
+                {MORE.filter(item => mailAllowed || item.to !== '/mail').map(({ to, label, Icon }) => (
                   <Link key={to} to={to} onClick={() => setMoreOpen(false)} className={`ds-more-item${pathname === to ? ' active' : ''}`}>
                     <Icon size={20} /><span>{label}</span><ChevronRight size={17} className="ds-more-chev" />
                   </Link>
@@ -168,6 +186,12 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout }: {
             </div>
           </div>
         )}
+        {studioError && <div role="alert" style={{
+          position: 'fixed', zIndex: 120, left: 16, right: 16, bottom: 88,
+          margin: '0 auto', maxWidth: 480, border: '1px solid var(--s-line)',
+          borderRadius: 14, padding: 12, background: 'var(--s-surface)',
+          color: 'var(--s-danger)', boxShadow: 'var(--sh-pop)', fontSize: 13,
+        }}>{studioError}</div>}
         {createOpen && <CreateBusinessSheet onClose={() => setCreateOpen(false)} />}
     </>
   )
