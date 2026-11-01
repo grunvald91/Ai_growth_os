@@ -1,3 +1,4 @@
+# Integrated recheck: retain main reverse-proxy CSRF fix and verify forwarded HTTPS setup.
 name: Growth first visit + Air shell — targeted tests and guarded deploy
 on:
   push:
@@ -39,6 +40,8 @@ jobs:
           assert 'request.url.netloc.casefold() == "servgo.ru"' in s
           assert 'path=SETUP_PATH' in s and 'httponly=True' in s
           assert 'response.delete_cookie(SETUP_COOKIE' in s
+          assert '_canonical_pwa(request, settings)' in s
+          assert 'x-forwarded-proto' in s
           assert 'sgNavFlow' in css and '/fonts/servgo-onest-cyrillic.woff2' in css
           print('SSO_UI_AND_CSS_CONTRACTS=PASS')
           PY
