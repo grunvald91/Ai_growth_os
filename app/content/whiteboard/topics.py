@@ -36,20 +36,24 @@ def suggest_company_video_topics(products_root, product) -> dict:
         if len(title) >= 8 and title.casefold() not in {t["topic"].casefold() for t in proposals}:
             proposals.append({"topic": title, "basis": basis})
 
-    for name in services[:3]:
-        if not name:
-            continue
-        add(f"Что важно знать об услуге «{name}» перед выбором?", "Услуга из профиля компании")
-        add(f"3 вопроса, которые стоит задать перед заказом «{name}»", "Услуга из профиля компании")
+    # Mix service explainers, audience pain, practical task and niche in one batch.
+    # Never infer business outcomes, prices, statistics or unverified features.
+    if services:
+        add(f"Что важно уточнить перед выбором «{services[0]}»?", "Услуга из профиля компании")
     for need in needs[:3]:
         if need:
-            add(f"Разбираем вопрос клиента: {need}", "Запрос клиентов из профиля")
+            add(f"Ситуация клиента: {need}. Как подойти к решению?", "Проблема аудитории из профиля")
     for job in jobs[:2]:
         if job:
-            add(f"Как разобраться в задаче: {job}", "Задача аудитории из профиля")
+            add(f"Пошагово: {job}", "Задача аудитории из профиля")
+    for name in services[1:3]:
+        if name:
+            add(f"Как устроен выбор «{name}»: простое объяснение", "Услуга из профиля компании")
     if niche:
-        add(f"Что обычно важно клиенту при выборе услуг в сфере «{niche}»?", "Ниша компании")
-        add(f"Какие вопросы задать специалисту в сфере «{niche}»?", "Ниша компании")
+        add(f"Что уточнить при выборе услуг в сфере «{niche}»?", "Ниша компании")
+        add(f"Распространённые вопросы клиентов в сфере «{niche}»", "Ниша компании")
+    if services:
+        add(f"Кому подходит «{services[0]}» и что спросить заранее?", "Услуга из профиля компании")
     if not proposals:
         return {"topics": [], "profile_ready": False,
                 "message": "Для предложений нужны хотя бы одна услуга, ниша или запрос клиента."}

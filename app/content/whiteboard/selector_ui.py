@@ -114,7 +114,7 @@ def topic_picker_html(product_id) -> str:
       }
     } catch (_) { status.textContent = "Не удалось загрузить темы. Попробуйте снова."; }
   });
-  for (const name of ["duration_seconds","science_mode","visual_review","max_api_calls"]) {
+  for (const name of ["duration_seconds","science_mode","visual_review","max_api_calls","source_script"]) {
     field(name).addEventListener("change", () => { if (chosen) void showQuote(); });
   }
   launch.addEventListener("click", () => {

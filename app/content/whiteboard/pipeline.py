@@ -89,6 +89,12 @@ class WhiteboardPipeline:
             self._check_text(value)
         if self.checkpoints is not None and bool(self.checkpoints.identity.get('visual_review')) != self.visual_review:
             raise ValueError('Checkpoint visual review policy does not match this job')
+        science_required = requires_science_review(request)
+        if science_required and self.science_reviewer is not None:
+            reviewer = getattr(self.science_reviewer, 'provider', self.science_reviewer)
+            prepare = getattr(reviewer, 'prepare_sources', None)
+            if callable(prepare):
+                await prepare(request)  # Zero paid model calls; public evidence only.
         self._report('storyboard', 0)
         if self.checkpoints is not None:
             if self.checkpoints.identity['request'] != request.model_dump(mode='json'):
@@ -100,7 +106,6 @@ class WhiteboardPipeline:
             storyboard = await self.storyboard.plan(request)
         if len(storyboard.scenes) != request.scenes:
             raise ValueError("Storyboard scene count mismatch")
-        science_required = requires_science_review(request)
         total = 2 + 2 * len(storyboard.scenes) + sum(len(scene.beats) for scene in storyboard.scenes)
         if science_required:
             total += 1

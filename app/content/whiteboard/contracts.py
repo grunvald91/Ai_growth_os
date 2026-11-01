@@ -38,6 +38,7 @@ class WhiteboardRequest(Contract):
     reference_materials: str = Field(default="", max_length=6000)
     # Legacy requests default to general; new Studio forms use auto detection.
     science_mode: Literal["general", "auto", "scientific"] = "general"
+    science_policy_version: int = Field(default=0, ge=0, le=1)
     # API execution must be manually approved. This is NOT a spending cap.
     request_generation: bool = False
 
@@ -60,6 +61,8 @@ class WhiteboardRequest(Contract):
                 data.pop(field, None)
         if data.get("science_mode") == "general":
             data.pop("science_mode", None)
+        if not data.get("science_policy_version"):
+            data.pop("science_policy_version", None)
         return data
 
 

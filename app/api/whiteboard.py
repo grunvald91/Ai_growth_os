@@ -96,7 +96,8 @@ def _queue(db, product, body, settings):
                                 duration_seconds=body.duration_seconds, scenes=SCENES_FOR_SECONDS[body.duration_seconds],
                                 call_to_action=body.call_to_action,
                                 source_script=body.source_script, background_notes=body.background_notes,
-                                reference_materials=body.reference_materials, science_mode=body.science_mode)
+                                reference_materials=body.reference_materials, science_mode=body.science_mode,
+                                science_policy_version=1)
     needed = required_calls(request, visual_review=body.visual_review)
     if body.max_api_calls is not None and body.max_api_calls < needed:
         raise HTTPException(422, f'Для этого видео нужно не меньше {needed} вызовов. Выберите лимит {needed} или больше, либо «Столько, сколько нужно».')
@@ -391,7 +392,7 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
              '<small>Материалы пользователя сами по себе не считаются независимым подтверждением фактов.</small></label>'
              '<label class="sg-field"><span>Научная проверка</span><select name="science_mode">' + ''.join(
                  f'<option value="{value}"' + (' selected' if science_mode == value else '') + f'>{label}</option>'
-                 for value, label in [('auto', 'Автоматически по теме'), ('scientific', 'Научный сюжет — обязательно проверять'), ('general', 'Обычный сюжет')]) +
+                 for value, label in [('auto', 'Автоматически по теме'), ('scientific', 'Научный сюжет — обязательно проверять'), ('general', 'Обычный сюжет (научные утверждения всё равно проверяются)')]) +
              '</select><small>Неподтверждённые научные утверждения остановят производство до рисунков и озвучки.</small></label>'
              '<label class="sg-field"><span>Длина видео</span><select name="duration_seconds">' + ''.join(
                  f'<option value="{value}"' + (' selected' if length == str(value) else '') + f'>{label}</option>'
@@ -494,7 +495,7 @@ async def studio_topic_quote(product_id: UUID, request: Request, db: Session = D
         seconds = int(q.get('duration_seconds', '30'))
         draft = WhiteboardRequest(product_id=product_id, topic=q.get('topic', ''),
             duration_seconds=seconds, scenes=SCENES_FOR_SECONDS[seconds],
-            science_mode=q.get('science_mode', 'auto'),
+            science_mode=q.get('science_mode', 'auto'), science_policy_version=1,
             source_script=q.get('source_script', ''))
         needed = required_calls(draft, visual_review=q.get('visual_review', 'once') == 'once')
         raw = q.get('max_api_calls', 'auto')

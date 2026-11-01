@@ -92,6 +92,10 @@ def records(db, task, *, lock=False):
 
 
 def queue_job(db, request: WhiteboardRequest, models: WhiteboardModels, *, max_api_calls=25, visual_review=False, image_provider='openrouter'):
+    # New approvals are v1. Do not alter already persisted legacy requests:
+    # only requests entering the queue path are upgraded.
+    if request.science_policy_version == 0:
+        request = request.model_copy(update={'science_policy_version': 1})
     gateway = PrivacyGateway()
     if any(gateway.sanitize_text(value) != value for value in (
         request.topic, request.call_to_action, request.source_script,

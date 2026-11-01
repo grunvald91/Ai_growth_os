@@ -26,9 +26,12 @@ SCIENCE_TERMS = re.compile(
 
 
 def requires_science_review(request: WhiteboardRequest) -> bool:
+    # The v0 default belongs only to previously approved immutable requests.
+    # New v1 requests must check scientific content even if the owner selects
+    # the editorial/general label in the UI or API.
+    scientific = bool(SCIENCE_TERMS.search(request.topic + " " + request.source_script))
     return request.science_mode == "scientific" or (
-        request.science_mode == "auto"
-        and bool(SCIENCE_TERMS.search(request.topic + " " + request.source_script))
+        scientific and (request.science_policy_version >= 1 or request.science_mode == "auto")
     )
 
 
@@ -74,50 +77,166 @@ class _HTMLText(HTMLParser):
             self.text.append(data.strip())
 
 
-async def retrieved_references(request: WhiteboardRequest) -> list[dict[str, str]]:
-    """Public evidence only. No private-network URLs, redirects or arbitrary downloads."""
+async def retrieved_references(request: WhiteboardRequest, *, client=None) -> list[dict[str, str]]:
+    """Discover factual material free of LLM calls; fail closed if nothing is found.
+
+    Only curated scientific anchors, fetched allowlisted pages and DOI-identified
+    publisher abstracts are shown to the reviewer. Search snippets alone are ignored.
+    """
     sources = reference_anchors(request)
-    seen = {item["url"] for item in sources}
-    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+    seen = {row["url"] for row in sources}
+    own_client = client is None
+    if own_client:
+        client = httpx.AsyncClient(timeout=httpx.Timeout(8.0, connect=3.0), follow_redirects=False,
+                                   trust_env=False)
+    try:
         for raw in URLS.findall(request.reference_materials)[:5]:
             url = raw.rstrip(".,;)]")
-            try:
-                parsed = urlsplit(url)
-                port = parsed.port
-                host = (parsed.hostname or "").casefold()
-            except ValueError:
+            if url in seen or not _source_url_allowed(url):
                 continue
-            if (url in seen or parsed.username or parsed.password or
-                port not in (None, 443) or
-                not any(host == h or host.endswith("." + h) for h in TRUSTED_HOSTS)):
+            text = await _read_public_html(client, url)
+            if len(text) < 140:
                 continue
             seen.add(url)
-            if len(sources) >= 5:
-                break
-            try:
-                async with client.stream("GET", url, headers={"Accept": "text/html"}) as response:
-                    if (response.status_code != 200 or
-                        "text/html" not in response.headers.get("content-type", "").lower()):
-                        continue
-                    payload = bytearray()
-                    too_large = False
-                    async for part in response.aiter_bytes():
-                        if len(payload) + len(part) > 200_000:
-                            too_large = True
-                            break
-                        payload.extend(part)
-                    if too_large:
-                        continue
-                parser = _HTMLText()
-                parser.feed(bytes(payload).decode("utf-8", errors="replace"))
-                excerpt = " ".join(parser.text)[:9000]
-                if len(excerpt) < 100:
-                    continue
-                sources.append({"id": "WEB" + str(len(sources) + 1), "url": url,
-                                "claim": excerpt})
-            except (httpx.HTTPError, ValueError, UnicodeError):
+            sources.append({"id": "WEB" + str(1 + sum(x["id"].startswith("WEB") for x in sources)),
+                            "url": url, "claim": "Verified page text: " + text[:2600]})
+        if not sources:
+            sources.extend(await _crossref_discover(client, request))
+        if len(sources) < 2:
+            for row in await _trusted_web_discover(client, request):
+                if row["url"] not in seen and len(sources) < 4:
+                    seen.add(row["url"])
+                    row["id"] = "WEB" + str(1 + sum(x["id"].startswith("WEB") for x in sources))
+                    sources.append(row)
+        return sources[:5]
+    finally:
+        if own_client:
+            await client.aclose()
+
+
+# Public evidence discovery: uses only fixed registry/search hosts and a small
+# allowlist of scientific publishers. Search snippets alone NEVER count as proof.
+SCIENTIFIC_SEARCH_QUERY = "https://api.crossref.org/works"
+DUCKDUCKGO_SEARCH = "https://html.duckduckgo.com/html/"
+DOI_PATTERN = re.compile(r"^10\\.\\d{4,9}/[-._;()/:A-Z0-9]+$", re.I)
+RUSSIAN_TO_ENGLISH = (
+    ("электрон", "electron"), ("заряж", "charged"), ("разряж", "discharged"),
+    ("аккумулятор", "battery"), ("температур", "temperature"),
+    ("масс", "mass"), ("горяч", "heat"), ("нагрев", "heating"),
+    ("холод", "cold"), ("энерги", "energy"), ("гравитац", "gravity"),
+    ("квант", "quantum"), ("атом", "atom"), ("свет", "light"),
+    ("скорост", "velocity"), ("биолог", "biology"), ("генет", "genetics"),
+    ("нейрон", "neuron"), ("космос", "astronomy"), ("давлен", "pressure"),
+    ("теплот", "heat"), ("вирус", "virus"), ("бактери", "bacteria"),
+    ("мозг", "brain"), ("плотност", "density"),
+)
+SEARCH_HEADERS = {"User-Agent": "ServGoGrowth/1.0 (scientific source lookup)",
+                  "Accept": "application/json, text/html"}
+
+def _search_terms(request: WhiteboardRequest) -> list[str]:
+    topic = " ".join(request.topic.split())[:180]
+    english = [en for ru, en in RUSSIAN_TO_ENGLISH if ru in topic.casefold()]
+    return [topic, " ".join(dict.fromkeys(english))] if len(english) >= 2 else [topic]
+
+
+def _source_plain_text(text: str) -> str:
+    parser = _HTMLText()
+    parser.feed(text[:30_000])
+    return " ".join(parser.text)[:3500]
+
+
+def _source_url_allowed(url: str) -> bool:
+    try:
+        value = urlsplit(url)
+        host = (value.hostname or "").casefold()
+        return (value.scheme == "https" and value.port in (None, 443)
+                and not value.username and not value.password
+                and not value.fragment and
+                any(host == suffix or host.endswith("." + suffix) for suffix in TRUSTED_HOSTS))
+    except ValueError:
+        return False
+
+
+async def _read_public_html(client: httpx.AsyncClient, url: str) -> str:
+    if not _source_url_allowed(url):
+        return ""
+    try:
+        async with client.stream("GET", url, headers={"Accept": "text/html"}) as reply:
+            if reply.status_code != 200 or "text/html" not in reply.headers.get("content-type","").lower():
+                return ""
+            content = bytearray()
+            async for chunk in reply.aiter_bytes():
+                if len(content) + len(chunk) > 200_000:
+                    return ""
+                content.extend(chunk)
+        return _source_plain_text(bytes(content).decode("utf-8", errors="replace"))
+    except (httpx.HTTPError, UnicodeError, ValueError):
+        return ""
+
+
+async def _crossref_discover(client: httpx.AsyncClient, request: WhiteboardRequest) -> list[dict[str, str]]:
+    found = []
+    seen = set()
+    for query in _search_terms(request)[:2]:
+        try:
+            result = await client.get(SCIENTIFIC_SEARCH_QUERY,
+                params={"query.bibliographic": query, "rows": 8,
+                        "select": "DOI,title,abstract,type,container-title"},
+                headers=SEARCH_HEADERS)
+            if result.status_code != 200 or len(result.content) > 600_000:
                 continue
-    return sources
+            works = result.json().get("message", {}).get("items", [])
+        except (httpx.HTTPError, ValueError, TypeError):
+            continue
+        for item in works[:8] if isinstance(works, list) else []:
+            if item.get("type") not in {"journal-article", "book-chapter", "report"}:
+                continue
+            doi = str(item.get("DOI", ""))
+            if not DOI_PATTERN.fullmatch(doi) or doi.casefold() in seen:
+                continue
+            title = item.get("title") or []
+            title = str(title[0]) if isinstance(title, list) and title else ""
+            abstract = _source_plain_text(str(item.get("abstract", "")))
+            if len(title) < 10 or len(abstract) < 140:
+                continue  # metadata without a usable abstract is not evidence.
+            # Crossref search is rank-based, not independent fact verification.
+            seen.add(doi.casefold())
+            found.append({"id": f"CR{len(found) + 1}",
+                          "url": "https://doi.org/" + doi,
+                          "claim": ("Published research metadata (not independently peer-reviewed): "
+                                    + title[:250] + ". Abstract: " + abstract[:2450])})
+            if len(found) >= 3:
+                return found
+        if found:
+            break
+    return found
+
+
+async def _trusted_web_discover(client: httpx.AsyncClient, request: WhiteboardRequest) -> list[dict[str, str]]:
+    from app.content.viral_content_research import parse_duckduckgo_html
+    rows = []
+    query = request.topic[:160]
+    try:
+        response = await client.post(DUCKDUCKGO_SEARCH, data={"q": query, "kl": "ru-ru"},
+                                     headers={**SEARCH_HEADERS, "Accept": "text/html"})
+        if response.status_code == 200 and len(response.content) <= 350_000:
+            rows = parse_duckduckgo_html(response.text, query)[:15]
+    except (httpx.HTTPError, ValueError):
+        pass
+    result = []
+    for candidate in rows:
+        url = str(candidate.url)
+        if not _source_url_allowed(url):
+            continue
+        excerpt = await _read_public_html(client, url)
+        if len(excerpt) < 180:
+            continue
+        result.append({"id": f"WEB{len(result)+1}", "url": url,
+                       "claim": ("Scientific/public institutional page, verify relevance: "
+                                 + candidate.title[:150] + ". Text: " + excerpt[:2450])})
+        if len(result) >= 2:
+            break
+    return result
 
 
 class FactFinding(Contract):
@@ -125,6 +244,7 @@ class FactFinding(Contract):
     verdict: Literal["supported", "contradicted", "unverified", "not_factual"]
     explanation: str = Field(min_length=12, max_length=600)
     reference_id: str | None = None
+    evidence_quote: str | None = Field(default=None, max_length=600)
 
 
 class FactReview(Contract):
@@ -192,20 +312,16 @@ def evidence_supported(review: FactReview, request: WhiteboardRequest,
     verified = set(review.verified_source_ids)
     if review.evidence_request_digest and review.evidence_request_digest != _evidence_digest(request):
         return False
-    # No source from a different topic may be reused to rubber-stamp this one.
-    trusted_urls = [
-        urlsplit(url.rstrip(".,;)]")).hostname or ""
-        for url in URLS.findall(request.reference_materials)
-    ]
-    external = bool(trusted_urls and any(
-        any(h == suffix or h.endswith("." + suffix) for suffix in TRUSTED_HOSTS)
-        for h in trusted_urls
-    ))
-    allowed = (verified & canonical) | (
-        {source for source in verified if re.fullmatch(r"WEB[1-5]", source)}
-        if external and review.evidence_request_digest == _evidence_digest(request)
-        else set()
-    )
+    # FactReviewer attaches source links itself, never trusting IDs supplied by the LLM.
+    # Discovered DOIs and approved hosts are accepted ONLY with an exact request digest.
+    links = {x.get("id"): x.get("url") for x in review.source_links}
+    discovered = {
+        source_id for source_id, url in links.items()
+        if source_id in verified and isinstance(url, str)
+        and ((str(source_id).startswith("CR") and url.startswith("https://doi.org/"))
+             or (str(source_id).startswith("WEB") and _source_url_allowed(url)))
+    } if review.evidence_request_digest == _evidence_digest(request) else set()
+    allowed = (verified & canonical) | discovered
     return (bool(allowed) and review.status == "supported"
             and (storyboard is None or not known_mass_falsehood(request, storyboard))
             and all(
@@ -232,8 +348,9 @@ def science_response_schema() -> dict:
                         "supported", "contradicted", "unverified", "not_factual"]},
                     "explanation": {"type": "string"},
                     "reference_id": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                    "evidence_quote": {"anyOf": [{"type": "string"}, {"type": "null"}]},
                 },
-                "required": ["claim", "verdict", "explanation", "reference_id"],
+                "required": ["claim", "verdict", "explanation", "reference_id", "evidence_quote"],
             }},
             "summary": {"type": "string"},
         },
@@ -244,9 +361,16 @@ def science_response_schema() -> dict:
 class FactReviewer:
     def __init__(self, service, model: str):
         self.service, self.model = service, model
+        self._sources: list[dict[str, str]] | None = None
+
+    async def prepare_sources(self, request: WhiteboardRequest) -> None:
+        from .runtime import ReadinessError
+        self._sources = await retrieved_references(request)
+        if not self._sources:
+            raise ReadinessError("science_sources_missing")
 
     async def review(self, storyboard: WhiteboardStoryboard, request: WhiteboardRequest) -> FactReview:
-        sources = await retrieved_references(request)
+        sources = self._sources if self._sources is not None else await retrieved_references(request)
         data = {"topic": request.topic,
                 "narration": [b.narration for s in storyboard.scenes for b in s.beats],
                 "trusted_references": sources,
@@ -259,6 +383,9 @@ class FactReviewer:
             "верни ровно один finding, где claim буквально совпадает с ПОЛНЫМ текстом реплики. "
             "Если в реплике нет фактического утверждения, verdict=not_factual и reference_id=null. "
             "Нельзя пропускать реплики или считать научный тезис not_factual. "
+            "Для supported приведи evidence_quote: короткую дословную выдержку из trusted_references.claim. "
+            "Для not_factual укажи evidence_quote=null. "
+
             "Если утверждение противоречит источнику или не подтверждено, "
             "верни status=blocked и verdict=contradicted/unverified. "
             "Не путай изменение массы и возможность измерить его обычными весами. "
@@ -271,6 +398,17 @@ class FactReviewer:
             max_tokens=3800, response_schema=science_response_schema(),
         ))
         assessment = FactReview.model_validate_json(response.content)
+        # Require that any quoted evidence is actually present in the published
+        # excerpt rather than fabricated; the model's semantic verdict remains advisory.
+        source_text = {item["id"]: " ".join(item["claim"].split()).casefold()
+                       for item in sources}
+        for finding in assessment.findings:
+            if finding.verdict != "supported":
+                continue
+            quote = " ".join((finding.evidence_quote or "").split()).casefold()
+            if not quote or quote not in source_text.get(finding.reference_id, ""):
+                assessment = assessment.model_copy(update={"status": "blocked"})
+                break
         return assessment.model_copy(update={
             "verified_source_ids": [item["id"] for item in sources],
             "source_links": [{"id":item["id"], "url":item["url"]} for item in sources],
