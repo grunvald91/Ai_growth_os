@@ -7,6 +7,7 @@ from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.domain import AgentRun, Product, Task, TaskStatus
 from app.services.control import ControlService
+from app.services.campaign_lifecycle import task_halted, reconcile_pending
 from app.telegram_control_bot import TelegramAPI
 
 
@@ -86,6 +87,21 @@ def _recover_transient_failed_experiment_tasks(
     )
     recovered = 0
     for parent in parents:
+        # Recovery must never restart an explicitly stopped/finished experiment.
+        # Only a verified task brief can establish the relationship.
+        import json
+        from app.models.domain import Artifact
+        brief = db.scalar(select(Artifact).where(
+            Artifact.product_id == parent.product_id, Artifact.task_id == parent.id,
+            Artifact.kind == "task_brief",
+        ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+        if brief is not None:
+            try:
+                payload = json.loads(brief.content)
+            except (TypeError, ValueError):
+                payload = {}
+            if isinstance(payload, dict) and task_halted(db, parent, payload):
+                continue
         child_tasks = list(
             db.scalars(select(Task).where(Task.parent_id == parent.id))
         )
@@ -148,6 +164,10 @@ def _recover_transient_failed_experiment_tasks(
 
 async def run_once() -> int:
     settings = get_settings()
+    # Reconcile pending stop/finish after a worker acknowledgement. This is
+    # read-only for running campaigns and does not authorize any publication.
+    with SessionLocal() as db:
+        reconcile_pending(db)
     from app.content.whiteboard.worker import run_whiteboard_once
     if await run_whiteboard_once(SessionLocal, settings):
         return 1
