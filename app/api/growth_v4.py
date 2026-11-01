@@ -223,14 +223,14 @@ def render_v4(page, request, pid, switch):
                      'Исследование конкурентов')])
             warning = original.outer(original.find(cls='sg-warning'))
             content = (
-                '<div class="create-workspace animate-in">'
+                '<div class="route-content"><div class="create-workspace animate-in">'
                 '<header class="create-heading"><h1>Что создадим?</h1>'
                 '<p>Выберите формат и напишите тему. Остальное поможет подготовить ИИ-команда.</p>'
                 '</header><section class="surface create-panel">'
                 + warning + form + '</section>'
                 '<details class="create-toolbox"><summary>Другие инструменты'
                 '<span>Контент-план, SEO, кампании и разведка</span></summary>'
-                '<div class="create-tool-links">' + more + '</div></details></div>'
+                '<div class="create-tool-links">' + more + '</div></details></div></div>'
             )
     if pid and current == base+'/seo':
         stages = [('Поисковые вопросы','Подсказки Яндекса и Google','search'),
