@@ -167,13 +167,11 @@ def sso_create(request: Request, background: BackgroundTasks, c: str = Form(""),
         # A host-only HttpOnly setup cookie is not a CSRF exemption. Verify the
         # real proxy Host and form's Origin/Referer before accepting the intent.
         from app.api.content_studio_auth import require_studio_csrf
+        from fastapi import HTTPException
         try:
             require_studio_csrf(request, settings=settings)
-        except Exception as error:
-            from fastapi import HTTPException
-            if isinstance(error, HTTPException):
-                return _message("Неверный источник запроса", "Вернитесь в ServGo и повторите вход.", 403)
-            raise
+        except HTTPException:
+            return _message("Неверный источник запроса", "Вернитесь в ServGo и повторите вход.", 403)
         if c or business_id < 1:
             return _message("Ссылка устарела", "Откройте маркетинг из ServGo ещё раз.", 400)
         intent = request.cookies.get(SETUP_COOKIE, "")
