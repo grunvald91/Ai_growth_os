@@ -301,6 +301,7 @@ def command(db: Session, *, product_id: UUID, experiment_id: UUID,
         for task in tasks:
             if task.status in {TaskStatus.QUEUED, TaskStatus.WAITING_APPROVAL}:
                 task.status = TaskStatus.CANCELLED
+        db.flush()  # Persist cancellations before any populate_existing resource reads.
         cancelled = _cancel_queued_telegram(db, campaign)
         pending = _reconcile_locked(db, campaign, tasks)
     else:
@@ -440,6 +441,7 @@ def recover_orphaned_research(
             run.status = "failed"
             run.error = "operator_verified_orphan_recovery"
             run.finished_at = datetime.now(timezone.utc)
+        db.flush()  # Keep internal cancellation visible to fresh resource queries.
         _write_audit(db, row, actor, "operator_recover_research",
                      f"tasks={len(orphan_ids)}, runs={len(runs)}; workers externally verified stopped")
         _reconcile_locked(db, row, tasks)

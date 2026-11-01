@@ -106,7 +106,7 @@ def load_resources(db: Session, campaigns: list[Experiment]) -> dict[UUID, Campa
               *(str(value) for value in decisions)]
     task_to_experiment = {}
     if tokens:
-        briefs = list(db.execute(select(Artifact, Task).join(
+        briefs = list(db.scalars(select(Artifact).join(
             Task, Task.id == Artifact.task_id,
         ).where(
             Artifact.product_id == product_id,
@@ -114,7 +114,10 @@ def load_resources(db: Session, campaigns: list[Experiment]) -> dict[UUID, Campa
             Artifact.kind == "task_brief",
             or_(*(Artifact.content.contains(token) for token in tokens)),
         ).execution_options(populate_existing=True)))
-        for brief, task in briefs:
+        for brief in briefs:
+            task = db.get(Task, brief.task_id)
+            if task is None:
+                continue
             try:
                 payload = json.loads(brief.content)
             except (ValueError, TypeError):
