@@ -1011,3 +1011,15 @@ def test_canonical_growth_defaults_to_v4_without_changing_legacy_preference(live
         page = legacy.get(base + "/work")
         assert page.status_code == 200
         assert 'data-growth-design="v4"' not in page.text
+
+
+
+def test_explicit_classic_wins_even_if_dispatcher_is_enabled(live, monkeypatch):
+    from app.api import dispatcher
+    client, db, product = live
+    monkeypatch.setattr(dispatcher, "enabled_for", lambda *_: True)
+    page = client.get(f"/studio/products/{product.id}?design=classic")
+    assert page.status_code == 200
+    assert 'data-growth-design="v4"' not in page.text
+    assert 'id="dp-state"' not in page.text
+    assert 'Новый дизайн' in page.text
