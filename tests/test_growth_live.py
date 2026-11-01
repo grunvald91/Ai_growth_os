@@ -322,3 +322,105 @@ def test_v4_campaign_scope_and_non_draft_protection(live):
                        data=_v4_campaign_fields(name='Не сохранять')).status_code == 409
     db.refresh(foreign)
     assert foreign.status == 'running' and foreign.name == 'Черновик'
+
+
+
+def test_campaign_launch_v4_scoped_once_and_without_external_actions(live, monkeypatch, tmp_path):
+    import json
+    from sqlalchemy import select
+    from app.models.domain import Artifact, CostRecord, Decision, Experiment, Product, Publication, Task
+    client, db, product = live
+    monkeypatch.setitem(app.dependency_overrides, get_settings,
+                        lambda: Settings(app_env='development', products_root=tmp_path, _env_file=None))
+    other = Product(name='Competitor', slug='another-company')
+    db.add(other)
+    db.commit()
+    own_base = f'/studio/products/{product.id}/campaigns'
+    foreign_base = f'/studio/products/{other.id}/campaigns'
+    assert client.post(own_base + '/new', data=_v4_campaign_fields(key='EXP-OWNER-001'),
+                       follow_redirects=False).status_code == 303
+    assert client.post(foreign_base + '/new', data=_v4_campaign_fields(key='EXP-OTHER-001'),
+                       follow_redirects=False).status_code == 303
+    own = db.scalar(select(Experiment).where(Experiment.product_id == product.id))
+    foreign = db.scalar(select(Experiment).where(Experiment.product_id == other.id))
+    action = f'{own_base}/{own.id}/launch'
+    detail = client.get(f'{own_base}/{own.id}?design=v4')
+    assert detail.status_code == 200
+    assert f'action="{action}"' in detail.text
+    assert 'Запустить внутреннюю подготовку' in detail.text
+    assert client.get(action).status_code == 405
+    assert client.post(f'{own_base}/{foreign.id}/launch').status_code == 404
+    assert db.get(Experiment, foreign.id).status == 'draft'
+    first = client.post(action, follow_redirects=False)
+    assert first.status_code == 303
+    assert first.headers['location'].endswith(f'/campaigns/{own.id}')
+    db.refresh(own)
+    assert own.status == 'running'
+    assert own.starts_at is not None and own.ends_at is not None
+    tasks = list(db.scalars(select(Task)))
+    decisions = list(db.scalars(select(Decision)))
+    assert len(tasks) == len(decisions) == 1
+    assert tasks[0].product_id == product.id
+    assert decisions[0].product_id == product.id
+    assert tasks[0].title.endswith(': prepare experiment')
+    brief = db.scalar(select(Artifact).where(Artifact.task_id == tasks[0].id))
+    assert brief.product_id == product.id
+    assert 'Sea SPA' not in json.dumps(json.loads(brief.content))
+    assert list(db.scalars(select(Publication))) == []
+    assert list(db.scalars(select(CostRecord))) == []
+    assert client.post(action).status_code == 409
+    assert len(list(db.scalars(select(Task)))) == 1
+    assert len(list(db.scalars(select(Decision)))) == 1
+    assert db.get(Experiment, foreign.id).status == 'draft'
+    assert 'Запустить внутреннюю подготовку' not in client.get(f'{own_base}/{own.id}').text
+
+
+def test_campaign_launch_v4_incomplete_contract_keeps_draft(live, monkeypatch, tmp_path):
+    from sqlalchemy import select
+    from app.models.domain import Decision, Experiment, Task
+    client, db, product = live
+    monkeypatch.setitem(app.dependency_overrides, get_settings,
+                        lambda: Settings(app_env='development', products_root=tmp_path, _env_file=None))
+    row = Experiment(product_id=product.id, experiment_key='EXP-INCOMPLETE-001',
+                     name='Unfinished test', hypothesis='Need more details', status='draft')
+    db.add(row)
+    db.commit()
+    response = client.post(f'/studio/products/{product.id}/campaigns/{row.id}/launch')
+    assert response.status_code == 409
+    assert 'baseline_summary' in response.text
+    db.refresh(row)
+    assert row.status == 'draft' and row.starts_at is None
+    assert list(db.scalars(select(Task))) == []
+    assert list(db.scalars(select(Decision))) == []
+
+
+def test_campaign_launch_v4_requires_company_account_and_csrf(live, monkeypatch, tmp_path):
+    from sqlalchemy import select
+    from app.core.studio_accounts import create_account
+    from app.models.domain import Experiment, Product, Task
+    client, db, product = live
+    other = Product(name='Foreign', slug='foreign-for-launch')
+    db.add(other)
+    db.commit()
+    settings = Settings(app_env='production', products_root=tmp_path,
+                        studio_admin_username='owner', studio_admin_password='fixture-only',
+                        studio_public_origin='https://growth.servgo.ru', _env_file=None)
+    create_account(settings, username='company-user', password='local-fixture-password',
+                   role='company', product_ids=[str(product.id)], created_by='test')
+    monkeypatch.setitem(app.dependency_overrides, get_settings, lambda: settings)
+    client.auth = ('owner', 'fixture-only')
+    origin = {'Origin': 'https://growth.servgo.ru'}
+    base = f'/studio/products/{product.id}/campaigns'
+    assert client.post(base + '/new', data=_v4_campaign_fields(key='EXP-CSRF-001'),
+                       headers=origin, follow_redirects=False).status_code == 303
+    experiment = db.scalar(select(Experiment).where(Experiment.product_id == product.id))
+    action = f'{base}/{experiment.id}/launch'
+    assert client.post(action).status_code == 403
+    assert client.post(action, headers={'Origin': 'https://evil.invalid'}).status_code == 403
+    assert db.get(Experiment, experiment.id).status == 'draft'
+    client.auth = ('company-user', 'local-fixture-password')
+    foreign_action = f'/studio/products/{other.id}/campaigns/{experiment.id}/launch'
+    assert client.post(foreign_action, headers=origin).status_code == 404
+    assert client.post(action, headers=origin, follow_redirects=False).status_code == 303
+    assert db.get(Experiment, experiment.id).status == 'running'
+    assert len(list(db.scalars(select(Task)))) == 1
