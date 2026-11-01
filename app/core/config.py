@@ -78,6 +78,8 @@ class Settings(BaseSettings):
     studio_admin_username: str | None = None
     studio_admin_password: str | None = None
     studio_public_origin: str | None = None
+    # Canonical ServGo origin is disabled until nginx and SSO pass staging checks.
+    studio_servgo_gateway_enabled: bool = False
     studio_htpasswd_file: Path | None = None
     studio_users_file: Path | None = None
     # Optional; without it a private key file is created next to the accounts file.
