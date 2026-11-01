@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.api.content_studio import (_owner_product, esc, mobile_header_html, mobile_nav_html, sidebar_html)
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
-from app.core.composition import SAFE_LLM_METADATA_FIELDS, build_llm_provider
+from app.core.composition import SAFE_LLM_METADATA_FIELDS, build_dispatcher_provider
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.dispatcher import service
@@ -42,7 +42,7 @@ def enabled_for(settings: Settings, product: Product) -> bool:
 def get_dispatcher_llm(settings: Settings = Depends(get_settings)) -> LLMService | None:
     """The model behind the dispatcher; tests replace this dependency. None means no model is configured."""
     try:
-        provider = build_llm_provider(settings)
+        provider = build_dispatcher_provider(settings)
     except ValueError:
         return None
     return LLMService(privacy_gateway=PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS),
