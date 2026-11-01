@@ -5,10 +5,7 @@ import { api, type BusinessDetail, type BlogArticleSummary, type EmployeeWithPri
 import { AirFrame, HeroArt } from './AirFrame'
 import { parsePhotoList, photoSrc, photoThumbSrc } from './airPhotos'
 import { applySeo, shortText } from '../../utils/seo'
-
-function withSeoRef(path: string, reference: string | null): string {
-  return reference ? path + (path.includes('?') ? '&' : '?') + 'seo_ref=' + encodeURIComponent(reference) : path
-}
+import { withSeoRef } from '../../utils/seoReferral'
 
 function linkifyText(text: string): ReactNode {
   const urlPattern = /(https?:\/\/[^\s]+|(?:vk\.com|t\.me)\/[^\s]+)/gi

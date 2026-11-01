@@ -42,6 +42,7 @@ import { HeroArt } from './AirFrame'
 import { photoSrc, photoThumbSrc } from './airPhotos'
 import { ACCUSATIVE, choosePhrase } from '../../utils/bookingLabels'
 import { resolveBookingEntry, resourceSupportsService, getAvailableResources, getAvailableServices, type BookingFlowOrder } from './bookingEntry'
+import { withSeoRef } from '../../utils/seoReferral'
 import './booking-flow.css'
 
 // ── Helpers ──
@@ -498,6 +499,28 @@ function BookingPageInner() {
         setSelectedServices(entry.services)
         setSelectedResource(entry.resource)
         setAnyResource(false)
+        // Query-param/business changes must start a fresh visit; carrying
+        // date, addons or confirmation state could book the wrong service.
+        setSelectedDate(null)
+        setSelectedTime(null)
+        setSlots([])
+        setSlotsKey('')
+        setPriceData(null)
+        setExtrasSeen(false)
+        setIsSoloPricing(false)
+        setSelectedAddons(new Set())
+        setAddonHours({})
+        setMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
+        setBookingError(null)
+        setFieldErrors({})
+        setRepeatEnabled(false)
+        setCreatedBookingId(null)
+        setCreatedNotifyToken(null)
+        setCreatedPrepayment(null)
+        setCreatedDates([])
+        setPaymentSent(false)
+        setReceiptUploaded(false)
+        historyRef.current = []
         setScreen(entry.step)
       })
       .catch(() => { if (!cancelled) setLoadError(true) })
@@ -663,7 +686,7 @@ function BookingPageInner() {
   function back() {
     if (historyRef.current.length > 0) window.history.back()
     else if (screen !== 'home' && preselectedServiceId === null && preselectedEmployeeId === null) setScreen('home')
-    else navigate(`/business/${businessId}`)
+    else navigate(withSeoRef(`/business/${businessId}`, seoRef))
   }
 
   useEffect(() => {

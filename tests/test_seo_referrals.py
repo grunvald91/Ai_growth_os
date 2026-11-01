@@ -108,6 +108,59 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
         self.secret.stop()
 
+    async def test_explicit_service_assignment_cannot_be_bypassed_by_unlinked_master(self):
+        from fastapi import HTTPException
+        from database.models import Employee, EmployeeService
+        from web.api.routes.client import get_slots
+
+        async with self.sessions() as db:
+            owner = await db.get(User, self.owner_id)
+            assigned = Employee(business_id=self.business_id, name="Assigned", role="master", is_active=True)
+            unassigned = Employee(business_id=self.business_id, name="Unassigned", role="master", is_active=True)
+            db.add_all([assigned, unassigned])
+            await db.flush()
+            db.add(EmployeeService(employee_id=assigned.id, service_id=self.service_ids[0]))
+            await db.commit()
+            when = date.today() + timedelta(days=11)
+            body = CreateBookingIn(
+                business_id=self.business_id, service_ids=[self.service_ids[0]],
+                employee_id=unassigned.id, date=when, time="11:00",
+            )
+            with self.assertRaises(HTTPException) as bad_booking:
+                await create_booking_visit(body, db, owner, commit=False)
+            self.assertEqual(bad_booking.exception.status_code, 422)
+            with self.assertRaises(HTTPException) as bad_slots:
+                await get_slots(self.business_id, when, self.service_ids[0], unassigned.id,
+                                30, False, None, db)
+            self.assertEqual(bad_slots.exception.status_code, 422)
+
+            # An unassigned service remains available to an unlinked master.
+            body = body.model_copy(update={"service_ids": [self.service_ids[1]]})
+            with patch("web.api.routes.client.lock_resource_days", new_callable=AsyncMock), \
+                 patch("web.api.routes.client.ensure_resource_available", new_callable=AsyncMock):
+                bookings = await create_booking_visit(body, db, owner, commit=False)
+            self.assertEqual(len(bookings), 1)
+            self.assertEqual(bookings[0].service_id, self.service_ids[1])
+
+    async def test_an_inactive_master_does_not_restrict_unlinked_active_staff(self):
+        from database.models import Employee, EmployeeService
+        async with self.sessions() as db:
+            owner = await db.get(User, self.owner_id)
+            inactive = Employee(business_id=self.business_id, name="Inactive", role="master", is_active=False)
+            active = Employee(business_id=self.business_id, name="Active", role="master", is_active=True)
+            db.add_all([inactive, active])
+            await db.flush()
+            db.add(EmployeeService(employee_id=inactive.id, service_id=self.service_ids[0]))
+            await db.commit()
+            body = CreateBookingIn(
+                business_id=self.business_id, service_ids=[self.service_ids[0]],
+                employee_id=active.id, date=date.today() + timedelta(days=12), time="12:00",
+            )
+            with patch("web.api.routes.client.lock_resource_days", new_callable=AsyncMock), \
+                 patch("web.api.routes.client.ensure_resource_available", new_callable=AsyncMock):
+                bookings = await create_booking_visit(body, db, owner, commit=False)
+            self.assertEqual(len(bookings), 1)
+
     async def test_booking_one_referral_for_multiservice_and_verified_owner_summary(self):
         async with self.sessions() as db:
             owner = await db.get(User, self.owner_id)

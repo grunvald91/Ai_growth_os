@@ -31,6 +31,7 @@ import { RentalBookingStatusPage } from './pages/client/RentalBookingStatusPage'
 import { LegalPage } from './pages/client/LegalPage'
 import { applySeo } from './utils/seo'
 import { postLoginPath } from './utils/postLogin'
+import { routeAccess } from './utils/authRouteAccess'
 
 const BookingPage = lazy(() => import('./pages/client/BookingPage').then(module => ({ default: module.BookingPage })))
 const MasterPage = lazy(() => import('./pages/master/MasterPage').then(module => ({ default: module.MasterPage })))
@@ -50,18 +51,23 @@ function LegacyAdminRedirect({ to }: { to: string }) {
   return <Navigate to={to} replace />
 }
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const token = localStorage.getItem('token')
-  if (!token) return <Navigate to="/login" replace />
+function ProtectedRoute({ children, restorationPending }: { children: React.ReactNode; restorationPending: boolean }) {
+  const access = routeAccess(
+    localStorage.getItem('token'), localStorage.getItem('userRole'), false, restorationPending,
+    localStorage.getItem('servgoExplicitLogout') === '1' || sessionStorage.getItem('servgoExplicitLogout') === '1',
+  )
+  if (access === 'wait') return <div role="status" style={{ padding: 24 }}>Восстанавливаем вход…</div>
+  if (access === 'login') return <Navigate to="/login" replace />
   return <>{children}</>
 }
 
-function AdminRoute({ children }: { children: React.ReactNode }) {
-  const token = localStorage.getItem('token')
-  const role = localStorage.getItem('userRole')
-  if (!token || (role !== 'admin' && role !== 'owner')) {
-    return <Navigate to="/login" replace />
-  }
+function AdminRoute({ children, restorationPending }: { children: React.ReactNode; restorationPending: boolean }) {
+  const access = routeAccess(
+    localStorage.getItem('token'), localStorage.getItem('userRole'), true, restorationPending,
+    localStorage.getItem('servgoExplicitLogout') === '1' || sessionStorage.getItem('servgoExplicitLogout') === '1',
+  )
+  if (access === 'wait') return <div role="status" style={{ padding: 24 }}>Восстанавливаем вход…</div>
+  if (access === 'login') return <Navigate to="/login" replace />
   return <>{children}</>
 }
 
@@ -78,6 +84,9 @@ function RouteSeo() {
 
 function App() {
   const [authReady, setAuthReady] = useState(false)
+  // Public routes may render after the existing 3s grace period, but protected
+  // routes must not redirect until the real cookie/Telegram check settles.
+  const [authRestoring, setAuthRestoring] = useState(true)
   // Enforce the approved seven-day retention when the PWA is next opened.
   useEffect(() => { void cleanupExpiredOfflineSnapshots().catch(console.warn) }, [])
 
@@ -138,7 +147,7 @@ function App() {
           // Not every visitor has a shared Telegram session.
         }
       } finally {
-        if (active) setAuthReady(true)
+        if (active) { setAuthRestoring(false); setAuthReady(true) }
       }
     }
     // Проверка входа не должна держать публичные страницы (главную со списком мест): если она
@@ -169,7 +178,7 @@ function App() {
         <Route
           path="/my"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute restorationPending={authRestoring}>
               <MyBookingsPage />
             </ProtectedRoute>
           }
@@ -181,9 +190,9 @@ function App() {
         <Route path="/login/yandex" element={<YandexLoginPage />} />
         <Route path="/mail" element={<OwnerMailPage />} />
         <Route path="/workspace/mail" element={<OwnerMailPage />} />
-        <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
-        <Route path="/master" element={<ProtectedRoute><MasterPage /></ProtectedRoute>} />
-        <Route path="/admin/prepayments" element={<AdminRoute><PrepaymentsPage /></AdminRoute>} />
+        <Route path="/account" element={<ProtectedRoute restorationPending={authRestoring}><AccountPage /></ProtectedRoute>} />
+        <Route path="/master" element={<ProtectedRoute restorationPending={authRestoring}><MasterPage /></ProtectedRoute>} />
+        <Route path="/admin/prepayments" element={<AdminRoute restorationPending={authRestoring}><PrepaymentsPage /></AdminRoute>} />
 
         {/* Legacy redirects */}
         <Route path="/book" element={<BookRedirect />} />
@@ -192,12 +201,12 @@ function App() {
         <Route path="/calendar" element={<LegacyAdminRedirect to="/admin/schedule" />} />
 
         {/* Admin routes */}
-        <Route path="/admin/sales" element={<AdminRoute><SalesInboxPage /></AdminRoute>} />
-        <Route path="/admin/sales/settings" element={<AdminRoute><SalesSettingsPage /></AdminRoute>} />
+        <Route path="/admin/sales" element={<AdminRoute restorationPending={authRestoring}><SalesInboxPage /></AdminRoute>} />
+        <Route path="/admin/sales/settings" element={<AdminRoute restorationPending={authRestoring}><SalesSettingsPage /></AdminRoute>} />
         <Route
           path="/admin"
           element={
-            <AdminRoute>
+            <AdminRoute restorationPending={authRestoring}>
               <AdminDashboard />
             </AdminRoute>
           }
@@ -205,7 +214,7 @@ function App() {
         <Route
           path="/admin/schedule"
           element={
-            <AdminRoute>
+            <AdminRoute restorationPending={authRestoring}>
               <SchedulePage />
             </AdminRoute>
           }
@@ -213,7 +222,7 @@ function App() {
         <Route
           path="/admin/services"
           element={
-            <AdminRoute>
+            <AdminRoute restorationPending={authRestoring}>
               <ServicesPage />
             </AdminRoute>
           }
@@ -221,16 +230,16 @@ function App() {
         <Route
           path="/admin/employees"
           element={
-            <AdminRoute>
+            <AdminRoute restorationPending={authRestoring}>
               <EmployeesPage />
             </AdminRoute>
           }
         />
-        <Route path="/admin/contacts" element={<AdminRoute><ContactsPage /></AdminRoute>} />
+        <Route path="/admin/contacts" element={<AdminRoute restorationPending={authRestoring}><ContactsPage /></AdminRoute>} />
         <Route
           path="/admin/analytics"
           element={
-            <AdminRoute>
+            <AdminRoute restorationPending={authRestoring}>
               <AnalyticsPage />
             </AdminRoute>
           }
@@ -238,7 +247,7 @@ function App() {
         <Route
           path="/admin/settings"
           element={
-            <AdminRoute>
+            <AdminRoute restorationPending={authRestoring}>
               <SettingsPage />
             </AdminRoute>
           }
@@ -246,7 +255,7 @@ function App() {
         <Route
           path="/admin/subscriptions"
           element={
-            <AdminRoute>
+            <AdminRoute restorationPending={authRestoring}>
               <SubscriptionsAdminPage />
             </AdminRoute>
           }

@@ -17,7 +17,7 @@ import uuid
 logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -441,6 +441,8 @@ async def get_slots(
             raise HTTPException(status_code=404, detail="Employee/resource not found")
         if emp.booking_interval_minutes:
             interval = emp.booking_interval_minutes
+        if service_id and await _incompatible_resource_services(db, business_id, employee_id, [service_id]):
+            raise HTTPException(422, "Selected resource does not provide this service")
 
     requested_duration = duration_minutes
     if requested_duration is None and service_id:
@@ -671,6 +673,35 @@ async def _visit_base_price(
     return services_total
 
 
+async def _incompatible_resource_services(
+    db: AsyncSession, business_id: int, employee_id: int, service_ids: list[int],
+) -> list[int]:
+    """Match the client catalogue: explicit per-service assignments take priority.
+
+    A resource without any bindings can handle an otherwise unassigned service,
+    but cannot bypass an explicit assignment to another active visible resource.
+    Only active non-admin staff from THIS business count.
+    """
+    rows = (await db.execute(
+        select(EmployeeService.employee_id, EmployeeService.service_id)
+        .join(Employee, Employee.id == EmployeeService.employee_id)
+        .where(
+            Employee.business_id == business_id,
+            Employee.is_active.is_(True),
+            Employee.role != "admin",
+            or_(
+                EmployeeService.employee_id == employee_id,
+                EmployeeService.service_id.in_(service_ids),
+            ),
+        )
+    )).all()
+    own = {sid for eid, sid in rows if eid == employee_id}
+    explicit = {sid for _, sid in rows if sid in service_ids}
+    return [sid for sid in service_ids
+            if (sid in explicit and sid not in own)
+            or (sid not in explicit and bool(own))]
+
+
 # ---------- POST /bookings ----------
 
 @router.post("/bookings", response_model=List[BookingOut])
@@ -776,15 +807,9 @@ async def create_booking_visit(
         selected_employee = emp_result.scalar_one_or_none()
         if not selected_employee:
             raise HTTPException(status_code=404, detail="Employee/resource not found")
-        links_result = await db.execute(
-            select(EmployeeService.service_id).where(EmployeeService.employee_id == body.employee_id)
+        incompatible = await _incompatible_resource_services(
+            db, body.business_id, body.employee_id, svc_ids,
         )
-        linked_service_ids = {row[0] for row in links_result.all()}
-        incompatible = [
-            service_id
-            for service_id in svc_ids
-            if linked_service_ids and service_id not in linked_service_ids
-        ]
         if incompatible:
             raise HTTPException(
                 status_code=422,
