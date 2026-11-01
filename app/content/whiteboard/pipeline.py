@@ -127,7 +127,7 @@ class WhiteboardPipeline:
             science_audit['check_type'] = 'curated_reference_ai_review'
             if self.progress is not None:
                 self.progress({'science_review_result': science_audit})
-            if not evidence_supported(assessment, request):
+            if not evidence_supported(assessment, request, storyboard):
                 raise ReadinessError('science_unsupported')
             completed += 1
 
