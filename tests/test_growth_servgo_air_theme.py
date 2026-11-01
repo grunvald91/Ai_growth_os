@@ -92,11 +92,12 @@ def test_v4_intake_profile_uses_readable_light_and_dark_semantic_inks():
     """Regression: profile intake headings/source text were dark-on-dark."""
     adapter = (ASSETS / "growth-servgo-air.css").read_text(encoding="utf-8")
     studio = (Path(__file__).resolve().parents[1] / "app/api/content_studio_design.py").read_text(encoding="utf-8")
+    refreshed = (Path(__file__).resolve().parents[1] / "app/api/content_studio_refresh.py").read_text(encoding="utf-8")
     profile = (Path(__file__).resolve().parents[1] / "app/api/content_studio_company.py").read_text(encoding="utf-8")
     shared = (ASSETS / "servgo-air-tokens.css").read_text(encoding="utf-8")
 
     # Source Studio uses an old light-only ink, even in the v4 wrapper.
-    assert ".sg-surface h2{font-size:21px;color:var(--sg-navy)" in studio
+    assert ".sg-surface h2{font-size:21px;color:var(--sg-navy)" in refreshed
     assert ".sg-intake-source span{overflow-wrap:anywhere;color:#324b68}" in studio
     for marker in ("sg-intake-working", "sg-intake-sources", "sg-intake-source", "sg-muted"):
         assert marker in profile
