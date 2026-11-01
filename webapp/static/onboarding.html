@@ -23,6 +23,7 @@
     @media(max-width:535px){.container{padding:0 15px}h1{font-size:34px}.hero-lead{font-size:13px}.sec-head{padding:19px 16px 12px;gap:11px}.sec-num{width:36px;height:36px;flex-basis:36px;border-radius:11px}.sec-title h2{font-size:18px}.sec-count{display:none}.task{padding:17px 16px}.task-header{gap:11px}.task-check{width:19px;height:19px;flex-basis:19px}.task-name{font-size:13px}.hint{font-size:11.5px}.task-inner{margin-left:30px}.field-grid,.field-grid.three{grid-template-columns:1fr}.entry .field-grid.two-sm{grid-template-columns:1fr 1fr}.day{grid-template-columns:80px minmax(0,1fr);gap:7px 4px}.day-label{font-size:11.5px}.day-times{gap:4px}.day input[type="time"]{width:88px;max-width:calc(50% - 7px);font-size:11px;padding:5px}.day-off{grid-column:2;justify-self:end}.footer-actions .btn{flex:1 1 auto;font-size:11.5px;padding:12px 10px}.logo-word{font-size:20px}}
     @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{animation:none!important;transition:none!important}}
     @media print{html,body{background:#fff!important;color:#1b2d42!important;font-size:10pt!important}.sitehead{position:static;border:0}.container{max-width:none;padding:0 11mm}.sitehead-inner{height:55px}.head-right,.sidebar,.footer-actions,.add,.remove-entry,.toast,.tiny-foot{display:none!important}.hero{padding:10px 0 17px}.hero:before{display:none}.hero h1{font-size:27px}.hero-lead{font-size:11px}.hero-meta{margin-top:8px}.shell{display:block;padding:0}.content{display:block}.section{box-shadow:none;border:1px solid #dde3ec;margin:0 0 14px;break-inside:avoid;border-radius:12px}.sec-head{padding:11px 15px 6px}.task{padding:9px 15px 10px}.task-inner{margin-top:8px}.field input,.field select,.field textarea{border:1px solid #e3e8ec;background:white!important;min-height:29px;padding:5px 8px;color:#1b2d42!important}.entry{padding:8px;background:#f9fbfe!important}.day{padding:5px 8px}.day input[type="time"]{min-height:22px}.footer-card{background:#f2f6fd!important;padding:13px 17px;margin-top:7px;break-inside:avoid}.footer-card h2{font-size:15px}.footer-card p{font-size:11px}.mini-notice{font-size:10px;margin-top:4px}input[type=checkbox]{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+  .send-choice{display:flex;align-items:flex-start;gap:10px;padding:12px 0;color:var(--text2);font-size:12px;line-height:1.5}.send-choice input{width:18px;height:18px;flex:0 0 18px;accent-color:var(--accent);margin:1px 0}.send-status{font-size:13px;font-weight:600;padding:10px 12px;border-radius:12px;background:var(--soft);margin:12px 0;overflow-wrap:anywhere}.send-status[hidden]{display:none}.send-status[data-kind="error"]{color:var(--danger)}.send-status[data-kind="success"]{color:var(--success)}#submitBtn:disabled{opacity:.6;cursor:wait}
   </style>
 </head>
 <body>
@@ -79,7 +80,7 @@
         <a href="#payments" data-nav="payments"><span class="num">06</span><span class="label">Оплата и предоплата</span><span class="nav-dot"></span></a>
         <a href="#materials" data-nav="materials"><span class="num">07</span><span class="label">Фото и запуск</span><span class="nav-dot"></span></a>
       </nav>
-      <div class="side-note"><strong>Как пользоваться:</strong> заполните поля и отметьте галочкой собранные пункты. Данные сохраняются только в этом браузере; для передачи используйте кнопки внизу.</div>
+      <div class="side-note"><strong>Как пользоваться:</strong> заполните поля и отметьте галочкой собранные пункты. Черновик сохранится в этом браузере. Когда всё будет готово, отправьте анкету в ServGo кнопкой внизу.</div>
     </aside>
     <main class="content" id="checklist">
       <section class="section" id="business" data-section>
@@ -123,13 +124,13 @@
       <section class="section" id="materials" data-section>
         <div class="sec-head"><div class="sec-num">07</div><div class="sec-title"><h2>Фото, доступ и запуск</h2><p>Последние детали для оформления карточки и проверки записи.</p></div><span class="sec-count" data-counter></span></div>
         <div class="task task-first"><div class="task-header"><input class="task-check" type="checkbox" id="t19"><div class="task-main"><label class="task-name" for="t19">Логотип и фотографии <span class="tag opt">Желательно</span></label><p class="hint">Логотип, обложка, интерьер, фото мастеров, фото услуг. Изображения передайте отдельно, желательно без водяных знаков.</p></div></div><div class="task-inner field-grid one"><label class="field"><span>Ссылки на материалы / комментарий</span><textarea data-field="Фотографии и логотип" placeholder="Ссылка на папку с фото или «пришлю в Telegram»"></textarea></label></div></div>
-        <div class="task"><div class="task-header"><input class="task-check" type="checkbox" id="t20"><div class="task-main"><label class="task-name" for="t20">Контакт ответственного <span class="tag req">Обязательно</span></label><p class="hint">Кому задать уточняющие вопросы и с кем проверить готовую страницу.</p></div></div><div class="task-inner field-grid"><label class="field"><span>Имя ответственного</span><input data-field="Ответственный за запуск" placeholder="Имя"></label><label class="field"><span>Контакт Telegram / телефон</span><input data-field="Контакт для настройки" placeholder="@username или телефон"></label></div></div>
+        <div class="task"><div class="task-header"><input class="task-check" type="checkbox" id="t20"><div class="task-main"><label class="task-name" for="t20">Контакт ответственного <span class="tag req">Обязательно</span></label><p class="hint">Кому задать уточняющие вопросы и с кем проверить готовую страницу.</p></div></div><div class="task-inner field-grid"><label class="field"><span>Имя ответственного</span><input data-field="Ответственный за запуск" placeholder="Имя"></label><label class="field"><span>Контакт Telegram / телефон</span><input data-field="Контакт для настройки" placeholder="@username или телефон"></label><label class="field"><span>Email для связи <small>по желанию</small></span><input type="email" data-field="Email для связи" autocomplete="email" placeholder="owner@example.ru"></label></div></div>
         <div class="task"><div class="task-header"><input class="task-check" type="checkbox" id="t21"><div class="task-main"><label class="task-name" for="t21">Проверка данных и разрешение на публикацию <span class="tag req">Перед запуском</span></label><p class="hint">Проверьте имена, цены, время и разрешение использовать отправленные фото и описание в публичной карточке.</p></div></div><div class="task-inner field-grid one"><label class="field"><span>Комментарии к запуску / дата открытия записи</span><textarea data-field="Комментарии к запуску" placeholder="Когда открыть онлайн-запись? Есть ли ограничения, которые ещё не обсудили?"></textarea></label></div></div>
         <div class="task"><div class="task-header"><input class="task-check" type="checkbox" id="t22"><div class="task-main"><label class="task-name" for="t22">Контрольная запись <span class="tag req">При приёмке</span></label><p class="hint">После настройки проверить путь клиента: услуга → мастер/зал → дата/время → подтверждение. Отдельно проверить уведомления и предоплату, если используются.</p></div></div></div>
       </section>
-      <div class="footer-card" id="export"><h2>Данные собраны? Передайте их нам.</h2><p>Скопируйте ответы в сообщение или скачайте файл и отправьте своему специалисту ServGo. Частично заполненную анкету тоже можно сохранить и дополнить позже.</p>
+      <div class="footer-card" id="export"><h2>Готовы подключить онлайн-запись?</h2><p>Сохраните анкету в ServGo и отправьте заявку. Мы получим email с краткой информацией и защищённой ссылкой на полный набор данных. Черновик останется на вашем устройстве.</p><label class="send-choice"><input type="checkbox" id="sendConsent"> <span>Согласен передать указанные сведения и контакты в ServGo исключительно для рассмотрения заявки и настройки онлайн-записи. Не указывайте здесь данные клиентов, пароли, номера карт и секретные ключи.</span></label><div class="footer-actions"><button class="btn btn-primary" id="submitBtn" type="button">Сохранить и отправить в ServGo</button></div><div id="submitStatus" class="send-status" role="status" aria-live="polite" hidden></div>
         <div class="footer-actions"><button class="btn btn-primary" id="copyBtn" type="button"><svg class="icon"><use href="#i-copy"/></svg>Скопировать ответы</button><button class="btn btn-secondary" id="downloadBtn" type="button"><svg class="icon"><use href="#i-download"/></svg>Скачать .txt</button><button class="btn btn-secondary" id="jsonBtn" type="button"><svg class="icon"><use href="#i-file"/></svg>Данные .json</button><button class="btn btn-tertiary" id="printBtn" type="button"><svg class="icon"><use href="#i-printer"/></svg>Печать</button></div>
-        <p class="mini-notice">Анкета работает без сервера: <strong>данные никому автоматически не отправляются</strong>. Черновик хранится в браузере этого устройства до очистки данных сайта. Не вводите пароли, платёжные реквизиты и данные клиентов.</p>
+        <p class="mini-notice">До нажатия кнопки отправки данные остаются в браузере. После отправки полный снимок анкеты сохраняется в базе ServGo, доступной только уполномоченному администратору; на почту приходит уведомление со ссылкой. При ошибке почты данные не теряются: статус показан выше.</p>
         <button type="button" id="clearBtn" style="background:none;border:0;color:#7489a0;text-decoration:underline;text-underline-offset:3px;font-size:11px;padding:0">Очистить черновик на устройстве</button>
       </div>
       <p class="tiny-foot">ServGo · Умная запись для бизнеса</p>
@@ -200,10 +201,53 @@
         if(n===6)lines.push('Предоплата: '+d.deposit_mode,'Онлайн-оплата: '+d.online_mode);
       }
       lines.push('','ОТМЕЧЕННЫЕ ПУНКТЫ:');q('.task-check').forEach(el=>{const label=el.closest('.task').querySelector('.task-name')?.textContent?.trim()||el.id;lines.push((el.checked?'[x] ':'[ ] ')+label)});
-      lines.push('','Передача данных выполняется вручную владельцем; автоматической отправки нет.');
+      lines.push('','Форма подготовлена для отправки в ServGo или ручной передачи.');
       return lines.join('\n');
     }
     function download(name,text,mime){const url=URL.createObjectURL(new Blob([text],{type:mime}));const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500)}
+
+    const PENDING_ID_KEY='servgo-onboarding-pending-id';
+    const PENDING_FORM_KEY='servgo-onboarding-pending-form';
+    const LAST_KEY='servgo-onboarding-last-submitted';
+    const resultStatus=(message,kind='info')=>{const el=$('submitStatus');el.hidden=false;el.dataset.kind=kind;el.textContent=message};
+    async function submitToServgo(){
+      const form=collect(),payload=JSON.stringify(form),fields=form.fields;
+      const business=fields['Название бизнеса'],person=fields['Ответственный за запуск'];
+      const contact=fields['Контакт для настройки']||fields['Email для связи']||fields['Телефон для клиентов'];
+      if(!business||!person||!contact){resultStatus('Для отправки укажите название бизнеса, имя ответственного и хотя бы один контакт.','error');return}
+      if(fields['ИНН']&&!/^(?:\d{10}|\d{12})$/.test(fields['ИНН'])){resultStatus('Проверьте ИНН: нужно 10 или 12 цифр.','error');return}
+      const email=fields['Email для связи'];if(email&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){resultStatus('Проверьте email ответственного.','error');return}
+      if(!$('sendConsent').checked){resultStatus('Подтвердите согласие на передачу сведений в ServGo.','error');return}
+      let last;try{last=JSON.parse(localStorage.getItem(LAST_KEY)||'null')}catch{}
+      if(last&&last.payload===payload){resultStatus('Эта версия уже отправлена в ServGo. Номер заявки: '+last.id+'. Если вы внесли изменения, отправьте обновлённую версию.','success');return}
+      if(localStorage.getItem(PENDING_FORM_KEY)!==payload){
+        localStorage.removeItem(PENDING_ID_KEY);
+        localStorage.setItem(PENDING_FORM_KEY,payload);
+      }
+      let key=localStorage.getItem(PENDING_ID_KEY);
+      if(!key){if(!crypto?.randomUUID){resultStatus('Для отправки нужна защищённая HTTPS-страница. Откройте анкету на promo.servgo.ru.','error');return}key=crypto.randomUUID();localStorage.setItem(PENDING_ID_KEY,key)}
+      const button=$('submitBtn');button.disabled=true;button.textContent='Сохраняем заявку…';
+      resultStatus('Сохраняем сведения в ServGo и отправляем уведомление…');
+      try{
+        const response=await fetch('/api/onboarding/requests',{
+          method:'POST',credentials:'omit',
+          headers:{'Content-Type':'application/json','Accept':'application/json'},
+          body:JSON.stringify({consent:true,idempotency_key:key,form})
+        });
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok||!data.saved){throw Error(data.error||'Не удалось сохранить заявку (HTTP '+response.status+'). Попробуйте снова.')}
+        if(data.email_sent){
+          localStorage.setItem(LAST_KEY,JSON.stringify({payload,id:data.request_id}));
+          localStorage.removeItem(PENDING_ID_KEY);localStorage.removeItem(PENDING_FORM_KEY);
+          resultStatus('Готово! Заявка №'+data.request_id+' сохранена в ServGo. Уведомление отправлено на почту. При изменении анкеты можно отправить новую версию.','success');
+        }else{
+          resultStatus('Заявка №'+data.request_id+' сохранена в ServGo, но письмо пока не отправлено. Данные не потеряны — нажмите кнопку ещё раз позднее.','error');
+        }
+      }catch(e){resultStatus(e.message||'Ошибка сети. Ваш черновик сохранён; повторите отправку.','error')}
+      finally{button.disabled=false;button.textContent='Сохранить и отправить в ServGo'}
+    }
+    $('submitBtn').addEventListener('click',submitToServgo);
+
     makeDays();addRow('service');addRow('staff');restore();initialized=true;updateProgress();
     document.addEventListener('input',e=>{if(e.target.matches('input,textarea,select'))save()});document.addEventListener('change',e=>{if(e.target.matches('input,textarea,select'))save()});
     $('addService').addEventListener('click',()=>addRow('service'));
@@ -213,7 +257,7 @@
     $('copyBtn').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(textExport());notify('Ответы скопированы. Теперь их можно отправить.')}catch{notify('Копирование недоступно. Скачайте текстовый файл.')}});
     $('downloadBtn').addEventListener('click',()=>{download('servgo-onboarding.txt',textExport(),'text/plain;charset=utf-8');notify('Текстовый файл подготовлен')});
     $('jsonBtn').addEventListener('click',()=>{download('servgo-onboarding.json',JSON.stringify(collect(),null,2),'application/json;charset=utf-8');notify('JSON-файл подготовлен')});
-    $('clearBtn').addEventListener('click',()=>{if(!confirm('Удалить все введённые данные и отметки с этого устройства?'))return;localStorage.removeItem(KEY);location.reload()});
+    $('clearBtn').addEventListener('click',()=>{if(!confirm('Удалить все введённые данные и отметки с этого устройства?'))return;localStorage.removeItem(KEY);localStorage.removeItem(PENDING_ID_KEY);localStorage.removeItem(PENDING_FORM_KEY);localStorage.removeItem(LAST_KEY);location.reload()});
   })();
   </script>
 </body>

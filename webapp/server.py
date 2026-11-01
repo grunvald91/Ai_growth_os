@@ -207,7 +207,7 @@ async def persist_landing_marketing_lead(payload: dict) -> int:
         return lead.id
 
 
-def send_landing_request_email(payload: dict) -> bool:
+def send_landing_request_email(payload: dict, *, subject: str | None = None, message_body: str | None = None) -> bool:
     """Send request email when SMTP settings are configured."""
     host = os.getenv("LANDING_SMTP_HOST") or os.getenv("SMTP_HOST")
     if not host:
@@ -230,12 +230,12 @@ def send_landing_request_email(payload: dict) -> bool:
     sender = os.getenv("LANDING_SMTP_FROM") or os.getenv("SMTP_FROM") or username or payload["recipient"]
 
     message = EmailMessage()
-    message["Subject"] = "Заявка на подключение бизнеса ServGo"
+    message["Subject"] = subject or "Заявка на подключение бизнеса ServGo"
     message["From"] = sender
     message["To"] = payload["recipient"]
     if payload.get("email"):
         message["Reply-To"] = payload["email"]
-    message.set_content(format_landing_request_message(payload))
+    message.set_content(message_body if message_body is not None else format_landing_request_message(payload))
 
     smtp_cls = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
     with smtp_cls(host, port, timeout=15) as smtp:
@@ -3663,6 +3663,14 @@ def create_webapp() -> web.Application:
 
     # Публичная дорожная карта — до catch-all /{slug}.
     app.router.add_get('/roadmap', serve_roadmap)
+
+    # Данные подключаемых бизнесов: независимая таблица, просмотр только platform-admin.
+    from database.database import engine as booking_engine
+    from webapp.onboarding_requests import register_onboarding_routes
+    register_onboarding_routes(
+        app, engine=booking_engine, get_user=get_authenticated_telegram_user,
+        admin_ids=ADMIN_IDS, send_email=send_landing_request_email,
+    )
 
     # Нишевые лендинги promo.servgo.ru/<slug> — регистрируется последним,
     # чтобы конкретные роуты выше (/calendar, /book, /login и т.д.) ловили
