@@ -364,6 +364,7 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
     body += (f'<form method="post" action="{base}" class="sg-form" id="wb-create-form">'
              '<input type="hidden" name="wb_topic_choice" value="">'
              '<input type="hidden" name="wb_paid_start" value="">'
+             '<input type="hidden" name="wb_paid_consent" value="">'
              '<label class="sg-field"><span>Что объяснить в видео?</span><textarea name="topic" minlength="8" maxlength="400" rows="3" required '
              f'placeholder="Например: почему пилот добавляет тягу при посадке на авианосец">{esc(fields.get("topic", ""))}</textarea></label>'
              '<button class="btn secondary" type="button" id="wb-suggest-btn">Предложить темы для моей компании</button>'
@@ -466,6 +467,31 @@ def history_html(states, product_id):
     return body
 
 
+@router.get('/studio/products/{product_id}/whiteboard/topics.json')
+def studio_topic_suggestions(product_id: UUID, db: Session = Depends(get_db), settings=Depends(get_settings)):
+    return suggest_company_video_topics(settings.products_root, _owner_product(db, product_id))
+
+
+@router.get('/studio/products/{product_id}/whiteboard/quote.json')
+def studio_topic_quote(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    q = request.query_params
+    try:
+        seconds = int(q.get('duration_seconds', '30'))
+        draft = WhiteboardRequest(product_id=product_id, topic=q.get('topic', ''),
+            duration_seconds=seconds, scenes=SCENES_FOR_SECONDS[seconds],
+            science_mode=q.get('science_mode', 'auto'))
+        needed = required_calls(draft, visual_review=q.get('visual_review', 'once') == 'once')
+        raw = q.get('max_api_calls', 'auto')
+        limit = needed if raw == 'auto' else int(raw)
+        if not 13 <= limit <= MAX_API_CALLS:
+            raise ValueError('Invalid limit')
+    except (TypeError, ValueError, KeyError, ValidationError):
+        raise HTTPException(422, 'Проверьте тему и лимит API-вызовов.') from None
+    return {'required_calls': needed, 'limit': limit, 'allowed': limit >= needed,
+            'science_review': requires_science_review(draft)}
+
+
 @router.get('/studio/products/{product_id}/whiteboard', response_class=HTMLResponse)
 async def studio_index(product_id: UUID, db: Session = Depends(get_db), settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
@@ -484,7 +510,8 @@ async def studio_index(product_id: UUID, db: Session = Depends(get_db), settings
 
 
 @router.post('/studio/products/{product_id}/whiteboard')
-async def studio_create(product_id: UUID, request: Request, db: Session = Depends(get_db), settings=Depends(get_settings)):
+async def studio_create(product_id: UUID, request: Request, db: Session = Depends(get_db),
+                        actor=Depends(require_studio_auth), settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     fields = await _studio_form(request)
     try:
@@ -492,14 +519,38 @@ async def studio_create(product_id: UUID, request: Request, db: Session = Depend
         body = CreateJob(topic=fields.get('topic', ''), max_api_calls=None if limit in ('', 'auto') else limit,
                          duration_seconds=int(fields.get('duration_seconds') or 30),
                          call_to_action=(fields.get('call_to_action') or '').strip(),
-                         profile=fields.get('profile', 'gemini_ru'), visual_review=fields.get('visual_review') == 'once')
+                         profile=fields.get('profile', 'gemini_ru'), visual_review=fields.get('visual_review') == 'once',
+                         source_script=fields.get('source_script', ''),
+                         background_notes=fields.get('background_notes', ''),
+                         reference_materials=fields.get('reference_materials', ''),
+                         science_mode=fields.get('science_mode', 'auto'))
     except ValueError:
         return page(product, 'Создать анимацию', creation_form(product_id, fields=fields, durations=task_durations(db),
                     error='Тема: 8–400 символов. Призыв: не короче 6 и не длиннее 200 символов, либо пусто. Выберите длину видео и вариант генерации.'), status=422)
+    auto_start = fields.get('wb_paid_start') == 'yes'
+    if auto_start:
+        topics = suggest_company_video_topics(settings.products_root, product)['topics']
+        if (fields.get('wb_paid_consent') != 'yes'
+                or fields.get('wb_topic_choice') != body.topic
+                or body.topic not in {item['topic'] for item in topics}):
+            return page(product, 'Создать анимацию',
+                        creation_form(product_id, fields=fields, durations=task_durations(db),
+                                      error='Недействительное подтверждение выбранной темы.'),
+                        status=409)
     try:
         task = _queue(db, product, body, settings)
     except HTTPException as exc:
         return page(product, 'Создать анимацию', creation_form(product_id, fields=fields, durations=task_durations(db), error=exc.detail), status=exc.status_code)
+    if auto_start:
+        state = job_state(db, product_id, task.id)
+        try:
+            await _approve(db, product_id, task.id,
+                           ApproveJob(request_digest=state['request_digest'], confirmed=True),
+                           actor, settings)
+        except HTTPException as exc:
+            state = _load(db, product_id, task.id)
+            return page(product, 'Генерация видео', job_html(state, product_id, error=exc.detail),
+                        status=exc.status_code)
     return RedirectResponse(f'/studio/products/{product_id}/whiteboard/{task.id}', status_code=303)
 
 
