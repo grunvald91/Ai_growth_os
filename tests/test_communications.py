@@ -125,3 +125,30 @@ async def test_definite_smtp_rejection_allows_retry_after_configuration_fix(db,t
     assert 'не принято' in result
     assert prospect.outreach_status=='not_contacted'
     assert db.scalar(select(ToolCall)).status=='not_sent'
+
+
+
+@pytest.mark.asyncio
+async def test_stopped_campaign_prevents_prepared_email_from_reserving_smtp(db, tmp_path, contact):
+    from app.services.campaign_lifecycle import command
+    p, experiment, prospect, _ = contact
+    approval_id, token, _ = prepare_email(db, prospect.id, tmp_path)
+    status, pending = command(
+        db, product_id=p.id, experiment_id=experiment.id,
+        action="stop", actor="owner",
+    )
+    assert status == "stopped" and pending.clear
+    @contextmanager
+    def sessions():
+        yield db
+    calls = []
+    with pytest.raises(ValueError, match="останавливается|завершён"):
+        await execute_email(
+            sessions, tmp_path, approval_id, token, "owner",
+            lambda *args, **kwargs: calls.append(kwargs),
+        )
+    assert calls == []
+    assert list(db.scalars(select(ToolCall))) == []
+    assert prospect.outreach_status == "not_contacted"
+    with pytest.raises(ValueError, match="Эксперимент не запущен"):
+        prepare_email(db, prospect.id, tmp_path)
