@@ -140,7 +140,9 @@ jobs:
       - name: Verify canonical Mail SSO, owner-only access and API URL rewrites
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: python tests/test_mail_same_origin.py
+        run: |
+          python tests/test_mail_same_origin.py
+          python tests/test_mail_air_v2.py
 
       - name: Verify signed Growth SSO and role restrictions
         env:
