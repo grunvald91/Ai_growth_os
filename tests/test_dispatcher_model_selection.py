@@ -15,6 +15,7 @@ from app.dispatcher import service
 from app.dispatcher.executors import Context
 from app.llm.xai import XAIProvider
 from app.llm.model_router import ModelRoutingProvider
+from app.llm.schemas import LLMMessage, LLMRequest
 from app.models.domain import Product
 
 
@@ -48,7 +49,12 @@ def test_general_team_router_remains_unchanged():
     dispatcher = build_dispatcher_provider(settings)
     assert isinstance(general, ModelRoutingProvider)
     assert general.router.overrides["article_writer"] == ("kimi-2.7",)
-    assert dispatcher._model == "deepseek-v4.1-flash"
+    assert isinstance(dispatcher, ModelRoutingProvider)
+    assert dispatcher.router.max_call_usd == general.router.max_call_usd
+    request = LLMRequest(messages=[LLMMessage(role="user", content="status")],
+                         metadata={"team_role":"dispatcher"})
+    assert dispatcher.router.select(request).candidates == ("deepseek-v4.1-flash",)
+    assert general.router.select(request).candidates == ("kimi-2.7",)
 
 
 def test_dispatcher_only_can_be_reconfigured_independently():
