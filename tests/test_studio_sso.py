@@ -594,3 +594,86 @@ def test_yes_is_refused_if_servgo_no_longer_confirms_the_owner(env):
 def test_the_business_name_in_the_question_is_escaped(env):
     _, page = asked(env, name="<script>alert(1)</script>")
     assert "<script>alert" not in page.text and "&lt;script&gt;" in page.text
+
+
+# ---- canonical ServGo first visit (native React confirmation, not a second login) ----
+
+def canonical_first_visit(env, **ticket):
+    from app.core.config import get_settings
+    db, settings, _, _, servgo = env
+    enabled = make_settings(
+        settings.products_root,
+        studio_public_origin="https://growth.servgo.ru",
+        studio_servgo_gateway_enabled=True,
+    )
+    app.dependency_overrides[get_settings] = lambda: enabled
+    servgo.allowed[(7, 31)] = ticket.pop("role", "owner")
+    servgo.businesses[31] = {**servgo.businesses[12], "name": "Баня Парная"}
+    client = TestClient(app, base_url="https://servgo.ru", follow_redirects=False)
+    page = client.get("/studio/sso", params={
+        "t": make_ticket(biz=31, jti=ticket.pop("jti", "w" * 16), **ticket)
+    })
+    return client, page
+
+
+def test_canonical_first_visit_opens_native_servgo_screen_without_creation(env):
+    db, *_ = env
+    count = len(list(db.scalars(select(Product))))
+    client, page = canonical_first_visit(env)
+    assert page.status_code == 303
+    assert page.headers["location"] == "/workspace/growth?setup=1&business_id=31"
+    assert page.headers["cache-control"] == "no-store"
+    assert page.headers["referrer-policy"] == "no-referrer"
+    cookie = page.headers["set-cookie"].lower()
+    assert "sg_growth_setup=" in cookie
+    assert "httponly" in cookie and "secure" in cookie and "samesite=lax" in cookie
+    assert "path=/studio/sso/create" in cookie
+    assert SSO not in page.headers["location"]
+    assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
+    assert len(list(db.scalars(select(Product)))) == count
+
+
+def test_canonical_confirmation_creates_only_selected_company_and_keeps_sso(env):
+    db, *_ = env
+    client, page = canonical_first_visit(env)
+    assert page.status_code == 303
+    created = client.post("/studio/sso/create", data={"business_id":31},
+                          headers={"origin": "https://servgo.ru"})
+    assert created.status_code == 303 and created.headers["location"].endswith("/profile")
+    link = db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31))
+    assert link is not None
+    replay = client.post("/studio/sso/create", data={"business_id":31},
+                         headers={"origin":"https://servgo.ru"})
+    assert replay.status_code == 409
+    assert len(list(db.scalars(select(StudioBusinessLink).where(
+        StudioBusinessLink.servgo_business_id == 31)))) == 1
+
+
+def test_canonical_first_visit_refuses_wrong_business_and_foreign_origin(env):
+    db, *_ = env
+    client, page = canonical_first_visit(env)
+    assert page.status_code == 303
+    wrong = client.post("/studio/sso/create", data={"business_id":12},
+                        headers={"origin":"https://servgo.ru"})
+    foreign = client.post("/studio/sso/create", data={"business_id":31},
+                          headers={"origin":"https://growth.servgo.ru"})
+    missing = client.post("/studio/sso/create", data={"business_id":31},
+                          headers={"origin":"https://evil.example"})
+    assert wrong.status_code == 409
+    assert foreign.status_code == 403 and missing.status_code == 403
+    assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
+
+
+def test_canonical_first_visit_requires_actual_signed_cookie_and_live_owner(env):
+    db, _, _, _, servgo = env
+    client, page = canonical_first_visit(env)
+    assert page.status_code == 303
+    empty = TestClient(app, base_url="https://servgo.ru", follow_redirects=False)
+    without_cookie = empty.post("/studio/sso/create", data={"business_id":31},
+                                headers={"origin":"https://servgo.ru"})
+    assert without_cookie.status_code == 400
+    servgo.allowed.clear()
+    revoked = client.post("/studio/sso/create", data={"business_id":31},
+                          headers={"origin":"https://servgo.ru"})
+    assert revoked.status_code == 403
+    assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
