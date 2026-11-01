@@ -131,7 +131,8 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
     request = LLMRequest(
         system_prompt=SYSTEM_PROMPT,
         messages=[*turns, LLMMessage(role="user", content=build_user_message(snapshot(ctx.db, ctx.product), text))],
-        model=settings.dispatcher_llm_model, max_tokens=900,
+        model=(settings.dispatcher_llm_model if settings.llm_provider == "xai" else settings.llm_model),
+        max_tokens=900,
         response_schema=DispatcherDecision.model_json_schema(),
         metadata={"team_role": "dispatcher", "task_type": "dispatcher", "reasoning_effort": "low"},
     )
