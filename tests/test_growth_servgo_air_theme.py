@@ -24,7 +24,7 @@ def test_growth_v4_loads_canonical_css_and_theme_script():
         "/studio/team?design=classic",
     )
     assert "/studio/assets/servgo-air-tokens.css?v=1" in html
-    assert "/studio/assets/growth-servgo-air.css?v=1" in html
+    assert "/studio/assets/growth-servgo-air.css?v=2" in html
     assert "/studio/assets/servgo-air-theme.js?v=1" in html
     assert 'action="/studio/team/apply"' in html
     assert 'name="role"' in html
@@ -74,3 +74,14 @@ def test_new_growth_theme_assets_have_registered_routes_and_serve_successfully()
         assert response.media_type == mime
         assert response.headers["X-Content-Type-Options"] == "nosniff"
         assert response.body
+
+
+def test_growth_air_mobile_shell_matches_booking_and_dark_hero_is_readable():
+    adapter = (ASSETS / "growth-servgo-air.css").read_text(encoding="utf-8")
+    for term in ('--s-text', '--s-muted', '--s-bg', 'grid-template-columns: repeat(5',
+                 'min-height: 54px', 'stroke-width: 1.65', 'sgNavFlow',
+                 '.hero-h', 'font-weight: 550', 'font-family: "ServGo Onest"',
+                 '/fonts/servgo-onest-cyrillic.woff2', '/fonts/servgo-onest-latin.woff2'):
+        assert term in adapter, term
+    assert '-webkit-text-fill-color: var(--s-text) !important' in adapter
+    assert 'color: var(--s-text) !important' in adapter
