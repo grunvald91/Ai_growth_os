@@ -286,11 +286,32 @@ def command(db: Session, *, product_id: UUID, experiment_id: UUID,
     return campaign.status, pending
 
 
+# Worker-process cursor: stuck early campaigns cannot starve later tenants.
+# Each independent worker cycles through all pending UUIDs; a restart starts
+# from the beginning, without storing global cross-tenant state in a company.
+_RECONCILE_CURSOR: UUID | None = None
+
+
 def reconcile_pending(db: Session, *, limit: int = 50) -> int:
-    """Worker calls this on every tick; no forced completion on timeouts."""
-    ids = list(db.scalars(select(Experiment.id).where(
+    """Reconcile a bounded, round-robin page without forced completion."""
+    global _RECONCILE_CURSOR
+    limit = max(1, min(limit, 500))
+    query = select(Experiment.id).where(
         Experiment.status.in_(FINAL_STATES),
-    ).order_by(Experiment.updated_at, Experiment.id).limit(limit)))
+    )
+    ids = []
+    if _RECONCILE_CURSOR is not None:
+        ids = list(db.scalars(query.where(
+            Experiment.id > _RECONCILE_CURSOR,
+        ).order_by(Experiment.id).limit(limit)))
+    if len(ids) < limit:
+        remaining = limit - len(ids)
+        beginning = query
+        if _RECONCILE_CURSOR is not None:
+            beginning = beginning.where(Experiment.id <= _RECONCILE_CURSOR)
+        ids.extend(db.scalars(beginning.order_by(Experiment.id).limit(remaining)))
+    if ids:
+        _RECONCILE_CURSOR = ids[-1]
     changed = 0
     for experiment_id in ids:
         row = db.scalar(select(Experiment).where(
