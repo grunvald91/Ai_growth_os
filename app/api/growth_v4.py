@@ -164,7 +164,6 @@ def render_v4(page, request, pid, switch):
                                ('Контент-план',base+'/plan','calendar','Темы и публикации по датам'),
                                ('SEO-статья',base+'?command=seo_factory','globe','Поисковые запросы и собственный блог'),
                                ('Кампания',base+'/campaigns','layers','Цель, аудитория, каналы и показатели'),
-                               ('Email-рассылка','https://servgo.ru/mail','mail','Письма и контакты в ServGo Mail'),
                                ('Разведка',f'/intelligence?product_id={pid}','search','Конкуренты, источники и гипотезы')])+'</div>')
     if pid and current == base+'/seo':
         stages = [('Поисковые вопросы','Подсказки Яндекса и Google','search'),
@@ -206,8 +205,13 @@ def render_v4(page, request, pid, switch):
     template = re.sub(r'<title>.*?</title>', lambda _:title_tag, pristine,count=1,flags=re.S)
     template = template.replace('<style>', styles+'<style>',1)
     nav = ''.join(link(r,True) for r in links[:3])
-    mail = next((r for r in links if r[0]=='mail'), links[-1])
-    nav += link(mail,True)+f'<details><summary>{icon("layers")}<span>Ещё</span></summary><div class="v4-more">'+''.join(link(r) for r in links)+'</div></details>'
+    # The platform-owner Mail is not a tenant feature. Use business Campaigns
+    # as the fourth mobile tab; platform Mail remains available in ServGo admin.
+    if pid:
+        campaigns = next((r for r in links if r[0] == 'campaigns'), None)
+        if campaigns:
+            nav += link(campaigns, True)
+    nav += f'<details><summary>{icon("layers")}<span>Ещё</span></summary><div class="v4-more">'+''.join(link(r) for r in links)+'</div></details>'
     template = template.replace('<nav class="mobile-nav" id="mobileNav"></nav>', '<nav class="mobile-nav" id="mobileNav" aria-label="Быстрая навигация">'+nav+'</nav>')
     template = template.replace('Единый интерфейс 4.0 · демоданные','Growth OS · интерфейс 4.0')
     template = template.replace('Демо · API не подключены', f'<a href="{switch}">Старый дизайн</a>')
