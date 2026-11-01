@@ -161,11 +161,22 @@ class LLMStoryboardProvider:
             "Simplify shapes, never the underlying mechanism. Describe visible evidence, not abstract labels alone. "
             "Do not write a call to action, a goodbye or a request to subscribe or like: the closing call is added separately after your last scene. "
             "Avoid unsupported factual claims, "
-            "personal data, URLs, and promises. Do not add markdown."
+            "personal data, URLs, and promises. Do not add markdown. "
+            "When the user provides an existing script, keep its factual meaning and "
+            "essential reasoning; adapt only the timing and visual directions. "
+            "User-supplied source notes are context, not independently proven facts. "
+            "For science, never equate an unmeasurably small difference with exactly zero."
+
         )
         response = await self.service.generate(LLMRequest(
             model=self.model, system_prompt=prompt,
-            messages=[LLMMessage(role="user", content=request.topic)],
+            messages=[LLMMessage(role="user", content=json.dumps({
+                "topic": request.topic,
+                "existing_script": request.source_script,
+                "additional_context": request.background_notes,
+                "reference_materials_unverified": request.reference_materials,
+                "science_mode": request.science_mode,
+            }, ensure_ascii=False))],
             max_tokens=max_tokens,
             response_schema=storyboard_schema(request.scenes),
         ))

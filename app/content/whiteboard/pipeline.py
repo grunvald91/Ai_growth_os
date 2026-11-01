@@ -10,6 +10,7 @@ from typing import Protocol
 import hashlib
 import json
 
+from app.content.whiteboard.science import FactReview, evidence_supported, requires_science_review
 from app.content.whiteboard.contracts import (
     WhiteboardOutput, WhiteboardRegionPlan, WhiteboardRequest,
     WhiteboardScene, WhiteboardSceneAssets, WhiteboardStoryboard,
@@ -45,6 +46,7 @@ class WhiteboardPipeline:
         speech: SpeechProvider, regions: RegionProvider, renderer: VideoRenderer,
         sanitizer=None, checkpoints=None, progress=None,
         critic=None, visual_author=None, visual_review=False, max_api_calls=25,
+        science_reviewer=None,
     ) -> None:
         if sanitizer is None or not callable(getattr(sanitizer, "sanitize_text", None)):
             raise ValueError("PrivacyGateway is required for outbound AI stages")
@@ -57,6 +59,7 @@ class WhiteboardPipeline:
         self.checkpoints = checkpoints
         self.progress = progress
         self.critic, self.visual_author = critic, visual_author
+        self.science_reviewer = science_reviewer
         self.visual_review, self.max_api_calls = visual_review, max_api_calls
         if visual_review and (critic is None or visual_author is None):
             raise ValueError('An advisory critic and primary visual author are required')
@@ -81,9 +84,17 @@ class WhiteboardPipeline:
             raise FileExistsError("Refusing to overwrite an existing video")
         if not request.request_generation or not approval_verified:
             raise PermissionError("Verified owner approval is required for paid generation")
-        self._check_text(request.topic)
+        for value in (request.topic, request.source_script, request.background_notes,
+                      request.reference_materials):
+            self._check_text(value)
         if self.checkpoints is not None and bool(self.checkpoints.identity.get('visual_review')) != self.visual_review:
             raise ValueError('Checkpoint visual review policy does not match this job')
+        science_required = requires_science_review(request)
+        if science_required and self.science_reviewer is not None:
+            reviewer = getattr(self.science_reviewer, 'provider', self.science_reviewer)
+            prepare = getattr(reviewer, 'prepare_sources', None)
+            if callable(prepare):
+                await prepare(request, checkpoints=self.checkpoints)  # Zero paid model calls.
         self._report('storyboard', 0)
         if self.checkpoints is not None:
             if self.checkpoints.identity['request'] != request.model_dump(mode='json'):
@@ -96,11 +107,34 @@ class WhiteboardPipeline:
         if len(storyboard.scenes) != request.scenes:
             raise ValueError("Storyboard scene count mismatch")
         total = 2 + 2 * len(storyboard.scenes) + sum(len(scene.beats) for scene in storyboard.scenes)
+        if science_required:
+            total += 1
         completed = 1
         for scene in storyboard.scenes:
             for text in (scene.title, *(b.label for b in scene.beats),
                          *(b.narration for b in scene.beats), *(b.visual for b in scene.beats)):
                 self._check_text(text)
+
+        science_audit = None
+        if science_required:
+            from .runtime import ReadinessError
+            if self.science_reviewer is None:
+                raise ReadinessError('science_reviewer_missing')
+            self._report('science_review', completed, total)
+            async def review_facts():
+                return await self.science_reviewer.review(storyboard, request)
+            assessment = (await self.checkpoints.json_stage('science-review', review_facts, FactReview)
+                          if self.checkpoints else await review_facts())
+            science_audit = assessment.model_dump()
+            science_audit['source_ids'] = [
+                item for item in assessment.verified_source_ids
+            ]
+            science_audit['check_type'] = 'curated_reference_ai_review'
+            if self.progress is not None:
+                self.progress({'science_review_result': science_audit})
+            if not evidence_supported(assessment, request, storyboard):
+                raise ReadinessError('science_unsupported')
+            completed += 1
 
         reviewed_images = {}
         visual_audit = None
@@ -237,10 +271,13 @@ class WhiteboardPipeline:
             raise RuntimeError("Renderer did not produce a nonempty MP4")
         if not (0 < duration <= 180):
             raise ValueError("Renderer returned an invalid video duration")
-        if visual_audit is not None:
+        if visual_audit is not None or science_audit is not None:
             meta_path = destination.with_suffix('.json')
             if meta_path.is_file() and not meta_path.is_symlink():
                 meta = json.loads(meta_path.read_text())
-                meta['visual_review'] = visual_audit
+                if visual_audit is not None:
+                    meta['visual_review'] = visual_audit
+                if science_audit is not None:
+                    meta['science_review'] = science_audit
                 meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-        return WhiteboardOutput(destination, storyboard, len(assets), duration, visual_audit)
+        return WhiteboardOutput(destination, storyboard, len(assets), duration, visual_audit, science_audit)

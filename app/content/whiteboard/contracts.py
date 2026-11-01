@@ -32,6 +32,13 @@ class WhiteboardRequest(Contract):
     voice: str = Field(default="default", min_length=1, max_length=80)
     # What the closing beat asks the viewer to do. Empty: subscribe to the channel and like.
     call_to_action: str = Field(default="", max_length=200)
+    # Source material is frozen into the same immutable owner-approved request.
+    source_script: str = Field(default="", max_length=12000)
+    background_notes: str = Field(default="", max_length=6000)
+    reference_materials: str = Field(default="", max_length=6000)
+    # Legacy requests default to general; new Studio forms use auto detection.
+    science_mode: Literal["general", "auto", "scientific"] = "general"
+    science_policy_version: int = Field(default=0, ge=0, le=1)
     # API execution must be manually approved. This is NOT a spending cap.
     request_generation: bool = False
 
@@ -49,8 +56,13 @@ class WhiteboardRequest(Contract):
         # An empty call to action is omitted, so requests, digests and checkpoints
         # created before this field existed keep exactly the same serialization.
         data = handler(self)
-        if not data.get("call_to_action"):
-            data.pop("call_to_action", None)
+        for field in ("call_to_action", "source_script", "background_notes", "reference_materials"):
+            if not data.get(field):
+                data.pop(field, None)
+        if data.get("science_mode") == "general":
+            data.pop("science_mode", None)
+        if not data.get("science_policy_version"):
+            data.pop("science_policy_version", None)
         return data
 
 
@@ -115,3 +127,4 @@ class WhiteboardOutput:
     # Only the renderer can determine actual audio/video duration.
     duration_seconds: float
     visual_review: dict | None = None
+    science_review: dict | None = None

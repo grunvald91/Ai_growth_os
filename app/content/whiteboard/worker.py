@@ -20,6 +20,7 @@ from .jobs import (AGENT, CallLedger, GuardedStage, job_directory, owner_task, r
 from .pipeline import WhiteboardPipeline
 from .render import MarkerSweepRenderer
 from .review import ClaudeHubVisualCritic, LLMVisualAuthor, OpenRouterVisualCritic
+from .science import FactReviewer, requires_science_review
 from .runtime import ReadinessError, SingleCallStoryboardLLM, preflight, regions_on_claudehub, safe_error, scoped_settings
 
 
@@ -28,6 +29,10 @@ def build_pipeline(settings, payload, store):
         raise ReadinessError('image_provider_required')
     privacy = PrivacyGateway()
     service = LLMService(privacy_gateway=privacy, provider=SingleCallStoryboardLLM(settings, diagnostic_directory=store.directory))
+    science_service = (LLMService(privacy_gateway=privacy,
+        provider=SingleCallStoryboardLLM(settings, diagnostic_directory=store.directory,
+                                         allow_fallback=False, allow_ceiling_retry=False))
+        if requires_science_review(payload.request) else None)
     if regions_on_claudehub(payload.models):
         regions = ClaudeHubRegionProvider(api_key=settings.xai_api_key, base_url=settings.xai_base_url, model=payload.models.regions)
         critic = ClaudeHubVisualCritic(api_key=settings.xai_api_key, base_url=settings.xai_base_url, model=payload.models.regions)
@@ -41,6 +46,7 @@ def build_pipeline(settings, payload, store):
         regions=regions,
         renderer=MarkerSweepRenderer(), sanitizer=privacy, checkpoints=store,
         visual_review=payload.visual_review, max_api_calls=payload.max_api_calls,
+        science_reviewer=FactReviewer(science_service, payload.models.regions) if science_service else None,
         critic=critic if payload.visual_review else None,
         visual_author=LLMVisualAuthor(service, model=payload.models.storyboard) if payload.visual_review else None)
 
@@ -192,6 +198,10 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
             ledger = CallLedger(session_factory, product_id, task_id)
             for attribute, stage in (('storyboard', 'storyboard'), ('images', 'image'), ('speech', 'speech'), ('regions', 'regions')):
                 setattr(pipeline, attribute, GuardedStage(getattr(pipeline, attribute), stage, ledger))
+            if requires_science_review(payload.request):
+                if pipeline.science_reviewer is None:
+                    raise ReadinessError('science_reviewer_missing')
+                pipeline.science_reviewer = GuardedStage(pipeline.science_reviewer, 'science_review', ledger)
             if payload.visual_review:
                 if not pipeline.visual_review:
                     raise ReadinessError('approval_invalid')
@@ -213,7 +223,8 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                     content=json.dumps({'task_id': str(task_id), 'duration_seconds': output.duration_seconds,
                         'scene_count': output.scene_count, 'storyboard': output.storyboard.model_dump(),
                         'cost_usd': None, 'cost_known': False, 'human_review_required': True,
-                        'visual_review': output.visual_review}, ensure_ascii=False))
+                        'visual_review': output.visual_review,
+                        'science_review': output.science_review}, ensure_ascii=False))
                 db.add(result); db.flush()
                 value = json.loads(state.content); value.update(stage='completed', error=None, artifact_id=str(result.id))
                 if value.get('progress_total') is not None:

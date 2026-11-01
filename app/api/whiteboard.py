@@ -15,6 +15,9 @@ from pydantic import ValidationError
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.content_studio import _owner_product, _studio_form, esc, studio_page_shell
 from app.content.whiteboard.contracts import SCENES_FOR_SECONDS, Contract, WhiteboardRequest
+from app.content.whiteboard.science import requires_science_review
+from app.content.whiteboard.topics import suggest_company_video_topics
+from app.content.whiteboard.selector_ui import topic_picker_html
 from app.content.whiteboard.jobs import (AGENT, MAX_API_CALLS, TOP_UP_STEP, approve_job, call_limit, can_resume, can_top_up, cancel_job,
                                          digest, job_directory, owner_task, queue_job, records, required_calls, resume_job)
 from app.content.whiteboard.runtime import MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings
@@ -41,6 +44,10 @@ class CreateJob(Contract):
     max_api_calls: int | None = Field(default=None, ge=13, le=MAX_API_CALLS)
     profile: Literal['configured', 'gemini_ru'] = 'gemini_ru'
     visual_review: bool = False
+    source_script: str = Field(default='', max_length=12000)
+    background_notes: str = Field(default='', max_length=6000)
+    reference_materials: str = Field(default='', max_length=6000)
+    science_mode: Literal['general', 'auto', 'scientific'] = 'auto'
 
     @model_validator(mode='after')
     def call_to_action_not_tiny(self):
@@ -87,7 +94,10 @@ def _queue(db, product, body, settings):
         raise HTTPException(503, MESSAGES['configuration_missing']) from None
     request = WhiteboardRequest(product_id=product.id, topic=body.topic, voice=voice,
                                 duration_seconds=body.duration_seconds, scenes=SCENES_FOR_SECONDS[body.duration_seconds],
-                                call_to_action=body.call_to_action)
+                                call_to_action=body.call_to_action,
+                                source_script=body.source_script, background_notes=body.background_notes,
+                                reference_materials=body.reference_materials, science_mode=body.science_mode,
+                                science_policy_version=1)
     needed = required_calls(request, visual_review=body.visual_review)
     if body.max_api_calls is not None and body.max_api_calls < needed:
         raise HTTPException(422, f'Для этого видео нужно не меньше {needed} вызовов. Выберите лимит {needed} или больше, либо «Столько, сколько нужно».')
@@ -178,6 +188,12 @@ def approval_card(state, product_id, error=None):
     warning = f'<p class="sg-warning" role="alert">{esc(error)}</p>' if error else ''
     cta = state['request'].get('call_to_action')
     cta_html = f'<p class="wb-cta"><strong>Призыв в конце:</strong> {esc(cta)}</p>' if cta else ''
+    inputs = state['request']
+    source_description = (
+        f'<p>Исходный сценарий: {len(inputs.get("source_script", ""))} символов; '
+        f'дополнительные материалы: {len(inputs.get("background_notes", ""))} символов. '
+        f'Тип проверки: {esc(inputs.get("science_mode", "general"))}.</p>'
+    )
     review = ('<p>Один проход визуального критика. Автор выбирает существенные исправления; '
               'каждая выбранная сцена перерисовывается максимум один раз.</p>' if state.get('visual_review_enabled') else '')
     provider = ('<p>Новые рисунки и перерисовки: Gemini 3.1 Flash Image через API ClaudeHub. '
@@ -189,7 +205,7 @@ def approval_card(state, product_id, error=None):
             f'<h2>{esc(state["request"]["topic"])}</h2></header>{warning}'
             '<div class="wb-facts"><div><span>Длительность</span>'
             f'<strong>{duration}</strong></div><div><span>Сценарий</span><strong>{scenes} сцен</strong></div>'
-            f'<div><span>Лимит генерации</span><strong>До {state["max_api_calls"]} API-вызовов</strong></div></div>{cta_html}'
+            f'<div><span>Лимит генерации</span><strong>До {state["max_api_calls"]} API-вызовов</strong></div></div>{cta_html}{source_description}'
             '<section class="wb-cost"><h3>Платная генерация</h3><p>Точная стоимость в долларах пока неизвестна. '
             'Лимит ограничивает число API-вызовов, а не сумму списаний.</p>'
             '<p>После временного сбоя генерация продолжается автоматически в пределах подтверждённого лимита.</p></section>'
@@ -209,7 +225,7 @@ def job_html(state, product_id, *, error=None):
     if state['status'] == 'waiting_approval' and not state.get('visual_repair_from'):
         return approval_card(state, product_id, error or MESSAGES.get(state.get('error')))
     base = f'/studio/products/{product_id}/whiteboard/{state["task_id"]}'
-    stages = {'storyboard': 'Сценарий', 'image': 'Рисунок', 'regions': 'Области рисования', 'speech': 'Озвучка',
+    stages = {'storyboard': 'Сценарий', 'science_review': 'Проверка научных утверждений', 'image': 'Рисунок', 'regions': 'Области рисования', 'speech': 'Озвучка',
               'visual_review': 'Критик проверяет рисунки', 'visual_decision': 'Автор разбирает замечания',
               'image_revision': 'Перерисовка выбранной сцены',
               'audio_reuse': 'Использование исходной озвучки без генерации',
@@ -277,6 +293,19 @@ def job_html(state, product_id, *, error=None):
                      f'{esc(entry.get("code", ""))} · вызовов {esc(str(entry.get("calls", "")))}'
                      + (f' · {esc(extra)}' if extra else '') + '</li>')
         body += '</ol></details>'
+    science = state.get('science_review_result')
+    if isinstance(science, dict):
+        summary = esc(science.get('summary', ''))
+        label = 'Научная проверка пройдена' if science.get('status') == 'supported' else 'Научные факты требуют исправления'
+        body += f'<p><strong>{label}</strong>: {summary}</p>'
+        sources = science.get('source_links') or []
+        if sources:
+            body += '<details><summary>Источники научной проверки</summary><ul>'
+            for item in sources[:5]:
+                url = str(item.get('url', ''))
+                if url.startswith('https://'):
+                    body += f'<li><a href="{esc(url)}" rel="noopener noreferrer" target="_blank">{esc(url)}</a></li>'
+            body += '</ul></details>'
     if state.get('visual_review_enabled'):
         body += '<p>Один проход визуального критика. Автор выбирает существенные исправления; каждая выбранная сцена перерисовывается максимум один раз.</p>'
     if state.get('image_provider') == 'claudehub':
@@ -341,13 +370,30 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
     maximum = str(fields.get('max_api_calls') or 'auto')
     visual_review = fields.get('visual_review', 'once')
     length = str(fields.get('duration_seconds', '30'))
+    science_mode = fields.get('science_mode', 'auto')
     body = '<section class="sg-surface"><h2>Создать анимацию с озвучкой</h2><p>Вертикальное видео на 30 секунд или на минуту: русская озвучка, MP4, обложка и субтитры. В конце видео зовёт подписаться, поставить лайк или сделать то, что вы напишете. Перед запуском вы подтвердите платную генерацию. Доступ к моделям проверяется перед платным запуском.</p>'
     body += f'<p class="sg-notice sg-duration-note" role="note">⏱ {esc(duration_notice(durations or {}, "whiteboard"))}</p>'
     if error:
         body += f'<p class="sg-warning" role="alert">{esc(error)}</p>'
-    body += (f'<form method="post" action="{base}" class="sg-form">'
+    body += (f'<form method="post" action="{base}" class="sg-form" id="wb-create-form">'
+             '<input type="hidden" name="wb_topic_choice" value="">'
+             '<input type="hidden" name="wb_paid_start" value="">'
+             '<input type="hidden" name="wb_paid_consent" value="">'
              '<label class="sg-field"><span>Что объяснить в видео?</span><textarea name="topic" minlength="8" maxlength="400" rows="3" required '
              f'placeholder="Например: почему пилот добавляет тягу при посадке на авианосец">{esc(fields.get("topic", ""))}</textarea></label>'
+             '<button class="btn secondary" type="button" id="wb-suggest-btn">Предложить темы для моей компании</button>'
+             '<label class="sg-field"><span>Готовый сценарий (необязательно)</span>'
+             f'<textarea name="source_script" rows="6" maxlength="12000" placeholder="Вставьте исходный текст ролика">{esc(fields.get("source_script", ""))}</textarea>'
+             '<small>Сценарист сохранит смысл и адаптирует текст под длительность. Важные утверждения не должны изменяться.</small></label>'
+             '<label class="sg-field"><span>Дополнительная информация (необязательно)</span>'
+             f'<textarea name="background_notes" rows="4" maxlength="6000" placeholder="Целевая аудитория, контекст, ограничения">{esc(fields.get("background_notes", ""))}</textarea></label>'
+             '<label class="sg-field"><span>Материалы для проверки фактов (необязательно)</span>'
+             f'<textarea name="reference_materials" rows="4" maxlength="6000" placeholder="Названия источников, ссылки, выдержки">{esc(fields.get("reference_materials", ""))}</textarea>'
+             '<small>Материалы пользователя сами по себе не считаются независимым подтверждением фактов.</small></label>'
+             '<label class="sg-field"><span>Научная проверка</span><select name="science_mode">' + ''.join(
+                 f'<option value="{value}"' + (' selected' if science_mode == value else '') + f'>{label}</option>'
+                 for value, label in [('auto', 'Автоматически по теме'), ('scientific', 'Научный сюжет — обязательно проверять'), ('general', 'Обычный сюжет (научные утверждения всё равно проверяются)')]) +
+             '</select><small>Неподтверждённые научные утверждения остановят производство до рисунков и озвучки.</small></label>'
              '<label class="sg-field"><span>Длина видео</span><select name="duration_seconds">' + ''.join(
                  f'<option value="{value}"' + (' selected' if length == str(value) else '') + f'>{label}</option>'
                  for value, label in [(30, 'Около 30 секунд — 3 сцены'), (60, 'Около минуты — 6 сцен, объяснение подробнее')]) +
@@ -370,6 +416,7 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
                                       (19, '19'), (25, '25'), (34, '34'), (45, '45')]) +
              '</select><small>Это лимит обращений к моделям; точная сумма списаний неизвестна. Для видео на 30 секунд без проверки рисунков нужно 14 вызовов, с проверкой 19; для минуты 26 и 34.</small></label></details>'
              '<button class="btn primary">Сохранить и перейти к подтверждению</button></form></section>')
+    body += topic_picker_html(product_id)
     return body
 
 
@@ -434,6 +481,33 @@ def history_html(states, product_id):
     return body
 
 
+@router.get('/studio/products/{product_id}/whiteboard/topics.json')
+def studio_topic_suggestions(product_id: UUID, db: Session = Depends(get_db), settings=Depends(get_settings)):
+    return suggest_company_video_topics(settings.products_root, _owner_product(db, product_id))
+
+
+@router.get('/studio/products/{product_id}/whiteboard/quote.json')
+@router.post('/studio/products/{product_id}/whiteboard/quote.json')
+async def studio_topic_quote(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    q = await _studio_form(request) if request.method == 'POST' else request.query_params
+    try:
+        seconds = int(q.get('duration_seconds', '30'))
+        draft = WhiteboardRequest(product_id=product_id, topic=q.get('topic', ''),
+            duration_seconds=seconds, scenes=SCENES_FOR_SECONDS[seconds],
+            science_mode=q.get('science_mode', 'auto'), science_policy_version=1,
+            source_script=q.get('source_script', ''))
+        needed = required_calls(draft, visual_review=q.get('visual_review', 'once') == 'once')
+        raw = q.get('max_api_calls', 'auto')
+        limit = needed if raw == 'auto' else int(raw)
+        if not 13 <= limit <= MAX_API_CALLS:
+            raise ValueError('Invalid limit')
+    except (TypeError, ValueError, KeyError, ValidationError):
+        raise HTTPException(422, 'Проверьте тему и лимит API-вызовов.') from None
+    return {'required_calls': needed, 'limit': limit, 'allowed': limit >= needed,
+            'science_review': requires_science_review(draft)}
+
+
 @router.get('/studio/products/{product_id}/whiteboard', response_class=HTMLResponse)
 async def studio_index(product_id: UUID, db: Session = Depends(get_db), settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
@@ -452,7 +526,8 @@ async def studio_index(product_id: UUID, db: Session = Depends(get_db), settings
 
 
 @router.post('/studio/products/{product_id}/whiteboard')
-async def studio_create(product_id: UUID, request: Request, db: Session = Depends(get_db), settings=Depends(get_settings)):
+async def studio_create(product_id: UUID, request: Request, db: Session = Depends(get_db),
+                        actor=Depends(require_studio_auth), settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     fields = await _studio_form(request)
     try:
@@ -460,14 +535,38 @@ async def studio_create(product_id: UUID, request: Request, db: Session = Depend
         body = CreateJob(topic=fields.get('topic', ''), max_api_calls=None if limit in ('', 'auto') else limit,
                          duration_seconds=int(fields.get('duration_seconds') or 30),
                          call_to_action=(fields.get('call_to_action') or '').strip(),
-                         profile=fields.get('profile', 'gemini_ru'), visual_review=fields.get('visual_review') == 'once')
+                         profile=fields.get('profile', 'gemini_ru'), visual_review=fields.get('visual_review') == 'once',
+                         source_script=fields.get('source_script', ''),
+                         background_notes=fields.get('background_notes', ''),
+                         reference_materials=fields.get('reference_materials', ''),
+                         science_mode=fields.get('science_mode', 'auto'))
     except ValueError:
         return page(product, 'Создать анимацию', creation_form(product_id, fields=fields, durations=task_durations(db),
                     error='Тема: 8–400 символов. Призыв: не короче 6 и не длиннее 200 символов, либо пусто. Выберите длину видео и вариант генерации.'), status=422)
+    auto_start = fields.get('wb_paid_start') == 'yes'
+    if auto_start:
+        topics = suggest_company_video_topics(settings.products_root, product)['topics']
+        if (fields.get('wb_paid_consent') != 'yes'
+                or fields.get('wb_topic_choice') != body.topic
+                or body.topic not in {item['topic'] for item in topics}):
+            return page(product, 'Создать анимацию',
+                        creation_form(product_id, fields=fields, durations=task_durations(db),
+                                      error='Недействительное подтверждение выбранной темы.'),
+                        status=409)
     try:
         task = _queue(db, product, body, settings)
     except HTTPException as exc:
         return page(product, 'Создать анимацию', creation_form(product_id, fields=fields, durations=task_durations(db), error=exc.detail), status=exc.status_code)
+    if auto_start:
+        state = job_state(db, product_id, task.id)
+        try:
+            await _approve(db, product_id, task.id,
+                           ApproveJob(request_digest=state['request_digest'], confirmed=True),
+                           actor, settings)
+        except HTTPException as exc:
+            state = _load(db, product_id, task.id)
+            return page(product, 'Генерация видео', job_html(state, product_id, error=exc.detail),
+                        status=exc.status_code)
     return RedirectResponse(f'/studio/products/{product_id}/whiteboard/{task.id}', status_code=303)
 
 

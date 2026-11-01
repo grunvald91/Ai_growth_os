@@ -94,6 +94,9 @@ MESSAGES = {
     'interrupted': 'Worker был остановлен. Готовые этапы сохранены; можно продолжить с места остановки.',
     'cancelled': 'Задание остановлено. Начатый API-вызов мог завершиться и быть оплачен; следующие вызовы запрещены.',
     'review_budget': 'В сценарии больше реплик, чем предусмотрено лимитом проверки рисунков. Генерация остановлена до изображений; автоматического повтора нет.',
+    'science_unsupported': 'Научные утверждения не подтверждены источниками. Создание рисунков и озвучки остановлено. Уточните сценарий и добавьте ссылки на опубликованные научные материалы.',
+    'science_reviewer_missing': 'Не удалось подключить научную проверку. Генерация изображений не началась.',
+    'science_sources_missing': 'Не удалось найти подходящие научные источники. Нейросети и изображения не запускались. Добавьте ссылку на научную публикацию или уточните тему.',
     'repair_source_invalid': 'Исходный сценарий или озвучка не прошли проверку сохранённых файлов. Визуальная правка остановлена; новая озвучка не запускается.',
     'repair_budget': 'В подтверждённом лимите исходного ролика осталось меньше 8 вызовов для визуальной правки. Повтор автоматически не запускается.',
     'image_provider_required': 'Новые рисунки разрешены только через Gemini 3.1 Flash Image в ClaudeHub. Создайте новый запрос с этими настройками; автоматической замены нет.',
@@ -199,9 +202,11 @@ class SingleCallStoryboardLLM:
     One POST per model. When the chosen model does not answer at all (provider 5xx/429, no
     connection) the next configured model is tried, so a provider outage does not stop the job.
     A model that answered (even with a bad result) is never retried or replaced here."""
-    def __init__(self, settings, *, client=None, diagnostic_directory=None):
+    def __init__(self, settings, *, client=None, diagnostic_directory=None, allow_fallback=True, allow_ceiling_retry=True):
         self.settings, self.client = settings, client
         self.diagnostic_directory = diagnostic_directory
+        self.allow_fallback = allow_fallback
+        self.allow_ceiling_retry = allow_ceiling_retry
 
     def record_response(self, response, *, name='storyboard'):
         # Private response capture permits offline diagnosis without repeating a paid call.
@@ -247,7 +252,7 @@ class SingleCallStoryboardLLM:
             response = await connection.post('chat/completions', json=payload,
                                              headers={'Authorization': 'Bearer ' + settings.xai_api_key})
             self.record_response(response)
-            if (payload['max_completion_tokens'] != request.max_tokens
+            if (self.allow_ceiling_retry and payload['max_completion_tokens'] != request.max_tokens
                     and rejects_ceiling(response.status_code, response.text)):
                 # This model has a smaller output limit: retry once with the caller's value.
                 payload['max_completion_tokens'] = request.max_tokens
@@ -276,7 +281,8 @@ class SingleCallStoryboardLLM:
                                usage=LLMUsage(input_tokens=usage.get('prompt_tokens', 0), output_tokens=usage.get('completion_tokens', 0)))
 
         async def with_fallbacks(connection):
-            candidates = [request.model, *self.fallback_models(request.model)]
+            candidates = ([request.model, *self.fallback_models(request.model)]
+                          if self.allow_fallback else [request.model])
             first_error = None
             for index, model in enumerate(candidates):
                 try:

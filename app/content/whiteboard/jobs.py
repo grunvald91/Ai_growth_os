@@ -14,6 +14,7 @@ from sqlalchemy import select
 from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Product, Task, TaskStatus
 from app.privacy import PrivacyGateway
 from .contracts import Contract, WhiteboardRequest
+from .science import requires_science_review
 from .runtime import TRANSIENT_STATUSES, ReadinessError, WhiteboardModels
 from pydantic import Field, model_validator
 
@@ -30,7 +31,7 @@ def required_calls(request: WhiteboardRequest, *, visual_review: bool = False) -
     at worst, one redrawn picture per scene."""
     beats = 2 * request.scenes + 1
     calls = 1 + 2 * request.scenes + beats
-    return calls + (2 + request.scenes if visual_review else 0)
+    return calls + (2 + request.scenes if visual_review else 0) + (1 if requires_science_review(request) else 0)
 
 
 class JobRequest(Contract):
@@ -91,8 +92,15 @@ def records(db, task, *, lock=False):
 
 
 def queue_job(db, request: WhiteboardRequest, models: WhiteboardModels, *, max_api_calls=25, visual_review=False, image_provider='openrouter'):
+    # New approvals are v1. Do not alter already persisted legacy requests:
+    # only requests entering the queue path are upgraded.
+    if request.science_policy_version == 0:
+        request = request.model_copy(update={'science_policy_version': 1})
     gateway = PrivacyGateway()
-    if gateway.sanitize_text(request.topic) != request.topic or gateway.sanitize_text(request.call_to_action) != request.call_to_action:
+    if any(gateway.sanitize_text(value) != value for value in (
+        request.topic, request.call_to_action, request.source_script,
+        request.background_notes, request.reference_materials,
+    )):
         raise ValueError('Sensitive text is not allowed')
     if max_api_calls < required_calls(request, visual_review=visual_review):
         raise ValueError('The call limit is below what this video needs')
@@ -339,9 +347,9 @@ class CallLedger:
             value = json.loads(state.content)
             if value['calls'] >= call_limit(value, payload):
                 raise ReadinessError('call_limit')
-            model_stage = {'visual_review': 'regions', 'visual_decision': 'storyboard', 'image_revision': 'image'}.get(stage, stage)
+            model_stage = {'visual_review': 'regions', 'visual_decision': 'storyboard', 'image_revision': 'image', 'science_review': 'regions'}.get(stage, stage)
             run = AgentRun(task_id=task.id, agent_name='whiteboard_' + stage,
-                           provider='configured_text' if model_stage == 'storyboard' else
+                           provider='configured_text' if model_stage == 'storyboard' or stage == 'science_review' else
                                payload.image_provider if model_stage == 'image' else 'openrouter',
                            model=getattr(payload.models, model_stage), status='running',
                            started_at=datetime.now(timezone.utc), input_references=[str(source.id)])
