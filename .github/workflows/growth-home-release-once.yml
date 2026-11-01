@@ -1,0 +1,85 @@
+name: One-off release of tested floating Growth home (no repeat CI)
+on:
+  push:
+    branches: [ops/growth-home-restore-release-once-20261101]
+
+permissions:
+  contents: read
+concurrency:
+  group: growth-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 6467c50ebebaf12ece373799ef8f8f996fedbb0c
+          fetch-depth: 0
+      - name: Verify exact tested main
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=6467c50ebebaf12ece373799ef8f8f996fedbb0c
+          [ "$(git rev-parse HEAD)" = "$sha" ]
+          [ "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$sha" ] || {
+            echo "::error::Main moved since CI; refusing stale deploy"; exit 1;
+          }
+          echo "Verified exact CI #41311461071 main."
+      - name: Wait for idle worker then guarded production deploy
+        shell: bash
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+        run: |
+          set -euo pipefail
+          SHA=6467c50ebebaf12ece373799ef8f8f996fedbb0c
+          [ -n "$SSHPASS" ] || { echo "::error::Missing SSH password"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            if ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Host key mismatch"; exit 1; }
+          SSH_OPTS=(-o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ControlMaster=auto
+                    -o ControlPath=/tmp/ssh-growth-%C -o ControlPersist=600)
+          run() { sshpass -e ssh "${SSH_OPTS[@]}" "root@$HOST" "$@"; }
+          run "docker exec ai-growth-os-api-1 sh -c 'cd /app && find app products -type f \( -name \"*.py\" -o -name \"*.json\" -o -name \"*.md\" -o -name \"*.html\" -o -name \"*.css\" -o -name \"*.js\" \) ! -path \"*/__pycache__/*\" -exec sha256sum {} +'" > running.txt
+          python3 - "$SHA" <<'PY'
+          import hashlib, subprocess, sys
+          sha=sys.argv[1]
+          def blob(rev,path):
+              r=subprocess.run(['git','show',f'{rev}:{path}'],capture_output=True)
+              return hashlib.sha256(r.stdout).hexdigest() if r.returncode==0 else None
+          unknown=[]
+          for line in open('running.txt'):
+              digest,path=line.split(None,1); path=path.strip()
+              if blob(sha,path)==digest: continue
+              revs=subprocess.run(['git','log','--format=%H','-n','300',sha,'--',path],
+                                  capture_output=True,text=True).stdout.split()
+              if not any(blob(rev,path)==digest for rev in revs): unknown.append(path)
+          if unknown:
+              print('::error::Unreviewed code drift; refusing release:',unknown)
+              sys.exit(1)
+          print('drift check: OK')
+          PY
+          busy=unknown
+          for attempt in 1 2 3 4 5 6 7 8 9; do
+            busy="$(run "docker exec ai-growth-os-api-1 python -c 'from sqlalchemy import select,func; from app.db.session import SessionLocal; from app.models.domain import Task,TaskStatus; db=SessionLocal(); print(db.scalar(select(func.count()).select_from(Task).where(Task.status==TaskStatus.RUNNING))); db.close()'")"
+            [ "$busy" = 0 ] && break
+            [[ "$busy" =~ ^[0-9]+$ ]] || { echo "::error::Cannot read task count"; exit 1; }
+            echo "$busy task(s) still running, leaving untouched (check $attempt/9)"
+            sleep 15
+          done
+          [ "$busy" = 0 ] || { echo "::error::Tasks remain active; no deploy"; exit 1; }
+          git archive --format=tar.gz "$SHA" app alembic/versions pyproject.toml products \
+            | run "python3 /opt/ai_growth_os/deploy/deploy_growth.py deploy $SHA"
+          run "docker ps --filter label=com.docker.compose.project=ai-growth-os --format '{{.Names}} {{.Image}} {{.Status}}'; curl -sS -o /dev/null -w 'health %{http_code}\n' http://127.0.0.1:8091/health"
