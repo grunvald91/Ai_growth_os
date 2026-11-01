@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.dispatcher.outcome import Context, Outcome, links_block
 from app.dispatcher.registry import page_href
-from app.dispatcher.readers import ACTIVE, attention, plans, work_rows
+from app.dispatcher.readers import ACTIVE, attention, plans, upcoming_slots, work_rows
 from app.models.domain import Artifact, Task
 
 
@@ -104,6 +104,75 @@ async def show_recent_videos(ctx: Context, params) -> Outcome:
             ]},
         ],
     )
+
+
+
+async def show_next_steps(ctx: Context, params) -> Outcome:
+    """Answer 'what's next according to our plan?' with company-scoped facts.
+
+    A marketing plan is NOT the same as the engineering roadmap. Only records
+    of this company's content plan, ongoing tasks and pending reviews are used.
+    """
+    from app.api.content_studio_activity import work_url
+
+    current = work_rows(ctx.db, ctx.product.id)
+    attention_items = attention(ctx.db, ctx.product.id)
+    active, draft = plans(ctx.db, ctx.product.id)
+    running = sorted(
+        (row for row in current if row.get("state") in ACTIVE),
+        key=lambda row: (str(row.get("created_at") or ""), str(row["id"])),
+    )
+    needs_review = [item for item in attention_items if item.get("kind") == "review"]
+    failures = [item for item in attention_items if item.get("kind") == "error"]
+
+    if active is not None:
+        due = upcoming_slots(active[1])
+        summary = f"Контент-план утверждён. Впереди публикаций: {len(due)}."
+    elif draft is not None:
+        due = []
+        summary = "Утверждённого контент-плана нет, но есть черновик на проверке."
+    else:
+        due = []
+        summary = "У этой компании пока нет утверждённого контент-плана."
+
+    summary += f" В работе или ожидании: {len(running)} заданий."
+    if needs_review:
+        summary += f" Требуют решения: {len(needs_review)}."
+    if failures:
+        summary += f" Ошибок, требующих внимания: {len(failures)}."
+
+    blocks = []
+    if due:
+        from app.api.content_studio import platform_label
+        from zoneinfo import ZoneInfo
+        try:
+            zone = ZoneInfo(str(active[1].get("timezone") or "Europe/Moscow"))
+        except (ValueError, KeyError):
+            zone = ZoneInfo("Europe/Moscow")
+        blocks.append({
+            "type": "table", "columns": ["Ближайшая публикация", "Площадка", "Тема"],
+            "rows": [[slot["_when"].astimezone(zone).strftime("%d.%m %H:%M"),
+                      platform_label(slot.get("platform")), str(slot.get("topic", ""))]
+                     for slot in due[:3]],
+        })
+
+    # Keep linked tasks readable in chronological order: recent at bottom.
+    if running:
+        blocks.append({
+            "type": "resource_list",
+            "items": [
+                {"title": str(row["title"])[:140],
+                 "status": str(row.get("label") or row["state"])[:80],
+                 "href": work_url(ctx.product.id, row)}
+                for row in running[-3:]
+            ],
+        })
+    blocks.append(links_block(ctx, "plan", "work", "review"))
+    blocks.append({"type": "chips", "items": [
+        {"label": "Показать весь контент-план", "capability": "show_plan", "params": {}},
+        {"label": "Что ждёт проверки", "capability": "show_review", "params": {}},
+    ]})
+    return Outcome(summary, summary, blocks)
 
 
 async def recommend_today(ctx: Context, params) -> Outcome:
