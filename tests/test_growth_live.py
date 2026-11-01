@@ -987,3 +987,27 @@ def test_approved_growth_home_has_floating_transparent_overlay():
     assert "ResizeObserver(measureDock)" in js
     assert "--v4-dock-height" in js
     assert "position:relative;\n  left:auto;\n  right:auto;" not in rules
+
+
+
+def test_canonical_growth_defaults_to_v4_without_changing_legacy_preference(live, monkeypatch):
+    client, db, product = live
+    config = Settings(app_env="development", studio_public_origin="https://growth.servgo.ru",
+                      studio_servgo_gateway_enabled=True, _env_file=None)
+    monkeypatch.setitem(app.dependency_overrides, get_settings, lambda: config)
+    base = f"/studio/products/{product.id}"
+    with TestClient(app, base_url="https://servgo.ru") as canonical:
+        page = canonical.get(base)
+        assert page.status_code == 200
+        assert 'data-growth-design="v4"' in page.text
+        assert 'id="dp-state"' in page.text
+        assert 'href="https://servgo.ru/mail"' not in page.text
+        # Users who choose Classic explicitly keep their preference.
+        classic = canonical.get(base + "?design=classic")
+        assert classic.status_code == 200
+        assert 'data-growth-design="v4"' not in classic.text
+        assert canonical.cookies.get("growth_design") == "classic"
+    with TestClient(app, base_url="https://growth.servgo.ru") as legacy:
+        page = legacy.get(base + "/work")
+        assert page.status_code == 200
+        assert 'data-growth-design="v4"' not in page.text
