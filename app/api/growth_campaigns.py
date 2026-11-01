@@ -687,7 +687,9 @@ async def finish_campaign(
     db: Session = Depends(get_db),
 ):
     _owner_product(db, product_id)
-    fields = await _studio_form(request)
+    # A conclusion is optional; accept an empty POST without Content-Type.
+    # Submitted forms still use the existing validated Studio form parser.
+    fields = await _studio_form(request) if request.headers.get("content-type") else {}
     try:
         lifecycle_command(
             db, product_id=product_id, experiment_id=experiment_id,
