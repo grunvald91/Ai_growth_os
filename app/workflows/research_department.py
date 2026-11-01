@@ -64,7 +64,7 @@ class ResearchDepartment:
         self.intelligence = intelligence
 
     async def run(self, product: Product, parent: Task, brief: Artifact, brief_data: dict) -> TeamTaskResult:
-        if task_halted(self.db, parent, brief_data):
+        if task_halted(self.db, parent, brief_data, lock=True):
             if parent.status == TaskStatus.QUEUED:
                 parent.status = TaskStatus.CANCELLED
                 self.db.commit()
