@@ -38,7 +38,15 @@ on:
       - 'migrations/add_configurable_staff_notifications.sql'
       - 'migrations/add_user_email.sql'
       - '.github/workflows/pwa-ci.yml'
+      - '.github/workflows/servgo-offline-browser.yml'
+      - 'scripts/check_servgo_offline_pwa_browser.py'
   workflow_dispatch:
+
+# Cancel only superseded PR test runs. Never cancel explicit manual runs,
+# and never share this group with production deployment concurrency.
+concurrency:
+  group: servgo-pwa-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate:
@@ -160,3 +168,13 @@ jobs:
           python tests/test_booking_safety.py
           python tests/test_notification_rules.py
           python tests/test_email_utils.py
+
+      # Reuse the frontend dist built earlier in THIS job.
+      # Previously the separate browser workflow rebuilt it unnecessarily.
+      - name: Install isolated Chromium browser dependencies
+        run: |
+          python -m pip install --disable-pip-version-check playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Verify installed PWA offline, owner login/logout, and booking SEO referral
+        run: python scripts/check_servgo_offline_pwa_browser.py

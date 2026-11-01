@@ -35,6 +35,10 @@ concurrency:
 
 jobs:
   deploy:
+    # Integration PR #109 merges source before the coordinated API/Growth/nginx
+    # rollout. Only that explicitly marked merge commit defers frontend release.
+    # Ordinary subsequent main pushes and manual dispatch remain unchanged.
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[defer-servgo-frontend-release]') }}
     runs-on: ubuntu-latest
     env:
       SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
