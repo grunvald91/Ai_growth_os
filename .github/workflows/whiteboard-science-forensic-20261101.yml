@@ -165,3 +165,5 @@ jobs:
                            for cat in sorted({i.get("category") for i in data.get("issues",[])})})
                   emit(section="no_mutation",task_id=str(task.id),writes=0,api_model_calls=0)
           PY
+
+# Read-only audit requested by repository owner; no deploy and no paid model calls.
