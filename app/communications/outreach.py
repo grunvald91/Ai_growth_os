@@ -56,6 +56,17 @@ def mail_revision(store, product_id):
 
 
 def prepare_email(db, prospect_id, root):
+    candidate = db.get(Prospect, prospect_id)
+    if candidate is None:
+        raise LookupError('Контакт не найден')
+    # Experiment -> Prospect -> Approval lock order, shared with the lifecycle
+    # command. No new outbound approval can be created after stop is requested.
+    experiment = db.scalar(select(Experiment).where(
+        Experiment.id == candidate.experiment_id,
+        Experiment.product_id == candidate.product_id,
+    ).with_for_update().execution_options(populate_existing=True))
+    if experiment is None or experiment.status != 'running':
+        raise ValueError('Эксперимент не запущен')
     prospect, profile = eligible(db, prospect_id, root, 'email')
     store = MailStore(root)
     config = store.load(prospect.product_id)
@@ -90,8 +101,23 @@ async def execute_email(session_factory, root, approval_id, token, actor, sender
         artifact = db.get(Artifact, approval.artifact_id)
         data = json.loads(artifact.content)
         prospect_id = UUID(data['prospect_id'])
-        prospect = db.scalar(select(Prospect).where(Prospect.id == prospect_id).with_for_update())
-        if prospect is None or prospect.product_id != approval.product_id:
+        preliminary = db.get(Prospect, prospect_id)
+        if preliminary is None or preliminary.product_id != approval.product_id:
+            raise ValueError('Неверная компания контакта')
+        # The reservation and a stop/finalize request serialize on the same
+        # experiment row. Stop cannot slip between approval and SMTP reserve.
+        experiment = db.scalar(select(Experiment).where(
+            Experiment.id == preliminary.experiment_id,
+            Experiment.product_id == preliminary.product_id,
+        ).with_for_update().execution_options(populate_existing=True))
+        if experiment is None or experiment.status != 'running':
+            raise ValueError('Эксперимент уже останавливается или завершён')
+        prospect = db.scalar(select(Prospect).where(
+            Prospect.id == prospect_id,
+            Prospect.product_id == approval.product_id,
+            Prospect.experiment_id == experiment.id,
+        ).with_for_update().execution_options(populate_existing=True))
+        if prospect is None:
             raise ValueError('Неверная компания контакта')
         approval = db.scalar(select(Approval).where(Approval.id == approval_id).with_for_update()
             .execution_options(populate_existing=True))
