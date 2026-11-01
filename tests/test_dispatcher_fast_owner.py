@@ -127,5 +127,5 @@ async def test_slow_model_stops_after_short_dispatcher_budget(db, owner, monkeyp
     assert blocks(answer, "chips")
 
 
-def test_dispatcher_model_timeout_is_short():
-    assert 5 <= service.DECISION_TIMEOUT_SECONDS <= 30
+def test_dispatcher_model_timeout_only_guards_provider_outages():
+    assert service.DECISION_TIMEOUT_SECONDS == 45
