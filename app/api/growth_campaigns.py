@@ -31,6 +31,11 @@ from app.services.campaign_readiness import (
     CampaignResources, CampaignResourceError, MATERIAL_KINDS,
     link_resource, load_resources,
 )
+from app.services.campaign_lifecycle import (
+    CampaignLifecycleError, command as lifecycle_command,
+    blockers as lifecycle_blockers,
+)
+
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 FIELDS = [
@@ -84,6 +89,8 @@ def read_fields(values: dict) -> ExperimentCreate:
 CAMPAIGN_STATUS = {
     "draft": "Планируется",
     "running": "Подготовка запущена",
+    "stopping": "Останавливается",
+    "finishing": "Завершается",
     "completed": "Завершена",
     "stopped": "Остановлена",
     "cancelled": "Отменена",
@@ -125,6 +132,10 @@ def campaign_facts(row: Experiment, *, compact: bool = False) -> str:
 def campaign_owner_step(row: Experiment, resources: CampaignResources | None = None) -> str:
     """Only request actions backed by this specific campaign's records."""
     resources = resources or CampaignResources()
+    if row.status == "stopping":
+        return "Остановка запрошена. Ждём завершения начатых операций и проверки отправок."
+    if row.status == "finishing":
+        return "Завершение запрошено. Сохраняем результаты и ожидаем окончания активных операций."
     if row.status == "draft" and not campaign_ready(row):
         return "Дополните условия кампании перед запуском."
     if row.status in {"draft", "running"} and resources.pending_material:
@@ -205,7 +216,7 @@ def form_page(product, values, error="", *, row=None):
 
 def campaign_page(product, row: Experiment, error: str = "", *,
                   metrics=(), resources: CampaignResources | None = None,
-                  candidates=()):
+                  candidates=(), lifecycle=None):
     resources = resources or CampaignResources()
     base = f"/studio/products/{product.id}/campaigns"
     path = f"{base}/{row.id}"
@@ -262,9 +273,41 @@ def campaign_page(product, row: Experiment, error: str = "", *,
             f'<p><a href="/studio/products/{product.id}/channels">Подключения каналов</a> · '
             f'<a href="/studio/products/{product.id}/review">Материалы на проверку</a></p>'
             '</details>'
+            '<details><summary>Остановить или завершить кампанию</summary>'
+            '<p>Остановка прекращает новые действия этой кампании. Уже начатые '
+            'задачи и отправки могут ещё выполняться — статус покажет это.</p>'
+            f'<form action="{path}/stop" method="post">'
+            '<button class="btn" type="submit">Запросить остановку</button></form>'
+            '<p>Завершение сохраняет результаты без автоматического вывода об успехе.</p>'
+            f'<form action="{path}/finish" method="post">'
+            '<label class="field">Итог владельца (необязательно)'
+            '<textarea name="note" rows="2" maxlength="2000" '
+            'placeholder="Что показал эксперимент?"></textarea></label>'
+            '<button class="btn" type="submit">Завершить кампанию</button></form>'
+            '</details>'
         )
     else:
         owner_action = ""
+    if row.status in {"stopping", "finishing"}:
+        if lifecycle is None:
+            pending_info = "Проверяем незавершённые операции."
+        else:
+            parts = []
+            if lifecycle.active_tasks:
+                parts.append(f"Активные задания: {lifecycle.active_tasks}")
+            if lifecycle.sending_emails:
+                parts.append(f"Письма в отправке: {lifecycle.sending_emails}")
+            if lifecycle.uncertain_emails:
+                parts.append(f"Отправка требует проверки: {lifecycle.uncertain_emails}")
+            if lifecycle.pending_publications:
+                parts.append(f"Публикации требуют отмены или проверки: {lifecycle.pending_publications}")
+            pending_info = "; ".join(parts) if parts else "Ожидаем подтверждения завершения."
+        owner_action = (
+            f'<p role="status">{esc(pending_info)}</p>'
+            f'<p><a class="btn" href="{path}">Обновить состояние</a> '
+            f'<a class="btn" href="/studio/products/{product.id}/channels">'
+            'Проверить публикации</a></p>'
+        )
 
     channel_section = ""
     if resources.needs_telegram:
@@ -422,6 +465,7 @@ def campaign_detail_context(db: Session, row: Experiment):
         "metrics": campaign_metrics(db, row.product_id, row.id),
         "resources": load_resources(db, [row])[row.id],
         "candidates": campaign_candidates(db, row.product_id),
+        "lifecycle": lifecycle_blockers(db, row) if row.status in {"stopping", "finishing"} else None,
     }
 
 
@@ -608,5 +652,57 @@ async def add_campaign_measurement(
         raise HTTPException(422, str(exc)) from None
     return RedirectResponse(
         f"/studio/products/{product_id}/campaigns/{experiment_id}#campaign-results",
+        status_code=303,
+    )
+
+
+@router.post("/studio/products/{product_id}/campaigns/{experiment_id}/stop")
+async def stop_campaign(
+    product_id: UUID, experiment_id: UUID, request: Request,
+    db: Session = Depends(get_db),
+):
+    _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    try:
+        lifecycle_command(
+            db, product_id=product_id, experiment_id=experiment_id,
+            action="stop",
+            actor=f"studio:{getattr(request.state, 'studio_login', 'operator')}",
+            note=fields.get("note", ""),
+        )
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(404, str(exc)) from None
+    except CampaignLifecycleError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(
+        f"/studio/products/{product_id}/campaigns/{experiment_id}",
+        status_code=303,
+    )
+
+
+@router.post("/studio/products/{product_id}/campaigns/{experiment_id}/finish")
+async def finish_campaign(
+    product_id: UUID, experiment_id: UUID, request: Request,
+    db: Session = Depends(get_db),
+):
+    _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    try:
+        lifecycle_command(
+            db, product_id=product_id, experiment_id=experiment_id,
+            action="finish",
+            actor=f"studio:{getattr(request.state, 'studio_login', 'operator')}",
+            note=fields.get("note", ""),
+        )
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(404, str(exc)) from None
+    except CampaignLifecycleError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(
+        f"/studio/products/{product_id}/campaigns/{experiment_id}",
         status_code=303,
     )
