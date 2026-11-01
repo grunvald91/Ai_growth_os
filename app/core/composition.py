@@ -54,6 +54,27 @@ def build_intake(db: Session, settings: Settings, provider: LLMProvider | None =
     )
 
 
+def build_dispatcher_provider(settings: Settings) -> LLMProvider:
+    """Dedicated low-latency owner command classifier, separate from team tasks.
+
+    The general model router may be correctly tuned for quality/cost on long
+    creative jobs, but that policy is not suitable for an interactive classifier.
+    Operators can change DISPATCHER_LLM_MODEL without changing the team.
+    """
+    if settings.llm_provider != "xai":
+        return build_llm_provider(settings)
+    if not settings.xai_api_key:
+        raise ValueError("Configure XAI_API_KEY")
+    model = settings.dispatcher_llm_model.strip()
+    if not model:
+        raise ValueError("Configure DISPATCHER_LLM_MODEL")
+    return XAIProvider(
+        api_key=settings.xai_api_key, model=model,
+        base_url=settings.xai_base_url, reasoning_effort="low",
+        timeout_seconds=settings.xai_timeout_seconds,
+    )
+
+
 def build_llm_provider(settings: Settings) -> LLMProvider:
     settings = effective_router_settings(settings)
     if settings.llm_provider == "anthropic":
