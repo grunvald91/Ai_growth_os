@@ -6,6 +6,16 @@ AI Growth OS is a control plane for an AI growth team. It turns business objecti
 
 The system is not a collection of independent chatbots. It is one auditable application with specialized agent roles.
 
+## Platform-wide architecture rule: multi-tenant SaaS
+
+**Accepted by the ServGo owner on 2026-11-01.** The [canonical platform ADR](https://github.com/grunvald91/booking_bot/blob/main/docs/architecture/SERVGO_SAAS_RULE.md) is mandatory; [the phased roadmap](docs/architecture/SERVGO_SAAS_ROADMAP.md) explains the implementation order.
+
+ServGo is a multi-tenant SaaS platform: shared, scalable compute and independently protected business workspaces. Business identity and authorization must be enforced for each API/worker/task/artifact/tool operation; isolation extends to model context, files, cache, memory, integration credentials and results. Concurrent work by one tenant must not leak data to or monopolize resources from other tenants. Durable task processing, fair resource allocation and per-tenant spending limits are implementation targets, **not claims about the current release**.
+
+The dispatcher understands owner requests, a deterministic coordinator owns job state and dispatch, the CMO handles marketing strategy when needed, and existing specialist workflows/critics execute or review only their supported roles. Do not create duplicate LLM managers or run an entire specialist pipeline twice.
+
+**Current order of work:** complete the mobile-first redesign before non-urgent infrastructure/orchestration work. Introduce the SaaS guarantees incrementally when changing related modules; immediately fix confirmed cross-tenant access vulnerabilities. Avoid premature new services before measurable need.
+
 ## 2. Phase 1 topology
 
 ```text
