@@ -125,10 +125,11 @@ def test_growth_profile_adapter_is_after_legacy_studio_css_in_html_head():
     legacy = (
         "<!doctype html><html lang='ru'><head><title>Профиль компании</title>"
         '<link rel="stylesheet" href="/studio/assets/studio.css?v=14">'
-        "</head><body><main><section class='sg-surface sg-intake-section'>"
+        "</head><body><main><header class='route-page-head'><h1>Профиль компании</h1></header>"
+        "<div class='route-content'><section class='sg-surface sg-intake-section'>"
         "<h2>Материалы · 1</h2><ul class='sg-intake-sources'>"
         "<li class='sg-intake-source'><b>Ваши сведения</b><span>ServGo: данные заведения</span></li>"
-        "</ul></section></main></body></html>"
+        "</ul></section></div></main></body></html>"
     )
     request = Request({
         "type": "http", "method": "GET",
