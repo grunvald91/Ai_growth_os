@@ -93,7 +93,10 @@ def records(db, task, *, lock=False):
 
 def queue_job(db, request: WhiteboardRequest, models: WhiteboardModels, *, max_api_calls=25, visual_review=False, image_provider='openrouter'):
     gateway = PrivacyGateway()
-    if gateway.sanitize_text(request.topic) != request.topic or gateway.sanitize_text(request.call_to_action) != request.call_to_action:
+    if any(gateway.sanitize_text(value) != value for value in (
+        request.topic, request.call_to_action, request.source_script,
+        request.background_notes, request.reference_materials,
+    )):
         raise ValueError('Sensitive text is not allowed')
     if max_api_calls < required_calls(request, visual_review=visual_review):
         raise ValueError('The call limit is below what this video needs')
