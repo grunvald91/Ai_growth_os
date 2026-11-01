@@ -388,9 +388,21 @@ def closing_campaign_for_material(db: Session, product_id: UUID,
                                   artifact_id: UUID, *, lock: bool = True) -> bool:
     """Gate only verified material links, never every campaign for this company.
 
-    Existing campaign row locks serialize a concurrent stop; a fresh link
-    cannot commit after stop because link_resource locks the same Experiment.
+    The material-row mutex serializes a concurrent link with the scheduling
+    or send transaction; campaign row locks serialize the subsequent stop.
+    Both locks are held until the caller commits or rolls back.
     """
+    # The material row is our per-artifact transaction mutex. link_resource()
+    # locks this SAME row *before* the campaign row and workspace write.
+    # Without it, a concurrent link can be invisible during the initial
+    # unlocked workspace scan and get missed even after campaign rechecking.
+    # This also serializes a newly linked post with its scheduled/send lease.
+    if lock:
+        present = db.scalar(select(Artifact.id).where(
+            Artifact.product_id == product_id, Artifact.id == artifact_id,
+        ).with_for_update())
+        if present is None:
+            return False
     query = select(Experiment).where(
         Experiment.product_id == product_id,
         Experiment.status.in_({"running", "stopping", "finishing", "stopped", "completed"}),

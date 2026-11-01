@@ -165,3 +165,9 @@ def test_101_campaigns_have_accessible_third_page(db, monkeypatch):
     assert "Campaign 0" in third
     assert "Campaign 100" not in third
     assert "page=2" in third
+
+
+def test_operator_recovery_cli_is_shipped_in_app_package():
+    """Production deploy archives app/, but not the repository scripts/ tree."""
+    from app.ops.recover_campaign_orphans import main
+    assert callable(main)

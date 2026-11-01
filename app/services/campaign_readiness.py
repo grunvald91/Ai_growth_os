@@ -181,9 +181,21 @@ def link_resource(db: Session, product_id: UUID, experiment_id: UUID,
                   target_id: UUID, *, relation: str) -> None:
     """Validate tenant, type and current status before saving a local link.
 
-    Lock the experiment to serialize concurrent edits without a new table or
-    schema migration. This does not authorize delivery or publication.
+    Lock the material first, then the experiment, to serialize links with
+    publication gates and concurrent edits. No migration is required; this
+    does not authorize delivery or publication.
     """
+    # Acquire the material-row mutex BEFORE the Experiment lock. The
+    # Telegram scheduling and send gates take the material lock first too.
+    # A new link therefore cannot slip through their initial workspace scan
+    # and the lock order cannot invert against a pending send.
+    target = None
+    if relation == "material":
+        target = db.scalar(select(Artifact).where(
+            Artifact.id == target_id, Artifact.product_id == product_id,
+        ).with_for_update().execution_options(populate_existing=True))
+        if target is None:
+            raise LookupError("Ресурс не найден у выбранной компании")
     row = db.scalar(select(Experiment).where(
         Experiment.id == experiment_id, Experiment.product_id == product_id,
     ).with_for_update().execution_options(populate_existing=True))
@@ -191,11 +203,12 @@ def link_resource(db: Session, product_id: UUID, experiment_id: UUID,
         raise LookupError("Кампания не найдена")
     if row.status not in {"draft", "running"}:
         raise CampaignResourceError("Менять связи можно только при подготовке кампании")
-    target = db.scalar(select(Artifact).where(
-        Artifact.id == target_id, Artifact.product_id == product_id,
-    ).execution_options(populate_existing=True))
     if target is None:
-        raise LookupError("Ресурс не найден у выбранной компании")
+        target = db.scalar(select(Artifact).where(
+            Artifact.id == target_id, Artifact.product_id == product_id,
+        ).execution_options(populate_existing=True))
+        if target is None:
+            raise LookupError("Ресурс не найден у выбранной компании")
     if relation == "telegram":
         if not is_telegram(row):
             raise CampaignResourceError("Для кампании не выбран канал Telegram")

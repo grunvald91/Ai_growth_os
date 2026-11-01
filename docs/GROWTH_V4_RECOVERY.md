@@ -1,15 +1,15 @@
 # Growth V4: ручное восстановление зависших research-задач
 
-Применяется только к кампании в `stopping` или `finishing`, когда после аварийного завершения research-процесса его задачи остались `RUNNING`.
+Применяется только к кампании в `stopping` или `finishing`, когда после аварийного завершения research-процесса его задачи остались `RUNNING`. Команда `app.ops.recover_campaign_orphans` входит в production-архив `app/` и доступна внутри API-контейнера; старый путь `scripts.recover_campaign_orphans` оставлен для локальной совместимости.
 
 1. **Сначала остановить все процессы research/team_worker** во всех репликах и убедиться по менеджеру процессов/контейнеров и логам, что они больше не выполняются. Время ожидания и возраст задачи сами по себе не доказывают отсутствие живого исполнителя.
 2. Проверить правильность UUID компании и кампании. На сервере с доступом к нужной базе выполнить сухую проверку:
    ```bash
-   python -m scripts.recover_campaign_orphans --product-id PRODUCT_UUID --experiment-id CAMPAIGN_UUID --actor admin
+   python -m app.ops.recover_campaign_orphans --product-id PRODUCT_UUID --experiment-id CAMPAIGN_UUID --actor admin
    ```
 3. Если отсутствие работающих исполнителей подтверждено, выполнить с явным подтверждением UUID:
    ```bash
-   python -m scripts.recover_campaign_orphans --product-id PRODUCT_UUID --experiment-id CAMPAIGN_UUID --actor admin --apply --confirm-worker-shutdown CAMPAIGN_UUID
+   python -m app.ops.recover_campaign_orphans --product-id PRODUCT_UUID --experiment-id CAMPAIGN_UUID --actor admin --apply --confirm-worker-shutdown CAMPAIGN_UUID
    ```
 4. Перепроверить статус кампании и blockers в интерфейсе и только после этого перезапустить воркеры. Если `sending`/`delivery_unknown` или публикация всё ещё блокирует завершение, выяснить реальный исход через соответствующий канал; **эта команда не отменяет и не повторяет внешние отправки**.
 

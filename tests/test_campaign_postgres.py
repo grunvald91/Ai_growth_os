@@ -335,3 +335,89 @@ def test_actual_schedule_does_not_deadlock_with_stop(pg_sessions, monkeypatch):
         finally:
             release.set()
         assert scheduled.result(timeout=8) == "blocked_after_stop"
+
+
+def test_material_link_waits_for_unlinked_publication_lease(pg_sessions):
+    """An in-flight send/schedule cannot miss a link committed during its gate."""
+    import time
+
+    Session = pg_sessions
+    with Session() as setup:
+        company, campaign = _company(setup, slug="pg-link-vs-lease")
+        material = Artifact(product_id=company, kind="channel_text",
+                            title="Initially unlinked post", content="{}")
+        setup.add(material)
+        setup.commit()
+        material_id = material.id
+
+    entered = threading.Event()
+
+    def link():
+        with Session() as session:
+            entered.set()
+            link_resource(session, company, campaign, material_id, relation="material")
+
+    with Session() as publisher, ThreadPoolExecutor(max_workers=1) as pool:
+        # This gate takes the material lock even though there is no link YET.
+        assert closing_campaign_for_material(publisher, company, material_id) is False
+        pending_link = pool.submit(link)
+        assert entered.wait(3)
+        time.sleep(0.15)  # Give the other connection time to attempt the lock.
+        assert not pending_link.done()
+        # Publication lease is durable before the link may commit.
+        pub = Publication(product_id=company, artifact_id=material_id,
+                          channel="telegram", status="scheduled")
+        publisher.add(pub)
+        publisher.commit()
+        pub_id = pub.id
+        pending_link.result(timeout=8)
+
+    with Session() as stopped:
+        status, remaining = command(stopped, product_id=company,
+                                    experiment_id=campaign, action="stop",
+                                    actor="pg-audit")
+        assert status == "stopped" and remaining.clear
+        assert stopped.get(Publication, pub_id).status == "cancelled"
+
+
+def test_gate_waits_for_uncommitted_material_link(pg_sessions):
+    """The first workspace scan must wait for a concurrent uncommitted link."""
+    import time
+    from app.services.campaign_readiness import workspace_title
+
+    Session = pg_sessions
+    with Session() as setup:
+        company, campaign = _company(setup, slug="pg-uncommitted-link")
+        material = Artifact(product_id=company, kind="channel_text",
+                            title="Uncommitted link", content="{}")
+        setup.add(material)
+        setup.commit()
+        material_id = material.id
+
+    entered = threading.Event()
+
+    def gate():
+        with Session() as publisher:
+            entered.set()
+            result = closing_campaign_for_material(publisher, company, material_id)
+            publisher.commit()
+            return result
+
+    with Session() as linker, ThreadPoolExecutor(max_workers=1) as pool:
+        linker.scalar(select(Artifact).where(Artifact.id == material_id).with_for_update())
+        linker.add(Artifact(product_id=company, kind="campaign_workspace",
+                           title=workspace_title(campaign),
+                           content=json.dumps({"experiment_id": str(campaign),
+                                               "material_ids": [str(material_id)]})))
+        linker.flush()
+        pending_gate = pool.submit(gate)
+        assert entered.wait(3)
+        time.sleep(0.15)
+        assert not pending_gate.done()
+        linker.commit()
+        assert pending_gate.result(timeout=8) is False  # Campaign remains running.
+
+    with Session() as stopped:
+        assert command(stopped, product_id=company, experiment_id=campaign,
+                       action="stop", actor="pg-audit")[0] == "stopped"
+        assert closing_campaign_for_material(stopped, company, material_id) is True
