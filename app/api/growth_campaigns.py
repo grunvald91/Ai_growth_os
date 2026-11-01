@@ -1,7 +1,7 @@
 """Growth V4: safe company-scoped campaign draft editor and read-only details.
 
-Launch uses the existing internal preparation service. It never publishes,
-sends messages, or spends money; stop/finalize require a separate worker-safe API.
+Launch uses the existing preparation service: no direct messages or publication.
+Queued AI tasks can consume model budget. Stop/finalize need a worker-safe API.
 """
 from __future__ import annotations
 
@@ -119,7 +119,8 @@ def campaign_page(product, row: Experiment, error: str = ""):
         f'<form action="{base}/{row.id}/launch" method="post">'
         '<button class="btn primary" type="submit">Запустить внутреннюю подготовку</button>'
         '<p>Создаст задание ИИ-команде и начнёт период наблюдения. '
-        'Без публикаций, рассылок и расходов.</p></form>'
+        'Работа ИИ может расходовать бюджет моделей. Сам запуск не отправляет '
+        'сообщения и не публикует материалы.</p></form>'
         if row.status == "draft" else ""
     )
     conclusion = f'<p><b>Заключение:</b> {esc(row.conclusion)}</p>' if row.conclusion else ""
