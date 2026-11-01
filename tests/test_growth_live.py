@@ -568,14 +568,14 @@ def test_campaign_real_telegram_connection_requires_selection_and_stays_scoped(l
     assert client.post(action, data={'connection_id': str(own_connection.id)},
                        follow_redirects=False).status_code == 303
     detail = client.get(path)
-    assert 'подключён канал' in detail.text
+    assert 'выбран ранее проверенный канал' in detail.text
     assert 'Наш проверенный канал' in detail.text
     assert 'Пока ничего не требуется' in detail.text
     own_connection.status = ArtifactStatus.REJECTED
     db.commit()
     detail = client.get(path)
     assert 'Подключить Telegram' in detail.text
-    assert 'подключён канал' not in detail.text
+    assert 'выбран ранее проверенный канал' not in detail.text
 
 
 def test_campaign_only_own_linked_material_requires_review_and_link_is_idempotent(live):
