@@ -687,3 +687,165 @@ def test_campaign_resource_post_origin_and_company_guards(live, monkeypatch, tmp
     assert client.post(base, data={'artifact_id': str(own.id)},
                        headers={'Origin': 'https://growth.servgo.ru'},
                        follow_redirects=False).status_code == 303
+
+
+
+def test_campaign_manual_measurements_compare_real_values_without_success_claim(live):
+    from sqlalchemy import select
+    from app.models.domain import CostRecord, Experiment, Metric, Publication, Task
+    client, db, product = live
+    row = Experiment(
+        product_id=product.id, experiment_key='EXP-MEASUREMENT-001',
+        name='Повторные записи', hypothesis='Возврат клиентов',
+        target_metric='Повторные записи', success_condition='20 дополнительных записей',
+        baseline_summary='Исходное значение не проверялось автоматически',
+        status='running',
+    )
+    db.add(row)
+    db.commit()
+    base = f'/studio/products/{product.id}/campaigns/{row.id}'
+    details = client.get(base+'?design=v4')
+    assert details.status_code == 200
+    assert 'Измерений пока нет — оценить эффективность ещё нельзя.' in details.text
+    assert f'action="{base}/measurements"' in details.text
+    samples = [
+        ('baseline', '10', '2026-10-01'),
+        ('result', '14', '2026-10-15'),
+    ]
+    for stage, amount, date in samples:
+        result = client.post(base+'/measurements', data={
+            'stage': stage, 'value': amount, 'unit': 'шт.',
+            'observed_on': date, 'source': 'CRM (со слов владельца)',
+        }, follow_redirects=False)
+        assert result.status_code == 303
+        assert result.headers['location'].endswith('#campaign-results')
+    html = client.get(base+'?design=v4').text
+    assert 'Изменение:' in html
+    assert '+4' in html and '+40%' in html
+    assert '2026-10-01' in html and '2026-10-15' in html
+    assert 'не доказывает' in html
+    assert 'источник не проверен автоматически' in html
+    assert '20 дополнительных записей' in html  # hypothesis/condition, not a claim of achievement
+    assert 'Условие выполнено' not in html
+    readings = list(db.scalars(select(Metric).where(
+        Metric.product_id == product.id, Metric.experiment_id == row.id)))
+    assert len(readings) == 2
+    assert {m.dimensions['stage'] for m in readings} == {'baseline', 'result'}
+    assert all(m.dimensions['entry_method'] == 'owner_manual' for m in readings)
+    assert list(db.scalars(select(Publication))) == []
+    assert list(db.scalars(select(CostRecord))) == []
+    assert list(db.scalars(select(Task))) == []
+
+
+def test_campaign_comparison_requires_matching_unit_and_known_baseline(live):
+    from app.models.domain import Experiment
+    client, db, product = live
+    row = Experiment(
+        product_id=product.id, experiment_key='EXP-MEASUREMENT-002',
+        name='Проверка единиц', hypothesis='Тест',
+        target_metric='Заявки', status='completed',
+    )
+    db.add(row)
+    db.commit()
+    base = f'/studio/products/{product.id}/campaigns/{row.id}/measurements'
+    for stage, unit, amount, date in (
+        ('baseline', 'шт.', '0', '2026-09-01'),
+        ('result', 'руб.', '5', '2026-10-01'),
+    ):
+        assert client.post(base, data={
+            'stage': stage, 'value': amount, 'unit': unit,
+            'observed_on': date, 'source': 'Отчёт',
+        }, follow_redirects=False).status_code == 303
+    output = client.get(f'/studio/products/{product.id}/campaigns/{row.id}').text
+    assert 'Единицы измерения не совпадают' in output
+    assert 'Изменение:' not in output
+    assert client.post(base, data={
+        'stage': 'result', 'value': '5', 'unit': 'шт.',
+        'observed_on': '2026-10-01', 'source': 'CRM',
+    }, follow_redirects=False).status_code == 303
+    output = client.get(f'/studio/products/{product.id}/campaigns/{row.id}').text
+    assert 'Изменение:' in output
+    assert '+5' in output
+    assert 'не доказывает' in output
+    assert '+Infinity%' not in output
+    assert '0%' not in output  # division by a baseline of zero is not presented
+
+
+def test_campaign_measurement_validation_company_isolation_and_no_side_effects(live):
+    from sqlalchemy import select
+    from app.models.domain import Experiment, Metric, Publication, Task
+    client, db, product = live
+    other = Product(name='Чужой бизнес для показателей', slug='metric-foreign-company')
+    db.add(other)
+    db.flush()
+    own = Experiment(
+        product_id=product.id, experiment_key='EXP-MEASUREMENT-003',
+        name='Own metrics', hypothesis='Test', target_metric='Заявки', status='running',
+    )
+    foreign = Experiment(
+        product_id=other.id, experiment_key='EXP-MEASUREMENT-004',
+        name='Other metrics', hypothesis='Test', target_metric='Заявки', status='running',
+    )
+    db.add_all([own, foreign])
+    db.commit()
+    base = f'/studio/products/{product.id}/campaigns'
+    valid = {'stage': 'baseline', 'value': '12,5', 'unit': 'шт.',
+             'observed_on': '2026-10-10', 'source': 'CRM'}
+    for modified in [
+        {'stage': 'invalid'}, {'value': 'NaN'}, {'value': '1e4'},
+        {'value': '1.00001'}, {'value': '100000000000000'},
+        {'observed_on': '2099-01-01'}, {'observed_on': 'n/a'},
+        {'source': ' '}, {'unit': 'X'*51},
+    ]:
+        resp = client.post(f'{base}/{own.id}/measurements', data={**valid, **modified})
+        assert resp.status_code == 422
+    assert client.post(f'{base}/{foreign.id}/measurements', data=valid).status_code == 404
+    assert client.post(f'/studio/products/{other.id}/campaigns/{own.id}/measurements',
+                       data=valid).status_code == 404
+    assert list(db.scalars(select(Metric))) == []
+    assert client.post(f'{base}/{own.id}/measurements', data=valid,
+                       follow_redirects=False).status_code == 303
+    data = list(db.scalars(select(Metric)))
+    assert len(data) == 1
+    assert str(data[0].value) == '12.5000'
+    assert data[0].product_id == product.id
+    assert data[0].experiment_id == own.id
+    assert list(db.scalars(select(Task))) == []
+    assert list(db.scalars(select(Publication))) == []
+
+
+def test_campaign_measurement_post_company_auth_and_origin(live, monkeypatch, tmp_path):
+    from app.core.studio_accounts import create_account
+    from sqlalchemy import select
+    from app.models.domain import Experiment, Metric
+    client, db, product = live
+    other = Product(name='Чужая фирма', slug='foreign-metric-access')
+    db.add(other)
+    db.flush()
+    campaign = Experiment(
+        product_id=product.id, experiment_key='EXP-MEASUREMENT-CSRF-1',
+        name='Sensitive measurement', hypothesis='Test',
+        target_metric='Заявки', status='running',
+    )
+    db.add(campaign)
+    db.commit()
+    settings = Settings(app_env='production', products_root=tmp_path,
+                        studio_admin_username='owner', studio_admin_password='fixture-only',
+                        studio_public_origin='https://growth.servgo.ru', _env_file=None)
+    create_account(settings, username='metric-user', password='local-fixture-password',
+                   role='company', product_ids=[str(product.id)], created_by='test')
+    monkeypatch.setitem(app.dependency_overrides, get_settings, lambda: settings)
+    client.auth = ('metric-user', 'local-fixture-password')
+    data = {'stage': 'result', 'value': '2', 'unit': 'шт.',
+            'observed_on': '2026-10-20', 'source': 'CRM'}
+    base = f'/studio/products/{product.id}/campaigns/{campaign.id}/measurements'
+    assert client.post(base, data=data).status_code == 403
+    assert client.post(base, data=data,
+                       headers={'Origin': 'https://attacker.invalid'}).status_code == 403
+    foreign_path = f'/studio/products/{other.id}/campaigns/{campaign.id}/measurements'
+    assert client.post(foreign_path, data=data,
+                       headers={'Origin': 'https://growth.servgo.ru'}).status_code == 404
+    assert list(db.scalars(select(Metric))) == []
+    assert client.post(base, data=data, headers={'Origin': 'https://growth.servgo.ru'},
+                       follow_redirects=False).status_code == 303
+    assert len(list(db.scalars(select(Metric)))) == 1
