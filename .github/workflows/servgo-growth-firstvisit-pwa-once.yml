@@ -1,0 +1,53 @@
+name: ServGo Growth first visit PWA — targeted tests and atomic release
+on:
+  push:
+    branches: [fix/servgo-growth-first-visit-20261101]
+    paths: ['.github/workflows/servgo-growth-firstvisit-pwa-once.yml']
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify branch and exact working tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Install existing frontend dependencies
+        working-directory: web/frontend
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
+      - name: Narrow Growth entry and PWA security regression
+        working-directory: web/frontend
+        run: |
+          node --test tests/studio-workspace-entry.test.mjs tests/auth-route.test.mjs tests/servgo-theme.test.mjs tests/sw-security.test.mjs
+      - name: Build complete PWA artifact
+        working-directory: web/frontend
+        run: npm run build
+      - name: Check stable shared-font files
+        working-directory: web/frontend
+        run: |
+          test -s dist/fonts/servgo-onest-latin.woff2
+          test -s dist/fonts/servgo-onest-cyrillic.woff2
+          test -s dist/offline-assets.json
+          echo 'PWA_BUILD_AND_LOCAL_FONTS=PASS'
+      - name: Atomic frontend release with server-side preflight and automatic rollback
+        env:
+          SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+          APPLY: 'true'
+        run: |
+          set -euo pipefail
+          test -n "$SERVGO_PASSWORD"
+          python -m pip install -q --disable-pip-version-check 'paramiko==3.5.1'
+          python scripts/deploy_servgo_frontend_atomic.py
