@@ -14,13 +14,16 @@ class GatewayConfigurationTests(unittest.TestCase):
     def test_gateway_is_narrow_and_uses_only_loopback_upstream(self):
         content = GATEWAY.read_text()
         locations = re.findall(r"^location\s+(.+?)\s*\{\s*$", content, re.M)
-        self.assertEqual(len(locations), 9, locations)
+        self.assertEqual(len(locations), 7, locations)
         self.assertIn("= /studio", locations)
         self.assertIn("= /studio/sso", locations)
         self.assertIn("access_log off;", content)
         self.assertIn("^~ /studio/", locations)
-        self.assertIn("= /workspace/growth", locations)
-        self.assertIn("= /workspace/growth/", locations)
+        # Keep the SSO entry inside the ServGo React app: never redirect
+        # /workspace/growth straight to the private /studio endpoint.
+        self.assertNotIn("= /workspace/growth", locations)
+        self.assertNotIn("= /workspace/growth/", locations)
+        self.assertIn("SPA fallback", content)
         self.assertIn("= /intelligence", locations)
         self.assertIn("= /competitive-intelligence/runs", locations)
         self.assertIn("^~ /competitive-intelligence/runs/", locations)

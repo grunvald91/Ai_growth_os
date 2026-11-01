@@ -1,5 +1,16 @@
 # ServGo — план реализации единого дизайна и PWA
 
+**Дополнение от 01.11.2026:** код #109 уже вошёл в BookingBot main; Growth #203
+восстановил плавающую главную и развёрнут на сервере. Продолжаются
+черновики Mail Air V2 [#117](https://github.com/grunvald91/booking_bot/pull/117)
+и Growth Air/Origin [#205](https://github.com/grunvald91/Ai_growth_os/pull/205).
+Однократная [серверная read-only проверка](https://github.com/grunvald91/booking_bot/actions/runs/41314587890)
+подтвердила один TLS-vhost на каждый домен, `nginx -t` OK и Growth
+`127.0.0.1:8091/health` HTTP 200. На `servgo.ru` пока **нет**
+Growth /studio proxy, а Mail workspace отвечает 404 до включения gateway.
+Ниже оставлена историческая отметка от 31.10 как состояние на указанную дату.
+Новый этап: [единый SSO-вход и обратная навигация](plans/2026-11-01-unified-workspace-entry.md).
+ 
 **Дата:** 31.10.2026. **Актуальная интеграция:** [BookingBot #109](https://github.com/grunvald91/booking_bot/pull/109) (единый UI + SW v4 с офлайн-записями + Mail/Growth) и [Growth #186](https://github.com/grunvald91/Ai_growth_os/pull/186) (новая main, CSP/320px). Оба остаются draft: **на production — только SW v3**, единое PWA/Gateway не выпущены. Предыдущие #107/#108/#184 — исторические источники кода, не отдельные релизы.
 **Продукт:** одно устанавливаемое ServGo на https://servgo.ru/.
 **Визуальный эталон:** предоставленные пользователем экраны клиентского пути (каталог, заведение, услуги) и [ServGo Air](../web/frontend/src/styles/design-system.css).

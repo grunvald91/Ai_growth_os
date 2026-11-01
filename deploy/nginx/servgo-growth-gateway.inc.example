@@ -17,14 +17,11 @@
 # All upstream protections (Growth cookie, owner/tenant scope, CSRF, CSP)
 # remain enabled. The gateway does NOT grant access by itself.
 #
-# Landing aliases for the canonical PWA; application still uses /studio/*.
-location = /workspace/growth {
-    return 302 /studio;
-}
-location = /workspace/growth/ {
-    return 302 /studio;
-}
-
+# /workspace/growth is a React/ServGo entry page served by the existing
+# servgo.ru SPA fallback, not a direct proxy alias. It requests a fresh,
+# server-authorized one-time Studio ticket for the selected business.
+# Do not define 'location = /workspace/growth' here; doing so skips SSO.
+#
 # Avoid matching /studio-something or widening to an arbitrary Growth path.
 location = /studio {
     proxy_pass http://127.0.0.1:8091;

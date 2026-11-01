@@ -14,6 +14,7 @@ import { SubscriptionsPage } from './pages/client/SubscriptionsPage'
 import { LoginPage } from './pages/client/LoginPage'
 import { YandexLoginPage } from './pages/client/YandexLoginPage'
 import { OwnerMailPage } from './pages/client/OwnerMailPage'
+import { GrowthWorkspacePage } from './pages/client/GrowthWorkspacePage'
 import { AccountPage } from './pages/client/AccountPage'
 import { PrepaymentsPage } from './pages/admin/PrepaymentsPage'
 import { AdminPaymentAttention } from './components/AdminPaymentAttention'
@@ -190,6 +191,7 @@ function App() {
         <Route path="/login/yandex" element={<YandexLoginPage />} />
         <Route path="/mail" element={<OwnerMailPage />} />
         <Route path="/workspace/mail" element={<OwnerMailPage />} />
+        <Route path="/workspace/growth" element={<ProtectedRoute restorationPending={authRestoring}><GrowthWorkspacePage /></ProtectedRoute>} />
         <Route path="/account" element={<ProtectedRoute restorationPending={authRestoring}><AccountPage /></ProtectedRoute>} />
         <Route path="/master" element={<ProtectedRoute restorationPending={authRestoring}><MasterPage /></ProtectedRoute>} />
         <Route path="/admin/prepayments" element={<AdminRoute restorationPending={authRestoring}><PrepaymentsPage /></AdminRoute>} />
