@@ -540,7 +540,9 @@ async def test_review_shows_typed_video_resource_not_truncated_duplicate_links(d
     assert card["href"] == f"/studio/products/{product.id}/whiteboard/{task.id}"
     assert not [b for b in answer["blocks"] if b["type"] == "links"]
     assert len([b for b in answer["blocks"] if b["type"] == "material"]) == 1
-    assert len([b for b in answer["blocks"] if b["type"] == "chips"]) == 1
+    assert any(chip["capability"] == "approve_material"
+               for block in answer["blocks"] if block["type"] == "chips"
+               for chip in block["items"])
 
 
 @pytest.mark.asyncio
