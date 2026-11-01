@@ -101,7 +101,7 @@ def task_campaign(db: Session, task: Task, brief_data: dict) -> Experiment | Non
     campaign = db.scalar(select(Experiment).where(
         Experiment.product_id == task.product_id,
         Experiment.id == experiment_id,
-    ))
+    ).execution_options(populate_existing=True))
     if campaign is None:
         return None
     expected = {
@@ -243,3 +243,24 @@ def reconcile_pending(db: Session, *, limit: int = 50) -> int:
             changed += 1
         db.commit()
     return changed
+
+
+def closing_campaign_for_material(db: Session, product_id: UUID,
+                                  artifact_id: UUID, *, lock: bool = True) -> bool:
+    """For scheduled publishing, close the race with a campaign stop request.
+
+    Only actual material links (explicit or verified task outputs) count.
+    When locking, both publishers and stoppers order locks Experiment first.
+    """
+    query = select(Experiment).where(
+        Experiment.product_id == product_id,
+        Experiment.status.in_({"stopping", "finishing", "stopped", "completed"}),
+    ).order_by(Experiment.id)
+    if lock:
+        query = query.with_for_update()
+    campaigns = list(db.scalars(query.execution_options(populate_existing=True)))
+    if not campaigns:
+        return False
+    resources = load_resources(db, campaigns)
+    return any(artifact_id in {a.id for a in resources[row.id].materials}
+               for row in campaigns)
