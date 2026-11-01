@@ -345,7 +345,7 @@ class CallLedger:
                 raise ReadinessError('call_limit')
             model_stage = {'visual_review': 'regions', 'visual_decision': 'storyboard', 'image_revision': 'image', 'science_review': 'regions'}.get(stage, stage)
             run = AgentRun(task_id=task.id, agent_name='whiteboard_' + stage,
-                           provider='configured_text' if model_stage == 'storyboard' else
+                           provider='configured_text' if model_stage == 'storyboard' or stage == 'science_review' else
                                payload.image_provider if model_stage == 'image' else 'openrouter',
                            model=getattr(payload.models, model_stage), status='running',
                            started_at=datetime.now(timezone.utc), input_references=[str(source.id)])
