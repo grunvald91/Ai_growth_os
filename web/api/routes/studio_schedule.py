@@ -81,7 +81,7 @@ def _working_dates(employee: Employee, dates: list[date], off_dates: set[date]) 
     if employee.duty_schedule:
         try:
             raw = json.loads(employee.duty_schedule)
-            allowed = set(raw) if isinstance(raw, list) and all(isinstance(d, str) for d in raw) else set()
+            allowed = {item for item in raw if isinstance(item, str)} if isinstance(raw, list) else set()
         except (ValueError, TypeError):
             allowed = set()  # invalid schedule is never treated as open
     return [
