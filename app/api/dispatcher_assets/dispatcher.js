@@ -209,23 +209,148 @@
     })[status] || status;
   }
 
+  var createFormatNames = {
+    post: 'Пост', story: 'Stories', short_video: 'Видеосценарий',
+    static_image: 'Бриф изображения', package: 'Полный пакет'
+  };
+  var createChannels = {
+    post: [['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['vc_ru','vc.ru'],['tenchat','TenChat']],
+    story: [['telegram','Telegram Stories'],['vk','Истории ВК'],['instagram_reels','Instagram Stories']],
+    short_video: [['youtube_shorts','YouTube Shorts'],['instagram_reels','Instagram Reels'],['vk_clips','VK Клипы']],
+    static_image: [['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['instagram_reels','Instagram']],
+    package: []
+  };
+  var createDefaultChannels = {post:'telegram',story:'telegram',short_video:'youtube_shorts',
+    static_image:'telegram',package:''};
+
+  function editableRow(label, value) {
+    var row = el('div', 'dp-create-detail');
+    row.appendChild(el('span', 'dp-create-detail-label', label));
+    row.appendChild(el('strong', 'dp-create-detail-value', value));
+    return row;
+  }
+
+  function renderCreationEditor(block, card, details, actions) {
+    var data = block.editable;
+    if (!data) return;
+    var editButton = el('button', 'dp-btn ghost dp-edit-create', 'Изменить');
+    editButton.type = 'button';
+    actions.insertBefore(editButton, actions.firstChild);
+    editButton.addEventListener('click', function () {
+      var form = el('form', 'dp-create-editor');
+      var status = el('p', 'dp-create-editor-error');
+      status.setAttribute('role', 'alert'); status.hidden = true;
+      function field(label, control) {
+        var wrapper = el('label', 'dp-create-edit-field');
+        wrapper.appendChild(el('span', '', label));
+        wrapper.appendChild(control);
+        return wrapper;
+      }
+      var kind = el('select', '');
+      kind.setAttribute('aria-label', 'Тип материала');
+      (data.formats || []).forEach(function (code) {
+        var item = el('option', '', createFormatNames[code] || code);
+        item.value = code; kind.appendChild(item);
+      });
+      kind.value = data.format;
+      var topic = el('textarea', '');
+      topic.value = data.topic || '';
+      topic.rows = 2; topic.maxLength = 300; topic.required = true;
+      topic.minLength = 3; topic.setAttribute('aria-label','Тема');
+      var count = el('select','');
+      var auto = el('option','','Автоматически (3–10)'); auto.value = ''; count.appendChild(auto);
+      for (var i=3; i<=10; i++){
+        var opt = el('option','',String(i)); opt.value=String(i); count.appendChild(opt);
+      }
+      count.value = data.frame_count == null ? '' : String(data.frame_count);
+      var platform = el('select','');
+      var countField = field('Количество экранов',count);
+      var platformField = field('Площадка', platform);
+      function refreshOptions() {
+        var fmt = kind.value;
+        countField.hidden = fmt !== 'story';
+        platformField.hidden = fmt === 'package';
+        var previous = platform.value || data.platform || '';
+        platform.replaceChildren();
+        (createChannels[fmt] || []).forEach(function (entry) {
+          var opt=el('option','',entry[1]);opt.value=entry[0];platform.appendChild(opt);
+        });
+        var choices=(createChannels[fmt] || []).map(function (x) {return x[0];});
+        platform.value = choices.indexOf(previous) >= 0 ? previous : createDefaultChannels[fmt];
+      }
+      kind.addEventListener('change',refreshOptions);
+      form.appendChild(field('Тип материала',kind));
+      form.appendChild(field('Тема',topic));
+      form.appendChild(countField);
+      form.appendChild(platformField);
+      refreshOptions();
+      form.appendChild(status);
+      var buttons = el('div','dp-create-edit-actions');
+      var discard = el('button','dp-btn ghost','Отменить правку');
+      discard.type='button';
+      var save = el('button','dp-btn primary','Сохранить');
+      save.type='submit';
+      discard.addEventListener('click',function(){
+        form.remove();details.hidden=false;actions.hidden=false;
+      });
+      buttons.append(discard,save);form.appendChild(buttons);
+      details.hidden=true; actions.hidden=true; card.appendChild(form);
+      form.addEventListener('submit',function (event) {
+        event.preventDefault();
+        if (!topic.value.trim() || topic.value.trim().length < 3) {
+          status.textContent='Введите тему не короче трёх символов.';
+          status.hidden=false;return;
+        }
+        save.disabled=true; discard.disabled=true; status.hidden=true;
+        post('/edit', {
+          confirmation_id:block.confirmation_id, revision:block.revision || 0,
+          format:kind.value, topic:topic.value.trim(),
+          frame_count:kind.value === 'story' && count.value ? Number(count.value) : null,
+          platform:kind.value === 'package' ? null : platform.value
+        }).then(applyResult).catch(function (error) {
+          status.textContent=error.message;status.hidden=false;
+          save.disabled=false;discard.disabled=false;
+        });
+      });
+      kind.focus();
+    });
+  }
+
   function renderConfirm(block) {
     var card = el('div', 'dp-confirm' + (block.paid ? ' paid' : ''));
     card.appendChild(el('strong', 'dp-confirm-title', voiceHoldEnabled ? friendlyTitle(block.title) : block.title));
     if (block.paid) card.appendChild(el('span', 'dp-badge', 'Платно'));
-    var list = el('ul', 'dp-confirm-list');
-    block.details.forEach(function (line) { list.appendChild(el('li', '', line)); });
-    card.appendChild(list);
+    var details = el('div', block.editable ? 'dp-create-details' : 'dp-confirm-list');
+    if (block.editable) {
+      var data = block.editable;
+      details.appendChild(editableRow('Тип',createFormatNames[data.format] || data.format));
+      if (data.format === 'story')
+        details.appendChild(editableRow('Экранов', data.frame_count == null ? 'Автоматически' : String(data.frame_count)));
+      details.appendChild(editableRow('Тема',data.topic));
+      if (data.platform)
+        details.appendChild(editableRow('Площадка',
+          ((createChannels[data.format] || []).find(function (row) { return row[0]===data.platform; }) || [null,data.platform])[1]));
+      (block.details || []).filter(function (line) {
+        return !/^(Тема|Формат|Экранов|Площадка):/.test(line);
+      }).forEach(function (line) {details.appendChild(el('p','dp-create-note',line));});
+    } else {
+      var list = el('ul', 'dp-confirm-list');
+      (block.details || []).forEach(function (line) {list.appendChild(el('li','',line));});
+      details.appendChild(list);
+    }
+    card.appendChild(details);
     if (block.state === 'pending') {
       var actions = el('div', 'dp-confirm-actions');
-      var no = el('button', 'dp-btn ghost', block.cancel_label); no.type = 'button';
-      var yes = el('button', 'dp-btn primary', block.confirm_label); yes.type = 'button';
-      no.addEventListener('click', function () { answer(block, false, no, yes); });
-      yes.addEventListener('click', function () { answer(block, true, no, yes); });
-      actions.appendChild(no); actions.appendChild(yes);
+      var no = el('button', 'dp-btn ghost', block.editable ? 'Отменить задание' : block.cancel_label); no.type='button';
+      var yes = el('button', 'dp-btn primary', block.confirm_label); yes.type='button';
+      no.addEventListener('click',function(){answer(block,false,no,yes);});
+      yes.addEventListener('click',function(){answer(block,true,no,yes);});
+      actions.appendChild(yes);
+      if (block.editable) renderCreationEditor(block,card,details,actions);
+      actions.appendChild(no);
       card.appendChild(actions);
     } else {
-      card.appendChild(el('span', 'dp-confirm-state', block.state === 'confirmed' ? 'Подтверждено' : 'Отменено'));
+      card.appendChild(el('span','dp-confirm-state',block.state === 'confirmed' ? 'Подтверждено' : 'Отменено'));
     }
     return card;
   }
