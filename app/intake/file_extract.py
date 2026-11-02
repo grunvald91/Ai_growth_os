@@ -8,9 +8,6 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree
 
-LIMIT = 12_001
-
-
 def office_archive(data):
     archive = zipfile.ZipFile(io.BytesIO(data))
     infos = archive.infolist()
@@ -42,36 +39,51 @@ def ocr_image(data):
 
 
 def extract_pdf(data):
+    """Extract every PDF page without arbitrary page or character cutoffs.
+
+    The isolated worker still bounds CPU, memory and time. Failed pages are
+    reported instead of silently claiming that every page was read.
+    """
     from pypdf import PdfReader
     reader = PdfReader(io.BytesIO(data))
     if reader.is_encrypted:
         raise ValueError("Encrypted PDF")
-    parts, notes = [], []
+    parts, unreadable = [], []
+    scan_detected = False
+    total_pages = len(reader.pages)
     with tempfile.TemporaryDirectory(prefix="intake-pdf-") as folder:
         path = Path(folder) / "document.pdf"
         path.write_bytes(data)
-        for index, page in enumerate(reader.pages[:40]):
-            text = page.extract_text() or ""
-            if not text.strip():
-                prefix = Path(folder) / "page"
-                subprocess.run(["pdftoppm", "-f", str(index + 1), "-l", str(index + 1),
-                                "-scale-to", "2400", "-singlefile", "-png", str(path), str(prefix)],
-                               capture_output=True, timeout=15, check=True)
-                text = ocr_image(prefix.with_suffix(".png").read_bytes())
-                notes.append("Текст на сканах распознан автоматически; проверьте названия, числа и цены.")
-            parts.append(f"Страница {index + 1}\n{text}")
-            if sum(len(p) for p in parts) > LIMIT:
-                break
-        partial = len(parts) < len(reader.pages)
-    if partial:
-        notes.append(f"Прочитано страниц: {len(parts)} из {len(reader.pages)}. Пришлите нужные страницы отдельным файлом.")
-    # Page markers alone must not make an empty PDF look successfully read.
+        for index in range(total_pages):
+            try:
+                text = reader.pages[index].extract_text() or ""
+                if not text.strip():
+                    prefix = Path(folder) / "page"
+                    subprocess.run(["pdftoppm", "-f", str(index + 1), "-l", str(index + 1),
+                                    "-scale-to", "2400", "-singlefile", "-png", str(path), str(prefix)],
+                                   capture_output=True, timeout=20, check=True)
+                    text = ocr_image(prefix.with_suffix(".png").read_bytes())
+                    scan_detected = True
+                if not text.strip():
+                    unreadable.append(index + 1)
+                    continue
+                parts.append(f"Страница {index + 1}\n{text}")
+            except Exception:
+                # PdfReadError and other parser failures must not hide valid pages.
+                # Never log untrusted document text or raw exception details.
+                unreadable.append(index + 1)
+    notes = [f"Обработано страниц: {total_pages - len(unreadable)} из {total_pages}."]
+    if scan_detected:
+        notes.append("Текст на сканах распознан автоматически; проверьте названия, числа и цены.")
+    if unreadable:
+        notes.append("Не удалось прочитать страницы: " + ", ".join(map(str, unreadable)) +
+                     ". Остальные страницы сохранены; проверьте этот документ.")
     meaningful = any(part.split("\n", 1)[1].strip() for part in parts)
-    return "\n\n".join(parts) if meaningful else "", partial, " ".join(dict.fromkeys(notes))
+    return "\n\n".join(parts) if meaningful else "", bool(unreadable), " ".join(notes)
 
 
 def extract_spreadsheet(suffix, data):
-    parts, length, missing_formulas = [], 0, False
+    parts, missing_formulas = [], False
     partial = False
     books = []
     try:
@@ -93,7 +105,6 @@ def extract_spreadsheet(suffix, data):
         cells = 0
         for title, rows, formula_rows in sheets:
             parts.append("Лист: " + title)
-            length += len(parts[-1])
             if formula_rows is not None:
                 rows = zip(rows, formula_rows)
             for row in rows:
@@ -115,10 +126,6 @@ def extract_spreadsheet(suffix, data):
                 line = " | ".join(values)
                 if line.strip(" |"):
                     parts.append(line)
-                    length += len(line) + 1
-                if length > LIMIT:
-                    partial = True
-                    break
             if partial:
                 break
         note = "Формулы не вычисляются. Есть ячейки без сохранённого результата; сохраните вычисленные значения и загрузите файл снова." if missing_formulas else ""
@@ -137,7 +144,7 @@ def extract_spreadsheet(suffix, data):
 if __name__ == "__main__":
     import resource
     resource.setrlimit(resource.RLIMIT_AS, (768 * 1024 * 1024,) * 2)
-    resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
+    resource.setrlimit(resource.RLIMIT_CPU, (420, 420))
     from app.intake.sources import parse_file
     source = parse_file(sys.argv[1], sys.stdin.buffer.read(), sys.argv[2])
     sys.stdout.write(source.model_dump_json())

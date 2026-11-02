@@ -445,3 +445,54 @@ async def test_telegram_failed_website_is_visible(db, tmp_path):
     await ui.callback(42, f'company:open:{product.id}')
     await ui.message({'chat': {'id': 42}, 'message_id': 11, 'text': 'https://example.com'})
     assert 'Страница недоступна.' in bot.messages[-1][0]
+
+
+def test_reupload_same_pdf_replaces_old_partial_pages_instead_of_adding_duplicate(db, tmp_path):
+    product, session, service, _ = setup(db, tmp_path)
+    old = make_source("owner_file", "growth studio: файл company.pdf",
+                      "Страница 1\nПодробности до страницы 6",
+                      filename="company.pdf", sha256="a" * 64, status="truncated",
+                      note="Прочитано страниц: 6 из 9.")
+    first = service.add_source(product.id, session, old, actor="owner")
+    assert len(first["sources"]) == 1
+    updated = make_source("owner_file", "growth studio: файл company.pdf",
+                          "Страница 1\nПодробности до страницы 6\nСтраница 9\nНовые цены",
+                          filename="company.pdf", sha256="a" * 64, status="read",
+                          note="Обработано страниц: 9 из 9.")
+    second = service.add_source(product.id, session, updated, actor="owner")
+    assert second["revision"] == first["revision"] + 1
+    assert len(second["sources"]) == 1
+    assert second["sources"][0]["id"] == updated.id
+    assert second["sources"][0]["status"] == "read"
+    assert "Страница 9" in second["sources"][0]["text"]
+    assert service.add_source(product.id, session, updated, actor="owner")["revision"] == second["revision"]
+    # An OCR retry that fails cannot destroy the last usable evidence.
+    unreadable = make_source("owner_file", "growth studio: файл company.pdf",
+                             filename="company.pdf", sha256="a" * 64, status="unavailable")
+    after_failure = service.add_source(product.id, session, unreadable, actor="owner")
+    assert len(after_failure["sources"]) == 1
+    assert after_failure["sources"][0]["id"] == updated.id
+    # New OCR run can be worse than a previously complete source; keep the
+    # verified complete copy instead of replacing it with 3 of 9 pages.
+    worse = make_source("owner_file", "growth studio: файл company.pdf",
+                        "Страница 1\nOnly three pages were decoded",
+                        filename="company.pdf", sha256="a" * 64,
+                        status="truncated", note="Обработано страниц: 3 из 9.")
+    not_downgraded = service.add_source(product.id, session, worse, actor="owner")
+    assert not_downgraded["revision"] == after_failure["revision"]
+    assert not_downgraded["sources"][0]["id"] == updated.id
+
+
+def test_recollect_current_company_identity_replaces_old_name(db, tmp_path):
+    product, session, service, _ = setup(db, tmp_path)
+    first = service.add_text(product.id, session,
+                             "Название компании: Старое имя",
+                             actor="owner", reference="growth studio: данные компании")
+    assert len(first["sources"]) == 1
+    updated = service.add_text(product.id, session,
+                               "Название компании: Новое имя\nОписание компании: Активный бизнес",
+                               actor="owner", reference="growth studio: данные компании")
+    assert len(updated["sources"]) == 1
+    assert updated["revision"] == first["revision"] + 1
+    assert "Новое имя" in updated["sources"][0]["text"]
+    assert "Старое имя" not in updated["sources"][0]["text"]

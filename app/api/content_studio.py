@@ -1782,24 +1782,9 @@ def analytics_page(db: Session, product: Product) -> str:
         body=body,
     )
 
-def product_selector(products: list[Product], *, can_add: bool = False) -> str:
-    add_card = ('<a class="product-link" href="/studio/new"><strong>＋ Добавить компанию</strong>'
-                '<small>Описание, сайт и проверка профиля →</small></a>') if can_add else ""
-    cards = "".join(
-        f'<a class="product-link" href="/studio/products/{p.id}"><strong>{esc(p.name)}</strong><small>{esc(p.slug)} · открыть Growth Studio →</small></a>'
-        for p in products
-    )
-    return f"""<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Growth Studio</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=14"></head>
-<body><main class="product-home">
-<section class="panel hero">{brand_html()}<div class="eyebrow" style="justify-content:center;margin-top:18px">GROWTH STUDIO <span class="beta">BETA</span></div>
-<h1>Выберите проект</h1><p class="subtitle">Контент-план, готовые материалы и сценарии собраны в одном интерфейсе.</p></section>
-<div class="product-list">{cards or '<div class="empty">Проекты ещё не добавлены.</div>'}{add_card}</div>
-<p class="sg-selector-foot"><a href="/studio/logout">Выйти · войти под другим логином</a></p>
-</main></body></html>"""
-
+def product_selector(products: list[Product], *, can_add: bool = False, can_link: bool = False) -> str:
+    from app.api.studio_company_picker import selector_html
+    return selector_html(products, can_add=can_add, can_link=can_link)
 
 @router.get("/studio/assets/servgo.svg")
 def studio_official_logo():
@@ -1831,9 +1816,12 @@ def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)
         query = query.where(Product.id.in_([UUID(value) for value in allowed]))
     products = list(db.scalars(query.order_by(Product.name).limit(100)))
     preferred = next((p for p in products if p.slug == "servgo"), None)
-    if preferred is not None and not choose:
-        return RedirectResponse(f"/studio/products/{preferred.id}", status_code=302)
-    response = HTMLResponse(product_selector(products, can_add=allowed is None))
+    if not choose and (len(products) == 1 or (preferred is not None and allowed is None)):
+        selected = products[0] if len(products) == 1 else preferred
+        return RedirectResponse(f"/studio/products/{selected.id}", status_code=302)
+    from app.sso.tickets import COOKIE as SSO_COOKIE
+    response = HTMLResponse(product_selector(products, can_add=allowed is None,
+                                            can_link=bool(request.cookies.get(SSO_COOKIE))))
     response.headers["Cache-Control"] = "no-store"
     return response
 

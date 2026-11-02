@@ -38,7 +38,7 @@ def test_selector_offers_to_add_a_company(studio):
     page = client.get("/studio?choose=1")
     assert page.status_code == 200
     assert 'href="/studio/new"' in page.text
-    assert "Добавить компанию" in client.get("/studio/new").text
+    assert "Собрать профиль" in client.get("/studio/new").text
 
 
 def test_new_company_starts_intake_with_owner_description(studio):
@@ -84,7 +84,8 @@ def _cancel_collection(client, product):
 def test_profile_page_offers_rename_cancel_and_delete(owned):
     client, db, product, _ = owned
     page = client.get(f"/studio/products/{product.id}/profile")
-    assert "Отменить сбор данных" in page.text and "Сохранить название" in page.text
+    assert "Отменить сбор данных" in page.text and "Собрать профиль" in page.text
+    assert f'action="/studio/products/{product.id}/profile/collect"' in page.text
     assert f"/studio/products/{product.id}/profile/delete" in page.text
     assert "Убрать" in page.text  # every material can be removed
 

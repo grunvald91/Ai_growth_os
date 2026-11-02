@@ -126,8 +126,8 @@ def _new_company_page(fields: dict | None = None, error: str | None = None, *, r
     <textarea name="about" required minlength="30" maxlength="12000" rows="8"
       placeholder="Чем занимается, какие услуги и цены, для кого, город, чем отличается, чего нельзя обещать.">{esc(fields.get('about', ''))}</textarea></label>
   {_file_field()}
-  <div class="sg-intake-actions"><button class="btn primary" type="submit">Добавить компанию</button>
-  <a href="/studio?choose=1">← К списку проектов</a></div>
+  <div class="sg-intake-actions"><a href="/studio?choose=1">← К компаниям</a>
+  <button class="btn primary" type="submit">Собрать профиль</button></div>
 </form>{ONCE_SCRIPT}</main></body></html>"""
 
 ONCE_SCRIPT = """<script>document.querySelectorAll('form[data-once]').forEach(function(f){f.addEventListener('submit',function(){
@@ -149,7 +149,7 @@ def _background_session():
 
 def _job(session_id) -> dict | None:
     job = _JOBS.get(str(session_id))
-    if job and job.get("running") and time.time() - job["started"] > JOB_STALE_SECONDS:
+    if job and job.get("running") and time.time() - job.get("heartbeat", job["started"]) > JOB_STALE_SECONDS:
         job.update(running=False, error="Работа прервалась. Материалы сохранены; запустите сборку ещё раз.")
     return job
 
@@ -160,24 +160,39 @@ def _job_running(session_id) -> bool:
 
 
 def _start_job(background: BackgroundTasks, product_id: UUID, session_id: UUID, *, website: str = "",
-               identifier: str = "", build: bool = False, notes: list[str] | None = None) -> None:
+               identifier: str = "", build: bool = False, notes: list[str] | None = None,
+               material_fields: dict | None = None,
+               files: list[tuple[str, bytes]] | None = None) -> None:
     if _job_running(session_id):
         raise IntakeError("Уже работаю над этой компанией. Подождите, страница обновится сама.")
-    stage = "Читаю сайт" if website else "Проверяю в реестре" if identifier else "Собираю профиль"
-    _JOBS[str(session_id)] = {"running": True, "started": time.time(), "stage": stage,
+    stage = ("Читаю файлы" if files else
+             "Читаю сайт" if website else "Проверяю в реестре" if identifier else "Собираю профиль")
+    _JOBS[str(session_id)] = {"running": True, "started": time.time(), "heartbeat": time.time(), "stage": stage,
                               "notes": list(notes or []), "error": None}
-    background.add_task(_run_job, product_id, session_id, website, identifier, build)
+    background.add_task(_run_job, product_id, session_id, website, identifier, build,
+                        material_fields or {}, files or [])
 
 
-async def _run_job(product_id: UUID, session_id: UUID, website: str, identifier: str, build: bool) -> None:
+async def _run_job(product_id: UUID, session_id: UUID, website: str, identifier: str, build: bool,
+                   material_fields: dict | None = None, files: list[tuple[str, bytes]] | None = None) -> None:
     job = _JOBS[str(session_id)]
     db = _background_session()
     try:
         service = _service(db)
+        touch = lambda: job.update(heartbeat=time.time())
+        touch()
+        if material_fields or files:
+            job["stage"] = "Читаю материалы"
+            job["notes"] += await _add_materials(
+                service, product_id, session_id, material_fields or {}, files or [],
+                text_reference="growth studio: сведения владельца", on_progress=touch)
+        touch()
         if website or identifier:
+            job["stage"] = "Читаю сайт" if website else "Проверяю в реестре"
             job["notes"] += await _add_materials(service, product_id, session_id,
                                                  {"website": website, "identifier": identifier}, [],
                                                  text_reference="")
+        touch()
         if build:
             job["stage"] = "Собираю профиль"
             from app.core.composition import build_intake
@@ -205,7 +220,8 @@ def new_company_form(request: Request, db: Session = Depends(get_db)):
 
 
 async def _add_materials(service: CompanyIntakeService, product_id: UUID, session_id: UUID,
-                         fields: dict, files: list[tuple[str, bytes]], *, text_reference: str) -> list[str]:
+                         fields: dict, files: list[tuple[str, bytes]], *, text_reference: str,
+                         on_progress=None) -> list[str]:
     """Add every kind of material the owner gave; one failed source never discards the others."""
     notes: list[str] = []
     if fields.get("text", "").strip():
@@ -232,7 +248,11 @@ async def _add_materials(service: CompanyIntakeService, product_id: UUID, sessio
                 notes.append(f"Прочитано страниц сайта: {len(readable)}.")
             notes.extend(dict.fromkeys(s["note"] for s in pages if s["note"] and s["status"] != "read"))
     for filename, data in files:
+        if on_progress:
+            on_progress()
         source = await parse_file_async(filename, data, f"growth studio: файл {filename}"[:500])
+        if on_progress:
+            on_progress()
         try:
             service.add_source(product_id, session_id, source, actor=ACTOR)
         except IntakeError as exc:
@@ -263,10 +283,10 @@ async def new_company_submit(request: Request, background: BackgroundTasks, db: 
         session = service.start(product.id, actor=ACTOR)
         session_id = UUID(session["session_id"])
         service.add_text(product.id, session_id, about, actor=ACTOR, reference="growth studio: описание владельца")
-        # Uploaded files are already here; the site, registry and draft follow in the background.
-        notes = await _add_materials(service, product.id, session_id, {}, files, text_reference="")
-        _start_job(background, product.id, session_id, website=website, identifier=identifier, build=True,
-                   notes=notes)
+        # Parse uploaded files in the background as well: multi-page OCR must
+        # never hold the POST connection open for its entire worker timeout.
+        _start_job(background, product.id, session_id, website=website, identifier=identifier,
+                   build=True, files=files)
     except IntakeError as exc:
         db.rollback()
         return RedirectResponse(f"/studio/products/{product.id}/profile?error={quote(str(exc)[:200])}", status_code=303)
@@ -332,6 +352,39 @@ def _company_settings_html(product: Product, *, can_delete: bool) -> str:
   <div class="sg-intake-actions"><button class="btn">Сохранить название</button>{delete_link}</div></form></section>"""
 
 
+def _collect_company_form(product: Product, registry_hint: str, review: dict | None = None) -> str:
+    """Single bottom action: save the company, ingest supplied evidence, then draft."""
+    base = f"/studio/products/{product.id}"
+    questions = _question_fields(review)
+    questions_block = (
+        '<div class="sg-intake-questions"><h3>Чего не хватает</h3>'
+        '<p class="sg-muted">Ответьте, что знаете; можно отметить «Не знаю».</p>'
+        + questions + '</div>'
+        if questions else ''
+    )
+    return f"""<section class="sg-surface sg-intake-section sg-company-collect"><h2>Добавить материалы</h2>
+<p class="sg-muted">Заполните всё необходимое и приложите файлы. Только после нажатия кнопки ниже
+система сохранит сведения и запустит анализ. Результат будет черновиком для вашего подтверждения.</p>
+<form method="post" action="{base}/profile/collect" enctype="multipart/form-data" class="sg-intake-form" data-once>
+  <label class="sg-field"><span>Название компании</span>
+    <input name="name" required minlength="2" maxlength="200" value="{esc(product.name)}"></label>
+  <label class="sg-field"><span>Краткое описание</span>
+    <textarea name="description" rows="3" maxlength="10000">{esc(product.description or '')}</textarea></label>
+  <label class="sg-field"><span>Дополнительные сведения</span>
+    <textarea name="text" rows="4" maxlength="12000"></textarea></label>
+  <label class="sg-field"><span>Сайт или страница</span>
+    <input name="link" type="text" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false"
+           maxlength="500" placeholder="nogotok.ru">
+    <small>По ссылке прочитаем главную и внутренние страницы: услуги, цены, контакты.</small></label>
+  <label class="sg-field"><span>ИНН или ОГРН</span>
+    <input name="identifier" inputmode="numeric" maxlength="40" placeholder="10 или 12 цифр">
+    <small>{esc(registry_hint)}</small></label>
+  {_file_field("Файлы")}
+  {questions_block}
+  <div class="sg-intake-actions"><button class="btn primary" type="submit">Собрать профиль</button></div>
+</form></section>"""
+
+
 def _edit_page_body(product: Product, profile: CompanyProfile | None, error: str | None) -> str:
     base = f"/studio/products/{product.id}"
     data = profile.model_dump(mode="json") if profile else {}
@@ -371,12 +424,10 @@ def _source_line(source: dict, base: str = "", removable: bool = False) -> str:
             f'<span>{esc(name)}{esc(mark)}</span>{note}{remove}</li>')
 
 
-def _questions_html(base: str, review: dict | None) -> str:
+def _question_fields(review: dict | None) -> str:
     questions = (review or {}).get("questions") or []
-    if not questions:
-        return ""
     items = []
-    for index, question in enumerate(questions):
+    for index, question in enumerate(questions[:10]):
         items.append(f"""<fieldset class="sg-intake-question">
   <legend>{esc(question['text'])}</legend>
   <input type="hidden" name="q{index}_field" value="{esc(question['field_path'])}">
@@ -384,9 +435,17 @@ def _questions_html(base: str, review: dict | None) -> str:
     <textarea name="q{index}_answer" rows="2" maxlength="4000" placeholder="Ответьте своими словами"></textarea></label>
   <label class="sg-check"><input type="checkbox" name="q{index}_unknown" value="1"> Не знаю — оставить пустым</label>
 </fieldset>""")
+    return "".join(items)
+
+
+def _questions_html(base: str, review: dict | None) -> str:
+    """Legacy standalone answer endpoint, kept for old clients."""
+    fields = _question_fields(review)
+    if not fields:
+        return ""
     return f"""<section class="sg-surface sg-intake-section"><h2>Чего не хватает</h2>
 <p class="sg-muted">Ответьте, что знаете. Агенты не будут придумывать недостающее.</p>
-<form method="post" action="{base}/profile/answers" class="sg-intake-form" data-once>{''.join(items)}
+<form method="post" action="{base}/profile/answers" class="sg-intake-form" data-once>{fields}
   <div class="sg-intake-actions"><button class="btn primary">Ответить и пересобрать профиль</button></div></form></section>"""
 
 
@@ -411,10 +470,10 @@ def _profile_body(product: Product, state: dict | None, error: str | None, notic
         parts.append(f'<div class="sg-intake-notice" role="status">{esc(notice)}</div>')
     if state is None:
         parts.append(_profile_summary_html(base, profile))
-        parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Дополнить из материалов</h2>
-<p>Добавьте сайт, ИНН, файлы или сведения своими словами: агент предложит изменения, а вы проверите их.</p>
-<form method="post" action="{base}/profile/start" class="sg-intake-actions"><button class="btn">Добавить материалы</button></form></section>""")
-        parts.append(_company_settings_html(product, can_delete=can_delete))
+        if can_delete:
+            parts.append(f'<p class="sg-muted"><a href="{base}/profile/delete">Удалить компанию</a></p>')
+        parts.append(_collect_company_form(product, registry_hint))
+        parts.append(ONCE_SCRIPT)
         return "".join(parts)
     sources = "".join(_source_line(s, base, removable=not running) for s in state["sources"])
     if running:
@@ -435,22 +494,17 @@ def _profile_body(product: Product, state: dict | None, error: str | None, notic
                  if review else "Агент изучит материалы и подготовит профиль.")
         parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Черновик профиля</h2>
 <p>{stale} Это занимает 1–3 минуты.</p>
-<form method="post" action="{base}/profile/build" class="sg-intake-actions" data-once><button class="btn primary">Собрать профиль</button></form></section>""")
-    # Questions come from the latest draft; answering adds evidence and rebuilds.
-    parts.append(_questions_html(base, review))
-    parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Добавить материалы</h2>
-<form method="post" action="{base}/profile/source" enctype="multipart/form-data" class="sg-intake-form" data-once>
-  <label class="sg-field"><span>Сведения своими словами</span><textarea name="text" rows="4" maxlength="12000"></textarea></label>
-  <label class="sg-field"><span>Сайт или страница</span><input name="link" type="text" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="500" placeholder="nogotok.ru">
-    <small>С главной прочитаем и внутренние страницы: услуги, цены, контакты.</small></label>
-  <label class="sg-field"><span>ИНН или ОГРН</span><input name="identifier" inputmode="numeric" maxlength="40" placeholder="10 или 12 цифр">
-    <small>{esc(registry_hint)}</small></label>
-  {_file_field("Файлы")}
-  <div class="sg-intake-actions"><button class="btn">Добавить</button></div></form></section>""")
+<p class="sg-muted">Чтобы запустить анализ, заполните сведения ниже и нажмите «Сохранить и собрать профиль».</p></section>""")
+    # Questions are submitted together with the company data and uploads.
+
     parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Передумали?</h2>
 <p class="sg-muted">Отмена закроет текущий сбор. Подтверждённый профиль останется как есть.</p>
 <form method="post" action="{base}/profile/cancel" class="sg-intake-actions"><button class="btn">Отменить сбор данных</button></form></section>""")
-    parts.append(_company_settings_html(product, can_delete=can_delete))
+    if can_delete:
+        parts.append(f'<p class="sg-muted"><a href="{base}/profile/delete">Удалить компанию</a></p>')
+    # The final operation is always the save-and-analyse button, not a save-name
+    # button or a build button above still-unsaved inputs.
+    parts.append(_collect_company_form(product, registry_hint, review))
     parts.append(ONCE_SCRIPT)
     return "".join(parts)
 
@@ -559,6 +613,34 @@ async def company_profile_action(product_id: UUID, action: str, request: Request
     try:
         if action == "start":
             service.start(product.id, actor=ACTOR)
+        elif action == "collect":
+            # One bottom-of-form action: preserve company settings immediately;
+            # collect and parse uploads in the background, THEN build the draft.
+            active = service.active(product.id, ACTOR)
+            if active and _job_running(active.id):
+                raise IntakeError("Уже работаю над этой компанией. Подождите, страница обновится сама.")
+            name = fields.get("name", product.name)
+            description = fields.get("description", product.description or "")
+            rename_company(db, product, name=name, description=description)
+            session = active or service.active(product.id, ACTOR)
+            if session is None:
+                opened = service.start(product.id, actor=ACTOR)
+                session_id = UUID(opened["session_id"])
+            else:
+                session_id = session.id
+            # The company header is evidence too: without this, saving the name
+            # and description updated the database but left the AI's source set stale.
+            identity = "Название компании: " + product.name
+            if product.description:
+                identity += "\nОписание компании: " + product.description
+            service.add_text(product.id, session_id, identity, actor=ACTOR,
+                             reference="growth studio: данные компании")
+            # Answers must be durable BEFORE the background build reads sources.
+            await _apply_answers(service, product, session_id, fields)
+            website = normalize_site(fields.get("link", ""))
+            identifier = fields.get("identifier", "").strip()
+            _start_job(background, product.id, session_id, website=website, identifier=identifier,
+                       material_fields={"text": fields.get("text", "").strip()}, files=files, build=True)
         elif action == "source":
             session_id = _session_id(service, product)
             if _job_running(session_id):

@@ -375,6 +375,46 @@ def main():
                 assert page.locator('#dp-input').input_value()=='', 'New Topic retained old draft'
                 result['checks'].append({'page':'topic-toolbar-390','no_blank_header_band':True,
                     'new_topic_above_composer':True,'no_keyboard_autofocus':True,'empty_state_restored':True})
+                # SEO route must remain compact and readable on a real dark-mode
+                # browser; calculate icon centers, not just class-name presence.
+                page.goto(f'{origin}/studio/products/{product.id}/seo?design=v4', wait_until='load')
+                for width in (360, 390, 780, 1280):
+                    page.set_viewport_size({'width':width,'height':844})
+                    page.evaluate("document.documentElement.dataset.theme='dark'")
+                    box=page.locator('.sg-notifications>summary')
+                    assert box.is_visible(), f'Notification control hidden at {width}px'
+                    geo=box.evaluate("""el => {
+                      const a=el.getBoundingClientRect(), b=el.querySelector('svg').getBoundingClientRect();
+                      return {dx:Math.abs((a.left+a.right-b.left-b.right)/2),
+                              dy:Math.abs((a.top+a.bottom-b.top-b.bottom)/2),
+                              width:a.width,height:a.height};
+                    }""")
+                    assert geo['dx']<=1 and geo['dy']<=1, f'Off-center bell at {width}px: {geo}'
+                    assert geo['width']>=43 and geo['height']>=43, geo
+                    status=page.locator('.seo-activation').bounding_box()
+                    steps=page.locator('.seo-process-overview').bounding_box()
+                    assert status and steps and status['y']<steps['y'], (status,steps)
+                    assert steps['height']<90, f'SEO stages should start collapsed: {steps}'
+                    assert page.locator('.route-content').evaluate(
+                        "el=>el.scrollWidth<=el.clientWidth+2"), 'SEO page horizontal overflow'
+                    ratio=page.evaluate("""() => {
+                      const el=document.querySelector('.seo-activation h2');
+                      const title=getComputedStyle(el).color;
+                      const bg=getComputedStyle(el.closest('.seo-activation')).backgroundColor;
+                      const lum = value => {
+                        const vals=(value.match(/[\d.]+/g)||[]).slice(0,3).map(x=>Number(x)/255);
+                        return vals.map(v=>v<=.04045?v/12.92:Math.pow((v+.055)/1.055,2.4))
+                                   .reduce((acc,v,i)=>acc+v*[.2126,.7152,.0722][i],0);
+                      };
+                      const a=lum(title),b=lum(bg);
+                      return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
+                    }""")
+                    assert ratio>=4.5, f'Low contrast SEO heading at {width}px: {ratio}'
+                    if width==390:
+                        page.screenshot(path=str(OUT/'seo-dark-390.png'),animations='disabled',full_page=True)
+                result['checks'].append({'page':'seo-v4-dark',
+                    'widths':[360,390,780,1280],'bell_centered':True,
+                    'heading_contrast_at_least_4_5':True,'stages_collapsed':True})
                 browser.close()
         finally:
             server.should_exit=True

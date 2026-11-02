@@ -227,6 +227,13 @@ def render_v4(page, request, pid, switch):
         # Some administrative handlers return a body without a main landmark.
         main = original.find(tag='body')
     content = original.inner(main).replace('class="topbar"','class="v4-module-head"')
+    # Keep special page-level wrappers when transplanting old <main> content:
+    # otherwise v4 drops their class, so dark-mode selector styles never apply.
+    main_classes = set((main[1].get('class') or '').split())
+    wrapper = next((item for item in ('sg-company-picker', 'sg-link-page')
+                    if item in main_classes), None)
+    if wrapper:
+        content = f'<div class="{wrapper}">{content}</div>'
     if request.url.path.startswith('/studio/tune'):
         content = original.outer(original.find(tag='header'))+content
     template = (ASSETS/'growth_os_v4_preview.html').read_text()
@@ -316,18 +323,35 @@ def render_v4(page, request, pid, switch):
                 voice_max=int(config_attrs.get('data-voice-max') or 300),
             )
     if pid and current == base+'/seo':
-        stages = [('Поисковые вопросы','Подсказки Яндекса и Google','search'),
-                  ('Семантическое ядро','Группировка по намерениям','layers'),
-                  ('SEO-контент-план','Темы и поисковые запросы','calendar'),
-                  ('Написание статей','Черновики для собственного блога','pen'),
-                  ('Проверка критиком','Контроль качества итогового текста','shield'),
-                  ('Публикация','После допуска — в блог','globe')]
-        pipeline = '<section class="pipeline-card surface animate-in"><div class="pipeline-head"><h2>Этапы производства</h2><span class="chip">6 шагов</span></div>'+''.join(
-            f'<div class="pipe-row"><span class="pipe-index">{i:02}</span><span style="flex:1"><b>{title}</b><p>{desc}</p></span>{icon(glyph)}</div>'
-            for i,(title,desc,glyph) in enumerate(stages,1))+'</section>'
-        content = content.replace('<div class="route-content">','<div class="route-content">'+pipeline,1)
+        steps = [
+            ('Поисковые вопросы', 'Подсказки Яндекса и Google'),
+            ('Семантическое ядро', 'Группировка запросов'),
+            ('Контент-план', 'Темы и даты публикации'),
+            ('Написание статьи', 'Текст для блога'),
+            ('ИИ-критик', 'Проверка содержания и фактов'),
+            ('Публикация', 'После допуска — в блог'),
+        ]
+        pipeline = (
+            '<details class="seo-process-overview">'
+            '<summary>Как создаётся статья <span>6 этапов</span></summary>'
+            '<ol class="seo-steps">'
+            + ''.join(f'<li><strong>{html.escape(name)}</strong>'
+                      f'<small>{html.escape(description)}</small></li>'
+                      for name, description in steps)
+            + '</ol></details>'
+        )
+        # Status and the enable button come first. The production steps are
+        # optional reference information, not a giant card above the controls.
+        at = content.find('<section class="panel seo-activation"')
+        after = content.find('</section>', at) if at >= 0 else -1
+        if after >= 0:
+            after += len('</section>')
+            content = content[:after] + pipeline + content[after:]
     # The same reviewed card styles frame the real forms, reports and permissions.
-    content = content.replace('class="panel"','class="surface module-card panel"')
+    if pid and current == base+'/seo':
+        content = content.replace('class="panel"', 'class="surface panel"')
+    else:
+        content = content.replace('class="panel"', 'class="surface module-card panel"')
     if pid and current == base+'/materials':
         content = content.replace('class="material-grid route-material-grid"', 'class="materials-grid"')
         content = content.replace('class="material-card"', 'class="material-card surface animate-in"')
@@ -409,7 +433,7 @@ def render_v4(page, request, pid, switch):
     template = template.replace('</head>', (
         '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=16">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
-        '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=5">'
+        '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=6">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
         '</head>'
     ))

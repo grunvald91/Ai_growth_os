@@ -355,3 +355,16 @@ def test_month_selection_is_recorded_and_invalid_period_rejected(env):
         Artifact.task_id == jobs(db, pid)[0].id, Artifact.kind == REQUEST_KIND))
     assert json.loads(request.content)["horizon_days"] == 30
     assert client.post(url(pid, "/queue"), data={"horizon_days": "365"}).status_code == 422
+
+
+
+def test_seo_dashboard_has_no_obsolete_not_deployed_message(env):
+    client, db, pid, other_pid = env
+    page = client.get(url(pid))
+    assert page.status_code == 200
+    assert 'Подключён' in page.text
+    assert 'seo-dash-stats' in page.text
+    assert 'seo-search' in page.text
+    assert 'станут доступны после выпуска' not in page.text
+    assert 'публикации нужно проверить после отдельного выпуска' not in page.text
+    assert client.get(url(other_pid)).status_code == 200
