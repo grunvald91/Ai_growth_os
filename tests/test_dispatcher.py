@@ -214,6 +214,29 @@ async def test_stale_confirmation_cannot_start_edited_request(db, product):
     assert len(tasks(db, "content_creative")) == 1
 
 
+
+
+@pytest.mark.asyncio
+async def test_edit_preserves_unmodified_audience_context(db, product):
+    from app.dispatcher.editable import EditCreation
+    result = await send(db, product, chip={
+        "label": "Stories for parents", "capability": "create_creative",
+        "params": {"topic": "Советы для родителей", "format": "story",
+                   "frame_count": "4", "audience": "Родители дошкольников"}})
+    card = next(b for b in result["messages"][1]["blocks"] if b["type"] == "confirm")
+    updated = await service.edit_confirmation(db, context(db, product), EditCreation(
+        confirmation_id=card["confirmation_id"], revision=0, format="story",
+        topic="Пять советов", frame_count=5))
+    stored = db.scalar(select(DispatcherMessage).where(
+        DispatcherMessage.id == result["messages"][1]["id"]))
+    assert stored.params["audience"] == "Родители дошкольников"
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True, revision=1)
+    task = tasks(db, "content_creative")[0]
+    artifact = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_request"))
+    assert json.loads(artifact.content)["audience"] == "Родители дошкольников"
+
+
 # ---- blocks -----------------------------------------------------------------------------
 
 def test_blocks_drop_foreign_links_and_misshapen_tables():

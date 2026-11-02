@@ -497,6 +497,9 @@
 
   function createCommand(text) {
     if (!root.classList.contains('sg-create-dispatch')) return text;
+    // Explicitly spoken/written format always wins over an older format chip.
+    // A selected chip is only a fallback for a bare subject like "про волосы".
+    if (/\b(?:сторис|истори\w*|пост\w*|видеосценари\w*|сценари\w*|видео|видеоролик\w*|ролик\w*|анимаци\w*|изображени\w*|картин\w*|стать\w*|пакет)\b/i.test(text)) return text;
     var format = root.getAttribute('data-create-format');
     var lead = ({
       post: 'Подготовь пост по следующей задаче: ',
@@ -506,7 +509,14 @@
       whiteboard: 'Создай простое рисованное анимированное видео по следующей задаче: ',
       package: 'Подготовь полный контент-пакет по следующей задаче: '
     })[format];
-    return lead ? lead + text : text;
+    if (!lead) return text;
+    if (format === 'story') {
+      var count = document.querySelector('#sg-create-form select[name="frame_count"]');
+      if (count && !count.disabled && count.value) {
+        lead = 'Создай ' + count.value + ' сторис по следующей задаче: ';
+      }
+    }
+    return lead + text;
   }
 
   function sendText() {

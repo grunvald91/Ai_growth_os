@@ -71,15 +71,18 @@ def draft_view(capability_id: str | None, params: dict) -> dict | None:
     }
 
 
-def target_for_edit(edit: EditCreation):
-    """Produce a fully validated executor request, discarding stale format-specific fields."""
+def target_for_edit(edit: EditCreation, existing: dict | None = None):
+    """Produce a validated executor request, keeping context the user did not edit."""
+    existing = existing or {}
+    audience = existing.get("audience")
     if edit.format == "post":
         return "create_post", PostParams(topic=edit.topic,
-            channel=edit.platform or "telegram")
+            channel=edit.platform or "telegram", audience=audience)
     if edit.format == "package":
         return "create_package", PackageParams(topic=edit.topic)
     return "create_creative", CreativeParams(
         topic=edit.topic, format=edit.format,
         platform=edit.platform or DEFAULT_PLATFORMS[edit.format],
         frame_count=edit.frame_count if edit.format == "story" else None,
+        audience=audience,
     )

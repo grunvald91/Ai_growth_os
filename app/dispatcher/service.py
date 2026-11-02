@@ -356,7 +356,7 @@ async def edit_confirmation(db: Session, ctx: Context, edit) -> dict:
     revision = int(current.get("revision", 0))
     if edit.revision != revision:
         raise PermissionError("Карточка была изменена. Откройте обновлённую версию")
-    capability_id, params = target_for_edit(edit)
+    capability_id, params = target_for_edit(edit, card.params)
     described = await executors.DESCRIBERS[capability_id](ctx, params)
     if not isinstance(described, Confirmation):
         raise ValueError("Не удалось подготовить подтверждение")

@@ -70,6 +70,10 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert '/studio/assets/dispatcher.js?v=create-20261102' in page.text
     assert page.text.count('id="dp-input"') == 1
     assert page.text.index('Что создаём?') < page.text.index('id="dp-input"')
+    js = client.get('/studio/assets/dispatcher.js')
+    assert js.status_code == 200
+    assert "root.classList.contains('sg-create-dispatch')" in js.text
+    assert "pending[pending.length - 1]" in js.text
 
 
 def test_home_keeps_real_dispatcher_and_voice(live):
