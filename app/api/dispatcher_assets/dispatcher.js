@@ -369,12 +369,26 @@
     send({ mode: 'chip', chip: { label: chip.label, capability: chip.capability, params: chip.params || {} } }, chip.label);
   }
 
+  function createCommand(text) {
+    if (!root.classList.contains('sg-create-dispatch')) return text;
+    var format = root.getAttribute('data-create-format');
+    var lead = ({
+      post: 'Подготовь пост по следующей задаче: ',
+      story: 'Создай Stories по следующей задаче: ',
+      static_image: 'Подготовь изображение по следующей задаче: ',
+      short_video: 'Подготовь видеосценарий по следующей задаче: ',
+      whiteboard: 'Создай простое рисованное анимированное видео по следующей задаче: ',
+      package: 'Подготовь полный контент-пакет по следующей задаче: '
+    })[format];
+    return lead ? lead + text : text;
+  }
+
   function sendText() {
     var text = input.value.trim();
     if (!text || busy) return;
     input.value = '';
     grow();
-    send({ mode: 'text', text: text }, text);
+    send({ mode: 'text', text: createCommand(text) }, text);
   }
 
   function grow() {
@@ -684,7 +698,7 @@
           voiceDispatchPending = true;
           setVoiceState('sending');
           showLive('Обрабатываю запрос…', '', true);
-          send({ mode: 'text', text: transcript }, transcript, true);
+          send({ mode: 'text', text: createCommand(transcript) }, transcript, true);
         } else {
           applyDictation(data);
         }
@@ -871,4 +885,15 @@
   syncConversationLayout();
   renderHints();
   toBottom();
+  if (root.hasAttribute('data-load-state')) {
+    // The Create page loads the same saved conversation without duplicating handlers.
+    fetch(api + '/state', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        (data.messages || []).forEach(upsert);
+        state.hints = data.hints || [];
+        syncConversationLayout(); renderHints(); toBottom();
+      }).catch(function () {});
+  }
 })();
