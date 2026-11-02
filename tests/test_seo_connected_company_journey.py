@@ -196,16 +196,22 @@ async def test_connected_company_article_reaches_own_blog_with_critic_and_demo_s
         assert db.scalar(select(Task).where(Task.product_id == demo_id)) is None
 
     class CriticUnavailableProvider(SequenceProvider):
-        """Keep six author stage fixtures independent of the attempted critic call."""
+        """Stage-specific responses survive retries; reviewer outage remains fail-closed."""
         def __init__(self, outputs):
             super().__init__(outputs)
+            names = ["content_strategist", "seo_editor", "article_writer",
+                     "conversion_editor", "human_editor", "marketing_editor"]
+            self.by_role = dict(zip(names, outputs, strict=True))
             self.critic_calls = 0
 
         async def generate(self, request):
             if request.metadata.get("task_type") == "quality_review":
                 self.critic_calls += 1
                 raise RuntimeError("Simulated critic outage; do not publish without review")
-            return await super().generate(request)
+            self.requests.append(request.model_copy(deep=True))
+            role = request.metadata["team_role"]
+            return LLMResponse(content=json.dumps(self.by_role[role], ensure_ascii=False),
+                               model="fixture", usage=LLMUsage(), stop_reason="end_turn")
 
     generated = CriticUnavailableProvider(article_outputs())
     monkeypatch.setattr(
