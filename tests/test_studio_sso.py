@@ -879,8 +879,9 @@ def test_operator_link_needs_both_real_sessions_and_rejects_wrong_password(env):
                           headers={"origin": ORIGIN})
     assert success.status_code == 303
     assert success.headers["location"] == "/studio/identity?linked=1"
-    linked = client.get("/studio/identity?linked=1")
+    linked = client.get("/studio/identity")
     assert linked.status_code == 200 and "Профили объединены" in linked.text
+    assert "Отвязать профиль Growth" in linked.text
     assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 200
     from app.core.studio_accounts import accounts_path
     path, _ = accounts_path(settings)
