@@ -279,17 +279,52 @@ async def test_publication_recovery_logs_failed_articles(env, tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_changed_reader_does_not_require_new_approval(env, tmp_path):
+async def test_changed_reader_requires_matching_critic_version_before_autopublish(env, tmp_path):
     db, product = env
     article_id = await make_article(db, product, tmp_path)
     row = db.get(Artifact, article_id)
     data = json.loads(row.content)
     data["reader_article"]["lead"] += " Изменённый текст."
-    row.content = json.dumps(data)
+    row.content = json.dumps(data, ensure_ascii=False)
+    db.commit()
+
+    # Automatic publication must not trust a critic verdict for old text.
+    outcome = publish_if_clear(db, article_id)
+    assert not outcome.published
+    assert "content_mismatch" in outcome.reason
+    assert db.get(Artifact, article_id).status == ArtifactStatus.AWAITING_APPROVAL
+    assert not list(db.scalars(select(Publication)))
+
+    # Once the critic reviews THIS version, no manual confirmation is needed.
+    run = db.scalar(select(AgentRun).where(
+        AgentRun.task_id == row.task_id, AgentRun.agent_name == "marketing_editor"))
+    review = db.scalar(select(Artifact).where(
+        Artifact.agent_run_id == run.id, Artifact.kind == "seo_final_review"))
+    article = ArticleArtifact.model_validate_json(row.content)
+    review.content = json.dumps({
+        "status": "no_material_issues",
+        "reader_hash": reader_hash(article.reader_article),
+    })
+    db.commit()
+    refreshed = publish_if_clear(db, article_id)
+    assert refreshed.published
+    assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
+
+
+@pytest.mark.asyncio
+async def test_critic_verdict_without_hash_cannot_autopublish(env, tmp_path):
+    db, product = env
+    article_id = await make_article(db, product, tmp_path)
+    row = db.get(Artifact, article_id)
+    run = db.scalar(select(AgentRun).where(
+        AgentRun.task_id == row.task_id, AgentRun.agent_name == "marketing_editor"))
+    review = db.scalar(select(Artifact).where(
+        Artifact.agent_run_id == run.id, Artifact.kind == "seo_final_review"))
+    review.content = json.dumps({"status": "no_material_issues"})
     db.commit()
     outcome = publish_if_clear(db, article_id)
-    assert outcome.published
-    assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
+    assert not outcome.published and "content_mismatch" in outcome.reason
+    assert not list(db.scalars(select(Publication)))
 
 
 @pytest.mark.asyncio
