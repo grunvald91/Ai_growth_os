@@ -114,7 +114,7 @@ def verify_live_contract(client) -> None:
         "    assert names <= set(schemas[ref]['properties'])\n"
         "print('insights_api_contract=ok')\n"
     )
-    run(client, "./venv/bin/python -c " + shlex.quote(source), 30)
+    run(client, "cd " + shlex.quote(ROOT) + " && ./venv/bin/python -c " + shlex.quote(source), 30)
 
 
 def main() -> None:
