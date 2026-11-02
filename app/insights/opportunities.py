@@ -83,22 +83,26 @@ def matching_slots(history: Schedule, availability: Schedule, today: date, servi
     """Match actual service-specific starts to former clients, preserving free-slot order."""
     if not any(service.id == service_id for service in availability.services):
         return []
+    # Spread initial suggestions across masters/dates first. Otherwise a master
+    # with six half-hourly starts would hide all other masters from a six-row view.
+    rows = [row for row in availability.free_slots
+            if row.service_id == service_id and row.resource_id is not None and row.times]
+    rows.sort(key=lambda row: (row.date, min(row.times), row.resource_id or 0))
+    starts = [(row, min(row.times)) for row in rows]
+    starts.extend((row, time) for row in rows for time in sorted(row.times)[1:])
     result: list[SlotOpportunity] = []
     seen: set[tuple[date, int, str]] = set()
-    for slot in sorted(availability.free_slots, key=lambda s: (s.date, s.resource_id or 0)):
-        if slot.service_id != service_id or slot.resource_id is None:
-            continue  # Legacy availability is not verified for this service.
-        for time in sorted(slot.times):
-            key = (slot.date, slot.resource_id, time)
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append(SlotOpportunity(
-                date=slot.date, time=time, resource_id=slot.resource_id,
-                resource=slot.resource or "Мастер",
-                clients=suggest_clients(history, today, service_id, slot.resource_id,
-                                        history_days=history_days),
-            ))
-            if len(result) >= max_slots:
-                return result
+    for slot, time in starts:
+        key = (slot.date, slot.resource_id, time)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(SlotOpportunity(
+            date=slot.date, time=time, resource_id=slot.resource_id,
+            resource=slot.resource or "Мастер",
+            clients=suggest_clients(history, today, service_id, slot.resource_id,
+                                    history_days=history_days),
+        ))
+        if len(result) >= max_slots:
+            break
     return result
