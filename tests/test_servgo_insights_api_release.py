@@ -76,3 +76,25 @@ def test_post_release_contract_refuses_partial_or_old_rollout():
             del invalid["components"]["schemas"]["BookingRow"]["properties"]["service_id"]
         with pytest.raises(RuntimeError):
             _check_live_contract(invalid)
+
+
+def test_one_time_actions_trigger_is_narrow_and_approval_is_preserved():
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/servgo-insights-api-release.yml").read_text()
+    data = yaml.safe_load(workflow)
+    triggers = data.get("on", data.get(True))  # PyYAML YAML 1.1 boolean normalization
+    assert triggers["push"]["branches"] == ["main"]
+    assert triggers["push"]["paths"] == [".github/release-signals/insights-api-20261102-v1.txt"]
+    assert "workflow_dispatch" in triggers
+    preflight = data["jobs"]["preflight"]
+    deploy = data["jobs"]["deploy"]
+    assert preflight["env"]["APPLY"] == "false"
+    assert deploy["env"]["APPLY"] == "true"
+    assert deploy["environment"] == "production"
+    assert deploy["needs"] == "preflight"
+    assert "github.event.head_commit.message == 'servgo: one-time insights API release 20261102-v1'" in preflight["if"]
+    assert "github.event.head_commit.message == 'servgo: one-time insights API release 20261102-v1'" in deploy["if"]
+    assert "needs.preflight.result == 'success'" in deploy["if"]
+    assert "SERVGO_INSIGHTS_API_RELEASE_ONCE_20261102_V1" in workflow
