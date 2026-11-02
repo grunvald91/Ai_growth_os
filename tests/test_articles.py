@@ -948,12 +948,13 @@ async def test_editor_prompts_are_commercially_useful_without_weakening_groundin
     by_role = {r.metadata['team_role']: r for r in provider.requests}
     assert 'подтверждённых audience_pains' in by_role['content_strategist'].system_prompt
     assert 'полезный и для поиска, и для продаж' in by_role['seo_editor'].system_prompt
-    assert 'конкретной узнаваемой ситуации' in by_role['human_editor'].system_prompt
-    assert 'Пиши, сокращай' in by_role['human_editor'].system_prompt
-    assert 'СЦЕНА → БОЛЬ → ЦЕНА ПРОБЛЕМЫ' in by_role['marketing_editor'].system_prompt
-    assert 'Юмор — только к месту' in by_role['marketing_editor'].system_prompt
-    assert 'без шуток' in by_role['marketing_editor'].system_prompt
-    assert 'third-party cases' in by_role['marketing_editor'].system_prompt
+    # Verify helpful, source-grounded editing, not a mandatory writing template.
+    assert 'интересной и живой' in by_role['human_editor'].system_prompt
+    assert 'не обедняя смысл' in by_role['human_editor'].system_prompt
+    assert 'не по жёсткой формуле' in by_role['marketing_editor'].system_prompt
+    assert 'уместный юмор' in by_role['marketing_editor'].system_prompt
+    assert 'не придумывай цены' in by_role['marketing_editor'].system_prompt
+    assert 'проверяемого источника' in by_role['marketing_editor'].system_prompt
     assert 'Write marketing, not an academic paper' in by_role['marketing_editor'].system_prompt
     assert '30-45 seconds' in by_role['video_director'].system_prompt
     from app.llm.timeouts import PROVIDER_TIMEOUT_SECONDS
