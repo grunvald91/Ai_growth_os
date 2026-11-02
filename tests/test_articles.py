@@ -1137,3 +1137,11 @@ def test_editorial_contract_allows_short_useful_article_without_invented_proof_g
         ArticleDraft.model_validate({"sections": [], "proof_needed_notes": []})
     with pytest.raises(ValueError):
         ArticleBodyDraft.model_validate({"sections": []})
+
+
+def test_article_common_prompt_does_not_hide_relevant_limitations_or_force_sales_formula():
+    from app.workflows.article_production import ARTICLE_COMMON
+    assert "Preserve meaningful caveats" in ARTICLE_COMMON
+    assert "one introduction or article structure" in ARTICLE_COMMON
+    assert "Существенные ограничения, сомнения и условия не скрывай" in ARTICLE_COMMON
+    assert "без оговорок, извинений" not in ARTICLE_COMMON
