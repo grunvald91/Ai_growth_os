@@ -114,6 +114,25 @@ async def test_creative_job_runs_only_two_specialists_and_keeps_approval(db, tmp
     )))
 
 
+
+
+def test_story_requested_count_is_validated_without_changing_other_formats():
+    from uuid import uuid4
+    product_id = uuid4()
+    request = CreativeRequest(mode="creative", product_id=product_id,
+                              topic="Пять советов при выборе цветов",
+                              format="story", platform="telegram", frame_count=5)
+    assert request.frame_count == 5
+    with pytest.raises(ValidationError):
+        CreativeRequest(mode="creative", product_id=product_id,
+                        topic="Пятнадцать историй", format="story",
+                        platform="telegram", frame_count=15)
+    with pytest.raises(ValidationError):
+        CreativeRequest(mode="creative", product_id=product_id,
+                        topic="Рисованное видео", format="short_video",
+                        platform="youtube_shorts", frame_count=5)
+
+
 def test_creative_timeline_and_platform_mismatch_fail_closed(db):
     from uuid import uuid4
     with pytest.raises(ValidationError):
