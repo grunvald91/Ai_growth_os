@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
-from app.intake.sources import MAX_FILE_BYTES, MAX_TEXT, make_source, parse_file, parse_file_async
+from app.intake.sources import MAX_FILE_BYTES, MAX_TEXT, MAX_DOCUMENT_TEXT, make_source, parse_file, parse_file_async
 
 
 def pdf_bytes():
@@ -71,8 +71,11 @@ def test_empty_and_partial_files_are_not_claimed_read():
     for data in [b'', b'  \n\t']:
         source = parse_file('empty.txt', data, 'empty')
         assert source.status == 'unavailable' and source.note and not source.text
-    source = parse_file('long.txt', b'a' * (MAX_TEXT + 100), 'long')
-    assert source.status == 'truncated' and len(source.text) == MAX_TEXT and source.note
+    source = parse_file('long.txt', b'a' * (MAX_DOCUMENT_TEXT + 100), 'long')
+    assert source.status == 'truncated' and len(source.text) == MAX_DOCUMENT_TEXT and source.note
+    # The previous arbitrary 100k file limit no longer truncates a valid document.
+    complete = parse_file('long.txt', b'a' * (MAX_TEXT + 100), 'valid-long')
+    assert complete.status == 'read' and len(complete.text) == MAX_TEXT + 100
     assert make_source('owner_message', 'message', 'x' * (MAX_TEXT + 1000)).note
     assert parse_file('large.txt', b'x' * (MAX_FILE_BYTES + 1), 'large').status == 'unsupported'
 
@@ -164,3 +167,65 @@ def test_contacts_are_redacted_and_a_huge_unbroken_text_is_not_slow():
     started = time.monotonic()
     clean_text("a" * 100_000)  # one unbroken string used to take about twenty seconds
     assert time.monotonic() - started < 3
+
+
+def multipage_pdf_bytes(count: int, page_chars: int = 160) -> bytes:
+    writer = PdfWriter()
+    for index in range(count):
+        page = writer.add_blank_page(width=600, height=800)
+        font = DictionaryObject({
+            NameObject('/Type'): NameObject('/Font'),
+            NameObject('/Subtype'): NameObject('/Type1'),
+            NameObject('/BaseFont'): NameObject('/Helvetica'),
+        })
+        page[NameObject('/Resources')] = DictionaryObject({
+            NameObject('/Font'): DictionaryObject({NameObject('/F1'): font}),
+        })
+        stream = DecodedStreamObject()
+        text = f"Document page {index + 1} " + "X" * page_chars
+        stream.set_data(f"BT /F1 16 Tf 50 700 Td ({text}) Tj ET".encode('ascii'))
+        page[NameObject('/Contents')] = writer._add_object(stream)
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def test_nine_page_pdf_longer_than_old_12k_reads_all_nine_pages():
+    # Reproduces the production "6 of 9 pages" failure: a 2,200-character
+    # page crossed the old 12,001-character cutoff after page six.
+    data = multipage_pdf_bytes(9, page_chars=2200)
+    source = parse_file('nine-pages.pdf', data, 'nine-pages')
+    assert source.status == 'read', source.note
+    assert 'Обработано страниц: 9 из 9' in source.note
+    for page in range(1, 10):
+        assert f"Страница {page}\nDocument page {page} " in source.text
+    assert source.text.index('Страница 9') > 12_001
+    assert len(source.text) > 18_000
+
+
+def test_pdf_extraction_has_no_fixed_40_page_limit():
+    source = parse_file('forty-six.pdf', multipage_pdf_bytes(46), 'long-document')
+    assert source.status == 'read', source.note
+    assert "Обработано страниц: 46 из 46" in source.note
+    assert "Страница 46\nDocument page 46" in source.text
+
+
+def test_spreadsheet_does_not_stop_after_12k_of_text():
+    book = Workbook()
+    sheet = book.active
+    for index in range(12):
+        sheet.append([f"Клиентская услуга {index}", 'A' * 1300])
+    output = io.BytesIO()
+    book.save(output)
+    source = parse_file('services.xlsx', output.getvalue(), 'services')
+    assert source.status == 'read', source.note
+    assert "Клиентская услуга 11" in source.text
+    assert len(source.text) > 12_001
+
+
+@pytest.mark.asyncio
+async def test_async_parser_reads_all_nine_pdf_pages():
+    source = await parse_file_async('nine-pages.pdf', multipage_pdf_bytes(9, 1800), 'async-pdf')
+    assert source.status == 'read', source.note
+    assert "Обработано страниц: 9 из 9" in source.note
+    assert "Страница 9\nDocument page 9" in source.text
