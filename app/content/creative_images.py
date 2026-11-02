@@ -79,7 +79,7 @@ def image_prompt(draft, frame, number: int, total: int, ratio: str) -> str:
          "Do not create a horizontal banner. "
          if draft.format == "story" else
          f"Create ONE finished social-media post image for {draft.platform}. ")
-        "Respect company identity as described, but do not invent a brand logo, "
+        + "Respect company identity as described, but do not invent a brand logo, "
         "endorsement, client quotation, price, statistic, product feature or result. "
         "Text, if present, must reproduce the exact Russian wording below; no extra text. "
         "Keep text readable on a phone and important details within safe margins. "
