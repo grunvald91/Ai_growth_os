@@ -117,6 +117,7 @@ class FillOpenSlotsParams(_Params):
                                    description="ID услуги только из подтверждённого каталога BookingBot. "
                                                "Не знаете ID — не указывайте, система покажет выбор услуг.")
     period: Literal["today", "tomorrow", "week"] = "tomorrow"
+    page: int = Field(default=1, ge=1, description="Страница каталога услуг.")
 
 
 class SlotOfferParams(_Params):
