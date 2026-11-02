@@ -60,6 +60,14 @@ class PostParams(_Params):
     audience: str | None = Field(default=None, max_length=300)
 
 
+class CreativeParams(_Params):
+    topic: str = Field(min_length=3, max_length=300, description="Тема материала. Если тема не названа, сначала спроси её или предложи темы.")
+    format: Literal["story", "short_video", "static_image"] = Field(description="Stories, видеосценарий или одиночный визуальный бриф.")
+    platform: Literal["telegram", "vk", "instagram_reels", "youtube_shorts", "vk_clips", "dzen"] = "telegram"
+    frame_count: int | None = Field(default=None, ge=3, le=10, description="Строгое число экранов Stories, если владелец его назвал. Например, четыре — 4. Для других форматов не указывать.")
+    audience: str | None = Field(default=None, max_length=300)
+
+
 class VideoParams(_Params):
     topic: str = Field(min_length=8, max_length=400)
     length: Literal["30", "60"] = Field(
@@ -209,6 +217,15 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                "Поставить в работу один пост на тему для площадки (по умолчанию Telegram). "
                "Нужна тема; площадка — telegram, vk, dzen, vc_ru или tenchat; аудитория необязательна.",
                ToolOperation.GENERATE_DRAFT, Cost.CHEAP, PostParams),
+    Capability("create_creative", "Создать Stories или видеосценарий",
+               "По просьбе «сделай 4 сторис», «создай пять историй», «подготовь сценарий Reels», "
+               "«сделай картинку» создать креатив по теме. format=story — Stories; short_video — только "
+               "сценарий ролика, НЕ MP4; static_image — пока только бриф изображения. "
+               "Сохраняй точное число экранов от 3 до 10 в frame_count, если оно названо. "
+               "Для Stories платформы telegram/vk/instagram_reels; для сценария youtube_shorts/instagram_reels/vk_clips; "
+               "для изображения telegram/vk/dzen/instagram_reels. Если тема не названа — уточни, не выдумывай. "
+               "Перед запуском показывай пользователю формат, число экранов и тему.",
+               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, CreativeParams, always_confirm=True),
     Capability("make_plan", "Составить контент-план",
                "Поставить в работу составление нового контент-плана. Он ничего не публикует: план утверждается отдельно.",
                ToolOperation.GENERATE_DRAFT, Cost.CHEAP, NoParams),
