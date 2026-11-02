@@ -126,8 +126,8 @@ def _new_company_page(fields: dict | None = None, error: str | None = None, *, r
     <textarea name="about" required minlength="30" maxlength="12000" rows="8"
       placeholder="Чем занимается, какие услуги и цены, для кого, город, чем отличается, чего нельзя обещать.">{esc(fields.get('about', ''))}</textarea></label>
   {_file_field()}
-  <div class="sg-intake-actions"><button class="btn primary" type="submit">Собрать профиль</button>
-  <a href="/studio?choose=1">← К списку проектов</a></div>
+  <div class="sg-intake-actions"><a href="/studio?choose=1">← К компаниям</a>
+  <button class="btn primary" type="submit">Собрать профиль</button></div>
 </form>{ONCE_SCRIPT}</main></body></html>"""
 
 ONCE_SCRIPT = """<script>document.querySelectorAll('form[data-once]').forEach(function(f){f.addEventListener('submit',function(){
