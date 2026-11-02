@@ -1024,3 +1024,37 @@ def test_explicit_classic_wins_even_if_dispatcher_is_enabled(live, monkeypatch):
     assert 'data-growth-design="v4"' not in page.text
     assert 'id="dp-state"' not in page.text
     assert 'Новый дизайн' in page.text
+
+
+
+def test_mobile_seo_dashboard_prioritizes_status_and_hides_process_details(live):
+    client, db, product = live
+    page = client.get(f'/studio/products/{product.id}/seo?design=v4')
+    assert page.status_code == 200
+    assert page.text.index('class="panel seo-activation"') < page.text.index('class="seo-process-overview"')
+    assert '<summary>Как создаётся статья <span>6 этапов</span></summary>' in page.text
+    assert 'class="seo-dash-stats"' in page.text
+    assert 'Запусков пока нет.' in page.text
+    assert 'Подключить SEO-завод' in page.text
+    assert 'после отдельного серверного выпуска' not in page.text
+    assert '/studio/assets/growth-servgo-air.css?v=6' in page.text
+
+
+def test_notification_bell_is_real_svg_centered_on_every_v4_screen(live):
+    client, db, product = live
+    from app.api.growth_v4 import Document
+    for route in ('', '/seo', '/work', '/create'):
+        page = client.get(f'/studio/products/{product.id}{route}?design=v4')
+        assert page.status_code == 200
+        doc = Document(page.text)
+        widget = doc.find(cls='sg-notifications')
+        assert widget is not None
+        markup = doc.outer(widget)
+        assert 'href="#i-bell"' in markup
+        assert 'data-sg-count' in markup
+        assert 'data-sg-read-all' in markup
+    css = client.get('/studio/assets/growth-servgo-air.css').text
+    assert '.top-actions .sg-notifications>summary' in css
+    assert 'place-items:center' in css
+    assert 'width:44px' in css
+    assert '.sg-notifications>summary>svg.icon' in css
