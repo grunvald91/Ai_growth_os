@@ -6,6 +6,8 @@ publication manual and preserves existing editorial approval guards.
 from __future__ import annotations
 
 import html
+import io
+import zipfile
 import json
 import re
 from collections import defaultdict
@@ -16,9 +18,11 @@ from uuid import UUID
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse, FileResponse, StreamingResponse
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
+from tempfile import SpooledTemporaryFile
 
 from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
 from app.api.content_studio_brand import SERVGO_FAVICON_SVG, servgo_brand_html
@@ -37,6 +41,8 @@ from app.content.revisions import post_history, queue_post_edit
 from app.content.revisions import source_fingerprint
 from app.content.manual_edits import editable_fields, save_manual_edit
 from app.content.creative import CreativeRequest, queue_creative
+from app.content.creative_images import generated_images, verified_file
+from app.api.creative_image_gallery import gallery_html
 from app.content.telegram_publishing import (verify_channel, save_verified_channel,
     connected_channels, schedule_post, cancel_scheduled_post, validate_telegram_text,
     reconcile_publication)
@@ -1543,6 +1549,11 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
         </section>
         """
     elif record.kind == "creative_brief":
+        image_rows = generated_images(db, product.id, record.task_id)
+        image_errors = list(db.scalars(select(Artifact).where(
+            Artifact.product_id == product.id, Artifact.task_id == record.task_id,
+            Artifact.kind == "creative_image_error")))
+        prepared_gallery = gallery_html(product.id, record.task_id, image_rows, errors=image_errors)
         frames = value.get("frames") or []
         scenes = "".join(
             '<article class="sg-storyboard-card">'
@@ -1561,8 +1572,13 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
         content = f"""
         <section class="sg-surface">
           <div class="sg-section-head"><div><span class="sg-overline">РАСКАДРОВКА · {esc(value.get('platform'))}</span>
-          <h2>{esc(display_material_title(record, value))}</h2><p>Предпросмотр структуры будущего материала. Медиафайлы не создавались.</p></div></div>
-          <div class="sg-storyboard-grid">{scenes or '<p>Кадры ещё не подготовлены.</p>'}</div>
+          <h2>{esc(display_material_title(record, value))}</h2>
+          <p>{'Готовые изображения доступны ниже.' if image_rows else 'Изображения ещё не готовы; ниже показана раскадровка.'}</p>
+          </div></div>
+          {prepared_gallery}
+          <details><summary>Раскадровка и промпты</summary>
+            <div class="sg-storyboard-grid">{scenes or '<p>Кадры ещё не подготовлены.</p>'}</div>
+          </details>
           <h3>Текст и рекомендации</h3>
           <div id="material-copy" class="article-text">{esc(artifact_text(record, value))}</div>
         </section>"""
@@ -2217,6 +2233,12 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
         Artifact.kind.in_(["content_request", "creative_request", "edit_request"]),
     ).order_by(Artifact.created_at.desc()).limit(1))
     body = task_detail_html(product.id, task, runs, results, request=request)
+    if task.assigned_agent == "content_creative":
+        images = generated_images(db, product.id, task.id)
+        errors = list(db.scalars(select(Artifact).where(
+            Artifact.product_id == product.id, Artifact.task_id == task.id,
+            Artifact.kind == "creative_image_error")))
+        body += gallery_html(product.id, task.id, images, errors=errors)
     response = HTMLResponse(studio_page_shell(
         product, active="work", title="Создание материала",
         subtitle="Настоящий статус задания, этапы ИИ-команды и готовые результаты.",
@@ -2224,6 +2246,80 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
     ))
     response.headers["Cache-Control"] = "private, no-store"
     return response
+
+
+
+def _creative_owner_task(db: Session, product_id: UUID, task_id: UUID) -> Task:
+    _owner_product(db, product_id)
+    task = db.scalar(select(Task).where(
+        Task.id == task_id, Task.product_id == product_id,
+        Task.assigned_agent == "content_creative"))
+    if task is None:
+        raise HTTPException(404, "Задание не найдено")
+    return task
+
+
+@router.get("/studio/products/{product_id}/tasks/{task_id}/images/{artifact_id}")
+def studio_creative_image(product_id: UUID, task_id: UUID, artifact_id: UUID,
+                          download: bool = False, db: Session = Depends(get_db),
+                          settings=Depends(get_settings)):
+    _creative_owner_task(db, product_id, task_id)
+    record = db.scalar(select(Artifact).where(
+        Artifact.id == artifact_id, Artifact.task_id == task_id,
+        Artifact.product_id == product_id, Artifact.kind == "generated_image"))
+    if record is None:
+        raise HTTPException(404, "Изображение не найдено")
+    try:
+        image = verified_file(settings.products_root, product_id, task_id, record)
+    except (LookupError, ValueError, OSError):
+        raise HTTPException(404, "Файл изображения недоступен") from None
+    return FileResponse(
+        image, media_type="image/png", filename=image.name if download else None,
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/studio/products/{product_id}/tasks/{task_id}/images.zip")
+def studio_creative_images_zip(product_id: UUID, task_id: UUID,
+                               db: Session = Depends(get_db), settings=Depends(get_settings)):
+    _creative_owner_task(db, product_id, task_id)
+    images = generated_images(db, product_id, task_id)
+    if not images:
+        raise HTTPException(404, "Нет готовых изображений")
+    files = []
+    for record in images:
+        try:
+            path = verified_file(settings.products_root, product_id, task_id, record)
+        except (LookupError, ValueError, OSError):
+            continue
+        files.append((path, json.loads(record.content)))
+    if not files:
+        raise HTTPException(404, "Файлы изображений недоступны")
+    # Spools to local temp disk if the bundle exceeds a small RAM budget.
+    output = SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
+    try:
+        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path, meta in files:
+                archive.write(path, arcname=path.name)
+            archive.writestr("metadata.json", json.dumps(
+                [{"frame_number": m["frame_number"], "model": m["model"],
+                  "prompt": m["prompt"], "filename": m["filename"]}
+                 for _, m in files], ensure_ascii=False, indent=2))
+        output.seek(0)
+    except Exception:
+        output.close()
+        raise
+    def chunks():
+        while True:
+            part = output.read(64 * 1024)
+            if not part:
+                break
+            yield part
+    return StreamingResponse(
+        chunks(), media_type="application/zip",
+        headers={"Cache-Control": "private, no-store",
+                 "Content-Disposition": 'attachment; filename="creative-images.zip"',
+                 "X-Content-Type-Options": "nosniff"},
+        background=BackgroundTask(output.close))
 
 
 @router.post("/studio/products/{product_id}/tasks/{task_id}/retry")

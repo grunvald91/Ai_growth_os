@@ -261,6 +261,13 @@
       audience.value = data.audience || ''; audience.maxLength = 300;
       var brief = el('textarea', '');
       brief.value = data.editorial_brief || ''; brief.maxLength = 3500; brief.rows = 2;
+      var model = el('select','');
+      [['auto','Автоматически · одна модель'],['gemini','Gemini'],['openai','ChatGPT Image']]
+        .forEach(function (entry) {
+          var opt=el('option','',entry[1]);opt.value=entry[0];model.appendChild(opt);
+        });
+      model.value=data.image_model && data.image_model!=='none' ? data.image_model : 'auto';
+      var modelField=field('Модель изображения',model);
       var count = el('select','');
       var auto = el('option','','Автоматически (3–10)'); auto.value = ''; count.appendChild(auto);
       for (var i=3; i<=10; i++){
@@ -273,6 +280,7 @@
       function refreshOptions() {
         var fmt = kind.value;
         countField.hidden = fmt !== 'story';
+        modelField.hidden = fmt !== 'story' && fmt !== 'static_image';
         platformField.hidden = fmt === 'package';
         var previous = platform.value || data.platform || '';
         platform.replaceChildren();
@@ -287,6 +295,7 @@
       form.appendChild(field('Тема',topic));
       form.appendChild(countField);
       form.appendChild(platformField);
+      form.appendChild(modelField);
       form.appendChild(field('Аудитория (необязательно)', audience));
       form.appendChild(field('Дополнительные требования', brief));
       refreshOptions();
@@ -313,7 +322,8 @@
           format:kind.value, topic:topic.value.trim(),
           frame_count:kind.value === 'story' && count.value ? Number(count.value) : null,
           platform:kind.value === 'package' ? null : platform.value,
-          audience:audience.value.trim(), editorial_brief:brief.value.trim()
+          audience:audience.value.trim(), editorial_brief:brief.value.trim(),
+          image_model:kind.value==='story'||kind.value==='static_image' ? model.value : 'none'
         }).then(applyResult).catch(function (error) {
           status.textContent=error.message;status.hidden=false;
           save.disabled=false;discard.disabled=false;
@@ -334,6 +344,9 @@
       if (data.format === 'story')
         details.appendChild(editableRow('Экранов', data.frame_count == null ? 'Автоматически' : String(data.frame_count)));
       details.appendChild(editableRow('Тема',data.topic));
+      if ((data.format==='story'||data.format==='static_image') && data.image_model!=='none')
+        details.appendChild(editableRow('Изображения', {'auto':'Автоматически',
+          'gemini':'Gemini','openai':'ChatGPT Image'}[data.image_model]||'Автоматически'));
       if (data.audience) details.appendChild(editableRow('Аудитория', data.audience));
       if (data.editorial_brief) details.appendChild(editableRow('Требования',
         data.editorial_brief.slice(0,170) + (data.editorial_brief.length>170 ? '…' : '')));
@@ -539,6 +552,7 @@
     var count=document.getElementById('sg-create-count');
     var audience=document.getElementById('sg-create-audience');
     var brief=document.getElementById('sg-create-brief');
+    var imageModel=document.getElementById('sg-create-image-model');
     var a=audience ? audience.value.trim() : '';
     var b=brief ? brief.value.trim() : '';
     if (!selected && !a && !b) return null;
@@ -547,7 +561,9 @@
       platform:selected && selected!=='package' && platform ? platform.value : null,
       frame_count:selected==='story' && count && count.value ? Number(count.value) : null,
       audience:a || null,
-      editorial_brief:b || null
+      editorial_brief:b || null,
+      image_model:selected==='story'||selected==='static_image'
+        ? (imageModel && imageModel.value || 'auto') : null
     };
   }
 

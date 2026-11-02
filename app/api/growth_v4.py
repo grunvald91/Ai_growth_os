@@ -68,8 +68,8 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
     formats = [
         ("post", "Пост", "Стратег и редактор создают текст для одной площадки."),
         ("article", "Статья", "Для статей пока используйте SEO-завод. Отдельный однократный режим статьи ещё не подключён."),
-        ("story", "Stories", "Пока создаётся раскадровка 3–10 экранов. Изображения будут добавлены отдельным этапом."),
-        ("static_image", "Изображение", "Пока создаётся бриф с промптом, не файл изображения."),
+        ("story", "Stories", "Сценарий и готовые изображения каждого экрана. Доступны PNG и ZIP."),
+        ("static_image", "Изображение", "Готовая картинка PNG с возможностью скачать файл."),
         ("short_video", "Видеосценарий", "Сценарий, кадры и озвучка, без готового MP4."),
         ("whiteboard", "Анимированное видео", "Рисованное видео с озвучкой и MP4; платный запуск подтверждается отдельно."),
         ("package", "Полный пакет", "Статья, адаптации и сценарии. Готовый MP4 пока в этот пакет не включён."),
@@ -110,6 +110,14 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
           <select id="sg-create-count" aria-label="Количество экранов">
             <option value="">Автоматически (3–10)</option>
             ''' + ''.join(f'<option value="{n}">{n}</option>' for n in range(3, 11)) + '''
+          </select>
+        </label>
+        <label class="sg-create-setting" id="sg-create-model-row" hidden>
+          <span>Генерация изображений</span>
+          <select id="sg-create-image-model" aria-label="Модель изображений">
+            <option value="auto">Автоматически · одна модель</option>
+            <option value="gemini">Gemini</option>
+            <option value="openai">ChatGPT Image</option>
           </select>
         </label>
         <label class="sg-create-setting">
@@ -354,10 +362,10 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>review-cards-20261101', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>images-20261102', extras)
     if pid and current == base+'/create':
-        extras += '<script src="/studio/assets/create-studio.js?v=1"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=create-20261102"></script>'
+        extras += '<script src="/studio/assets/create-studio.js?v=images-20261102"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=images-20261102"></script>'
     if pid:
         button = Document(template).find(ident='notifyBtn')
         template = template.replace(Document(template).outer(button), notice_html(pid).replace('<span aria-hidden="true">🔔</span>', icon('bell')))
@@ -365,7 +373,7 @@ def render_v4(page, request, pid, switch):
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=15">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=16">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=5">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.dispatcher.policy import Cost
 from app.tools import ToolOperation
@@ -68,6 +68,13 @@ class CreativeParams(_Params):
     frame_count: int | None = Field(default=None, ge=3, le=10, description="Строгое число экранов Stories, если владелец его назвал. Например, четыре — 4. Для других форматов не указывать.")
     audience: str | None = Field(default=None, max_length=300)
     editorial_brief: str | None = Field(default=None, max_length=3500)
+    image_model: Literal["none", "auto", "gemini", "openai"] | None = None
+
+    @model_validator(mode="after")
+    def image_format(self):
+        if self.image_model not in (None, "none") and self.format == "short_video":
+            raise ValueError("Images only apply to Stories and image formats")
+        return self
 
 
 class PackageParams(_Params):

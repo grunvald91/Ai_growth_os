@@ -9,6 +9,7 @@
   const count=document.getElementById('sg-create-count');
   const platformRow=document.getElementById('sg-create-platform-row');
   const countRow=document.getElementById('sg-create-count-row');
+  const modelRow=document.getElementById('sg-create-model-row');
   const channels={
     post:[['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['vc_ru','vc.ru'],['tenchat','TenChat']],
     story:[['telegram','Telegram Stories'],['vk','Истории ВК'],['instagram_reels','Instagram Stories']],
@@ -50,6 +51,7 @@
     });
     platformRow.hidden=!channels[key] || channels[key].length===0;
     countRow.hidden=key!=='story';
+    modelRow.hidden=key!=='story' && key!=='static_image';
     const previous=platform.value;
     platform.replaceChildren();
     (channels[key]||[]).forEach(([value,label])=>{

@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     xai_timeout_seconds: float = 300.0
     llm_fallback_models: str = "grok-4.7"
     openrouter_api_key: str | None = None
+    # Direct OpenAI Images API, separate from LLM provider routing.
+    openai_api_key: str | None = None
     # Optional: company registry lookup by ИНН/ОГРН during company intake.
     dadata_api_key: str | None = None
     whiteboard_storyboard_model: str = ""

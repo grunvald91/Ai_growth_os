@@ -268,8 +268,14 @@ async def describe_create_creative(ctx: Context, params: CreativeParams) -> Conf
         details.append(f"Экранов: {params.frame_count}.")
     platform = params.platform or {"story": "telegram", "short_video": "youtube_shorts", "static_image": "telegram"}[params.format]
     details.append(f"Площадка: {platform}.")
+    if params.format in {"story", "static_image"}:
+        selected = params.image_model or "auto"
+        details.append(f"Генерация изображений: {selected}.")
     details.extend(_context_details(params))
-    details.append("Сейчас этот процесс создаёт раскадровку и промпты; файлы изображений и MP4 не генерируются.")
+    if params.format == "short_video":
+        details.append("Это видеосценарий, не готовый MP4.")
+    else:
+        details.append("После раскадровки будут созданы готовые PNG. Платные вызовы модели начинаются только после подтверждения.")
     details.append("Без отдельного согласования ничего не публикуется.")
     return Confirmation(title=f"Подготовить {item}?", details=details,
                         params=params.model_dump(exclude_none=True), confirm_label="Создать")
@@ -284,7 +290,9 @@ async def confirm_create_creative(ctx: Context, stored: dict, via: str) -> Outco
                                   format=params.format,
                                   platform=params.platform or {"story": "telegram", "short_video": "youtube_shorts", "static_image": "telegram"}[params.format],
                                   frame_count=params.frame_count, audience=params.audience,
-                                  editorial_brief=params.editorial_brief)
+                                  editorial_brief=params.editorial_brief,
+                                  image_model=(params.image_model or
+                                               ("auto" if params.format in {"story", "static_image"} else "none")))
         task = queue_creative(ctx.db, command)
     except (ValueError, ValidationError, LookupError):
         ctx.db.rollback()

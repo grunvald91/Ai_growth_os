@@ -1,4 +1,27 @@
 STUDIO_CSS = r"""
+
+/* Creative image output: compact preview grid with direct PNG/ZIP access. */
+.sg-creative-images{padding:15px 0;margin:12px 0;max-width:100%}
+.sg-image-gallery-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+.sg-image-gallery-head h3{font-size:17px;margin:0 0 3px;font-weight:700}
+.sg-image-gallery-head p{font-size:12px;margin:0;color:var(--sg-muted,var(--muted,#728198))}
+.sg-image-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(165px,100%),1fr));gap:10px}
+.sg-image-tile{min-width:0;overflow:hidden;border:1px solid var(--sg-line,var(--line,#dbe5ef));border-radius:12px;background:var(--sg-card,var(--card,#fff))}
+.sg-image-tile>a{display:block;background:var(--sg-bg,var(--tint,#f1f5fb));aspect-ratio:9/16;overflow:hidden}
+.sg-image-tile img{width:100%;height:100%;object-fit:contain;display:block}
+.sg-image-tile-foot{padding:10px;display:flex;align-items:center;justify-content:space-between;gap:6px}
+.sg-image-tile-foot>div{min-width:0;display:grid;gap:2px}
+.sg-image-tile-foot b{font-size:12px}
+.sg-image-tile-foot small{font-size:10px;color:var(--sg-muted,var(--muted,#728198))}
+.sg-image-tile-foot .btn{font-size:11px;white-space:nowrap;padding:9px 8px;border-radius:9px}
+.sg-image-partial{font-size:12px;line-height:1.5;color:var(--sg-red,#ca4c56)}
+@media(max-width:460px){
+  .sg-image-gallery{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .sg-image-gallery-head>a{width:100%;text-align:center}
+  .sg-image-tile-foot{align-items:stretch;flex-direction:column}
+  .sg-image-tile-foot .btn{text-align:center}
+}
+
 :root{
   --sg-blue:#0b7cff;
   --sg-blue-600:#0666dc;
@@ -620,4 +643,8 @@ STUDIO_CSS += """
 .sg-intake-source .sg-inline-form{grid-column:1/-1;justify-self:start;margin-top:4px}
 .sg-danger-zone{border-color:#F3D3D3}
 @media(max-width:640px){.sg-intake-source .sg-inline-form{justify-self:stretch}.sg-intake-source .sg-inline-form .btn{width:100%;min-height:44px}}
+"""
+
+STUDIO_CSS += """
+.sg-image-tile>a.is-square{aspect-ratio:1/1}
 """

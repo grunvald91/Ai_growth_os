@@ -40,6 +40,7 @@ class EditCreation(BaseModel):
     platform: str | None = Field(default=None, max_length=40)
     audience: str | None = Field(default=None, max_length=300)
     editorial_brief: str | None = Field(default=None, max_length=3500)
+    image_model: Literal["none", "auto", "gemini", "openai"] | None = None
 
     @model_validator(mode="after")
     def valid_combination(self):
@@ -49,6 +50,8 @@ class EditCreation(BaseModel):
             raise ValueError("У полного пакета площадка не задаётся")
         if self.platform is not None and self.platform not in CHANNELS[self.format]:
             raise ValueError("Эта площадка не подходит для выбранного формата")
+        if self.image_model not in (None, "none") and self.format not in {"story", "static_image"}:
+            raise ValueError("Image model only applies to Stories or images")
         return self
 
 
@@ -72,6 +75,8 @@ class CreateHints(BaseModel):
             raise ValueError("Для пакета площадка не указывается")
         if self.platform and self.platform not in CHANNELS[self.format]:
             raise ValueError("Несовместимая площадка и формат")
+        if self.image_model not in (None, "none") and self.format not in {"story", "static_image", None}:
+            raise ValueError("Model selection only applies to Stories and images")
         return self
 
 
@@ -95,6 +100,8 @@ def draft_view(capability_id: str | None, params: dict) -> dict | None:
         "platform": platform, "formats": list(FORMATS),
         "audience": params.get("audience") or "",
         "editorial_brief": params.get("editorial_brief") or "",
+        "image_model": (params.get("image_model") or
+                        ("auto" if fmt in {"story", "static_image"} else "none")),
     }
 
 
@@ -118,4 +125,6 @@ def target_for_edit(edit: EditCreation, existing: dict | None = None):
         platform=edit.platform or DEFAULT_PLATFORMS[edit.format],
         frame_count=edit.frame_count if edit.format == "story" else None,
         audience=audience, editorial_brief=editorial_brief,
+        image_model=(edit.image_model or
+                     ("auto" if edit.format in {"story", "static_image"} else "none")),
     )

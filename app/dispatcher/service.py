@@ -255,6 +255,8 @@ def _apply_create_hints(decision: DispatcherDecision, hints, text: str) -> None:
         params["audience"] = hints.audience
     if hints.editorial_brief and not params.get("editorial_brief"):
         params["editorial_brief"] = hints.editorial_brief
+    if target in {"story", "static_image"} and hints.format == target and hints.image_model:
+        params["image_model"] = hints.image_model
     if capability == "create_creative" and target == "story":
         spoken_count = requested_story_count(text)
         if spoken_count is not None:

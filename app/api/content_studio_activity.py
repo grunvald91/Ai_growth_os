@@ -44,6 +44,7 @@ ANIMATOR_PHASES = {
 STAGE_NAMES = {
     "creative_strategist": "Изучение темы и аудитории",
     "creative_director": "Сценарий и раскадровка",
+    "creative_image": "Генерация изображений",
     "post_strategist": "Идея и структура поста",
     "post_writer_editor": "Написание и редактура",
     "content_renderer": "Создание видеофайла",
