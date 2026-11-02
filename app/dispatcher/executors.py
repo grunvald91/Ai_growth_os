@@ -224,6 +224,15 @@ async def send_to_team(ctx: Context, params) -> Outcome:
 
 # ---- creating work -----------------------------------------------------------------------
 
+async def describe_create_post(ctx: Context, params: PostParams) -> Confirmation:
+    return Confirmation(
+        title="Подготовить пост?",
+        details=[f"Тема: {params.topic}.", f"Площадка: {CHANNEL_LABELS[params.channel]}.",
+                 "Готовый текст придёт на проверку; автоматической публикации нет."],
+        params=params.model_dump(exclude_none=True), confirm_label="Создать",
+    )
+
+
 async def create_post(ctx: Context, params: PostParams) -> Outcome:
     from app.content.service import queue_content
     try:
@@ -456,9 +465,11 @@ EXECUTORS = {
 }
 # Abilities that always ask first: describe what will happen, run it only after a confirmation.
 DESCRIBERS = {"approve_plan": describe_approve_plan, "seo_factory": describe_seo_factory,
+              "create_post": describe_create_post,
               "create_creative": describe_create_creative,
               "create_package": describe_create_package}
 CONFIRMERS = {"approve_plan": confirm_approve_plan, "whiteboard_video": confirm_whiteboard_video,
+              "create_post": lambda ctx, stored, via: create_post(ctx, PostParams.model_validate(stored)),
               "create_creative": confirm_create_creative,
               "create_package": confirm_create_package,
               "seo_factory": confirm_seo_factory}
