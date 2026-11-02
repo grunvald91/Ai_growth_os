@@ -33,7 +33,7 @@ _TRANSLIT = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъы
 _LEAKS = re.compile(r"\[REDACTED|\{[a-z_]+\}|TODO|lorem ipsum|proof_needed|schema:", re.IGNORECASE)
 # The verified ServGo company profile explicitly has no approved subscription
 # prices. Avoid fabricating a commercial offer even if a critic misses the claim.
-_SERVGO_PRICE = re.compile(r"(?<!\\w)\\d[\\d\\s\\u00a0]{0,12}\\s*(?:₽|руб(?:\\.|ля|лей)?|RUB)(?!\\w)", re.IGNORECASE)
+_SERVGO_PRICE = re.compile(r"(?<!\w)\d[\d\s\u00a0]{0,12}\s*(?:₽|руб(?:\.|ля|лей)?|RUB)(?!\w)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -144,7 +144,7 @@ def unsupported_servgo_pricing(db: Session, row: Artifact, article: ArticleArtif
     if product is None or product.slug != "servgo" or article.reader_article is None:
         return []
     reader = article.reader_article
-    visible = "\\n".join([reader.title, reader.lead, reader.direct_answer or "",
+    visible = "\n".join([reader.title, reader.lead, reader.direct_answer or "",
                           *(section.body for section in reader.sections), reader.closing])
     return (["unverified ServGo price: no approved public tariff in company profile"]
             if _SERVGO_PRICE.search(visible) else [])
