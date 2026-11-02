@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.dispatcher.readers import ACTIVE, attention, latest_active_video, plans, upcoming_slots, work_rows
-from app.dispatcher.registry import (CAPABILITIES, CHANNEL_LABELS, CancelVideoParams, DepthParams, GoToParams,
+from app.dispatcher.registry import (CAPABILITIES, CHANNEL_LABELS, CancelVideoParams, CreativeParams, DepthParams, GoToParams,
                                      InsightsParams, PostParams, ScheduleParams, VideoParams, page_href, page_label)
 from app.dispatcher.outcome import Confirmation, Context, Outcome, links_block, task_block  # noqa: F401
 from app.models.domain import Approval, Product, Task, ToolCall
@@ -240,6 +240,37 @@ async def create_post(ctx: Context, params: PostParams) -> Outcome:
                                 f"/studio/products/{ctx.product.id}/tasks/{task.id}")], task_id=task.id)
 
 
+async def describe_create_creative(ctx: Context, params: CreativeParams) -> Confirmation:
+    labels = {"story": "Stories", "short_video": "Видеосценарий", "static_image": "Визуальный бриф"}
+    item = labels[params.format]
+    details = [f"Тема: {params.topic}.", f"Формат: {item}."]
+    if params.frame_count is not None:
+        details.append(f"Экранов: {params.frame_count}.")
+    details.append("Сейчас этот процесс создаёт раскадровку и промпты; файлы изображений и MP4 не генерируются.")
+    details.append("Без отдельного согласования ничего не публикуется.")
+    return Confirmation(title=f"Подготовить {item}?", details=details,
+                        params=params.model_dump(exclude_none=True), confirm_label="Создать")
+
+
+async def confirm_create_creative(ctx: Context, stored: dict, via: str) -> Outcome:
+    from app.content.creative import CreativeRequest, queue_creative
+    from pydantic import ValidationError
+    try:
+        params = CreativeParams.model_validate(stored)
+        command = CreativeRequest(mode="creative", product_id=ctx.product.id, topic=params.topic,
+                                  format=params.format, platform=params.platform,
+                                  frame_count=params.frame_count, audience=params.audience)
+        task = queue_creative(ctx.db, command)
+    except (ValueError, ValidationError, LookupError):
+        ctx.db.rollback()
+        return Outcome("Не удалось создать задание. Проверьте тему, формат и площадку.", ok=False)
+    label = {"story": "Stories", "short_video": "Видеосценарий", "static_image": "Бриф изображения"}[params.format]
+    amount = f" ({params.frame_count} экранов)" if params.frame_count else ""
+    return Outcome(f"Принял. Готовлю {label}{amount} на тему «{params.topic}». Результат появится в заданиях.",
+                   blocks=[_task_block(ctx, task, f"{label}{amount}: {params.topic}",
+                                       f"/studio/products/{ctx.product.id}/tasks/{task.id}")], task_id=task.id)
+
+
 async def make_plan(ctx: Context, params) -> Outcome:
     from app.content.calendar import queue_plan
     try:
@@ -400,8 +431,10 @@ EXECUTORS = {
     "whiteboard_video": whiteboard_video, "cancel_video": cancel_video, "restricted_action": restricted_action,
 }
 # Abilities that always ask first: describe what will happen, run it only after a confirmation.
-DESCRIBERS = {"approve_plan": describe_approve_plan, "seo_factory": describe_seo_factory}
+DESCRIBERS = {"approve_plan": describe_approve_plan, "seo_factory": describe_seo_factory,
+              "create_creative": describe_create_creative}
 CONFIRMERS = {"approve_plan": confirm_approve_plan, "whiteboard_video": confirm_whiteboard_video,
+              "create_creative": confirm_create_creative,
               "seo_factory": confirm_seo_factory}
 
 # Materials and publication live in their own module; it imports the shared types from `outcome`, not from here.
