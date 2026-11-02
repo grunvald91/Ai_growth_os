@@ -98,7 +98,7 @@ function dayLabel(iso: string): string {
 }
 
 // ── Bar chart: one measure, one scale ──
-// Выручка и записи — разные единицы, поэтому это два отдельных графика, а не
+// Расчётная стоимость и записи — разные единицы, поэтому это два отдельных графика, а не
 // одна картинка с двумя шкалами. Весь период помещается в ширину экрана;
 // касание столбика показывает значение дня в заголовке.
 function DayBars({ title, points, weekly, value, format }: {
@@ -179,7 +179,7 @@ function DailyCharts({ daily }: { daily: AnalyticsDailyPoint[] }) {
   const unit = weekly ? 'неделям' : 'дням'
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <DayBars title={`Выручка по ${unit}`} points={points} weekly={weekly} value={(p) => p.revenue} format={formatRub} />
+      <DayBars title={`Стоимость записей по ${unit}`} points={points} weekly={weekly} value={(p) => p.revenue} format={formatRub} />
       <DayBars title={`Записи по ${unit}`} points={points} weekly={weekly} value={(p) => p.bookings} format={formatBookings} />
     </div>
   )
@@ -240,7 +240,7 @@ export function AnalyticsPage() {
     >
       <div className="ds-context" style={{ paddingBottom: 8 }}>
         <div className="ds-context-eyebrow">Аналитика · последние {PERIOD_DAYS[period]} {plural(PERIOD_DAYS[period], 'день', 'дня', 'дней')}</div>
-        <div className="ds-context-help">Подтверждённые и завершённые записи. Стрелка — сравнение с предыдущим таким же периодом.</div>
+        <div className="ds-context-help">Подтверждённые и завершённые записи. Суммы по ценам услуг — оценка, не полученные платежи. Загрузка ориентировочная, без индивидуальных графиков дежурств. Стрелка — сравнение с предыдущим периодом.</div>
       </div>
 
       {loading ? (
@@ -254,10 +254,10 @@ export function AnalyticsPage() {
         <>
           {/* KPI */}
           <div className="ds-stats-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <KpiCard label="Выручка" value={kpis ? formatRub(kpis.revenue) : '—'} icon={<Wallet size={16} />} color="var(--s-accent)" cur={kpis?.revenue ?? 0} prev={kpis?.revenue_prev ?? 0} />
+            <KpiCard label="Стоимость записей" value={kpis ? formatRub(kpis.revenue) : '—'} icon={<Wallet size={16} />} color="var(--s-accent)" cur={kpis?.revenue ?? 0} prev={kpis?.revenue_prev ?? 0} />
             <KpiCard label="Записей" value={kpis ? String(kpis.bookings) : '—'} icon={<Calendar size={16} />} color="var(--s-success)" cur={kpis?.bookings ?? 0} prev={kpis?.bookings_prev ?? 0} />
-            <KpiCard label="Средний чек" value={kpis ? formatRub(kpis.avg_check) : '—'} icon={<Receipt size={16} />} color="var(--s-warning)" cur={kpis?.avg_check ?? 0} prev={kpis?.avg_check_prev ?? 0} />
-            <KpiCard label="Загрузка" value={kpis && kpis.load_percent != null ? `${kpis.load_percent.toFixed(1)}%` : '—'} icon={<Activity size={16} />} color="var(--s-danger)" cur={kpis?.load_percent ?? 0} prev={kpis?.load_percent_prev ?? 0} isPoints />
+            <KpiCard label="Средняя стоимость" value={kpis ? formatRub(kpis.avg_check) : '—'} icon={<Receipt size={16} />} color="var(--s-warning)" cur={kpis?.avg_check ?? 0} prev={kpis?.avg_check_prev ?? 0} />
+            <KpiCard label="Загрузка (оценка)" value={kpis && kpis.load_percent != null ? `${kpis.load_percent.toFixed(1)}%` : '—'} icon={<Activity size={16} />} color="var(--s-danger)" cur={kpis?.load_percent ?? 0} prev={kpis?.load_percent_prev ?? 0} isPoints />
           </div>
 
           {/* Графики */}
