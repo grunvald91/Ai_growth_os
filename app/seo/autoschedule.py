@@ -57,6 +57,8 @@ def enqueue_servgo_if_due(db: Session, settings, *, now: datetime | None = None)
     recent = list(db.scalars(select(Task).where(
         Task.product_id == product.id, Task.assigned_agent == AGENT,
     ).order_by(Task.created_at.desc()).limit(settings.seo_servgo_autorun_max_runs_28d + 1)))
+    if any(t.status in (TaskStatus.QUEUED, TaskStatus.RUNNING) for t in recent):
+        return False
     if recent and _utc(recent[0].created_at) > now - timedelta(days=settings.seo_servgo_autorun_interval_days):
         return False
     if sum(_utc(task.created_at) >= now - timedelta(days=28) for task in recent) >= settings.seo_servgo_autorun_max_runs_28d:
