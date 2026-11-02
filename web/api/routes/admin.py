@@ -211,21 +211,21 @@ async def dashboard(
 
     result = await db.execute(
         select(
-            func.count(Booking.id),
+            func.count(case((Booking.occupies_resource.is_(True), Booking.id))),
             func.coalesce(
                 func.sum(
                     case(
-                        (Booking.status.in_(["confirmed", "completed"]), Service.price),
+                        (Booking.status.in_(["confirmed", "completed"]), func.coalesce(Booking.estimated_price, Service.price, 0)),
                         else_=0,
                     )
                 ),
                 0,
             ),
             func.coalesce(
-                func.sum(case((Booking.status == "pending", 1), else_=0)), 0
+                func.sum(case((and_(Booking.status == "pending", Booking.occupies_resource.is_(True)), 1), else_=0)), 0
             ),
             func.coalesce(
-                func.sum(case((Booking.status == "confirmed", 1), else_=0)), 0
+                func.sum(case((and_(Booking.status == "confirmed", Booking.occupies_resource.is_(True)), 1), else_=0)), 0
             ),
         )
         .join(Service, Booking.service_id == Service.id)
@@ -431,31 +431,36 @@ async def analytics_overview(
     cur_cancelled = await _fetch_by_status(start_date, end_date, ["cancelled"])
     prev_cancelled = await _fetch_by_status(prev_start, prev_end, ["cancelled"])
 
+    # Legacy API field names remain for compatibility. Values are booked-service
+    # price ESTIMATES, not captured payments, and add-ons are not extra visits.
     def _calc_revenue(bookings):
-        total = 0
-        for b in bookings:
-            if b.service:
-                total += b.service.price or 0
-        return total
+        return sum(
+            b.estimated_price if b.estimated_price is not None
+            else (b.service.price or 0 if b.service else 0)
+            for b in bookings
+        )
 
     def _calc_booked_minutes(bookings):
-        total = 0
-        for b in bookings:
-            total += (b.service.duration_minutes if b.service else None) or 60
-        return total
+        return sum(
+            (b.resource_duration_minutes or b.duration_minutes
+             or (b.service.duration_minutes if b.service else None) or 60)
+            for b in bookings if b.occupies_resource
+        )
 
     cur_revenue = _calc_revenue(cur_bookings)
-    cur_count = len(cur_bookings)
-    cur_avg = round(cur_revenue / cur_count) if cur_count > 0 else 0
+    cur_count = sum(1 for b in cur_bookings if b.occupies_resource)
+    cur_avg = round(cur_revenue / cur_count) if cur_count else 0
 
     prev_revenue = _calc_revenue(prev_bookings)
-    prev_count = len(prev_bookings)
-    prev_avg = round(prev_revenue / prev_count) if prev_count > 0 else 0
+    prev_count = sum(1 for b in prev_bookings if b.occupies_resource)
+    prev_avg = round(prev_revenue / prev_count) if prev_count else 0
 
     def _cancellation_rate(cancelled_list, active_count):
         total = len(cancelled_list) + active_count
         return round(len(cancelled_list) / total * 100, 1) if total > 0 else 0.0
 
+    cur_cancelled = [b for b in cur_cancelled if b.occupies_resource]
+    prev_cancelled = [b for b in prev_cancelled if b.occupies_resource]
     cur_cancellation_rate = _cancellation_rate(cur_cancelled, cur_count)
     prev_cancellation_rate = _cancellation_rate(prev_cancelled, prev_count)
 
@@ -465,6 +470,7 @@ async def analytics_overview(
         select(func.count(Employee.id)).where(
             Employee.business_id == business_id,
             Employee.is_active == True,
+            Employee.role != "administrator",
         )
     )
     active_emp_count = emp_count_res.scalar() or 0
@@ -515,7 +521,7 @@ async def analytics_overview(
         if sid not in svc_map:
             svc_map[sid] = {"id": sid, "name": b.service.name, "count": 0, "revenue": 0}
         svc_map[sid]["count"] += 1
-        svc_map[sid]["revenue"] += b.service.price or 0
+        svc_map[sid]["revenue"] += b.estimated_price if b.estimated_price is not None else (b.service.price or 0)
 
     svc_list = sorted(
         svc_map.values(),
@@ -541,9 +547,10 @@ async def analytics_overview(
         eid = b.employee.id
         if eid not in emp_map:
             emp_map[eid] = {"id": eid, "name": b.employee.name, "count": 0, "revenue": 0}
-        emp_map[eid]["count"] += 1
+        if b.occupies_resource:
+            emp_map[eid]["count"] += 1
         if b.service:
-            emp_map[eid]["revenue"] += b.service.price or 0
+            emp_map[eid]["revenue"] += b.estimated_price if b.estimated_price is not None else (b.service.price or 0)
 
     emp_list = sorted(
         emp_map.values(),
@@ -567,9 +574,10 @@ async def analytics_overview(
         d = b.booking_date
         if d not in daily_map:
             daily_map[d] = {"bookings": 0, "revenue": 0, "cancelled": 0}
-        daily_map[d]["bookings"] += 1
+        if b.occupies_resource:
+            daily_map[d]["bookings"] += 1
         if b.service:
-            daily_map[d]["revenue"] += b.service.price or 0
+            daily_map[d]["revenue"] += b.estimated_price if b.estimated_price is not None else (b.service.price or 0)
     for b in cur_cancelled:
         d = b.booking_date
         if d not in daily_map:
@@ -590,7 +598,7 @@ async def analytics_overview(
         start_date, end_date,
         ["pending", "confirmed", "completed", "cancelled", "pending_prepayment", "prepayment_sent"],
     )
-    required = [b for b in all_period_bookings if b.prepayment_amount is not None]
+    required = [b for b in all_period_bookings if b.occupies_resource and b.prepayment_amount is not None]
     confirmed_pp = [b for b in required if b.prepayment_confirmed_at is not None]
     conversion_rate = round(len(confirmed_pp) / len(required) * 100, 1) if required else 0.0
     if confirmed_pp:
@@ -615,6 +623,8 @@ async def analytics_overview(
     heatmap_bookings = await _fetch_by_status(heatmap_start, today, ["confirmed", "completed"])
     heatmap_map: dict[tuple[int, int], int] = {}
     for b in heatmap_bookings:
+        if not b.occupies_resource:
+            continue
         dow = b.booking_date.weekday()
         hour = b.booking_time.hour
         key = (dow, hour)
