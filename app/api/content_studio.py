@@ -2109,9 +2109,11 @@ async def studio_create_submit(product_id: UUID, request: Request, db: Session =
             task = queue_content(db, product.id, topic, format="post",
                           channel=fields.get("channel"), audience=audience, editorial_brief=brief)
         elif chosen in {"short_video", "story", "static_image"}:
+            count_text = fields.get("frame_count") if chosen == "story" else None
+            count = int(count_text) if count_text else None
             command = CreativeRequest(mode="creative", product_id=product.id, topic=topic,
                                       format=chosen, platform=fields.get("channel") or "",
-                                      audience=audience, editorial_brief=brief)
+                                      frame_count=count, audience=audience, editorial_brief=brief)
             task = queue_creative(db, command)
         else:
             raise ValueError("Неизвестный формат")
