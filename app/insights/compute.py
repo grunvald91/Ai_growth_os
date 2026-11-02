@@ -12,6 +12,7 @@ from statistics import median
 from zoneinfo import ZoneInfo
 
 from app.schedule.source import Booking, Schedule
+from app.insights.retention import find_return_candidates
 from app.schedule.views import COUNTED, SCHEDULE_TZ, WEEKDAYS, _count, day_label
 
 METRIC_PREFIX = "servgo."
@@ -167,19 +168,10 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
                     f"возвращались 2+ раза: {completed_returning}.")
         result.row(["Вернулись по выполненным визитам", str(completed_returning)])
 
-        # Suggested opportunity, not a claim of churn: require >=3 distinct visits
-        # (two intervals) and no active booking in the fetched 14-day horizon.
-        upcoming_clients = {b.client_id for b in upcoming if b.client_id is not None}
-        due = 0
-        eligible = 0
-        for client_id, dates in completed_dates.items():
-            if len(dates) < 3:
-                continue
-            eligible += 1
-            typical_gap = median([(b - a).days for a, b in zip(dates, dates[1:])])
-            elapsed = (today - dates[-1]).days
-            if elapsed > max(7, round(typical_gap * 1.25)) and client_id not in upcoming_clients:
-                due += 1
+        # The same deterministic selection powers the owner's detailed CRM list.
+        # Nothing identifying is copied into metrics or sent to the marketing team.
+        eligible, candidates = find_return_candidates(schedule, today, depth_days, ahead_days)
+        due = len(candidates)
         if eligible:
             add("clients_possible_return_delay", "Клиентов с потенциальной задержкой повторного визита",
                 due, "чел")
