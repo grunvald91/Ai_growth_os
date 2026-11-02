@@ -499,7 +499,7 @@
     if (!root.classList.contains('sg-create-dispatch')) return text;
     // Explicitly spoken/written format always wins over an older format chip.
     // A selected chip is only a fallback for a bare subject like "про волосы".
-    if (/\b(?:сторис|истори\w*|пост\w*|видеосценари\w*|сценари\w*|видео|видеоролик\w*|ролик\w*|анимаци\w*|изображени\w*|картин\w*|стать\w*|пакет)\b/i.test(text)) return text;
+    if (/(?:^|[^\p{L}\p{N}])(?:сторис|истори(?:и|й|ю|я|ями|ях)|пост(?:ы|а|у|е|ом|ов|ам|ами|ах)?|видеосценари\p{L}*|сценари\p{L}*|видео|видеоролик\p{L}*|ролик\p{L}*|анимаци\p{L}*|изображени\p{L}*|картин\p{L}*|стать(?:я|ю|и|е|ей|ёй|ями|ях)|пакет)(?=$|[^\p{L}\p{N}])/iu.test(text)) return text;
     var format = root.getAttribute('data-create-format');
     var lead = ({
       post: 'Подготовь пост по следующей задаче: ',
