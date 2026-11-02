@@ -211,7 +211,7 @@
 
   var createFormatNames = {
     post: 'Пост', story: 'Stories', short_video: 'Видеосценарий',
-    static_image: 'Бриф изображения', package: 'Полный пакет'
+    static_image: 'Изображение', package: 'Полный пакет'
   };
   var createChannels = {
     post: [['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['vc_ru','vc.ru'],['tenchat','TenChat']],

@@ -13,6 +13,7 @@ def gallery_html(product_id: UUID, task_id: UUID, images: list[Artifact], *, err
         return ""
     base = f"/studio/products/{product_id}/tasks/{task_id}"
     tiles = []
+    succeeded = set()
     for record in images:
         try:
             meta = json.loads(record.content or "{}")
@@ -22,6 +23,7 @@ def gallery_html(product_id: UUID, task_id: UUID, images: list[Artifact], *, err
             continue
         if not 1 <= number <= 10:
             continue
+        succeeded.add(number)
         uri = f"{base}/images/{record.id}"
         tiles.append(
             '<article class="sg-image-tile">'
@@ -40,6 +42,8 @@ def gallery_html(product_id: UUID, task_id: UUID, images: list[Artifact], *, err
             failed.append(int(meta["frame_number"]))
         except (ValueError, KeyError, TypeError):
             continue
+    # Do not report a recovered frame as missing after a successful retry.
+    failed = [number for number in failed if number not in succeeded]
     if not tiles and not failed:
         return ""
     status = (
