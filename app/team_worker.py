@@ -212,13 +212,16 @@ async def run_once() -> int:
         tick_calendar(db, settings)
     if await run_planner_once(SessionLocal, settings):
         return 1
+    from app.seo.autoschedule import enqueue_servgo_if_due
+    with SessionLocal() as db:
+        enqueue_servgo_if_due(db, settings)
     from app.seo.factory import run_factory_once
     if await run_factory_once(SessionLocal, settings):
         return 1
     from app.seo.publishing import publish_owner_approved, publish_pending
     with SessionLocal() as db:
-        publish_pending(db)
-        if publish_owner_approved(db):
+        publish_pending(db, daily_limit=settings.seo_publications_per_day)
+        if publish_owner_approved(db, daily_limit=settings.seo_publications_per_day):
             return 1
     # Only explicitly scheduled, owner-approved posts can leave the system.
     # The dispatcher is a durable at-most-once sender and is OFF by default.

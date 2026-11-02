@@ -1011,7 +1011,8 @@ class ArticleProduction:
                                 'provider_timeout_seconds': PROVIDER_TIMEOUT_SECONDS,
                             }), validate_revision=validate_stage_revision,
                             on_observed=record_model_call,
-                            on_review_progress=record_review_progress),
+                            on_review_progress=record_review_progress,
+                            review_enabled=(name == 'marketing_editor' and attempt == 0)),
                             timeout=CALL_WAIT_SECONDS + self.llm.extra_timeout_seconds)
                         persist_critic_audit(
                             self.db, product_id=product_id, task_id=task_id,
@@ -1052,7 +1053,8 @@ class ArticleProduction:
                             response_schema=schema.model_json_schema(),
                             metadata={'reasoning_effort': 'low', 'team_role': name, 'task_type': 'article_production',
                                       'provider_timeout_seconds': STAGE_PROVIDER_TIMEOUT_SECONDS.get(name, 90)},
-                        ), validate_revision=validate_stage_revision, on_observed=record_model_call), timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
+                        ), validate_revision=validate_stage_revision, on_observed=record_model_call,
+                        review_enabled=False), timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
                         if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
                             raise rejected
                         parsed = accept(response.content)
