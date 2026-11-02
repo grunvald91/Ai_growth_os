@@ -52,6 +52,8 @@ def test_only_completed_matching_service_visits_can_produce_suggestions():
     assert len(options) == 2
     assert [[client.client_id for client in option.clients] for option in options] == [[10], [10]]
     assert options[0].clients[0].visits == 3
+    paused = history().model_copy(update={"paused_client_ids": [10]})
+    assert all(not o.clients for o in matching_slots(paused, available(), TODAY, SERVICE))
     assert not matching_slots(history(), available(service_id=None), TODAY, SERVICE)
     assert not matching_slots(history(), Schedule.model_validate({
         "today": TODAY.isoformat(), "free_slots": available().model_dump(mode="json")["free_slots"]
