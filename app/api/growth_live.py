@@ -566,21 +566,17 @@ def seo_insights_endpoint(product_id: UUID, db: Session = Depends(get_db)):
 def seo_insights_html(db: Session, product_id: UUID) -> str:
     report = company_seo_insights(db, product_id)
     return (
-        '<section class="panel" aria-label="Поиск и AI-ответы">'
-        '<h3>Поиск и AI-ответы</h3>'
-        f'<p>Опубликовано статей: <strong>{report["published_articles"]}</strong>. '
-        f'Скрыто: <strong>{report["hidden_articles"]}</strong>.</p>'
-        '<p>Google Search Console: данные пока не подключены. '
-        'Яндекс Вебмастер: данные пока не подключены. '
-        'Bing AI Performance: данные о цитировании пока не подключены.</p>'
-        '<p>Показы, клики, позиции и цитирования неизвестны — '
-        'публикация статьи сама по себе их не подтверждает.</p>'
-        '<p><a class="btn" href="/studio/products/' + str(product_id)
-        + '/seo/search-metrics">Открыть поисковые показатели</a></p>'
-        '<p>Техническая готовность: полный HTML, canonical, разметка Article '
-        'и sitemap подготовлены в BookingBot; их внешняя доступность '
-        'проверяется после отдельного серверного выпуска.</p>'
-        '</section>'
+        '<details class="seo-search" aria-label="Поиск и AI-ответы">'
+        '<summary>Поиск и AI-ответы <span>Статистика</span></summary>'
+        '<div class="seo-insights-body">'
+        f'<p>Опубликовано статей: {report["published_articles"]}. '
+        f'Скрыто: {report["hidden_articles"]}.</p>'
+        '<p>Google Search Console, Яндекс Вебмастер и Bing AI Performance '
+        'не предоставляют подтверждённых данных. '
+        'Показы, клики, позиции и цитирования пока неизвестны.</p>'
+        '<p>Публикация статьи сама по себе не подтверждает индексацию.</p>'
+        f'<a class="btn secondary" href="/studio/products/{product_id}/seo/search-metrics">'
+        'Открыть поисковые показатели</a></div></details>'
     )
 
 
@@ -597,63 +593,83 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
     enabled = is_enabled(db, product_id)
     runs = seo_runs(db, product_id)
-    rows = list(db.scalars(select(Artifact).where(Artifact.product_id == product_id,
-                      Artifact.kind.in_(['semantic_core', 'seo_content_plan', 'seo_factory_report']))
-                      .order_by(Artifact.created_at.desc()).limit(100)))
-    cards = ''.join(f'<article class="panel"><h3>{html.escape(row.title)}</h3>'
-                    f'<p>{html.escape(row.kind)} · {html.escape(row.status.value)}</p>'
-                    f'{artifact_content(row.content)}</article>' for row in rows)
+    report = company_seo_insights(db, product_id)
+    rows = list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id,
+        Artifact.kind.in_(['semantic_core', 'seo_content_plan', 'seo_factory_report'])
+    ).order_by(Artifact.created_at.desc()).limit(100)))
     base = f'/studio/products/{product_id}'
-    # servgo.ru/blog is wired to the single Growth product slug 'servgo'.
-    # Other companies have a per-product feed but no known public frontend URL.
+    # Only the central ServGo product uses the /blog route.
     blog_base = 'https://servgo.ru' if product.slug == 'servgo' else None
-    run_cards = ''.join(seo_run_card(row, product_id, blog_base=blog_base, enabled=enabled) for row in runs)
-    publication_note = (
-        '<p class="seo-publish-destination">Место публикации: блог ServGo. '
-        'Публичную доступность статьи нужно проверить после отдельного выпуска SEO-страниц.</p>'
-        if blog_base else
-        '<p class="seo-publish-destination">Место публикации: персональный блог компании на ServGo '
-        '(own_site). Адреса и серверный HTML подготовлены в коде и станут доступны после выпуска '
-        'BookingBot и настройки маршрутов, не на внешнем сайте клиента.</p>'
-    )
+    business_id = db.scalar(select(StudioBusinessLink.servgo_business_id).where(
+        StudioBusinessLink.product_id == product_id).limit(1))
+    if product.slug == 'servgo':
+        destination = '<a href="https://servgo.ru/blog">Блог ServGo</a>'
+    elif business_id is not None:
+        destination = (f'<a href="https://servgo.ru/business/{business_id}/blog">'
+                       'Блог компании на ServGo</a>')
+    else:
+        destination = 'Для публичной ссылки нужна привязка к бизнесу ServGo.'
     activation_form = (
         '<section class="panel seo-activation" aria-label="Подключение SEO-завода">'
-        '<h2>SEO-завод компании</h2>'
-        + ('<p><strong>Подключён.</strong> Можно запускать подготовку статей для этого бизнеса.</p>'
-           if enabled else
-           '<p><strong>Выключен.</strong> Эта компания, включая демо-бизнесы, '
-           'не создаёт SEO-статьи и не тратит средства на генерацию.</p>')
+        '<div class="seo-status-head"><h2>SEO-завод компании</h2>'
+        + ('<span class="seo-status-badge is-on">Подключён</span>' if enabled
+           else '<span class="seo-status-badge">Выключен</span>')
+        + '</div>'
+        + ('<p>SEO-завод подключён. Запустите подготовку плана.</p>' if enabled
+           else '<p>Для этой компании генерация статей отключена.</p>')
         + (f'<form method="post" action="{base}/seo/activation">'
            f'<input type="hidden" name="action" value="{"disable" if enabled else "enable"}">'
            f'<button class="btn {"danger" if enabled else "primary"}" type="submit">'
            + ('Отключить SEO-завод' if enabled else 'Подключить SEO-завод')
            + '</button></form>')
-        + '<p class="subtitle">Подключение само по себе не запускает платную генерацию. '
-          '«Новый запуск» готовит до трёх статей; после успешной проверки '
-          'ИИ-критиком они публикуются автоматически. Отключение отменяет '
-          'задания в очереди и блокирует новые статьи; опубликованные материалы остаются.</p>'
+        + '<details class="seo-help"><summary>Как работает подключение</summary>'
+          '<p>Подключение само по себе не запускает платную генерацию. '
+          'План создаётся на 7 или 30 дней, с лимитом до трёх статей на день. '
+          'Перед публикацией текст проходит проверку ИИ-критиком. '
+          'При отключении отменяются ожидающие задания, '
+          'уже опубликованные статьи остаются.</p></details>'
         + '</section>'
     )
-    if not enabled:
-        available_actions = '<p>Сначала подключите SEO-завод для этой компании.</p>'
-    else:
-        available_actions = (
-            f'<p><a class="btn primary" href="{base}/seo/queue">Новый запуск SEO-завода</a> '
-            f'<a class="btn" href="{base}?design=v4&amp;command=seo_factory">'
-            'Через ИИ-диспетчер</a> '
-            f'<a class="btn" href="{base}/work">Все задания</a> '
-            f'<a class="btn" href="{base}/materials?kind=article">Статьи</a></p>'
-        )
-    return studio_page_shell(product, active='seo', title='SEO-завод',
-        subtitle='Реальные статусы запусков, результаты и ошибки из базы вашей компании.',
-        body=activation_form + publication_note + available_actions
-             + '<h2>Запуски SEO-завода</h2>'
-             + (run_cards or '<p>Запуски SEO-завода пока не зарегистрированы.</p>')
-             + '<h2>Статьи в блоге</h2>'
-             + seo_published_articles(db, product_id, enabled)
-             + seo_insights_html(db, product_id)
-             + '<h2>Сохранённые материалы и отчёты</h2>'
-             + (cards or '<p>Материалы пока не подготовлены.</p>'))
+    available_actions = (
+        f'<nav class="seo-action-row" aria-label="Управление SEO-заводом">'
+        f'<a class="btn primary" href="{base}/seo/queue">Новый запуск</a>'
+        f'<a class="btn secondary" href="{base}?design=v4&amp;command=seo_factory">'
+        'Через диспетчера</a>'
+        f'<a class="btn secondary" href="{base}/work">Задания</a></nav>'
+        if enabled else ''
+    )
+    run_cards = ''.join(seo_run_card(row, product_id, blog_base=blog_base, enabled=enabled)
+                        for row in runs)
+    saved_cards = ''.join(
+        f'<article class="seo-saved-item"><h3>{html.escape(row.title)}</h3>'
+        f'<p>{html.escape(row.kind)} · {html.escape(row.status.value)}</p>'
+        f'{artifact_content(row.content)}</article>' for row in rows
+    )
+    content = (
+        activation_form + available_actions
+        + '<p class="seo-publish-destination"><strong>Публикация:</strong> '
+        + destination + '</p>'
+        + '<div class="seo-dash-stats" aria-label="SEO-статистика">'
+          f'<div><span>Запусков</span><strong>{len(runs)}</strong></div>'
+          f'<div><span>Опубликовано</span><strong>{report["published_articles"]}</strong></div>'
+          f'<div><span>Скрыто</span><strong>{report["hidden_articles"]}</strong></div></div>'
+        + '<section class="seo-section"><h2>Запуски</h2>'
+        + (run_cards or '<p>Запусков пока нет.</p>') + '</section>'
+        + '<section class="seo-section"><h2>Статьи в блоге</h2>'
+        + seo_published_articles(db, product_id, enabled) + '</section>'
+        + seo_insights_html(db, product_id)
+        + '<details class="seo-saved"><summary>Материалы и отчёты'
+          f'<span>{len(rows)}</span></summary>'
+          '<div class="seo-saved-body">'
+        + (saved_cards or '<p>Материалы пока не подготовлены.</p>')
+        + '</div></details>'
+    )
+    return studio_page_shell(
+        product, active='seo', title='SEO-завод',
+        subtitle='Статьи, публикации и результаты вашей компании.',
+        body=content,
+    )
 
 
 @router.get('/studio/products/{product_id}/campaigns', response_class=HTMLResponse)
