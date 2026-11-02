@@ -71,8 +71,13 @@ def critic_verdict(db: Session, task_id, reader=None) -> str:
     for review in reviews:
         try:
             data = json.loads(review.content)
-            # Use the final editor's critic verdict. Do not block publication
-            # due to an earlier review hash or force a fresh owner signoff.
+            # The critic reviewed the final reader-facing version. A later
+            # content edit cannot inherit approval from an older version.
+            # This is an automatic version guard, NOT a manual owner gate.
+            if not isinstance(data, dict):
+                continue
+            if reader is None or data.get("reader_hash") != reader_hash(reader):
+                return "content_mismatch"
             return str(data.get("status", "missing"))
         except (TypeError, ValueError):
             continue
