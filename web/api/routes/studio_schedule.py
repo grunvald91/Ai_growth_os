@@ -8,6 +8,7 @@ Client name, phone and e-mail are included on purpose (owner decision of 22.10.2
 "who is next". Notes, payment details and Telegram ids are not sent.
 """
 import hmac
+import json
 from datetime import date, datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -17,6 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from database.models import EmployeeDayOff
 from ..database import Booking, Business, Employee, Service, User, get_db
 from .studio_sso import _secret, studio_role
 
@@ -48,6 +50,8 @@ class BookingRow(BaseModel):
 class ResourceOut(BaseModel):
     id: int
     name: str
+    # Calendar dates on which this resource can work, accounting for duty and days off.
+    working_dates: list[str] | None = None
 
 
 class FreeSlots(BaseModel):
@@ -69,6 +73,23 @@ class ScheduleOut(BaseModel):
 
 def _hours(start, end) -> Optional[str]:
     return f"{start.strftime('%H:%M')}–{end.strftime('%H:%M')}" if start and end else None
+
+
+def _working_dates(employee: Employee, dates: list[date], off_dates: set[date]) -> list[str]:
+    """Mirror resource_works duty and days-off checks without per-day database queries."""
+    allowed: set[str] | None = None
+    if employee.duty_schedule:
+        try:
+            raw = json.loads(employee.duty_schedule)
+            allowed = {item for item in raw if isinstance(item, str)} if isinstance(raw, list) else set()
+        except (ValueError, TypeError):
+            allowed = set()  # invalid schedule is never treated as open
+    return [
+        day.isoformat() for day in dates
+        if day not in off_dates
+        and (allowed is None or day.isoformat() in allowed)
+        and (allowed is not None or employee.on_duty_date is None or employee.on_duty_date == day)
+    ]
 
 
 @router.get("/internal/studio/schedule", response_model=ScheduleOut)
@@ -97,7 +118,8 @@ async def studio_schedule(
         raise HTTPException(status_code=404, detail="Business not found")
 
     resources = (await db.scalars(select(Employee).where(
-        Employee.business_id == business_id, Employee.is_active.is_(True), Employee.role != "administrator"
+        Employee.business_id == business_id, Employee.is_active.is_(True),
+        Employee.role.notin_(["administrator", "admin"])
     ).order_by(Employee.id))).all()
 
     rows = (await db.execute(
@@ -109,6 +131,19 @@ async def studio_schedule(
                Booking.booking_date <= date_to)
         .order_by(Booking.booking_date, Booking.booking_time, Booking.id)
     )).all()
+    # One batched days-off lookup for the entire requested interval, rather than N*M queries.
+    days = [date_from + timedelta(days=i) for i in range((date_to - date_from).days + 1)]
+    off_by_employee: dict[int, set[date]] = {}
+    if resources:
+        off_rows = (await db.execute(
+            select(EmployeeDayOff.employee_id, EmployeeDayOff.date).where(
+                EmployeeDayOff.employee_id.in_([resource.id for resource in resources]),
+                EmployeeDayOff.date >= date_from, EmployeeDayOff.date <= date_to,
+            )
+        )).all()
+        for employee_id, off_day in off_rows:
+            off_by_employee.setdefault(employee_id, set()).add(off_day)
+
     bookings = [BookingRow(
         id=booking.id, date=booking.booking_date.isoformat(), time=booking.booking_time.strftime("%H:%M"),
         duration_minutes=booking.duration_minutes or booking.resource_duration_minutes,
@@ -146,5 +181,7 @@ async def studio_schedule(
         working_hours=_hours(business.working_hours_start, business.working_hours_end),
         break_hours=_hours(business.break_start, business.break_end),
         step_minutes=business.booking_interval_minutes,
-        resources=[ResourceOut(id=item.id, name=item.name) for item in resources],
+        resources=[ResourceOut(id=item.id, name=item.name,
+                               working_dates=_working_dates(item, days, off_by_employee.get(item.id, set())))
+                   for item in resources],
         bookings=bookings, free_slots=free_slots)

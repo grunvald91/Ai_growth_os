@@ -83,8 +83,8 @@ async def _booking_stats(db: AsyncSession, business_id: int):
     subq = (
         select(
             Booking.client_id.label("uid"),
-            func.count(Booking.id).label("total"),
-            func.sum(case((Booking.status == "completed", 1), else_=0)).label("completed"),
+            func.count(case((Booking.occupies_resource.is_(True), Booking.id))).label("total"),
+            func.sum(case((and_(Booking.status == "completed", Booking.occupies_resource.is_(True)), 1), else_=0)).label("completed"),
             func.max(Booking.booking_date).label("last_date"),
             func.min(
                 case(
@@ -266,11 +266,13 @@ async def get_contact(
         **_row(key, user, meta, bookings=len(history), account_contact=bool(history)),
         "bookings_count": await db.scalar(
             select(func.count(Booking.id)).where(Booking.business_id == business_id,
-                                                  Booking.client_id == user.id)
+                                                  Booking.client_id == user.id,
+                                                  Booking.occupies_resource.is_(True))
         ),
         "completed_count": await db.scalar(
             select(func.count(Booking.id)).where(Booking.business_id == business_id,
                                                   Booking.client_id == user.id,
+                                                  Booking.occupies_resource.is_(True),
                                                   Booking.status == "completed")
         ),
         "last_booking": history[0]["date"] if history else None,

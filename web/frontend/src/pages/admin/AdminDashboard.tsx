@@ -97,7 +97,7 @@ export function AdminDashboard() {
   const stats = data
     ? [
         { label: 'Записей сегодня', value: data.today_bookings, Icon: Calendar, color: 'var(--s-accent)', to: '/admin/schedule' },
-        { label: 'Выручка', value: `${new Intl.NumberFormat('ru-RU').format(data.total_revenue)} ₽`, Icon: DollarSign, color: 'var(--s-success)', to: '/admin/analytics' },
+        { label: 'Стоимость записей', value: `${new Intl.NumberFormat('ru-RU').format(data.total_revenue)} ₽`, Icon: DollarSign, color: 'var(--s-success)', to: '/admin/analytics' },
         { label: 'Подтверждено', value: data.confirmed_count, Icon: CheckCircle, color: 'var(--st-completed)', to: '/admin/schedule' },
         { label: 'Ожидает', value: data.pending_count, Icon: AlertCircle, color: 'var(--s-warning)', to: '/admin/schedule' },
       ]

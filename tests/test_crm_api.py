@@ -97,6 +97,29 @@ class CRMApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r["key"] for r in other_business], [f"u:{self.booked_id}"])
         self.assertEqual(other_business[0]["bookings_count"], 1)
 
+    async def test_additional_service_does_not_create_extra_completed_visit(self):
+        async with self.sessions() as db:
+            primary = (await db.scalars(select(Booking).where(
+                Booking.business_id == self.a, Booking.client_id == self.booked_id))).first()
+            primary.status = "completed"
+            extra = Service(business_id=self.a, name="Дополнительный уход",
+                            duration_minutes=15, price=350)
+            db.add(extra)
+            await db.flush()
+            db.add(Booking(business_id=self.a, client_id=self.booked_id,
+                           service_id=extra.id, booking_date=primary.booking_date,
+                           booking_time=primary.booking_time, status="completed",
+                           occupies_resource=False, resource_duration_minutes=15))
+            await db.commit()
+        contacts = self.client.get(self.url(self.a)).json()["items"]
+        contact = next(item for item in contacts if item["key"] == f"u:{self.booked_id}")
+        self.assertEqual(contact["bookings_count"], 1)
+        self.assertEqual(contact["completed_count"], 1)
+        details = self.client.get(self.url(self.a, f"/u:{self.booked_id}")).json()
+        self.assertEqual(details["bookings_count"], 1)
+        self.assertEqual(details["completed_count"], 1)
+        self.assertEqual(len(details["history"]), 2)  # Service history retains the add-on.
+
     async def test_private_notes_do_not_change_global_user_or_other_business(self):
         key = f"u:{self.booked_id}"
         response = self.client.patch(self.url(self.a, "/" + key),
