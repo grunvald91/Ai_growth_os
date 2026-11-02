@@ -883,6 +883,10 @@ def test_operator_link_needs_both_real_sessions_and_rejects_wrong_password(env):
     assert linked.status_code == 200 and "Профили объединены" in linked.text
     assert "Отвязать профиль Growth" in linked.text
     assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 200
+    # Operator-specific settings gates must recognize "owner" after linking,
+    # rather than the raw servgo:<id> identity.
+    settings.studio_tune_usernames = "owner"
+    assert client.get("/studio/tune").status_code == 200
     from app.core.studio_accounts import accounts_path
     path, _ = accounts_path(settings)
     stored = (path.parent / "servgo_operator_links.json").read_text()
