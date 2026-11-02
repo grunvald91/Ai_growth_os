@@ -117,3 +117,38 @@ async def test_draft_rechecks_time_and_never_passes_customer_identity(owner_cont
     assert len(seen) == 1
     with pytest.raises(ValueError):
         SlotOfferParams(service_id=SERVICE, resource_id=RESOURCE, day=TODAY, time="29:99")
+
+
+def test_old_revenue_metrics_are_excluded_from_marketing_context(db, tmp_path):
+    from decimal import Decimal
+    from datetime import timezone
+    from app.models.domain import Metric
+    from app.workflows.context import load_context
+
+    company = Product(name="Тест метрик", slug="legacy-metrics")
+    db.add(company)
+    db.flush()
+    now = datetime.now(timezone.utc)
+    db.add_all([
+        Metric(product_id=company.id, name="servgo.revenue_total",
+               value=Decimal("5000"), unit="₽", source="servgo_schedule:30d",
+               observed_at=now, dimensions={}),
+        Metric(product_id=company.id, name="servgo.service_revenue:Стрижка",
+               value=Decimal("3500"), unit="₽", source="servgo_schedule:30d",
+               observed_at=now, dimensions={}),
+        Metric(product_id=company.id, name="servgo.estimated_booking_value_total",
+               value=Decimal("3500"), unit="₽", source="servgo_schedule:30d",
+               observed_at=now, dimensions={}),
+    ])
+    db.commit()
+    context = load_context(db, company, tmp_path)
+    names = [record["name"] for record in context["records"]["metric"]]
+    assert names == ["servgo.estimated_booking_value_total"]
+
+
+def test_service_value_is_an_estimate_not_revenue():
+    from app.insights.compute import compute
+    result = compute(history(), TODAY, 90, 14)
+    names = {fact.name for fact in result.facts}
+    assert "servgo.service_estimated_value:Стрижка" not in names  # no prices in history()
+    assert "servgo.service_revenue:Стрижка" not in names
