@@ -72,7 +72,7 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'class="voice-hold-overlay vg"' in page.text
     assert 'id="vgBars"' in page.text
     assert 'id="vgKnob"' in page.text
-    assert '/studio/assets/voice-glow.js?v=1' in page.text
+    assert '/studio/assets/voice-glow.js?v=2' in page.text
     assert 'id="dp-voice-status"' in page.text
     assert 'id="sg-create-suggestions"' in page.text
     assert 'id="sg-create-count"' in page.text
@@ -81,7 +81,7 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="sg-create-brief"' in page.text
     assert 'id="sg-create-form"' not in page.text
     assert '/studio/assets/create-studio.js?v=images-20261102' in page.text
-    assert '/studio/assets/dispatcher.js?v=voice-glow-20261102' in page.text
+    assert '/studio/assets/dispatcher.js?v=voice-glow-audio-20261102' in page.text
     assert page.text.count('id="dp-input"') == 1
     assert page.text.index('Что создаём?') < page.text.index('id="dp-input"')
     js = client.get('/studio/assets/dispatcher.js')
@@ -136,7 +136,7 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert 'class="voice-hold-overlay vg"' in page.text
     assert 'id="vgBars"' in page.text
     assert 'id="vgKnob"' in page.text
-    assert '/studio/assets/voice-glow.js?v=1' in page.text
+    assert '/studio/assets/voice-glow.js?v=2' in page.text
     assert 'id="dp-voice-hitbox"' in page.text
     assert 'id="dp-voice-status"' in page.text
     assert 'placeholder="Нажмите — текст · удерживайте — голос"' in page.text
@@ -149,7 +149,7 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
     assert '/studio/assets/growth-live.css?v=17' in page.text
-    assert '/studio/assets/dispatcher.js?v=voice-glow-20261102' in page.text
+    assert '/studio/assets/dispatcher.js?v=voice-glow-audio-20261102' in page.text
     assert '/studio/assets/growth-live.js?v=8' in page.text
     assert 'Простое видео' in page.text
     assert 'hero-intro' in page.text
@@ -1175,3 +1175,7 @@ def test_voice_glow_uses_existing_audio_stream(live):
     assert "window.VoiceGlow.start(stream)" in dispatcher
     assert "window.VoiceGlow.recognize()" in dispatcher
     assert "window.VoiceGlow.hide()" in dispatcher
+    assert "window.VoiceGlow.arm()" in dispatcher
+    assert "function arm()" in res.text
+    assert "attempt !== resumeAttempt" in res.text
+    assert "Math.sqrt(sum / samples.length) - .003" in res.text

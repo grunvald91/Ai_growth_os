@@ -23,7 +23,7 @@
   var wts = new Float32Array(N).fill(0);
   var mode = 'idle', raf = 0, lastRoll = 0, level = 0, t0 = 0;
   var analyser = null, samples = null, source = null, audioContext = null;
-  var simulated = false, endTimer = null, generation = 0;
+  var simulated = false, endTimer = null, generation = 0, resumeAttempt = 0;
 
   function edge(i) {
     var u = Math.min(i, N - 1 - i) / 9, t = Math.min(1, u);
@@ -48,7 +48,8 @@
         sum += v * v;
       }
       // RMS amplitude, with a small noise floor. This measures loudness, NOT pitch.
-      return Math.min(1, Math.max(0, (Math.sqrt(sum / samples.length) - .012) * 8));
+      // Keep a small noise floor, but do not discard quiet speech.
+      return Math.min(1, Math.max(0, (Math.sqrt(sum / samples.length) - .003) * 8));
     }
     if (simulated) {
       var t = (now - t0) / 1000;
@@ -61,7 +62,7 @@
     raf = requestAnimationFrame(frame);
     var target = mode === 'listen' ? readLevel(now) : 0;
     level += (target - level) * (target > level ? ATTACK : RELEASE);
-    if (mode === 'listen' && level > .08 && now - lastRoll > REROLL_MS) {
+    if (mode === 'listen' && level > .005 && now - lastRoll > REROLL_MS) {
       reroll(); lastRoll = now;
     }
     ctx.clearRect(0, 0, W, H);
@@ -85,12 +86,16 @@
   function animate() {
     if (!raf) raf = requestAnimationFrame(frame);
   }
-  function releaseAudio() {
+  function releaseGraph() {
     analyser = null; samples = null;
     if (source) {
       try { source.disconnect(); } catch (ignored) {}
       source = null;
     }
+  }
+  function releaseAudio() {
+    ++resumeAttempt; // Invalidate every unresolved resume() callback.
+    releaseGraph();
     if (audioContext) {
       var previous = audioContext;
       audioContext = null;
@@ -99,7 +104,38 @@
         if (closed && closed.catch) closed.catch(function () {});
       } catch (ignored) {}
     }
-    // IMPORTANT: recordStream is owned and stopped by dispatcher.js, not here.
+    // MediaRecorder owns the MediaStream and its tracks; do not stop them here.
+  }
+  function unavailable() {
+    label.textContent = 'Запись идёт · индикатор звука недоступен';
+    releaseAudio();
+  }
+  function tryResume(context) {
+    if (!context || context.state !== 'suspended') return;
+    var attempt = ++resumeAttempt;
+    try {
+      var pending = context.resume();
+      if (pending && pending.catch) pending.catch(function () {
+        // An old denied resume must never close a newer recording's context.
+        if (audioContext !== context || attempt !== resumeAttempt || mode !== 'listen') return;
+        unavailable();
+      });
+    } catch (error) {
+      if (audioContext === context && attempt === resumeAttempt && mode === 'listen') unavailable();
+    }
+  }
+  function arm() {
+    // Called synchronously on pointerdown, while browser user activation exists.
+    // No permission prompt, new MediaStream or audio playback is involved.
+    if (mode !== 'idle' || audioContext) return;
+    try {
+      var Audio = window.AudioContext || window.webkitAudioContext;
+      if (!Audio) return;
+      audioContext = new Audio();
+      tryResume(audioContext);
+    } catch (error) {
+      releaseAudio();
+    }
   }
   function reveal(next) {
     generation += 1;
@@ -112,17 +148,19 @@
     animate();
   }
   function connecting() {
-    releaseAudio();
+    // Keep the AudioContext armed in pointerdown; getUserMedia is asynchronous.
     simulated = false;
     reveal('connecting');
     label.textContent = 'Подключаю микрофон…';
   }
   function start(stream) {
-    releaseAudio();
+    releaseGraph();
+    ++resumeAttempt; // Older arm/start resume promises no longer own this session.
     simulated = false;
     level = 0;
     vals.fill(H_MIN);
     wts.fill(0);
+    reroll(); // A quiet first sound must have visible bars immediately.
     t0 = performance.now(); lastRoll = 0;
     reveal('listen');
     label.textContent = 'Отпустите, чтобы отправить';
@@ -133,21 +171,18 @@
       return;
     }
     try {
-      var Audio = window.AudioContext || window.webkitAudioContext;
-      if (!Audio) throw new Error('AudioContext unavailable');
-      audioContext = new Audio();
-      analyser = audioContext.createAnalyser();
+      if (!audioContext) {
+        var Audio = window.AudioContext || window.webkitAudioContext;
+        if (!Audio) throw new Error('AudioContext unavailable');
+        audioContext = new Audio(); // Standalone fallback, without pointerdown arm().
+      }
+      var currentContext = audioContext;
+      analyser = currentContext.createAnalyser();
       analyser.fftSize = 512;
       samples = new Uint8Array(analyser.fftSize);
-      source = audioContext.createMediaStreamSource(stream);
+      source = currentContext.createMediaStreamSource(stream);
       source.connect(analyser);
-      if (audioContext.state === 'suspended') {
-        var resumed = audioContext.resume();
-        if (resumed && resumed.catch) resumed.catch(function () {
-          label.textContent = 'Запись идёт · индикатор звука недоступен';
-          releaseAudio();
-        });
-      }
+      tryResume(currentContext);
     } catch (error) {
       releaseAudio();
       label.textContent = 'Запись идёт · индикатор звука недоступен';
@@ -163,8 +198,9 @@
     root.classList.add('rec');
   }
   function hide() {
-    if (mode === 'idle' && !root.classList.contains('is-active')) return;
+    // Even a short tap needs to release its prewarmed AudioContext.
     releaseAudio();
+    if (mode === 'idle' && !root.classList.contains('is-active')) return;
     simulated = false;
     mode = 'idle';
     generation += 1;
@@ -185,6 +221,6 @@
   }
   window.VoiceGlow = {
     start: start, recognize: recognize, hide: hide,
-    connecting: connecting, setKnobX: setKnobX
+    arm: arm, connecting: connecting, setKnobX: setKnobX
   };
 })();

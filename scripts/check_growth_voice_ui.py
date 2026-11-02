@@ -66,8 +66,14 @@ def main():
                 page.add_init_script("""(() => {
                   window.__mockMicStarts = 0;
                   window.__mockLevel = 0;
+                  window.__mockAudioContexts = 0;
+                  window.__mockAudioResumes = 0;
+                  window.__mockAudioCloses = 0;
                   class MockAudioContext {
-                    constructor(){ this.state='running'; }
+                    constructor(){
+                      this.state='suspended';
+                      window.__mockAudioContexts++;
+                    }
                     createAnalyser(){ return {
                       fftSize:512,
                       getByteTimeDomainData(array){
@@ -76,8 +82,16 @@ def main():
                       }
                     }; }
                     createMediaStreamSource(){ return {connect(){},disconnect(){}}; }
-                    close(){ this.state='closed'; return Promise.resolve(); }
-                    resume(){ return Promise.resolve(); }
+                    close(){
+                      this.state='closed';
+                      window.__mockAudioCloses++;
+                      return Promise.resolve();
+                    }
+                    resume(){
+                      this.state='running';
+                      window.__mockAudioResumes++;
+                      return Promise.resolve();
+                    }
                   }
                   window.AudioContext=MockAudioContext;
                   Object.defineProperty(navigator, 'mediaDevices', {configurable:true, value:{
@@ -170,9 +184,13 @@ def main():
                       }));
                     }""",[kind,pointer_id])
                 pointer('pointerdown',11)
+                # The Web Audio context must be activated during the user gesture,
+                # not from the later getUserMedia promise.
+                assert page.evaluate('window.__mockAudioResumes')==1, 'AudioContext not armed on pointerdown'
                 pointer('pointerup',11)
                 page.wait_for_timeout(270)
                 assert page.evaluate('window.__mockMicStarts')==0, 'short tap started audio'
+                assert page.evaluate('window.__mockAudioCloses')==1, 'short tap leaked an armed AudioContext'
                 assert page.locator('#dp-input').evaluate("el=>document.activeElement===el")
                 assert page.locator('#dp-mode-mic').is_visible(), 'typing must reveal mic switch'
                 assert page.locator('#dp-input').get_attribute('placeholder')=='Введите команду…'
@@ -193,7 +211,9 @@ def main():
                   "e=>getComputedStyle(e).pointerEvents")=='auto', 'voice hitbox not restored'
                 assert page.locator('#dp-input').input_value()=='Мой незавершённый текст'
                 pointer('pointerdown',12)
+                assert page.evaluate('window.__mockAudioResumes')==2, 'hold did not arm audio in gesture'
                 page.wait_for_function("() => window.__mockMicStarts===1 && document.querySelector('#dp-form').classList.contains('voice-recording')")
+                assert page.evaluate('window.__mockAudioContexts')==2, 'recorder opened a second AudioContext'
                 page.wait_for_timeout(180)
                 active_overlay=page.locator('#dp-voice-overlay').evaluate("""element=>({
                   opacity:parseFloat(getComputedStyle(element).opacity),
@@ -228,10 +248,14 @@ def main():
                       return count;
                     }""")
                 quiet=waveform_pixels()
+                page.evaluate('window.__mockLevel=3')  # quiet speech was invisible before the fix
+                page.wait_for_timeout(220)
+                soft=waveform_pixels()
+                assert soft>quiet+15,(quiet,soft)
                 page.evaluate('window.__mockLevel=36')
                 page.wait_for_timeout(260)
                 loud=waveform_pixels()
-                assert loud>quiet+65,(quiet,loud)
+                assert loud>soft+65,(quiet,soft,loud)
                 assert page.evaluate('window.__mockMicStarts')==1, 'VoiceGlow opened a second mic'
                 # The small knob tracks the real active pointer, not an unrelated animation.
                 page.evaluate("""() => document.dispatchEvent(new PointerEvent('pointermove',{
@@ -310,6 +334,49 @@ def main():
                         break
                     page.wait_for_timeout(100)
                 assert len(dispatch_calls)==3,dispatch_calls
+                # A pending resume rejection for the old session must not
+                # close a newly started recording's AudioContext.
+                race=page.evaluate("""async () => {
+                  const saved=window.AudioContext, contexts=[];
+                  class DeferredContext extends saved {
+                    constructor(){
+                      super();
+                      this.state='suspended';
+                      this.closed=false;
+                      contexts.push(this);
+                    }
+                    resume(){
+                      return new Promise((resolve,reject)=>{this.rejectResume=reject;});
+                    }
+                    close(){
+                      this.closed=true;
+                      this.state='closed';
+                      return Promise.resolve();
+                    }
+                  }
+                  try {
+                    window.AudioContext=DeferredContext;
+                    window.VoiceGlow.start({}); // first session
+                    const first=contexts[0];
+                    window.VoiceGlow.hide();
+                    window.VoiceGlow.start({}); // newer session
+                    const second=contexts[1];
+                    first.rejectResume(new Error('stale resume failure'));
+                    await Promise.resolve();
+                    await Promise.resolve();
+                    const preserved=!second.closed && document.getElementById('dp-voice-overlay-text').textContent==='Отпустите, чтобы отправить';
+                    second.rejectResume(new Error('current resume failure'));
+                    await Promise.resolve();
+                    await Promise.resolve();
+                    const currentRejected=second.closed &&
+                      document.getElementById('dp-voice-overlay-text').textContent.includes('индикатор звука недоступен');
+                    return {preserved,currentRejected,count:contexts.length};
+                  } finally {
+                    window.VoiceGlow.hide();
+                    window.AudioContext=saved;
+                  }
+                }""")
+                assert race['count']==2 and race['preserved'] and race['currentRejected'],race
                 assert not [error for error in errors if error.startswith('js:')],errors
                 result['checks'].append({'page':'voice-hold-mock','width':390,
                     'short_tap':True,'cancel':True,'automatic_send':True,'retry_idempotent':True,
@@ -318,7 +385,10 @@ def main():
                     'compact_composer':True,'real_touch_long_press':True,
                     'no_native_text_selection':True,'mic_visible_on_focus':True,
                     'mic_hides_keyboard':True,'text_editable_with_keyboard':True,
-                    'typing_draft_preserved':True})
+                    'typing_draft_preserved':True,'quiet_voice_moves_bars':True,
+                    'context_armed_on_pointerdown':True,'short_tap_releases_context':True,
+                    'old_resume_error_does_not_cancel_new_recording':True,
+                    'current_resume_error_releases_analyser':True})
                 page.screenshot(path=str(OUT/'voice-hold-390.png'),animations='disabled')
                 # The conversation must not retain the centered empty-home
                 # layout, or reserve a separate band for New Topic above chat.

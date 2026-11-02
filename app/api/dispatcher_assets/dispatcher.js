@@ -1014,7 +1014,10 @@
       // Defer the Android keyboard/text-selection gesture until a short tap is known.
       if (event.pointerType === 'touch') event.preventDefault();
       activeHold = { id: event.pointerId, x: event.clientX, y: event.clientY, cancelled: false, started: false };
-      if (window.VoiceGlow) window.VoiceGlow.setKnobX(event.clientX);
+      if (window.VoiceGlow) {
+        window.VoiceGlow.setKnobX(event.clientX);
+        window.VoiceGlow.arm(); // Safari/iOS needs AudioContext resumed in a real pointer gesture.
+      }
       // Keep the pointer stream attached to the non-selectable surface.
       if (event.pointerType === 'touch' && event.target.setPointerCapture) {
         try { event.target.setPointerCapture(event.pointerId); } catch (error) {}
@@ -1043,6 +1046,7 @@
         setVoiceState('idle');
         if (!cancelled) showNote('После разрешения микрофона удерживайте строку ещё раз.', false);
       } else if (!intent.started && !cancelled) {
+        if (window.VoiceGlow) window.VoiceGlow.hide(); // Close context armed by a short tap.
         input.focus();
       } else {
         hideLive();
