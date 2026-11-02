@@ -161,12 +161,17 @@ async def test_dispatcher_always_asks_first_and_queues_only_after_confirmation(e
     assert verdict(capability.operation, capability.cost) == Verdict.CONFIRM_FIRST
     with factory() as db:
         ctx = Context(db=db, product=db.get(Product, product_id), settings=settings, account="owner")
-        card = await executors.DESCRIBERS["seo_factory"](ctx, capability.params(focus="парикмахерские"))
+        card = await executors.DESCRIBERS["seo_factory"](ctx, capability.params(focus="парикмахерские", horizon_days=30))
         assert isinstance(card, Confirmation) and card.paid and "парикмахерские" in card.details[0]
+        assert card.params["horizon_days"] == 30
+        assert any("месяц" in line for line in card.details)
         assert not list(db.scalars(select(Task).where(Task.assigned_agent == "seo_factory")))
         outcome = await executors.CONFIRMERS["seo_factory"](ctx, card.params, "text")
         assert outcome.ok and outcome.task_id
         assert db.get(Task, outcome.task_id).assigned_agent == "seo_factory"
+        monthly = db.scalar(select(Artifact).where(
+            Artifact.task_id == outcome.task_id, Artifact.kind == "seo_factory_request"))
+        assert json.loads(monthly.content)["horizon_days"] == 30
 
 
 # ---- daily limit of blog articles and light mode ----------------------------------------------------
