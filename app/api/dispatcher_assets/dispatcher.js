@@ -885,15 +885,5 @@
   syncConversationLayout();
   renderHints();
   toBottom();
-  if (root.hasAttribute('data-load-state')) {
-    // The Create page loads the same saved conversation without duplicating handlers.
-    fetch(api + '/state', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
-      .then(function (response) { return response.ok ? response.json() : null; })
-      .then(function (data) {
-        if (!data) return;
-        (data.messages || []).forEach(upsert);
-        state.hints = data.hints || [];
-        syncConversationLayout(); renderHints(); toBottom();
-      }).catch(function () {});
-  }
+
 })();
