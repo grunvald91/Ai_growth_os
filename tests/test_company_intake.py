@@ -472,3 +472,12 @@ def test_reupload_same_pdf_replaces_old_partial_pages_instead_of_adding_duplicat
     after_failure = service.add_source(product.id, session, unreadable, actor="owner")
     assert len(after_failure["sources"]) == 1
     assert after_failure["sources"][0]["id"] == updated.id
+    # New OCR run can be worse than a previously complete source; keep the
+    # verified complete copy instead of replacing it with 3 of 9 pages.
+    worse = make_source("owner_file", "growth studio: файл company.pdf",
+                        "Страница 1\nOnly three pages were decoded",
+                        filename="company.pdf", sha256="a" * 64,
+                        status="truncated", note="Обработано страниц: 3 из 9.")
+    not_downgraded = service.add_source(product.id, session, worse, actor="owner")
+    assert not_downgraded["revision"] == after_failure["revision"]
+    assert not_downgraded["sources"][0]["id"] == updated.id
