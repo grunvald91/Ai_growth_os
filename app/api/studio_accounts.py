@@ -220,3 +220,123 @@ def connections_delete(product_id: UUID, link_id: str, request: Request, db: Ses
     except sso_links.LinkError as exc:
         return _render(request, db, product, settings, status=404, connection_error=str(exc))
     return RedirectResponse(f"/studio/products/{product.id}/accounts#connections", status_code=303)
+
+
+# --- Explicitly link an existing Growth operator to a signed-in ServGo user. ---
+# The password is verified once, never copied into BookingBot and never stored
+# with the binding. Both identities must be proved in the same browser.
+def _live_servgo_identity(request: Request, settings, db: Session) -> int | None:
+    from app.sso import access, tickets
+    from app.api.content_studio_auth import _sso_link_current
+    if not tickets.configured(settings):
+        return None
+    session = tickets.read_session(settings, request.cookies.get(tickets.COOKIE))
+    if session is None or not _sso_link_current(db, session):
+        return None
+    access.forget(session.user_id, session.business_id)
+    if access.servgo_role(settings, session.user_id, session.business_id) is None:
+        return None
+    return session.user_id
+
+
+def _identity_html(*, connected: bool = False, linked: bool = False, error: str = "",
+                   status: int = 200) -> HTMLResponse:
+    notice = ('<p class="sg-link-success" role="status">Профили объединены. '
+              'Вы можете открывать Growth из ServGo с правами существующего администратора.</p>'
+              if linked else "")
+    alert = f'<p role="alert" class="sg-link-error">{esc(error)}</p>' if error else ""
+    form = (
+        '<form method="post" action="/studio/identity" class="sg-link-form">'
+        '<label>Логин Growth <input type="text" name="username" autocomplete="username" '
+        'required maxlength="80" placeholder="Существующий логин"></label>'
+        '<label>Пароль Growth <input type="password" name="password" autocomplete="current-password" '
+        'required maxlength="200" placeholder="Текущий пароль"></label>'
+        '<button type="submit">Подтвердить и объединить</button></form>'
+        if connected and not linked else (
+            '<p class="sg-link-hint">Сначала откройте Growth кнопкой «Маркетинг» из '
+            '<a href="https://servgo.ru/admin">админки ServGo</a>, '
+            'чтобы подтвердить вашу учётную запись ServGo.</p>' if not connected else ''
+        )
+    )
+    content = ('<!doctype html><html lang="ru"><head><meta charset="utf-8">'
+               '<meta name="viewport" content="width=device-width,initial-scale=1">'
+               '<title>Единый профиль · ServGo</title>'
+               '<style>'
+               '.sg-link-page{--link-ink:#192a3b;--link-muted:#5c6c7f;--link-bg:#fff;--link-border:#dce3ef;'
+               'width:min(100% - 28px,510px);margin:24px auto;padding:24px;border:1px solid var(--link-border);'
+               'border-radius:18px;background:var(--link-bg);color:var(--link-ink);font:inherit}'
+               '.sg-link-page h1{font-size:25px;line-height:1.2;margin:0 0 10px;color:var(--link-ink)}'
+               '.sg-link-page p{line-height:1.55;color:var(--link-muted);font-size:14px}'
+               '.sg-link-page a{color:#315edf}'
+               '.sg-link-form{display:grid;gap:14px;margin-top:22px}'
+               '.sg-link-form label{display:grid;gap:6px;font-weight:600;font-size:13px}'
+               '.sg-link-form input{box-sizing:border-box;width:100%;min-height:46px;'
+               'padding:12px;border:1px solid var(--link-border);border-radius:12px;font:inherit;'
+               'background:var(--link-bg);color:var(--link-ink)}'
+               '.sg-link-form button{background:#315edf;color:#fff;min-height:46px;border:0;'
+               'border-radius:12px;font:600 14px inherit;cursor:pointer}'
+               '.sg-link-page .sg-link-error{color:#a72839}'
+               '.sg-link-page .sg-link-success{color:#21683c}'
+               'body[data-growth-design="v4"] .sg-link-page{--link-ink:var(--s-text);--link-muted:var(--s-muted);'
+               '--link-bg:var(--s-surface);--link-border:var(--s-line-2);margin:14px auto}'
+               'body[data-growth-design="v4"] .sg-link-page a{color:var(--s-accent)}'
+               'body[data-growth-design="v4"] .sg-link-form button{background:var(--s-accent);color:var(--s-accent-ink)}'
+               '</style></head><body><main class="sg-link-page">'
+               '<h1>Объединить профили</h1>'
+               '<p>Войдите с вашим существующим логином Growth один раз. '
+               'Пароль проверяется на сервере Growth и не передаётся BookingBot. '
+               'После привязки права старого профиля будут доступны при входе через ServGo. '
+               'Смена пароля Growth автоматически отменит привязку.</p>'
+               + notice + alert + form +
+               '<p><a href="/studio?choose=1">← К компаниям</a></p>'
+               '</main></body></html>')
+    return HTMLResponse(content, status_code=status, headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/studio/identity", response_class=HTMLResponse)
+def studio_identity(request: Request, db: Session = Depends(get_db),
+                    settings=Depends(get_settings), linked: bool = False):
+    uid = _live_servgo_identity(request, settings, db)
+    connected = uid is not None
+    if connected:
+        from app.core.studio_operator_links import linked_operator
+        from app.api.content_studio_auth import _load_users
+        linked = linked and linked_operator(settings, uid, _load_users(settings)) is not None
+    else:
+        linked = False
+    return _identity_html(connected=connected, linked=linked)
+
+
+@router.post("/studio/identity", response_class=HTMLResponse)
+async def studio_identity_connect(request: Request, db: Session = Depends(get_db),
+                                  settings=Depends(get_settings)):
+    uid = _live_servgo_identity(request, settings, db)
+    if uid is None:
+        return _identity_html(error="Нет подтверждённого входа ServGo. Откройте Growth из админки.",
+                              status=403)
+    fields = await _studio_form(request)
+    login, password = fields.get("username", ""), fields.get("password", "")
+    from app.api.content_studio_auth import _load_users, check_credentials, credential_fingerprint
+    from app.core.studio_operator_links import bind_operator
+    from app.core.studio_sessions import clear_failures, normalize_login, record_failure, too_many_failures
+
+    client = request.headers.get("x-real-ip") or (request.client.host if request.client else "")
+    keys = ("link:" + normalize_login(login), "ip:" + client)
+    if any(too_many_failures(key) for key in keys):
+        return _identity_html(connected=True, status=429,
+                              error="Слишком много попыток входа. Попробуйте позже.")
+    users = _load_users(settings)
+    verified = check_credentials(settings, users, login, password) if login and password else None
+    if verified is None or verified[1] is not None:
+        for key in keys:
+            record_failure(key)
+        return _identity_html(connected=True, status=401,
+                              error="Логин или пароль не подошёл либо аккаунт не имеет прав администратора Growth.")
+    name, _ = verified
+    current = credential_fingerprint(settings, users, name)
+    if current is None or current[1] is not None:
+        return _identity_html(connected=True, status=403, error="Нет прав администратора Growth.")
+    bind_operator(settings, uid, name, current[0])
+    for key in keys:
+        clear_failures(key)
+    return RedirectResponse("/studio/identity?linked=1", status_code=303)
