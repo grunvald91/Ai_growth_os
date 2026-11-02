@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from database.models import Base, Business, Employee, Service, User
+from database.models import Base, Business, CRMContact, Employee, Service, User
 from web.api.database import get_db
 from web.api.routes.studio_schedule import router
 
@@ -103,6 +103,21 @@ class StudioSlotOpportunitiesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status_code, 422)
         self.assertEqual(self.client.get("/internal/studio/schedule", params=self.url(),
                                          headers={"X-Studio-Key": "invalid"}).status_code, 403)
+
+    async def test_paused_contacts_are_filtered_without_exposing_crm_notes(self):
+        async with self.sessions() as db:
+            visitor = User(telegram_id=999, full_name="Тестовый клиент")
+            db.add(visitor)
+            await db.flush()
+            db.add(CRMContact(business_id=self.business_id, user_id=visitor.id,
+                              stage="paused", notes="Не показывать в предложениях"))
+            await db.commit()
+            paused_id = visitor.id
+        response = self.client.get("/internal/studio/schedule", params=self.url(),
+                                   headers={"X-Studio-Key": SECRET})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn(paused_id, response.json()["paused_client_ids"])
+        self.assertNotIn("Не показывать в предложениях", response.text)
 
     async def test_incompatible_master_does_not_fail_entire_read(self):
         with patch("web.api.routes.client.get_slots",
