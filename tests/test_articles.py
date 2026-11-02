@@ -955,7 +955,8 @@ async def test_editor_prompts_are_commercially_useful_without_weakening_groundin
     assert 'уместный юмор' in by_role['marketing_editor'].system_prompt
     assert 'не придумывай цены' in by_role['marketing_editor'].system_prompt
     assert 'проверяемого источника' in by_role['marketing_editor'].system_prompt
-    assert 'Write marketing, not an academic paper' in by_role['marketing_editor'].system_prompt
+    assert 'не по жёсткой формуле' in by_role['marketing_editor'].system_prompt
+    assert 'не придумывай цены' in by_role['marketing_editor'].system_prompt
     assert '30-45 seconds' in by_role['video_director'].system_prompt
     from app.llm.timeouts import PROVIDER_TIMEOUT_SECONDS
     assert by_role['marketing_editor'].metadata['provider_timeout_seconds'] == PROVIDER_TIMEOUT_SECONDS
