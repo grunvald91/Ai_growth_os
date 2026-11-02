@@ -134,6 +134,10 @@ async def test_one_factory_launch_queues_full_plan_without_three_article_cap(env
         jobs = list(db.scalars(select(Task).where(
             Task.product_id == product_id, Task.title.like("SEO-ARTICLE:%"))))
         assert len(jobs) >= 4
+        from collections import Counter
+        from app.seo.schedule import day
+        assert all(job.due_at is not None for job in jobs)
+        assert max(Counter(day(job.due_at) for job in jobs).values()) <= 3
         report = db.scalar(select(Artifact).where(Artifact.kind == "seo_factory_report"))
         summary = json.loads(report.content)
         assert summary["articles_queued"] == len(jobs)
