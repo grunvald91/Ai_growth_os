@@ -445,3 +445,30 @@ async def test_telegram_failed_website_is_visible(db, tmp_path):
     await ui.callback(42, f'company:open:{product.id}')
     await ui.message({'chat': {'id': 42}, 'message_id': 11, 'text': 'https://example.com'})
     assert 'Страница недоступна.' in bot.messages[-1][0]
+
+
+def test_reupload_same_pdf_replaces_old_partial_pages_instead_of_adding_duplicate(db, tmp_path):
+    product, session, service, _ = setup(db, tmp_path)
+    old = make_source("owner_file", "growth studio: файл company.pdf",
+                      "Страница 1\nПодробности до страницы 6",
+                      filename="company.pdf", sha256="a" * 64, status="truncated",
+                      note="Прочитано страниц: 6 из 9.")
+    first = service.add_source(product.id, session, old, actor="owner")
+    assert len(first["sources"]) == 1
+    updated = make_source("owner_file", "growth studio: файл company.pdf",
+                          "Страница 1\nПодробности до страницы 6\nСтраница 9\nНовые цены",
+                          filename="company.pdf", sha256="a" * 64, status="read",
+                          note="Обработано страниц: 9 из 9.")
+    second = service.add_source(product.id, session, updated, actor="owner")
+    assert second["revision"] == first["revision"] + 1
+    assert len(second["sources"]) == 1
+    assert second["sources"][0]["id"] == updated.id
+    assert second["sources"][0]["status"] == "read"
+    assert "Страница 9" in second["sources"][0]["text"]
+    assert service.add_source(product.id, session, updated, actor="owner")["revision"] == second["revision"]
+    # An OCR retry that fails cannot destroy the last usable evidence.
+    unreadable = make_source("owner_file", "growth studio: файл company.pdf",
+                             filename="company.pdf", sha256="a" * 64, status="unavailable")
+    after_failure = service.add_source(product.id, session, unreadable, actor="owner")
+    assert len(after_failure["sources"]) == 1
+    assert after_failure["sources"][0]["id"] == updated.id

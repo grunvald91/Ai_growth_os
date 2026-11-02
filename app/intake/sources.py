@@ -22,7 +22,8 @@ from app.privacy.gateway import PrivacyGateway
 
 MAX_FILE_BYTES = 20_000_000
 FILE_HELP = "TXT, MD, JSON, CSV, DOCX, PDF, XLSX, XLS, JPG, PNG, WEBP, TIFF и BMP — до 20 МБ. PDF-сканы и изображения: распознавание русского и английского текста."
-MAX_TEXT = 100_000  # one file or one page; the whole collection is bounded by MAX_SOURCE_TEXT in service.py
+MAX_TEXT = 100_000  # small text sources and website page bounds
+MAX_DOCUMENT_TEXT = 240_000  # match CompanyIntakeService.MAX_SOURCE_TEXT; no lower per-file cutoff
 MAX_WEB_BYTES = 5 * 1024 * 1024  # HTML of one page, scripts and styles included
 # Only long blocks count as repeats (footer text, cookie notices, SEO paragraphs). Shorter ones such as a price or
 # "до 10 человек, капитан включён" may honestly repeat on another boat's page and must stay with that boat.
@@ -125,7 +126,7 @@ def parse_file(filename: str, data: bytes, reference: str) -> IntakeSource:
                                note="Читаемый текст не найден. Пришлите другой файл или напишите данные сообщением.", **metadata)
         if partial and not note:
             note = "Материал прочитан частично; пришлите нужный раздел отдельно."
-        return make_source("owner_file", reference, text,
+        return make_source("owner_file", reference, text, limit=MAX_DOCUMENT_TEXT,
                            status="truncated" if partial else "read", note=note, **metadata)
     except Exception:
         # Parsers process untrusted files; never expose their error messages or file contents.
@@ -143,12 +144,12 @@ async def parse_file_async(filename: str, data: bytes, reference: str) -> Intake
     def run():
         try:
             result = subprocess.run([sys.executable, "-m", "app.intake.file_extract", filename, reference[:500]],
-                                    input=data, capture_output=True, timeout=90, check=True)
+                                    input=data, capture_output=True, timeout=480, check=True)
             return IntakeSource.model_validate_json(result.stdout)
         except (OSError, ValueError, subprocess.SubprocessError):
             return make_source("owner_file", reference, filename=clean_text(PurePosixPath(filename).name)[:200],
                                sha256=hashlib.sha256(data).hexdigest(), status="unavailable",
-                               note="Файл не удалось обработать за отведённое время или не хватает ресурсов. Пришлите нужный раздел отдельно.")
+                               note="Не удалось обработать документ полностью: истекло время обработки или не хватило ресурсов. Файл не добавлен; попробуйте загрузить его ещё раз.")
     return await asyncio.to_thread(run)
 
 

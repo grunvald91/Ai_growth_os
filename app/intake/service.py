@@ -247,12 +247,30 @@ class CompanyIntakeService:
     def add_source(self, product_id, session_id, source: IntakeSource, *, actor):
         task = self._task(product_id, session_id, actor, active=True)
         state = self._state(task.id)
-        # Same evidence is deduplicated; distinct sources remain traceable.
+        # Same evidence is deduplicated; a re-upload after an improved parser
+        # replaces the previous *incomplete* extraction of the very same bytes.
+        # Otherwise the old 6/9-page text would remain beside the new 9/9 one.
         if any(row["id"] == source.id for row in state["sources"]):
             return self.get(product_id, session_id, actor=actor)
-        if len(state["sources"]) >= MAX_SOURCES or self._used_text(state) + len(source.text) > MAX_SOURCE_TEXT:
-            raise IntakeError("Слишком много материалов в одном сборе. Сначала проверьте текущие данные.")
-        state["sources"].append(source.model_dump())
+        existing_index = next((
+            index for index, row in enumerate(state["sources"])
+            if source.source_type == "owner_file" and source.sha256
+            and row.get("source_type") == "owner_file"
+            and row.get("sha256") == source.sha256
+        ), None)
+        if existing_index is not None:
+            if not source.text:
+                # A failed retry must not destroy useful previously-read text.
+                return self.get(product_id, session_id, actor=actor)
+            previous = state["sources"][existing_index]
+            new_total = self._used_text(state) - len(previous["text"]) + len(source.text)
+            if new_total > MAX_SOURCE_TEXT:
+                raise IntakeError("Слишком много материалов в одном сборе. Сначала проверьте текущие данные.")
+            state["sources"][existing_index] = source.model_dump()
+        else:
+            if len(state["sources"]) >= MAX_SOURCES or self._used_text(state) + len(source.text) > MAX_SOURCE_TEXT:
+                raise IntakeError("Слишком много материалов в одном сборе. Сначала проверьте текущие данные.")
+            state["sources"].append(source.model_dump())
         state["revision"] += 1
         self._save_state(task.id, product_id, state)
         task.status = TaskStatus.QUEUED
