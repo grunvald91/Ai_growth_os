@@ -111,7 +111,11 @@ def servgo_business_ids(settings, user_id: int, *, now: float | None = None) -> 
     if len(_BUSINESS_IDS_CACHE) > 2000:
         _BUSINESS_IDS_CACHE.clear()
     result = frozenset(ids)
-    _BUSINESS_IDS_CACHE[cache_key] = (current + CACHE_SECONDS, result)
+    if result:
+        _BUSINESS_IDS_CACHE[cache_key] = (current + CACHE_SECONDS, result)
+    else:
+        # Do not delay recovery when the owner grants access again.
+        _BUSINESS_IDS_CACHE.pop(cache_key, None)
     return result
 
 
@@ -136,3 +140,4 @@ def servgo_business(settings, user_id: int, business_id: int) -> dict | None:
         _logger.warning("studio_sso_business_failed %s", type(exc).__name__)
         return None
     return data if isinstance(data, dict) and isinstance(data.get("name"), str) else None
+

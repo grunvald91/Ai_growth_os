@@ -188,29 +188,41 @@ def _session_login(request: Request, settings, users: dict) -> tuple[str, list[s
 
 
 def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str]] | None:
-    """Sign-in that started from the ServGo admin. ServGo is asked on every request, so removing
-    someone there (or switching the administrators' access off) closes the studio at once."""
+    """Validate the signed identity and derive company access from live ServGo permissions."""
     from app.sso import access, tickets
     session = tickets.read_session(settings, request.cookies.get(tickets.COOKIE))
     if session is None or not tickets.configured(settings):
         return None
     if db is None or not _sso_link_current(db, session):
         return None  # The studio owner disconnected or re-linked this business: the old session ends.
-    role = access.servgo_role(settings, session.user_id, session.business_id)
-    if role is None:
-        return None
-    request.state.studio_sso_role = role
-    # The signed ticket proves which user entered Growth, but not permanent
-    # access to any other company. ServGo supplies the live authorized IDs;
-    # Growth keeps only profiles explicitly linked to those businesses.
-    allowed = {session.product_id}
     business_ids = access.servgo_business_ids(settings, session.user_id)
-    if business_ids is not None:
+    if business_ids is None:
+        # An old/unavailable API may authorize only the original ticket scope.
+        role = access.servgo_role(settings, session.user_id, session.business_id)
+        if role is None:
+            return None
+        request.state.studio_sso_role = role
+        allowed = {session.product_id}
+    else:
+        # Losing access to the entry business must not log the user out of
+        # another company they still manage. An empty list is authoritative.
         from sqlalchemy import select
         from app.sso.models import StudioBusinessLink
-        linked = db.scalars(select(StudioBusinessLink.product_id).where(
-            StudioBusinessLink.servgo_business_id.in_(business_ids)))
-        allowed.update(str(product_id) for product_id in linked)
+        linked = list(db.scalars(select(StudioBusinessLink).where(
+            StudioBusinessLink.servgo_business_id.in_(business_ids))))
+        allowed = {str(link.product_id) for link in linked}
+        current = request.path_params.get("product_id")
+        if current is not None:
+            # Resolve the role for the requested company, not the entry ticket.
+            roles = [access.servgo_role(settings, session.user_id, link.servgo_business_id)
+                     for link in linked if str(link.product_id) == str(current)]
+            role = next((value for value in ("owner", "co_owner", "administrator") if value in roles), None)
+            if role is None:
+                allowed.discard(str(current))
+            else:
+                request.state.studio_sso_role = role
+        if not allowed:
+            return None
     return f"servgo:{session.user_id}", sorted(allowed)
 
 
@@ -342,3 +354,4 @@ def require_studio_csrf(
     if not (is_legacy_origin or is_servgo_gateway_origin):
         _reject_origin(request, 403, "Cross-origin action rejected", configured)
     return None
+

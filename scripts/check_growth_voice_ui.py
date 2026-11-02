@@ -111,6 +111,21 @@ def main():
                 response=page.goto(
                     f'{origin}/studio/products/{product.id}?design=v4',wait_until='load')
                 assert response and response.status==200
+                # Computed visibility catches a hidden parent even when the
+                # company label and mobile overrides are present in the HTML.
+                for width in (360, 390, 780, 1280):
+                    page.set_viewport_size({'width': width, 'height': 844})
+                    switcher = page.locator('#bizBtn')
+                    assert switcher.is_visible(), f'Company switcher hidden at {width}px'
+                    assert switcher.locator('strong').is_visible()
+                    assert switcher.get_attribute('href') == '/studio?choose=1'
+                page.set_viewport_size({'width': 390, 'height': 844})
+                page.locator('#bizBtn').click()
+                page.wait_for_url('**/studio?choose=1')
+                assert page.get_by_text(product.name, exact=True).count() >= 1
+                page.goto(f'{origin}/studio/products/{product.id}?design=v4', wait_until='load')
+                result['checks'].append({'page': 'company-switcher',
+                    'widths': [360, 390, 780, 1280], 'visible': True, 'chooser_opens': True})
                 assert page.locator('#dp-mic').count()==0, 'v4 must have no microphone button'
                 assert page.locator('#dp-press-hint').count()==0, 'hint belongs inside composer'
                 assert page.locator('#dp-input').get_attribute('placeholder')=='Нажмите — текст · удерживайте — голос'
@@ -374,3 +389,4 @@ def main():
 
 if __name__=="__main__":
     main()
+

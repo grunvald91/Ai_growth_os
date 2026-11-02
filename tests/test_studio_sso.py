@@ -207,6 +207,45 @@ def test_sso_owner_can_switch_between_linked_businesses_but_not_other_profiles(e
     assert "Другая" not in client.get("/studio?choose=1").text
 
 
+def test_revoking_entry_company_keeps_other_authorized_company(env):
+    db, _, salon, other, servgo = env
+    db.add(StudioBusinessLink(servgo_business_id=14, product_id=other.id))
+    db.commit()
+    servgo.allowed[(7, 14)] = "co_owner"
+    client = signed_in(env)
+    assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 200
+    servgo.allowed.pop((7, 12))
+    access.forget()
+    assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 200
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 404
+    chooser = client.get("/studio?choose=1")
+    assert chooser.status_code == 200
+    assert "Другая" in chooser.text and "Салон" not in chooser.text
+    servgo.allowed.pop((7, 14))
+    access.forget()
+    assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 401
+
+
+def test_empty_business_list_does_not_restore_cached_entry_access(env):
+    _, _, salon, _, servgo = env
+    client = signed_in(env)  # caches the entry role, but not the business list
+    servgo.allowed.clear()
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+
+
+@pytest.mark.parametrize("mode", ["legacy", "list_down", "invalid_list"])
+def test_failed_list_cannot_keep_other_company_after_entry_access_is_revoked(env, mode):
+    db, _, salon, other, servgo = env
+    db.add(StudioBusinessLink(servgo_business_id=14, product_id=other.id))
+    db.commit()
+    servgo.allowed[(7, 14)] = "co_owner"
+    client = signed_in(env)
+    servgo.allowed.pop((7, 12))
+    servgo.mode = mode
+    access.forget()
+    assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 401
+
+
 @pytest.mark.parametrize("mode", ["legacy", "list_down", "invalid_list"])
 def test_business_list_failure_falls_back_to_original_ticket_scope(env, mode):
     db, _, salon, other, servgo = env
@@ -812,3 +851,4 @@ def test_legacy_first_visit_form_never_enters_v4_transform(env):
     assert page.status_code == 200
     assert 'name="c"' in page.text
     assert 'data-growth-design="v4"' not in page.text
+
