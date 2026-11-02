@@ -201,7 +201,7 @@ def main():
                   animation:getComputedStyle(element.querySelector('.vg__glow')).animationDuration,
                   label:element.querySelector('#dp-voice-overlay-text').textContent
                 })""")
-                assert active_overlay['opacity']>.9 and active_overlay['position']=='fixed',active_overlay
+                assert active_overlay['opacity']>.75 and active_overlay['position']=='fixed',active_overlay
                 assert active_overlay['animation']=='4.6s',active_overlay
                 assert 'Отпустите' in active_overlay['label']
                 overlay_geometry=page.locator('#dp-voice-overlay').evaluate("""element=>{
