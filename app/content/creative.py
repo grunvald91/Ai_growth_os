@@ -61,7 +61,8 @@ CREATIVE_DIRECTOR = (
     "У каждого кадра — подробный visual_prompt для генерации, точный текст на экране, действие или анимация "
     "и понятная цель. caption — готовая подпись к публикации: заход, коротко польза, один призыв. "
     "cover_text — 2–5 слов, которые обещают пользу. "
-    "STORY: 3–10 последовательных кадров от 0 секунд, всего не больше 90 секунд; сюжет: заход → польза "
+    "STORY: 3–10 последовательных кадров от 0 секунд, всего не больше 90 секунд; " 
+    "если запрос содержит frame_count, создай СТРОГО столько экранов; сюжет: заход → польза "
     "по шагам (один шаг — один кадр) → мост к компании → призыв; интерактив (опрос, вопрос, стикер) — "
     "только если он помогает пользе. "
     "STATIC_IMAGE: один кадр со временем 0 и 0; на изображении один крупный заголовок с пользой или "
@@ -95,11 +96,14 @@ class CreativeRequest(Strict):
     topic: str = Field(min_length=3, max_length=300)
     audience: str | None = Field(default=None, max_length=300)
     editorial_brief: str | None = Field(default=None, max_length=3500)
+    frame_count: int | None = Field(default=None, ge=3, le=10)
 
     @model_validator(mode="after")
     def platform_supported(self):
         if self.platform not in CREATIVE_PLATFORMS[self.format]:
             raise ValueError("Unsupported platform for the selected creative format")
+        if self.frame_count is not None and self.format != "story":
+            raise ValueError("Frame count applies only to Stories")
         return self
 
 
@@ -263,6 +267,7 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             "audience": privacy.sanitize_text(request.audience or ""),
             "editorial_brief": privacy.sanitize_text(request.editorial_brief or ""),
             "format": request.format, "platform": request.platform,
+            "frame_count": request.frame_count,
             "deliverable": "text_only_director_ready_brief",
         }
         strategy = None
@@ -287,6 +292,8 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     parsed.format != request.format or parsed.platform != request.platform
                 ):
                     raise ValueError("LLM changed the selected format or platform")
+                if agent == "creative_director" and request.frame_count is not None and len(parsed.frames) != request.frame_count:
+                    raise ValueError("LLM changed the requested Stories screen count")
                 return parsed
 
             def record_model_call(stage, observed):
