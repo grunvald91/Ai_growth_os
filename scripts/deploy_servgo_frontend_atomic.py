@@ -8,6 +8,7 @@ directory in releases/legacy-*; subsequent switches are atomic.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import os
 from pathlib import Path
@@ -48,6 +49,53 @@ def read_file(sftp, path: str) -> bytes | None:
             return handle.read()
     except OSError:
         return None
+
+
+STUDIO_SSO = "web/api/routes/studio_sso.py"
+
+
+def backend_equivalent(path: str, current: bytes | None, candidate: bytes) -> bool:
+    """Permit a text-only production SSO difference without overwriting it.
+
+    Other backend files must remain byte-for-byte identical. We accept only
+    the exact pre-existing production SSO shape: two identical declarations
+    appended at the end, with every other AST node in identical order.
+    Runtime-ignored comments may differ. The live SSO file is not changed.
+    """
+    if current == candidate:
+        return True
+    if path != STUDIO_SSO or current is None:
+        return False
+    try:
+        current_tree = ast.parse(current.decode("utf-8"), filename=path)
+        candidate_tree = ast.parse(candidate.decode("utf-8"), filename=path)
+        canonical = lambda node: ast.dump(node, include_attributes=False)
+        if canonical(current_tree) == canonical(candidate_tree):
+            return True
+        # The existing production SSO patch appended exactly these two
+        # unmodified definitions after all other declarations. Preserve it
+        # only when *everything else*, including decorator AST, matches main
+        # in the same order. Never allow arbitrary definition reordering.
+        moved = ("_businesses_for_studio", "studio_accessible_businesses")
+        def function_name(node):
+            return node.name if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else None
+        current_nodes = current_tree.body
+        candidate_nodes = candidate_tree.body
+        if len(current_nodes) < 2 or tuple(function_name(n) for n in current_nodes[-2:]) != moved:
+            return False
+        if [function_name(n) for n in candidate_nodes].count(moved[0]) != 1:
+            return False
+        if [function_name(n) for n in candidate_nodes].count(moved[1]) != 1:
+            return False
+        original_moved = [next(n for n in candidate_nodes if function_name(n) == name) for name in moved]
+        if [canonical(n) for n in current_nodes[-2:]] != [canonical(n) for n in original_moved]:
+            return False
+        other_candidate = [n for n in candidate_nodes if function_name(n) not in moved]
+        if [canonical(n) for n in current_nodes[:-2]] != [canonical(n) for n in other_candidate]:
+            return False
+        return True
+    except (SyntaxError, UnicodeError, ValueError):
+        return False
 
 
 def main():
@@ -101,8 +149,10 @@ def main():
         for path in FILES:
             server = read_file(sftp, ROOT + "/" + path)
             candidate = (root / path).read_bytes()
-            if server != candidate:
+            if not backend_equivalent(path, server, candidate):
                 mismatches.append(path)
+            elif server != candidate:
+                print("backend_sso_ast_equivalent=true; preserving_server_studio_sso=yes", flush=True)
         print(f"frontend_preflight=ok files={len(files)} backend_ready={str(not mismatches).lower()}")
         for item in mismatches:
             print("backend_release_required=" + item)
@@ -168,6 +218,36 @@ def main():
                       "--max-time 12 https://servgo.ru/sw.js | sha256sum | cut -d' ' -f1")
         if sw_hash != expected["sw.js"]:
             raise RuntimeError("Live HTTPS SW checksum is not the staged version")
+
+        # Verify critical same-origin navigation and owner-only gates *before*
+        # finalizing release; any failure uses the existing symlink rollback.
+        routes = {
+            ("servgo.ru", "/mail"): {"200"},
+            ("servgo.ru", "/workspace/mail"): {"200"},
+            ("servgo.ru", "/workspace/growth"): {"200"},
+            ("servgo.ru", "/api/owner-mail/workspace"): {"303"},
+            ("servgo.ru", "/api/owner-mail/api/company-search"): {"401", "403"},
+            ("mail.servgo.ru", "/"): {"200"},
+        }
+        for (domain, path), expected_codes in routes.items():
+            status = run(
+                client, "curl -sS -o /dev/null -w '%{http_code}' --max-time 12"
+                + " --resolve " + sh(domain + ":443:127.0.0.1")
+                + " " + sh("https://" + domain + path)
+            )
+            if status not in expected_codes:
+                raise RuntimeError("Post-release route verification failed: " + domain + path + " HTTP " + status)
+            print("frontend_route_check=" + domain + path + " http=" + status, flush=True)
+        # The internal Studio API is NOT nginx-proxied at the public /internal/*
+        # path: that public URL resolves to the SPA (HTTP 200). Verify the
+        # actual FastAPI handler on the loopback service instead.
+        studio_code = run(
+            client, "curl -sS -o /dev/null -w '%{http_code}' --max-time 8 "
+            + sh("http://127.0.0.1:8000/internal/studio/businesses?user_id=0")
+        )
+        if studio_code != "403":
+            raise RuntimeError("Internal Studio SSO accepted unauthenticated request: HTTP " + studio_code)
+        print("frontend_studio_internal_auth_check=http_403", flush=True)
         print(f"frontend_release_ok=true commit={commit} assets_verified={len(files)} release={name}")
     except Exception:
         if switched or legacy:
