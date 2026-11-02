@@ -126,13 +126,26 @@ def load_view(schedule: Schedule, period: str, first: date, last: date, label: s
         return View("В заведении не заданы часы работы, загрузку посчитать не могу." + _suffix(label),
                     "Часы работы не заданы, загрузку не посчитать.")
     day_minutes = work - (_minutes(schedule.break_hours) or 0)
+    if day_minutes <= 0:
+        return View("Часы работы и перерыва заданы некорректно, загрузку посчитать не могу." + _suffix(label),
+                    "Некорректные часы работы, загрузку не посчитать.")
     days = (last - first).days + 1
+    missing_duty = any(resource.working_dates is None for resource in schedule.resources)
+
+    def minutes_available(resource, day: date) -> int:
+        # Older BookingBot did not send workdays: retain an explicitly approximate fallback.
+        return day_minutes if resource.working_dates is None or day in resource.working_dates else 0
+
+    def resource_capacity(resource) -> int:
+        return sum(minutes_available(resource, first + timedelta(days=offset)) for offset in range(days))
+
     counted = [b for b in schedule.bookings if b.status in COUNTED and b.occupies_resource]
     names = [r.name for r in schedule.resources]
     if not names:
         groups = [("Все записи", counted, day_minutes * days)]
     else:
-        groups = [(name, [b for b in counted if b.resource == name], day_minutes * days) for name in names]
+        groups = [(r.name, [b for b in counted if b.resource == r.name], resource_capacity(r))
+                  for r in schedule.resources]
         loose = [b for b in counted if b.resource not in names]
         if loose:
             groups.append(("Без мастера", loose, 0))
@@ -147,12 +160,21 @@ def load_view(schedule: Schedule, period: str, first: date, last: date, label: s
             day = first + timedelta(days=offset)
             booked = sum(b.duration_minutes or 0 for b in counted if b.date == day)
             count = sum(1 for b in counted if b.date == day)
-            per_day.append([day_label(day), str(count), _percent(booked, day_minutes * max(1, len(schedule.resources)))])
+            available = (sum(minutes_available(resource, day) for resource in schedule.resources)
+                         if schedule.resources else day_minutes)
+            per_day.append([day_label(day), str(count), _percent(booked, available)])
         blocks.append({"type": "table", "columns": ["День", "Записей", "Загрузка"], "rows": per_day})
     total_booked = sum(b.duration_minutes or 0 for b in counted)
-    capacity = day_minutes * days * max(1, len(schedule.resources))
-    text = (f"Загрузка {when}: {_percent(total_booked, capacity)}, записей {len(counted)}. "
-            "Выходные мастеров здесь не учитываются.")
+    capacity = (sum(resource_capacity(resource) for resource in schedule.resources)
+                if schedule.resources else day_minutes * days)
+    percent = _percent(total_booked, capacity)
+    text = f"Загрузка {when}: {percent}, записей {len(counted)}. "
+    if missing_duty or not schedule.resources:
+        text += "Расчёт ориентировочный: индивидуальные рабочие даты недоступны."
+    elif capacity <= 0:
+        text += "По графикам нет доступных рабочих часов; проверьте даты и записи."
+    else:
+        text += "Учтены дежурства и выходные мастеров."
     return View(text + _suffix(label), f"Загрузка {when}: {_percent(total_booked, capacity)}.", blocks)
 
 
