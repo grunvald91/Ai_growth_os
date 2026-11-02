@@ -851,4 +851,3 @@ def test_legacy_first_visit_form_never_enters_v4_transform(env):
     assert page.status_code == 200
     assert 'name="c"' in page.text
     assert 'data-growth-design="v4"' not in page.text
-
