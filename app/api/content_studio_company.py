@@ -126,7 +126,7 @@ def _new_company_page(fields: dict | None = None, error: str | None = None, *, r
     <textarea name="about" required minlength="30" maxlength="12000" rows="8"
       placeholder="Чем занимается, какие услуги и цены, для кого, город, чем отличается, чего нельзя обещать.">{esc(fields.get('about', ''))}</textarea></label>
   {_file_field()}
-  <div class="sg-intake-actions"><button class="btn primary" type="submit">Сохранить и собрать профиль</button>
+  <div class="sg-intake-actions"><button class="btn primary" type="submit">Собрать профиль</button>
   <a href="/studio?choose=1">← К списку проектов</a></div>
 </form>{ONCE_SCRIPT}</main></body></html>"""
 
@@ -343,10 +343,17 @@ def _company_settings_html(product: Product, *, can_delete: bool) -> str:
   <div class="sg-intake-actions"><button class="btn">Сохранить название</button>{delete_link}</div></form></section>"""
 
 
-def _collect_company_form(product: Product, registry_hint: str) -> str:
+def _collect_company_form(product: Product, registry_hint: str, review: dict | None = None) -> str:
     """Single bottom action: save the company, ingest supplied evidence, then draft."""
     base = f"/studio/products/{product.id}"
-    return f"""<section class="sg-surface sg-intake-section sg-company-collect"><h2>Данные компании и материалы</h2>
+    questions = _question_fields(review)
+    questions_block = (
+        '<div class="sg-intake-questions"><h3>Чего не хватает</h3>'
+        '<p class="sg-muted">Ответьте, что знаете; можно отметить «Не знаю».</p>'
+        + questions + '</div>'
+        if questions else ''
+    )
+    return f"""<section class="sg-surface sg-intake-section sg-company-collect"><h2>Добавить материалы</h2>
 <p class="sg-muted">Заполните всё необходимое и приложите файлы. Только после нажатия кнопки ниже
 система сохранит сведения и запустит анализ. Результат будет черновиком для вашего подтверждения.</p>
 <form method="post" action="{base}/profile/collect" enctype="multipart/form-data" class="sg-intake-form" data-once>
@@ -364,7 +371,8 @@ def _collect_company_form(product: Product, registry_hint: str) -> str:
     <input name="identifier" inputmode="numeric" maxlength="40" placeholder="10 или 12 цифр">
     <small>{esc(registry_hint)}</small></label>
   {_file_field("Файлы")}
-  <div class="sg-intake-actions"><button class="btn primary" type="submit">Сохранить и собрать профиль</button></div>
+  {questions_block}
+  <div class="sg-intake-actions"><button class="btn primary" type="submit">Собрать профиль</button></div>
 </form></section>"""
 
 
@@ -407,12 +415,10 @@ def _source_line(source: dict, base: str = "", removable: bool = False) -> str:
             f'<span>{esc(name)}{esc(mark)}</span>{note}{remove}</li>')
 
 
-def _questions_html(base: str, review: dict | None) -> str:
+def _question_fields(review: dict | None) -> str:
     questions = (review or {}).get("questions") or []
-    if not questions:
-        return ""
     items = []
-    for index, question in enumerate(questions):
+    for index, question in enumerate(questions[:10]):
         items.append(f"""<fieldset class="sg-intake-question">
   <legend>{esc(question['text'])}</legend>
   <input type="hidden" name="q{index}_field" value="{esc(question['field_path'])}">
@@ -420,9 +426,17 @@ def _questions_html(base: str, review: dict | None) -> str:
     <textarea name="q{index}_answer" rows="2" maxlength="4000" placeholder="Ответьте своими словами"></textarea></label>
   <label class="sg-check"><input type="checkbox" name="q{index}_unknown" value="1"> Не знаю — оставить пустым</label>
 </fieldset>""")
+    return "".join(items)
+
+
+def _questions_html(base: str, review: dict | None) -> str:
+    """Legacy standalone answer endpoint, kept for old clients."""
+    fields = _question_fields(review)
+    if not fields:
+        return ""
     return f"""<section class="sg-surface sg-intake-section"><h2>Чего не хватает</h2>
 <p class="sg-muted">Ответьте, что знаете. Агенты не будут придумывать недостающее.</p>
-<form method="post" action="{base}/profile/answers" class="sg-intake-form" data-once>{''.join(items)}
+<form method="post" action="{base}/profile/answers" class="sg-intake-form" data-once>{fields}
   <div class="sg-intake-actions"><button class="btn primary">Ответить и пересобрать профиль</button></div></form></section>"""
 
 
@@ -472,8 +486,7 @@ def _profile_body(product: Product, state: dict | None, error: str | None, notic
         parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Черновик профиля</h2>
 <p>{stale} Это занимает 1–3 минуты.</p>
 <p class="sg-muted">Чтобы запустить анализ, заполните сведения ниже и нажмите «Сохранить и собрать профиль».</p></section>""")
-    # Questions come from the latest draft; answering adds evidence and rebuilds.
-    parts.append(_questions_html(base, review))
+    # Questions are submitted together with the company data and uploads.
 
     parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Передумали?</h2>
 <p class="sg-muted">Отмена закроет текущий сбор. Подтверждённый профиль останется как есть.</p>
@@ -482,7 +495,7 @@ def _profile_body(product: Product, state: dict | None, error: str | None, notic
         parts.append(f'<p class="sg-muted"><a href="{base}/profile/delete">Удалить компанию</a></p>')
     # The final operation is always the save-and-analyse button, not a save-name
     # button or a build button above still-unsaved inputs.
-    parts.append(_collect_company_form(product, registry_hint))
+    parts.append(_collect_company_form(product, registry_hint, review))
     parts.append(ONCE_SCRIPT)
     return "".join(parts)
 
@@ -606,6 +619,8 @@ async def company_profile_action(product_id: UUID, action: str, request: Request
                 session_id = UUID(opened["session_id"])
             else:
                 session_id = session.id
+            # Answers must be durable BEFORE the background build reads sources.
+            await _apply_answers(service, product, session_id, fields)
             website = normalize_site(fields.get("link", ""))
             identifier = fields.get("identifier", "").strip()
             _start_job(background, product.id, session_id, website=website, identifier=identifier,
