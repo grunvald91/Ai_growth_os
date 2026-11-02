@@ -60,6 +60,18 @@ def test_only_completed_matching_service_visits_can_produce_suggestions():
     }), TODAY, SERVICE)
 
 
+def test_slot_preview_covers_multiple_masters_before_alternative_starts():
+    data = available().model_dump(mode="json")
+    data["free_slots"].append({
+        "date": (TODAY + timedelta(days=1)).isoformat(),
+        "service_id": SERVICE, "resource_id": 5,
+        "resource": "Ольга", "times": ["11:45", "12:45"],
+    })
+    rows = matching_slots(history(), Schedule.model_validate(data), TODAY, SERVICE, max_slots=2)
+    assert len(rows) == 2
+    assert {row.resource_id for row in rows} == {4, 5}
+
+
 class FakeSource:
     def __init__(self):
         self.calls = []
