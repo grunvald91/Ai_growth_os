@@ -229,3 +229,30 @@ async def test_async_parser_reads_all_nine_pdf_pages():
     assert source.status == 'read', source.note
     assert "Обработано страниц: 9 из 9" in source.note
     assert "Страница 9\nDocument page 9" in source.text
+
+
+def test_unreadable_pdf_page_is_reported_without_dropping_other_pages(monkeypatch):
+    from pypdf.errors import PdfReadError
+
+    class Page:
+        def __init__(self, text):
+            self.text = text
+
+        def extract_text(self):
+            if self.text is None:
+                raise PdfReadError("broken internal PDF stream")
+            return self.text
+
+    class Reader:
+        is_encrypted = False
+
+        def __init__(self, _):
+            self.pages = [Page("First page details"), Page(None), Page("Third page details")]
+
+    monkeypatch.setattr('pypdf.PdfReader', Reader)
+    source = parse_file('partly-broken.pdf', b'fake-contents', 'partial')
+    assert source.status == 'truncated'
+    assert "Обработано страниц: 2 из 3" in source.note
+    assert "Не удалось прочитать страницы: 2" in source.note
+    assert "First page details" in source.text and "Third page details" in source.text
+    assert "broken internal PDF stream" not in source.note
