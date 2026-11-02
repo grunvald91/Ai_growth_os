@@ -761,6 +761,7 @@ def test_profile_collect_button_is_last_and_saves_everything_before_draft(studio
     all_text = "\n".join(row["text"] for row in state["sources"])
     assert source in all_text and "Service: manicure 2500" in all_text
     assert "Ноготок Плюс" in all_text
+    assert "Описание компании: Салон маникюра в Сочи" in all_text
     assert state["review_current"] is True
     assert len(client.provider.requests) > before_requests
 
