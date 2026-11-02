@@ -188,6 +188,16 @@ jobs:
           # An ephemeral test company is published, checked through the live
           # local HTTP server, and fully deleted (even if the smoke test fails).
           if [ "${{ steps.seo-migration.outputs.prepare }}" = "true" ]; then
-            git show "$SHA:deploy/ops/20261102/seo_smoke_publish.py" \
-              | run "docker exec -i ai-growth-os-api-1 python - --execute"
+            if ! git show "$SHA:deploy/ops/20261102/seo_smoke_publish.py" \
+              | run "docker exec -i ai-growth-os-api-1 python - --execute"; then
+              echo "::error::SEO production canary failed; restoring previous application."
+              run "python3 /opt/ai_growth_os/deploy/deploy_growth.py rollback" || true
+              exit 1
+            fi
+            if ! run "curl -fsS --max-time 15 --resolve servgo.ru:443:127.0.0.1 -o /dev/null https://servgo.ru/blog && curl -fsS --max-time 15 --resolve servgo.ru:443:127.0.0.1 -o /dev/null https://servgo.ru/blog/sitemap.xml && curl -fsS --max-time 15 --resolve growth.servgo.ru:443:127.0.0.1 -o /dev/null https://growth.servgo.ru/public/blog/servgo/articles"; then
+              echo "::error::Public HTTPS blog check failed; restoring previous application."
+              run "python3 /opt/ai_growth_os/deploy/deploy_growth.py rollback" || true
+              exit 1
+            fi
+            echo "SEO_RELEASE_SMOKE_OK (temporary company removed)"
           fi
