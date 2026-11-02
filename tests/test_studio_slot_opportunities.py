@@ -57,7 +57,7 @@ class StudioSlotOpportunitiesTest(unittest.IsolatedAsyncioTestCase):
                 yield db
         app.dependency_overrides[get_db] = session
         self.client = TestClient(app)
-        self.secret_patch = patch("web.api.routes.studio_schedule._secret", return_value=SECRET)
+        self.secret_patch = patch("web.api.routes.studio_schedule._secret", return_value=SECRET.encode())
         self.secret_patch.start()
 
     async def asyncTearDown(self):
