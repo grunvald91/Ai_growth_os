@@ -42,8 +42,15 @@
     if(count){count.hidden=key!=='story';count.querySelector('select').disabled=key!=='story';}
     const names={post:'Пост',story:'Stories',static_image:'Изображение',
       short_video:'Видеосценарий',whiteboard:'Анимированное видео',package:'Полный пакет'};
-    document.getElementById('sg-create-context').textContent=
-      'Выбрано: '+names[key]+'. Опишите тему в нижней строке или откройте подробности.';
+    const context=document.getElementById('sg-create-context');
+    context.textContent='Выбрано: '+names[key]+'. Опишите тему в нижней строке.';
+    const advanced=document.getElementById('sg-create-advanced');
+    if(advanced) advanced.hidden=key==='whiteboard';
+    if(key==='whiteboard'){
+      const link=document.createElement('a');link.href=base+'/whiteboard';
+      link.textContent='Подробные настройки видео →';
+      context.append(document.createTextNode(' '),link);
+    }
   }
   screen.querySelectorAll('[data-sg-format]').forEach(button=>{
     button.addEventListener('click',()=>chooseFormat(button.dataset.sgFormat));
