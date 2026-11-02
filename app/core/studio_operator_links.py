@@ -59,3 +59,17 @@ def linked_operator(settings, user_id: int, accounts: dict) -> str | None:
     except (OSError, ValueError, TypeError):
         log.warning("growth_operator_link_invalid")
     return None
+
+
+def unbind_operator(settings, user_id: int) -> None:
+    """Revoke only the signed-in ServGo user's binding."""
+    path = _path(settings)
+    with _Locked(path):
+        try:
+            links = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        if not isinstance(links, dict):
+            raise ValueError("Invalid operator links")
+        links.pop(str(user_id), None)
+        _write(path, links)
