@@ -6,6 +6,7 @@ plus an executor in `executors.py`. Risk and cost live here, and the policy read
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Literal
 from uuid import UUID
 
@@ -111,6 +112,22 @@ class ReturnCandidatesParams(_Params):
                       description="За сколько последних дней изучить выполненные визиты. По умолчанию 180 дней.")
 
 
+class FillOpenSlotsParams(_Params):
+    service_id: int | None = Field(default=None, ge=1,
+                                   description="ID услуги только из подтверждённого каталога BookingBot. "
+                                               "Не знаете ID — не указывайте, система покажет выбор услуг.")
+    period: Literal["today", "tomorrow", "week"] = "tomorrow"
+    page: int = Field(default=1, ge=1, description="Страница каталога услуг.")
+
+
+class SlotOfferParams(_Params):
+    service_id: int = Field(ge=1)
+    resource_id: int = Field(ge=1)
+    day: date
+    time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    channel: Literal["telegram", "vk", "dzen", "vc_ru", "tenchat"] = "telegram"
+
+
 
 
 class MaterialParams(_Params):
@@ -204,6 +221,17 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                "«как увеличить число клиентов», «что улучшить», «сколько заработали», «какие дни пустые», "
                "«как часто возвращаются клиенты». topic — о чём именно вопрос (на узкий вопрос — узкий ответ); days — за сколько дней, если владелец назвал срок.",
                ToolOperation.ANALYTICS, Cost.NONE, InsightsParams),
+    Capability("fill_open_slots", "Подобрать клиентов под свободные часы",
+               "Для «чем заполнить завтра», «найди клиентов под свободные окна», «что делать с пустыми слотами»: "
+               "показывает услуги, реальные возможные времена начала записи и клиентов с выполненными "
+               "посещениями этой услуги без ближайшей записи. Никакие сообщения не отправляет. "
+               "Без service_id предлагает выбрать услугу.",
+               ToolOperation.ANALYTICS, Cost.NONE, FillOpenSlotsParams),
+    Capability("prepare_slot_offer", "Подготовить маркетинговый пост для свободного времени",
+               "Передать маркетинговой команде подготовку черновика объявления о конкретной свободной записи. "
+               "Время перед постановкой задачи перепроверяется. Клиентские данные не передаются команде, "
+               "рассылка не запускается, публикации нет. Использовать только после выбора конкретного времени.",
+               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, SlotOfferParams),
     Capability("show_return_candidates", "Кого пригласить на повторный визит",
                "Список клиентов из CRM записей с минимум тремя выполненными визитами, "
                "которые выходят за свой прежний интервал повторных посещений и не записаны "

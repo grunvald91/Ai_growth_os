@@ -6,7 +6,7 @@ keep their duplicate protection, owner approvals and audit records. Nothing here
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.dispatcher.readers import ACTIVE, attention, latest_active_video, plans, upcoming_slots, work_rows
 from app.dispatcher.registry import (CAPABILITIES, CHANNEL_LABELS, CancelVideoParams, DepthParams, GoToParams,
-                                     InsightsParams, PostParams, ReturnCandidatesParams, ScheduleParams, VideoParams, page_href, page_label)
+                                     FillOpenSlotsParams, InsightsParams, PostParams, ReturnCandidatesParams, ScheduleParams, SlotOfferParams, VideoParams, page_href, page_label)
 from app.dispatcher.outcome import Confirmation, Context, Outcome, links_block, task_block  # noqa: F401
 from app.models.domain import Approval, Product, Task, ToolCall
 
@@ -189,6 +189,153 @@ async def show_insights(ctx: Context, params: InsightsParams) -> Outcome:
     return Outcome("\n".join(lines) + note, " ".join(lines[:2]),
                    [{"type": "table", "columns": ["Показатель", "Значение"], "rows": rows},
                     {"type": "chips", "items": chips}, _links(ctx, "schedule")])
+
+
+
+async def fill_open_slots(ctx: Context, params: FillOpenSlotsParams) -> Outcome:
+    """Read-only service-specific availability and past-client suggestions."""
+    from datetime import timedelta
+    from app.insights.opportunities import matching_slots
+    from app.schedule.source import source_for
+    from app.schedule.views import day_label, period_dates
+    from app.insights.settings import AHEAD_DAYS
+
+    source = source_for(ctx.db, ctx.settings, ctx.product, ctx.account)
+    if source is None:
+        return _no_booking_data(ctx, "no_link")
+    today = datetime.now(ZoneInfo("Europe/Moscow")).date()
+    if params.service_id is None:
+        catalog = await asyncio.to_thread(source.fetch, today, today)
+        if catalog is None:
+            return _no_booking_data(ctx, "unavailable")
+        if not catalog.services:
+            return Outcome("Список основных активных услуг пуст или BookingBot ещё не передаёт "
+                           "каталог. Слоты без подтверждённой услуги не предлагаю.",
+                           "Не вижу список услуг для подбора свободного времени.", no_data=True)
+        page_size = 12
+        first_item = (params.page - 1) * page_size
+        services = catalog.services[first_item:first_item + page_size]
+        if not services:
+            return Outcome("На этой странице услуг нет. Покажу начало списка.",
+                           "Страница услуг пуста.",
+                           [{"type": "chips", "items": [{
+                               "label": "Первая страница", "capability": "fill_open_slots",
+                               "params": {"period": params.period, "page": "1"}}]}])
+        chips = [{"label": service.name[:45], "capability": "fill_open_slots",
+                  "params": {"service_id": str(service.id), "period": params.period}}
+                 for service in services]
+        if params.page > 1:
+            chips.append({"label": "Предыдущие услуги", "capability": "fill_open_slots",
+                          "params": {"period": params.period, "page": str(params.page - 1)}})
+        if first_item + page_size < len(catalog.services):
+            chips.append({"label": "Другие услуги", "capability": "fill_open_slots",
+                          "params": {"period": params.period, "page": str(params.page + 1)}})
+        return Outcome("Выберите услугу, чтобы проверить её реальную длительность, "
+                       "свободное время у мастеров и историю клиентов. "
+                       "Это только анализ, никаких рассылок.",
+                       "Выберите услугу для поиска свободных часов.",
+                       [{"type": "chips", "items": chips}, _links(ctx, "schedule")])
+
+    # Read history and future bookings without expensive availability calculations.
+    history = await asyncio.to_thread(
+        source.fetch, today - timedelta(days=180),
+        today + timedelta(days=AHEAD_DAYS - 1))
+    if history is None:
+        return _no_booking_data(ctx, "unavailable")
+    service = next((item for item in history.services if item.id == params.service_id), None)
+    if service is None:
+        return Outcome("Эта услуга не найдена у выбранной организации. "
+                       "Выберите услугу из актуального списка.",
+                       "Услуга недоступна.", no_data=True)
+    first, last = period_dates(params.period, today)
+    availability = await asyncio.to_thread(
+        source.fetch, first, last, with_slots=True, slot_service_id=params.service_id)
+    if availability is None:
+        return _no_booking_data(ctx, "unavailable")
+    if not availability.services:
+        return Outcome("BookingBot ещё не подтверждает доступность по конкретной услуге. "
+                       "Не буду предлагать непроверенные окна.", "Нет достоверных данных о свободном времени.",
+                       no_data=True)
+    options = matching_slots(history, availability, today, params.service_id)
+    if not options:
+        return Outcome(f"Для услуги «{service.name}» на выбранный период "
+                       "подтверждённых свободных стартов не нашёл.",
+                       "Свободного времени для этой услуги не найдено.",
+                       [{"type": "chips", "items": [
+                           {"label": "Другая услуга", "capability": "fill_open_slots",
+                            "params": {"period": params.period}},
+                           {"label": "Ближайшая неделя", "capability": "fill_open_slots",
+                            "params": {"service_id": str(params.service_id), "period": "week"}}]},
+                        _links(ctx, "schedule")])
+
+    rows = []
+    chips = []
+    chosen_resources: set[int] = set()
+    for option in options:
+        names = ", ".join(f"{c.name} ({c.visits} виз.)" for c in option.clients) or "Нет по истории"
+        rows.append([day_label(option.date), option.time, option.resource, names])
+        if option.resource_id not in chosen_resources and len(chips) < 3:
+            chosen_resources.add(option.resource_id)
+            chips.append({"label": f"Подготовить пост: {day_label(option.date)} {option.time} · {option.resource[:18]}",
+                          "capability": "prepare_slot_offer",
+                          "params": {"service_id": str(params.service_id),
+                                     "resource_id": str(option.resource_id),
+                                     "day": option.date.isoformat(), "time": option.time}})
+
+    text = (f"«{service.name}»: проверенные варианты начала записи — {len(options)} "
+            f"(показаны первые {len(options)}). Клиенты рядом — те, кто раньше завершил эту услугу "
+            "и не записан в ближайшие 14 дней; это предложения для проверки, "
+            "не согласие на сообщения. Начала могут перекрываться по времени: "
+            "нельзя считать их независимыми свободными часами или гарантированной выручкой. "
+            "Свободное время не забронировано.")
+    return Outcome(text, f"Нашёл {len(options)} вариантов начала записи. Таблица на экране.",
+                   [{"type": "table", "columns": ["Дата", "Начало", "Мастер/зал",
+                                                 "Клиенты из истории (не аудитория рассылки)"], "rows": rows},
+                    {"type": "chips", "items": chips}, _links(ctx, "schedule")])
+
+
+async def prepare_slot_offer(ctx: Context, params: SlotOfferParams) -> Outcome:
+    """Queue a draft for the content team only after a fresh authoritative slot check."""
+    from app.schedule.source import source_for
+    from app.content.service import queue_content
+    source = source_for(ctx.db, ctx.settings, ctx.product, ctx.account)
+    if source is None:
+        return _no_booking_data(ctx, "no_link")
+    today = datetime.now(ZoneInfo("Europe/Moscow")).date()
+    if not today <= params.day <= today + timedelta(days=6):
+        return Outcome("Для подготовки предложения выберите время в ближайшие семь дней.",
+                       "Выберите ближайшую дату.", ok=False)
+    schedule = await asyncio.to_thread(source.fetch, params.day, params.day,
+                                       with_slots=True, slot_service_id=params.service_id)
+    if schedule is None:
+        return _no_booking_data(ctx, "unavailable")
+    service = next((s for s in schedule.services if s.id == params.service_id), None)
+    free = next((s for s in schedule.free_slots if s.resource_id == params.resource_id
+                 and s.service_id == params.service_id and params.time in s.times), None)
+    if service is None or free is None:
+        return Outcome("Это время для выбранной услуги сейчас недоступно. "
+                       "Откройте свежий подбор и выберите другое.",
+                       "Свободное время изменилось.", ok=False,
+                       blocks=[{"type": "chips", "items": [
+                           {"label": "Перепроверить время", "capability": "fill_open_slots",
+                            "params": {"service_id": str(params.service_id), "period": "week"}}]}])
+    # No names, client IDs, contacts or list of CRM candidates enter the content task.
+    topic = (f"Мягкое приглашение на услугу «{service.name[:55]}» "
+             f"{params.day:%d.%m.%Y} в {params.time}, {str(free.resource or 'специалист')[:55]}. "
+             "Без скидок и обещаний брони; ссылка на онлайн-запись ServGo. "
+             "Перед публикацией проверить актуальность слота.")
+    try:
+        task = queue_content(ctx.db, ctx.product.id, topic, format="post", channel=params.channel)
+    except (ValueError, LookupError):
+        ctx.db.rollback()
+        return Outcome("Не удалось передать черновик команде.", "Задание не создано.", ok=False)
+    return Outcome("Маркетинговой команде передано задание подготовить пост. "
+                   "Клиентские контакты и персональные данные не переданы. "
+                   "Пост не публикуется автоматически, а свободное время не резервируется.",
+                   "Пост готовится. Публикации и рассылки не запущены.",
+                   [_task_block(ctx, task, "Предложение для свободного времени",
+                                f"/studio/products/{ctx.product.id}/tasks/{task.id}")],
+                   task_id=task.id)
 
 
 async def show_return_candidates(ctx: Context, params: ReturnCandidatesParams) -> Outcome:
@@ -446,6 +593,7 @@ async def restricted_action(ctx: Context, params) -> Outcome:
 EXECUTORS = {
     "show_work": show_work, "show_review": show_review, "show_plan": show_plan, "go_to": go_to,
     "show_schedule": show_schedule, "show_insights": show_insights, "show_return_candidates": show_return_candidates,
+    "fill_open_slots": fill_open_slots, "prepare_slot_offer": prepare_slot_offer,
     "set_insights_depth": set_insights_depth, "send_to_team": send_to_team, "create_post": create_post, "make_plan": make_plan,
     "whiteboard_video": whiteboard_video, "cancel_video": cancel_video, "restricted_action": restricted_action,
 }
