@@ -198,10 +198,12 @@ def _record_tool_call(db: Session, ctx: Context, capability_id: str, params: dic
         status="executed" if outcome.ok else "failed", executed_at=datetime.now(timezone.utc)))
 
 
-def _confirm_block(confirmation: Confirmation, confirmation_id: str) -> dict:
+def _confirm_block(confirmation: Confirmation, confirmation_id: str, capability_id: str | None = None) -> dict:
+    from app.dispatcher.editable import draft_view
     return {"type": "confirm", "confirmation_id": confirmation_id, "title": confirmation.title,
             "details": confirmation.details, "confirm_label": confirmation.confirm_label,
-            "cancel_label": "Отмена", "paid": confirmation.paid, "state": "pending"}
+            "cancel_label": "Отмена", "paid": confirmation.paid, "state": "pending",
+            "revision": 0, "editable": draft_view(capability_id, confirmation.params)}
 
 
 async def act(ctx: Context, capability_id: str, raw_params: dict) -> tuple[Outcome, Confirmation | None, str]:
@@ -307,7 +309,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
     confirmation_id = None
     if confirmation is not None:
         confirmation_id = uuid4().hex
-        blocks.append(_confirm_block(confirmation, confirmation_id))
+        blocks.append(_confirm_block(confirmation, confirmation_id, capability_id))
     elif chips:
         blocks.append({"type": "chips", "items": chips})
     params = {**confirmation.params, "_capability": capability_id} if confirmation is not None else \
@@ -327,6 +329,52 @@ def _fallback_chips() -> list[Chip]:
 
 
 # ---- confirmations ----------------------------------------------------------------------
+
+async def edit_confirmation(db: Session, ctx: Context, edit) -> dict:
+    """Edit a content request under the same conversation lock as confirmation.
+
+    Never queues work: only the explicit /confirm endpoint may start the saved draft.
+    """
+    from app.dispatcher.editable import EDITABLE_CAPABILITIES, target_for_edit, draft_view
+    conversation = open_conversation(db, ctx.product.id, ctx.account)
+    card = db.scalar(select(DispatcherMessage).where(
+        DispatcherMessage.conversation_id == conversation.id,
+        DispatcherMessage.confirmation_id == edit.confirmation_id,
+        DispatcherMessage.role == "assistant").with_for_update())
+    if card is None:
+        raise LookupError("Карточка не найдена")
+    if card.confirmation_state != "pending":
+        raise PermissionError("Задание уже подтверждено или отменено")
+    old_capability = (card.params or {}).get("_capability", card.capability)
+    if old_capability not in EDITABLE_CAPABILITIES:
+        raise PermissionError("Это подтверждение нельзя редактировать")
+    blocks = list(card.blocks or [])
+    current = next((b for b in blocks if b.get("type") == "confirm"
+                    and b.get("confirmation_id") == edit.confirmation_id), None)
+    if current is None or current.get("state") != "pending":
+        raise PermissionError("Карточка уже недоступна")
+    revision = int(current.get("revision", 0))
+    if edit.revision != revision:
+        raise PermissionError("Карточка была изменена. Откройте обновлённую версию")
+    capability_id, params = target_for_edit(edit)
+    described = await executors.DESCRIBERS[capability_id](ctx, params)
+    if not isinstance(described, Confirmation):
+        raise ValueError("Не удалось подготовить подтверждение")
+    replacement = _confirm_block(described, edit.confirmation_id, capability_id)
+    replacement["revision"] = revision + 1
+    card.blocks = clean_blocks([
+        *[{"type": "text", "text": "Параметры обновлены. Проверьте и подтвердите создание."}],
+        *[replacement if b.get("type") == "confirm" else b
+          for b in blocks if b.get("type") != "text"],
+    ])
+    card.params = {**described.params, "_capability": capability_id}
+    card.capability = capability_id
+    card.text = "Параметры обновлены. Проверьте и подтвердите создание."
+    card.spoken = card.text
+    db.commit()
+    return {"messages": [to_dict(card)], "replayed": False}
+
+
 
 async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bool, via: str = "button") -> dict:
     """Answer a confirmation card. A card works once; a voice 'yes' only answers the latest open card."""
