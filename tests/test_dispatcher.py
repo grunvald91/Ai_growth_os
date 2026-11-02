@@ -106,7 +106,7 @@ async def test_stories_require_confirmation_and_keep_exact_count(db, product):
     assert len(created) == 1
     from app.models.domain import Artifact
     item = db.scalar(select(Artifact).where(Artifact.task_id == created[0].id,
-                                             Artifact.kind == "content_request"))
+                                             Artifact.kind == "creative_request"))
     assert item is not None
     assert json.loads(item.content)["frame_count"] == 5
     assert any(b["type"] == "task" for b in confirmed["messages"][-1]["blocks"])
