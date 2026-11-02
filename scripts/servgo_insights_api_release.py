@@ -97,22 +97,22 @@ def _check_live_contract(spec: dict) -> None:
 def verify_live_contract(client) -> None:
     # Only loopback, and only schema keys are processed: no users, secrets or client records.
     source = (
-        "import json, urllib.request\\n"
-        "with urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=8) as r:\\n"
-        "    spec = json.load(r)\\n"
-        "paths = spec.get('paths', {})\\n"
-        "assert '/internal/studio/businesses' in paths\\n"
-        "params = {p.get('name') for p in paths['/internal/studio/schedule']['get']['parameters']}\\n"
-        "assert 'slot_service_id' in params\\n"
-        "schemas = spec['components']['schemas']\\n"
-        "fields = schemas['ScheduleOut']['properties']\\n"
-        "assert {'services', 'paused_client_ids', 'resources', 'bookings', 'free_slots'} <= set(fields)\\n"
+        "import json, urllib.request\n"
+        "with urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=8) as r:\n"
+        "    spec = json.load(r)\n"
+        "paths = spec.get('paths', {})\n"
+        "assert '/internal/studio/businesses' in paths\n"
+        "params = {p.get('name') for p in paths['/internal/studio/schedule']['get']['parameters']}\n"
+        "assert 'slot_service_id' in params\n"
+        "schemas = spec['components']['schemas']\n"
+        "fields = schemas['ScheduleOut']['properties']\n"
+        "assert {'services', 'paused_client_ids', 'resources', 'bookings', 'free_slots'} <= set(fields)\n"
         "expected = {'resources': {'working_dates'}, "
-        "'bookings': {'service_id', 'resource_id'}, 'free_slots': {'service_id'}}\\n"
-        "for field, names in expected.items():\\n"
-        "    ref = fields[field]['items']['$ref'].rsplit('/', 1)[-1]\\n"
-        "    assert names <= set(schemas[ref]['properties'])\\n"
-        "print('insights_api_contract=ok')\\n"
+        "'bookings': {'service_id', 'resource_id'}, 'free_slots': {'service_id'}}\n"
+        "for field, names in expected.items():\n"
+        "    ref = fields[field]['items']['$ref'].rsplit('/', 1)[-1]\n"
+        "    assert names <= set(schemas[ref]['properties'])\n"
+        "print('insights_api_contract=ok')\n"
     )
     run(client, "./venv/bin/python -c " + shlex.quote(source), 30)
 
