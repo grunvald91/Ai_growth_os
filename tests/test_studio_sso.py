@@ -204,6 +204,38 @@ class StudioSsoTest(unittest.IsolatedAsyncioTestCase):
             self.current = who
             self.assertEqual(self.client.get('/studio/businesses').json(), [])
 
+    async def test_internal_business_list_is_server_only_and_rechecks_roles(self):
+        endpoint = '/internal/studio/businesses'
+        params = {'user_id': self.u['owner']}
+        self.assertEqual(self.client.get(endpoint, params=params).status_code, 403)
+        self.assertEqual(self.client.get(endpoint, params=params,
+                                        headers={'X-Studio-Key': 'wrong'}).status_code, 403)
+        headers = {'X-Studio-Key': KEY}
+        first = self.client.get(endpoint, params=params, headers=headers)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json(), [{'id': self.business_id, 'name': 'Салон', 'role': 'owner'}])
+
+        async with self.sessions() as db:
+            second = Business(owner_id=self.u['owner'], name='Вторая компания',
+                              business_type='salon', is_active=True)
+            db.add(second)
+            await db.commit()
+            second_id = second.id
+        listed = self.client.get(endpoint, params=params, headers=headers).json()
+        self.assertEqual({item['id'] for item in listed}, {self.business_id, second_id})
+        self.assertEqual(self.client.get(endpoint, params={'user_id': self.u['stranger']},
+                                         headers=headers).json(), [])
+        self.assertEqual(self.client.get(endpoint, params={'user_id': 999999},
+                                         headers=headers).json(), [])
+
+        await self.set_flag(True)
+        admin_list = self.client.get(endpoint, params={'user_id': self.u['admin']},
+                                     headers=headers).json()
+        self.assertEqual([item['id'] for item in admin_list], [self.business_id])
+        await self.set_flag(False)
+        self.assertEqual(self.client.get(endpoint, params={'user_id': self.u['admin']},
+                                         headers=headers).json(), [])
+
     async def test_the_entry_list_is_empty_while_sign_in_is_not_configured(self):
         with mock.patch.dict(os.environ, {'STUDIO_SSO_SECRET': '', 'STUDIO_INTERNAL_KEY': ''}):
             self.current = 'owner'
