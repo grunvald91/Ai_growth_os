@@ -536,3 +536,28 @@ async def test_fabricated_servgo_price_rejected_by_author_requires_owner_review(
     assert not blocked.published and "critical_finding_unresolved" in blocked.reason
     assert db.get(Artifact, article_id).status == ArtifactStatus.AWAITING_APPROVAL
     assert not list(db.scalars(select(Publication)))
+
+
+
+@pytest.mark.asyncio
+async def test_unverified_servgo_tariff_blocked_even_when_critic_missed_it(env, tmp_path):
+    db, company = env
+    article_id = await make_article(db, company, tmp_path, critic_status="no_material_issues")
+    row = db.get(Artifact, article_id)
+    article = ArticleArtifact.model_validate_json(row.content)
+    article.reader_article.sections[0].body += " Наш сервис стоит 2 990 ₽ ежемесячно."
+    article.full_article += " Наш сервис стоит 2 990 ₽ ежемесячно."
+    row.content = article.model_dump_json()
+    reviewer = db.scalar(select(AgentRun).where(
+        AgentRun.task_id == row.task_id, AgentRun.agent_name == "marketing_editor"))
+    review = db.scalar(select(Artifact).where(
+        Artifact.agent_run_id == reviewer.id, Artifact.kind == "seo_final_review"))
+    review.content = json.dumps({
+        "status": "no_material_issues",
+        "reader_hash": reader_hash(article.reader_article),
+        "findings": [],
+    })
+    db.commit()
+    blocked = publish_if_clear(db, article_id)
+    assert not blocked.published and "unverified ServGo price" in blocked.reason
+    assert not list(db.scalars(select(Publication)))

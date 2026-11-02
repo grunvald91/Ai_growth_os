@@ -31,6 +31,9 @@ _TRANSLIT = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъы
                      ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r", "s", "t",
                       "u", "f", "h", "ts", "ch", "sh", "sch", "", "y", "", "e", "yu", "ya"]))
 _LEAKS = re.compile(r"\[REDACTED|\{[a-z_]+\}|TODO|lorem ipsum|proof_needed|schema:", re.IGNORECASE)
+# The verified ServGo company profile explicitly has no approved subscription
+# prices. Avoid fabricating a commercial offer even if a critic misses the claim.
+_SERVGO_PRICE = re.compile(r"(?<!\\w)\\d[\\d\\s\\u00a0]{0,12}\\s*(?:₽|руб(?:\\.|ля|лей)?|RUB)(?!\\w)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -130,6 +133,23 @@ def static_problems(article: ArticleArtifact) -> list[str]:
     return problems
 
 
+def unsupported_servgo_pricing(db: Session, row: Artifact, article: ArticleArtifact) -> list[str]:
+    """B2B ServGo currently has no approved public price (profile: pricing under review).
+
+    Restrict this extra check to the ServGo marketing company, not tenant
+    articles about their own genuine service prices. The approved offer can
+    replace this rule once validated pricing is part of the company profile.
+    """
+    product = db.get(Product, row.product_id)
+    if product is None or product.slug != "servgo" or article.reader_article is None:
+        return []
+    reader = article.reader_article
+    visible = "\\n".join([reader.title, reader.lead, reader.direct_answer or "",
+                          *(section.body for section in reader.sections), reader.closing])
+    return (["unverified ServGo price: no approved public tariff in company profile"]
+            if _SERVGO_PRICE.search(visible) else [])
+
+
 def duplicate_page_problems(db: Session, row: Artifact, article: ArticleArtifact) -> list[str]:
     """Fail on actual repeats; avoid fuzzy heuristics that punish legitimately similar guides."""
     def core_text(value: ArticleArtifact) -> str:
@@ -214,7 +234,8 @@ def publish_if_clear(db: Session, article_id, *, now: datetime | None = None,
     if published_today(db, row.product_id, now=now) >= daily_limit:
         return Outcome(False, "daily_publication_limit")
     article = ArticleArtifact.model_validate_json(row.content)
-    problems = static_problems(article) + duplicate_page_problems(db, row, article)
+    problems = (static_problems(article) + unsupported_servgo_pricing(db, row, article)
+                + duplicate_page_problems(db, row, article))
     verdict = critic_verdict(db, row.task_id, article.reader_article)
     if verdict not in CLEAN_CRITIC_STATUSES:
         problems.append(f"critic review: {verdict}")
@@ -320,7 +341,8 @@ def publish_owner_approved(db: Session, *, now: datetime | None = None,
             continue
         # Owner confirmation can override the critic's editorial verdict, not
         # basic page completeness: public_blog dereferences reader_article.
-        problems = static_problems(article) + duplicate_page_problems(db, row, article)
+        problems = (static_problems(article) + unsupported_servgo_pricing(db, row, article)
+                + duplicate_page_problems(db, row, article))
         if problems:
             _logger.warning("SEO owner-approved article failed static checks %s: %s",
                             row.id, "; ".join(problems))
