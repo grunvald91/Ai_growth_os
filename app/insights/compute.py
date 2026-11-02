@@ -229,13 +229,14 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
     result.topic = "services"
     # Services and masters/halls.
     services = Counter(_short(b.service) for b in sold)
-    revenue: dict[str, int] = defaultdict(int)
+    estimated_value: dict[str, int] = defaultdict(int)
     for b in sold:
-        revenue[_short(b.service)] += b.price or 0
+        estimated_value[_short(b.service)] += b.price or 0
     for name, count in services.most_common(TOP_ITEMS):
         add(f"service_bookings:{name}", f"Записей на услугу «{name}»", count, "шт")
-        if revenue[name]:
-            add(f"service_revenue:{name}", f"Сумма по услуге «{name}»", revenue[name], "₽")
+        if estimated_value[name]:
+            add(f"service_estimated_value:{name}",
+                f"Расчётная стоимость записанной услуги «{name}»", estimated_value[name], "₽")
     if services:
         result.line("Чаще всего берут: " + ", ".join(f"«{n}» — {c}" for n, c in services.most_common(3)) + ".")
         result.row(["Услуги", ", ".join(f"{n} {c}" for n, c in services.most_common(3))])
