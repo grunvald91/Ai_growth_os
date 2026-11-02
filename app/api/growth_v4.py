@@ -132,7 +132,7 @@ def create_workspace_v4(pid, form, warning, voice_project="", voice_max=300):
           <div class="sg-create-tools">{tool_rows}</div>
         </details>
         <div class="sg-create-context" id="sg-create-context" aria-live="polite"></div>
-        <section class="dp-home sg-create-dispatch" data-load-state="1" data-create-format=""
+        <section class="dp-home sg-create-dispatch" data-create-format=""
           data-api="{base}/dispatch" data-voice-url="/studio/voice/dictate"
           data-voice-preview-url="/studio/voice/preview" data-voice-max="{int(voice_max)}"
           data-voice-project="{html.escape(voice_project,quote=True)}"
