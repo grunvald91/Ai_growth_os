@@ -394,3 +394,17 @@ def test_servgo_autoschedule_28_day_cap_and_company_opt_out(env):
         assert enqueue_servgo_if_due(db, enabled, now=now + timedelta(days=29))
         set_enabled(db, product_id, enabled=False, actor="owner")
         assert not enqueue_servgo_if_due(db, enabled, now=now + timedelta(days=60))
+
+
+def test_seo_article_forces_critic_without_enabling_global_reviews(env):
+    from app.core.composition import build_article_production
+
+    factory, settings, _product_id = env
+    assert settings.agent_critic_enabled is False
+    with factory() as db:
+        general = build_article_production(db, settings, provider=Provider())
+        seo = build_article_production(db, settings, provider=Provider(), force_critic=True)
+        # SEO review should remain compulsory, but general article production
+        # must not incur extra critic calls when the global flag is disabled.
+        assert general.llm.extra_timeout_seconds == 0
+        assert seo.llm.extra_timeout_seconds > 0
