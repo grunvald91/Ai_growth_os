@@ -201,7 +201,7 @@ def test_studio_root_redirects_to_servgo_dashboard(studio_db):
         assert response.headers["location"]==f"/studio/products/{product.id}"
         chooser=client.get("/studio?choose=true")
         assert chooser.status_code==200
-        assert "Выберите проект" in chooser.text
+        assert "Ваши компании" in chooser.text
     finally:
         app.dependency_overrides.clear()
 

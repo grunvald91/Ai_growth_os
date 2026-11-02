@@ -187,7 +187,7 @@ def _session_login(request: Request, settings, users: dict) -> tuple[str, list[s
     return login, current[1]
 
 
-def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str]] | None:
+def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str] | None] | None:
     """Validate the signed identity and derive company access from live ServGo permissions."""
     from app.sso import access, tickets
     session = tickets.read_session(settings, request.cookies.get(tickets.COOKIE))
@@ -223,6 +223,15 @@ def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str]] | N
                 request.state.studio_sso_role = role
         if not allowed:
             return None
+    # Platform-wide access is NEVER inferred from a BookingBot owner/admin role.
+    # It is unlocked only after the person has explicitly proved control of an
+    # existing Growth operator credential in a live ServGo SSO session.
+    from app.core.studio_operator_links import linked_operator
+    linked_login = linked_operator(settings, session.user_id, _load_users(settings))
+    if linked_login is not None:
+        # Preserve the proven operator login so permission gates such as
+        # STUDIO_TUNE_USERNAMES continue to recognize this exact identity.
+        return linked_login, None
     return f"servgo:{session.user_id}", sorted(allowed)
 
 
