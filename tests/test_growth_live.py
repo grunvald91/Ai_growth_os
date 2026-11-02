@@ -69,6 +69,10 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'class="dp-form command-bar"' in page.text
     assert 'id="dp-voice-hitbox"' in page.text
     assert 'id="dp-voice-overlay"' in page.text
+    assert 'class="voice-hold-overlay vg"' in page.text
+    assert 'id="vgBars"' in page.text
+    assert 'id="vgKnob"' in page.text
+    assert '/studio/assets/voice-glow.js?v=1' in page.text
     assert 'id="dp-voice-status"' in page.text
     assert 'id="sg-create-suggestions"' in page.text
     assert 'id="sg-create-count"' in page.text
@@ -77,7 +81,7 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="sg-create-brief"' in page.text
     assert 'id="sg-create-form"' not in page.text
     assert '/studio/assets/create-studio.js?v=images-20261102' in page.text
-    assert '/studio/assets/dispatcher.js?v=images-20261102' in page.text
+    assert '/studio/assets/dispatcher.js?v=voice-glow-20261102' in page.text
     assert page.text.count('id="dp-input"') == 1
     assert page.text.index('Что создаём?') < page.text.index('id="dp-input"')
     js = client.get('/studio/assets/dispatcher.js')
@@ -129,6 +133,10 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert 'data-voice-url="/studio/voice/dictate"' in page.text
     assert 'id="dp-state"' in page.text
     assert 'id="dp-voice-overlay"' in page.text
+    assert 'class="voice-hold-overlay vg"' in page.text
+    assert 'id="vgBars"' in page.text
+    assert 'id="vgKnob"' in page.text
+    assert '/studio/assets/voice-glow.js?v=1' in page.text
     assert 'id="dp-voice-hitbox"' in page.text
     assert 'id="dp-voice-status"' in page.text
     assert 'placeholder="Нажмите — текст · удерживайте — голос"' in page.text
@@ -140,8 +148,8 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=16' in page.text
-    assert '/studio/assets/dispatcher.js?v=images-20261102' in page.text
+    assert '/studio/assets/growth-live.css?v=17' in page.text
+    assert '/studio/assets/dispatcher.js?v=voice-glow-20261102' in page.text
     assert '/studio/assets/growth-live.js?v=8' in page.text
     assert 'Простое видео' in page.text
     assert 'hero-intro' in page.text
@@ -1150,3 +1158,20 @@ def test_create_timing_explains_status_without_unverified_estimates(live):
     assert "Сколько занимает создание?" in html
     assert "фактическим статусом" in html
     assert "точное время заранее не гарантируется" in html
+
+
+def test_voice_glow_uses_existing_audio_stream(live):
+    client, _, _ = live
+    res = client.get('/studio/assets/voice-glow.js')
+    assert res.status_code == 200
+    assert res.headers['content-type'].startswith('application/javascript')
+    assert "createMediaStreamSource(stream)" in res.text
+    assert "getUserMedia(" not in res.text
+    assert "stream.getTracks().forEach" not in res.text
+    assert "getByteTimeDomainData" in res.text
+    assert "recognize: recognize" in res.text
+    assert "setKnobX: setKnobX" in res.text
+    dispatcher = client.get('/studio/assets/dispatcher.js').text
+    assert "window.VoiceGlow.start(stream)" in dispatcher
+    assert "window.VoiceGlow.recognize()" in dispatcher
+    assert "window.VoiceGlow.hide()" in dispatcher

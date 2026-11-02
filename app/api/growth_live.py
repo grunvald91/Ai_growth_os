@@ -113,6 +113,12 @@ def stylesheet():
 def javascript():
     return Response((ASSETS/'growth-live.js').read_text(), media_type='application/javascript')
 
+@router.get('/studio/assets/voice-glow.js')
+def voice_glow_javascript():
+    return Response((ASSETS/'voice-glow.js').read_text(), media_type='application/javascript',
+                    headers={'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'})
+
+
 @router.get('/studio/assets/create-studio.js')
 def create_studio_javascript():
     return Response((ASSETS/'create-studio.js').read_text(), media_type='application/javascript',
