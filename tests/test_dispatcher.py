@@ -237,6 +237,112 @@ async def test_edit_preserves_unmodified_audience_context(db, product):
     assert json.loads(artifact.content)["audience"] == "Родители дошкольников"
 
 
+
+# ---- unified Create: dispatcher intent + optional manual details -------------------------
+
+@pytest.mark.asyncio
+async def test_create_options_merge_with_voice_and_survive_confirmation(db, product):
+    from app.dispatcher.editable import CreateHints
+    model, _ = llm({"intent": "execute", "capability": "create_creative", "confidence": 0.95,
+                    "params": {"format": "story", "topic": "Как ухаживать за волосами"}})
+    request = CreateHints(format="story", platform="vk", frame_count=6,
+                          audience="Клиенты салона красоты",
+                          editorial_brief="Не обещать медицинских результатов")
+    response = await service.handle_message(
+        db, context(db, product), model, text="Сделай четыре сторис про уход",
+        client_key="voice-details", creation=request)
+    card = next(b for b in response["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "story"
+    assert card["editable"]["frame_count"] == 4  # explicit voice wins over dropdown
+    assert card["editable"]["platform"] == "vk"
+    assert card["editable"]["audience"] == "Клиенты салона красоты"
+    assert card["editable"]["editorial_brief"] == "Не обещать медицинских результатов"
+    assert tasks(db, "content_creative") == []
+    await service.confirm(db, context(db, product), card["confirmation_id"],
+                          accept=True, revision=0)
+    job = tasks(db, "content_creative")[0]
+    source = db.scalar(select(Artifact).where(
+        Artifact.task_id == job.id, Artifact.kind == "creative_request"))
+    request_data = json.loads(source.content)
+    assert request_data["frame_count"] == 4 and request_data["platform"] == "vk"
+    assert request_data["audience"] == "Клиенты салона красоты"
+    assert request_data["editorial_brief"] == "Не обещать медицинских результатов"
+
+
+@pytest.mark.asyncio
+async def test_manual_story_selection_cannot_override_explicit_post(db, product):
+    from app.dispatcher.editable import CreateHints
+    model, _ = llm({"intent": "execute", "capability": "create_post", "confidence": 0.96,
+                    "params": {"topic": "Как выбрать услугу"}})
+    result = await service.handle_message(
+        db, context(db, product), model, text="Напиши пост про услуги",
+        client_key="format-override", creation=CreateHints(
+            format="story", platform="vk", frame_count=6,
+            audience="Новые клиенты"))
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "post"
+    assert card["editable"]["platform"] == "telegram"
+    assert card["editable"]["audience"] == "Новые клиенты"
+    assert card["editable"]["frame_count"] is None
+    assert tasks(db, "content_factory") == []
+
+
+@pytest.mark.asyncio
+async def test_spoken_platform_overrides_existing_dropdown(db, product):
+    from app.dispatcher.editable import CreateHints
+    model, _ = llm({"intent": "execute", "capability": "create_creative", "confidence": 0.96,
+                    "params": {"topic": "Пять советов", "format": "story", "platform": "telegram"}})
+    result = await service.handle_message(
+        db, context(db, product), model, text="Сделай пять сторис в Телеграм",
+        client_key="platform-override", creation=CreateHints(
+            format="story", platform="vk", frame_count=7))
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["platform"] == "telegram"
+    assert card["editable"]["frame_count"] == 5
+
+
+@pytest.mark.asyncio
+async def test_full_package_keeps_audience_and_editorial_brief(db, product):
+    from app.dispatcher.editable import CreateHints
+    model, _ = llm({"intent": "execute", "capability": "create_package", "confidence": 0.94,
+                    "params": {"topic": "Онлайн-запись для салонов"}})
+    result = await service.handle_message(
+        db, context(db, product), model, text="Сделай полный пакет про запись",
+        client_key="package-details", creation=CreateHints(
+            format="package", audience="Владельцы салонов", editorial_brief="Тон экспертный"))
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["audience"] == "Владельцы салонов"
+    await service.confirm(db, context(db, product), card["confirmation_id"],
+                          accept=True, revision=0)
+    job = tasks(db, "content_factory")[0]
+    source = db.scalar(select(Artifact).where(
+        Artifact.task_id == job.id, Artifact.kind == "content_request"))
+    request_data = json.loads(source.content)
+    assert request_data["audience"] == "Владельцы салонов"
+    assert request_data["editorial_brief"] == "Тон экспертный"
+
+
+def test_create_details_validation_and_edit_clearing():
+    from app.dispatcher.editable import CreateHints, EditCreation
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        CreateHints(format="story", platform="youtube_shorts")
+    with pytest.raises(ValidationError):
+        CreateHints(format="post", frame_count=5)
+    with pytest.raises(ValidationError):
+        CreateHints(platform="telegram")
+    with pytest.raises(ValidationError):
+        CreateHints(format="story", frame_count=11)
+    from app.dispatcher.editable import target_for_edit
+    cap, params = target_for_edit(EditCreation(
+        confirmation_id="sample", revision=0, format="story", topic="Новая тема",
+        frame_count=4, audience="", editorial_brief=""),
+        existing={"audience": "Старая аудитория", "editorial_brief": "Старые требования"})
+    assert cap == "create_creative"
+    assert params.audience is None and params.editorial_brief is None
+
+
+
 # ---- blocks -----------------------------------------------------------------------------
 
 def test_blocks_drop_foreign_links_and_misshapen_tables():

@@ -224,10 +224,21 @@ async def send_to_team(ctx: Context, params) -> Outcome:
 
 # ---- creating work -----------------------------------------------------------------------
 
+def _context_details(params) -> list[str]:
+    details = []
+    if params.audience:
+        details.append(f"Аудитория: {params.audience}.")
+    if params.editorial_brief:
+        preview = params.editorial_brief[:180]
+        details.append(f"Требования: {preview}" + ("…" if len(params.editorial_brief) > 180 else ""))
+    return details
+
+
 async def describe_create_post(ctx: Context, params: PostParams) -> Confirmation:
     return Confirmation(
         title="Подготовить пост?",
         details=[f"Тема: {params.topic}.", f"Площадка: {CHANNEL_LABELS[params.channel]}.",
+                 *_context_details(params),
                  "Готовый текст придёт на проверку; автоматической публикации нет."],
         params=params.model_dump(exclude_none=True), confirm_label="Создать",
     )
@@ -237,7 +248,7 @@ async def create_post(ctx: Context, params: PostParams) -> Outcome:
     from app.content.service import queue_content
     try:
         task = queue_content(ctx.db, ctx.product.id, params.topic, format="post", channel=params.channel,
-                             audience=params.audience)
+                             audience=params.audience, editorial_brief=params.editorial_brief)
     except (ValueError, LookupError):
         ctx.db.rollback()
         return Outcome("Не получилось поставить пост в работу: проверьте тему и площадку.",
@@ -257,6 +268,7 @@ async def describe_create_creative(ctx: Context, params: CreativeParams) -> Conf
         details.append(f"Экранов: {params.frame_count}.")
     platform = params.platform or {"story": "telegram", "short_video": "youtube_shorts", "static_image": "telegram"}[params.format]
     details.append(f"Площадка: {platform}.")
+    details.extend(_context_details(params))
     details.append("Сейчас этот процесс создаёт раскадровку и промпты; файлы изображений и MP4 не генерируются.")
     details.append("Без отдельного согласования ничего не публикуется.")
     return Confirmation(title=f"Подготовить {item}?", details=details,
@@ -271,7 +283,8 @@ async def confirm_create_creative(ctx: Context, stored: dict, via: str) -> Outco
         command = CreativeRequest(mode="creative", product_id=ctx.product.id, topic=params.topic,
                                   format=params.format,
                                   platform=params.platform or {"story": "telegram", "short_video": "youtube_shorts", "static_image": "telegram"}[params.format],
-                                  frame_count=params.frame_count, audience=params.audience)
+                                  frame_count=params.frame_count, audience=params.audience,
+                                  editorial_brief=params.editorial_brief)
         task = queue_creative(ctx.db, command)
     except (ValueError, ValidationError, LookupError):
         ctx.db.rollback()
@@ -286,6 +299,7 @@ async def confirm_create_creative(ctx: Context, stored: dict, via: str) -> Outco
 async def describe_create_package(ctx: Context, params: PackageParams) -> Confirmation:
     return Confirmation(title="Создать полный пакет?",
         details=[f"Тема: {params.topic}.", "Включены статья, адаптации и видеосценарии.",
+                 *_context_details(params),
                  "Готовый анимированный MP4 не входит и отдельно оплачивается.",
                  "Публикация не запускается автоматически."],
         params=params.model_dump(exclude_none=True), confirm_label="Создать")
@@ -295,7 +309,8 @@ async def confirm_create_package(ctx: Context, stored: dict, via: str) -> Outcom
     from app.content.service import queue_content
     try:
         params = PackageParams.model_validate(stored)
-        task = queue_content(ctx.db, ctx.product.id, params.topic, format="package")
+        task = queue_content(ctx.db, ctx.product.id, params.topic, format="package",
+                             audience=params.audience, editorial_brief=params.editorial_brief)
     except (ValueError, LookupError):
         ctx.db.rollback()
         return Outcome("Не удалось создать пакет. Уточните тему.", ok=False)

@@ -62,7 +62,7 @@ def icon(name):
 
 
 
-def create_workspace_v4(pid, form, warning, voice_project="", voice_max=300):
+def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
     """Compact creation UI with the same dispatcher voice gesture as the owner home."""
     base = f"/studio/products/{pid}"
     formats = [
@@ -98,13 +98,33 @@ def create_workspace_v4(pid, form, warning, voice_project="", voice_max=300):
         f'aria-label="Об инструменте {html.escape(label)}">i</button></div>'
         for label, href, description in tools
     )
-    frame_count = (
-        '<label class="sg-field sg-story-count" hidden><span>Число экранов Stories</span>'
-        '<select name="frame_count"><option value="">Автоматически (3–10)</option>'
-        + ''.join(f'<option value="{n}">{n} экранов</option>' for n in range(3, 11))
-        + '</select></label>'
-    )
-    form = form.replace('<div class="sg-fields">', '<div class="sg-fields">' + frame_count, 1)
+    # V4 has one command path; classic Studio keeps the legacy /create POST.
+    advanced = '''
+      <div id="sg-create-settings" class="sg-create-settings">
+        <label class="sg-create-setting" id="sg-create-platform-row" hidden>
+          <span>Площадка</span>
+          <select id="sg-create-platform" aria-label="Площадка"></select>
+        </label>
+        <label class="sg-create-setting" id="sg-create-count-row" hidden>
+          <span>Количество экранов Stories</span>
+          <select id="sg-create-count" aria-label="Количество экранов">
+            <option value="">Автоматически (3–10)</option>
+            ''' + ''.join(f'<option value="{n}">{n}</option>' for n in range(3, 11)) + '''
+          </select>
+        </label>
+        <label class="sg-create-setting">
+          <span>Аудитория <small>· необязательно</small></span>
+          <input id="sg-create-audience" maxlength="300" placeholder="Для кого готовим материал?">
+        </label>
+        <label class="sg-create-setting">
+          <span>Дополнительные требования <small>· необязательно</small></span>
+          <textarea id="sg-create-brief" maxlength="3500" rows="2"
+            placeholder="Тон, важные условия, что нельзя обещать…"></textarea>
+        </label>
+        <p class="sg-create-tip">Параметры попадут в карточку диспетчера.
+          Работа начнётся только после вашего подтверждения.</p>
+      </div>
+    '''
     return f'''
     <section class="sg-create-screen">
       <div class="sg-create-scroll">
@@ -125,7 +145,7 @@ def create_workspace_v4(pid, form, warning, voice_project="", voice_max=300):
           <summary>Сценарий и подробности</summary>
           <p class="sg-create-tip">Нужны особые требования, аудитория или площадка?
           Укажите их здесь либо просто опишите задачу в строке ниже.</p>
-          {warning}{form}
+          {warning}{advanced}
         </details>
         <details class="sg-create-extra">
           <summary>Другие инструменты</summary>
@@ -261,13 +281,12 @@ def render_v4(page, request, pid, switch):
                    '</div>'
                    '<div class="home-hero-subnote">Результаты и следующие шаги появятся после запроса</div></div></section>')
     if pid and current == base+'/create':
-        form = original.outer(original.find(ident='sg-create-form'))
-        if form:
+        if original.find(ident='sg-create-form'):
             warning = original.outer(original.find(cls='sg-warning'))
             config = original.find(cls='sg-create-voice-config')
             config_attrs = config[1] if config else {}
             content = create_workspace_v4(
-                pid, form, warning,
+                pid, warning,
                 voice_project=config_attrs.get('data-voice-project') or '',
                 voice_max=int(config_attrs.get('data-voice-max') or 300),
             )
@@ -346,7 +365,7 @@ def render_v4(page, request, pid, switch):
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=14">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=15">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=5">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'

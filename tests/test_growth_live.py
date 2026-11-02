@@ -42,8 +42,14 @@ def test_switch_both_ways_preserves_query_and_real_forms(live):
     assert 'data-growth-design="v4"' in new.text
     assert 'Старый дизайн' in new.text
     assert client.cookies['growth_design'] == 'v4'
-    assert 'name="topic"' in new.text
-    assert f'action="{base}/create"' in new.text
+    assert 'id="sg-create-settings"' in new.text
+    assert 'id="sg-create-audience"' in new.text
+    assert 'id="sg-create-brief"' in new.text
+    assert 'id="sg-create-platform"' in new.text
+    assert 'id="sg-create-count"' in new.text
+    assert f'action="{base}/create"' not in new.text
+    assert 'id="sg-create-form"' not in new.text
+    assert f'action="{base}/create"' in classic.text
     assert 'private, no-store' == new.headers['cache-control']
     assert 'Cookie' in new.headers['vary']
     assert 'data-growth-design="v4"' in client.get(base+'/work').text
@@ -65,7 +71,11 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="dp-voice-overlay"' in page.text
     assert 'id="dp-voice-status"' in page.text
     assert 'id="sg-create-suggestions"' in page.text
-    assert 'name="frame_count"' in page.text
+    assert 'id="sg-create-count"' in page.text
+    assert 'id="sg-create-platform"' in page.text
+    assert 'id="sg-create-audience"' in page.text
+    assert 'id="sg-create-brief"' in page.text
+    assert 'id="sg-create-form"' not in page.text
     assert '/studio/assets/create-studio.js?v=1' in page.text
     assert '/studio/assets/dispatcher.js?v=create-20261102' in page.text
     assert page.text.count('id="dp-input"') == 1
@@ -74,6 +84,27 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert js.status_code == 200
     assert "root.classList.contains('sg-create-dispatch')" in js.text
     assert "pending[pending.length - 1]" in js.text
+
+
+
+def test_create_has_only_dispatcher_submit_and_reusable_details(live):
+    client, _, product = live
+    base = f'/studio/products/{product.id}'
+    page = client.get(base + '/create?design=v4').text
+    # No hidden legacy form may bypass dispatcher confirmation.
+    assert 'id="dp-form"' in page and 'id="dp-send"' in page
+    assert 'id="sg-create-settings"' in page
+    assert 'sg-primary-action' not in page
+    assert '<form method="post" action="' + base + '/create"' not in page
+    js = client.get('/studio/assets/create-studio.js')
+    assert js.status_code == 200
+    assert "document.getElementById('sg-create-platform')" in js.text
+    assert "document.getElementById('sg-create-count')" in js.text
+    assert "Only the lower dispatcher composer can submit" in js.text
+    dispatcher = client.get('/studio/assets/dispatcher.js').text
+    assert "creation: creationHints()" in dispatcher
+    assert "frame_count:selected==='story'" in dispatcher
+    assert "editorial_brief:b || null" in dispatcher
 
 
 def test_home_keeps_real_dispatcher_and_voice(live):
@@ -95,7 +126,7 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=14' in page.text
+    assert '/studio/assets/growth-live.css?v=15' in page.text
     assert '/studio/assets/dispatcher.js?v=review-cards-20261101' in page.text
     assert '/studio/assets/growth-live.js?v=8' in page.text
     assert 'Простое видео' in page.text

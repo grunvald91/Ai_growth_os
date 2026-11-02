@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -236,8 +237,46 @@ async def act(ctx: Context, capability_id: str, raw_params: dict) -> tuple[Outco
 FOLLOW_UP = [Chip(label="Что в работе", capability="show_work").model_dump()]
 
 
+def _apply_create_hints(decision: DispatcherDecision, hints, text: str) -> None:
+    """Merge optional UI settings only after dispatcher has determined an action.
+
+    Explicitly spoken screen count and channel take precedence over older UI
+    settings. Hints alone never start work.
+    """
+    if hints is None or decision.intent != "execute":
+        return
+    capability = decision.capability
+    if capability not in {"create_post", "create_creative", "create_package"}:
+        return
+    params = decision.params
+    target = ("post" if capability == "create_post" else
+              "package" if capability == "create_package" else params.get("format"))
+    if hints.audience and not params.get("audience"):
+        params["audience"] = hints.audience
+    if hints.editorial_brief and not params.get("editorial_brief"):
+        params["editorial_brief"] = hints.editorial_brief
+    if capability == "create_creative" and target == "story":
+        spoken_count = requested_story_count(text)
+        if spoken_count is not None:
+            params["frame_count"] = spoken_count
+        elif hints.format == "story" and hints.frame_count is not None:
+            params["frame_count"] = hints.frame_count
+    if hints.format != target or not hints.platform:
+        return
+    # Explicitly spoken platforms override the manual dropdown.
+    explicit_channel = re.search(
+        r"(?iu)(?:телеграм|telegram|вконтакте|\bvk\b|инстаграм|instagram|youtube|ютуб|дзен|dzen|tenchat|vc\.ru)",
+        text)
+    if explicit_channel:
+        return
+    if capability == "create_post":
+        params["channel"] = hints.platform
+    elif capability == "create_creative":
+        params["platform"] = hints.platform
+
+
 async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, text: str, client_key: str | None,
-                         mode: str = "text", chip: dict | None = None) -> dict:
+                         mode: str = "text", chip: dict | None = None, creation=None) -> dict:
     """Process one owner message and return the user and assistant messages."""
     conversation = open_conversation(db, ctx.product.id, ctx.account)
     # One message at a time per conversation; a retry with the same key returns the first answer.
@@ -275,10 +314,15 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         elif llm is not None:
             decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
 
-    if decision is not None and decision.intent == "execute" and decision.capability == "create_creative" and decision.params.get("format") == "story":
-        count = requested_story_count(text)
-        if count is not None:
-            decision.params["frame_count"] = str(count)
+    if decision is not None:
+        _apply_create_hints(decision, creation, text)
+        # Explicit voice/text counts are authoritative without any manual selection.
+        if (creation is None and decision.intent == "execute"
+                and decision.capability == "create_creative"
+                and decision.params.get("format") == "story"):
+            count = requested_story_count(text)
+            if count is not None:
+                decision.params["frame_count"] = count
     outcome: Outcome | None = None
     confirmation: Confirmation | None = None
     capability_id: str | None = None

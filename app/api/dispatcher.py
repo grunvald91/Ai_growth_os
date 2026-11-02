@@ -64,15 +64,16 @@ class ChipIn(BaseModel):
     params: dict[str, str] = Field(default_factory=dict)
 
 
+from app.dispatcher.editable import CreateHints, EditCreation
+
+
 class MessageIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str = ""
     chip: ChipIn | None = None
     client_key: str | None = Field(default=None, max_length=100)
     mode: str = Field(default="text", pattern="^(text|chip|voice)$")
-
-
-from app.dispatcher.editable import EditCreation
+    creation: CreateHints | None = None
 
 
 class ConfirmIn(BaseModel):
@@ -195,7 +196,8 @@ async def dispatch_message(product_id: UUID, request: Request, db: Session = Dep
         raise HTTPException(422, "Напишите, что нужно сделать")
     result = await service.handle_message(
         db, _context(db, product, settings, request), llm, text=text, client_key=body.client_key,
-        mode="chip" if body.chip else body.mode, chip=body.chip.model_dump() if body.chip else None)
+        mode="chip" if body.chip else body.mode, chip=body.chip.model_dump() if body.chip else None,
+        creation=body.creation)
     result["hints"] = _hints(db, product, settings)
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 

@@ -179,6 +179,56 @@ def test_confirmation_revision_prevents_stale_browser_from_starting_work(env):
     assert db.scalar(select(Task).where(Task.assigned_agent == "content_creative")) is not None
 
 
+
+def test_create_details_go_through_one_confirmed_dispatcher_path(env):
+    from app.models.domain import Artifact
+    db, settings, servgo, _, _ = env
+    client = TestClient(app)
+    url = f"/studio/products/{servgo.id}/dispatch/messages"
+    payload = {"mode": "text", "text": "Напиши пост про неявки", "client_key": "unified-details",
+               "creation": {"format": "post", "platform": "vk",
+                            "audience": "Владельцы небольших салонов",
+                            "editorial_brief": "Без обещаний гарантированного дохода"}}
+    result = client.post(url, json=payload)
+    assert result.status_code == 200
+    card = next(b for b in result.json()["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "post"
+    assert card["editable"]["platform"] == "vk"
+    assert card["editable"]["audience"] == "Владельцы небольших салонов"
+    assert card["editable"]["editorial_brief"] == "Без обещаний гарантированного дохода"
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_factory")) is None
+    response = client.post(f"/studio/products/{servgo.id}/dispatch/confirm",
+                           json={"confirmation_id": card["confirmation_id"], "accept": True,
+                                 "revision": 0})
+    assert response.status_code == 200
+    task = db.scalar(select(Task).where(Task.assigned_agent == "content_factory"))
+    request = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "content_request"))
+    parsed = json.loads(request.content)
+    assert parsed["channel"] == "vk"
+    assert parsed["audience"] == "Владельцы небольших салонов"
+    assert parsed["editorial_brief"] == "Без обещаний гарантированного дохода"
+    assert len(list(db.scalars(select(Task).where(Task.assigned_agent == "content_factory")))) == 1
+
+
+def test_create_details_are_strictly_validated_over_http(env):
+    _, _, servgo, _, _ = env
+    client = TestClient(app)
+    url = f"/studio/products/{servgo.id}/dispatch/messages"
+    base = {"mode": "text", "text": "Сделай пост про запись"}
+    bad = [
+        {"format": "post", "frame_count": 5},
+        {"format": "story", "platform": "youtube_shorts"},
+        {"format": "story", "frame_count": 11},
+        {"format": "post", "audience": "x" * 301},
+        {"format": "post", "editorial_brief": "x" * 3501},
+        {"format": "story", "extra": "ignored?"},
+    ]
+    for hints in bad:
+        response = client.post(url, json={**base, "creation": hints})
+        assert response.status_code == 422
+
+
 def test_empty_message_and_unknown_fields_are_rejected(env):
     _, _, servgo, _, provider = env
     client = TestClient(app)

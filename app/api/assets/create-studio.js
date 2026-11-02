@@ -5,7 +5,19 @@
   if(!screen)return;
   const root=screen.querySelector('.sg-create-dispatch');
   const composer=document.getElementById('dp-input');
-  const form=document.getElementById('sg-create-form');
+  const platform=document.getElementById('sg-create-platform');
+  const count=document.getElementById('sg-create-count');
+  const platformRow=document.getElementById('sg-create-platform-row');
+  const countRow=document.getElementById('sg-create-count-row');
+  const channels={
+    post:[['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['vc_ru','vc.ru'],['tenchat','TenChat']],
+    story:[['telegram','Telegram Stories'],['vk','Истории ВК'],['instagram_reels','Instagram Stories']],
+    short_video:[['youtube_shorts','YouTube Shorts'],['instagram_reels','Instagram Reels'],['vk_clips','VK Клипы']],
+    static_image:[['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['instagram_reels','Instagram']],
+    package:[]
+  };
+  const defaults={post:'telegram',story:'telegram',short_video:'youtube_shorts',
+    static_image:'telegram',package:''};
   const panel=document.getElementById('sg-create-info-panel');
   const topics=document.getElementById('sg-create-suggestions');
   const base=root.getAttribute('data-api').replace(/\/dispatch$/, '');
@@ -36,10 +48,16 @@
     screen.querySelectorAll('[data-sg-format]').forEach(button=>{
       button.setAttribute('aria-pressed',button===selected?'true':'false');
     });
-    const radio=form?.querySelector('input[name="format"][value="'+key+'"]');
-    if(radio&&!radio.checked){radio.checked=true;radio.dispatchEvent(new Event('change',{bubbles:true}));}
-    const count=form?.querySelector('.sg-story-count');
-    if(count){count.hidden=key!=='story';count.querySelector('select').disabled=key!=='story';}
+    platformRow.hidden=!channels[key] || channels[key].length===0;
+    countRow.hidden=key!=='story';
+    const previous=platform.value;
+    platform.replaceChildren();
+    (channels[key]||[]).forEach(([value,label])=>{
+      const option=document.createElement('option');option.value=value;option.textContent=label;
+      platform.append(option);
+    });
+    if(channels[key] && channels[key].some(([value])=>value===previous)) platform.value=previous;
+    else platform.value=defaults[key]||'';
     const names={post:'Пост',story:'Stories',static_image:'Изображение',
       short_video:'Видеосценарий',whiteboard:'Анимированное видео',package:'Полный пакет'};
     const context=document.getElementById('sg-create-context');
@@ -85,17 +103,6 @@
       status.textContent='Не удалось получить предложения. Вы можете задать тему самостоятельно.';
     }
   });
-  if(form){
-    form.classList.add('sg-create-js-ready');
-    // The original form still has its own checked default, but it must not override speech.
-    // No initial top-level format is forced; a free-form voice request chooses its own.
-    const count=form.querySelector('.sg-story-count');
-    if(count){count.hidden=true;count.querySelector('select').disabled=true;}
-    form.querySelectorAll('input[name="format"]').forEach(radio=>{
-      radio.addEventListener('change',()=>{
-        if(radio.checked&&radio.value!=='article'&&radio.value!=='whiteboard')
-          chooseFormat(radio.value);
-      });
-    });
-  }
+  // Only the lower dispatcher composer can submit a request.
+  // Settings are read at send time, including immediately after voice transcription.
 })();

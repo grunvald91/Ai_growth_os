@@ -257,6 +257,10 @@
       topic.value = data.topic || '';
       topic.rows = 2; topic.maxLength = 300; topic.required = true;
       topic.minLength = 3; topic.setAttribute('aria-label','Тема');
+      var audience = el('input', '');
+      audience.value = data.audience || ''; audience.maxLength = 300;
+      var brief = el('textarea', '');
+      brief.value = data.editorial_brief || ''; brief.maxLength = 3500; brief.rows = 2;
       var count = el('select','');
       var auto = el('option','','Автоматически (3–10)'); auto.value = ''; count.appendChild(auto);
       for (var i=3; i<=10; i++){
@@ -283,6 +287,8 @@
       form.appendChild(field('Тема',topic));
       form.appendChild(countField);
       form.appendChild(platformField);
+      form.appendChild(field('Аудитория (необязательно)', audience));
+      form.appendChild(field('Дополнительные требования', brief));
       refreshOptions();
       form.appendChild(status);
       var buttons = el('div','dp-create-edit-actions');
@@ -306,7 +312,8 @@
           confirmation_id:block.confirmation_id, revision:block.revision || 0,
           format:kind.value, topic:topic.value.trim(),
           frame_count:kind.value === 'story' && count.value ? Number(count.value) : null,
-          platform:kind.value === 'package' ? null : platform.value
+          platform:kind.value === 'package' ? null : platform.value,
+          audience:audience.value.trim(), editorial_brief:brief.value.trim()
         }).then(applyResult).catch(function (error) {
           status.textContent=error.message;status.hidden=false;
           save.disabled=false;discard.disabled=false;
@@ -327,11 +334,14 @@
       if (data.format === 'story')
         details.appendChild(editableRow('Экранов', data.frame_count == null ? 'Автоматически' : String(data.frame_count)));
       details.appendChild(editableRow('Тема',data.topic));
+      if (data.audience) details.appendChild(editableRow('Аудитория', data.audience));
+      if (data.editorial_brief) details.appendChild(editableRow('Требования',
+        data.editorial_brief.slice(0,170) + (data.editorial_brief.length>170 ? '…' : '')));
       if (data.platform)
         details.appendChild(editableRow('Площадка',
           ((createChannels[data.format] || []).find(function (row) { return row[0]===data.platform; }) || [null,data.platform])[1]));
       (block.details || []).filter(function (line) {
-        return !/^(Тема|Формат|Экранов|Площадка):/.test(line);
+        return !/^(Тема|Формат|Экранов|Площадка|Аудитория|Требования):/.test(line);
       }).forEach(function (line) {details.appendChild(el('p','dp-create-note',line));});
     } else {
       var list = el('ul', 'dp-confirm-list');
@@ -484,7 +494,9 @@
         });
         showNote('Голосовая команда сохранена, отправка не удалась.', true, retry);
       } else if (body.mode === 'text') {
-        input.value = body.text + (input.value.trim() ? '\n' + input.value : '');
+        // A Create hint is transport context, not part of the user's draft.
+        var restored = root.classList.contains('sg-create-dispatch') && echo ? echo : body.text;
+        input.value = restored + (input.value.trim() ? '\n' + input.value : '');
         grow();
       }
     }).then(function () { setBusy(false); });
@@ -511,12 +523,32 @@
     })[format];
     if (!lead) return text;
     if (format === 'story') {
-      var count = document.querySelector('#sg-create-form select[name="frame_count"]');
-      if (count && !count.disabled && count.value) {
+      var count = document.getElementById('sg-create-count');
+      if (count && count.value) {
         lead = 'Создай ' + count.value + ' сторис по следующей задаче: ';
       }
     }
     return lead + text;
+  }
+
+  function creationHints() {
+    if (!root.classList.contains('sg-create-dispatch')) return null;
+    var chosen=root.getAttribute('data-create-format');
+    var selected=/^(post|story|short_video|static_image|package)$/.test(chosen||'') ? chosen : null;
+    var platform=document.getElementById('sg-create-platform');
+    var count=document.getElementById('sg-create-count');
+    var audience=document.getElementById('sg-create-audience');
+    var brief=document.getElementById('sg-create-brief');
+    var a=audience ? audience.value.trim() : '';
+    var b=brief ? brief.value.trim() : '';
+    if (!selected && !a && !b) return null;
+    return {
+      format:selected,
+      platform:selected && selected!=='package' && platform ? platform.value : null,
+      frame_count:selected==='story' && count && count.value ? Number(count.value) : null,
+      audience:a || null,
+      editorial_brief:b || null
+    };
   }
 
   function sendText() {
@@ -524,7 +556,7 @@
     if (!text || busy) return;
     input.value = '';
     grow();
-    send({ mode: 'text', text: createCommand(text) }, text);
+    send({ mode: 'text', text: createCommand(text), creation: creationHints() }, text);
   }
 
   function grow() {
@@ -834,7 +866,7 @@
           voiceDispatchPending = true;
           setVoiceState('sending');
           showLive('Обрабатываю запрос…', '', true);
-          send({ mode: 'text', text: createCommand(transcript) }, transcript, true);
+          send({ mode: 'text', text: createCommand(transcript), creation: creationHints() }, transcript, true);
         } else {
           applyDictation(data);
         }

@@ -58,6 +58,7 @@ class PostParams(_Params):
     topic: str = Field(min_length=3, max_length=300)
     channel: Literal["telegram", "vk", "dzen", "vc_ru", "tenchat"] = "telegram"
     audience: str | None = Field(default=None, max_length=300)
+    editorial_brief: str | None = Field(default=None, max_length=3500)
 
 
 class CreativeParams(_Params):
@@ -66,10 +67,13 @@ class CreativeParams(_Params):
     platform: Literal["telegram", "vk", "instagram_reels", "youtube_shorts", "vk_clips", "dzen"] | None = Field(default=None, description="Если не указана, автоматически выбирается подходящая площадка по формату.")
     frame_count: int | None = Field(default=None, ge=3, le=10, description="Строгое число экранов Stories, если владелец его назвал. Например, четыре — 4. Для других форматов не указывать.")
     audience: str | None = Field(default=None, max_length=300)
+    editorial_brief: str | None = Field(default=None, max_length=3500)
 
 
 class PackageParams(_Params):
     topic: str = Field(min_length=3, max_length=300, description="Тема полного контент-пакета. Если не названа, сначала уточни или предложи тему.")
+    audience: str | None = Field(default=None, max_length=300)
+    editorial_brief: str | None = Field(default=None, max_length=3500)
 
 
 class VideoParams(_Params):

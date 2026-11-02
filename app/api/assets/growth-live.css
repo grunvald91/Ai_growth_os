@@ -733,11 +733,18 @@ body[data-growth-design="v4"] :is(.sg-create-advanced,.sg-create-extra)>summary:
 body[data-growth-design="v4"] .sg-create-tip,
 body[data-growth-design="v4"] .sg-create-context{font-size:12px;color:var(--muted)}
 body[data-growth-design="v4"] .sg-create-context{padding:8px 0}
-body[data-growth-design="v4"] .sg-create-advanced .sg-form{margin:0 0 12px}
-body[data-growth-design="v4"] .sg-create-advanced .sg-format-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-body[data-growth-design="v4"] .sg-create-advanced .sg-create-js-ready .sg-format-grid{display:none}
-body[data-growth-design="v4"] .sg-create-advanced .sg-create-js-ready .sg-story-count[hidden]{display:none!important}
-body[data-growth-design="v4"] .sg-create-advanced .sg-create-js-ready .sg-fields{margin-top:9px}
+body[data-growth-design="v4"] .sg-create-settings{display:grid;gap:10px;padding:0 0 12px}
+body[data-growth-design="v4"] .sg-create-setting{display:grid;gap:5px;font-size:12px;font-weight:600}
+body[data-growth-design="v4"] .sg-create-setting[hidden]{display:none!important}
+body[data-growth-design="v4"] .sg-create-setting small{font-weight:400;color:var(--muted)}
+body[data-growth-design="v4"] .sg-create-setting :is(select,input,textarea){
+  box-sizing:border-box;width:100%;min-height:40px;padding:9px 11px;border:1px solid var(--line);
+  background:var(--card);color:var(--text);border-radius:10px;font:inherit;font-size:13px;
+}
+body[data-growth-design="v4"] .sg-create-setting textarea{min-height:66px;resize:vertical}
+body[data-growth-design="v4"] .sg-create-setting :is(select,input,textarea):focus-visible{
+  outline:2px solid var(--blue);outline-offset:2px
+}
 body[data-growth-design="v4"] .sg-create-tools{display:grid;gap:0;margin-bottom:10px}
 body[data-growth-design="v4"] .sg-create-tool{
   display:flex;align-items:center;justify-content:space-between;

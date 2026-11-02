@@ -38,6 +38,8 @@ class EditCreation(BaseModel):
     topic: str = Field(min_length=3, max_length=300)
     frame_count: int | None = Field(default=None, ge=3, le=10)
     platform: str | None = Field(default=None, max_length=40)
+    audience: str | None = Field(default=None, max_length=300)
+    editorial_brief: str | None = Field(default=None, max_length=3500)
 
     @model_validator(mode="after")
     def valid_combination(self):
@@ -47,6 +49,29 @@ class EditCreation(BaseModel):
             raise ValueError("У полного пакета площадка не задаётся")
         if self.platform is not None and self.platform not in CHANNELS[self.format]:
             raise ValueError("Эта площадка не подходит для выбранного формата")
+        return self
+
+
+class CreateHints(BaseModel):
+    """Optional manual settings, never a command to run an action."""
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    format: Literal["post", "story", "short_video", "static_image", "package"] | None = None
+    platform: str | None = Field(default=None, max_length=40)
+    frame_count: int | None = Field(default=None, ge=3, le=10)
+    audience: str | None = Field(default=None, max_length=300)
+    editorial_brief: str | None = Field(default=None, max_length=3500)
+
+    @model_validator(mode="after")
+    def valid_combination(self):
+        if self.format is None:
+            if self.platform or self.frame_count is not None:
+                raise ValueError("Площадка и количество требуют выбранного формата")
+        elif self.format != "story" and self.frame_count is not None:
+            raise ValueError("Количество экранов можно задавать только для Stories")
+        if self.format == "package" and self.platform:
+            raise ValueError("Для пакета площадка не указывается")
+        if self.platform and self.platform not in CHANNELS[self.format]:
+            raise ValueError("Несовместимая площадка и формат")
         return self
 
 
@@ -68,21 +93,29 @@ def draft_view(capability_id: str | None, params: dict) -> dict | None:
         "format": fmt, "topic": params.get("topic", ""),
         "frame_count": params.get("frame_count") if fmt == "story" else None,
         "platform": platform, "formats": list(FORMATS),
+        "audience": params.get("audience") or "",
+        "editorial_brief": params.get("editorial_brief") or "",
     }
 
 
 def target_for_edit(edit: EditCreation, existing: dict | None = None):
     """Produce a validated executor request, keeping context the user did not edit."""
     existing = existing or {}
-    audience = existing.get("audience")
+    audience = edit.audience if edit.audience is not None else existing.get("audience")
+    editorial_brief = (edit.editorial_brief if edit.editorial_brief is not None
+                       else existing.get("editorial_brief"))
+    audience = audience or None
+    editorial_brief = editorial_brief or None
     if edit.format == "post":
         return "create_post", PostParams(topic=edit.topic,
-            channel=edit.platform or "telegram", audience=audience)
+            channel=edit.platform or "telegram", audience=audience,
+            editorial_brief=editorial_brief)
     if edit.format == "package":
-        return "create_package", PackageParams(topic=edit.topic)
+        return "create_package", PackageParams(
+            topic=edit.topic, audience=audience, editorial_brief=editorial_brief)
     return "create_creative", CreativeParams(
         topic=edit.topic, format=edit.format,
         platform=edit.platform or DEFAULT_PLATFORMS[edit.format],
         frame_count=edit.frame_count if edit.format == "story" else None,
-        audience=audience,
+        audience=audience, editorial_brief=editorial_brief,
     )
