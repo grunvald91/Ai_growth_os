@@ -1573,7 +1573,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
         <section class="sg-surface">
           <div class="sg-section-head"><div><span class="sg-overline">РАСКАДРОВКА · {esc(value.get('platform'))}</span>
           <h2>{esc(display_material_title(record, value))}</h2>
-          <p>{'Готовые изображения доступны ниже.' if image_rows else 'Изображения ещё не готовы; ниже показана раскадровка.'}</p>
+          <p>{'Готовые изображения доступны ниже.' if image_rows else 'Медиафайлы не создавались. Ниже показана раскадровка.'}</p>
           </div></div>
           {prepared_gallery}
           <details><summary>Раскадровка и промпты</summary>

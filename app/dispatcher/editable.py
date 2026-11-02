@@ -63,6 +63,7 @@ class CreateHints(BaseModel):
     frame_count: int | None = Field(default=None, ge=3, le=10)
     audience: str | None = Field(default=None, max_length=300)
     editorial_brief: str | None = Field(default=None, max_length=3500)
+    image_model: Literal["none", "auto", "gemini", "openai"] | None = None
 
     @model_validator(mode="after")
     def valid_combination(self):
