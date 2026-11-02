@@ -2078,9 +2078,14 @@ async def studio_manual_edit(product_id: UUID, artifact_id: UUID, request: Reque
 
 
 @router.get("/studio/products/{product_id}/create", response_class=HTMLResponse)
-def studio_create_page(product_id: UUID, created: bool = False, db: Session = Depends(get_db)):
+def studio_create_page(product_id: UUID, created: bool = False, db: Session = Depends(get_db),
+                       settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     html_body = create_content_html(product.id, created=created, durations=task_durations(db))
+    # Preserve the same project vocabulary and recording limit as the home voice composer.
+    html_body += (f'<span class="sg-create-voice-config" hidden '
+                  f'data-voice-project="{esc(product.slug)}" '
+                  f'data-voice-max="{int(settings.voice_max_audio_seconds)}"></span>')
     # Tasks have a dedicated persistent workspace; never duplicate a raw
     # technical job log below the creative form.
     html_body += ('<p class="sg-create-work-link"><a href="/studio/products/'
