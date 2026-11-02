@@ -1,4 +1,7 @@
 """Check working calendars exported to the Studio without database round-trips."""
+import os
+os.environ.setdefault("BOT_TOKEN", "test-token")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 from datetime import date, timedelta
 from types import SimpleNamespace
 
