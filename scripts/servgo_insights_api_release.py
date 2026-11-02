@@ -65,6 +65,58 @@ def read_remote(sftp, path: str) -> bytes | None:
         return None
 
 
+
+def _check_live_contract(spec: dict) -> None:
+    """Require the exact added API contract; /health alone cannot prove rollout."""
+    paths = spec.get("paths", {})
+    if "/internal/studio/businesses" not in paths:
+        raise RuntimeError("The live API does not expose the Studio business list")
+    schedule = paths.get("/internal/studio/schedule", {}).get("get", {})
+    parameters = {part.get("name") for part in schedule.get("parameters", [])}
+    if "slot_service_id" not in parameters:
+        raise RuntimeError("The live API is missing the service-specific slot parameter")
+    schemas = spec.get("components", {}).get("schemas", {})
+    result_fields = schemas.get("ScheduleOut", {}).get("properties", {})
+    if not {"services", "paused_client_ids", "resources", "bookings", "free_slots"} <= set(result_fields):
+        raise RuntimeError("The live schedule response uses the old analytics schema")
+    for field, required in (
+        ("resources", {"working_dates"}),
+        ("bookings", {"service_id", "resource_id"}),
+        ("free_slots", {"service_id"}),
+    ):
+        field_def = result_fields[field]
+        reference = field_def.get("items", {}).get("$ref")
+        if not reference:
+            raise RuntimeError(f"Cannot inspect {field} contract")
+        schema_name = reference.rsplit("/", 1)[-1]
+        properties = schemas.get(schema_name, {}).get("properties", {})
+        if not required <= set(properties):
+            raise RuntimeError(f"Live {field} contract has not been upgraded")
+
+
+def verify_live_contract(client) -> None:
+    # Only loopback, and only schema keys are processed: no users, secrets or client records.
+    source = (
+        "import json, urllib.request\\n"
+        "with urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=8) as r:\\n"
+        "    spec = json.load(r)\\n"
+        "paths = spec.get('paths', {})\\n"
+        "assert '/internal/studio/businesses' in paths\\n"
+        "params = {p.get('name') for p in paths['/internal/studio/schedule']['get']['parameters']}\\n"
+        "assert 'slot_service_id' in params\\n"
+        "schemas = spec['components']['schemas']\\n"
+        "fields = schemas['ScheduleOut']['properties']\\n"
+        "assert {'services', 'paused_client_ids', 'resources', 'bookings', 'free_slots'} <= set(fields)\\n"
+        "expected = {'resources': {'working_dates'}, "
+        "'bookings': {'service_id', 'resource_id'}, 'free_slots': {'service_id'}}\\n"
+        "for field, names in expected.items():\\n"
+        "    ref = fields[field]['items']['$ref'].rsplit('/', 1)[-1]\\n"
+        "    assert names <= set(schemas[ref]['properties'])\\n"
+        "print('insights_api_contract=ok')\\n"
+    )
+    run(client, "./venv/bin/python -c " + shlex.quote(source), 30)
+
+
 def main() -> None:
     repo = Path(__file__).resolve().parent.parent
     apply = os.environ.get("APPLY", "false").strip().lower() == "true"
@@ -145,6 +197,7 @@ def main() -> None:
         wait_web_ready(client)
         if run(client, "systemctl is-active " + WEB_SERVICE) != "active":
             raise RuntimeError("Web API is not active after release")
+        verify_live_contract(client)
         print(f"insights_api_release=success files_changed={len(to_change)} backup={backup}")
     except Exception:
         if updated:
