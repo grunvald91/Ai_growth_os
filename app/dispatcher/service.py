@@ -21,7 +21,7 @@ from app.dispatcher import executors
 from app.dispatcher.blocks import Chip, clean_blocks
 from app.dispatcher.decision import (CONFIDENCE_TO_ACT, SYSTEM_PROMPT, DispatcherDecision, build_user_message)
 from app.dispatcher.executors import Confirmation, Context, Outcome
-from app.dispatcher.fast_routes import quick_capability
+from app.dispatcher.fast_routes import quick_capability, requested_story_count
 from app.dispatcher.models import DispatcherConversation, DispatcherMessage
 from app.dispatcher.policy import Verdict, verdict
 from app.dispatcher.readers import snapshot
@@ -273,6 +273,10 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         elif llm is not None:
             decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
 
+    if decision is not None and decision.intent == "execute" and decision.capability == "create_creative" and decision.params.get("format") == "story":
+        count = requested_story_count(text)
+        if count is not None:
+            decision.params["frame_count"] = str(count)
     outcome: Outcome | None = None
     confirmation: Confirmation | None = None
     capability_id: str | None = None
