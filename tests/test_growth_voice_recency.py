@@ -54,8 +54,9 @@ async def test_ready_and_failed_events_are_globally_chronological(db):
     assert ids.index(str(recent.id)) < ids.index(str(middle.id)) < ids.index(str(old.id))
     result = await executors.show_review(executors.Context(db=db, product=product,
                                                           settings=object(), account="owner"), None)
-    links = next(block for block in result.blocks if block["type"] == "links")["items"]
-    assert "Старый материал" in links[0]["label"]
-    assert "Свежий материал" in links[-1]["label"]
+    resources = next(block for block in result.blocks if block["type"] == "resource_list")["items"]
+    # The newest review is a full approval card, so the resource list contains only older items.
+    assert "Старый материал" in resources[0]["title"]
+    assert all("Свежий материал" not in item["title"] for item in resources)
     assert result.blocks[-2]["type"] == "material"
     assert result.blocks[-1]["type"] == "chips"
