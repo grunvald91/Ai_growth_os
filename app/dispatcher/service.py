@@ -22,7 +22,7 @@ from app.dispatcher import executors
 from app.dispatcher.blocks import Chip, clean_blocks
 from app.dispatcher.decision import (CONFIDENCE_TO_ACT, SYSTEM_PROMPT, DispatcherDecision, build_user_message)
 from app.dispatcher.executors import Confirmation, Context, Outcome
-from app.dispatcher.fast_routes import quick_capability, requested_story_count
+from app.dispatcher.fast_routes import quick_capability, quick_video_request, requested_story_count
 from app.dispatcher.models import DispatcherConversation, DispatcherMessage
 from app.dispatcher.policy import Verdict, verdict
 from app.dispatcher.readers import snapshot
@@ -340,6 +340,11 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         quick = quick_capability(text)
         if quick is not None:
             decision = DispatcherDecision(intent="execute", capability=quick, params={}, confidence=1.0)
+        elif (video_params := quick_video_request(text)) is not None:
+            # Exact topic and duration from the user's explicit request. Existing
+            # whiteboard executor still requires paid approval before rendering.
+            decision = DispatcherDecision(intent="execute", capability="whiteboard_video",
+                                          params=video_params, confidence=1.0)
         elif llm is not None:
             decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
 

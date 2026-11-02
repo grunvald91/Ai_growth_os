@@ -166,6 +166,12 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
           Укажите их здесь либо просто опишите задачу в строке ниже.</p>
           {warning}{advanced}
         </details>
+        <details class="sg-create-timing" id="sg-create-timing">
+          <summary>Сколько занимает создание?</summary>
+          <p>Зависит от формата, выбранной модели и количества материалов.
+          После подтверждения следите за фактическим статусом на странице задания;
+          точное время заранее не гарантируется.</p>
+        </details>
         <details class="sg-create-extra">
           <summary>Другие инструменты</summary>
           <div class="sg-create-tools">{tool_rows}</div>

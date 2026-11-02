@@ -1107,3 +1107,12 @@ def test_create_includes_aspect_controls_and_story_vertical_hint(live):
     dispatcher_script = client.get("/studio/assets/dispatcher.js").text
     assert "aspect_ratio:selected==='story' ? '9:16'" in dispatcher_script
     assert "kind.addEventListener('change',function(){aspect.value='';refreshOptions();});" in dispatcher_script
+
+
+def test_create_timing_explains_status_without_unverified_estimates(live):
+    client, _, product = live
+    html = client.get(f"/studio/products/{product.id}/create?design=v4").text
+    assert '<details class="sg-create-timing"' in html
+    assert "Сколько занимает создание?" in html
+    assert "фактическим статусом" in html
+    assert "точное время заранее не гарантируется" in html

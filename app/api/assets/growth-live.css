@@ -845,3 +845,11 @@ body[data-growth-design="v4"] .dp-confirm .dp-btn:disabled{opacity:.5}
 }
 
 .sg-image-tile>a.is-square{aspect-ratio:1/1}
+
+/* Create: optional completion-time guidance, no invented ETA. */
+body[data-growth-design="v4"] .sg-create-timing{border:0;border-bottom:1px solid var(--line);margin-top:5px}
+body[data-growth-design="v4"] .sg-create-timing>summary{display:flex;align-items:center;justify-content:space-between;min-height:42px;padding:8px 0;font-size:12px;font-weight:600;color:var(--text);cursor:pointer;list-style:none}
+body[data-growth-design="v4"] .sg-create-timing>summary::-webkit-details-marker{display:none}
+body[data-growth-design="v4"] .sg-create-timing>summary:after{content:"⌄";color:var(--muted)}
+body[data-growth-design="v4"] .sg-create-timing[open]>summary:after{content:"⌃"}
+body[data-growth-design="v4"] .sg-create-timing>p{font-size:12px;line-height:1.55;margin:0 0 11px;color:var(--muted)}
