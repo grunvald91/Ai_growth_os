@@ -851,3 +851,74 @@ def test_legacy_first_visit_form_never_enters_v4_transform(env):
     assert page.status_code == 200
     assert 'name="c"' in page.text
     assert 'data-growth-design="v4"' not in page.text
+
+
+# ---- unified platform identity --------------------------------------------------------------
+
+def test_legacy_operator_is_not_auto_linked_to_servgo_owner(env):
+    _, _, salon, _, _ = env
+    client = signed_in(env)
+    # A business owner has business permissions, not platform operator privileges.
+    response = client.get(f"/studio/products/{salon.id}/accounts")
+    assert response.status_code == 403
+    chooser = client.get("/studio?choose=1")
+    assert chooser.status_code == 200
+    assert "Объединить профиль с ServGo" in chooser.text
+
+
+def test_operator_link_needs_both_real_sessions_and_rejects_wrong_password(env):
+    _, settings, salon, _, _ = env
+    client = signed_in(env)
+    assert client.get("/studio/identity").status_code == 200
+    denied = client.post("/studio/identity", data={"username": "owner", "password": "wrong-password"},
+                         headers={"origin": ORIGIN})
+    assert denied.status_code == 401
+    from app.core.studio_operator_links import linked_operator
+    assert linked_operator(settings, 7, {}) is None
+    success = client.post("/studio/identity", data={"username": "owner", "password": "correct-secret"},
+                          headers={"origin": ORIGIN})
+    assert success.status_code == 303
+    assert success.headers["location"] == "/studio/identity?linked=1"
+    linked = client.get("/studio/identity?linked=1")
+    assert linked.status_code == 200 and "Профили объединены" in linked.text
+    assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 200
+    from app.core.studio_accounts import accounts_path
+    path, _ = accounts_path(settings)
+    stored = (path.parent / "servgo_operator_links.json").read_text()
+    assert "correct-secret" not in stored and '"login": "owner"' in stored
+
+
+def test_operator_link_revoked_on_password_change_and_disconnect(env):
+    _, settings, salon, _, _ = env
+    client = signed_in(env)
+    assert client.post("/studio/identity", data={"username": "owner", "password": "correct-secret"},
+                       headers={"origin": ORIGIN}).status_code == 303
+    assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 200
+    settings.studio_admin_password = "a-different-secret"
+    assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 403
+    # Existing owner can explicitly re-bind the new password, then disconnect.
+    assert client.post("/studio/identity", data={"username": "owner", "password": "a-different-secret"},
+                       headers={"origin": ORIGIN}).status_code == 303
+    assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 200
+    assert client.post("/studio/identity/disconnect", headers={"origin": ORIGIN}).status_code == 303
+    assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 403
+
+
+def test_operator_binding_does_not_bypass_live_servgo_revocation(env):
+    _, _, salon, _, servgo = env
+    client = signed_in(env)
+    assert client.post("/studio/identity", data={"username": "owner", "password": "correct-secret"},
+                       headers={"origin": ORIGIN}).status_code == 303
+    assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 200
+    servgo.allowed.clear()
+    access.forget()
+    assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 401
+
+
+def test_link_attempt_without_servgo_cookie_is_denied(env):
+    _, _, _, _, _ = env
+    client = browser()
+    # A legacy admin login without the separate ServGo session may not bind an ID.
+    response = client.post("/studio/identity", data={"username": "owner", "password": "correct-secret"},
+                           headers={"origin": ORIGIN}, auth=("owner", "correct-secret"))
+    assert response.status_code == 403
