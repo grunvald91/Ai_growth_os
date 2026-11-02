@@ -97,13 +97,8 @@ class StudioBusinessOut(BaseModel):
     role: str
 
 
-@router.get("/studio/businesses", response_model=list[StudioBusinessOut])
-async def studio_businesses(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """Businesses this person can open in the marketing studio. Empty while the sign-in is not configured,
-    so the «Маркетинг» entry only appears when it will really work."""
-    if (len(os.getenv("STUDIO_SSO_SECRET", "")) < MIN_SECRET_LENGTH
-            or len(os.getenv("STUDIO_INTERNAL_KEY", "")) < MIN_SECRET_LENGTH):
-        return []
+async def _businesses_for_studio(db: AsyncSession, user: User) -> list[StudioBusinessOut]:
+    """One permission source for the owner's UI and Growth's server-to-server switcher."""
     ids = set((await db.scalars(select(Business.id).where(Business.owner_id == user.id))).all())
     ids |= set((await db.scalars(select(BusinessOwner.business_id).where(BusinessOwner.user_id == user.id))).all())
     if user.telegram_id:
@@ -118,6 +113,30 @@ async def studio_businesses(user: User = Depends(get_current_user), db: AsyncSes
         if role and business:
             result.append(StudioBusinessOut(id=business_id, name=business.name or f"№{business_id}", role=role))
     return result
+
+
+@router.get("/studio/businesses", response_model=list[StudioBusinessOut])
+async def studio_businesses(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """List only the businesses the signed-in user can open in Growth Studio."""
+    if (len(os.getenv("STUDIO_SSO_SECRET", "")) < MIN_SECRET_LENGTH
+            or len(os.getenv("STUDIO_INTERNAL_KEY", "")) < MIN_SECRET_LENGTH):
+        return []
+    return await _businesses_for_studio(db, user)
+
+
+@router.get("/internal/studio/businesses", response_model=list[StudioBusinessOut])
+async def studio_accessible_businesses(user_id: int, x_studio_key: str = Header(default=""),
+                                       db: AsyncSession = Depends(get_db)):
+    """Server-only list used to authorize multi-company Studio sessions.
+
+    The caller cannot supply roles or company IDs. Each access is recalculated
+    from the live ServGo ownership and administrator permission records.
+    """
+    expected = _secret("STUDIO_INTERNAL_KEY")
+    if not hmac.compare_digest(x_studio_key.encode(), expected):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    user = await db.get(User, user_id)
+    return await _businesses_for_studio(db, user) if user is not None else []
 
 
 class TicketIn(BaseModel):
