@@ -61,7 +61,7 @@ def test_confirmation_does_not_queue_and_explicit_post_deduplicates(env):
     client, db, pid, _ = env
     before = client.get(url(pid, "/queue"))
     assert before.status_code == 200
-    assert "не более трёх статей" in before.text
+    assert "На месяц (30 дней)" in before.text
     assert "Подтвердить постановку в очередь" in before.text
     assert jobs(db, pid) == []
     for _ in range(2):
@@ -76,7 +76,7 @@ def test_confirmation_does_not_queue_and_explicit_post_deduplicates(env):
     request = db.scalar(select(Artifact).where(
         Artifact.task_id == task.id, Artifact.kind == REQUEST_KIND,
     ))
-    assert json.loads(request.content) == {"focus": "запись для салонов"}
+    assert json.loads(request.content) == {"focus": "запись для салонов", "horizon_days": 7}
 
 
 def test_pilot_dashboard_shows_queued_and_deferred_articles(env):
@@ -343,3 +343,15 @@ def test_seo_discloses_unconnected_blog_without_claiming_publication(env):
     db.commit()
     assert "Место публикации: блог ServGo" in client.get(url(pid)).text
     assert "персональный блог компании на ServGo" in client.get(url(other_pid)).text
+
+
+
+def test_month_selection_is_recorded_and_invalid_period_rejected(env):
+    client, db, pid, _ = env
+    response = client.post(url(pid, "/queue"),
+        data={"focus": "выбор CRM", "horizon_days": "30"}, follow_redirects=False)
+    assert response.status_code == 303
+    request = db.scalar(select(Artifact).where(
+        Artifact.task_id == jobs(db, pid)[0].id, Artifact.kind == REQUEST_KIND))
+    assert json.loads(request.content)["horizon_days"] == 30
+    assert client.post(url(pid, "/queue"), data={"horizon_days": "365"}).status_code == 422

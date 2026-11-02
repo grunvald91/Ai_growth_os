@@ -26,7 +26,8 @@ async def run_content_once(session_factory, settings):
             ~Task.title.like(f'{SEO_TASK_PREFIX}%'),
             Task.product_id.in_(enabled) if enabled else False,
         ))
-        exhausted = exhausted_products(db, settings.seo_articles_per_day)
+        exhausted = (exhausted_products(db, settings.seo_articles_per_day)
+                     if settings.seo_articles_per_day > 0 else set())
         if exhausted:
             # A company's blog articles for today are used up; they wait for tomorrow while everything else runs.
             query = query.where(~and_(Task.title.like(f'{SEO_TASK_PREFIX}%'), Task.product_id.in_(exhausted)))

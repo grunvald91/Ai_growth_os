@@ -30,7 +30,8 @@ PLAN_PROMPT = (
     "You are the seo_editor of an organic growth team. Build a content plan for a blog from REAL search "
     "suggestion clusters of this company's niche. Rules: every item must cite existing cluster_ids; primary_query "
     "must be copied exactly from the queries of those clusters; stage and intent must equal the cluster's; "
-    "one article per primary_query. Cover all funnel stages (awareness, consideration, decision) in proportion "
+    "one article per primary_query. Cover the requested 7/30-day time horizon with useful topics; " 
+    "do not impose a fixed article-count cap. Cover all funnel stages (awareness, consideration, decision) in proportion "
     "to the clusters that exist; skip clusters that are irrelevant to the company. For each article give the "
     "reader's problem, the questions a person would ask an AI assistant about it, and where the article leads "
     "the reader next, using only services the company profile actually offers. Give each item a different "
@@ -130,7 +131,8 @@ async def plan_seeds(db: Session, llm: LLMService, privacy: PrivacyGateway, prod
 
 
 async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, product_id: UUID, core: SemanticCore, *,
-                       products_root: Path, model: str, factory_task_id: UUID | None = None) -> Artifact:
+                       products_root: Path, model: str, factory_task_id: UUID | None = None,
+                       horizon_days: int = 7) -> Artifact:
     product = db.get(Product, product_id)
     if product is None:
         raise LookupError("Product not found")
@@ -141,6 +143,7 @@ async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, pr
     clusters = sorted(core.clusters, key=lambda c: (-len(c.engines), -len(c.queries), c.id))
     payload = {
         "company": _company(db, product, products_root, privacy),
+        "planning_horizon_days": horizon_days,
         "clusters": [{"id": c.id, "intent": c.intent, "stage": c.stage, "engines": c.engines,
                       "queries": c.queries} for c in clusters],
     }
