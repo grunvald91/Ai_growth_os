@@ -280,6 +280,30 @@ def _apply_create_hints(decision: DispatcherDecision, hints, text: str) -> None:
         params["platform"] = hints.platform
 
 
+def _visual_preferences(text: str) -> tuple[str | None, str | None]:
+    """Explicit user constraints outrank the provider's or model's defaults."""
+    value = (text or "").casefold().replace("ё", "е")
+    candidates = (
+        ("instagram_reels", r"(?:instagram|инстаграм\w*)"),
+        ("vk", r"(?:вконтакте|\bвк\b|\bvk\b)"),
+        ("telegram", r"(?:telegram|телеграм\w*)"),
+        ("dzen", r"(?:\bдзен\b|\bdzen\b)"),
+        ("vc_ru", r"\bvc\.ru\b"),
+        ("tenchat", r"\btenchat\b"),
+    )
+    channel = next((name for name, expression in candidates
+                    if re.search(expression, value, re.I)), None)
+    ratio = next((x for x in ("9:16", "4:5", "1:1", "16:9") if x in value), None)
+    if ratio is None:
+        if re.search(r"горизонтальн\w*", value):
+            ratio = "16:9"
+        elif re.search(r"(?:вертикальн\w*|портретн\w*)", value):
+            ratio = "4:5"
+        elif re.search(r"квадрат\w*", value):
+            ratio = "1:1"
+    return channel, ratio
+
+
 async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, text: str, client_key: str | None,
                          mode: str = "text", chip: dict | None = None, creation=None) -> dict:
     """Process one owner message and return the user and assistant messages."""
@@ -319,6 +343,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         elif llm is not None:
             decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
 
+
     if decision is not None:
         # A request for an illustrated post must produce an image AND ready
         # caption, never silently degrade into text-only create_post.
@@ -328,19 +353,30 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 and re.search(r"(?iu)(?:картин\w*|изображени\w*|иллюстраци\w*|фото|обложк\w*)", text)
                 and not re.search(r"(?iu)без\s+(?:картин\w*|изображени\w*|фото)", text)):
             old = decision.params
-            default_platform = old.get("channel") or old.get("platform") or "telegram"
+            spoken_platform, spoken_ratio = _visual_preferences(text)
+            default_platform = spoken_platform or old.get("channel") or old.get("platform") or "telegram"
             decision.capability = "create_creative"
             decision.params = {
                 "topic": old.get("topic") or text.strip()[:300],
                 "format": "static_image",
                 "platform": default_platform,
                 "image_model": old.get("image_model") or "auto",
+                **({"aspect_ratio": spoken_ratio} if spoken_ratio else {}),
                 "editorial_brief": (
                     (old.get("editorial_brief") or "") +
                     "\nПодготовь полноценный текст поста в поле caption вместе с готовым изображением."
                 ).strip()[:3500],
                 **({"audience": old["audience"]} if old.get("audience") else {}),
             }
+        # For a naturally described image, accept explicit channel/orientation
+        # even when the LLM fails to preserve these details.
+        if (decision.intent == "execute" and decision.capability == "create_creative"
+                and decision.params.get("format") == "static_image"):
+            spoken_platform, spoken_ratio = _visual_preferences(text)
+            if spoken_platform:
+                decision.params["platform"] = spoken_platform
+            if spoken_ratio:
+                decision.params["aspect_ratio"] = spoken_ratio
         _apply_create_hints(decision, creation, text)
         # Explicit voice/text counts are authoritative without any manual selection.
         if (creation is None and decision.intent == "execute"

@@ -901,3 +901,40 @@ def test_editing_story_aspect_and_platform_auto_defaults():
     view = draft_view("create_creative", edited.model_dump(exclude_none=True))
     assert view["aspect_ratio"] is None
     assert view["platform"] == "instagram_reels"
+
+
+@pytest.mark.asyncio
+async def test_illustrated_post_uses_spoken_instagram_platform_and_portrait_ratio(db, product):
+    model, _ = llm({
+        "intent": "execute", "capability": "create_post", "confidence": 0.96,
+        "params": {"topic": "Осенние букеты", "channel": "telegram"},
+    })
+    result = await send(db, product, text="Сделай пост с картинкой для Instagram про букеты",
+                        model=model, key="instagram-illustrated")
+    card = next(x for x in result["messages"][-1]["blocks"] if x["type"] == "confirm")
+    assert card["editable"]["format"] == "static_image"
+    assert card["editable"]["platform"] == "instagram_reels"
+    assert card["editable"]["aspect_ratio"] is None
+    await service.confirm(db, context(db, product), card["confirmation_id"],
+                          accept=True, revision=0)
+    task = tasks(db, "content_creative")[0]
+    artifact = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_request"))
+    payload = json.loads(artifact.content)
+    assert payload["platform"] == "instagram_reels"
+    assert payload["image_model"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_illustrated_post_explicit_landscape_overrides_platform_default(db, product):
+    model, _ = llm({
+        "intent": "execute", "capability": "create_post", "confidence": 0.96,
+        "params": {"topic": "Новые услуги", "channel": "telegram"},
+    })
+    result = await send(db, product,
+                        text="Нарисуй горизонтальную картинку 16:9 для поста ВКонтакте",
+                        model=model, key="vk-wide-image")
+    card = next(x for x in result["messages"][-1]["blocks"] if x["type"] == "confirm")
+    assert card["editable"]["format"] == "static_image"
+    assert card["editable"]["platform"] == "vk"
+    assert card["editable"]["aspect_ratio"] == "16:9"

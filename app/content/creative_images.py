@@ -167,7 +167,7 @@ async def request_image(settings, model: str, prompt: str, ratio: str, *, client
         if not isinstance(encoded, str) or len(encoded) > 23_000_000:
             raise ValueError("Invalid base64 image")
         raw = base64.b64decode(encoded, validate=True)
-    except (KeyError, IndexError, TypeError, ValueError, base64.binascii.Error) as exc:
+    except (KeyError, IndexError, TypeError, base64.binascii.Error) as exc:
         raise ValueError("Image API returned invalid data") from exc
     return png_output(raw, ratio=ratio)
 

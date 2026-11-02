@@ -69,12 +69,13 @@ class CreateHints(BaseModel):
     audience: str | None = Field(default=None, max_length=300)
     editorial_brief: str | None = Field(default=None, max_length=3500)
     image_model: Literal["none", "auto", "gemini", "openai"] | None = None
+    aspect_ratio: Literal["9:16", "4:5", "1:1", "16:9"] | None = None
 
     @model_validator(mode="after")
     def valid_combination(self):
         if self.format is None:
-            if self.platform or self.frame_count is not None:
-                raise ValueError("Площадка и количество требуют выбранного формата")
+            if self.platform or self.frame_count is not None or self.aspect_ratio is not None:
+                raise ValueError("Площадка, пропорции и количество требуют выбранного формата")
         elif self.format != "story" and self.frame_count is not None:
             raise ValueError("Количество экранов можно задавать только для Stories")
         if self.format == "package" and self.platform:
