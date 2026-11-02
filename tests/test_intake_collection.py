@@ -789,3 +789,24 @@ def test_collect_from_closed_session_creates_new_review(studio):
     assert new_session is not None and new_session.id != session.id
     assert "Новая услуга" in "\n".join(
         row["text"] for row in service.get(product.id, new_session.id, actor="local_owner")["sources"])
+
+
+def test_long_multi_file_job_is_not_marked_stale_while_making_progress(monkeypatch):
+    import time
+    import app.api.content_studio_company as company
+
+    sid = "heartbeat-only-test"
+    now = time.time()
+    company._JOBS[sid] = {
+        "running": True,
+        "started": now - company.JOB_STALE_SECONDS - 10,
+        "heartbeat": now,
+        "stage": "Читаю файлы",
+        "notes": [], "error": None,
+    }
+    try:
+        assert company._job(sid)["running"] is True
+        company._JOBS[sid]["heartbeat"] = now - company.JOB_STALE_SECONDS - 10
+        assert company._job(sid)["running"] is False
+    finally:
+        company._JOBS.pop(sid, None)
