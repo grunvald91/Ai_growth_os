@@ -209,8 +209,8 @@ async def fill_open_slots(ctx: Context, params: FillOpenSlotsParams) -> Outcome:
         if catalog is None:
             return _no_booking_data(ctx, "unavailable")
         if not catalog.services:
-            return Outcome("Список услуг недоступен. Требуется обновлённый API BookingBot "
-                           "со справочником услуг; ничего не угадываю.",
+            return Outcome("Список основных активных услуг пуст или BookingBot ещё не передаёт "
+                           "каталог. Слоты без подтверждённой услуги не предлагаю.",
                            "Не вижу список услуг для подбора свободного времени.", no_data=True)
         page_size = 12
         first_item = (params.page - 1) * page_size
@@ -321,7 +321,7 @@ async def prepare_slot_offer(ctx: Context, params: SlotOfferParams) -> Outcome:
                             "params": {"service_id": str(params.service_id), "period": "week"}}]}])
     # No names, client IDs, contacts or list of CRM candidates enter the content task.
     topic = (f"Мягкое приглашение на услугу «{service.name[:55]}» "
-             f"{params.day:%d.%m.%Y} в {params.time}, {free.resource or 'специалист'}. "
+             f"{params.day:%d.%m.%Y} в {params.time}, {str(free.resource or 'специалист')[:55]}. "
              "Без скидок и обещаний брони; ссылка на онлайн-запись ServGo. "
              "Перед публикацией проверить актуальность слота.")
     try:
