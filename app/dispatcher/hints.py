@@ -61,6 +61,7 @@ def compute_hints(db: Session, product: Product, products_root: Path, *, schedul
         chips.append(Chip(label="Свободные окна на неделю", capability="show_schedule",
                           params={"view": "free", "period": "week"}))
         chips.append(Chip(label="Итоги бизнеса", capability="show_insights"))
+        chips.append(Chip(label="Кого пригласить повторно", capability="show_return_candidates"))
         chips.append(Chip(label="Передать данные команде", capability="send_to_team"))
     chips.extend(topic_ideas(products_root, product.slug))
     seen, unique = set(), []
