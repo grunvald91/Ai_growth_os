@@ -78,6 +78,7 @@ class Schedule(_Row):
     resources: list[Resource] = Field(default_factory=list)
     services: list[Service] = Field(default_factory=list)
     bookings: list[Booking] = Field(default_factory=list)
+    paused_client_ids: list[int] = Field(default_factory=list)
     free_slots: list[FreeSlots] = Field(default_factory=list)
 
 
