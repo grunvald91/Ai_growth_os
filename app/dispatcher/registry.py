@@ -6,6 +6,7 @@ plus an executor in `executors.py`. Risk and cost live here, and the policy read
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Literal
 from uuid import UUID
 
@@ -91,7 +92,7 @@ INSIGHT_TOPICS = ("all", "cancellations", "money", "clients", "weekdays", "dayti
 class InsightsParams(_Params):
     topic: Literal["all", "cancellations", "money", "clients", "weekdays", "daytime", "services", "upcoming"] = Field(
         default="all",
-        description="О чём спросил владелец: cancellations — отмены; money — выручка, сколько заработали, средний чек; "
+        description="О чём спросил владелец: cancellations — отмены; money — расчётная стоимость записей, не выручка, фактические оплаты неизвестны; "
                     "clients — клиенты, возвраты, постоянные; weekdays — по каким дням недели больше или меньше записей, "
                     "пустые дни; daytime — утро, день, вечер и за сколько дней записываются; services — какие услуги и "
                     "какие яхты, мастера, залы берут; upcoming — сколько уже записано вперёд; all — общий вопрос про "
@@ -104,6 +105,29 @@ class InsightsParams(_Params):
 
 class DepthParams(_Params):
     days: int = Field(ge=7, le=365, description="Сколько последних дней анализировать: 30 — месяц, 90 — квартал, 7 — неделя.")
+
+
+class ReturnCandidatesParams(_Params):
+    days: int = Field(default=180, ge=30, le=365,
+                      description="За сколько последних дней изучить выполненные визиты. По умолчанию 180 дней.")
+
+
+class FillOpenSlotsParams(_Params):
+    service_id: int | None = Field(default=None, ge=1,
+                                   description="ID услуги только из подтверждённого каталога BookingBot. "
+                                               "Не знаете ID — не указывайте, система покажет выбор услуг.")
+    period: Literal["today", "tomorrow", "week"] = "tomorrow"
+    page: int = Field(default=1, ge=1, description="Страница каталога услуг.")
+
+
+class SlotOfferParams(_Params):
+    service_id: int = Field(ge=1)
+    resource_id: int = Field(ge=1)
+    day: date
+    time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+    channel: Literal["telegram", "vk", "dzen", "vc_ru", "tenchat"] = "telegram"
+
+
 
 
 class MaterialParams(_Params):
@@ -193,12 +217,30 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                "period — today, tomorrow или week (ближайшие 7 дней).",
                ToolOperation.ANALYTICS, Cost.NONE, ScheduleParams),
     Capability("show_insights", "Итоги бизнеса по записям",
-               "Глубокий разбор бизнеса по записям клиентов за период: сколько записей и отмен, средний чек, "
+               "Разбор записей за период: количество, отмены, расчётная стоимость услуг (не фактическая выручка), "
                "вернувшиеся клиенты, самые слабые дни и время, за сколько дней записываются, чем чаще берут, "
                "сколько уже записано вперёд. Подходит для вопросов «как дела в бизнесе», «почему мало клиентов», "
                "«как увеличить число клиентов», «что улучшить», «сколько заработали», «какие дни пустые», "
                "«как часто возвращаются клиенты». topic — о чём именно вопрос (на узкий вопрос — узкий ответ); days — за сколько дней, если владелец назвал срок.",
                ToolOperation.ANALYTICS, Cost.NONE, InsightsParams),
+    Capability("fill_open_slots", "Подобрать клиентов под свободные часы",
+               "Для «чем заполнить завтра», «найди клиентов под свободные окна», «что делать с пустыми слотами»: "
+               "показывает услуги, реальные возможные времена начала записи и клиентов с выполненными "
+               "посещениями этой услуги без ближайшей записи. Никакие сообщения не отправляет. "
+               "Без service_id предлагает выбрать услугу.",
+               ToolOperation.ANALYTICS, Cost.NONE, FillOpenSlotsParams),
+    Capability("prepare_slot_offer", "Подготовить маркетинговый пост для свободного времени",
+               "Передать маркетинговой команде подготовку черновика объявления о конкретной свободной записи. "
+               "Время перед постановкой задачи перепроверяется. Клиентские данные не передаются команде, "
+               "рассылка не запускается, публикации нет. Использовать только после выбора конкретного времени.",
+               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, SlotOfferParams),
+    Capability("show_return_candidates", "Кого пригласить на повторный визит",
+               "Список клиентов из CRM записей с минимум тремя выполненными визитами, "
+               "которые выходят за свой прежний интервал повторных посещений и не записаны "
+               "на ближайшие 14 дней. Отчёт только для владельца, сообщений клиентам не отправляет. "
+               "Подходит для «кто давно не приходил», «кому предложить вернуться», "
+               "«покажи клиентов для повторного приглашения».",
+               ToolOperation.ANALYTICS, Cost.NONE, ReturnCandidatesParams),
     Capability("set_insights_depth", "Глубина анализа",
                "Изменить, за сколько последних дней смотреть записи при разборе бизнеса (от 7 до 365 дней). "
                "Например: «смотри за квартал» — 90, «за полгода» — 180.",
