@@ -123,7 +123,7 @@ class SlotOfferParams(_Params):
     service_id: int = Field(ge=1)
     resource_id: int = Field(ge=1)
     day: date
-    time: str = Field(pattern=r"^([01]\\d|2[0-3]):[0-5]\\d$")
+    time: str = Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
     channel: Literal["telegram", "vk", "dzen", "vc_ru", "tenchat"] = "telegram"
 
 
