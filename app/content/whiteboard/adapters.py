@@ -308,7 +308,11 @@ class ClaudeHubGeminiImageProvider(OpenRouterImageProvider):
         if endpoint != 'images' or payload['model'] != 'gemini-3.1-flash-image':
             raise ValueError('No alternative image model or transport is permitted')
         # ClaudeHub documents model/prompt/size, not OpenRouter's resolution/image_config.
-        body = {'model': self.model, 'prompt': payload['prompt'], 'size': '1024x1792'}
+        size = payload.get('size', '1024x1792')
+        # The existing whiteboard path retains its portrait default.
+        if size not in {'1024x1792', '1024x1024'}:
+            raise ValueError('Unsupported ClaudeHub image request size')
+        body = {'model': self.model, 'prompt': payload['prompt'], 'size': size}
         headers = {'Authorization': 'Bearer ' + self.key}
         if self.client is not None:
             response = await self.client.post('images/generations', json=body, headers=headers)

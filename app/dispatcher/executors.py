@@ -458,7 +458,7 @@ async def create_post(ctx: Context, params: PostParams) -> Outcome:
 
 
 async def describe_create_creative(ctx: Context, params: CreativeParams) -> Confirmation:
-    labels = {"story": "Stories", "short_video": "Видеосценарий", "static_image": "Визуальный бриф"}
+    labels = {"story": "Stories", "short_video": "Видеосценарий", "static_image": "Изображение"}
     item = labels[params.format]
     details = [f"Тема: {params.topic}.", f"Формат: {item}."]
     if params.frame_count is not None:
@@ -466,6 +466,8 @@ async def describe_create_creative(ctx: Context, params: CreativeParams) -> Conf
     platform = params.platform or {"story": "telegram", "short_video": "youtube_shorts", "static_image": "telegram"}[params.format]
     details.append(f"Площадка: {platform}.")
     if params.format in {"story", "static_image"}:
+        from app.content.creative_images import image_aspect_ratio
+        details.append(f"Пропорции: {image_aspect_ratio(params.format, platform, requested=params.aspect_ratio)}.")
         selected = params.image_model or "auto"
         details.append(f"Генерация изображений: {selected}.")
     details.extend(_context_details(params))
@@ -489,7 +491,8 @@ async def confirm_create_creative(ctx: Context, stored: dict, via: str) -> Outco
                                   frame_count=params.frame_count, audience=params.audience,
                                   editorial_brief=params.editorial_brief,
                                   image_model=(params.image_model or
-                                               ("auto" if params.format in {"story", "static_image"} else "none")))
+                                               ("auto" if params.format in {"story", "static_image"} else "none")),
+                                  aspect_ratio=params.aspect_ratio)
         task = queue_creative(ctx.db, command)
     except (ValueError, ValidationError, LookupError):
         ctx.db.rollback()

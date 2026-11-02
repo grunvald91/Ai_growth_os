@@ -24,7 +24,7 @@ CHANNELS = {
     "post": POST_CHANNELS,
     "story": ("telegram", "vk", "instagram_reels"),
     "short_video": ("youtube_shorts", "instagram_reels", "vk_clips"),
-    "static_image": ("telegram", "vk", "dzen", "instagram_reels"),
+    "static_image": ("telegram", "vk", "dzen", "vc_ru", "tenchat", "instagram_reels"),
     "package": (),
 }
 EDITABLE_CAPABILITIES = frozenset(("create_post", "create_creative", "create_package"))
@@ -41,6 +41,7 @@ class EditCreation(BaseModel):
     audience: str | None = Field(default=None, max_length=300)
     editorial_brief: str | None = Field(default=None, max_length=3500)
     image_model: Literal["none", "auto", "gemini", "openai"] | None = None
+    aspect_ratio: Literal["9:16", "4:5", "1:1", "16:9"] | None = None
 
     @model_validator(mode="after")
     def valid_combination(self):
@@ -52,6 +53,10 @@ class EditCreation(BaseModel):
             raise ValueError("Эта площадка не подходит для выбранного формата")
         if self.image_model not in (None, "none") and self.format not in {"story", "static_image"}:
             raise ValueError("Image model only applies to Stories or images")
+        if self.aspect_ratio is not None and self.format not in {"story", "static_image"}:
+            raise ValueError("Aspect ratio only applies to images")
+        if self.format == "story" and self.aspect_ratio not in (None, "9:16"):
+            raise ValueError("Stories must be vertical 9:16")
         return self
 
 
@@ -78,6 +83,10 @@ class CreateHints(BaseModel):
             raise ValueError("Несовместимая площадка и формат")
         if self.image_model not in (None, "none") and self.format not in {"story", "static_image", None}:
             raise ValueError("Model selection only applies to Stories and images")
+        if self.aspect_ratio is not None and self.format not in {"story", "static_image", None}:
+            raise ValueError("Aspect ratio only applies to images")
+        if self.format == "story" and self.aspect_ratio not in (None, "9:16"):
+            raise ValueError("Stories must be vertical 9:16")
         return self
 
 
@@ -103,6 +112,9 @@ def draft_view(capability_id: str | None, params: dict) -> dict | None:
         "editorial_brief": params.get("editorial_brief") or "",
         "image_model": (params.get("image_model") or
                         ("auto" if fmt in {"story", "static_image"} else "none")),
+        # None means "according to platform"; preserve it as an automatic choice
+        # rather than freezing the previously displayed default on later edits.
+        "aspect_ratio": "9:16" if fmt == "story" else params.get("aspect_ratio"),
     }
 
 
@@ -128,4 +140,5 @@ def target_for_edit(edit: EditCreation, existing: dict | None = None):
         audience=audience, editorial_brief=editorial_brief,
         image_model=(edit.image_model or
                      ("auto" if edit.format in {"story", "static_image"} else "none")),
+        aspect_ratio=("9:16" if edit.format == "story" else edit.aspect_ratio),
     )

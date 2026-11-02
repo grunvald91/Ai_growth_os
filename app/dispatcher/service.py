@@ -255,8 +255,11 @@ def _apply_create_hints(decision: DispatcherDecision, hints, text: str) -> None:
         params["audience"] = hints.audience
     if hints.editorial_brief and not params.get("editorial_brief"):
         params["editorial_brief"] = hints.editorial_brief
-    if target in {"story", "static_image"} and hints.format == target and hints.image_model:
-        params["image_model"] = hints.image_model
+    if target in {"story", "static_image"} and hints.format == target:
+        if hints.image_model:
+            params["image_model"] = hints.image_model
+        if hints.aspect_ratio:
+            params["aspect_ratio"] = hints.aspect_ratio
     if capability == "create_creative" and target == "story":
         spoken_count = requested_story_count(text)
         if spoken_count is not None:
@@ -317,6 +320,27 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
 
     if decision is not None:
+        # A request for an illustrated post must produce an image AND ready
+        # caption, never silently degrade into text-only create_post.
+        if (chip is None and decision.intent == "execute"
+                and decision.capability in {"create_post", "create_creative"}
+                and re.search(r"(?iu)\b(?:пост\w*|публикаци\w*)\b", text)
+                and re.search(r"(?iu)(?:картин\w*|изображени\w*|иллюстраци\w*|фото|обложк\w*)", text)
+                and not re.search(r"(?iu)без\s+(?:картин\w*|изображени\w*|фото)", text)):
+            old = decision.params
+            default_platform = old.get("channel") or old.get("platform") or "telegram"
+            decision.capability = "create_creative"
+            decision.params = {
+                "topic": old.get("topic") or text.strip()[:300],
+                "format": "static_image",
+                "platform": default_platform,
+                "image_model": old.get("image_model") or "auto",
+                "editorial_brief": (
+                    (old.get("editorial_brief") or "") +
+                    "\nПодготовь полноценный текст поста в поле caption вместе с готовым изображением."
+                ).strip()[:3500],
+                **({"audience": old["audience"]} if old.get("audience") else {}),
+            }
         _apply_create_hints(decision, creation, text)
         # Explicit voice/text counts are authoritative without any manual selection.
         if (creation is None and decision.intent == "execute"

@@ -217,7 +217,7 @@
     post: [['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['vc_ru','vc.ru'],['tenchat','TenChat']],
     story: [['telegram','Telegram Stories'],['vk','Истории ВК'],['instagram_reels','Instagram Stories']],
     short_video: [['youtube_shorts','YouTube Shorts'],['instagram_reels','Instagram Reels'],['vk_clips','VK Клипы']],
-    static_image: [['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['instagram_reels','Instagram']],
+    static_image: [['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['vc_ru','vc.ru'],['tenchat','TenChat'],['instagram_reels','Instagram']],
     package: []
   };
   var createDefaultChannels = {post:'telegram',story:'telegram',short_video:'youtube_shorts',
@@ -268,6 +268,12 @@
         });
       model.value=data.image_model && data.image_model!=='none' ? data.image_model : 'auto';
       var modelField=field('Модель изображения',model);
+      var aspect=el('select','');
+      [['','По площадке'],['1:1','1:1 · квадрат'],['4:5','4:5 · вертикальный пост'],
+        ['9:16','9:16 · сторис'],['16:9','16:9 · горизонтальный']]
+        .forEach(function(entry){var item=el('option','',entry[1]);item.value=entry[0];aspect.appendChild(item);});
+      aspect.value=data.aspect_ratio || '';
+      var aspectField=field('Пропорции изображения',aspect);
       var count = el('select','');
       var auto = el('option','','Автоматически (3–10)'); auto.value = ''; count.appendChild(auto);
       for (var i=3; i<=10; i++){
@@ -281,6 +287,7 @@
         var fmt = kind.value;
         countField.hidden = fmt !== 'story';
         modelField.hidden = fmt !== 'story' && fmt !== 'static_image';
+        aspectField.hidden = fmt !== 'static_image';
         platformField.hidden = fmt === 'package';
         var previous = platform.value || data.platform || '';
         platform.replaceChildren();
@@ -290,12 +297,13 @@
         var choices=(createChannels[fmt] || []).map(function (x) {return x[0];});
         platform.value = choices.indexOf(previous) >= 0 ? previous : createDefaultChannels[fmt];
       }
-      kind.addEventListener('change',refreshOptions);
+      kind.addEventListener('change',function(){aspect.value='';refreshOptions();});
       form.appendChild(field('Тип материала',kind));
       form.appendChild(field('Тема',topic));
       form.appendChild(countField);
       form.appendChild(platformField);
       form.appendChild(modelField);
+      form.appendChild(aspectField);
       form.appendChild(field('Аудитория (необязательно)', audience));
       form.appendChild(field('Дополнительные требования', brief));
       refreshOptions();
@@ -323,7 +331,9 @@
           frame_count:kind.value === 'story' && count.value ? Number(count.value) : null,
           platform:kind.value === 'package' ? null : platform.value,
           audience:audience.value.trim(), editorial_brief:brief.value.trim(),
-          image_model:kind.value==='story'||kind.value==='static_image' ? model.value : 'none'
+          image_model:kind.value==='story'||kind.value==='static_image' ? model.value : 'none',
+          aspect_ratio:kind.value==='story' ? '9:16'
+            : kind.value==='static_image' ? (aspect.value || null) : null
         }).then(applyResult).catch(function (error) {
           status.textContent=error.message;status.hidden=false;
           save.disabled=false;discard.disabled=false;
@@ -344,6 +354,9 @@
       if (data.format === 'story')
         details.appendChild(editableRow('Экранов', data.frame_count == null ? 'Автоматически' : String(data.frame_count)));
       details.appendChild(editableRow('Тема',data.topic));
+      if (data.format==='story'||data.format==='static_image')
+        details.appendChild(editableRow('Пропорции',data.aspect_ratio ||
+          (data.format==='story'?'9:16':(data.platform==='instagram_reels'?'4:5':'1:1'))));
       if ((data.format==='story'||data.format==='static_image') && data.image_model!=='none')
         details.appendChild(editableRow('Изображения', {'auto':'Автоматически',
           'gemini':'Gemini','openai':'ChatGPT Image'}[data.image_model]||'Автоматически'));
@@ -354,7 +367,7 @@
         details.appendChild(editableRow('Площадка',
           ((createChannels[data.format] || []).find(function (row) { return row[0]===data.platform; }) || [null,data.platform])[1]));
       (block.details || []).filter(function (line) {
-        return !/^(Тема|Формат|Экранов|Площадка|Аудитория|Требования):/.test(line);
+        return !/^(Тема|Формат|Экранов|Площадка|Аудитория|Требования|Пропорции):/.test(line);
       }).forEach(function (line) {details.appendChild(el('p','dp-create-note',line));});
     } else {
       var list = el('ul', 'dp-confirm-list');
@@ -553,6 +566,7 @@
     var audience=document.getElementById('sg-create-audience');
     var brief=document.getElementById('sg-create-brief');
     var imageModel=document.getElementById('sg-create-image-model');
+    var aspect=document.getElementById('sg-create-aspect');
     var a=audience ? audience.value.trim() : '';
     var b=brief ? brief.value.trim() : '';
     if (!selected && !a && !b) return null;
@@ -563,7 +577,9 @@
       audience:a || null,
       editorial_brief:b || null,
       image_model:selected==='story'||selected==='static_image'
-        ? (imageModel && imageModel.value || 'auto') : null
+        ? (imageModel && imageModel.value || 'auto') : null,
+      aspect_ratio:selected==='story' ? '9:16'
+        : selected==='static_image' && aspect && aspect.value ? aspect.value : null
     };
   }
 

@@ -844,3 +844,60 @@ async def test_review_many_videos_is_compact_and_keeps_full_review_route(db, pro
     links = [b for b in answer["blocks"] if b["type"] == "links"]
     assert len(links) == 1
     assert links[0]["items"][0]["href"] == f"/studio/products/{product.id}/review"
+
+
+@pytest.mark.asyncio
+async def test_illustrated_post_is_not_sent_to_text_only_generator(db, product):
+    model, _ = llm({
+        "intent": "execute", "capability": "create_post", "confidence": 0.98,
+        "params": {"topic": "Почему стоит записываться онлайн", "channel": "vk"},
+    })
+    result = await send(db, product, text="Напиши пост с картинкой про онлайн-запись",
+                        model=model, key="illustrated-post")
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "static_image"
+    assert card["editable"]["platform"] == "vk"
+    assert card["editable"]["image_model"] == "auto"
+    assert card["editable"]["aspect_ratio"] is None
+    assert "полноценный текст поста" in card["editable"]["editorial_brief"]
+    assert tasks(db, "content_factory") == []
+    await service.confirm(db, context(db, product),
+                          card["confirmation_id"], accept=True, revision=0)
+    created = tasks(db, "content_creative")
+    assert len(created) == 1
+    payload = db.scalar(select(Artifact).where(
+        Artifact.task_id == created[0].id, Artifact.kind == "creative_request"))
+    data = json.loads(payload.content)
+    assert data["format"] == "static_image" and data["image_model"] == "auto"
+    assert data["platform"] == "vk"
+
+
+@pytest.mark.asyncio
+async def test_plain_post_does_not_generate_an_image(db, product):
+    model, _ = llm({
+        "intent": "execute", "capability": "create_post", "confidence": 0.98,
+        "params": {"topic": "Онлайн-запись без звонков", "channel": "telegram"},
+    })
+    result = await send(db, product, text="Напиши пост про онлайн-запись",
+                        model=model, key="plain-post")
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "post"
+
+
+def test_editing_story_aspect_and_platform_auto_defaults():
+    from app.dispatcher.editable import EditCreation, CreateHints, draft_view, target_for_edit
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        EditCreation(confirmation_id="x", revision=0, format="story",
+                     topic="Четыре совета", aspect_ratio="4:5")
+    with pytest.raises(ValidationError):
+        CreateHints(format="story", aspect_ratio="1:1")
+    _, edited = target_for_edit(EditCreation(
+        confirmation_id="x", revision=0, format="static_image",
+        topic="Баннер в соцсеть", platform="instagram_reels",
+        image_model="gemini", aspect_ratio=None),
+        existing={"format": "story", "aspect_ratio": "9:16"})
+    assert edited.aspect_ratio is None  # platform chooses 4:5
+    view = draft_view("create_creative", edited.model_dump(exclude_none=True))
+    assert view["aspect_ratio"] is None
+    assert view["platform"] == "instagram_reels"

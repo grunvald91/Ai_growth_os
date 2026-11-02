@@ -27,6 +27,27 @@ OPENAI_MODEL = "gpt-image-2.5-sunburst"
 GEMINI_MODEL = "gemini-3.1-flash-image"
 LIMIT = 12_000_000
 FILE_NAME = re.compile(r"^frame-(?:0[1-9]|10)\.png$")
+# Rendering targets are export profiles, not assumptions about remote responses.
+OUTPUT_SIZES = {"9:16": (900, 1600), "4:5": (960, 1200), "1:1": (1024, 1024), "16:9": (1600, 900)}
+OPENAI_REQUEST_SIZES = {"9:16": "1008x1792", "4:5": "1024x1280",
+                        "1:1": "1024x1024", "16:9": "1792x1008"}
+GEMINI_REQUEST_SIZES = {"9:16": "1024x1792", "4:5": "1024x1024",
+                        "1:1": "1024x1024", "16:9": "1024x1024"}
+
+
+def image_aspect_ratio(fmt: str, platform: str, *, requested: str | None = None) -> str:
+    """Respect explicit user composition; platform defaults apply otherwise."""
+    if fmt == "story":
+        if requested and requested != "9:16":
+            raise ValueError("Stories are always vertical 9:16")
+        return "9:16"
+    if fmt != "static_image":
+        raise ValueError("Only image materials have an image aspect ratio")
+    if requested:
+        if requested not in OUTPUT_SIZES:
+            raise ValueError("Unsupported image aspect ratio")
+        return requested
+    return "4:5" if platform == "instagram_reels" else "1:1"
 
 
 class ImageProviderUnavailable(ValueError):
@@ -54,12 +75,16 @@ def image_folder(root: Path, product_id: UUID, task_id: UUID) -> Path:
 
 def image_prompt(draft, frame, number: int, total: int, ratio: str) -> str:
     return (
-        "Create ONE complete professional Russian-language social-media image. "
+        (f"Create ONE finished vertical 9:16 Stories screen for {draft.platform}. "
+         "Do not create a horizontal banner. "
+         if draft.format == "story" else
+         f"Create ONE finished social-media post image for {draft.platform}. ")
         "Respect company identity as described, but do not invent a brand logo, "
         "endorsement, client quotation, price, statistic, product feature or result. "
         "Text, if present, must reproduce the exact Russian wording below; no extra text. "
         "Keep text readable on a phone and important details within safe margins. "
-        f"Aspect ratio {ratio}. Frame {number} of {total}. "
+        f"Aspect ratio {ratio}. Compose for the final full-frame layout; no arbitrary dimensions. "
+        f"Frame {number} of {total}. "
         "Maintain a consistent artistic identity across the series. "
         f"Art direction: {draft.visual_style[:1600]}. "
         f"Scene objective: {frame.purpose}. "
@@ -81,7 +106,10 @@ def png_output(raw: bytes, *, ratio: str) -> bytes:
             image = source.convert("RGB")
     except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
         raise ValueError("Image model did not return a usable image") from exc
-    size = (900, 1600) if ratio == "9:16" else (1024, 1024)
+    try:
+        size = OUTPUT_SIZES[ratio]
+    except KeyError as exc:
+        raise ValueError("Unsupported image aspect ratio") from exc
     target = ImageOps.pad(image, size, method=Image.Resampling.LANCZOS, color="white", centering=(.5, .5))
     buffer = io.BytesIO()
     target.save(buffer, format="PNG", optimize=True)
@@ -97,10 +125,13 @@ async def request_image(settings, model: str, prompt: str, ratio: str, *, client
         provider = ClaudeHubGeminiImageProvider(
             api_key=settings.xai_api_key, base_url=settings.xai_base_url,
             model=GEMINI_MODEL, client=client)
-        response = await provider.post("images", {"model": GEMINI_MODEL, "prompt": prompt})
+        response = await provider.post("images", {
+            "model": GEMINI_MODEL, "prompt": prompt,
+            "size": GEMINI_REQUEST_SIZES[ratio],
+        })
     elif model == OPENAI_MODEL:
         body = {"model": OPENAI_MODEL, "prompt": prompt,
-                "size": "1024x1536" if ratio == "9:16" else "1024x1024",
+                "size": OPENAI_REQUEST_SIZES[ratio],
                 "quality": "medium", "output_format": "png", "n": 1}
         headers = {"Authorization": "Bearer " + settings.openai_api_key}
         if client is not None:
@@ -118,7 +149,21 @@ async def request_image(settings, model: str, prompt: str, ratio: str, *, client
         data = response.json()["data"]
         if len(data) != 1:
             raise ValueError("Expected exactly one image")
-        encoded = data[0]["b64_json"]
+        item = data[0]
+        if not isinstance(item, dict):
+            raise ValueError("Expected image object")
+        # Accept base64 or a data URI containing PNG/JPEG/WebP/etc. Reject external
+        # URLs: downloading arbitrary provider URLs would add SSRF risk.
+        encoded = item.get("b64_json")
+        if encoded is None:
+            image_url = item.get("image_url")
+            uri = item.get("url") or (
+                image_url.get("url") if isinstance(image_url, dict) else image_url)
+            if not isinstance(uri, str) or not uri.startswith("data:image/"):
+                raise ValueError("Image API did not return inline image data")
+            media, delimiter, encoded = uri.partition(",")
+            if delimiter != "," or ";base64" not in media:
+                raise ValueError("Expected inline base64 image")
         if not isinstance(encoded, str) or len(encoded) > 23_000_000:
             raise ValueError("Invalid base64 image")
         raw = base64.b64decode(encoded, validate=True)
@@ -159,7 +204,8 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
     if request.format not in {"story", "static_image"} or request.image_model == "none":
         return True
     model = resolve_model(settings, request.image_model)
-    ratio = "9:16" if request.format == "story" else "1:1"
+    ratio = image_aspect_ratio(request.format, request.platform,
+                               requested=getattr(request, "aspect_ratio", None))
     directory = image_folder(settings.products_root, request.product_id, task_id)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     existing = {int(json.loads(a.content)["frame_number"])

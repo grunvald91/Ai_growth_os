@@ -1092,3 +1092,17 @@ def test_explicit_classic_wins_even_if_dispatcher_is_enabled(live, monkeypatch):
     assert 'data-growth-design="v4"' not in page.text
     assert 'id="dp-state"' not in page.text
     assert 'Новый дизайн' in page.text
+
+
+def test_create_includes_aspect_controls_and_story_vertical_hint(live):
+    client, _, product = live
+    html = client.get(f"/studio/products/{product.id}/create?design=v4").text
+    assert 'id="sg-create-aspect"' in html
+    assert 'id="sg-create-story-ratio"' in html
+    assert 'value="4:5"' in html and 'value="16:9"' in html
+    assert "вертикальные 9:16" in html
+    create_script = client.get("/studio/assets/create-studio.js").text
+    assert "aspectRow.hidden=key!=='static_image'" in create_script
+    dispatcher_script = client.get("/studio/assets/dispatcher.js").text
+    assert "aspect_ratio:selected==='story' ? '9:16'" in dispatcher_script
+    assert "kind.addEventListener('change',function(){aspect.value='';refreshOptions();});" in dispatcher_script

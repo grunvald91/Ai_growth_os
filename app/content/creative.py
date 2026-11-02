@@ -31,7 +31,7 @@ from app.llm.timeouts import CALL_WAIT_SECONDS, PROVIDER_TIMEOUT_SECONDS
 CREATIVE_PLATFORMS = {
     "short_video": {"youtube_shorts", "instagram_reels", "vk_clips"},
     "story": {"telegram", "vk", "instagram_reels"},
-    "static_image": {"telegram", "vk", "dzen", "instagram_reels"},
+    "static_image": {"telegram", "vk", "dzen", "vc_ru", "tenchat", "instagram_reels"},
 }
 
 
@@ -61,11 +61,14 @@ CREATIVE_DIRECTOR = (
     "У каждого кадра — подробный visual_prompt для генерации, точный текст на экране, действие или анимация "
     "и понятная цель. caption — готовая подпись к публикации: заход, коротко польза, один призыв. "
     "cover_text — 2–5 слов, которые обещают пользу. "
-    "STORY: 3–10 последовательных кадров от 0 секунд, всего не больше 90 секунд; "
+    "STORY: вертикальные мобильные экраны 9:16 с единым стилем и безопасными полями; "
+    "3–10 последовательных кадров от 0 секунд, всего не больше 90 секунд; "
     "если запрос содержит frame_count, создай СТРОГО столько экранов; сюжет: заход → польза "
     "по шагам (один шаг — один кадр) → мост к компании → призыв; интерактив (опрос, вопрос, стикер) — "
     "только если он помогает пользе. "
-    "STATIC_IMAGE: один кадр со временем 0 и 0; на изображении один крупный заголовок с пользой или "
+    "STATIC_IMAGE: один кадр со временем 0 и 0; соблюдай площадку и aspect_ratio. "
+    "caption — готовый к публикации текст поста, особенно для запроса «пост с картинкой». "
+    "На изображении один крупный заголовок с пользой или "
     "болью и при необходимости одна короткая строка поддержки; композиция с ясной точкой фокуса и местом "
     "под текст; польза и призыв — в caption. "
     "For short_video create 3-8 adjacent timed shots covering precisely 0-30 seconds with full spoken "
@@ -99,6 +102,7 @@ class CreativeRequest(Strict):
     frame_count: int | None = Field(default=None, ge=3, le=10)
     # 'none' preserves classic text-only callers; dispatcher explicitly opts in.
     image_model: Literal["none", "auto", "gemini", "openai"] = "none"
+    aspect_ratio: Literal["9:16", "4:5", "1:1", "16:9"] | None = None
 
     @model_validator(mode="after")
     def platform_supported(self):
@@ -108,6 +112,11 @@ class CreativeRequest(Strict):
             raise ValueError("Frame count applies only to Stories")
         if self.image_model != "none" and self.format not in {"story", "static_image"}:
             raise ValueError("Image generation requires Stories or static image")
+        if self.aspect_ratio is not None:
+            if self.format == "story" and self.aspect_ratio != "9:16":
+                raise ValueError("Stories must be vertical 9:16")
+            if self.format not in {"story", "static_image"}:
+                raise ValueError("Aspect ratio applies only to images")
         return self
 
 
@@ -276,7 +285,9 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             "audience": privacy.sanitize_text(request.audience or ""),
             "editorial_brief": privacy.sanitize_text(request.editorial_brief or ""),
             "format": request.format, "platform": request.platform,
-            "frame_count": request.frame_count,
+            "frame_count": request.frame_count, "aspect_ratio": (
+                "9:16" if request.format == "story" else request.aspect_ratio
+            ),
             "deliverable": ("director_ready_brief_and_real_images" if request.image_model != "none"
                             else "text_only_director_ready_brief"),
         }

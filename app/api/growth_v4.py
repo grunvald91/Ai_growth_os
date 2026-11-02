@@ -112,6 +112,17 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             ''' + ''.join(f'<option value="{n}">{n}</option>' for n in range(3, 11)) + '''
           </select>
         </label>
+        <label class="sg-create-setting" id="sg-create-aspect-row" hidden>
+          <span>Пропорции изображения</span>
+          <select id="sg-create-aspect" aria-label="Пропорции изображения">
+            <option value="">Автоматически по площадке</option>
+            <option value="1:1">1:1 · квадрат</option>
+            <option value="4:5">4:5 · вертикальный пост</option>
+            <option value="9:16">9:16 · вертикальный экран</option>
+            <option value="16:9">16:9 · горизонтальный</option>
+          </select>
+        </label>
+        <p id="sg-create-story-ratio" class="sg-create-tip" hidden>Stories · вертикальные 9:16</p>
         <label class="sg-create-setting" id="sg-create-model-row" hidden>
           <span>Генерация изображений</span>
           <select id="sg-create-image-model" aria-label="Модель изображений">

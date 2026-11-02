@@ -18,7 +18,7 @@ from sqlalchemy.pool import StaticPool
 from app.content.creative import CreativeDraft, CreativeRequest, queue_creative, run_creative_once
 from app.content.creative_images import (
     GEMINI_MODEL, OPENAI_MODEL, ImageProviderUnavailable, generate_images,
-    generated_images, image_folder, png_output, request_image, resolve_model,
+    generated_images, image_folder, png_output, request_image, resolve_model, image_aspect_ratio,
 )
 from app.core.config import Settings, get_settings
 from app.db.models import Base
@@ -260,3 +260,117 @@ async def test_missing_image_key_fails_before_strategy_llm_cost(company_db):
     assert fake.calls == []
     db.refresh(task)
     assert task.status == TaskStatus.FAILED
+
+
+@pytest.mark.parametrize(("fmt", "platform", "requested", "ratio"), [
+    ("story", "telegram", None, "9:16"),
+    ("story", "vk", "9:16", "9:16"),
+    ("static_image", "instagram_reels", None, "4:5"),
+    ("static_image", "vk", None, "1:1"),
+    ("static_image", "telegram", None, "1:1"),
+    ("static_image", "dzen", "16:9", "16:9"),
+    ("static_image", "instagram_reels", "1:1", "1:1"),
+])
+def test_platform_image_ratio(fmt, platform, requested, ratio):
+    assert image_aspect_ratio(fmt, platform, requested=requested) == ratio
+
+
+def test_story_cannot_be_horizontal_or_square():
+    with pytest.raises(ValueError):
+        image_aspect_ratio("story", "vk", requested="1:1")
+    with pytest.raises(ValueError):
+        CreativeRequest(mode="creative", product_id=uuid4(), topic="Четыре истории",
+                        format="story", platform="telegram", aspect_ratio="4:5")
+    with pytest.raises(ValueError):
+        CreativeRequest(mode="creative", product_id=uuid4(), topic="Текст ролика",
+                        format="short_video", platform="vk_clips", aspect_ratio="9:16")
+
+
+@pytest.mark.parametrize(("source_format", "ratio", "size"), [
+    ("PNG", "9:16", (900, 1600)),
+    ("JPEG", "4:5", (960, 1200)),
+    ("WEBP", "1:1", (1024, 1024)),
+    ("GIF", "16:9", (1600, 900)),
+])
+def test_image_decoder_accepts_multiple_input_formats_and_sizes(source_format, ratio, size):
+    source = Image.new("RGB", (731, 1099), (30, 100, 170))
+    buf = io.BytesIO()
+    source.save(buf, format=source_format)
+    data = png_output(buf.getvalue(), ratio=ratio)
+    with Image.open(io.BytesIO(data)) as result:
+        assert result.format == "PNG"
+        assert result.size == size
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("provider", "input_format", "kind", "ratio", "expected_size"), [
+    ("gemini", "JPEG", "b64_json", "9:16", "1024x1792"),
+    ("gemini", "WEBP", "data_uri", "1:1", "1024x1024"),
+    ("openai", "WEBP", "b64_json", "4:5", "1024x1280"),
+    ("openai", "JPEG", "data_uri", "16:9", "1792x1008"),
+])
+async def test_provider_correct_size_and_multiple_image_transport_forms(
+    provider, input_format, kind, ratio, expected_size,
+):
+    image_data = io.BytesIO()
+    Image.new("RGB", (840, 1280), (90, 150, 110)).save(image_data, input_format)
+    encoded = base64.b64encode(image_data.getvalue()).decode("ascii")
+    api_data = ({"b64_json": encoded} if kind == "b64_json" else
+                {"image_url": {"url": f"data:image/{input_format.lower()};base64,{encoded}"}})
+    calls = []
+
+    def respond(request):
+        data = json.loads(request.content)
+        calls.append(data)
+        return httpx.Response(200, json={"data": [api_data]})
+
+    base = "https://api.claudehub.fun/v1/" if provider == "gemini" else "https://api.openai.com/v1/"
+    async with httpx.AsyncClient(base_url=base, transport=httpx.MockTransport(respond)) as http:
+        settings = Settings(_env_file=None, xai_api_key="gemini-test", openai_api_key="openai-test")
+        model = GEMINI_MODEL if provider == "gemini" else OPENAI_MODEL
+        answer = await request_image(settings, model, "Russian visual poster", ratio, client=http)
+    assert len(calls) == 1
+    assert calls[0]["size"] == expected_size
+    with Image.open(io.BytesIO(answer)) as final:
+        assert final.format == "PNG"
+        assert final.size == {"9:16": (900, 1600), "4:5": (960, 1200),
+                              "1:1": (1024, 1024), "16:9": (1600, 900)}[ratio]
+
+
+@pytest.mark.asyncio
+async def test_instagram_post_image_defaults_to_four_by_five(company_db):
+    db, company, _, root = company_db
+    request = CreativeRequest(mode="creative", product_id=company.id,
+                              topic="Как выбрать букет", format="static_image",
+                              platform="instagram_reels", image_model="gemini")
+    task = queue_creative(db, request)
+    original = draft_story().model_dump(mode="json")
+    original["format"] = "static_image"
+    original["platform"] = "instagram_reels"
+    frame = original["frames"][0]
+    frame["start_second"] = frame["end_second"] = 0
+    original["frames"] = [frame]
+    rendered = await generate_images(db, Settings(
+        _env_file=None, products_root=root, xai_api_key="gemini-test",
+    ), request, CreativeDraft.model_validate(original),
+        task_id=task.id, provider=FakeImages())
+    assert rendered is True
+    record = generated_images(db, company.id, task.id)[0]
+    assert json.loads(record.content)["ratio"] == "4:5"
+    image_path = image_folder(root, company.id, task.id) / "frame-01.png"
+    with Image.open(image_path) as picture:
+        assert picture.size == (960, 1200)
+
+
+@pytest.mark.asyncio
+async def test_provider_rejects_remote_image_url():
+    def handler(request):
+        return httpx.Response(200, json={"data": [{"url": "https://untrusted.example/secret.png"}]})
+    async with httpx.AsyncClient(
+        base_url="https://api.openai.com/v1/", transport=httpx.MockTransport(handler),
+    ) as http:
+        with pytest.raises(ValueError, match="inline image"):
+            await request_image(
+                Settings(_env_file=None, openai_api_key="test"),
+                OPENAI_MODEL, "A picture", "1:1", client=http,
+            )

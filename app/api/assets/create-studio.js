@@ -10,11 +10,14 @@
   const platformRow=document.getElementById('sg-create-platform-row');
   const countRow=document.getElementById('sg-create-count-row');
   const modelRow=document.getElementById('sg-create-model-row');
+  const aspectRow=document.getElementById('sg-create-aspect-row');
+  const storyRatio=document.getElementById('sg-create-story-ratio');
+  const aspect=document.getElementById('sg-create-aspect');
   const channels={
     post:[['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['vc_ru','vc.ru'],['tenchat','TenChat']],
     story:[['telegram','Telegram Stories'],['vk','Истории ВК'],['instagram_reels','Instagram Stories']],
     short_video:[['youtube_shorts','YouTube Shorts'],['instagram_reels','Instagram Reels'],['vk_clips','VK Клипы']],
-    static_image:[['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['instagram_reels','Instagram']],
+    static_image:[['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['vc_ru','vc.ru'],['tenchat','TenChat'],['instagram_reels','Instagram']],
     package:[]
   };
   const defaults={post:'telegram',story:'telegram',short_video:'youtube_shorts',
@@ -52,6 +55,9 @@
     platformRow.hidden=!channels[key] || channels[key].length===0;
     countRow.hidden=key!=='story';
     modelRow.hidden=key!=='story' && key!=='static_image';
+    aspectRow.hidden=key!=='static_image';
+    storyRatio.hidden=key!=='story';
+    if(key!=='static_image') aspect.value='';
     const previous=platform.value;
     platform.replaceChildren();
     (channels[key]||[]).forEach(([value,label])=>{
