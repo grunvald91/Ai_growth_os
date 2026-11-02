@@ -198,9 +198,13 @@ async def test_connected_company_article_reaches_own_blog_with_critic_and_demo_s
     generated = SequenceProvider(article_outputs())
     monkeypatch.setattr(
         content_worker, "build_article_production",
-        lambda db, settings: build_article_production(db, settings, generated),
+        lambda db, settings, *, force_critic=False: build_article_production(
+            db, settings, generated, force_critic=force_critic
+        ),
     )
     assert await content_worker.run_content_once(sf, settings) == 1
+    # One final editorial review, never a fresh critique of each intermediate stage.
+    assert sum(r.metadata.get("task_type") == "quality_review" for r in generated.requests) == 1
     with sf() as db:
         article = db.scalar(select(Artifact).where(Artifact.product_id == company_id, Artifact.kind == "article"))
         assert article is not None
