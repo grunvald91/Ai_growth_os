@@ -187,7 +187,7 @@ def _session_login(request: Request, settings, users: dict) -> tuple[str, list[s
     return login, current[1]
 
 
-def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str]] | None:
+def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str] | None] | None:
     """Validate the signed identity and derive company access from live ServGo permissions."""
     from app.sso import access, tickets
     session = tickets.read_session(settings, request.cookies.get(tickets.COOKIE))
