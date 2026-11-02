@@ -293,7 +293,8 @@ def test_profile_shows_questions_and_answers_rebuild_the_draft(studio):
     response = client.post("/studio/new", data={"name": "Ноготок", "about": ABOUT}, follow_redirects=False)
     base = response.headers["location"]
     page = client.get(base).text  # The first draft was built automatically after creation.
-    assert "Чего не хватает" in page and "Ответить и пересобрать профиль" in page
+    assert "Чего не хватает" in page and "Собрать профиль" in page
+    assert '/profile/collect"' in page
     assert 'name="q0_field"' in page
     field = page.split('name="q0_field" value="')[1].split('"')[0]
     second = page.split('name="q1_field" value="')[1].split('"')[0]
