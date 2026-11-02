@@ -619,6 +619,13 @@ async def company_profile_action(product_id: UUID, action: str, request: Request
                 session_id = UUID(opened["session_id"])
             else:
                 session_id = session.id
+            # The company header is evidence too: without this, saving the name
+            # and description updated the database but left the AI's source set stale.
+            identity = "Название компании: " + product.name
+            if product.description:
+                identity += "\nОписание компании: " + product.description
+            service.add_text(product.id, session_id, identity, actor=ACTOR,
+                             reference="growth studio: данные компании")
             # Answers must be durable BEFORE the background build reads sources.
             await _apply_answers(service, product, session_id, fields)
             website = normalize_site(fields.get("link", ""))
