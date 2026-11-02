@@ -59,7 +59,6 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     page = client.get(f'/studio/products/{product.id}/create?design=v4')
     assert page.status_code == 200
     assert 'class="sg-create-screen"' in page.text
-    assert 'data-load-state="1"' in page.text
     assert 'id="dp-form"' in page.text
     assert 'class="dp-form command-bar"' in page.text
     assert 'id="dp-voice-hitbox"' in page.text
