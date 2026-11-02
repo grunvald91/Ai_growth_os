@@ -1,0 +1,57 @@
+name: Verify Growth legacy operator (read-only, one-time)
+
+on:
+  push:
+    branches: [ops/verify-artur-live-20261102]
+    paths:
+      - .github/workflows/verify-artur-readonly.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-artur-readonly
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Inspect only flags, never print identities, passwords or configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS" || { echo "SSH secret unavailable"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 12 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/server-keys
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one-key
+            ssh-keygen -lf /tmp/one-key 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/server-keys
+          test -s ~/.ssh/known_hosts || { echo "Pinned host fingerprint mismatch"; exit 1; }
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "root@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          from app.core.config import get_settings
+          from app.api.content_studio_auth import _load_users, credential_fingerprint
+          from app.api.studio_accounts import _operator_logins
+          from app.sso import tickets
+          settings = get_settings()
+          users = _load_users(settings)
+          candidate = next((name for name in (set(users) | _operator_logins(settings))
+                            if isinstance(name, str) and name.casefold() == "artur"), None)
+          record = credential_fingerprint(settings, users, candidate) if candidate else None
+          print("artur_account_present=" + ("yes" if record is not None else "no"))
+          print("artur_platform_admin=" + ("yes" if record is not None and record[1] is None else "no"))
+          print("artur_tune_enabled=" + ("yes" if candidate and candidate in
+                {name.strip() for name in (settings.studio_tune_usernames or "").split(",")} else "no"))
+          print("growth_sso_configured=" + ("yes" if tickets.configured(settings) else "no"))
+          PY
+          REMOTE
