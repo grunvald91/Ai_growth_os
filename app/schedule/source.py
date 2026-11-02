@@ -34,7 +34,9 @@ class Booking(_Row):
     duration_minutes: int | None = None
     status: str
     service: str
+    service_id: int | None = None
     resource: str | None = None
+    resource_id: int | None = None
     client_name: str
     client_phone: str | None = None
     client_email: str | None = None
@@ -53,8 +55,16 @@ class Resource(_Row):
     working_dates: list[date] | None = None
 
 
+class Service(_Row):
+    id: int
+    name: str
+    duration_minutes: int | None = None
+    price_estimate: int | None = None
+
+
 class FreeSlots(_Row):
     date: date
+    service_id: int | None = None
     resource_id: int | None = None
     resource: str | None = None
     times: list[str] = Field(default_factory=list)
@@ -66,6 +76,7 @@ class Schedule(_Row):
     break_hours: str | None = None
     step_minutes: int | None = None
     resources: list[Resource] = Field(default_factory=list)
+    services: list[Service] = Field(default_factory=list)
     bookings: list[Booking] = Field(default_factory=list)
     free_slots: list[FreeSlots] = Field(default_factory=list)
 
@@ -73,7 +84,8 @@ class Schedule(_Row):
 class ScheduleSource(Protocol):
     business_label: str | None
 
-    def fetch(self, date_from: date, date_to: date, *, with_slots: bool = False) -> Schedule | None:
+    def fetch(self, date_from: date, date_to: date, *, with_slots: bool = False,
+              slot_service_id: int | None = None) -> Schedule | None:
         """The schedule for the period, or None when it cannot be read right now."""
 
 
@@ -84,7 +96,8 @@ class ServGoSchedule:
         self._user_id = user_id
         self.business_label = business_label
 
-    def fetch(self, date_from: date, date_to: date, *, with_slots: bool = False) -> Schedule | None:
+    def fetch(self, date_from: date, date_to: date, *, with_slots: bool = False,
+              slot_service_id: int | None = None) -> Schedule | None:
         key = self._settings.servgo_internal_key or ""
         if len(key) < 32:
             return None
@@ -92,6 +105,8 @@ class ServGoSchedule:
                                                "date_to": date_to.isoformat(), "with_slots": with_slots}
         if self._user_id is not None:
             params["user_id"] = self._user_id
+        if slot_service_id is not None:
+            params["slot_service_id"] = slot_service_id
         url = self._settings.servgo_api_url.rstrip("/") + "/internal/studio/schedule"
         try:
             with access.http_client(TIMEOUT_SECONDS) as client:
