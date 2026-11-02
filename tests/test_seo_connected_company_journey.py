@@ -195,7 +195,19 @@ async def test_connected_company_article_reaches_own_blog_with_critic_and_demo_s
         assert article_job is not None and article_job.status == TaskStatus.QUEUED
         assert db.scalar(select(Task).where(Task.product_id == demo_id)) is None
 
-    generated = SequenceProvider(article_outputs())
+    class CriticUnavailableProvider(SequenceProvider):
+        """Keep six author stage fixtures independent of the attempted critic call."""
+        def __init__(self, outputs):
+            super().__init__(outputs)
+            self.critic_calls = 0
+
+        async def generate(self, request):
+            if request.metadata.get("task_type") == "quality_review":
+                self.critic_calls += 1
+                raise RuntimeError("Simulated critic outage; do not publish without review")
+            return await super().generate(request)
+
+    generated = CriticUnavailableProvider(article_outputs())
     monkeypatch.setattr(
         content_worker, "build_article_production",
         lambda db, settings, *, force_critic=False: build_article_production(
@@ -204,7 +216,7 @@ async def test_connected_company_article_reaches_own_blog_with_critic_and_demo_s
     )
     assert await content_worker.run_content_once(sf, settings) == 1
     # One final editorial review, never a fresh critique of each intermediate stage.
-    assert sum(r.metadata.get("task_type") == "quality_review" for r in generated.requests) == 1
+    assert generated.critic_calls == 1
     with sf() as db:
         article = db.scalar(select(Artifact).where(Artifact.product_id == company_id, Artifact.kind == "article"))
         assert article is not None
