@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -21,7 +22,7 @@ from app.dispatcher import executors
 from app.dispatcher.blocks import Chip, clean_blocks
 from app.dispatcher.decision import (CONFIDENCE_TO_ACT, SYSTEM_PROMPT, DispatcherDecision, build_user_message)
 from app.dispatcher.executors import Confirmation, Context, Outcome
-from app.dispatcher.fast_routes import quick_capability
+from app.dispatcher.fast_routes import quick_capability, quick_video_request, requested_story_count
 from app.dispatcher.models import DispatcherConversation, DispatcherMessage
 from app.dispatcher.policy import Verdict, verdict
 from app.dispatcher.readers import snapshot
@@ -198,10 +199,12 @@ def _record_tool_call(db: Session, ctx: Context, capability_id: str, params: dic
         status="executed" if outcome.ok else "failed", executed_at=datetime.now(timezone.utc)))
 
 
-def _confirm_block(confirmation: Confirmation, confirmation_id: str) -> dict:
+def _confirm_block(confirmation: Confirmation, confirmation_id: str, capability_id: str | None = None) -> dict:
+    from app.dispatcher.editable import draft_view
     return {"type": "confirm", "confirmation_id": confirmation_id, "title": confirmation.title,
             "details": confirmation.details, "confirm_label": confirmation.confirm_label,
-            "cancel_label": "Отмена", "paid": confirmation.paid, "state": "pending"}
+            "cancel_label": "Отмена", "paid": confirmation.paid, "state": "pending",
+            "revision": 0, "editable": draft_view(capability_id, confirmation.params)}
 
 
 async def act(ctx: Context, capability_id: str, raw_params: dict) -> tuple[Outcome, Confirmation | None, str]:
@@ -234,8 +237,75 @@ async def act(ctx: Context, capability_id: str, raw_params: dict) -> tuple[Outco
 FOLLOW_UP = [Chip(label="Что в работе", capability="show_work").model_dump()]
 
 
+def _apply_create_hints(decision: DispatcherDecision, hints, text: str) -> None:
+    """Merge optional UI settings only after dispatcher has determined an action.
+
+    Explicitly spoken screen count and channel take precedence over older UI
+    settings. Hints alone never start work.
+    """
+    if hints is None or decision.intent != "execute":
+        return
+    capability = decision.capability
+    if capability not in {"create_post", "create_creative", "create_package"}:
+        return
+    params = decision.params
+    target = ("post" if capability == "create_post" else
+              "package" if capability == "create_package" else params.get("format"))
+    if hints.audience and not params.get("audience"):
+        params["audience"] = hints.audience
+    if hints.editorial_brief and not params.get("editorial_brief"):
+        params["editorial_brief"] = hints.editorial_brief
+    if target in {"story", "static_image"} and hints.format == target:
+        if hints.image_model:
+            params["image_model"] = hints.image_model
+        if hints.aspect_ratio:
+            params["aspect_ratio"] = hints.aspect_ratio
+    if capability == "create_creative" and target == "story":
+        spoken_count = requested_story_count(text)
+        if spoken_count is not None:
+            params["frame_count"] = spoken_count
+        elif hints.format == "story" and hints.frame_count is not None:
+            params["frame_count"] = hints.frame_count
+    if hints.format != target or not hints.platform:
+        return
+    # Explicitly spoken platforms override the manual dropdown.
+    explicit_channel = re.search(
+        r"(?iu)(?:телеграм|telegram|вконтакте|\bvk\b|инстаграм|instagram|youtube|ютуб|дзен|dzen|tenchat|vc\.ru)",
+        text)
+    if explicit_channel:
+        return
+    if capability == "create_post":
+        params["channel"] = hints.platform
+    elif capability == "create_creative":
+        params["platform"] = hints.platform
+
+
+def _visual_preferences(text: str) -> tuple[str | None, str | None]:
+    """Explicit user constraints outrank the provider's or model's defaults."""
+    value = (text or "").casefold().replace("ё", "е")
+    candidates = (
+        ("instagram_reels", r"(?:instagram|инстаграм\w*)"),
+        ("vk", r"(?:вконтакте|\bвк\b|\bvk\b)"),
+        ("telegram", r"(?:telegram|телеграм\w*)"),
+        ("dzen", r"(?:\bдзен\b|\bdzen\b)"),
+        ("vc_ru", r"\bvc\.ru\b"),
+        ("tenchat", r"\btenchat\b"),
+    )
+    channel = next((name for name, expression in candidates
+                    if re.search(expression, value, re.I)), None)
+    ratio = next((x for x in ("9:16", "4:5", "1:1", "16:9") if x in value), None)
+    if ratio is None:
+        if re.search(r"горизонтальн\w*", value):
+            ratio = "16:9"
+        elif re.search(r"(?:вертикальн\w*|портретн\w*)", value):
+            ratio = "4:5"
+        elif re.search(r"квадрат\w*", value):
+            ratio = "1:1"
+    return channel, ratio
+
+
 async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, text: str, client_key: str | None,
-                         mode: str = "text", chip: dict | None = None) -> dict:
+                         mode: str = "text", chip: dict | None = None, creation=None) -> dict:
     """Process one owner message and return the user and assistant messages."""
     conversation = open_conversation(db, ctx.product.id, ctx.account)
     # One message at a time per conversation; a retry with the same key returns the first answer.
@@ -270,9 +340,56 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         quick = quick_capability(text)
         if quick is not None:
             decision = DispatcherDecision(intent="execute", capability=quick, params={}, confidence=1.0)
+        elif (video_params := quick_video_request(text)) is not None:
+            # Exact topic and duration from the user's explicit request. Existing
+            # whiteboard executor still requires paid approval before rendering.
+            decision = DispatcherDecision(intent="execute", capability="whiteboard_video",
+                                          params=video_params, confidence=1.0)
         elif llm is not None:
             decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
 
+
+    if decision is not None:
+        # A request for an illustrated post must produce an image AND ready
+        # caption, never silently degrade into text-only create_post.
+        if (chip is None and decision.intent == "execute"
+                and decision.capability in {"create_post", "create_creative"}
+                and re.search(r"(?iu)\b(?:пост\w*|публикаци\w*)\b", text)
+                and re.search(r"(?iu)(?:картин\w*|изображени\w*|иллюстраци\w*|фото|обложк\w*)", text)
+                and not re.search(r"(?iu)без\s+(?:картин\w*|изображени\w*|фото)", text)):
+            old = decision.params
+            spoken_platform, spoken_ratio = _visual_preferences(text)
+            default_platform = spoken_platform or old.get("channel") or old.get("platform") or "telegram"
+            decision.capability = "create_creative"
+            decision.params = {
+                "topic": old.get("topic") or text.strip()[:300],
+                "format": "static_image",
+                "platform": default_platform,
+                "image_model": old.get("image_model") or "auto",
+                **({"aspect_ratio": spoken_ratio} if spoken_ratio else {}),
+                "editorial_brief": (
+                    (old.get("editorial_brief") or "") +
+                    "\nПодготовь полноценный текст поста в поле caption вместе с готовым изображением."
+                ).strip()[:3500],
+                **({"audience": old["audience"]} if old.get("audience") else {}),
+            }
+        # For a naturally described image, accept explicit channel/orientation
+        # even when the LLM fails to preserve these details.
+        if (decision.intent == "execute" and decision.capability == "create_creative"
+                and decision.params.get("format") == "static_image"):
+            spoken_platform, spoken_ratio = _visual_preferences(text)
+            if spoken_platform:
+                decision.params["platform"] = spoken_platform
+            if spoken_ratio:
+                decision.params["aspect_ratio"] = spoken_ratio
+        _apply_create_hints(decision, creation, text)
+        # Explicit voice/text counts are authoritative without any manual selection.
+        if (creation is None and decision.intent == "execute"
+                and decision.capability == "create_creative"
+                and decision.params.get("format") == "story"):
+            count = requested_story_count(text)
+            if count is not None:
+                decision.params["frame_count"] = count
     outcome: Outcome | None = None
     confirmation: Confirmation | None = None
     capability_id: str | None = None
@@ -303,7 +420,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
     confirmation_id = None
     if confirmation is not None:
         confirmation_id = uuid4().hex
-        blocks.append(_confirm_block(confirmation, confirmation_id))
+        blocks.append(_confirm_block(confirmation, confirmation_id, capability_id))
     elif chips:
         blocks.append({"type": "chips", "items": chips})
     params = {**confirmation.params, "_capability": capability_id} if confirmation is not None else \
@@ -324,7 +441,54 @@ def _fallback_chips() -> list[Chip]:
 
 # ---- confirmations ----------------------------------------------------------------------
 
-async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bool, via: str = "button") -> dict:
+async def edit_confirmation(db: Session, ctx: Context, edit) -> dict:
+    """Edit a content request under the same conversation lock as confirmation.
+
+    Never queues work: only the explicit /confirm endpoint may start the saved draft.
+    """
+    from app.dispatcher.editable import EDITABLE_CAPABILITIES, target_for_edit, draft_view
+    conversation = open_conversation(db, ctx.product.id, ctx.account)
+    card = db.scalar(select(DispatcherMessage).where(
+        DispatcherMessage.conversation_id == conversation.id,
+        DispatcherMessage.confirmation_id == edit.confirmation_id,
+        DispatcherMessage.role == "assistant").with_for_update())
+    if card is None:
+        raise LookupError("Карточка не найдена")
+    if card.confirmation_state != "pending":
+        raise PermissionError("Задание уже подтверждено или отменено")
+    old_capability = (card.params or {}).get("_capability", card.capability)
+    if old_capability not in EDITABLE_CAPABILITIES:
+        raise PermissionError("Это подтверждение нельзя редактировать")
+    blocks = list(card.blocks or [])
+    current = next((b for b in blocks if b.get("type") == "confirm"
+                    and b.get("confirmation_id") == edit.confirmation_id), None)
+    if current is None or current.get("state") != "pending":
+        raise PermissionError("Карточка уже недоступна")
+    revision = int(current.get("revision", 0))
+    if edit.revision != revision:
+        raise PermissionError("Карточка была изменена. Откройте обновлённую версию")
+    capability_id, params = target_for_edit(edit, card.params)
+    described = await executors.DESCRIBERS[capability_id](ctx, params)
+    if not isinstance(described, Confirmation):
+        raise ValueError("Не удалось подготовить подтверждение")
+    replacement = _confirm_block(described, edit.confirmation_id, capability_id)
+    replacement["revision"] = revision + 1
+    card.blocks = clean_blocks([
+        *[{"type": "text", "text": "Параметры обновлены. Проверьте и подтвердите создание."}],
+        *[replacement if b.get("type") == "confirm" else b
+          for b in blocks if b.get("type") != "text"],
+    ])
+    card.params = {**described.params, "_capability": capability_id}
+    card.capability = capability_id
+    card.text = "Параметры обновлены. Проверьте и подтвердите создание."
+    card.spoken = card.text
+    db.commit()
+    return {"messages": [to_dict(card)], "replayed": False}
+
+
+
+async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bool,
+                  via: str = "button", revision: int | None = None) -> dict:
     """Answer a confirmation card. A card works once; a voice 'yes' only answers the latest open card."""
     conversation = open_conversation(db, ctx.product.id, ctx.account)
     card = db.scalar(select(DispatcherMessage).where(
@@ -334,6 +498,16 @@ async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bo
         raise LookupError("Карточка не найдена")
     if card.confirmation_state != "pending":
         return {"messages": [to_dict(card)], "replayed": True}
+    current_block = next((b for b in (card.blocks or [])
+                          if b.get("type") == "confirm" and b.get("confirmation_id") == confirmation_id), None)
+    if current_block and current_block.get("editable"):
+        saved_revision = int(current_block.get("revision", 0))
+        # Legacy clients can approve unedited cards, but a modified card
+        # must carry its current revision. A stale phone/tab cannot approve
+        # different material than what its user actually reviewed.
+        if (revision is None and saved_revision != 0) or (
+                revision is not None and revision != saved_revision):
+            raise PermissionError("Задание изменилось. Откройте обновлённую карточку перед созданием")
     if via == "voice":
         latest = db.scalar(select(DispatcherMessage).where(
             DispatcherMessage.conversation_id == conversation.id,

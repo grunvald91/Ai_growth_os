@@ -42,14 +42,83 @@ def test_switch_both_ways_preserves_query_and_real_forms(live):
     assert 'data-growth-design="v4"' in new.text
     assert 'Старый дизайн' in new.text
     assert client.cookies['growth_design'] == 'v4'
-    assert 'name="topic"' in new.text
-    assert f'action="{base}/create"' in new.text
+    assert 'id="sg-create-settings"' in new.text
+    assert 'id="sg-create-audience"' in new.text
+    assert 'id="sg-create-brief"' in new.text
+    assert 'id="sg-create-platform"' in new.text
+    assert 'id="sg-create-count"' in new.text
+    assert f'action="{base}/create"' not in new.text
+    assert 'id="sg-create-form"' not in new.text
+    assert f'action="{base}/create"' in classic.text
     assert 'private, no-store' == new.headers['cache-control']
     assert 'Cookie' in new.headers['vary']
     assert 'data-growth-design="v4"' in client.get(base+'/work').text
     back = client.get(base+'/work?design=classic')
     assert 'data-growth-design="v4"' not in back.text
     assert 'Новый дизайн' in back.text
+
+
+
+
+def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
+    client, _, product = live
+    page = client.get(f'/studio/products/{product.id}/create?design=v4')
+    assert page.status_code == 200
+    assert 'class="sg-create-screen"' in page.text
+    assert 'id="dp-form"' in page.text
+    assert 'class="dp-form command-bar"' in page.text
+    assert 'id="dp-voice-hitbox"' in page.text
+    assert 'id="dp-voice-overlay"' in page.text
+    assert 'id="dp-voice-status"' in page.text
+    assert 'id="sg-create-suggestions"' in page.text
+    assert 'id="sg-create-count"' in page.text
+    assert 'id="sg-create-platform"' in page.text
+    assert 'id="sg-create-audience"' in page.text
+    assert 'id="sg-create-brief"' in page.text
+    assert 'id="sg-create-form"' not in page.text
+    assert '/studio/assets/create-studio.js?v=images-20261102' in page.text
+    assert '/studio/assets/dispatcher.js?v=images-20261102' in page.text
+    assert page.text.count('id="dp-input"') == 1
+    assert page.text.index('Что создаём?') < page.text.index('id="dp-input"')
+    js = client.get('/studio/assets/dispatcher.js')
+    assert js.status_code == 200
+    assert "root.classList.contains('sg-create-dispatch')" in js.text
+    assert "pending[pending.length - 1]" in js.text
+
+
+
+def test_create_has_only_dispatcher_submit_and_reusable_details(live):
+    client, _, product = live
+    base = f'/studio/products/{product.id}'
+    page = client.get(base + '/create?design=v4').text
+    # No hidden legacy form may bypass dispatcher confirmation.
+    assert 'id="dp-form"' in page and 'id="dp-send"' in page
+    assert 'id="sg-create-settings"' in page
+    assert 'sg-primary-action' not in page
+    assert '<form method="post" action="' + base + '/create"' not in page
+    js = client.get('/studio/assets/create-studio.js')
+    assert js.status_code == 200
+    assert "document.getElementById('sg-create-platform')" in js.text
+    assert "document.getElementById('sg-create-count')" in js.text
+    assert "Only the lower dispatcher composer can submit" in js.text
+    dispatcher = client.get('/studio/assets/dispatcher.js').text
+    assert "creation: creationHints()" in dispatcher
+    assert "frame_count:selected==='story'" in dispatcher
+    assert "editorial_brief:b || null" in dispatcher
+
+
+def test_create_image_model_is_single_select_and_confirmable(live):
+    client, _, product = live
+    page = client.get(f'/studio/products/{product.id}/create?design=v4')
+    assert page.status_code == 200
+    assert 'id="sg-create-image-model"' in page.text
+    assert 'value="gemini"' in page.text
+    assert 'value="openai"' in page.text
+    assert 'Автоматически · одна модель' in page.text
+    script = client.get('/studio/assets/dispatcher.js')
+    assert script.status_code == 200
+    assert "image_model" in script.text
+    assert "sg-create-image-model" in script.text
 
 
 def test_home_keeps_real_dispatcher_and_voice(live):
@@ -71,8 +140,8 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=13' in page.text
-    assert '/studio/assets/dispatcher.js?v=review-cards-20261101' in page.text
+    assert '/studio/assets/growth-live.css?v=16' in page.text
+    assert '/studio/assets/dispatcher.js?v=images-20261102' in page.text
     assert '/studio/assets/growth-live.js?v=8' in page.text
     assert 'Простое видео' in page.text
     assert 'hero-intro' in page.text
@@ -1058,3 +1127,26 @@ def test_notification_bell_is_real_svg_centered_on_every_v4_screen(live):
     assert 'place-items:center' in css
     assert 'width:44px' in css
     assert '.sg-notifications>summary>svg.icon' in css
+
+
+def test_create_includes_aspect_controls_and_story_vertical_hint(live):
+    client, _, product = live
+    html = client.get(f"/studio/products/{product.id}/create?design=v4").text
+    assert 'id="sg-create-aspect"' in html
+    assert 'id="sg-create-story-ratio"' in html
+    assert 'value="4:5"' in html and 'value="16:9"' in html
+    assert "вертикальные 9:16" in html
+    create_script = client.get("/studio/assets/create-studio.js").text
+    assert "aspectRow.hidden=key!=='static_image'" in create_script
+    dispatcher_script = client.get("/studio/assets/dispatcher.js").text
+    assert "aspect_ratio:selected==='story' ? '9:16'" in dispatcher_script
+    assert "kind.addEventListener('change',function(){aspect.value='';refreshOptions();});" in dispatcher_script
+
+
+def test_create_timing_explains_status_without_unverified_estimates(live):
+    client, _, product = live
+    html = client.get(f"/studio/products/{product.id}/create?design=v4").text
+    assert '<details class="sg-create-timing"' in html
+    assert "Сколько занимает создание?" in html
+    assert "фактическим статусом" in html
+    assert "точное время заранее не гарантируется" in html

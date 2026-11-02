@@ -122,6 +122,8 @@ class ConfirmBlock(_Block):
     # Shown on the card so nobody confirms a payment they did not understand.
     paid: bool = False
     state: Literal["pending", "confirmed", "declined"] = "pending"
+    revision: int = Field(default=0, ge=0)
+    editable: dict | None = None
 
 
 Block = Annotated[

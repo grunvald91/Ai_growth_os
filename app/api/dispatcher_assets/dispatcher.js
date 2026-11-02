@@ -209,30 +209,192 @@
     })[status] || status;
   }
 
+  var createFormatNames = {
+    post: 'Пост', story: 'Stories', short_video: 'Видеосценарий',
+    static_image: 'Бриф изображения', package: 'Полный пакет'
+  };
+  var createChannels = {
+    post: [['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['vc_ru','vc.ru'],['tenchat','TenChat']],
+    story: [['telegram','Telegram Stories'],['vk','Истории ВК'],['instagram_reels','Instagram Stories']],
+    short_video: [['youtube_shorts','YouTube Shorts'],['instagram_reels','Instagram Reels'],['vk_clips','VK Клипы']],
+    static_image: [['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['vc_ru','vc.ru'],['tenchat','TenChat'],['instagram_reels','Instagram']],
+    package: []
+  };
+  var createDefaultChannels = {post:'telegram',story:'telegram',short_video:'youtube_shorts',
+    static_image:'telegram',package:''};
+
+  function editableRow(label, value) {
+    var row = el('div', 'dp-create-detail');
+    row.appendChild(el('span', 'dp-create-detail-label', label));
+    row.appendChild(el('strong', 'dp-create-detail-value', value));
+    return row;
+  }
+
+  function renderCreationEditor(block, card, details, actions) {
+    var data = block.editable;
+    if (!data) return;
+    var editButton = el('button', 'dp-btn ghost dp-edit-create', 'Изменить');
+    editButton.type = 'button';
+    actions.insertBefore(editButton, actions.firstChild);
+    editButton.addEventListener('click', function () {
+      var form = el('form', 'dp-create-editor');
+      var status = el('p', 'dp-create-editor-error');
+      status.setAttribute('role', 'alert'); status.hidden = true;
+      function field(label, control) {
+        var wrapper = el('label', 'dp-create-edit-field');
+        wrapper.appendChild(el('span', '', label));
+        wrapper.appendChild(control);
+        return wrapper;
+      }
+      var kind = el('select', '');
+      kind.setAttribute('aria-label', 'Тип материала');
+      (data.formats || []).forEach(function (code) {
+        var item = el('option', '', createFormatNames[code] || code);
+        item.value = code; kind.appendChild(item);
+      });
+      kind.value = data.format;
+      var topic = el('textarea', '');
+      topic.value = data.topic || '';
+      topic.rows = 2; topic.maxLength = 300; topic.required = true;
+      topic.minLength = 3; topic.setAttribute('aria-label','Тема');
+      var audience = el('input', '');
+      audience.value = data.audience || ''; audience.maxLength = 300;
+      var brief = el('textarea', '');
+      brief.value = data.editorial_brief || ''; brief.maxLength = 3500; brief.rows = 2;
+      var model = el('select','');
+      [['auto','Автоматически · одна модель'],['gemini','Gemini'],['openai','ChatGPT Image']]
+        .forEach(function (entry) {
+          var opt=el('option','',entry[1]);opt.value=entry[0];model.appendChild(opt);
+        });
+      model.value=data.image_model && data.image_model!=='none' ? data.image_model : 'auto';
+      var modelField=field('Модель изображения',model);
+      var aspect=el('select','');
+      [['','По площадке'],['1:1','1:1 · квадрат'],['4:5','4:5 · вертикальный пост'],
+        ['9:16','9:16 · сторис'],['16:9','16:9 · горизонтальный']]
+        .forEach(function(entry){var item=el('option','',entry[1]);item.value=entry[0];aspect.appendChild(item);});
+      aspect.value=data.aspect_ratio || '';
+      var aspectField=field('Пропорции изображения',aspect);
+      var count = el('select','');
+      var auto = el('option','','Автоматически (3–10)'); auto.value = ''; count.appendChild(auto);
+      for (var i=3; i<=10; i++){
+        var opt = el('option','',String(i)); opt.value=String(i); count.appendChild(opt);
+      }
+      count.value = data.frame_count == null ? '' : String(data.frame_count);
+      var platform = el('select','');
+      var countField = field('Количество экранов',count);
+      var platformField = field('Площадка', platform);
+      function refreshOptions() {
+        var fmt = kind.value;
+        countField.hidden = fmt !== 'story';
+        modelField.hidden = fmt !== 'story' && fmt !== 'static_image';
+        aspectField.hidden = fmt !== 'static_image';
+        platformField.hidden = fmt === 'package';
+        var previous = platform.value || data.platform || '';
+        platform.replaceChildren();
+        (createChannels[fmt] || []).forEach(function (entry) {
+          var opt=el('option','',entry[1]);opt.value=entry[0];platform.appendChild(opt);
+        });
+        var choices=(createChannels[fmt] || []).map(function (x) {return x[0];});
+        platform.value = choices.indexOf(previous) >= 0 ? previous : createDefaultChannels[fmt];
+      }
+      kind.addEventListener('change',function(){aspect.value='';refreshOptions();});
+      form.appendChild(field('Тип материала',kind));
+      form.appendChild(field('Тема',topic));
+      form.appendChild(countField);
+      form.appendChild(platformField);
+      form.appendChild(modelField);
+      form.appendChild(aspectField);
+      form.appendChild(field('Аудитория (необязательно)', audience));
+      form.appendChild(field('Дополнительные требования', brief));
+      refreshOptions();
+      form.appendChild(status);
+      var buttons = el('div','dp-create-edit-actions');
+      var discard = el('button','dp-btn ghost','Отменить правку');
+      discard.type='button';
+      var save = el('button','dp-btn primary','Сохранить');
+      save.type='submit';
+      discard.addEventListener('click',function(){
+        form.remove();details.hidden=false;actions.hidden=false;
+      });
+      buttons.append(discard,save);form.appendChild(buttons);
+      details.hidden=true; actions.hidden=true; card.appendChild(form);
+      form.addEventListener('submit',function (event) {
+        event.preventDefault();
+        if (!topic.value.trim() || topic.value.trim().length < 3) {
+          status.textContent='Введите тему не короче трёх символов.';
+          status.hidden=false;return;
+        }
+        save.disabled=true; discard.disabled=true; status.hidden=true;
+        post('/edit', {
+          confirmation_id:block.confirmation_id, revision:block.revision || 0,
+          format:kind.value, topic:topic.value.trim(),
+          frame_count:kind.value === 'story' && count.value ? Number(count.value) : null,
+          platform:kind.value === 'package' ? null : platform.value,
+          audience:audience.value.trim(), editorial_brief:brief.value.trim(),
+          image_model:kind.value==='story'||kind.value==='static_image' ? model.value : 'none',
+          aspect_ratio:kind.value==='story' ? '9:16'
+            : kind.value==='static_image' ? (aspect.value || null) : null
+        }).then(applyResult).catch(function (error) {
+          status.textContent=error.message;status.hidden=false;
+          save.disabled=false;discard.disabled=false;
+        });
+      });
+      kind.focus();
+    });
+  }
+
   function renderConfirm(block) {
     var card = el('div', 'dp-confirm' + (block.paid ? ' paid' : ''));
     card.appendChild(el('strong', 'dp-confirm-title', voiceHoldEnabled ? friendlyTitle(block.title) : block.title));
     if (block.paid) card.appendChild(el('span', 'dp-badge', 'Платно'));
-    var list = el('ul', 'dp-confirm-list');
-    block.details.forEach(function (line) { list.appendChild(el('li', '', line)); });
-    card.appendChild(list);
+    var details = el('div', block.editable ? 'dp-create-details' : 'dp-confirm-list');
+    if (block.editable) {
+      var data = block.editable;
+      details.appendChild(editableRow('Тип',createFormatNames[data.format] || data.format));
+      if (data.format === 'story')
+        details.appendChild(editableRow('Экранов', data.frame_count == null ? 'Автоматически' : String(data.frame_count)));
+      details.appendChild(editableRow('Тема',data.topic));
+      if (data.format==='story'||data.format==='static_image')
+        details.appendChild(editableRow('Пропорции',data.aspect_ratio ||
+          (data.format==='story'?'9:16':(data.platform==='instagram_reels'?'4:5':'1:1'))));
+      if ((data.format==='story'||data.format==='static_image') && data.image_model!=='none')
+        details.appendChild(editableRow('Изображения', {'auto':'Автоматически',
+          'gemini':'Gemini','openai':'ChatGPT Image'}[data.image_model]||'Автоматически'));
+      if (data.audience) details.appendChild(editableRow('Аудитория', data.audience));
+      if (data.editorial_brief) details.appendChild(editableRow('Требования',
+        data.editorial_brief.slice(0,170) + (data.editorial_brief.length>170 ? '…' : '')));
+      if (data.platform)
+        details.appendChild(editableRow('Площадка',
+          ((createChannels[data.format] || []).find(function (row) { return row[0]===data.platform; }) || [null,data.platform])[1]));
+      (block.details || []).filter(function (line) {
+        return !/^(Тема|Формат|Экранов|Площадка|Аудитория|Требования|Пропорции):/.test(line);
+      }).forEach(function (line) {details.appendChild(el('p','dp-create-note',line));});
+    } else {
+      var list = el('ul', 'dp-confirm-list');
+      (block.details || []).forEach(function (line) {list.appendChild(el('li','',line));});
+      details.appendChild(list);
+    }
+    card.appendChild(details);
     if (block.state === 'pending') {
       var actions = el('div', 'dp-confirm-actions');
-      var no = el('button', 'dp-btn ghost', block.cancel_label); no.type = 'button';
-      var yes = el('button', 'dp-btn primary', block.confirm_label); yes.type = 'button';
-      no.addEventListener('click', function () { answer(block, false, no, yes); });
-      yes.addEventListener('click', function () { answer(block, true, no, yes); });
-      actions.appendChild(no); actions.appendChild(yes);
+      var no = el('button', 'dp-btn ghost', block.editable ? 'Отменить задание' : block.cancel_label); no.type='button';
+      var yes = el('button', 'dp-btn primary', block.confirm_label); yes.type='button';
+      no.addEventListener('click',function(){answer(block,false,no,yes);});
+      yes.addEventListener('click',function(){answer(block,true,no,yes);});
+      actions.appendChild(yes);
+      if (block.editable) renderCreationEditor(block,card,details,actions);
+      actions.appendChild(no);
       card.appendChild(actions);
     } else {
-      card.appendChild(el('span', 'dp-confirm-state', block.state === 'confirmed' ? 'Подтверждено' : 'Отменено'));
+      card.appendChild(el('span','dp-confirm-state',block.state === 'confirmed' ? 'Подтверждено' : 'Отменено'));
     }
     return card;
   }
 
   function answer(block, accept, no, yes) {
     no.disabled = yes.disabled = true;
-    post('/confirm', { confirmation_id: block.confirmation_id, accept: accept, via: 'button' })
+    post('/confirm', { confirmation_id: block.confirmation_id, accept: accept,
+      via: 'button', revision: block.revision || 0 })
       .then(applyResult)
       .catch(function (error) { no.disabled = yes.disabled = false; notify(error.message); });
   }
@@ -358,7 +520,9 @@
         });
         showNote('Голосовая команда сохранена, отправка не удалась.', true, retry);
       } else if (body.mode === 'text') {
-        input.value = body.text + (input.value.trim() ? '\n' + input.value : '');
+        // A Create hint is transport context, not part of the user's draft.
+        var restored = root.classList.contains('sg-create-dispatch') && echo ? echo : body.text;
+        input.value = restored + (input.value.trim() ? '\n' + input.value : '');
         grow();
       }
     }).then(function () { setBusy(false); });
@@ -369,12 +533,62 @@
     send({ mode: 'chip', chip: { label: chip.label, capability: chip.capability, params: chip.params || {} } }, chip.label);
   }
 
+  function createCommand(text) {
+    if (!root.classList.contains('sg-create-dispatch')) return text;
+    // Explicitly spoken/written format always wins over an older format chip.
+    // A selected chip is only a fallback for a bare subject like "про волосы".
+    if (/(?:^|[^\p{L}\p{N}])(?:сторис|истори(?:и|й|ю|я|ями|ях)|пост(?:ы|а|у|е|ом|ов|ам|ами|ах)?|видеосценари\p{L}*|сценари\p{L}*|видео|видеоролик\p{L}*|ролик\p{L}*|анимаци\p{L}*|изображени\p{L}*|картин\p{L}*|стать(?:я|ю|и|е|ей|ёй|ями|ях)|пакет)(?=$|[^\p{L}\p{N}])/iu.test(text)) return text;
+    var format = root.getAttribute('data-create-format');
+    var lead = ({
+      post: 'Подготовь пост по следующей задаче: ',
+      story: 'Создай Stories по следующей задаче: ',
+      static_image: 'Подготовь изображение по следующей задаче: ',
+      short_video: 'Подготовь видеосценарий по следующей задаче: ',
+      whiteboard: 'Создай простое рисованное анимированное видео по следующей задаче: ',
+      package: 'Подготовь полный контент-пакет по следующей задаче: '
+    })[format];
+    if (!lead) return text;
+    if (format === 'story') {
+      var count = document.getElementById('sg-create-count');
+      if (count && count.value) {
+        lead = 'Создай ' + count.value + ' сторис по следующей задаче: ';
+      }
+    }
+    return lead + text;
+  }
+
+  function creationHints() {
+    if (!root.classList.contains('sg-create-dispatch')) return null;
+    var chosen=root.getAttribute('data-create-format');
+    var selected=/^(post|story|short_video|static_image|package)$/.test(chosen||'') ? chosen : null;
+    var platform=document.getElementById('sg-create-platform');
+    var count=document.getElementById('sg-create-count');
+    var audience=document.getElementById('sg-create-audience');
+    var brief=document.getElementById('sg-create-brief');
+    var imageModel=document.getElementById('sg-create-image-model');
+    var aspect=document.getElementById('sg-create-aspect');
+    var a=audience ? audience.value.trim() : '';
+    var b=brief ? brief.value.trim() : '';
+    if (!selected && !a && !b) return null;
+    return {
+      format:selected,
+      platform:selected && selected!=='package' && platform ? platform.value : null,
+      frame_count:selected==='story' && count && count.value ? Number(count.value) : null,
+      audience:a || null,
+      editorial_brief:b || null,
+      image_model:selected==='story'||selected==='static_image'
+        ? (imageModel && imageModel.value || 'auto') : null,
+      aspect_ratio:selected==='story' ? '9:16'
+        : selected==='static_image' && aspect && aspect.value ? aspect.value : null
+    };
+  }
+
   function sendText() {
     var text = input.value.trim();
     if (!text || busy) return;
     input.value = '';
     grow();
-    send({ mode: 'text', text: text }, text);
+    send({ mode: 'text', text: createCommand(text), creation: creationHints() }, text);
   }
 
   function grow() {
@@ -684,7 +898,7 @@
           voiceDispatchPending = true;
           setVoiceState('sending');
           showLive('Обрабатываю запрос…', '', true);
-          send({ mode: 'text', text: transcript }, transcript, true);
+          send({ mode: 'text', text: createCommand(transcript), creation: creationHints() }, transcript, true);
         } else {
           applyDictation(data);
         }
@@ -871,4 +1085,22 @@
   syncConversationLayout();
   renderHints();
   toBottom();
+
+  if (root.classList.contains('sg-create-dispatch')) {
+    // On Create, restore only the last pending creation card. Do not copy the
+    // full conversation from Home into the compact composition workspace.
+    fetch(api + '/state', { credentials: 'same-origin',
+      headers: { Accept: 'application/json' } })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (data) {
+        if (!data || !Array.isArray(data.messages) ||
+            feed.querySelector('.dp-msg:not(.dp-typing)')) return;
+        var pending = data.messages.filter(function (message) {
+          return message.role === 'assistant' && (message.blocks || []).some(function (b) {
+            return b.type === 'confirm' && b.state === 'pending' && !!b.editable;
+          });
+        });
+        if (pending.length) applyResult({ messages: [pending[pending.length - 1]] });
+      }).catch(function () { /* No network means no restored card, not a page failure. */ });
+  }
 })();

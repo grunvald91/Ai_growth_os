@@ -80,6 +80,271 @@ def test_every_capability_has_a_way_to_run():
             assert capability.id in executors.EXECUTORS
 
 
+
+
+def test_voice_story_counts_keep_requested_number():
+    from app.dispatcher.fast_routes import requested_story_count
+    assert requested_story_count("Сделай четыре сторис про летний уход") == 4
+    assert requested_story_count("Подготовь 5 историй про волосы") == 5
+    assert requested_story_count("Сделай сторис из шести экранов") == 6
+    assert requested_story_count("Подготовь сторис на завтра") is None
+
+
+@pytest.mark.asyncio
+async def test_stories_require_confirmation_and_keep_exact_count(db, product):
+    chip = {"label": "Пять сторис про услуги", "capability": "create_creative",
+            "params": {"topic": "Как выбрать услугу", "format": "story",
+                       "frame_count": 5}}
+    result = await send(db, product, chip=chip)
+    answer = result["messages"][1]
+    confirm_block = next(block for block in answer["blocks"] if block["type"] == "confirm")
+    assert confirm_block["confirmation_id"]
+    assert "5" in str(confirm_block["details"])
+    assert not tasks(db, "content_creative")
+    confirmed = await service.confirm(db, context(db, product),
+                                      confirm_block["confirmation_id"], accept=True)
+    created = tasks(db, "content_creative")
+    assert len(created) == 1
+    from app.models.domain import Artifact
+    item = db.scalar(select(Artifact).where(Artifact.task_id == created[0].id,
+                                             Artifact.kind == "creative_request"))
+    assert item is not None
+    assert json.loads(item.content)["frame_count"] == 5
+    assert any(b["type"] == "task" for b in confirmed["messages"][-1]["blocks"])
+
+
+
+
+# ---- inline editing of a pending create card ---------------------------------------------
+
+@pytest.mark.asyncio
+async def test_edit_stories_card_updates_saved_job_without_creating_work(db, product):
+    from app.dispatcher.editable import EditCreation
+    result = await send(db, product, chip={
+        "label": "Четыре Stories", "capability": "create_creative",
+        "params": {"topic": "Уход за волосами", "format": "story", "frame_count": 4},
+    })
+    original = next(b for b in result["messages"][1]["blocks"] if b["type"] == "confirm")
+    assert original["editable"]["frame_count"] == 4 and original["revision"] == 0
+    assert tasks(db, "content_creative") == []
+    updated = await service.edit_confirmation(db, context(db, product), EditCreation(
+        confirmation_id=original["confirmation_id"], revision=0, format="story",
+        topic="Топ-6 ошибок ухода за волосами", frame_count=6, platform="vk"))
+    card = next(b for b in updated["messages"][0]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["frame_count"] == 6
+    assert card["editable"]["topic"] == "Топ-6 ошибок ухода за волосами"
+    assert card["editable"]["platform"] == "vk"
+    assert card["revision"] == 1
+    assert tasks(db, "content_creative") == []
+    with pytest.raises(PermissionError):
+        await service.edit_confirmation(db, context(db, product), EditCreation(
+            confirmation_id=original["confirmation_id"], revision=0, format="story",
+            topic="Новая тема", frame_count=5))
+    confirmed = await service.confirm(db, context(db, product),
+                                      original["confirmation_id"], accept=True, revision=1)
+    task = tasks(db, "content_creative")[0]
+    source = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_request"))
+    payload = json.loads(source.content)
+    assert payload["topic"] == "Топ-6 ошибок ухода за волосами"
+    assert payload["frame_count"] == 6 and payload["platform"] == "vk"
+    assert any(block["type"] == "task" for block in confirmed["messages"][-1]["blocks"])
+    with pytest.raises(PermissionError):
+        await service.edit_confirmation(db, context(db, product), EditCreation(
+            confirmation_id=original["confirmation_id"], revision=1,
+            format="story", topic="Слишком поздно"))
+
+
+@pytest.mark.asyncio
+async def test_edit_can_change_stories_into_post_and_preserves_company_isolation(db, product):
+    from app.dispatcher.editable import EditCreation
+    result = await send(db, product, chip={
+        "label": "Stories", "capability": "create_creative",
+        "params": {"topic": "Как выбрать услугу", "format": "story", "frame_count": 5}})
+    block = next(b for b in result["messages"][1]["blocks"] if b["type"] == "confirm")
+    params = dict(confirmation_id=block["confirmation_id"], revision=0,
+                  format="post", topic="Новый пост про услуги", platform="vk")
+    with pytest.raises(LookupError):
+        await service.edit_confirmation(db, context(db, product, "other"),
+                                        EditCreation(**params))
+    outcome = await service.edit_confirmation(db, context(db, product),
+                                               EditCreation(**params))
+    edit = next(b for b in outcome["messages"][0]["blocks"] if b["type"] == "confirm")
+    assert edit["editable"]["format"] == "post"
+    assert edit["editable"]["frame_count"] is None
+    assert edit["editable"]["platform"] == "vk"
+    await service.confirm(db, context(db, product), block["confirmation_id"],
+                          accept=True, revision=1)
+    assert tasks(db, "content_creative") == []
+    assert len(tasks(db, "content_factory")) == 1
+
+
+def test_inline_edit_contract_rejects_bad_format_combinations():
+    from app.dispatcher.editable import EditCreation
+    from pydantic import ValidationError
+    data = {"confirmation_id": "x", "revision": 0, "format": "post", "topic": "Тема"}
+    with pytest.raises(ValidationError):
+        EditCreation(**data, frame_count=4)
+    with pytest.raises(ValidationError):
+        EditCreation(**{**data, "format": "story", "platform": "vc_ru"})
+    with pytest.raises(ValidationError):
+        EditCreation(**{**data, "format": "story", "frame_count": 11})
+    with pytest.raises(ValidationError):
+        EditCreation(**{**data, "topic": "x"})
+
+
+@pytest.mark.asyncio
+async def test_stale_confirmation_cannot_start_edited_request(db, product):
+    from app.dispatcher.editable import EditCreation
+    original = await send(db, product, chip={
+        "label": "4 Stories", "capability": "create_creative",
+        "params": {"topic": "Уход за волосами", "format": "story", "frame_count": 4}})
+    block = next(x for x in original["messages"][1]["blocks"] if x["type"] == "confirm")
+    await service.edit_confirmation(db, context(db, product), EditCreation(
+        confirmation_id=block["confirmation_id"], revision=0, format="story",
+        topic="Шесть советов", frame_count=6))
+    with pytest.raises(PermissionError):
+        await service.confirm(db, context(db, product), block["confirmation_id"],
+                              accept=True, revision=0)
+    with pytest.raises(PermissionError):
+        await service.confirm(db, context(db, product), block["confirmation_id"],
+                              accept=True)
+    assert tasks(db, "content_creative") == []
+    await service.confirm(db, context(db, product), block["confirmation_id"],
+                          accept=True, revision=1)
+    assert len(tasks(db, "content_creative")) == 1
+
+
+
+
+@pytest.mark.asyncio
+async def test_edit_preserves_unmodified_audience_context(db, product):
+    from app.dispatcher.editable import EditCreation
+    from uuid import UUID
+    result = await send(db, product, chip={
+        "label": "Stories for parents", "capability": "create_creative",
+        "params": {"topic": "Советы для родителей", "format": "story",
+                   "frame_count": "4", "audience": "Родители дошкольников"}})
+    card = next(b for b in result["messages"][1]["blocks"] if b["type"] == "confirm")
+    updated = await service.edit_confirmation(db, context(db, product), EditCreation(
+        confirmation_id=card["confirmation_id"], revision=0, format="story",
+        topic="Пять советов", frame_count=5))
+    stored = db.scalar(select(DispatcherMessage).where(
+        DispatcherMessage.id == UUID(result["messages"][1]["id"])))
+    assert stored.params["audience"] == "Родители дошкольников"
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True, revision=1)
+    task = tasks(db, "content_creative")[0]
+    artifact = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_request"))
+    assert json.loads(artifact.content)["audience"] == "Родители дошкольников"
+
+
+
+# ---- unified Create: dispatcher intent + optional manual details -------------------------
+
+@pytest.mark.asyncio
+async def test_create_options_merge_with_voice_and_survive_confirmation(db, product):
+    from app.dispatcher.editable import CreateHints
+    model, _ = llm({"intent": "execute", "capability": "create_creative", "confidence": 0.95,
+                    "params": {"format": "story", "topic": "Как ухаживать за волосами"}})
+    request = CreateHints(format="story", platform="vk", frame_count=6,
+                          audience="Клиенты салона красоты",
+                          editorial_brief="Не обещать медицинских результатов")
+    response = await service.handle_message(
+        db, context(db, product), model, text="Сделай четыре сторис про уход",
+        client_key="voice-details", creation=request)
+    card = next(b for b in response["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "story"
+    assert card["editable"]["frame_count"] == 4  # explicit voice wins over dropdown
+    assert card["editable"]["platform"] == "vk"
+    assert card["editable"]["audience"] == "Клиенты салона красоты"
+    assert card["editable"]["editorial_brief"] == "Не обещать медицинских результатов"
+    assert tasks(db, "content_creative") == []
+    await service.confirm(db, context(db, product), card["confirmation_id"],
+                          accept=True, revision=0)
+    job = tasks(db, "content_creative")[0]
+    source = db.scalar(select(Artifact).where(
+        Artifact.task_id == job.id, Artifact.kind == "creative_request"))
+    request_data = json.loads(source.content)
+    assert request_data["frame_count"] == 4 and request_data["platform"] == "vk"
+    assert request_data["audience"] == "Клиенты салона красоты"
+    assert request_data["editorial_brief"] == "Не обещать медицинских результатов"
+
+
+@pytest.mark.asyncio
+async def test_manual_story_selection_cannot_override_explicit_post(db, product):
+    from app.dispatcher.editable import CreateHints
+    model, _ = llm({"intent": "execute", "capability": "create_post", "confidence": 0.96,
+                    "params": {"topic": "Как выбрать услугу"}})
+    result = await service.handle_message(
+        db, context(db, product), model, text="Напиши пост про услуги",
+        client_key="format-override", creation=CreateHints(
+            format="story", platform="vk", frame_count=6,
+            audience="Новые клиенты"))
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "post"
+    assert card["editable"]["platform"] == "telegram"
+    assert card["editable"]["audience"] == "Новые клиенты"
+    assert card["editable"]["frame_count"] is None
+    assert tasks(db, "content_factory") == []
+
+
+@pytest.mark.asyncio
+async def test_spoken_platform_overrides_existing_dropdown(db, product):
+    from app.dispatcher.editable import CreateHints
+    model, _ = llm({"intent": "execute", "capability": "create_creative", "confidence": 0.96,
+                    "params": {"topic": "Пять советов", "format": "story", "platform": "telegram"}})
+    result = await service.handle_message(
+        db, context(db, product), model, text="Сделай пять сторис в Телеграм",
+        client_key="platform-override", creation=CreateHints(
+            format="story", platform="vk", frame_count=7))
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["platform"] == "telegram"
+    assert card["editable"]["frame_count"] == 5
+
+
+@pytest.mark.asyncio
+async def test_full_package_keeps_audience_and_editorial_brief(db, product):
+    from app.dispatcher.editable import CreateHints
+    model, _ = llm({"intent": "execute", "capability": "create_package", "confidence": 0.94,
+                    "params": {"topic": "Онлайн-запись для салонов"}})
+    result = await service.handle_message(
+        db, context(db, product), model, text="Сделай полный пакет про запись",
+        client_key="package-details", creation=CreateHints(
+            format="package", audience="Владельцы салонов", editorial_brief="Тон экспертный"))
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["audience"] == "Владельцы салонов"
+    await service.confirm(db, context(db, product), card["confirmation_id"],
+                          accept=True, revision=0)
+    job = tasks(db, "content_factory")[0]
+    source = db.scalar(select(Artifact).where(
+        Artifact.task_id == job.id, Artifact.kind == "content_request"))
+    request_data = json.loads(source.content)
+    assert request_data["audience"] == "Владельцы салонов"
+    assert request_data["editorial_brief"] == "Тон экспертный"
+
+
+def test_create_details_validation_and_edit_clearing():
+    from app.dispatcher.editable import CreateHints, EditCreation
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        CreateHints(format="story", platform="youtube_shorts")
+    with pytest.raises(ValidationError):
+        CreateHints(format="post", frame_count=5)
+    with pytest.raises(ValidationError):
+        CreateHints(platform="telegram")
+    with pytest.raises(ValidationError):
+        CreateHints(format="story", frame_count=11)
+    from app.dispatcher.editable import target_for_edit
+    cap, params = target_for_edit(EditCreation(
+        confirmation_id="sample", revision=0, format="story", topic="Новая тема",
+        frame_count=4, audience="", editorial_brief=""),
+        existing={"audience": "Старая аудитория", "editorial_brief": "Старые требования"})
+    assert cap == "create_creative"
+    assert params.audience is None and params.editorial_brief is None
+
+
+
 # ---- blocks -----------------------------------------------------------------------------
 
 def test_blocks_drop_foreign_links_and_misshapen_tables():
@@ -106,12 +371,15 @@ async def test_chip_creates_post_without_calling_the_model(db, product):
     model, provider = llm({"intent": "answer", "reply_text": "x"})
     result = await send(db, product, chip=post_chip(), model=model)
     assert provider.requests == []
-    created = tasks(db, "content_factory")
-    assert len(created) == 1 and created[0].status == TaskStatus.QUEUED
+    assert tasks(db, "content_factory") == []
     user, answer = result["messages"]
     assert user["role"] == "user" and answer["role"] == "assistant"
-    assert answer["blocks"][0]["text"].startswith("Принял.")
-    assert any(block["type"] == "task" and block["task_id"] == str(created[0].id) for block in answer["blocks"])
+    card = next(block for block in answer["blocks"] if block["type"] == "confirm")
+    assert card["editable"]["format"] == "post"
+    assert card["editable"]["topic"] == "Онлайн-запись без звонков"
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    created = tasks(db, "content_factory")
+    assert len(created) == 1 and created[0].status == TaskStatus.QUEUED
     call = db.scalar(select(ToolCall).where(ToolCall.operation == "create_post"))
     assert call is not None and call.task_id == created[0].id and call.status == "executed"
 
@@ -121,9 +389,14 @@ async def test_retry_with_same_key_does_not_repeat_the_action(db, product):
     first = await send(db, product, chip=post_chip(), key="same")
     again = await send(db, product, chip=post_chip(), key="same")
     assert again["replayed"] is True
-    assert len(tasks(db, "content_factory")) == 1
+    assert tasks(db, "content_factory") == []
     assert [m["id"] for m in again["messages"]] == [m["id"] for m in first["messages"]]
     assert db.scalar(select(DispatcherMessage).where(DispatcherMessage.role == "assistant").limit(1)) is not None
+    assert list(db.scalars(select(ToolCall))) == []
+    card = next(b for b in first["messages"][1]["blocks"] if b["type"] == "confirm")
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    assert len(tasks(db, "content_factory")) == 1
     assert len(list(db.scalars(select(ToolCall)))) == 1
 
 
@@ -153,7 +426,8 @@ async def test_text_request_is_routed_by_model_decision(db, product):
                            "params": {"topic": "Как снизить неявки", "channel": "telegram"},
                            "reply_text": "Сделаю"})
     result = await send(db, product, text="напиши пост про неявки", model=model)
-    assert len(tasks(db, "content_factory")) == 1
+    assert tasks(db, "content_factory") == []
+    assert any(b["type"] == "confirm" for b in result["messages"][1]["blocks"])
     request = provider.last_request
     assert request.metadata["team_role"] == "dispatcher"
     assert "create_post" in request.messages[-1].content
@@ -161,7 +435,7 @@ async def test_text_request_is_routed_by_model_decision(db, product):
     assert cost is not None and cost.input_tokens == 120 and cost.product_id == product.id
     stored = db.scalar(select(DispatcherMessage).where(DispatcherMessage.role == "assistant"))
     assert stored.capability == "create_post" and stored.confidence == pytest.approx(0.93)
-    assert stored.model == "fake-dispatcher" and stored.task_id is not None
+    assert stored.model == "fake-dispatcher" and stored.task_id is None
     assert result["messages"][1]["intent"] == "execute"
 
 
@@ -570,3 +844,97 @@ async def test_review_many_videos_is_compact_and_keeps_full_review_route(db, pro
     links = [b for b in answer["blocks"] if b["type"] == "links"]
     assert len(links) == 1
     assert links[0]["items"][0]["href"] == f"/studio/products/{product.id}/review"
+
+
+@pytest.mark.asyncio
+async def test_illustrated_post_is_not_sent_to_text_only_generator(db, product):
+    model, _ = llm({
+        "intent": "execute", "capability": "create_post", "confidence": 0.98,
+        "params": {"topic": "Почему стоит записываться онлайн", "channel": "vk"},
+    })
+    result = await send(db, product, text="Напиши пост с картинкой про онлайн-запись",
+                        model=model, key="illustrated-post")
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "static_image"
+    assert card["editable"]["platform"] == "vk"
+    assert card["editable"]["image_model"] == "auto"
+    assert card["editable"]["aspect_ratio"] is None
+    assert "полноценный текст поста" in card["editable"]["editorial_brief"]
+    assert tasks(db, "content_factory") == []
+    await service.confirm(db, context(db, product),
+                          card["confirmation_id"], accept=True, revision=0)
+    created = tasks(db, "content_creative")
+    assert len(created) == 1
+    payload = db.scalar(select(Artifact).where(
+        Artifact.task_id == created[0].id, Artifact.kind == "creative_request"))
+    data = json.loads(payload.content)
+    assert data["format"] == "static_image" and data["image_model"] == "auto"
+    assert data["platform"] == "vk"
+
+
+@pytest.mark.asyncio
+async def test_plain_post_does_not_generate_an_image(db, product):
+    model, _ = llm({
+        "intent": "execute", "capability": "create_post", "confidence": 0.98,
+        "params": {"topic": "Онлайн-запись без звонков", "channel": "telegram"},
+    })
+    result = await send(db, product, text="Напиши пост про онлайн-запись",
+                        model=model, key="plain-post")
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "post"
+
+
+def test_editing_story_aspect_and_platform_auto_defaults():
+    from app.dispatcher.editable import EditCreation, CreateHints, draft_view, target_for_edit
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        EditCreation(confirmation_id="x", revision=0, format="story",
+                     topic="Четыре совета", aspect_ratio="4:5")
+    with pytest.raises(ValidationError):
+        CreateHints(format="story", aspect_ratio="1:1")
+    _, edited = target_for_edit(EditCreation(
+        confirmation_id="x", revision=0, format="static_image",
+        topic="Баннер в соцсеть", platform="instagram_reels",
+        image_model="gemini", aspect_ratio=None),
+        existing={"format": "story", "aspect_ratio": "9:16"})
+    assert edited.aspect_ratio is None  # platform chooses 4:5
+    view = draft_view("create_creative", edited.model_dump(exclude_none=True))
+    assert view["aspect_ratio"] is None
+    assert view["platform"] == "instagram_reels"
+
+
+@pytest.mark.asyncio
+async def test_illustrated_post_uses_spoken_instagram_platform_and_portrait_ratio(db, product):
+    model, _ = llm({
+        "intent": "execute", "capability": "create_post", "confidence": 0.96,
+        "params": {"topic": "Осенние букеты", "channel": "telegram"},
+    })
+    result = await send(db, product, text="Сделай пост с картинкой для Instagram про букеты",
+                        model=model, key="instagram-illustrated")
+    card = next(x for x in result["messages"][-1]["blocks"] if x["type"] == "confirm")
+    assert card["editable"]["format"] == "static_image"
+    assert card["editable"]["platform"] == "instagram_reels"
+    assert card["editable"]["aspect_ratio"] is None
+    await service.confirm(db, context(db, product), card["confirmation_id"],
+                          accept=True, revision=0)
+    task = tasks(db, "content_creative")[0]
+    artifact = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_request"))
+    payload = json.loads(artifact.content)
+    assert payload["platform"] == "instagram_reels"
+    assert payload["image_model"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_illustrated_post_explicit_landscape_overrides_platform_default(db, product):
+    model, _ = llm({
+        "intent": "execute", "capability": "create_post", "confidence": 0.96,
+        "params": {"topic": "Новые услуги", "channel": "telegram"},
+    })
+    result = await send(db, product,
+                        text="Нарисуй горизонтальную картинку 16:9 для поста ВКонтакте",
+                        model=model, key="vk-wide-image")
+    card = next(x for x in result["messages"][-1]["blocks"] if x["type"] == "confirm")
+    assert card["editable"]["format"] == "static_image"
+    assert card["editable"]["platform"] == "vk"
+    assert card["editable"]["aspect_ratio"] == "16:9"

@@ -61,6 +61,165 @@ def icon(name):
     return f'<svg class="icon" aria-hidden="true"><use href="#i-{name}"/></svg>'
 
 
+
+def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
+    """Compact creation UI with the same dispatcher voice gesture as the owner home."""
+    base = f"/studio/products/{pid}"
+    formats = [
+        ("post", "Пост", "Стратег и редактор создают текст для одной площадки."),
+        ("article", "Статья", "Для статей пока используйте SEO-завод. Отдельный однократный режим статьи ещё не подключён."),
+        ("story", "Stories", "Сценарий и готовые изображения каждого экрана. Доступны PNG и ZIP."),
+        ("static_image", "Изображение", "Готовая картинка PNG с возможностью скачать файл."),
+        ("short_video", "Видеосценарий", "Сценарий, кадры и озвучка, без готового MP4."),
+        ("whiteboard", "Анимированное видео", "Рисованное видео с озвучкой и MP4; платный запуск подтверждается отдельно."),
+        ("package", "Полный пакет", "Статья, адаптации и сценарии. Готовый MP4 пока в этот пакет не включён."),
+    ]
+    cards = ''.join(
+        '<div class="sg-create-pick">'
+        + (f'<a class="sg-create-format-link" href="{base}/seo">{html.escape(label)}</a>'
+           if key == "article" else
+           f'<button type="button" class="sg-create-format" data-sg-format="{key}" '
+           f'aria-pressed="false">{html.escape(label)}</button>')
+        + f'<button type="button" class="sg-create-info" data-sg-info="{html.escape(label)}" '
+          f'data-sg-description="{html.escape(description, quote=True)}" '
+          f'aria-label="О формате {html.escape(label)}">i</button></div>'
+        for key, label, description in formats
+    )
+    tools = [
+        ("Контент-план", base + "/plan", "Темы и сроки публикаций."),
+        ("SEO-завод", base + "/seo", "Поисковые запросы, статьи и блог."),
+        ("Кампании", base + "/campaigns", "Цели, аудитории, каналы и результаты."),
+        ("Разведка", f"/intelligence?product_id={pid}", "Конкуренты и маркетинговые гипотезы."),
+    ]
+    tool_rows = ''.join(
+        f'<div class="sg-create-tool"><a href="{html.escape(href, quote=True)}">{html.escape(label)}</a>'
+        f'<button type="button" class="sg-create-info" data-sg-info="{html.escape(label)}" '
+        f'data-sg-description="{html.escape(description,quote=True)}" '
+        f'aria-label="Об инструменте {html.escape(label)}">i</button></div>'
+        for label, href, description in tools
+    )
+    # V4 has one command path; classic Studio keeps the legacy /create POST.
+    advanced = '''
+      <div id="sg-create-settings" class="sg-create-settings">
+        <label class="sg-create-setting" id="sg-create-platform-row" hidden>
+          <span>Площадка</span>
+          <select id="sg-create-platform" aria-label="Площадка"></select>
+        </label>
+        <label class="sg-create-setting" id="sg-create-count-row" hidden>
+          <span>Количество экранов Stories</span>
+          <select id="sg-create-count" aria-label="Количество экранов">
+            <option value="">Автоматически (3–10)</option>
+            ''' + ''.join(f'<option value="{n}">{n}</option>' for n in range(3, 11)) + '''
+          </select>
+        </label>
+        <label class="sg-create-setting" id="sg-create-aspect-row" hidden>
+          <span>Пропорции изображения</span>
+          <select id="sg-create-aspect" aria-label="Пропорции изображения">
+            <option value="">Автоматически по площадке</option>
+            <option value="1:1">1:1 · квадрат</option>
+            <option value="4:5">4:5 · вертикальный пост</option>
+            <option value="9:16">9:16 · вертикальный экран</option>
+            <option value="16:9">16:9 · горизонтальный</option>
+          </select>
+        </label>
+        <p id="sg-create-story-ratio" class="sg-create-tip" hidden>Stories · вертикальные 9:16</p>
+        <label class="sg-create-setting" id="sg-create-model-row" hidden>
+          <span>Генерация изображений</span>
+          <select id="sg-create-image-model" aria-label="Модель изображений">
+            <option value="auto">Автоматически · одна модель</option>
+            <option value="gemini">Gemini</option>
+            <option value="openai">ChatGPT Image</option>
+          </select>
+        </label>
+        <label class="sg-create-setting">
+          <span>Аудитория <small>· необязательно</small></span>
+          <input id="sg-create-audience" maxlength="300" placeholder="Для кого готовим материал?">
+        </label>
+        <label class="sg-create-setting">
+          <span>Дополнительные требования <small>· необязательно</small></span>
+          <textarea id="sg-create-brief" maxlength="3500" rows="2"
+            placeholder="Тон, важные условия, что нельзя обещать…"></textarea>
+        </label>
+        <p class="sg-create-tip">Параметры попадут в карточку диспетчера.
+          Работа начнётся только после вашего подтверждения.</p>
+      </div>
+    '''
+    return f'''
+    <section class="sg-create-screen">
+      <div class="sg-create-scroll">
+        <header class="sg-create-intro">
+          <h1>Создать</h1>
+          <p><b>Ваша ИИ-команда готовит материалы для бизнеса.</b> Используем профиль
+          компании, доступные исследования аудитории и проверяем результат перед публикацией.</p>
+          <div class="sg-create-intro-links">
+            <button type="button" data-sg-about>Как это работает <span aria-hidden="true">ⓘ</span></button>
+            <button type="button" data-sg-suggest>✦ Предложить тему</button>
+          </div>
+        </header>
+        <div class="sg-create-info-panel" id="sg-create-info-panel" role="note" hidden></div>
+        <div class="sg-create-suggestions" id="sg-create-suggestions" hidden></div>
+        <div class="sg-create-label">Что создаём?</div>
+        <div class="sg-create-picks">{cards}</div>
+        <details class="sg-create-advanced" id="sg-create-advanced">
+          <summary>Сценарий и подробности</summary>
+          <p class="sg-create-tip">Нужны особые требования, аудитория или площадка?
+          Укажите их здесь либо просто опишите задачу в строке ниже.</p>
+          {warning}{advanced}
+        </details>
+        <details class="sg-create-timing" id="sg-create-timing">
+          <summary>Сколько занимает создание?</summary>
+          <p>Зависит от формата, выбранной модели и количества материалов.
+          После подтверждения следите за фактическим статусом на странице задания;
+          точное время заранее не гарантируется.</p>
+        </details>
+        <details class="sg-create-extra">
+          <summary>Другие инструменты</summary>
+          <div class="sg-create-tools">{tool_rows}</div>
+        </details>
+        <div class="sg-create-context" id="sg-create-context" aria-live="polite"></div>
+        <section class="dp-home sg-create-dispatch" data-create-format=""
+          data-api="{base}/dispatch" data-voice-url="/studio/voice/dictate"
+          data-voice-preview-url="/studio/voice/preview" data-voice-max="{int(voice_max)}"
+          data-voice-project="{html.escape(voice_project,quote=True)}"
+          aria-label="Создание через диспетчера">
+          <div class="dp-feed" id="dp-feed" role="log" aria-live="polite" aria-label="Ответы диспетчера"></div>
+          <div class="command-dock">
+            <div class="voice-hold-overlay" id="dp-voice-overlay" aria-hidden="true">
+              <div class="voice-hold-instruction" id="dp-voice-overlay-text">Отпустите, чтобы отправить</div>
+              <div class="voice-hold-scale" aria-hidden="true"><span class="voice-hold-dot"></span></div>
+            </div>
+            <div class="dp-live" id="dp-live" hidden>
+              <span id="dp-live-label">Слушаю…</span><p id="dp-live-text"></p>
+            </div>
+            <p class="dp-voice-note" id="dp-voice-note" role="status" aria-live="polite" hidden></p>
+            <div class="command-topicbar">
+              <button class="dp-new" id="dp-new" type="button">＋ Новая тема</button>
+            </div>
+            <form class="dp-form command-bar" id="dp-form" autocomplete="off">
+              <label class="dp-sr" for="dp-input">Напишите или скажите, что создать</label>
+              <textarea id="dp-input" class="dp-input" rows="1"
+                placeholder="Нажмите — текст · удерживайте — голос" enterkeyhint="send"></textarea>
+              <span class="voice-hold-hitbox" id="dp-voice-hitbox" aria-hidden="true"></span>
+              <span class="voice-composer-status" id="dp-voice-status" role="status" hidden></span>
+              <button class="command-mode-mic" id="dp-mode-mic" type="button" hidden
+                 aria-label="Скрыть клавиатуру и перейти к голосовому вводу"
+                 title="Вернуться к голосовому вводу"><svg aria-hidden="true" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <rect x="9" y="2.5" width="6" height="12" rx="3"/>
+                <path d="M5.5 10.5v1.5a6.5 6.5 0 0 0 13 0v-1.5M12 18.5V22M8.5 22h7"/>
+              </svg></button>
+              <button class="dp-send command-go" id="dp-send" type="submit"
+                aria-label="Отправить запрос"><span aria-hidden="true">↑</span></button>
+            </form>
+            <div class="command-tools"><div class="command-hints" id="dp-chips"
+              aria-label="Подсказки"></div></div>
+          </div>
+        </section>
+      </div>
+    </section>
+    <script type="application/json" id="dp-state">{{"messages":[],"hints":[]}}</script>
+    '''
+
 def render_v4(page, request, pid, switch):
     original = Document(page)
     main = original.find(tag='main')
@@ -154,24 +313,15 @@ def render_v4(page, request, pid, switch):
                    '</div>'
                    '<div class="home-hero-subnote">Результаты и следующие шаги появятся после запроса</div></div></section>')
     if pid and current == base+'/create':
-        form = original.outer(original.find(ident='sg-create-form'))
-        if form:
-            form = form.replace('class="sg-format-grid"', 'class="format-grid sg-format-grid"')
-            form = form.replace('class="sg-choice"', 'class="format-option sg-choice"')
+        if original.find(ident='sg-create-form'):
             warning = original.outer(original.find(cls='sg-warning'))
-            content = ('<div class="page-head animate-in"><div><div class="eyebrow">Создание</div>'
-                       '<h1 style="margin-top:7px">Что хотите создать?</h1>'
-                       '<p class="subline">Выберите результат — или начните с голосовой команды.</p></div></div>'
-                       '<section class="surface form-card animate-in"><h2>Формат</h2>'+warning+form+'</section>'
-                       '<div class="module-grid mt14">'+''.join(
-                           f'<a class="module-card surface" href="{href}"><div class="module-icon">{icon(glyph)}</div>'
-                           f'<h3>{name}</h3><p>{desc}</p><span class="link">Открыть →</span></a>'
-                           for name,href,glyph,desc in [
-                               ('Простое видео',base+'/whiteboard','video','Объяснения и простая анимированная реклама · MP4'),
-                               ('Контент-план',base+'/plan','calendar','Темы и публикации по датам'),
-                               ('SEO-статья',base+'?command=seo_factory','globe','Поисковые запросы и собственный блог'),
-                               ('Кампания',base+'/campaigns','layers','Цель, аудитория, каналы и показатели'),
-                               ('Разведка',f'/intelligence?product_id={pid}','search','Конкуренты, источники и гипотезы')])+'</div>')
+            config = original.find(cls='sg-create-voice-config')
+            config_attrs = config[1] if config else {}
+            content = create_workspace_v4(
+                pid, warning,
+                voice_project=config_attrs.get('data-voice-project') or '',
+                voice_max=int(config_attrs.get('data-voice-max') or 300),
+            )
     if pid and current == base+'/seo':
         steps = [
             ('Поисковые вопросы', 'Подсказки Яндекса и Google'),
@@ -270,7 +420,10 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>review-cards-20261101', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>images-20261102', extras)
+    if pid and current == base+'/create':
+        extras += '<script src="/studio/assets/create-studio.js?v=images-20261102"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=images-20261102"></script>'
     if pid:
         button = Document(template).find(ident='notifyBtn')
         template = template.replace(Document(template).outer(button), notice_html(pid).replace('<span aria-hidden="true">🔔</span>', icon('bell')))
@@ -278,7 +431,7 @@ def render_v4(page, request, pid, switch):
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=13">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=16">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=6">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'

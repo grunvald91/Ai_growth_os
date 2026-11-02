@@ -64,12 +64,16 @@ class ChipIn(BaseModel):
     params: dict[str, str] = Field(default_factory=dict)
 
 
+from app.dispatcher.editable import CreateHints, EditCreation
+
+
 class MessageIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str = ""
     chip: ChipIn | None = None
     client_key: str | None = Field(default=None, max_length=100)
     mode: str = Field(default="text", pattern="^(text|chip|voice)$")
+    creation: CreateHints | None = None
 
 
 class ConfirmIn(BaseModel):
@@ -77,6 +81,7 @@ class ConfirmIn(BaseModel):
     confirmation_id: str = Field(min_length=1, max_length=64)
     accept: bool
     via: str = Field(default="button", pattern="^(button|voice)$")
+    revision: int | None = Field(default=None, ge=0)
 
 
 async def _json(request: Request, model):
@@ -191,8 +196,25 @@ async def dispatch_message(product_id: UUID, request: Request, db: Session = Dep
         raise HTTPException(422, "Напишите, что нужно сделать")
     result = await service.handle_message(
         db, _context(db, product, settings, request), llm, text=text, client_key=body.client_key,
-        mode="chip" if body.chip else body.mode, chip=body.chip.model_dump() if body.chip else None)
+        mode="chip" if body.chip else body.mode, chip=body.chip.model_dump() if body.chip else None,
+        creation=body.creation)
     result["hints"] = _hints(db, product, settings)
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/studio/products/{product_id}/dispatch/edit")
+async def dispatch_edit(product_id: UUID, request: Request, db: Session = Depends(get_db),
+                        settings: Settings = Depends(get_settings)):
+    product = _owner_product(db, product_id)
+    body = await _json(request, EditCreation)
+    try:
+        result = await service.edit_confirmation(db, _context(db, product, settings, request), body)
+    except LookupError:
+        raise HTTPException(404, "Карточка не найдена") from None
+    except PermissionError as exc:
+        raise HTTPException(409, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
@@ -203,7 +225,7 @@ async def dispatch_confirm(product_id: UUID, request: Request, db: Session = Dep
     body = await _json(request, ConfirmIn)
     try:
         result = await service.confirm(db, _context(db, product, settings, request), body.confirmation_id,
-                                       accept=body.accept, via=body.via)
+                                       accept=body.accept, via=body.via, revision=body.revision)
     except LookupError:
         raise HTTPException(404, "Этот вопрос уже недоступен") from None
     except PermissionError as exc:

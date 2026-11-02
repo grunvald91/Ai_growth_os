@@ -10,7 +10,7 @@ from datetime import date
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.dispatcher.policy import Cost
 from app.tools import ToolOperation
@@ -59,6 +59,34 @@ class PostParams(_Params):
     topic: str = Field(min_length=3, max_length=300)
     channel: Literal["telegram", "vk", "dzen", "vc_ru", "tenchat"] = "telegram"
     audience: str | None = Field(default=None, max_length=300)
+    editorial_brief: str | None = Field(default=None, max_length=3500)
+
+
+class CreativeParams(_Params):
+    topic: str = Field(min_length=3, max_length=300, description="Тема материала. Если тема не названа, сначала спроси её или предложи темы.")
+    format: Literal["story", "short_video", "static_image"] = Field(description="Stories, видеосценарий или одиночный визуальный бриф.")
+    platform: Literal["telegram", "vk", "instagram_reels", "youtube_shorts", "vk_clips", "dzen", "vc_ru", "tenchat"] | None = Field(default=None, description="Если не указана, автоматически выбирается подходящая площадка по формату.")
+    frame_count: int | None = Field(default=None, ge=3, le=10, description="Строгое число экранов Stories, если владелец его назвал. Например, четыре — 4. Для других форматов не указывать.")
+    audience: str | None = Field(default=None, max_length=300)
+    editorial_brief: str | None = Field(default=None, max_length=3500)
+    image_model: Literal["none", "auto", "gemini", "openai"] | None = None
+    aspect_ratio: Literal["9:16", "4:5", "1:1", "16:9"] | None = None
+
+    @model_validator(mode="after")
+    def image_format(self):
+        if self.image_model not in (None, "none") and self.format == "short_video":
+            raise ValueError("Images only apply to Stories and image formats")
+        if self.aspect_ratio is not None and self.format not in {"story", "static_image"}:
+            raise ValueError("Aspect ratio only applies to images")
+        if self.format == "story" and self.aspect_ratio not in (None, "9:16"):
+            raise ValueError("Stories must be vertical 9:16")
+        return self
+
+
+class PackageParams(_Params):
+    topic: str = Field(min_length=3, max_length=300, description="Тема полного контент-пакета. Если не названа, сначала уточни или предложи тему.")
+    audience: str | None = Field(default=None, max_length=300)
+    editorial_brief: str | None = Field(default=None, max_length=3500)
 
 
 class VideoParams(_Params):
@@ -252,7 +280,25 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
     Capability("create_post", "Создать пост",
                "Поставить в работу один пост на тему для площадки (по умолчанию Telegram). "
                "Нужна тема; площадка — telegram, vk, dzen, vc_ru или tenchat; аудитория необязательна.",
-               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, PostParams),
+               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, PostParams, always_confirm=True),
+    Capability("create_creative", "Создать Stories или видеосценарий",
+               "По просьбе «сделай 4 сторис», «создай пять историй», «подготовь сценарий Reels», "
+               "«сделай картинку», «пост с картинкой», «обложка к посту» создать креатив. "
+               "Если нужен пост вместе с изображением — create_creative/static_image, caption — текст поста. "
+               "format=story — Stories; short_video — только "
+               "сценарий ролика, НЕ MP4; static_image — готовая картинка PNG и подпись. "
+               "Stories 9:16 вертикальные; картинка для Instagram 4:5, для Telegram/VK/Dzen 1:1 "
+               "по умолчанию. Явные предпочтения сторон передавай как aspect_ratio. "
+               "Сохраняй точное число экранов от 3 до 10 в frame_count, если оно названо. "
+               "Для Stories платформы telegram/vk/instagram_reels; для сценария youtube_shorts/instagram_reels/vk_clips; "
+               "для изображения telegram/vk/dzen/vc_ru/tenchat/instagram_reels. Если тема не названа — уточни, не выдумывай. "
+               "Перед запуском показывай пользователю формат, число экранов и тему.",
+               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, CreativeParams, always_confirm=True),
+    Capability("create_package", "Создать полный пакет",
+               "Подготовить по одной теме статью и адаптации для разных площадок, креативные брифы "
+               "и видеосценарии. Готовый MP4 пока не входит. Если тема не названа, уточни её. "
+               "Обязательно показать подтверждение перед запуском.",
+               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, PackageParams, always_confirm=True),
     Capability("make_plan", "Составить контент-план",
                "Поставить в работу составление нового контент-плана. Он ничего не публикует: план утверждается отдельно.",
                ToolOperation.GENERATE_DRAFT, Cost.CHEAP, NoParams),

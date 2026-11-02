@@ -14,8 +14,8 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.dispatcher.readers import ACTIVE, attention, latest_active_video, plans, upcoming_slots, work_rows
-from app.dispatcher.registry import (CAPABILITIES, CHANNEL_LABELS, CancelVideoParams, DepthParams, GoToParams,
-                                     FillOpenSlotsParams, InsightsParams, PostParams, ReturnCandidatesParams, ScheduleParams, SlotOfferParams, VideoParams, page_href, page_label)
+from app.dispatcher.registry import (CAPABILITIES, CHANNEL_LABELS, CancelVideoParams, CreativeParams, DepthParams, GoToParams,
+                                     FillOpenSlotsParams, InsightsParams, PackageParams, PostParams, ReturnCandidatesParams, ScheduleParams, SlotOfferParams, VideoParams, page_href, page_label)
 from app.dispatcher.outcome import Confirmation, Context, Outcome, links_block, task_block  # noqa: F401
 from app.models.domain import Approval, Product, Task, ToolCall
 
@@ -421,11 +421,31 @@ async def send_to_team(ctx: Context, params) -> Outcome:
 
 # ---- creating work -----------------------------------------------------------------------
 
+def _context_details(params) -> list[str]:
+    details = []
+    if params.audience:
+        details.append(f"Аудитория: {params.audience}.")
+    if params.editorial_brief:
+        preview = params.editorial_brief[:180]
+        details.append(f"Требования: {preview}" + ("…" if len(params.editorial_brief) > 180 else ""))
+    return details
+
+
+async def describe_create_post(ctx: Context, params: PostParams) -> Confirmation:
+    return Confirmation(
+        title="Подготовить пост?",
+        details=[f"Тема: {params.topic}.", f"Площадка: {CHANNEL_LABELS[params.channel]}.",
+                 *_context_details(params),
+                 "Готовый текст придёт на проверку; автоматической публикации нет."],
+        params=params.model_dump(exclude_none=True), confirm_label="Создать",
+    )
+
+
 async def create_post(ctx: Context, params: PostParams) -> Outcome:
     from app.content.service import queue_content
     try:
         task = queue_content(ctx.db, ctx.product.id, params.topic, format="post", channel=params.channel,
-                             audience=params.audience)
+                             audience=params.audience, editorial_brief=params.editorial_brief)
     except (ValueError, LookupError):
         ctx.db.rollback()
         return Outcome("Не получилось поставить пост в работу: проверьте тему и площадку.",
@@ -435,6 +455,76 @@ async def create_post(ctx: Context, params: PostParams) -> Outcome:
     return Outcome(text, f"Принял, пишу пост для {label}. Скоро будет готов.",
                    [_task_block(ctx, task, f"Пост для {label}: {params.topic}",
                                 f"/studio/products/{ctx.product.id}/tasks/{task.id}")], task_id=task.id)
+
+
+async def describe_create_creative(ctx: Context, params: CreativeParams) -> Confirmation:
+    labels = {"story": "Stories", "short_video": "Видеосценарий", "static_image": "Изображение"}
+    item = labels[params.format]
+    details = [f"Тема: {params.topic}.", f"Формат: {item}."]
+    if params.frame_count is not None:
+        details.append(f"Экранов: {params.frame_count}.")
+    platform = params.platform or {"story": "telegram", "short_video": "youtube_shorts", "static_image": "telegram"}[params.format]
+    details.append(f"Площадка: {platform}.")
+    if params.format in {"story", "static_image"}:
+        from app.content.creative_images import image_aspect_ratio
+        details.append(f"Пропорции: {image_aspect_ratio(params.format, platform, requested=params.aspect_ratio)}.")
+        selected = params.image_model or "auto"
+        details.append(f"Генерация изображений: {selected}.")
+    details.extend(_context_details(params))
+    if params.format == "short_video":
+        details.append("Это видеосценарий, не готовый MP4.")
+    else:
+        details.append("После раскадровки будут созданы готовые PNG. Платные вызовы модели начинаются только после подтверждения.")
+    details.append("Без отдельного согласования ничего не публикуется.")
+    return Confirmation(title=f"Подготовить {item}?", details=details,
+                        params=params.model_dump(exclude_none=True), confirm_label="Создать")
+
+
+async def confirm_create_creative(ctx: Context, stored: dict, via: str) -> Outcome:
+    from app.content.creative import CreativeRequest, queue_creative
+    from pydantic import ValidationError
+    try:
+        params = CreativeParams.model_validate(stored)
+        command = CreativeRequest(mode="creative", product_id=ctx.product.id, topic=params.topic,
+                                  format=params.format,
+                                  platform=params.platform or {"story": "telegram", "short_video": "youtube_shorts", "static_image": "telegram"}[params.format],
+                                  frame_count=params.frame_count, audience=params.audience,
+                                  editorial_brief=params.editorial_brief,
+                                  image_model=(params.image_model or
+                                               ("auto" if params.format in {"story", "static_image"} else "none")),
+                                  aspect_ratio=params.aspect_ratio)
+        task = queue_creative(ctx.db, command)
+    except (ValueError, ValidationError, LookupError):
+        ctx.db.rollback()
+        return Outcome("Не удалось создать задание. Проверьте тему, формат и площадку.", ok=False)
+    label = {"story": "Stories", "short_video": "Видеосценарий", "static_image": "Бриф изображения"}[params.format]
+    amount = f" ({params.frame_count} экранов)" if params.frame_count else ""
+    return Outcome(f"Принял. Готовлю {label}{amount} на тему «{params.topic}». Результат появится в заданиях.",
+                   blocks=[_task_block(ctx, task, f"{label}{amount}: {params.topic}",
+                                       f"/studio/products/{ctx.product.id}/tasks/{task.id}")], task_id=task.id)
+
+
+async def describe_create_package(ctx: Context, params: PackageParams) -> Confirmation:
+    return Confirmation(title="Создать полный пакет?",
+        details=[f"Тема: {params.topic}.", "Включены статья, адаптации и видеосценарии.",
+                 *_context_details(params),
+                 "Готовый анимированный MP4 не входит и отдельно оплачивается.",
+                 "Публикация не запускается автоматически."],
+        params=params.model_dump(exclude_none=True), confirm_label="Создать")
+
+
+async def confirm_create_package(ctx: Context, stored: dict, via: str) -> Outcome:
+    from app.content.service import queue_content
+    try:
+        params = PackageParams.model_validate(stored)
+        task = queue_content(ctx.db, ctx.product.id, params.topic, format="package",
+                             audience=params.audience, editorial_brief=params.editorial_brief)
+    except (ValueError, LookupError):
+        ctx.db.rollback()
+        return Outcome("Не удалось создать пакет. Уточните тему.", ok=False)
+    return Outcome(f"Принял. Готовлю полный пакет на тему «{params.topic}».",
+        blocks=[_task_block(ctx, task, f"Полный пакет: {params.topic}",
+                            f"/studio/products/{ctx.product.id}/tasks/{task.id}")], task_id=task.id)
 
 
 async def make_plan(ctx: Context, params) -> Outcome:
@@ -607,8 +697,14 @@ EXECUTORS = {
     "whiteboard_video": whiteboard_video, "cancel_video": cancel_video, "restricted_action": restricted_action,
 }
 # Abilities that always ask first: describe what will happen, run it only after a confirmation.
-DESCRIBERS = {"approve_plan": describe_approve_plan, "seo_factory": describe_seo_factory}
+DESCRIBERS = {"approve_plan": describe_approve_plan, "seo_factory": describe_seo_factory,
+              "create_post": describe_create_post,
+              "create_creative": describe_create_creative,
+              "create_package": describe_create_package}
 CONFIRMERS = {"approve_plan": confirm_approve_plan, "whiteboard_video": confirm_whiteboard_video,
+              "create_post": lambda ctx, stored, via: create_post(ctx, PostParams.model_validate(stored)),
+              "create_creative": confirm_create_creative,
+              "create_package": confirm_create_package,
               "seo_factory": confirm_seo_factory}
 
 # Materials and publication live in their own module; it imports the shared types from `outcome`, not from here.
