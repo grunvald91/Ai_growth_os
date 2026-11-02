@@ -149,7 +149,7 @@ def _background_session():
 
 def _job(session_id) -> dict | None:
     job = _JOBS.get(str(session_id))
-    if job and job.get("running") and time.time() - job["started"] > JOB_STALE_SECONDS:
+    if job and job.get("running") and time.time() - job.get("heartbeat", job["started"]) > JOB_STALE_SECONDS:
         job.update(running=False, error="Работа прервалась. Материалы сохранены; запустите сборку ещё раз.")
     return job
 
@@ -167,7 +167,7 @@ def _start_job(background: BackgroundTasks, product_id: UUID, session_id: UUID, 
         raise IntakeError("Уже работаю над этой компанией. Подождите, страница обновится сама.")
     stage = ("Читаю файлы" if files else
              "Читаю сайт" if website else "Проверяю в реестре" if identifier else "Собираю профиль")
-    _JOBS[str(session_id)] = {"running": True, "started": time.time(), "stage": stage,
+    _JOBS[str(session_id)] = {"running": True, "started": time.time(), "heartbeat": time.time(), "stage": stage,
                               "notes": list(notes or []), "error": None}
     background.add_task(_run_job, product_id, session_id, website, identifier, build,
                         material_fields or {}, files or [])
@@ -179,16 +179,20 @@ async def _run_job(product_id: UUID, session_id: UUID, website: str, identifier:
     db = _background_session()
     try:
         service = _service(db)
+        touch = lambda: job.update(heartbeat=time.time())
+        touch()
         if material_fields or files:
             job["stage"] = "Читаю материалы"
             job["notes"] += await _add_materials(
                 service, product_id, session_id, material_fields or {}, files or [],
-                text_reference="growth studio: сведения владельца")
+                text_reference="growth studio: сведения владельца", on_progress=touch)
+        touch()
         if website or identifier:
             job["stage"] = "Читаю сайт" if website else "Проверяю в реестре"
             job["notes"] += await _add_materials(service, product_id, session_id,
                                                  {"website": website, "identifier": identifier}, [],
                                                  text_reference="")
+        touch()
         if build:
             job["stage"] = "Собираю профиль"
             from app.core.composition import build_intake
@@ -216,7 +220,8 @@ def new_company_form(request: Request, db: Session = Depends(get_db)):
 
 
 async def _add_materials(service: CompanyIntakeService, product_id: UUID, session_id: UUID,
-                         fields: dict, files: list[tuple[str, bytes]], *, text_reference: str) -> list[str]:
+                         fields: dict, files: list[tuple[str, bytes]], *, text_reference: str,
+                         on_progress=None) -> list[str]:
     """Add every kind of material the owner gave; one failed source never discards the others."""
     notes: list[str] = []
     if fields.get("text", "").strip():
@@ -243,7 +248,11 @@ async def _add_materials(service: CompanyIntakeService, product_id: UUID, sessio
                 notes.append(f"Прочитано страниц сайта: {len(readable)}.")
             notes.extend(dict.fromkeys(s["note"] for s in pages if s["note"] and s["status"] != "read"))
     for filename, data in files:
+        if on_progress:
+            on_progress()
         source = await parse_file_async(filename, data, f"growth studio: файл {filename}"[:500])
+        if on_progress:
+            on_progress()
         try:
             service.add_source(product_id, session_id, source, actor=ACTOR)
         except IntakeError as exc:
