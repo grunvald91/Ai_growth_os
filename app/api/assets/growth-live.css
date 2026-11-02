@@ -804,3 +804,12 @@ body[data-growth-design="v4"] .sg-create-dispatch .dp-voice-note:not([hidden]){
 .dp-confirm:has(.dp-create-details) .dp-confirm-actions .dp-btn:last-child{grid-column:1/-1;
   background:transparent;border:0;min-height:32px;font-weight:500;text-decoration:underline}
 .dp-confirm:has(.dp-create-details) .dp-confirm-actions[hidden]{display:none!important}
+
+/* V4 does not load the legacy dispatcher.css: retain clear action hierarchy. */
+body[data-growth-design="v4"] .dp-confirm .dp-btn.primary{
+  background:var(--blue);color:#fff;border:1px solid var(--blue);
+}
+body[data-growth-design="v4"] .dp-confirm .dp-btn.ghost{
+  background:var(--tint);color:var(--text);border:1px solid var(--line);
+}
+body[data-growth-design="v4"] .dp-confirm .dp-btn:disabled{opacity:.5}
