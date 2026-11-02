@@ -500,3 +500,39 @@ async def test_unsubstantiated_all_rejected_status_still_blocks_publication(env,
     assert not outcome.published
     assert "unresolved_critic_findings" in outcome.reason
     assert not list(db.scalars(select(Publication)))
+
+
+
+@pytest.mark.asyncio
+async def test_fabricated_servgo_price_rejected_by_author_requires_owner_review(env, tmp_path):
+    """An AI author's unsupported dismissal of a critical false price is not a release approval."""
+    db, company = env
+    article_id = await make_article(db, company, tmp_path, critic_status="all_rejected")
+    row = db.get(Artifact, article_id)
+    article = ArticleArtifact.model_validate_json(row.content)
+    article.reader_article.sections[0].body += " ServGo стоит 2 990 ₽ в месяц."
+    article.full_article += " ServGo стоит 2 990 ₽ в месяц."
+    row.content = article.model_dump_json()
+    run = db.scalar(select(AgentRun).where(
+        AgentRun.task_id == row.task_id, AgentRun.agent_name == "marketing_editor"))
+    review = db.scalar(select(Artifact).where(
+        Artifact.agent_run_id == run.id, Artifact.kind == "seo_final_review"))
+    review.content = json.dumps({
+        "status": "all_rejected",
+        "reader_hash": reader_hash(article.reader_article),
+        "findings": [{
+            "id": "false-price", "severity": "critical",
+            "problem": "The article quotes an unverified ServGo subscription price",
+            "evidence": "2 990 ₽ в месяц",
+            "suggestion": "Remove the invented pricing claim",
+        }],
+        "decisions": [{
+            "id": "false-price", "decision": "reject",
+            "rationale": "The author asserts the price without any approved source",
+        }],
+    }, ensure_ascii=False)
+    db.commit()
+    blocked = publish_if_clear(db, article_id)
+    assert not blocked.published and "critical_finding_unresolved" in blocked.reason
+    assert db.get(Artifact, article_id).status == ArtifactStatus.AWAITING_APPROVAL
+    assert not list(db.scalars(select(Publication)))

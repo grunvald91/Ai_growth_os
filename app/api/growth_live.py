@@ -243,7 +243,7 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
                     critic += '<p>Статья не прошла автоматическую проверку. Причина указана выше.</p>'
             scheduled = article.get("scheduled_at")
             scheduled_note = (
-                '<span>Запланировано: ' + html.escape(str(scheduled)) + ' (UTC)</span>'
+                '<span>Запланировано: ' + html.escape(str(scheduled)) + ' МСК</span>'
                 if scheduled else ''
             )
             article_cards.append(

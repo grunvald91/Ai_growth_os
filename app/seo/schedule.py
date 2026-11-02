@@ -77,10 +77,11 @@ def available_slots(db, product_id, count: int, *, limit: int = PUBLICATIONS_PER
         scheduled_by_task[task.id] = scheduled
         if scheduled >= today:
             occupied[scheduled].add(f"task:{task.id}")
+    day_start, _ = day_bounds(now)
     publications = db.execute(select(Publication.id, Publication.published_at, Artifact.task_id)
         .join(Artifact, Publication.artifact_id == Artifact.id)
         .where(Publication.product_id == product_id, Publication.channel == "own_site",
-               Publication.published_at.is_not(None))).all()
+               Publication.published_at >= db_time(db, day_start))).all()
     for publication_id, published_at, task_id in publications:
         published_date = day(published_at)
         if published_date >= today:
