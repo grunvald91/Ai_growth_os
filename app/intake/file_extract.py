@@ -64,8 +64,13 @@ def extract_pdf(data):
                                    capture_output=True, timeout=20, check=True)
                     text = ocr_image(prefix.with_suffix(".png").read_bytes())
                     scan_detected = True
+                if not text.strip():
+                    unreadable.append(index + 1)
+                    continue
                 parts.append(f"Страница {index + 1}\n{text}")
-            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            except Exception:
+                # PdfReadError and other parser failures must not hide valid pages.
+                # Never log untrusted document text or raw exception details.
                 unreadable.append(index + 1)
     notes = [f"Обработано страниц: {total_pages - len(unreadable)} из {total_pages}."]
     if scan_detected:
