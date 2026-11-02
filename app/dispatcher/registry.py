@@ -220,7 +220,7 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
     Capability("create_post", "Создать пост",
                "Поставить в работу один пост на тему для площадки (по умолчанию Telegram). "
                "Нужна тема; площадка — telegram, vk, dzen, vc_ru или tenchat; аудитория необязательна.",
-               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, PostParams),
+               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, PostParams, always_confirm=True),
     Capability("create_creative", "Создать Stories или видеосценарий",
                "По просьбе «сделай 4 сторис», «создай пять историй», «подготовь сценарий Reels», "
                "«сделай картинку» создать креатив по теме. format=story — Stories; short_video — только "
