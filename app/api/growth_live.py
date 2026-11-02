@@ -604,12 +604,14 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     business_id = db.scalar(select(StudioBusinessLink.servgo_business_id).where(
         StudioBusinessLink.product_id == product_id).limit(1))
     if product.slug == 'servgo':
-        destination = '<a href="https://servgo.ru/blog">Блог ServGo</a>'
+        destination = ('<strong>Место публикации: блог ServGo</strong> · '
+                       '<a href="https://servgo.ru/blog">Открыть блог</a>')
     elif business_id is not None:
-        destination = (f'<a href="https://servgo.ru/business/{business_id}/blog">'
-                       'Блог компании на ServGo</a>')
+        destination = (f'Место публикации: персональный блог компании на ServGo · '
+                       f'<a href="https://servgo.ru/business/{business_id}/blog">Открыть блог</a>')
     else:
-        destination = 'Для публичной ссылки нужна привязка к бизнесу ServGo.'
+        destination = ('Место публикации: персональный блог компании на ServGo. '
+                       'Ссылка появится после привязки бизнеса.')
     activation_form = (
         '<section class="panel seo-activation" aria-label="Подключение SEO-завода">'
         '<div class="seo-status-head"><h2>SEO-завод компании</h2>'
@@ -648,8 +650,7 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     )
     content = (
         activation_form + available_actions
-        + '<p class="seo-publish-destination"><strong>Публикация:</strong> '
-        + destination + '</p>'
+        + '<p class="seo-publish-destination">' + destination + '</p>'
         + '<div class="seo-dash-stats" aria-label="SEO-статистика">'
           f'<div><span>Запусков</span><strong>{len(runs)}</strong></div>'
           f'<div><span>Опубликовано</span><strong>{report["published_articles"]}</strong></div>'
