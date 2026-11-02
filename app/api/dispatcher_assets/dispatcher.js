@@ -701,28 +701,12 @@
       root.classList.toggle('voice-connecting', mode === 'connecting');
       root.classList.toggle('voice-recording', recording);
       root.classList.toggle('voice-processing', mode === 'processing' || mode === 'sending');
-      if (voiceOverlay) {
-        var wasVisible = voiceOverlay.getAttribute('aria-hidden') === 'false';
-        if (entering) {
-          if (overlayExitTimer) clearTimeout(overlayExitTimer);
-          overlayExitTimer = null;
-          voiceOverlay.classList.remove('is-exiting');
-        } else if (wasVisible) {
-          // Distinct exit trajectory: opacity 1->0 and scale 1->.985 in 185ms.
-          voiceOverlay.classList.add('is-exiting');
-          if (overlayExitTimer) clearTimeout(overlayExitTimer);
-          overlayExitTimer = setTimeout(function () {
-            if (voiceOverlay.getAttribute('aria-hidden') === 'true') {
-              voiceOverlay.classList.remove('is-exiting');
-            }
-            overlayExitTimer = null;
-          }, 195);
-        }
-        voiceOverlay.classList.toggle('is-active', entering);
-        voiceOverlay.setAttribute('aria-hidden', entering ? 'false' : 'true');
+      // VoiceGlow owns transitions and uses the same stream as MediaRecorder.
+      if (window.VoiceGlow) {
+        if (mode === 'connecting') window.VoiceGlow.connecting();
+        else if (mode === 'processing') window.VoiceGlow.recognize();
+        else if (mode === 'sending' || mode === 'idle') window.VoiceGlow.hide();
       }
-      if (voiceOverlayText) voiceOverlayText.textContent = mode === 'connecting'
-        ? 'Подключаю микрофон…' : 'Отпустите, чтобы отправить';
       if (voiceStatus) {
         voiceStatus.hidden = mode !== 'processing' && mode !== 'sending';
         voiceStatus.textContent = mode === 'processing' ? 'Распознаю и редактирую запись…'
@@ -826,6 +810,7 @@
       try { recorder.start(1000); }
       catch (error) { recorder = null; releaseStream(); hideLive(); setVoiceState('idle'); showNote('Не получилось включить запись.', true); return; }
       recordStarted = Date.now();
+      if (voiceHoldEnabled && window.VoiceGlow) window.VoiceGlow.start(stream);
       recordingId += 1; lastLive = '';
       showLive(voiceHoldEnabled ? 'Говорите · отпустите, чтобы отправить' : 'Слушаю…', '', false);
       schedulePreview(2500, recordingId);
@@ -849,7 +834,13 @@
   }
 
   function stopRecording() {
-    if (recorder && recorder.state !== 'inactive') recorder.stop();
+    if (recorder && recorder.state !== 'inactive') {
+      if (voiceHoldEnabled && window.VoiceGlow) {
+        if (discardRecording) window.VoiceGlow.hide();
+        else window.VoiceGlow.recognize();
+      }
+      recorder.stop();
+    }
   }
 
   function onRecorded() {
@@ -1023,6 +1014,7 @@
       // Defer the Android keyboard/text-selection gesture until a short tap is known.
       if (event.pointerType === 'touch') event.preventDefault();
       activeHold = { id: event.pointerId, x: event.clientX, y: event.clientY, cancelled: false, started: false };
+      if (window.VoiceGlow) window.VoiceGlow.setKnobX(event.clientX);
       // Keep the pointer stream attached to the non-selectable surface.
       if (event.pointerType === 'touch' && event.target.setPointerCapture) {
         try { event.target.setPointerCapture(event.pointerId); } catch (error) {}
@@ -1057,6 +1049,11 @@
         setVoiceState('idle');
       }
     }
+    document.addEventListener('pointermove', function (event) {
+      if (activeHold && event.pointerId === activeHold.id && window.VoiceGlow) {
+        window.VoiceGlow.setKnobX(event.clientX);
+      }
+    });
     document.addEventListener('pointerup', function (event) { endHold(event, false); });
     document.addEventListener('pointercancel', function (event) { endHold(event, true); });
     document.addEventListener('visibilitychange', function () {
