@@ -1025,6 +1025,12 @@ class ArticleProduction:
                                 'task_type': 'article_production',
                                 'provider_timeout_seconds': PROVIDER_TIMEOUT_SECONDS,
                             }), validate_revision=validate_stage_revision,
+                            # The editorial stage uses Pydantic's normalized object:
+                            # valid drafts may omit default-valued fields, which
+                            # JSON Schema would otherwise reject before the critic.
+                            prepare_original=(lambda raw: _parse_stage_payload(
+                                schema, raw).model_dump(mode='json'))
+                                if name == 'marketing_editor' and attempt == 0 else None,
                             on_observed=record_model_call,
                             on_review_progress=record_review_progress,
                             review_enabled=(name == 'marketing_editor' and attempt == 0)),
