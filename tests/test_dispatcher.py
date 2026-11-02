@@ -80,6 +80,38 @@ def test_every_capability_has_a_way_to_run():
             assert capability.id in executors.EXECUTORS
 
 
+
+
+def test_voice_story_counts_keep_requested_number():
+    from app.dispatcher.fast_routes import requested_story_count
+    assert requested_story_count("Сделай четыре сторис про летний уход") == 4
+    assert requested_story_count("Подготовь 5 историй про волосы") == 5
+    assert requested_story_count("Сделай сторис из шести экранов") == 6
+    assert requested_story_count("Подготовь сторис на завтра") is None
+
+
+@pytest.mark.asyncio
+async def test_stories_require_confirmation_and_keep_exact_count(db, product):
+    chip = {"label": "Пять сторис про услуги", "capability": "create_creative",
+            "params": {"topic": "Как выбрать услугу", "format": "story",
+                       "frame_count": 5}}
+    result = await send(db, product, chip=chip)
+    answer = result["messages"][1]
+    assert answer["confirmation_id"]
+    assert "5" in str(answer["blocks"])
+    assert not tasks(db, "content_creative")
+    confirmed = await service.confirm(db, context(db, product),
+                                      answer["confirmation_id"], accept=True)
+    created = tasks(db, "content_creative")
+    assert len(created) == 1
+    from app.models.domain import Artifact
+    item = db.scalar(select(Artifact).where(Artifact.task_id == created[0].id,
+                                             Artifact.kind == "content_request"))
+    assert item is not None
+    assert json.loads(item.content)["frame_count"] == 5
+    assert any(b["type"] == "task" for b in confirmed["messages"][-1]["blocks"])
+
+
 # ---- blocks -----------------------------------------------------------------------------
 
 def test_blocks_drop_foreign_links_and_misshapen_tables():
