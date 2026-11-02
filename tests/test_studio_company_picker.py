@@ -38,3 +38,25 @@ def test_empty_picker_is_honest_and_plain():
     page = selector_html([])
     assert "Пока нет организаций" in page
     assert "Открыть студию компании" not in page
+
+
+def test_v4_preserves_chooser_wrapper_and_dark_theme_selectors():
+    from app.api.growth_v4 import render_v4
+    from types import SimpleNamespace
+    page = selector_html([_company("Тёмная тема")])
+    request = SimpleNamespace(url=SimpleNamespace(path="/studio", query="choose=1"))
+    wrapped = render_v4(page, request, None, "/studio?design=classic")
+    assert '<div class="sg-company-picker">' in wrapped
+    assert 'data-growth-design="v4"' in wrapped
+    assert "var(--s-text)" in wrapped
+    assert "Тёмная тема" in wrapped
+
+
+def test_v4_preserves_secure_account_link_page_wrapper():
+    from app.api.growth_v4 import render_v4
+    from app.api.studio_accounts import _identity_html
+    page = _identity_html(connected=True).body.decode("utf-8")
+    request = SimpleNamespace(url=SimpleNamespace(path="/studio/identity", query=""))
+    wrapped = render_v4(page, request, None, "/studio/identity?design=classic")
+    assert '<div class="sg-link-page">' in wrapped
+    assert 'action="/studio/identity"' in wrapped
