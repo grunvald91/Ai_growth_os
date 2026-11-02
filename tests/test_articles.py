@@ -1075,11 +1075,11 @@ async def test_required_stage_gets_one_repair_attempt_with_the_problem(db, produ
     assert 'rejected by validation' in strategist[1].system_prompt
 
 
-def test_platform_writer_telegram_follows_quick_post_structure():
+def test_platform_writer_supports_natural_telegram_posts_without_forced_lists():
     from app.prompts import text as prompt_text
     rule = prompt_text('article.rules.platform_writer')
-    for required in ('сначала польза', 'TELEGRAM', 'нумерованным списком',
-                     'Длина определяется смыслом', 'ровно один призыв',
+    for required in ('сначала польза', 'TELEGRAM', 'не по обязательным трём-пяти пунктам',
+                     'Длина определяется смыслом', 'Следующий шаг',
                      'TOP-LEVEL FORMAT IS MANDATORY'):
         assert required in rule
 
@@ -1088,7 +1088,7 @@ def test_article_text_chain_rules_are_value_first_and_keep_hard_constraints():
     from app.prompts import text as prompt_text
     rules = {name: prompt_text(f'article.rules.{name}') for name in (
         'content_strategist', 'seo_editor', 'article_writer', 'conversion_editor',
-        'human_editor', 'marketing_editor', 'repurposing_editor')}
+        'human_editor', 'marketing_editor', 'platform_writer', 'repurposing_editor')}
     assert 'полезные приёмы' in rules['content_strategist']
     assert 'конкретное действие' in rules['seo_editor']
     assert 'Не растягивай текст' in rules['article_writer']
