@@ -141,7 +141,7 @@ async def test_edit_stories_card_updates_saved_job_without_creating_work(db, pro
             confirmation_id=original["confirmation_id"], revision=0, format="story",
             topic="Новая тема", frame_count=5))
     confirmed = await service.confirm(db, context(db, product),
-                                      original["confirmation_id"], accept=True)
+                                      original["confirmation_id"], accept=True, revision=1)
     task = tasks(db, "content_creative")[0]
     source = db.scalar(select(Artifact).where(
         Artifact.task_id == task.id, Artifact.kind == "creative_request"))
@@ -173,7 +173,8 @@ async def test_edit_can_change_stories_into_post_and_preserves_company_isolation
     assert edit["editable"]["format"] == "post"
     assert edit["editable"]["frame_count"] is None
     assert edit["editable"]["platform"] == "vk"
-    await service.confirm(db, context(db, product), block["confirmation_id"], accept=True)
+    await service.confirm(db, context(db, product), block["confirmation_id"],
+                          accept=True, revision=1)
     assert tasks(db, "content_creative") == []
     assert len(tasks(db, "content_factory")) == 1
 
@@ -219,6 +220,7 @@ async def test_stale_confirmation_cannot_start_edited_request(db, product):
 @pytest.mark.asyncio
 async def test_edit_preserves_unmodified_audience_context(db, product):
     from app.dispatcher.editable import EditCreation
+    from uuid import UUID
     result = await send(db, product, chip={
         "label": "Stories for parents", "capability": "create_creative",
         "params": {"topic": "Советы для родителей", "format": "story",
@@ -228,7 +230,7 @@ async def test_edit_preserves_unmodified_audience_context(db, product):
         confirmation_id=card["confirmation_id"], revision=0, format="story",
         topic="Пять советов", frame_count=5))
     stored = db.scalar(select(DispatcherMessage).where(
-        DispatcherMessage.id == result["messages"][1]["id"]))
+        DispatcherMessage.id == UUID(result["messages"][1]["id"])))
     assert stored.params["audience"] == "Родители дошкольников"
     await service.confirm(db, context(db, product), card["confirmation_id"], accept=True, revision=1)
     task = tasks(db, "content_creative")[0]
