@@ -258,6 +258,9 @@ def _identity_html(*, connected: bool = False, linked: bool = False, error: str 
             'чтобы подтвердить вашу учётную запись ServGo.</p>' if not connected else ''
         )
     )
+    if connected and linked:
+        form = ('<form method="post" action="/studio/identity/disconnect" class="sg-link-form">'
+                '<button type="submit" class="sg-link-revoke">Отвязать профиль Growth</button></form>')
     content = ('<!doctype html><html lang="ru"><head><meta charset="utf-8">'
                '<meta name="viewport" content="width=device-width,initial-scale=1">'
                '<title>Единый профиль · ServGo</title>'
@@ -340,3 +343,14 @@ async def studio_identity_connect(request: Request, db: Session = Depends(get_db
     for key in keys:
         clear_failures(key)
     return RedirectResponse("/studio/identity?linked=1", status_code=303)
+
+
+@router.post("/studio/identity/disconnect")
+def studio_identity_disconnect(request: Request, db: Session = Depends(get_db),
+                               settings=Depends(get_settings)):
+    uid = _live_servgo_identity(request, settings, db)
+    if uid is None:
+        return _identity_html(status=403, error="Вход ServGo не подтверждён.")
+    from app.core.studio_operator_links import unbind_operator
+    unbind_operator(settings, uid)
+    return RedirectResponse("/studio/identity", status_code=303)
