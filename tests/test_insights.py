@@ -568,7 +568,7 @@ def test_average_check_leaves_out_visits_without_a_price():
     days = [TODAY - timedelta(days=d) for d in (2, 3, 4)]
     rows_ = [row(1, days[0], price=10000), row(2, days[1], price=20000), row(3, days[2], price=None)]
     by_name = {f.name: f.value for f in compute(schedule(rows_), TODAY, 30, 14).facts}
-    assert by_name["servgo.average_check"] == 15000
+    assert by_name["servgo.average_booking_value"] == 15000
 
 
 # ---- narrow questions get narrow answers ------------------------------------------------------
@@ -578,9 +578,9 @@ def test_a_topic_shows_its_own_lines_and_the_basics():
     lines, rows = result.view("cancellations")
     text = " ".join(lines)
     assert "отменено: 1" in text and "Средний чек" not in text and "Клиентов:" not in text
-    assert [r[0] for r in rows] == ["Записей", "Отмен"]
+    assert [r[0] for r in rows] == ["Записей", "Подтверждённые выполненные визиты", "Отмен"]
     money, money_rows = result.view("money")
-    assert "средний чек" in " ".join(money) and "Средний чек" in [r[0] for r in money_rows]
+    assert "Расчётная стоимость записей" in " ".join(money) and "Средняя расчётная стоимость визита" in [r[0] for r in money_rows]
     assert len(result.view("all")[0]) == len(result.lines)
 
 
@@ -598,7 +598,7 @@ async def test_narrow_question_through_the_dispatcher(db, linked, platform):
     chips = [c for b in answer["blocks"] if b["type"] == "chips" for c in b["items"]]
     assert "Показать всё" in {c["label"] for c in chips}
     full = await chip(db, linked, "show_insights", {"topic": "all"}, key="all")
-    assert "средний чек" in full["text"]
+    assert "Расчётная стоимость записей" in full["text"]
 
 
 @pytest.mark.asyncio
