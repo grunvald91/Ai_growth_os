@@ -1,5 +1,9 @@
 """Guarded, scoped ServGo booking analytics backend rollout.
 
+The already-deployed Studio SSO switching route is verified by its live API
+contract but is deliberately NOT overwritten: production has a separately
+deployed version that must be preserved.
+
 Never deploys on a push. Requires workflow_dispatch and APPLY=true, with
 production environment approval. It refuses unknown live file content and
 backs up each affected file before replacing it. No client data is printed.
@@ -18,7 +22,6 @@ from scripts.deploy_business_creation_and_reminders import (
 )
 
 FILES = (
-    "web/api/routes/studio_sso.py",
     "web/api/routes/studio_schedule.py",
     "web/api/routes/admin.py",
     "web/api/routes/crm.py",
