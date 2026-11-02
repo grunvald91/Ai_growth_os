@@ -715,3 +715,75 @@ async def test_draft_in_code_fences_with_extra_keys_is_still_reviewed(db, tmp_pa
     provider.steps = [fenced, _reply({"findings": []})]
     await service.build(product.id, session, actor="owner")
     assert provider.calls == 2  # the quirk did not skip the one review
+
+
+def test_profile_collect_button_is_last_and_saves_everything_before_draft(studio):
+    from app.intake.service import CompanyIntakeService
+    from app.core.config import get_settings
+
+    client, db = studio
+    created = client.post("/studio/new",
+                          data={"name": "Ноготок", "about": ABOUT},
+                          follow_redirects=False)
+    assert created.status_code == 303
+    base = created.headers["location"]
+    product = db.scalar(select(Product).where(Product.name == "Ноготок"))
+    before_requests = len(client.provider.requests)
+    page = client.get(base).text
+    assert f'action="{base}/collect"' in page
+    assert page.index('name="name"') < page.index('name="files"')
+    assert page.rfind('name="files"') < page.rfind('>Собрать профиль</button>')
+    assert page.rfind('>Собрать профиль</button>') > page.rfind('profile/cancel')
+    # Only one build CTA: no earlier build form that ignores unsaved fields.
+    assert page.count('>Собрать профиль</button>') == 1
+    assert f'action="{base}/build"' not in page
+    assert 'name="q0_field"' in page
+
+    source = "Дополнительные сведения о скидках: 25% постоянным клиентам."
+    updated = client.post(base + "/collect", data={
+        "name": "Ноготок Плюс",
+        "description": "Салон маникюра в Сочи",
+        "text": source,
+        "q0_field": "identity.name",
+        "q0_answer": "Ноготок Плюс",
+    }, files=[("files", ("price.txt", b"Service: manicure 2500", "text/plain"))],
+                          follow_redirects=False)
+    assert updated.status_code == 303
+    db.refresh(product)
+    assert product.name == "Ноготок Плюс"
+    assert product.description == "Салон маникюра в Сочи"
+    active = CompanyIntakeService(db, products_root=get_settings().products_root).active(
+        product.id, "local_owner")
+    assert active is not None
+    state = CompanyIntakeService(db, products_root=get_settings().products_root).get(
+        product.id, active.id, actor="local_owner")
+    all_text = "\n".join(row["text"] for row in state["sources"])
+    assert source in all_text and "Service: manicure 2500" in all_text
+    assert "Ноготок Плюс" in all_text
+    assert state["review_current"] is True
+    assert len(client.provider.requests) > before_requests
+
+
+def test_collect_from_closed_session_creates_new_review(studio):
+    from app.intake.service import CompanyIntakeService
+    from app.core.config import get_settings
+
+    client, db = studio
+    created = client.post("/studio/new", data={"name": "Ноготок", "about": ABOUT},
+                          follow_redirects=False)
+    product = db.scalar(select(Product).where(Product.name == "Ноготок"))
+    service = CompanyIntakeService(db, products_root=get_settings().products_root)
+    session = service.active(product.id, "local_owner")
+    service.cancel(product.id, session.id, actor="local_owner")
+    base = f"/studio/products/{product.id}/profile"
+    page = client.get(base).text
+    assert f'action="{base}/collect"' in page
+    assert page.rfind('>Собрать профиль</button>') > page.rfind('name="files"')
+    submitted = client.post(base + "/collect",
+                            data={"name": "Ноготок", "description": "Новая информация",
+                                  "text": "Новая услуга: массаж лица"}, follow_redirects=False)
+    assert submitted.status_code == 303
+    new_session = service.active(product.id, "local_owner")
+    assert new_session is not None and new_session.id != session.id
+    assert "Новая услуга" in "\n".join(
+        row["text"] for row in service.get(product.id, new_session.id, actor="local_owner")["sources"])
