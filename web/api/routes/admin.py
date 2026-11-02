@@ -470,7 +470,7 @@ async def analytics_overview(
         select(func.count(Employee.id)).where(
             Employee.business_id == business_id,
             Employee.is_active == True,
-            Employee.role != "administrator",
+            Employee.role.notin_(["administrator", "admin"]),
         )
     )
     active_emp_count = emp_count_res.scalar() or 0
