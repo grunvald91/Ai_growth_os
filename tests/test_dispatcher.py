@@ -191,6 +191,29 @@ def test_inline_edit_contract_rejects_bad_format_combinations():
     with pytest.raises(ValidationError):
         EditCreation(**{**data, "topic": "x"})
 
+
+@pytest.mark.asyncio
+async def test_stale_confirmation_cannot_start_edited_request(db, product):
+    from app.dispatcher.editable import EditCreation
+    original = await send(db, product, chip={
+        "label": "4 Stories", "capability": "create_creative",
+        "params": {"topic": "Уход за волосами", "format": "story", "frame_count": 4}})
+    block = next(x for x in original["messages"][1]["blocks"] if x["type"] == "confirm")
+    await service.edit_confirmation(db, context(db, product), EditCreation(
+        confirmation_id=block["confirmation_id"], revision=0, format="story",
+        topic="Шесть советов", frame_count=6))
+    with pytest.raises(PermissionError):
+        await service.confirm(db, context(db, product), block["confirmation_id"],
+                              accept=True, revision=0)
+    with pytest.raises(PermissionError):
+        await service.confirm(db, context(db, product), block["confirmation_id"],
+                              accept=True)
+    assert tasks(db, "content_creative") == []
+    await service.confirm(db, context(db, product), block["confirmation_id"],
+                          accept=True, revision=1)
+    assert len(tasks(db, "content_creative")) == 1
+
+
 # ---- blocks -----------------------------------------------------------------------------
 
 def test_blocks_drop_foreign_links_and_misshapen_tables():

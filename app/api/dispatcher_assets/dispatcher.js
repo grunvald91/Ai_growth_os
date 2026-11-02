@@ -357,7 +357,8 @@
 
   function answer(block, accept, no, yes) {
     no.disabled = yes.disabled = true;
-    post('/confirm', { confirmation_id: block.confirmation_id, accept: accept, via: 'button' })
+    post('/confirm', { confirmation_id: block.confirmation_id, accept: accept,
+      via: 'button', revision: block.revision || 0 })
       .then(applyResult)
       .catch(function (error) { no.disabled = yes.disabled = false; notify(error.message); });
   }
@@ -1011,4 +1012,21 @@
   renderHints();
   toBottom();
 
+  if (root.classList.contains('sg-create-dispatch')) {
+    // On Create, restore only the last pending creation card. Do not copy the
+    // full conversation from Home into the compact composition workspace.
+    fetch(api + '/state', { credentials: 'same-origin',
+      headers: { Accept: 'application/json' } })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (data) {
+        if (!data || !Array.isArray(data.messages) ||
+            feed.querySelector('.dp-msg:not(.dp-typing)')) return;
+        var pending = data.messages.filter(function (message) {
+          return message.role === 'assistant' && (message.blocks || []).some(function (b) {
+            return b.type === 'confirm' && b.state === 'pending' && !!b.editable;
+          });
+        });
+        if (pending.length) applyResult({ messages: [pending[pending.length - 1]] });
+      }).catch(function () { /* No network means no restored card, not a page failure. */ });
+  }
 })();

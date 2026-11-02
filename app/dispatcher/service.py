@@ -376,7 +376,8 @@ async def edit_confirmation(db: Session, ctx: Context, edit) -> dict:
 
 
 
-async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bool, via: str = "button") -> dict:
+async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bool,
+                  via: str = "button", revision: int | None = None) -> dict:
     """Answer a confirmation card. A card works once; a voice 'yes' only answers the latest open card."""
     conversation = open_conversation(db, ctx.product.id, ctx.account)
     card = db.scalar(select(DispatcherMessage).where(
@@ -386,6 +387,16 @@ async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bo
         raise LookupError("Карточка не найдена")
     if card.confirmation_state != "pending":
         return {"messages": [to_dict(card)], "replayed": True}
+    current_block = next((b for b in (card.blocks or [])
+                          if b.get("type") == "confirm" and b.get("confirmation_id") == confirmation_id), None)
+    if current_block and current_block.get("editable"):
+        saved_revision = int(current_block.get("revision", 0))
+        # Legacy clients can approve unedited cards, but a modified card
+        # must carry its current revision. A stale phone/tab cannot approve
+        # different material than what its user actually reviewed.
+        if (revision is None and saved_revision != 0) or (
+                revision is not None and revision != saved_revision):
+            raise PermissionError("Задание изменилось. Откройте обновлённую карточку перед созданием")
     if via == "voice":
         latest = db.scalar(select(DispatcherMessage).where(
             DispatcherMessage.conversation_id == conversation.id,

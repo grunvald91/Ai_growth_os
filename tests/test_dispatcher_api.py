@@ -150,7 +150,31 @@ def test_inline_edit_endpoint_changes_same_card_without_starting_work(env):
     assert client.post(f"/studio/products/{servgo.id}/dispatch/edit", json={
         **request, "revision": 1, "admin": True}).status_code == 422
     saved = client.post(f"/studio/products/{servgo.id}/dispatch/confirm", json={
-        "confirmation_id": card["confirmation_id"], "accept": True})
+        "confirmation_id": card["confirmation_id"], "accept": True, "revision": 1})
+    assert saved.status_code == 200
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_creative")) is not None
+
+
+
+def test_confirmation_revision_prevents_stale_browser_from_starting_work(env):
+    db, settings, servgo, other, _ = env
+    client = TestClient(app)
+    created = client.post(f"/studio/products/{servgo.id}/dispatch/messages", json={
+        "mode": "chip", "client_key": "confirm-race",
+        "chip": {"label": "4 сторис", "capability": "create_creative",
+                 "params": {"format": "story", "topic": "Четыре совета", "frame_count": "4"}}})
+    card = next(b for b in created.json()["messages"][-1]["blocks"] if b["type"] == "confirm")
+    edited = client.post(f"/studio/products/{servgo.id}/dispatch/edit", json={
+        "confirmation_id": card["confirmation_id"], "revision": 0,
+        "format": "story", "topic": "Пять советов", "frame_count": 5})
+    assert edited.status_code == 200
+    for stale in ({"revision": 0}, {}):
+        rejected = client.post(f"/studio/products/{servgo.id}/dispatch/confirm", json={
+            "confirmation_id": card["confirmation_id"], "accept": True, **stale})
+        assert rejected.status_code == 409
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_creative")) is None
+    saved = client.post(f"/studio/products/{servgo.id}/dispatch/confirm", json={
+        "confirmation_id": card["confirmation_id"], "accept": True, "revision": 1})
     assert saved.status_code == 200
     assert db.scalar(select(Task).where(Task.assigned_agent == "content_creative")) is not None
 

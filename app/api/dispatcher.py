@@ -80,6 +80,7 @@ class ConfirmIn(BaseModel):
     confirmation_id: str = Field(min_length=1, max_length=64)
     accept: bool
     via: str = Field(default="button", pattern="^(button|voice)$")
+    revision: int | None = Field(default=None, ge=0)
 
 
 async def _json(request: Request, model):
@@ -222,7 +223,7 @@ async def dispatch_confirm(product_id: UUID, request: Request, db: Session = Dep
     body = await _json(request, ConfirmIn)
     try:
         result = await service.confirm(db, _context(db, product, settings, request), body.confirmation_id,
-                                       accept=body.accept, via=body.via)
+                                       accept=body.accept, via=body.via, revision=body.revision)
     except LookupError:
         raise HTTPException(404, "Этот вопрос уже недоступен") from None
     except PermissionError as exc:
