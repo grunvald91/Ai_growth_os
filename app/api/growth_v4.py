@@ -62,7 +62,7 @@ def icon(name):
 
 
 
-def create_workspace_v4(pid, form, warning):
+def create_workspace_v4(pid, form, warning, voice_project="", voice_max=300):
     """Compact creation UI with the same dispatcher voice gesture as the owner home."""
     base = f"/studio/products/{pid}"
     formats = [
@@ -134,7 +134,8 @@ def create_workspace_v4(pid, form, warning):
         <div class="sg-create-context" id="sg-create-context" aria-live="polite"></div>
         <section class="dp-home sg-create-dispatch" data-load-state="1" data-create-format=""
           data-api="{base}/dispatch" data-voice-url="/studio/voice/dictate"
-          data-voice-preview-url="/studio/voice/preview" data-voice-max="300"
+          data-voice-preview-url="/studio/voice/preview" data-voice-max="{int(voice_max)}"
+          data-voice-project="{html.escape(voice_project,quote=True)}"
           aria-label="Создание через диспетчера">
           <div class="dp-feed" id="dp-feed" role="log" aria-live="polite" aria-label="Ответы диспетчера"></div>
           <div class="command-dock">
@@ -157,9 +158,13 @@ def create_workspace_v4(pid, form, warning):
               <span class="voice-composer-status" id="dp-voice-status" role="status" hidden></span>
               <button class="command-mode-mic" id="dp-mode-mic" type="button" hidden
                  aria-label="Скрыть клавиатуру и перейти к голосовому вводу"
-                 title="Вернуться к голосовому вводу">♩</button>
+                 title="Вернуться к голосовому вводу"><svg aria-hidden="true" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <rect x="9" y="2.5" width="6" height="12" rx="3"/>
+                <path d="M5.5 10.5v1.5a6.5 6.5 0 0 0 13 0v-1.5M12 18.5V22M8.5 22h7"/>
+              </svg></button>
               <button class="dp-send command-go" id="dp-send" type="submit"
-                aria-label="Отправить запрос">{icon("plus")}</button>
+                aria-label="Отправить запрос"><span aria-hidden="true">↑</span></button>
             </form>
             <div class="command-tools"><div class="command-hints" id="dp-chips"
               aria-label="Подсказки"></div></div>
@@ -259,7 +264,13 @@ def render_v4(page, request, pid, switch):
         form = original.outer(original.find(ident='sg-create-form'))
         if form:
             warning = original.outer(original.find(cls='sg-warning'))
-            content = create_workspace_v4(pid, form, warning)
+            config = original.find(cls='sg-create-voice-config')
+            config_attrs = config[1] if config else {}
+            content = create_workspace_v4(
+                pid, form, warning,
+                voice_project=config_attrs.get('data-voice-project') or '',
+                voice_max=int(config_attrs.get('data-voice-max') or 300),
+            )
     if pid and current == base+'/seo':
         stages = [('Поисковые вопросы','Подсказки Яндекса и Google','search'),
                   ('Семантическое ядро','Группировка по намерениям','layers'),
