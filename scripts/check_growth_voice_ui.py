@@ -65,6 +65,21 @@ def main():
                 # Mock microphone and POST responses: no model tokens, recordings or live tasks.
                 page.add_init_script("""(() => {
                   window.__mockMicStarts = 0;
+                  window.__mockLevel = 0;
+                  class MockAudioContext {
+                    constructor(){ this.state='running'; }
+                    createAnalyser(){ return {
+                      fftSize:512,
+                      getByteTimeDomainData(array){
+                        for(let i=0;i<array.length;i++)
+                          array[i]=128+Math.round(window.__mockLevel*Math.sin(i*.31));
+                      }
+                    }; }
+                    createMediaStreamSource(){ return {connect(){},disconnect(){}}; }
+                    close(){ this.state='closed'; return Promise.resolve(); }
+                    resume(){ return Promise.resolve(); }
+                  }
+                  window.AudioContext=MockAudioContext;
                   Object.defineProperty(navigator, 'mediaDevices', {configurable:true, value:{
                     getUserMedia: async () => { window.__mockMicStarts++; return {
                       getTracks: () => [{stop(){}}]
@@ -183,11 +198,11 @@ def main():
                 active_overlay=page.locator('#dp-voice-overlay').evaluate("""element=>({
                   opacity:parseFloat(getComputedStyle(element).opacity),
                   position:getComputedStyle(element).position,
-                  animation:getComputedStyle(element,'::after').animationDuration,
+                  animation:getComputedStyle(element.querySelector('.vg__glow')).animationDuration,
                   label:element.querySelector('#dp-voice-overlay-text').textContent
                 })""")
                 assert active_overlay['opacity']>.9 and active_overlay['position']=='fixed',active_overlay
-                assert active_overlay['animation']=='3s',active_overlay
+                assert active_overlay['animation']=='4.6s',active_overlay
                 assert 'Отпустите' in active_overlay['label']
                 overlay_geometry=page.locator('#dp-voice-overlay').evaluate("""element=>{
                   const r=element.getBoundingClientRect(),sty=getComputedStyle(element);
@@ -197,11 +212,32 @@ def main():
                     overlayActive:element.classList.contains('is-active')};
                 }""")
                 assert overlay_geometry['parent']=='BODY',overlay_geometry
-                assert abs(overlay_geometry['left'])<2 and abs(overlay_geometry['top'])<2,overlay_geometry
+                assert abs(overlay_geometry['left'])<2,overlay_geometry
+                assert abs(overlay_geometry['top']-(overlay_geometry['viewportHeight']-300))<2,overlay_geometry
                 assert abs(overlay_geometry['width']-overlay_geometry['viewportWidth'])<2,overlay_geometry
-                assert abs(overlay_geometry['height']-overlay_geometry['viewportHeight'])<2,overlay_geometry
+                assert abs(overlay_geometry['height']-300)<2,overlay_geometry
                 assert overlay_geometry['bg']=='rgba(0, 0, 0, 0)',overlay_geometry
                 assert overlay_geometry['dim']=='none' and overlay_geometry['overlayActive'],overlay_geometry
+                # Mic samples, not randomly animated placeholders, control the bars.
+                def waveform_pixels():
+                    return page.locator('#vgBars').evaluate("""canvas => {
+                      const ctx=canvas.getContext('2d');
+                      const data=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+                      let count=0;
+                      for(let i=3;i<data.length;i+=4) if(data[i]>10) count++;
+                      return count;
+                    }""")
+                quiet=waveform_pixels()
+                page.evaluate('window.__mockLevel=36')
+                page.wait_for_timeout(260)
+                loud=waveform_pixels()
+                assert loud>quiet+65,(quiet,loud)
+                assert page.evaluate('window.__mockMicStarts')==1, 'VoiceGlow opened a second mic'
+                # The small knob tracks the real active pointer, not an unrelated animation.
+                page.evaluate("""() => document.dispatchEvent(new PointerEvent('pointermove',{
+                  bubbles:true,cancelable:true,button:0,pointerType:'touch',pointerId:12,clientX:212,clientY:630
+                }))""")
+                assert 210<=page.locator('#vgKnob').evaluate("e=>parseFloat(e.style.left)")<=214
                 page.screenshot(path=str(OUT/'voice-hold-active-390.png'),animations='allow')
                 pointer('pointercancel',12)
                 page.wait_for_timeout(220)
@@ -211,10 +247,12 @@ def main():
                 page.wait_for_function("() => window.__mockMicStarts===2 && document.querySelector('#dp-form').classList.contains('voice-recording')")
                 pointer('pointerup',13)
                 page.wait_for_function("() => document.querySelector('#dp-form').classList.contains('voice-processing')")
+                assert page.locator('#dp-voice-overlay').evaluate("e=>e.classList.contains('rec')")
+                assert 'Распознавание' in page.locator('#dp-voice-overlay-text').inner_text()
                 assert page.locator('#dp-voice-status').is_visible()
                 assert 'Распознаю и редактирую' in page.locator('#dp-voice-status').inner_text()
                 page.wait_for_timeout(200)
-                assert page.locator('#dp-voice-overlay').evaluate("e=>parseFloat(getComputedStyle(e).opacity)")<.1
+                assert page.locator('#dp-voice-overlay').evaluate("e=>parseFloat(getComputedStyle(e).opacity)")>.9
                 page.screenshot(path=str(OUT/'voice-processing-390.png'),animations='disabled')
                 page.wait_for_function("() => document.querySelector('#dp-voice-note button.dp-voice-undo')")
                 assert len(voice_calls)==1 and len(dispatch_calls)==1, (voice_calls,dispatch_calls)
