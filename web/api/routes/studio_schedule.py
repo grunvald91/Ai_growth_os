@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import EmployeeDayOff
+from database.models import CRMContact, EmployeeDayOff
 from ..database import Booking, Business, Employee, Service, User, get_db
 from .studio_sso import _secret, studio_role
 
@@ -79,6 +79,7 @@ class ScheduleOut(BaseModel):
     resources: list[ResourceOut]
     services: list[ServiceOut] = []
     bookings: list[BookingRow]
+    paused_client_ids: list[int] = []
     free_slots: list[FreeSlots] = []
 
 
@@ -168,6 +169,14 @@ async def studio_schedule(
         for employee_id, off_day in off_rows:
             off_by_employee.setdefault(employee_id, set()).add(off_day)
 
+    # A paused CRM contact should not appear as a proposed reactivation audience.
+    # No CRM notes or contact details are returned for this filter.
+    paused_client_ids = list((await db.scalars(select(CRMContact.user_id).where(
+        CRMContact.business_id == business_id,
+        CRMContact.stage == "paused",
+        CRMContact.user_id.is_not(None),
+    ))).all())
+
     bookings = [BookingRow(
         id=booking.id, date=booking.booking_date.isoformat(), time=booking.booking_time.strftime("%H:%M"),
         duration_minutes=booking.duration_minutes or booking.resource_duration_minutes,
@@ -218,4 +227,4 @@ async def studio_schedule(
                    for item in resources],
         services=[ServiceOut(id=item.id, name=item.name, duration_minutes=item.duration_minutes,
                              price_estimate=item.price) for item in active_services],
-        bookings=bookings, free_slots=free_slots)
+        bookings=bookings, paused_client_ids=paused_client_ids, free_slots=free_slots)
