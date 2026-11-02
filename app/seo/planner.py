@@ -30,7 +30,7 @@ PLAN_PROMPT = (
     "You are the seo_editor of an organic growth team. Build a content plan for a blog from REAL search "
     "suggestion clusters of this company's niche. Rules: every item must cite existing cluster_ids; primary_query "
     "must be copied exactly from the queries of those clusters; stage and intent must equal the cluster's; "
-    "one article per primary_query. Cover the requested 7/30-day time horizon with useful topics; " 
+    "one article per primary_query. Cover the requested 7/30-day time horizon with useful topics; "
     "do not impose a fixed article-count cap. Cover all funnel stages (awareness, consideration, decision) in proportion "
     "to the clusters that exist; skip clusters that are irrelevant to the company. For each article give the "
     "reader's problem, the questions a person would ask an AI assistant about it, and where the article leads "
