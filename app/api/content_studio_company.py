@@ -160,21 +160,32 @@ def _job_running(session_id) -> bool:
 
 
 def _start_job(background: BackgroundTasks, product_id: UUID, session_id: UUID, *, website: str = "",
-               identifier: str = "", build: bool = False, notes: list[str] | None = None) -> None:
+               identifier: str = "", build: bool = False, notes: list[str] | None = None,
+               material_fields: dict | None = None,
+               files: list[tuple[str, bytes]] | None = None) -> None:
     if _job_running(session_id):
         raise IntakeError("Уже работаю над этой компанией. Подождите, страница обновится сама.")
-    stage = "Читаю сайт" if website else "Проверяю в реестре" if identifier else "Собираю профиль"
+    stage = ("Читаю файлы" if files else
+             "Читаю сайт" if website else "Проверяю в реестре" if identifier else "Собираю профиль")
     _JOBS[str(session_id)] = {"running": True, "started": time.time(), "stage": stage,
                               "notes": list(notes or []), "error": None}
-    background.add_task(_run_job, product_id, session_id, website, identifier, build)
+    background.add_task(_run_job, product_id, session_id, website, identifier, build,
+                        material_fields or {}, files or [])
 
 
-async def _run_job(product_id: UUID, session_id: UUID, website: str, identifier: str, build: bool) -> None:
+async def _run_job(product_id: UUID, session_id: UUID, website: str, identifier: str, build: bool,
+                   material_fields: dict | None = None, files: list[tuple[str, bytes]] | None = None) -> None:
     job = _JOBS[str(session_id)]
     db = _background_session()
     try:
         service = _service(db)
+        if material_fields or files:
+            job["stage"] = "Читаю материалы"
+            job["notes"] += await _add_materials(
+                service, product_id, session_id, material_fields or {}, files or [],
+                text_reference="growth studio: сведения владельца")
         if website or identifier:
+            job["stage"] = "Читаю сайт" if website else "Проверяю в реестре"
             job["notes"] += await _add_materials(service, product_id, session_id,
                                                  {"website": website, "identifier": identifier}, [],
                                                  text_reference="")
@@ -263,10 +274,10 @@ async def new_company_submit(request: Request, background: BackgroundTasks, db: 
         session = service.start(product.id, actor=ACTOR)
         session_id = UUID(session["session_id"])
         service.add_text(product.id, session_id, about, actor=ACTOR, reference="growth studio: описание владельца")
-        # Uploaded files are already here; the site, registry and draft follow in the background.
-        notes = await _add_materials(service, product.id, session_id, {}, files, text_reference="")
-        _start_job(background, product.id, session_id, website=website, identifier=identifier, build=True,
-                   notes=notes)
+        # Parse uploaded files in the background as well: multi-page OCR must
+        # never hold the POST connection open for its entire worker timeout.
+        _start_job(background, product.id, session_id, website=website, identifier=identifier,
+                   build=True, files=files)
     except IntakeError as exc:
         db.rollback()
         return RedirectResponse(f"/studio/products/{product.id}/profile?error={quote(str(exc)[:200])}", status_code=303)
@@ -436,9 +447,9 @@ def _profile_body(product: Product, state: dict | None, error: str | None, notic
         parts.append(f'<div class="sg-intake-notice" role="status">{esc(notice)}</div>')
     if state is None:
         parts.append(_profile_summary_html(base, profile))
-        parts.append(_collect_company_form(product, registry_hint))
         if can_delete:
             parts.append(f'<p class="sg-muted"><a href="{base}/profile/delete">Удалить компанию</a></p>')
+        parts.append(_collect_company_form(product, registry_hint))
         parts.append(ONCE_SCRIPT)
         return "".join(parts)
     sources = "".join(_source_line(s, base, removable=not running) for s in state["sources"])
@@ -580,6 +591,25 @@ async def company_profile_action(product_id: UUID, action: str, request: Request
     try:
         if action == "start":
             service.start(product.id, actor=ACTOR)
+        elif action == "collect":
+            # One bottom-of-form action: preserve company settings immediately;
+            # collect and parse uploads in the background, THEN build the draft.
+            active = service.active(product.id, ACTOR)
+            if active and _job_running(active.id):
+                raise IntakeError("Уже работаю над этой компанией. Подождите, страница обновится сама.")
+            name = fields.get("name", product.name)
+            description = fields.get("description", product.description or "")
+            rename_company(db, product, name=name, description=description)
+            session = active or service.active(product.id, ACTOR)
+            if session is None:
+                opened = service.start(product.id, actor=ACTOR)
+                session_id = UUID(opened["session_id"])
+            else:
+                session_id = session.id
+            website = normalize_site(fields.get("link", ""))
+            identifier = fields.get("identifier", "").strip()
+            _start_job(background, product.id, session_id, website=website, identifier=identifier,
+                       material_fields={"text": fields.get("text", "").strip()}, files=files, build=True)
         elif action == "source":
             session_id = _session_id(service, product)
             if _job_running(session_id):
