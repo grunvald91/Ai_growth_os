@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     agent_critic_enabled: bool = False
     # Owner's decision: at most this many blog articles of the SEO plan are started per day (Moscow time).
     seo_articles_per_day: int = Field(default=3, ge=1)
+    seo_publications_per_day: int = Field(default=3, ge=1)
+    seo_servgo_autorun_enabled: bool = False
+    seo_servgo_autorun_interval_days: int = Field(default=7, ge=1, le=90)
     # Critic bounds. The reviewer sees the complete task, so oversized contexts
     # are skipped rather than compacted; raise these together with the model.
     agent_critic_max_context_chars: int = Field(default=24000, ge=1000, le=2_000_000)

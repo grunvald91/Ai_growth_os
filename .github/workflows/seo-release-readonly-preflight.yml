@@ -1,0 +1,59 @@
+name: ServGo SEO release — read-only production preflight
+
+# Runs once when introduced on the release branch, never on article generation.
+# All commands are read-only. Does NOT deploy, migrate or enable paid API tasks.
+on:
+  push:
+    branches: [release/servgo-seo-calendar-20261102]
+    paths:
+      - .github/workflows/seo-release-readonly-preflight.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servgo-seo-readonly-preflight
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Inspect only (pinned SSH key; never print credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD unavailable"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/seo-host-keys
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/seo-host-key
+            ssh-keygen -lf /tmp/seo-host-key 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/seo-host-keys
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Pinned server host key mismatch"; exit 1; }
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'bash -s' <<'REMOTE'
+          set -u
+          echo "== Server nginx syntax (read-only)"
+          nginx -t 2>&1 | tail -n 4
+          echo "== Growth application containers (no secrets)"
+          docker ps --filter label=com.docker.compose.project=ai-growth-os --format '{{.Names}} {{.Status}}' || true
+          echo "== BookingBot web service"
+          systemctl is-active booking-bot || true
+          echo "== Growth DB revision"
+          docker exec ai-growth-os-api-1 alembic current 2>&1 | tail -n 4 || true
+          echo "== ServGo profile / migration readiness"
+          docker exec ai-growth-os-api-1 python -c 'from app.db.session import SessionLocal; from sqlalchemy import text; db=SessionLocal(); print("servgo_product_exists=", bool(db.execute(text("SELECT id FROM products WHERE slug=:slug LIMIT 1"), {"slug":"servgo"}).first())); print("seo_activation_table=", db.execute(text("SELECT to_regclass(:table)"), {"table":"public.seo_factory_activations"}).scalar()); db.close()' || true
+          echo "== HTTPS routes (status and content-type only)"
+          for entry in 'servgo.ru /' 'servgo.ru /blog' 'servgo.ru /blog/sitemap.xml' 'servgo.ru /robots.txt' 'servgo.ru /blog/__seo_unknown_slug__' 'growth.servgo.ru /studio' 'growth.servgo.ru /public/blog/servgo/articles'; do
+            set -- $entry
+            printf "%s%s => " "$1" "$2"
+            curl -sS --max-time 12 --resolve "$1:443:127.0.0.1" -o /dev/null -w '%{http_code} %{content_type}\n' "https://$1$2" || echo 'network_error'
+          done
+          REMOTE

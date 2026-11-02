@@ -7,23 +7,33 @@ from __future__ import annotations
 
 import html
 import json
+import httpx
 import re
 from pathlib import Path
 from urllib.parse import urlencode
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, Response, JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
-from app.api.content_studio import MATERIAL_KINDS, _owner_product, studio_page_shell
+from app.api.content_studio import MATERIAL_KINDS, _owner_product, _studio_form, studio_page_shell
 from app.db.session import get_db
 from app.models.domain import Artifact, Experiment, Task
 from app.api.growth_campaigns import campaign_list_card
 from app.services.campaign_readiness import load_resources
+from app.api.seo_run_view import seo_runs
+from app.seo.control import SeoControlError, create_seo_run, change_seo_run
+from app.seo.activation import is_enabled, set_enabled
+from app.seo.visibility import VisibilityError, change_article_visibility
+from app.seo.insights import company_seo_insights
+from app.seo.search_metrics import company_search_metrics, inspect_google_article
+from app.models.domain import ArtifactStatus, Publication, Product
+from app.workflows.article_contracts import ArticleArtifact
+from app.sso.models import StudioBusinessLink
 
 ASSETS = Path(__file__).parent / 'assets'
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -44,8 +54,7 @@ def decorate(page: str, request: Request, new: bool) -> str:
                             'padding:12px 18px;border-radius:24px;background:#215da9;color:white;'
                             'font:600 14px system-ui;box-shadow:0 3px 16px #1234}</style></body>')
     match = re.search(r'/studio/products/([0-9a-fA-F-]{36})(?:/|$)', request.url.path)
-    # The company chooser contains links to multiple businesses. Its first
-    # card is not an active tenant, and must not become the V4 navigation scope.
+    # A multi-company chooser must never borrow tenant scope from its first card.
     if not match and request.url.path != '/studio':
         match = re.search(r'/studio/products/([0-9a-fA-F-]{36})', page)
     pid = UUID(match[1]) if match else None
@@ -157,20 +166,499 @@ def artifact_content(content: str) -> str:
     return '<details class="gv-result"><summary>Подробнее</summary>'+render(value)+'</details>'
 
 
+def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | None = None, enabled: bool = True) -> str:
+    def state(label: str, done: bool) -> str:
+        return (f'<li>{html.escape(label)}: '
+                f'<strong>{"Есть результат" if done else "Пока нет результата"}</strong></li>')
+    error = (f'<p role="status">Последняя ошибка: {html.escape(row["last_error"])}</p>'
+             if row["last_error"] else '')
+    queued = (f'<p>Статей поставлено в очередь: <b>{row["articles_queued"]}</b></p>'
+              if row["articles_queued"] is not None else
+              '<p>Количество поставленных статей пока не подтверждено.</p>')
+    deferred = row.get("articles_deferred")
+    if isinstance(deferred, int) and deferred > 0:
+        queued += (f'<p>Осталось в SEO-плане без генерации: <b>{deferred}</b>. '
+                   'Следующая партия запускается отдельно.</p>')
+    attempts = (f'<p>Попыток выполнения: {row["attempts"]}</p>'
+                if row["attempts"] else '<p>Попытки выполнения ещё не зарегистрированы.</p>')
+    base = f'/studio/products/{product_id}/seo' if product_id else ''
+    actions = ''
+    if base and enabled and row["status"] in {"queued", "failed", "cancelled"}:
+        operation = "cancel" if row["status"] == "queued" else "retry"
+        caption = "Отменить из очереди" if operation == "cancel" else "Повторить запуск"
+        actions = (
+            f'<form method="post" action="{base}/{row["id"]}/{operation}" class="seo-run-actions">'
+            f'<button class="btn secondary" type="submit">{caption}</button></form>'
+        )
+    article_labels = {
+        "queued": "Ожидает генерации", "running": "Создаётся",
+        "completed": "Обработка завершена", "failed": "Ошибка создания",
+        "cancelled": "Отменено",
+    }
+    saved_labels = {
+        "draft": "Черновик", "awaiting_approval": "На согласовании",
+        "approved": "Согласована", "published": "Опубликована",
+        "rejected": "Отклонена",
+    }
+    critic_labels = {
+        "no_material_issues": "существенных замечаний нет",
+        "revised": "замечания учтены, статья доработана",
+        "all_rejected": "замечания отклонены автором",
+        "rejected_domain_revision": "доработка не прошла проверку",
+        "review_unavailable": "проверка не завершена",
+        "revision_unavailable": "доработка не завершена",
+        "revision_pending": "ожидает доработки",
+        "revision_cancelled": "доработка прервана",
+        "skipped_incomplete_context": "проверка пропущена: неполный контекст",
+        "skipped_incomplete_original": "проверка пропущена: ответ оборван",
+        "skipped_size_limit": "проверка пропущена: ограничение размера",
+        "skipped_invalid_original": "проверка пропущена: неверный формат",
+        "missing": "нет подтверждённого результата",
+    }
+    article_cards = []
+    if base:
+        for article in row.get("articles", []):
+            status = (saved_labels.get(article["article_status"], article["article_status"])
+                      if article["article_status"] else
+                      article_labels.get(article["task_status"], article["task_status"]))
+            target = (f'/studio/products/{product_id}/materials/{article["article_id"]}'
+                      if article["article_id"] else
+                      f'/studio/products/{product_id}/tasks/{article["task_id"]}')
+            extra = ''
+            pub = article.get("publication_path")
+            if pub and pub.startswith("/blog/"):
+                if blog_base:
+                    extra = (f'<a href="{html.escape(blog_base + pub, quote=True)}"'
+                             ' target="_blank" rel="noopener noreferrer">Посмотреть в блоге</a>')
+                else:
+                    extra = '<span>Запись о публикации есть; адрес сайта этой компании не подключён</span>'
+            critic = ''
+            article_id = article.get("article_id")
+            if article_id:
+                verdict = article.get("critic_status", "missing")
+                label = critic_labels.get(verdict, "статус требует проверки")
+                critic = (f'<p class="seo-critic-result">Критик: '
+                          f'{html.escape(label)}</p>')
+                findings = article.get("critic_findings") or []
+                total = article.get("critic_findings_total", len(findings))
+                if findings:
+                    issues = ''.join(f'<li>{html.escape(str(issue))}</li>' for issue in findings)
+                    critic += (f'<details class="seo-critic-findings"><summary>'
+                               f'Замечания критика ({total})</summary><ul>{issues}</ul></details>')
+                if article.get("approval_reason") and article.get("article_status") == "awaiting_approval":
+                    critic += ('<p class="seo-critic-reason">Причина согласования: ' +
+                               html.escape(article["approval_reason"][:600]) + '</p>')
+                if article.get("article_status") == "awaiting_approval":
+                    critic += (f'<a class="btn secondary" href="{html.escape(target, quote=True)}">'
+                               'Открыть статью и проверить</a>')
+                    critic += '<p>Статья не прошла автоматическую проверку. Причина указана выше.</p>'
+            scheduled = article.get("scheduled_at")
+            scheduled_note = (
+                '<span>Запланировано: ' + html.escape(str(scheduled)) + ' МСК</span>'
+                if scheduled else ''
+            )
+            article_cards.append(
+                '<li class="seo-article-item">'
+                f'<div class="seo-article-copy"><a href="{html.escape(target, quote=True)}">'
+                f'{html.escape(article["title"])}</a>'
+                f'<span>{html.escape(status or "Статус неизвестен")}</span>'
+                + scheduled_note + critic + extra + '</div></li>'
+            )
+    article_list = (
+        f'<details class="seo-run-articles"><summary>Статьи ({len(article_cards)})</summary>'
+        '<ul>' + ''.join(article_cards) + '</ul></details>'
+        if article_cards else ''
+    )
+    return (
+        f'<article class="panel seo-run" data-seo-status="{html.escape(row["status"], quote=True)}">'
+        f'<div class="seo-run-head"><h3>{html.escape(row["title"])}</h3>'
+        f'<span class="seo-run-status">{html.escape(row["status_label"])}</span></div>'
+        f'<p>Последнее обновление: {html.escape(row["updated_at"] or "неизвестно")}</p>'
+        + attempts + queued + error
+        + '<details class="seo-run-details"><summary>Этапы и источники данных</summary>'
+        + '<ul>'
+        + state('Семантическое ядро', row['semantic_ready'])
+        + state('SEO-контент-план', row['plan_ready'])
+        + '</ul>'
+        + (f'<p>Источников в итоговом отчёте: {row["sources_confirmed"]}</p>'
+           if row["sources_confirmed"] is not None else
+           '<p>Количество источников пока не подтверждено.</p>')
+        + '<p>Стоимость: нет подтверждённых данных о списании провайдера.</p>'
+        + '</details>'
+        + article_list
+        + actions
+        + ('<p class="seo-run-hint">Запущенное выполнение нельзя прервать этой кнопкой.</p>'
+           if row['status'] == 'running' else '')
+        + '</article>'
+    )
+
+
+
+@router.get('/studio/products/{product_id}/seo/queue', response_class=HTMLResponse)
+def seo_queue_confirm(product_id: UUID, db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    if not is_enabled(db, product_id):
+        return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
+    base = f'/studio/products/{product_id}/seo'
+    body = (
+        '<section class="panel seo-queue-confirm">'
+        '<h2>Новый запуск SEO-завода</h2>'
+        '<p>Завод подготовит поисковые запросы, SEO-план и задания на статьи. '
+        'Обработка после постановки в очередь может использовать платные модели. '
+        'Выберите план на неделю или месяц; все уместные темы '
+        'попадут в очередь без искусственного лимита числа статей. '
+        'Статьи с положительным заключением ИИ-критика и без ошибок проверки '
+        'автоматически публикуются в блоге компании. '
+        'Только материалы с замечаниями остаются на проверке. '
+        'Отмена запуска в очереди не удаляет созданные статьи и не отменяет '
+        'уже поставленные отдельно задания на статьи.</p>'
+        f'<form method="post" action="{base}/queue">'
+        '<label class="field" for="seo-focus">Тема или направление (необязательно)</label>'
+        '<input id="seo-focus" name="focus" maxlength="300"'
+        ' placeholder="Например, онлайн-запись для салонов красоты">'
+        '<label class="field" for="seo-horizon">Период контент-плана</label>'
+        '<select id="seo-horizon" name="horizon_days">'
+        '<option value="7">На 7 дней</option>'
+        '<option value="30">На месяц (30 дней)</option>'
+        '</select>'
+        '<div class="seo-run-actions"><button class="btn primary" type="submit">'
+        'Подтвердить постановку в очередь</button>'
+        f'<a class="btn" href="{base}">Вернуться без запуска</a></div></form>'
+        '</section>'
+    )
+    return studio_page_shell(product, active='seo', title='Новый запуск SEO-завода',
+                             subtitle='Подтвердите создание задания.', body=body)
+
+
+@router.post('/studio/products/{product_id}/seo/activation')
+async def seo_activation(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+    """Explicit owner action. Never enable SEO while creating or viewing a company."""
+    _owner_product(db, product_id)
+    if getattr(request.state, 'studio_sso_role', None) not in (None, 'owner', 'co_owner'):
+        raise HTTPException(403, 'Подключать SEO-завод может только владелец бизнеса')
+    form = await _studio_form(request)
+    action = form.get('action')
+    if action not in ('enable', 'disable'):
+        raise HTTPException(422, 'Некорректное действие')
+    set_enabled(db, product_id, enabled=action == 'enable',
+                actor=getattr(request.state, 'studio_login', 'studio_owner'))
+    return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
+
+
+@router.post('/studio/products/{product_id}/seo/queue')
+async def seo_queue_submit(product_id: UUID, request: Request,
+                           db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    values = await _studio_form(request)
+    focus = values.get('focus', '')
+    if not isinstance(focus, str) or len(focus) > 300:
+        raise HTTPException(422, 'Уточните тему SEO-завода')
+    horizon = values.get("horizon_days", "7")
+    if not isinstance(horizon, str) or horizon not in ("7", "30"):
+        raise HTTPException(422, 'Период SEO-плана должен быть 7 или 30 дней')
+    try:
+        create_seo_run(db, product_id=product_id, focus=focus, horizon_days=int(horizon))
+    except LookupError:
+        raise HTTPException(404, 'Компания не найдена') from None
+    except SeoControlError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
+
+
+@router.post('/studio/products/{product_id}/seo/{task_id}/cancel')
+def seo_cancel_queued(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    try:
+        change_seo_run(db, product_id=product_id, task_id=task_id, action='cancel')
+    except LookupError:
+        raise HTTPException(404, 'Запуск SEO-завода не найден') from None
+    except SeoControlError as exc:
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
+
+
+@router.post('/studio/products/{product_id}/seo/{task_id}/retry')
+def seo_retry_run(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    try:
+        change_seo_run(db, product_id=product_id, task_id=task_id, action='retry')
+    except LookupError:
+        raise HTTPException(404, 'Запуск SEO-завода не найден') from None
+    except SeoControlError as exc:
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
+
+
+@router.post('/studio/products/{product_id}/seo/articles/{article_id}/{action}')
+def seo_article_visibility(product_id: UUID, article_id: UUID, action: str,
+                           request: Request, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    if getattr(request.state, 'studio_sso_role', None) not in (None, 'owner', 'co_owner'):
+        raise HTTPException(403, 'Управлять видимостью статьи может только владелец бизнеса')
+    try:
+        change_article_visibility(
+            db, product_id=product_id, article_id=article_id, action=action,
+            actor=getattr(request.state, 'studio_login', 'studio_owner'))
+    except LookupError:
+        raise HTTPException(404, 'Статья не найдена') from None
+    except VisibilityError as exc:
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
+
+
+def seo_published_articles(db: Session, product_id: UUID, enabled: bool) -> str:
+    """A compact owner view of public and hidden pages, never of other companies."""
+    published = list(db.execute(
+        select(Publication, Artifact).join(Artifact, Publication.artifact_id == Artifact.id)
+        .where(Publication.product_id == product_id, Artifact.product_id == product_id,
+               Publication.channel == "own_site",
+               Publication.status.in_(["published", "unpublished"]),
+               Artifact.kind == "article")
+        .order_by(Publication.published_at.desc(), Publication.id.desc()).limit(100)
+    ))
+    if not published:
+        return '<p>Опубликованных или скрытых статей пока нет.</p>'
+    business_id = db.scalar(select(StudioBusinessLink.servgo_business_id).where(
+        StudioBusinessLink.product_id == product_id).limit(1))
+    items = []
+    for publication, article in published:
+        try:
+            title = ArticleArtifact.model_validate_json(article.content).reader_article.title
+        except (TypeError, ValueError, AttributeError):
+            title = article.title
+        public_url = None
+        slug = (publication.external_reference or "").removeprefix("/blog/")
+        if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug):
+            if business_id is not None:
+                public_url = f'https://servgo.ru/business/{business_id}/blog/{slug}'
+            elif db.scalar(select(Product.slug).where(Product.id == product_id)) == "servgo":
+                public_url = f'https://servgo.ru/blog/{slug}'
+            else:
+                # A standalone Growth product may not have a BookingBot public route yet.
+                public_url = None
+        visible = publication.status == "published" and article.status == ArtifactStatus.PUBLISHED
+        action = 'hide' if visible else 'restore'
+        button = 'Снять с публикации' if visible else 'Вернуть в блог'
+        links = (f'<a href="{html.escape(public_url, quote=True)}" '
+                 'target="_blank" rel="noopener noreferrer">Открыть статью</a>'
+                 if visible and public_url else
+                 '<span>Ссылка на публичную страницу появится после подключения бизнеса.</span>'
+                 if visible else '<span>Страница скрыта от публичного блога и sitemap.</span>')
+        items.append(
+            '<li><strong>' + html.escape(title) + '</strong> '
+            + ('<span>Опубликована</span>' if visible else '<span>Скрыта</span>')
+            + ' · ' + links
+            + f'<form method="post" action="/studio/products/{product_id}/seo/articles/{article.id}/{action}">'
+            + f'<button class="btn secondary" type="submit"{"" if visible or enabled else " disabled"}>'
+            + button + '</button></form></li>'
+        )
+    return '<ul class="seo-article-visibility">' + ''.join(items) + '</ul>'
+
+
+@router.post('/studio/products/{product_id}/seo/inspect', response_class=HTMLResponse)
+async def seo_inspect_published_url(product_id: UUID, request: Request,
+                                    db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    form = await _studio_form(request)
+    url = form.get("url", "")
+    if not isinstance(url, str) or len(url) > 500:
+        raise HTTPException(422, 'Укажите адрес опубликованной статьи')
+    async with httpx.AsyncClient(follow_redirects=False) as client:
+        try:
+            data = await inspect_google_article(db, product_id, url=url, client=client)
+        except LookupError:
+            raise HTTPException(404, 'Статья этого бизнеса не найдена') from None
+    status = data["status"]
+    if status != "connected":
+        message = ('Google Search Console ещё не подключён.' if status == 'not_configured'
+                   else 'Google временно не вернул данные об индексировании.')
+    else:
+        result = data["indexing"]
+        names = {"verdict": "Вердикт Google", "coverageState": "Состояние в индексе",
+                 "lastCrawlTime": "Последний известный обход",
+                 "robotsTxtState": "robots.txt", "indexingState": "Разрешение индексации",
+                 "pageFetchState": "Загрузка страницы",
+                 "googleCanonical": "Canonical Google",
+                 "userCanonical": "Canonical страницы"}
+        message = '<ul>' + ''.join('<li><strong>' + label + '</strong>: '
+                 + html.escape(str(result[key])) + '</li>'
+                 for key, label in names.items() if result.get(key) is not None) + '</ul>'
+    body = ('<p><a href="/studio/products/' + str(product_id)
+            + '/seo/search-metrics">← К поисковой аналитике</a></p>'
+            + '<p>Проверена только эта опубликованная страница: '
+            + html.escape(url) + '</p>' + message
+            + '<p>Это состояние версии в индексе Google, '
+              'а не проверка доступности сайта в реальном времени. '
+              'Цитирование в AI-ответах не подтверждается.</p>')
+    return studio_page_shell(product, active='seo', title='Индексирование Google',
+                             subtitle='Проверка конкретной статьи', body=body)
+
+
+@router.get('/studio/products/{product_id}/seo/search-metrics.json')
+async def seo_search_metrics_api(product_id: UUID, days: int = 28,
+                                 db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    if not 1 <= days <= 90:
+        raise HTTPException(422, 'Период: от 1 до 90 дней')
+    return JSONResponse(await company_search_metrics(db, product_id, days=days),
+                        headers={'Cache-Control': 'private, no-store'})
+
+
+@router.get('/studio/products/{product_id}/seo/search-metrics', response_class=HTMLResponse)
+async def seo_search_metrics_page(product_id: UUID, days: int = 28,
+                                  db: Session = Depends(get_db)):
+    product = _owner_product(db, product_id)
+    if not 1 <= days <= 90:
+        raise HTTPException(422, 'Период: от 1 до 90 дней')
+    metrics = await company_search_metrics(db, product_id, days=days)
+    names = [('google_search_console', 'Google Search Console'),
+             ('yandex_webmaster', 'Яндекс Вебмастер')]
+    cards = []
+    for source, name in names:
+        data = metrics[source]
+        if data['status'] != 'connected':
+            labels = {'not_configured': 'Источник пока не подключён',
+                      'no_public_articles': 'Нет опубликованных статей с доступными URL',
+                      'provider_unavailable': 'Не удалось получить данные провайдера'}
+            cards.append('<section class="panel"><h3>' + name + '</h3><p>'
+                         + html.escape(labels.get(data['status'], 'Данные недоступны'))
+                         + '</p></section>')
+            continue
+        entries = []
+        for item in data['pages']:
+            url = str(item['url'])
+            entries.append('<li><a href="' + html.escape(url, quote=True)
+                           + '" rel="noopener noreferrer" target="_blank">'
+                           + html.escape(url.removeprefix('https://servgo.ru'))
+                           + '</a> · клики: ' + str(item['clicks'])
+                           + ', показы: ' + str(item['impressions'])
+                           + '<form method="post" action="/studio/products/'
+                           + str(product_id) + '/seo/inspect">'
+                           + '<input type="hidden" name="url" value="'
+                           + html.escape(url, quote=True) + '">'
+                           + '<button type="submit" class="btn">Проверить индекс Google</button>'
+                           + '</form></li>')
+        cards.append('<section class="panel"><h3>' + name + '</h3>'
+                     + '<p>Данные за ' + str(data['period_days'])
+                     + ' дн. Только опубликованные статьи этого бизнеса.</p>'
+                     + '<p>Клики по доступным строкам: <strong>' + str(data['clicks'])
+                     + '</strong>; показы: <strong>' + str(data['impressions'])
+                     + '</strong>.</p>'
+                     + '<p>API может возвращать неполную выборку страниц — '
+                       'это не гарантированные общие показатели.</p>'
+                     + '<ul>' + ''.join(entries) + '</ul></section>')
+    content = ('<p><a href="/studio/products/' + str(product_id)
+               + '/seo">← SEO-завод</a></p>'
+               + '<p>Опубликованных адресов: '
+               + str(metrics['published_url_count']) + '.</p>'
+               + ''.join(cards)
+               + '<section class="panel"><h3>AI-ответы</h3>'
+                 '<p>Точное количество цитирований в Bing Copilot и ChatGPT '
+                 'неизвестно: подтверждённый источник данных пока не подключён.</p>'
+                 '</section>')
+    return studio_page_shell(product, active='seo', title='Поиск и AI-ответы',
+                             subtitle='Проверенные показатели по публичным статьям компании',
+                             body=content)
+
+
+@router.get('/studio/products/{product_id}/seo/insights')
+def seo_insights_endpoint(product_id: UUID, db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    return JSONResponse(company_seo_insights(db, product_id),
+                        headers={'Cache-Control': 'private, no-store'})
+
+
+def seo_insights_html(db: Session, product_id: UUID) -> str:
+    report = company_seo_insights(db, product_id)
+    return (
+        '<section class="panel" aria-label="Поиск и AI-ответы">'
+        '<h3>Поиск и AI-ответы</h3>'
+        f'<p>Опубликовано статей: <strong>{report["published_articles"]}</strong>. '
+        f'Скрыто: <strong>{report["hidden_articles"]}</strong>.</p>'
+        '<p>Google Search Console: данные пока не подключены. '
+        'Яндекс Вебмастер: данные пока не подключены. '
+        'Bing AI Performance: данные о цитировании пока не подключены.</p>'
+        '<p>Показы, клики, позиции и цитирования неизвестны — '
+        'публикация статьи сама по себе их не подтверждает.</p>'
+        '<p><a class="btn" href="/studio/products/' + str(product_id)
+        + '/seo/search-metrics">Открыть поисковые показатели</a></p>'
+        '<p>Техническая готовность: полный HTML, canonical, разметка Article '
+        'и sitemap подготовлены в BookingBot; их внешняя доступность '
+        'проверяется после отдельного серверного выпуска.</p>'
+        '</section>'
+    )
+
+
+@router.get('/studio/products/{product_id}/seo/status')
+def seo_status(product_id: UUID, db: Session = Depends(get_db)):
+    """Existing task state, retry attempts, stage results; never fake spend."""
+    _owner_product(db, product_id)
+    return JSONResponse({'runs': seo_runs(db, product_id)},
+                        headers={'Cache-Control': 'private, no-store'})
+
+
 @router.get('/studio/products/{product_id}/seo', response_class=HTMLResponse)
 def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
+    enabled = is_enabled(db, product_id)
+    runs = seo_runs(db, product_id)
     rows = list(db.scalars(select(Artifact).where(Artifact.product_id == product_id,
-                      Artifact.kind.in_(['semantic_core', 'seo_content_plan', 'seo_factory_report'])).order_by(Artifact.created_at.desc()).limit(100)))
-    cards = ''.join(f'<article class="panel"><h2>{html.escape(row.title)}</h2>'
+                      Artifact.kind.in_(['semantic_core', 'seo_content_plan', 'seo_factory_report']))
+                      .order_by(Artifact.created_at.desc()).limit(100)))
+    cards = ''.join(f'<article class="panel"><h3>{html.escape(row.title)}</h3>'
                     f'<p>{html.escape(row.kind)} · {html.escape(row.status.value)}</p>'
                     f'{artifact_content(row.content)}</article>' for row in rows)
     base = f'/studio/products/{product_id}'
+    # servgo.ru/blog is wired to the single Growth product slug 'servgo'.
+    # Other companies have a per-product feed but no known public frontend URL.
+    blog_base = 'https://servgo.ru' if product.slug == 'servgo' else None
+    run_cards = ''.join(seo_run_card(row, product_id, blog_base=blog_base, enabled=enabled) for row in runs)
+    publication_note = (
+        '<p class="seo-publish-destination">Место публикации: блог ServGo. '
+        'Публичную доступность статьи нужно проверить после отдельного выпуска SEO-страниц.</p>'
+        if blog_base else
+        '<p class="seo-publish-destination">Место публикации: персональный блог компании на ServGo '
+        '(own_site). Адреса и серверный HTML подготовлены в коде и станут доступны после выпуска '
+        'BookingBot и настройки маршрутов, не на внешнем сайте клиента.</p>'
+    )
+    activation_form = (
+        '<section class="panel seo-activation" aria-label="Подключение SEO-завода">'
+        '<h2>SEO-завод компании</h2>'
+        + ('<p><strong>Подключён.</strong> Можно запускать подготовку статей для этого бизнеса.</p>'
+           if enabled else
+           '<p><strong>Выключен.</strong> Эта компания, включая демо-бизнесы, '
+           'не создаёт SEO-статьи и не тратит средства на генерацию.</p>')
+        + (f'<form method="post" action="{base}/seo/activation">'
+           f'<input type="hidden" name="action" value="{"disable" if enabled else "enable"}">'
+           f'<button class="btn {"danger" if enabled else "primary"}" type="submit">'
+           + ('Отключить SEO-завод' if enabled else 'Подключить SEO-завод')
+           + '</button></form>')
+        + '<p class="subtitle">Подключение само по себе не запускает платную генерацию. '
+          '«Новый запуск» готовит до трёх статей; после успешной проверки '
+          'ИИ-критиком они публикуются автоматически. Отключение отменяет '
+          'задания в очереди и блокирует новые статьи; опубликованные материалы остаются.</p>'
+        + '</section>'
+    )
+    if not enabled:
+        available_actions = '<p>Сначала подключите SEO-завод для этой компании.</p>'
+    else:
+        available_actions = (
+            f'<p><a class="btn primary" href="{base}/seo/queue">Новый запуск SEO-завода</a> '
+            f'<a class="btn" href="{base}?design=v4&amp;command=seo_factory">'
+            'Через ИИ-диспетчер</a> '
+            f'<a class="btn" href="{base}/work">Все задания</a> '
+            f'<a class="btn" href="{base}/materials?kind=article">Статьи</a></p>'
+        )
     return studio_page_shell(product, active='seo', title='SEO-завод',
-        subtitle='Семантика, планы и отчёты из базы вашей компании.',
-        body=f'<p><a class="btn primary" href="{base}?design=v4&amp;command=seo_factory">Запустить SEO-завод</a> '
-             f'<a class="btn" href="{base}/materials?kind=article">Статьи</a></p>'+
-             (cards or '<p>SEO-материалов пока нет. Запустите сбор через диспетчер.</p>'))
+        subtitle='Реальные статусы запусков, результаты и ошибки из базы вашей компании.',
+        body=activation_form + publication_note + available_actions
+             + '<h2>Запуски SEO-завода</h2>'
+             + (run_cards or '<p>Запуски SEO-завода пока не зарегистрированы.</p>')
+             + '<h2>Статьи в блоге</h2>'
+             + seo_published_articles(db, product_id, enabled)
+             + seo_insights_html(db, product_id)
+             + '<h2>Сохранённые материалы и отчёты</h2>'
+             + (cards or '<p>Материалы пока не подготовлены.</p>'))
 
 
 @router.get('/studio/products/{product_id}/campaigns', response_class=HTMLResponse)

@@ -149,12 +149,25 @@ def build_article_production(
     db: Session,
     settings: Settings,
     provider: LLMProvider | None = None,
+    *,
+    force_critic: bool = False,
 ) -> ArticleProduction:
     provider = provider or build_llm_provider(settings)
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
+    # SEO articles contain a verified company profile, references and multiple
+    # stage outputs. A 24k-character critic budget skips the final review before
+    # it starts. Keep the ENTIRE task, never silently drop sources/constraints.
+    # On any real context/provider failure publication still fails closed.
+    seo_review_limits = ({
+        "max_context_chars": max(settings.agent_critic_max_context_chars, 150_000),
+        "review_timeout": settings.agent_critic_review_timeout_seconds,
+        "revision_timeout": settings.agent_critic_revision_timeout_seconds,
+    } if force_critic else None)
     return ArticleProduction(
         db=db,
-        llm=LLMService(privacy_gateway=privacy, provider=provider, critic_enabled=settings.agent_critic_enabled),
+        llm=LLMService(privacy_gateway=privacy, provider=provider,
+                       critic_enabled=(settings.agent_critic_enabled or force_critic),
+                       critic_limits=seo_review_limits),
         privacy=privacy,
         products_root=settings.products_root,
         provider_name=settings.llm_provider,

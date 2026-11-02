@@ -164,7 +164,8 @@ def test_live_screens_read_company_records_only(live):
     page = client.get(f'/studio/products/{product.id}/seo?design=v4')
     assert 'Наш SEO-отчёт' in page.text
     assert 'Чужой секретный отчёт' not in page.text
-    assert 'command=seo_factory' in page.text
+    assert 'Подключить SEO-завод' in page.text
+    assert 'command=seo_factory' not in page.text  # company has not explicitly opted in
     assert client.get(f'/studio/products/{uuid4()}/seo').status_code == 404
     assert client.get(f'/studio/products/{product.id}/campaigns').status_code == 200
 

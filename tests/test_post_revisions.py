@@ -303,7 +303,7 @@ async def test_revision_with_enabled_critic_records_review_and_every_call(db, tm
     assert await run_post_edit(db, settings, request, task_id=queued.id, provider=provider)
     review = provider.calls[1]
     assert review.metadata["task_type"] == "quality_review"
-    assert "критик-редактор" in review.system_prompt  # marketing critic, not the fact critic
+    assert "редактор-критик" in review.system_prompt  # editorial critic, not the fact critic
     assert list(db.scalars(select(Artifact).where(
         Artifact.task_id == queued.id, Artifact.kind == "agent_quality_review")))
     stages = [c.details["llm_stage"] for c in db.scalars(

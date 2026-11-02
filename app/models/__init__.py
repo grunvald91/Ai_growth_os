@@ -18,9 +18,10 @@ from app.dispatcher.models import DispatcherConversation, DispatcherMessage
 from app.sso.models import StudioBusinessLink, StudioSsoTicket
 from app.insights.models import InsightSettings
 from app.voice.models import VoiceCostAlert, VoiceUsage
+from app.seo.activation import SeoFactoryActivation
 
 __all__ = [
     "Product", "Goal", "Task", "AgentRun", "Artifact", "Decision",
     "Experiment", "Prospect", "Metric", "Approval", "ToolCall", "CostRecord", "Publication",
-    "BusinessComment", "CommentChannel", "DispatcherConversation", "DispatcherMessage", "StudioBusinessLink", "StudioSsoTicket", "InsightSettings", "VoiceUsage", "VoiceCostAlert",
+    "BusinessComment", "CommentChannel", "DispatcherConversation", "DispatcherMessage", "StudioBusinessLink", "StudioSsoTicket", "InsightSettings", "VoiceUsage", "VoiceCostAlert", "SeoFactoryActivation",
 ]
