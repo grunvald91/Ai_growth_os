@@ -56,3 +56,68 @@ def test_growth_v4_preview_uses_real_studio_auth(monkeypatch):
         authorized = client.get(url, auth=("preview-owner", "local-test-fixture"))
         assert authorized.status_code == 200
         assert authorized.headers["cache-control"] == "private, no-store"
+
+
+def test_v4_company_switcher_opens_authorized_company_chooser():
+    """The production v4 HTML must not ship the prototype's inert switch button."""
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from app.api.growth_v4 import render_v4
+
+    pid = str(uuid4())
+    page = (
+        '<html lang="ru"><head><title>Материалы</title></head><body>'
+        '<a class="sg-mobile-project" aria-label="Сменить компанию: Две фирмы"></a>'
+        '<main><h1>Материалы</h1><p>Мои файлы</p></main>'
+        '</body></html>'
+    )
+    request = SimpleNamespace(url=SimpleNamespace(path=f"/studio/products/{pid}/materials", query=""))
+    result = render_v4(page, request, pid, "/studio?design=classic")
+    assert '<a class="biz-switch" id="bizBtn" href="/studio?choose=1"' in result
+    assert 'aria-label="Сменить компанию"' in result
+    assert '<strong>Две фирмы</strong>' in result
+    assert '<button class="biz-switch" id="bizBtn">' not in result
+
+
+def test_v4_company_chooser_does_not_bind_to_first_business():
+    """The chooser has no active tenant, despite containing profile URLs."""
+    from uuid import uuid4
+    from starlette.requests import Request
+    from app.api.growth_live import decorate
+
+    first, second = uuid4(), uuid4()
+    page = (
+        '<html lang="ru"><head><title>Выбор компании</title></head>'
+        '<body><main><h1>Выберите проект</h1>'
+        f'<a href="/studio/products/{first}">Первая</a>'
+        f'<a href="/studio/products/{second}">Вторая</a>'
+        '</main></body></html>'
+    )
+    request = Request({
+        "type": "http", "method": "GET", "path": "/studio",
+        "query_string": b"choose=1", "headers": [],
+        "scheme": "https", "server": ("studio.test", 443),
+    })
+    result = decorate(page, request, new=True)
+    assert f'href="/studio/products/{first}"' in result
+    assert f'href="/studio/products/{second}"' in result
+    assert f'/studio/products/{first}/work' not in result
+    assert "Выберите компанию" in result
+
+
+def test_v4_mobile_shows_active_company_name():
+    from types import SimpleNamespace
+    from uuid import uuid4
+    from app.api.growth_v4 import render_v4
+
+    pid = uuid4()
+    page = ('<html><head><title>Главная</title></head><body>'
+            '<a class="sg-mobile-project" aria-label="Сменить компанию: Салон Пион"></a>'
+            '<main><h1>Главная</h1></main></body></html>')
+    request = SimpleNamespace(url=SimpleNamespace(
+        path=f'/studio/products/{pid}/work', query=''))
+    result = render_v4(page, request, pid, '/studio?design=classic')
+    assert '<strong>Салон Пион</strong>' in result
+    assert '.biz-switch>span:not(.avatar){display:block' in result
+    assert '.biz-switch .avatar{display:none}' in result

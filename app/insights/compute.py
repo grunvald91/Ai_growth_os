@@ -12,6 +12,7 @@ from statistics import median
 from zoneinfo import ZoneInfo
 
 from app.schedule.source import Booking, Schedule
+from app.insights.retention import find_return_candidates
 from app.schedule.views import COUNTED, SCHEDULE_TZ, WEEKDAYS, _count, day_label
 
 METRIC_PREFIX = "servgo."
@@ -99,6 +100,7 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
     cancelled = [b for b in past if b.status == "cancelled" and b.occupies_resource]
     upcoming = [b for b in ahead if b.status in COUNTED and b.occupies_resource]
     sold = [b for b in past if b.status in COUNTED]  # every paid line, add-ons included
+    completed = [b for b in done if b.status == "completed"]
     result.bookings = len(done)
     result.low_data = len(done) < LOW_DATA_BOOKINGS
     facts = result.facts
@@ -108,39 +110,76 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
 
     add("depth_days", "Сколько дней смотрели назад", depth_days, "дн")
     add("bookings_total", "Записей за период (без отменённых)", len(done), "шт")
+    add("completed_visits", "Посещений со статусом «выполнена»", len(completed), "шт")
+    add("past_bookings_unverified", "Прошедших записей без отметки о выполнении", len(done) - len(completed), "шт")
     add("bookings_cancelled", "Отменённых записей", len(cancelled), "шт")
     add("cancelled_share_pct", "Доля отмен", _percent(len(cancelled), len(done) + len(cancelled)), "%")
     result.line(f"За период {day_label(first)} – {day_label(last)} ({depth_days} дн.) записей: {len(done)}"
                         + (f", отменено: {len(cancelled)} ({_percent(len(cancelled), len(done) + len(cancelled)):g}%)."
                            if cancelled else ", отмен не было."))
     result.row(["Записей", str(len(done))])
+    result.line(f"Из них отмечены выполненными: {len(completed)}. "
+                f"Без отметки о выполнении: {len(done) - len(completed)}; считать их посещениями нельзя.")
+    result.row(["Подтверждённые выполненные визиты", str(len(completed))])
     result.row(["Отмен", f"{len(cancelled)} ({_percent(len(cancelled), len(done) + len(cancelled)):g}%)"])
 
     result.topic = "money"
-    priced = [b.price for b in sold if b.price]
+    # BookingBot sends estimated_price, not a payment ledger. Never call these figures
+    # revenue or a paid check. Group add-ons into the value of their primary booking.
+    priced = [b.price for b in sold if b.price is not None]
     if priced:
         total = sum(priced)
-        # Per visit with a price: a visit with an add-on is one cheque; visits without a price are left out.
-        paid_visits = sum(1 for b in done if b.price) or len(done)
-        average = total / paid_visits if paid_visits else 0.0
-        add("revenue_total", "Сумма записей по цене услуги", total, "₽")
-        add("average_check", "Средний чек", average, "₽")
-        result.line(f"Сумма записей по цене услуг: {_money(total)}, средний чек {_money(average)}.")
-        result.row(["Сумма по ценам услуг", _money(total)])
-        result.row(["Средний чек", _money(average)])
+        priced_visits = sum(1 for b in done if b.price is not None)
+        add("estimated_booking_value_total", "Расчётная стоимость записей (не оплаченная выручка)", total, "₽")
+        result.line(f"Расчётная стоимость записей: {_money(total)}. Это НЕ полученная выручка; "
+                    "данных о фактических оплатах здесь нет.")
+        result.row(["Расчётная стоимость записей", _money(total)])
+        if priced_visits:
+            average = total / priced_visits
+            add("average_booking_value", "Средняя расчётная стоимость визита (не оплаченный чек)",
+                average, "₽")
+            result.row(["Средняя расчётная стоимость визита", _money(average)])
 
     result.topic = "clients"
     # Clients: counted by the platform's client number, never by name; two bookings on one day are one visit.
+    # Repeat bookings and repeat *completed* visits are different, especially when
+    # old pending/confirmed rows were never marked completed in BookingBot.
     visits = Counter(client for client, _ in {(b.client_id, b.date) for b in done if b.client_id is not None})
+    completed_dates: dict[int, list[date]] = defaultdict(list)
+    for client, day in sorted({(b.client_id, b.date) for b in completed if b.client_id is not None}):
+        completed_dates[client].append(day)
     if visits:
         returning = sum(1 for count in visits.values() if count >= 2)
-        add("clients_unique", "Разных клиентов", len(visits), "чел")
-        add("clients_returning", "Клиентов, пришедших 2 раза и больше", returning, "чел")
-        add("clients_returning_share_pct", "Доля клиентов, пришедших 2 раза и больше", _percent(returning, len(visits)), "%")
-        result.line(f"Клиентов: {len(visits)}. Пришли больше одного раза: {returning} "
-                            f"({_percent(returning, len(visits)):g}%), остальные — один раз за период.")
-        result.row(["Клиентов", str(len(visits))])
-        result.row(["Вернулись (2+ раза)", f"{returning} ({_percent(returning, len(visits)):g}%)"])
+        add("clients_unique", "Разных клиентов с записью за период", len(visits), "чел")
+        add("clients_returning", "Клиентов с повторной записью за период (не факт визита)", returning, "чел")
+        add("clients_returning_share_pct", "Доля клиентов с повторной записью за период",
+            _percent(returning, len(visits)), "%")
+        result.line(f"Клиентов с записями: {len(visits)}. Повторно записывались: {returning} "
+                    f"({_percent(returning, len(visits)):g}%). Запись ещё не означает посещение.")
+        result.row(["Клиентов с записями", str(len(visits))])
+        result.row(["Повторно записывались (2+ даты)", f"{returning} ({_percent(returning, len(visits)):g}%)"])
+    if completed_dates:
+        completed_returning = sum(len(days) >= 2 for days in completed_dates.values())
+        add("clients_completed_unique", "Клиентов с выполненными визитами за период",
+            len(completed_dates), "чел")
+        add("clients_completed_returning", "Клиентов с 2+ выполненными визитами за период",
+            completed_returning, "чел")
+        result.line(f"По отметкам «выполнена» посетили: {len(completed_dates)} клиентов; "
+                    f"возвращались 2+ раза: {completed_returning}.")
+        result.row(["Вернулись по выполненным визитам", str(completed_returning)])
+
+        # The same deterministic selection powers the owner's detailed CRM list.
+        # Nothing identifying is copied into metrics or sent to the marketing team.
+        eligible, candidates = find_return_candidates(schedule, today, depth_days, ahead_days)
+        due = len(candidates)
+        if eligible:
+            add("clients_possible_return_delay", "Клиентов с потенциальной задержкой повторного визита",
+                due, "чел")
+            add("clients_return_interval_sample", "Клиентов с минимум 3 выполненными визитами", eligible, "чел")
+            result.line(f"Возможность для повторной записи: {due} из {eligible} клиентов с 3+ "
+                        f"выполненными визитами вышли за обычный интервал и не записаны на "
+                        f"ближайшие {ahead_days} дней. Это гипотеза, не прогноз оттока.")
+            result.row(["Возможное запоздание повторного визита", f"{due} из {eligible}"])
 
     result.topic = "weekdays"
     # Weekdays: by visit date. A weekday with no bookings at all is reported as a fact, not as a verdict.
@@ -190,13 +229,14 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
     result.topic = "services"
     # Services and masters/halls.
     services = Counter(_short(b.service) for b in sold)
-    revenue: dict[str, int] = defaultdict(int)
+    estimated_value: dict[str, int] = defaultdict(int)
     for b in sold:
-        revenue[_short(b.service)] += b.price or 0
+        estimated_value[_short(b.service)] += b.price or 0
     for name, count in services.most_common(TOP_ITEMS):
         add(f"service_bookings:{name}", f"Записей на услугу «{name}»", count, "шт")
-        if revenue[name]:
-            add(f"service_revenue:{name}", f"Сумма по услуге «{name}»", revenue[name], "₽")
+        if estimated_value[name]:
+            add(f"service_estimated_value:{name}",
+                f"Расчётная стоимость записанной услуги «{name}»", estimated_value[name], "₽")
     if services:
         result.line("Чаще всего берут: " + ", ".join(f"«{n}» — {c}" for n, c in services.most_common(3)) + ".")
         result.row(["Услуги", ", ".join(f"{n} {c}" for n, c in services.most_common(3))])

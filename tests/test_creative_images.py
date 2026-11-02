@@ -15,7 +15,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.content.creative import CreativeDraft, CreativeRequest, queue_creative
+from app.content.creative import CreativeDraft, CreativeRequest, queue_creative, run_creative_once
 from app.content.creative_images import (
     GEMINI_MODEL, OPENAI_MODEL, ImageProviderUnavailable, generate_images,
     generated_images, image_folder, png_output, request_image, resolve_model,
@@ -24,7 +24,8 @@ from app.core.config import Settings, get_settings
 from app.db.models import Base
 from app.db.session import get_db
 from app.main import app
-from app.models.domain import Artifact, Product
+from app.models.domain import Artifact, Product, TaskStatus, Task
+from app.llm.schemas import LLMResponse, LLMUsage
 
 
 def source_picture() -> bytes:
@@ -195,3 +196,67 @@ def test_creative_request_rejects_images_for_video_scripts():
     with pytest.raises(ValueError):
         CreativeRequest(mode="creative", product_id=uuid4(), topic="Видео про услуги",
                         format="short_video", platform="youtube_shorts", image_model="openai")
+
+
+class FakeDirectorLLM:
+    def __init__(self):
+        self.calls = []
+
+    async def generate(self, request):
+        self.calls.append(request)
+        if len(self.calls) == 1:
+            result = {
+                "audience_pain": "Клиенты не знают, с чего начать выбор цветов",
+                "audience_insight": "Простой совет помогает избежать ненужной покупки",
+                "hook": "Три совета для покупателя цветов",
+                "core_takeaway": "Уточнить повод, предпочтения и время доставки",
+                "cta": "Спросите о предпочтениях получателя",
+                "evidence_ids": [],
+            }
+        else:
+            result = draft_story().model_dump(mode="json")
+        return LLMResponse(content=json.dumps(result, ensure_ascii=False),
+                           model="fake", usage=LLMUsage(input_tokens=100, output_tokens=400))
+
+
+@pytest.mark.asyncio
+async def test_end_to_end_story_task_generates_three_real_images(monkeypatch, company_db):
+    db, company, _, root = company_db
+    request = CreativeRequest(mode="creative", product_id=company.id,
+                              topic="Как выбрать букет", format="story", platform="telegram",
+                              image_model="gemini")
+    task = queue_creative(db, request)
+    provider = FakeDirectorLLM()
+
+    async def fake_image(settings, model, prompt, ratio):
+        assert model == GEMINI_MODEL and ratio == "9:16"
+        assert "EXACT visible words" in prompt
+        return source_picture()
+
+    monkeypatch.setattr("app.content.creative_images.request_image", fake_image)
+    done = await run_creative_once(
+        db, Settings(_env_file=None, products_root=root, xai_api_key="test",
+                     agent_critic_enabled=False),
+        request, task_id=task.id, provider=provider)
+    assert done is True
+    assert len(provider.calls) == 2
+    assert len(generated_images(db, company.id, task.id)) == 3
+    db.refresh(task)
+    assert task.status == TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_missing_image_key_fails_before_strategy_llm_cost(company_db):
+    db, company, _, root = company_db
+    request = CreativeRequest(mode="creative", product_id=company.id,
+                              topic="Как выбрать букет", format="story", platform="telegram",
+                              image_model="openai")
+    task = queue_creative(db, request)
+    fake = FakeDirectorLLM()
+    done = await run_creative_once(
+        db, Settings(_env_file=None, products_root=root, openai_api_key=None,
+                     agent_critic_enabled=False), request, task_id=task.id, provider=fake)
+    assert done is False
+    assert fake.calls == []
+    db.refresh(task)
+    assert task.status == TaskStatus.FAILED

@@ -250,6 +250,11 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
         return False
     run_ids = []
     try:
+        # Fail before spending strategy/director tokens if no image credential
+        # is configured for the requested real-image deliverable.
+        if request.image_model != "none":
+            from app.content.creative_images import resolve_model
+            resolve_model(settings, request.image_model)
         for agent in ("creative_strategist", "creative_director"):
             run = AgentRun(
                 task_id=task_id, agent_name=agent,
