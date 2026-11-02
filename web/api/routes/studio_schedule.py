@@ -34,7 +34,9 @@ class BookingRow(BaseModel):
     duration_minutes: Optional[int] = None
     status: str
     service: str
+    service_id: int | None = None
     resource: Optional[str] = None
+    resource_id: int | None = None
     client_name: str
     client_phone: Optional[str] = None
     client_email: Optional[str] = None
@@ -54,8 +56,16 @@ class ResourceOut(BaseModel):
     working_dates: list[str] | None = None
 
 
+class ServiceOut(BaseModel):
+    id: int
+    name: str
+    duration_minutes: int | None = None
+    price_estimate: int | None = None
+
+
 class FreeSlots(BaseModel):
     date: str
+    service_id: int | None = None
     resource_id: Optional[int] = None
     resource: Optional[str] = None
     times: list[str]
@@ -67,6 +77,7 @@ class ScheduleOut(BaseModel):
     break_hours: Optional[str] = None
     step_minutes: Optional[int] = None
     resources: list[ResourceOut]
+    services: list[ServiceOut] = []
     bookings: list[BookingRow]
     free_slots: list[FreeSlots] = []
 
@@ -100,6 +111,7 @@ async def studio_schedule(
     user_id: Optional[int] = None,
     with_slots: bool = Query(False),
     slot_minutes: Optional[int] = Query(None, ge=1, le=24 * 60),
+    slot_service_id: Optional[int] = Query(None, ge=1),
     x_studio_key: str = Header(default=""),
     db: AsyncSession = Depends(get_db),
 ):
@@ -113,9 +125,21 @@ async def studio_schedule(
         raise HTTPException(status_code=403, detail="Forbidden")
     if date_to < date_from:
         raise HTTPException(status_code=422, detail="date_to is before date_from")
+    # Free-start calculations are relatively expensive for multiple masters.
+    if with_slots and (date_to - date_from).days >= 7:
+        raise HTTPException(status_code=422, detail="Free-slot request exceeds 7 days")
+    if slot_service_id is not None and (not with_slots or slot_minutes is not None):
+        raise HTTPException(status_code=422, detail="Service-specific slots must use service duration")
     business = await db.get(Business, business_id)
     if business is None:
         raise HTTPException(status_code=404, detail="Business not found")
+
+    active_services = (await db.scalars(select(Service).where(
+        Service.business_id == business_id, Service.is_active.is_(True),
+        Service.is_additional.is_(False),
+    ).order_by(Service.id))).all()
+    if slot_service_id is not None and not any(s.id == slot_service_id for s in active_services):
+        raise HTTPException(status_code=404, detail="Service not found")
 
     resources = (await db.scalars(select(Employee).where(
         Employee.business_id == business_id, Employee.is_active.is_(True),
@@ -147,7 +171,8 @@ async def studio_schedule(
     bookings = [BookingRow(
         id=booking.id, date=booking.booking_date.isoformat(), time=booking.booking_time.strftime("%H:%M"),
         duration_minutes=booking.duration_minutes or booking.resource_duration_minutes,
-        status=booking.status, service=service.name, resource=employee.name if employee else None,
+        status=booking.status, service=service.name, service_id=service.id,
+        resource=employee.name if employee else None, resource_id=employee.id if employee else None,
         client_name=client.full_name, client_phone=client.phone, client_email=client.email,
         price=booking.estimated_price, occupies_resource=bool(booking.occupies_resource),
         client_id=booking.client_id,
@@ -164,15 +189,22 @@ async def studio_schedule(
                 # A hall with a minimum rental time has no free start shorter than that minimum, so the window asked
                 # for is at least that long; otherwise the platform's own step is used.
                 minutes = slot_minutes
-                if minutes is None and resource is not None and resource.min_booking_minutes:
+                if slot_service_id is None and minutes is None and resource is not None and resource.min_booking_minutes:
                     step = resource.booking_interval_minutes or business.booking_interval_minutes or 30
                     minutes = max(step, resource.min_booking_minutes)
-                slots = await get_slots(
-                    business_id=business_id, date=day, service_id=None,
-                    employee_id=resource.id if resource else None, duration_minutes=minutes,
-                    include_unavailable=False, exclude_booking_id=None, db=db)
+                try:
+                    slots = await get_slots(
+                        business_id=business_id, date=day, service_id=slot_service_id,
+                        employee_id=resource.id if resource else None, duration_minutes=minutes,
+                        include_unavailable=False, exclude_booking_id=None, db=db)
+                except HTTPException as exc:
+                    if slot_service_id is not None and exc.status_code == 422:
+                        # A resource that does not offer the selected service is not an available option.
+                        continue
+                    raise
                 free_slots.append(FreeSlots(
-                    date=day.isoformat(), resource_id=resource.id if resource else None,
+                    date=day.isoformat(), service_id=slot_service_id,
+                    resource_id=resource.id if resource else None,
                     resource=resource.name if resource else None, times=[slot.time for slot in slots]))
             day += timedelta(days=1)
 
@@ -184,4 +216,6 @@ async def studio_schedule(
         resources=[ResourceOut(id=item.id, name=item.name,
                                working_dates=_working_dates(item, days, off_by_employee.get(item.id, set())))
                    for item in resources],
+        services=[ServiceOut(id=item.id, name=item.name, duration_minutes=item.duration_minutes,
+                             price_estimate=item.price) for item in active_services],
         bookings=bookings, free_slots=free_slots)
