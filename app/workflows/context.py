@@ -100,7 +100,16 @@ def load_context(db: Session, product: Product, products_root: Path) -> dict:
         if model is Experiment:
             query = query.order_by(Experiment.status.in_(['active', 'running']).desc())
         if model is Metric:
-            query = query.order_by(Metric.observed_at.desc())
+            # Historical runs used misleading metric names for service PRICE estimates.
+            # Keep their rows for old decision evidence, but never send these names
+            # back to the marketing LLM as apparently verified paid revenue.
+            from sqlalchemy import and_, not_
+            legacy_finance = and_(
+                Metric.source.like("servgo_schedule:%"),
+                or_(Metric.name.in_(("servgo.revenue_total", "servgo.average_check")),
+                    Metric.name.like("servgo.service_revenue:%")),
+            )
+            query = query.where(not_(legacy_finance)).order_by(Metric.observed_at.desc())
         limit = KIND_LIMITS.get(kind, ROW_LIMIT)
         rows = list(db.scalars(query.order_by(model.created_at.desc(), model.id).limit(limit + 1)))
         if len(rows) > limit:
