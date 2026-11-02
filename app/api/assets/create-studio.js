@@ -37,7 +37,7 @@
       button.setAttribute('aria-pressed',button===selected?'true':'false');
     });
     const radio=form?.querySelector('input[name="format"][value="'+key+'"]');
-    if(radio){radio.checked=true;radio.dispatchEvent(new Event('change',{bubbles:true}));}
+    if(radio&&!radio.checked){radio.checked=true;radio.dispatchEvent(new Event('change',{bubbles:true}));}
     const count=form?.querySelector('.sg-story-count');
     if(count){count.hidden=key!=='story';count.querySelector('select').disabled=key!=='story';}
     const names={post:'Пост',story:'Stories',static_image:'Изображение',
@@ -80,7 +80,7 @@
   });
   if(form){
     form.classList.add('sg-create-js-ready');
-    const checked=form.querySelector('input[name="format"]:checked');
+    // The original form still has its own checked default, but it must not override speech.
     // No initial top-level format is forced; a free-form voice request chooses its own.
     const count=form.querySelector('.sg-story-count');
     if(count){count.hidden=true;count.querySelector('select').disabled=true;}
