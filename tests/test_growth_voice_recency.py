@@ -54,9 +54,11 @@ async def test_ready_and_failed_events_are_globally_chronological(db):
     assert ids.index(str(recent.id)) < ids.index(str(middle.id)) < ids.index(str(old.id))
     result = await executors.show_review(executors.Context(db=db, product=product,
                                                           settings=object(), account="owner"), None)
+    # The dispatcher now uses a compact resource list plus a typed approval
+    # card for the newest material, not an additional wall of duplicate links.
     resources = next(block for block in result.blocks if block["type"] == "resource_list")["items"]
-    # The newest review is a full approval card, so the resource list contains only older items.
     assert "Старый материал" in resources[0]["title"]
-    assert all("Свежий материал" not in item["title"] for item in resources)
+    assert "Неудача" in resources[-1]["title"]
     assert result.blocks[-2]["type"] == "material"
+    assert "Свежий материал" in str(result.blocks[-2])
     assert result.blocks[-1]["type"] == "chips"
