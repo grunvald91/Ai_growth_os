@@ -220,6 +220,17 @@ def render_v4(page, request, pid, switch):
                if company_link else 'Моя компания')
     template = template.replace('Студия «Мята»',html.escape(company)).replace('<span class="avatar">М</span>',
                      '<span class="avatar">'+html.escape(company[:1])+'</span>')
+    # The prototype switch button had no click handler in the production page:
+    # its demo script is intentionally stripped above. Open the real, scoped
+    # server-rendered company chooser instead of presenting a dead control.
+    template = template.replace('<button class="biz-switch" id="bizBtn">',
+                                '<a class="biz-switch" id="bizBtn" href="/studio?choose=1" '
+                                'aria-label="Сменить компанию" title="Сменить компанию">', 1)
+    template = template.replace('<svg class="icon sm"><use href="#i-down"/></svg></button>',
+                                '<svg class="icon sm"><use href="#i-down"/></svg></a>', 1)
+    template = template.replace('</head>',
+        '<style>@media(max-width:780px){.biz-switch .avatar{display:grid}'
+        '.biz-switch .icon{display:block}.biz-switch{min-height:38px}}</style></head>', 1)
     template = template.replace('data-page="home"',f'onclick="location.href=\'{base}\'"')
     template = template.replace('<body>', '<body data-growth-design="v4"'+(' class="home-page home-empty"' if home else '')+'>')
     # Retain scripts and outside-main dialogs, avoiding duplicate inline scripts.

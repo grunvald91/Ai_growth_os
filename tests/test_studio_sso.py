@@ -78,6 +78,14 @@ class FakeServGo:
             return httpx.Response(500, json={})
         if request.headers.get("x-studio-key") != KEY:
             return httpx.Response(403, json={})
+        if request.url.path.endswith("/internal/studio/businesses"):
+            if self.mode == "legacy":
+                return httpx.Response(404)
+            uid = int(request.url.params["user_id"])
+            return httpx.Response(200, json=[
+                {"id": biz, "name": self.businesses.get(biz, {}).get("name", f"#{biz}"), "role": role}
+                for (user, biz), role in self.allowed.items() if user == uid
+            ])
         pair = (int(request.url.params["user_id"]), int(request.url.params["business_id"]))
         role = self.allowed.get(pair)
         return httpx.Response(200, json={"allowed": role is not None, "role": role})
@@ -172,6 +180,41 @@ def test_good_link_opens_the_connected_company(env):
     assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
 
 
+def test_sso_owner_can_switch_between_linked_businesses_but_not_other_profiles(env):
+    db, _, salon, other, servgo = env
+    db.add(StudioBusinessLink(servgo_business_id=14, product_id=other.id))
+    unrelated = Product(name="Чужая компания", slug="unrelated")
+    db.add(unrelated)
+    db.commit()
+    servgo.allowed[(7, 14)] = "co_owner"
+    client = browser()
+    assert client.get("/studio/sso", params={"t": make_ticket()}).status_code == 303
+    chooser = client.get("/studio?choose=1")
+    assert chooser.status_code == 200
+    assert "Салон" in chooser.text and "Другая" in chooser.text
+    assert "Чужая компания" not in chooser.text
+    assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 200
+    assert client.get(f"/studio/products/{unrelated.id}/dispatch/state").status_code == 404
+
+    # Losing access in ServGo removes a company even if Growth still has its link.
+    servgo.allowed.pop((7, 14))
+    access.forget()
+    assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 404
+    assert "Другая" not in client.get("/studio?choose=1").text
+
+
+def test_legacy_business_list_falls_back_to_original_ticket_scope(env):
+    db, _, salon, other, servgo = env
+    db.add(StudioBusinessLink(servgo_business_id=14, product_id=other.id))
+    db.commit()
+    servgo.allowed[(7, 14)] = "co_owner"
+    servgo.mode = "legacy"
+    client = browser()
+    assert client.get("/studio/sso", params={"t": make_ticket()}).status_code == 303
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+    assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 404
+
+
 def test_the_same_link_works_only_once(env):
     db, settings, salon, *_ = env
     ticket = make_ticket()
@@ -249,9 +292,9 @@ def test_first_visit_creates_the_company_and_starts_collecting_data(env):
     assert db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == "company_intake")) is not None
     page = client.get(response.headers["location"])
     assert page.status_code == 200 and "ServGo: данные заведения" in page.text
-    # The new session opens only this company.
+    # SSO also permits this owner's other existing, linked Studio companies.
     assert client.get(f"/studio/products/{product.id}/dispatch/state").status_code == 200
-    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 404
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
     assert any(call.url.path.endswith("/internal/studio/business") and call.headers["x-studio-key"] == KEY
                for call in servgo.calls)
 

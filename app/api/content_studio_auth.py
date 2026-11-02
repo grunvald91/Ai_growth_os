@@ -200,7 +200,18 @@ def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str]] | N
     if role is None:
         return None
     request.state.studio_sso_role = role
-    return f"servgo:{session.user_id}", [session.product_id]
+    # The signed ticket proves which user entered Growth, but not permanent
+    # access to any other company. ServGo supplies the live authorized IDs;
+    # Growth keeps only profiles explicitly linked to those businesses.
+    allowed = {session.product_id}
+    business_ids = access.servgo_business_ids(settings, session.user_id)
+    if business_ids is not None:
+        from sqlalchemy import select
+        from app.sso.models import StudioBusinessLink
+        linked = db.scalars(select(StudioBusinessLink.product_id).where(
+            StudioBusinessLink.servgo_business_id.in_(business_ids)))
+        allowed.update(str(product_id) for product_id in linked)
+    return f"servgo:{session.user_id}", sorted(allowed)
 
 
 def _sso_link_current(db, session) -> bool:
