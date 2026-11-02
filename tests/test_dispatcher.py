@@ -97,11 +97,12 @@ async def test_stories_require_confirmation_and_keep_exact_count(db, product):
                        "frame_count": 5}}
     result = await send(db, product, chip=chip)
     answer = result["messages"][1]
-    assert answer["confirmation_id"]
-    assert "5" in str(answer["blocks"])
+    confirm_block = next(block for block in answer["blocks"] if block["type"] == "confirm")
+    assert confirm_block["confirmation_id"]
+    assert "5" in str(confirm_block["details"])
     assert not tasks(db, "content_creative")
     confirmed = await service.confirm(db, context(db, product),
-                                      answer["confirmation_id"], accept=True)
+                                      confirm_block["confirmation_id"], accept=True)
     created = tasks(db, "content_creative")
     assert len(created) == 1
     from app.models.domain import Artifact
