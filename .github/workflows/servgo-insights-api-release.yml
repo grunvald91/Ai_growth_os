@@ -1,0 +1,63 @@
+name: ServGo booking analytics API release (guarded)
+
+# Manual only. No production changes from a push or PR.
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Deploy four reviewed API routes (false = read-only preflight)'
+        type: boolean
+        default: false
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: github.actor == github.repository_owner && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned SSH library and tests
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1' 'pytest>=8,<9'
+      - name: Offline guard tests
+        run: python -m pytest -q tests/test_servgo_insights_api_release.py
+      - name: Read-only server preflight (always)
+        run: python scripts/servgo_insights_api_release.py
+
+  deploy:
+    if: inputs.apply == true && github.actor == github.repository_owner && github.ref == 'refs/heads/main'
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned SSH library
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Revalidate live file hashes, deploy four API files and verify health
+        run: python scripts/servgo_insights_api_release.py
