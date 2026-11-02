@@ -139,7 +139,7 @@ def extract_spreadsheet(suffix, data):
 if __name__ == "__main__":
     import resource
     resource.setrlimit(resource.RLIMIT_AS, (768 * 1024 * 1024,) * 2)
-    resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
+    resource.setrlimit(resource.RLIMIT_CPU, (420, 420))
     from app.intake.sources import parse_file
     source = parse_file(sys.argv[1], sys.stdin.buffer.read(), sys.argv[2])
     sys.stdout.write(source.model_dump_json())
