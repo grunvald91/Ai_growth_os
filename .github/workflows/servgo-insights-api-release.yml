@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       apply:
-        description: 'Deploy four reviewed API routes (false = read-only preflight)'
+        description: 'Deploy three reviewed API routes (preserve live SSO) (false = read-only preflight)'
         type: boolean
         default: false
         required: true
@@ -75,5 +75,5 @@ jobs:
           python-version: '3.12'
       - name: Install pinned SSH library
         run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
-      - name: Revalidate live file hashes, deploy four API files and verify health
+      - name: Revalidate live file hashes, deploy three API files and verify health
         run: python -m scripts.servgo_insights_api_release
