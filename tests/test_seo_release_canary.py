@@ -48,11 +48,15 @@ def test_canary_publish_live_http_then_cleanup(isolated_api):
 
 def test_canary_cleans_up_if_public_endpoint_fails(isolated_api):
     factory, client = isolated_api
+    feed_requests = 0
     def broken(path):
+        nonlocal feed_requests
         if path.endswith("/articles"):
-            class Response:
-                status_code = 503
-            return Response()
+            feed_requests += 1
+            if feed_requests == 1:
+                class Response:
+                    status_code = 503
+                return Response()
         return client.get(path)
     with pytest.raises(AssertionError, match="CANARY_FEED_HTTP_503"):
         canary.perform(factory, broken)
