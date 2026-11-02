@@ -114,6 +114,11 @@ async def show_schedule(ctx: Context, params: ScheduleParams) -> Outcome:
     from app.schedule.source import source_for
     source = source_for(ctx.db, ctx.settings, ctx.product, ctx.account)
     if source is None:
+        from app.schedule.source import linked_business_ids
+        if len(linked_business_ids(ctx.db, ctx.product.id)) > 1:
+            return Outcome("С этим профилем связано несколько заведений. Выберите организацию в ServGo, "
+                           "чтобы не смешать данные расписаний.", "Выберите организацию для анализа.",
+                           [_links(ctx, "schedule")], no_data=True)
         return Outcome("Расписание записей я пока не вижу: заведение не связано с этой компанией. "
                        "Открыть его можно в админке ServGo.",
                        "Расписание записей я пока не вижу: заведение не связано с компанией.",
