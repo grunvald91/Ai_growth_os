@@ -325,3 +325,72 @@ async def test_factory_resumes_committed_plan_without_new_llm_calls(env, monkeyp
     with factory() as db:
         assert db.get(Task, task_id).status == TaskStatus.COMPLETED
         assert len(list(db.scalars(select(Task).where(Task.title.like("SEO-ARTICLE:%"))))) == 1
+
+
+def test_servgo_autoschedule_off_by_default_and_respects_cooldown(env):
+    from datetime import datetime, timedelta, timezone
+    from app.seo.autoschedule import enqueue_servgo_if_due
+
+    factory, settings, _product_id = env
+    now = datetime.now(timezone.utc)
+    enabled = settings.model_copy(update={"seo_servgo_autorun_enabled": True})
+    with factory() as db:
+        assert not enqueue_servgo_if_due(db, settings, now=now)
+        assert enqueue_servgo_if_due(db, enabled, now=now)
+        assert not enqueue_servgo_if_due(db, enabled, now=now)
+        runs = list(db.scalars(select(Task).where(Task.assigned_agent == "seo_factory")))
+        assert len(runs) == 1
+        runs[0].status = TaskStatus.COMPLETED
+        db.commit()
+        assert not enqueue_servgo_if_due(db, enabled, now=now + timedelta(days=6))
+        assert enqueue_servgo_if_due(db, enabled, now=now + timedelta(days=8))
+
+
+def test_servgo_autoschedule_pauses_when_article_backlog_or_review_exists(env):
+    from datetime import datetime, timedelta, timezone
+    from app.seo.autoschedule import enqueue_servgo_if_due
+    from app.models.domain import ArtifactStatus
+
+    factory, settings, product_id = env
+    now = datetime.now(timezone.utc)
+    enabled = settings.model_copy(update={"seo_servgo_autorun_enabled": True})
+    with factory() as db:
+        assert enqueue_servgo_if_due(db, enabled, now=now)
+        factory_task = db.scalar(select(Task).where(Task.assigned_agent == "seo_factory"))
+        factory_task.status = TaskStatus.COMPLETED
+        article = Task(
+            product_id=product_id, title="SEO-ARTICLE:backlog",
+            assigned_agent="content_factory", status=TaskStatus.QUEUED,
+        )
+        db.add(article)
+        db.commit()
+        assert not enqueue_servgo_if_due(db, enabled, now=now + timedelta(days=8))
+        article.status = TaskStatus.COMPLETED
+        db.add(Artifact(
+            product_id=product_id, task_id=article.id, kind="article",
+            title="Held by critic", content="{}", status=ArtifactStatus.AWAITING_APPROVAL,
+        ))
+        db.commit()
+        assert not enqueue_servgo_if_due(db, enabled, now=now + timedelta(days=8))
+
+
+def test_servgo_autoschedule_28_day_cap_and_company_opt_out(env):
+    from datetime import datetime, timedelta, timezone
+    from app.seo.autoschedule import enqueue_servgo_if_due
+    from app.seo.activation import set_enabled
+
+    factory, settings, product_id = env
+    now = datetime.now(timezone.utc)
+    enabled = settings.model_copy(update={
+        "seo_servgo_autorun_enabled": True,
+        "seo_servgo_autorun_max_runs_28d": 1,
+    })
+    with factory() as db:
+        assert enqueue_servgo_if_due(db, enabled, now=now)
+        run = db.scalar(select(Task).where(Task.assigned_agent == "seo_factory"))
+        run.status = TaskStatus.COMPLETED
+        db.commit()
+        assert not enqueue_servgo_if_due(db, enabled, now=now + timedelta(days=8))
+        assert enqueue_servgo_if_due(db, enabled, now=now + timedelta(days=29))
+        set_enabled(db, product_id, enabled=False, actor="owner")
+        assert not enqueue_servgo_if_due(db, enabled, now=now + timedelta(days=60))
