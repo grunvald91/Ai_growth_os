@@ -71,8 +71,12 @@ def main() -> None:
     password = os.environ.get("SERVGO_PASSWORD") or ""
     if not password:
         raise RuntimeError("Missing SERVER_SSH_PASSWORD; no server changes")
-    if subprocess.check_output(["git", "branch", "--show-current"], cwd=repo, text=True).strip() != "main":
-        raise RuntimeError("Only reviewed default-branch content may be released")
+    if os.environ.get("GITHUB_REF") != "refs/heads/main":
+        raise RuntimeError("Release must be dispatched from refs/heads/main")
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    main_head = subprocess.check_output(["git", "rev-parse", "origin/main"], cwd=repo, text=True).strip()
+    if head != main_head:
+        raise RuntimeError("Refusing a stale or non-main release SHA")
 
     desired = {path: (repo / path).read_bytes() for path in FILES}
     known = {path: accepted_versions(repo, path) for path in FILES}
