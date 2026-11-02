@@ -81,6 +81,10 @@ class FakeServGo:
         if request.url.path.endswith("/internal/studio/businesses"):
             if self.mode == "legacy":
                 return httpx.Response(404)
+            if self.mode == "list_down":
+                raise httpx.ConnectTimeout("business list unavailable")
+            if self.mode == "invalid_list":
+                return httpx.Response(200, json=[{"id": "14", "role": "owner"}])
             uid = int(request.url.params["user_id"])
             return httpx.Response(200, json=[
                 {"id": biz, "name": self.businesses.get(biz, {}).get("name", f"#{biz}"), "role": role}
@@ -203,12 +207,13 @@ def test_sso_owner_can_switch_between_linked_businesses_but_not_other_profiles(e
     assert "Другая" not in client.get("/studio?choose=1").text
 
 
-def test_legacy_business_list_falls_back_to_original_ticket_scope(env):
+@pytest.mark.parametrize("mode", ["legacy", "list_down", "invalid_list"])
+def test_business_list_failure_falls_back_to_original_ticket_scope(env, mode):
     db, _, salon, other, servgo = env
     db.add(StudioBusinessLink(servgo_business_id=14, product_id=other.id))
     db.commit()
     servgo.allowed[(7, 14)] = "co_owner"
-    servgo.mode = "legacy"
+    servgo.mode = mode
     client = browser()
     assert client.get("/studio/sso", params={"t": make_ticket()}).status_code == 303
     assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
