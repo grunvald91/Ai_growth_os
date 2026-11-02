@@ -987,10 +987,9 @@ class ArticleProduction:
                             }), validate_revision=validate_stage_revision,
                             on_observed=record_model_call,
                             on_review_progress=record_review_progress,
-                            # One SEO critique of the final reader-facing stage;
-                            # never critique intermediary drafts six times.
-                            review_enabled=(not safe_request.seo_brief or name == 'marketing_editor')
-                                and attempt == 0),
+                            # Exactly one critic review of the final article stage
+                            # for both SEO and ordinary content production.
+                            review_enabled=(name == 'marketing_editor' and attempt == 0)),
                             timeout=CALL_WAIT_SECONDS + self.llm.extra_timeout_seconds)
                         persist_critic_audit(
                             self.db, product_id=product_id, task_id=task_id,

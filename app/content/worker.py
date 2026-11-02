@@ -57,7 +57,7 @@ async def run_content_once(session_factory, settings):
                     if data.seo_brief is not None:
                         require_enabled(db, product_id)
                     result = await build_article_production(
-                        db, settings, force_critic=(data.seo_brief is not None)
+                        db, settings, force_critic=True
                     ).run(data.model_copy(update={'task_id': task_id}))
                     if data.seo_brief is not None and result.status == 'completed':
                         # Clean critic verdict + static checks publish automatically; failures wait for review.
