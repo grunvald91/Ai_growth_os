@@ -118,7 +118,8 @@ async def studio_schedule(
         raise HTTPException(status_code=404, detail="Business not found")
 
     resources = (await db.scalars(select(Employee).where(
-        Employee.business_id == business_id, Employee.is_active.is_(True), Employee.role != "administrator"
+        Employee.business_id == business_id, Employee.is_active.is_(True),
+        Employee.role.notin_(["administrator", "admin"])
     ).order_by(Employee.id))).all()
 
     rows = (await db.execute(
