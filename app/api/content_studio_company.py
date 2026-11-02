@@ -126,7 +126,7 @@ def _new_company_page(fields: dict | None = None, error: str | None = None, *, r
     <textarea name="about" required minlength="30" maxlength="12000" rows="8"
       placeholder="Чем занимается, какие услуги и цены, для кого, город, чем отличается, чего нельзя обещать.">{esc(fields.get('about', ''))}</textarea></label>
   {_file_field()}
-  <div class="sg-intake-actions"><button class="btn primary" type="submit">Добавить компанию</button>
+  <div class="sg-intake-actions"><button class="btn primary" type="submit">Сохранить и собрать профиль</button>
   <a href="/studio?choose=1">← К списку проектов</a></div>
 </form>{ONCE_SCRIPT}</main></body></html>"""
 
@@ -332,6 +332,31 @@ def _company_settings_html(product: Product, *, can_delete: bool) -> str:
   <div class="sg-intake-actions"><button class="btn">Сохранить название</button>{delete_link}</div></form></section>"""
 
 
+def _collect_company_form(product: Product, registry_hint: str) -> str:
+    """Single bottom action: save the company, ingest supplied evidence, then draft."""
+    base = f"/studio/products/{product.id}"
+    return f"""<section class="sg-surface sg-intake-section sg-company-collect"><h2>Данные компании и материалы</h2>
+<p class="sg-muted">Заполните всё необходимое и приложите файлы. Только после нажатия кнопки ниже
+система сохранит сведения и запустит анализ. Результат будет черновиком для вашего подтверждения.</p>
+<form method="post" action="{base}/profile/collect" enctype="multipart/form-data" class="sg-intake-form" data-once>
+  <label class="sg-field"><span>Название компании</span>
+    <input name="name" required minlength="2" maxlength="200" value="{esc(product.name)}"></label>
+  <label class="sg-field"><span>Краткое описание</span>
+    <textarea name="description" rows="3" maxlength="10000">{esc(product.description or '')}</textarea></label>
+  <label class="sg-field"><span>Дополнительные сведения</span>
+    <textarea name="text" rows="4" maxlength="12000"></textarea></label>
+  <label class="sg-field"><span>Сайт или страница</span>
+    <input name="link" type="text" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false"
+           maxlength="500" placeholder="nogotok.ru">
+    <small>По ссылке прочитаем главную и внутренние страницы: услуги, цены, контакты.</small></label>
+  <label class="sg-field"><span>ИНН или ОГРН</span>
+    <input name="identifier" inputmode="numeric" maxlength="40" placeholder="10 или 12 цифр">
+    <small>{esc(registry_hint)}</small></label>
+  {_file_field("Файлы")}
+  <div class="sg-intake-actions"><button class="btn primary" type="submit">Сохранить и собрать профиль</button></div>
+</form></section>"""
+
+
 def _edit_page_body(product: Product, profile: CompanyProfile | None, error: str | None) -> str:
     base = f"/studio/products/{product.id}"
     data = profile.model_dump(mode="json") if profile else {}
@@ -411,10 +436,10 @@ def _profile_body(product: Product, state: dict | None, error: str | None, notic
         parts.append(f'<div class="sg-intake-notice" role="status">{esc(notice)}</div>')
     if state is None:
         parts.append(_profile_summary_html(base, profile))
-        parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Дополнить из материалов</h2>
-<p>Добавьте сайт, ИНН, файлы или сведения своими словами: агент предложит изменения, а вы проверите их.</p>
-<form method="post" action="{base}/profile/start" class="sg-intake-actions"><button class="btn">Добавить материалы</button></form></section>""")
-        parts.append(_company_settings_html(product, can_delete=can_delete))
+        parts.append(_collect_company_form(product, registry_hint))
+        if can_delete:
+            parts.append(f'<p class="sg-muted"><a href="{base}/profile/delete">Удалить компанию</a></p>')
+        parts.append(ONCE_SCRIPT)
         return "".join(parts)
     sources = "".join(_source_line(s, base, removable=not running) for s in state["sources"])
     if running:
@@ -435,22 +460,18 @@ def _profile_body(product: Product, state: dict | None, error: str | None, notic
                  if review else "Агент изучит материалы и подготовит профиль.")
         parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Черновик профиля</h2>
 <p>{stale} Это занимает 1–3 минуты.</p>
-<form method="post" action="{base}/profile/build" class="sg-intake-actions" data-once><button class="btn primary">Собрать профиль</button></form></section>""")
+<p class="sg-muted">Чтобы запустить анализ, заполните сведения ниже и нажмите «Сохранить и собрать профиль».</p></section>""")
     # Questions come from the latest draft; answering adds evidence and rebuilds.
     parts.append(_questions_html(base, review))
-    parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Добавить материалы</h2>
-<form method="post" action="{base}/profile/source" enctype="multipart/form-data" class="sg-intake-form" data-once>
-  <label class="sg-field"><span>Сведения своими словами</span><textarea name="text" rows="4" maxlength="12000"></textarea></label>
-  <label class="sg-field"><span>Сайт или страница</span><input name="link" type="text" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="500" placeholder="nogotok.ru">
-    <small>С главной прочитаем и внутренние страницы: услуги, цены, контакты.</small></label>
-  <label class="sg-field"><span>ИНН или ОГРН</span><input name="identifier" inputmode="numeric" maxlength="40" placeholder="10 или 12 цифр">
-    <small>{esc(registry_hint)}</small></label>
-  {_file_field("Файлы")}
-  <div class="sg-intake-actions"><button class="btn">Добавить</button></div></form></section>""")
+
     parts.append(f"""<section class="sg-surface sg-intake-section"><h2>Передумали?</h2>
 <p class="sg-muted">Отмена закроет текущий сбор. Подтверждённый профиль останется как есть.</p>
 <form method="post" action="{base}/profile/cancel" class="sg-intake-actions"><button class="btn">Отменить сбор данных</button></form></section>""")
-    parts.append(_company_settings_html(product, can_delete=can_delete))
+    if can_delete:
+        parts.append(f'<p class="sg-muted"><a href="{base}/profile/delete">Удалить компанию</a></p>')
+    # The final operation is always the save-and-analyse button, not a save-name
+    # button or a build button above still-unsaved inputs.
+    parts.append(_collect_company_form(product, registry_hint))
     parts.append(ONCE_SCRIPT)
     return "".join(parts)
 
