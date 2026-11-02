@@ -304,7 +304,7 @@ def studio_identity(request: Request, db: Session = Depends(get_db),
     if connected:
         from app.core.studio_operator_links import linked_operator
         from app.api.content_studio_auth import _load_users
-        linked = linked and linked_operator(settings, uid, _load_users(settings)) is not None
+        linked = linked_operator(settings, uid, _load_users(settings)) is not None
     else:
         linked = False
     return _identity_html(connected=connected, linked=linked)
