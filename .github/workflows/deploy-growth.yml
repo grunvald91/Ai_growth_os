@@ -147,6 +147,10 @@ jobs:
           SSH_OPTS=(-o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ControlMaster=auto
                     -o ControlPath=/tmp/ssh-growth-%C -o ControlPersist=600)
           run() { sshpass -e ssh "${SSH_OPTS[@]}" "root@$HOST" "$@"; }
+          # Read-only: owner-tuned editorial rules take precedence over code defaults.
+          # Never print actual prompt text (it may contain private company context).
+          # Refuse to migrate while known obsolete quotas remain active in overrides.
+          run "docker exec ai-growth-os-api-1 python -c 'from app.prompts import read_state; p=read_state().get(\"prompts\", {}); keys=sorted(k for k in p if k.startswith((\"article.\", \"critic.marketing\"))); strict=sorted(k for k in keys if any(term in str(p[k].get(\"text\", \"\")).casefold() for term in (\"не меньше 2000 символов\", \"не меньше 4 разделов\", \"800–1500 символов\", \"один короткий абзац\"))); print(\"editorial_override_keys\", keys); print(\"obsolete_editorial_rules\", strict); raise SystemExit(1 if strict else 0)'"
           # Drift check: refuse if the running code has files not in this commit's history.
           run "docker exec ai-growth-os-api-1 sh -c 'cd /app && find app products -type f \( -name \"*.py\" -o -name \"*.json\" -o -name \"*.md\" -o -name \"*.html\" -o -name \"*.css\" -o -name \"*.js\" \) ! -path \"*/__pycache__/*\" -exec sha256sum {} +'" > running.txt
           python3 - "$SHA" <<'PY2'
