@@ -54,3 +54,11 @@
 6. Проверить отправку на собственный тестовый ящик после настройки подтверждённого адреса; SPF/DKIM/DMARC и отписка.
 
 Состояние: рабочая ветка, не production. Потребуются доступ к среде BookingBot и отдельная проверка браузера/pytest перед PR и слиянием.
+
+## Выпуск Mail backend и объединение PWA — 02.11.2026
+- PR #123 слит в `main` коммитом `e684657333f422f82c34c65e6c154312d0f99dcb`: защищённый маршрут `/workspace/mail`, сохранён `/mail` и отдельный `mail.servgo.ru`.
+- PR CI успешен: https://github.com/grunvald91/booking_bot/actions/runs/41432096052.
+- Read-only production preflight: https://github.com/grunvald91/booking_bot/actions/runs/41432580556 — 7 серверных Mail-файлов точно совпадали с предыдущим `main`, конфликтов не было, `SERVGO_MAIL_GATEWAY_ENABLED` уже активен, HTTPS Mail entry возвращал 303.
+- Ограниченный выпуск: https://github.com/grunvald91/booking_bot/actions/runs/41432827960 — **7 Mail backend файлов обновлены**, резервные копии сохранены, после перезапуска web API health=200, Mail HTTPS gateway=303, старый `mail.servgo.ru`=200; обращение к API поиска без авторизации отклонено (401/403). Фронтенд, Mail worker, `studio_sso.py`, база и шлюз не изменялись, письма скриптом не отправлялись.
+- **Остающийся блокер:** текущий `studio_sso.py` на сервере отличается от исходника в `main`; защищённый скрипт `deploy_servgo_frontend_atomic.py` отказывается менять PWA-дистрибутив, пока backend не согласован. Последний frontend deploy до объединения имел ошибку `Backend release must be applied first`. Поэтому новая JS-навигация `/workspace/mail` есть в main, но её установка на рабочий фронтенд **пока не подтверждена**. Нельзя считать общий фронтенд выпущенным.
+- Старый маршрут `/mail` на текущем PWA уже открывает вход в mail-сессию, после которого Mail gateway работает на `servgo.ru` при разрешённых cookie. Авторизованный пользовательский прогон на реальном мобильном устройстве не проведён.
