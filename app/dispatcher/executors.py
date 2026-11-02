@@ -208,14 +208,28 @@ async def fill_open_slots(ctx: Context, params: FillOpenSlotsParams) -> Outcome:
         catalog = await asyncio.to_thread(source.fetch, today, today)
         if catalog is None:
             return _no_booking_data(ctx, "unavailable")
-        services = catalog.services[:12]
-        if not services:
+        if not catalog.services:
             return Outcome("Список услуг недоступен. Требуется обновлённый API BookingBot "
                            "со справочником услуг; ничего не угадываю.",
                            "Не вижу список услуг для подбора свободного времени.", no_data=True)
+        page_size = 12
+        first_item = (params.page - 1) * page_size
+        services = catalog.services[first_item:first_item + page_size]
+        if not services:
+            return Outcome("На этой странице услуг нет. Покажу начало списка.",
+                           "Страница услуг пуста.",
+                           [{"type": "chips", "items": [{
+                               "label": "Первая страница", "capability": "fill_open_slots",
+                               "params": {"period": params.period, "page": "1"}}]}])
         chips = [{"label": service.name[:45], "capability": "fill_open_slots",
                   "params": {"service_id": str(service.id), "period": params.period}}
                  for service in services]
+        if params.page > 1:
+            chips.append({"label": "Предыдущие услуги", "capability": "fill_open_slots",
+                          "params": {"period": params.period, "page": str(params.page - 1)}})
+        if first_item + page_size < len(catalog.services):
+            chips.append({"label": "Другие услуги", "capability": "fill_open_slots",
+                          "params": {"period": params.period, "page": str(params.page + 1)}})
         return Outcome("Выберите услугу, чтобы проверить её реальную длительность, "
                        "свободное время у мастеров и историю клиентов. "
                        "Это только анализ, никаких рассылок.",
