@@ -611,7 +611,16 @@ html[data-theme] body.servgo-mail-v2 .mail-v3-nav a {display:flex;position:relat
 html[data-theme] body.servgo-mail-v2 .mail-v3-nav a b {font-size:20px;font-weight:600;line-height:1.05}
 html[data-theme] body.servgo-mail-v2 .mail-v3-nav a[aria-current="page"],
 html[data-theme] body.servgo-mail-v2 .mail-v3-nav a[aria-current=""] {color:var(--s-accent);background:var(--s-accent-soft)}
-html[data-theme] body.servgo-mail-v2 .mail-v3-nav a[aria-current]::after {content:"";position:absolute;bottom:3px;width:34px;height:3px;background:var(--s-accent);clip-path:polygon(0 50%,5px 0,calc(100% - 5px) 0,100% 50%,calc(100% - 5px) 100%,5px 100%)}
+/* Exact ServGo design-system.css .ds-bn::after indicator, including the
+   animation and double-tapered shape. Not a flat rounded rectangle. */
+html[data-theme] body.servgo-mail-v2 .mail-v3-nav a[aria-current]::after {
+  content: ""; display: block; position: absolute; left: 22%; right: 22%; bottom: 0; height: 2px; width: auto; pointer-events: none;
+  background: var(--s-flow-grad, linear-gradient(104deg, #307be8, #8ad8f3, #686fe4, #336be2, #67baf4, #307be8));
+  background-size: 310% 100%;
+  clip-path: polygon(0% 50%, 10% 45%, 24% 36%, 36% 23%, 45% 10%, 55% 10%, 64% 23%, 76% 36%, 90% 45%, 100% 50%, 90% 55%, 76% 64%, 64% 77%, 55% 90%, 45% 90%, 36% 77%, 24% 64%, 10% 55%);
+  animation: dsFlowLine 3.7s linear infinite;
+}
+@keyframes dsFlowLine { 0% { background-position: 0 50%; } 100% { background-position: 100% 50%; } }
 html[data-theme] body.servgo-mail-v2 .mail-v3-popover {position:relative}
 html[data-theme] body.servgo-mail-v2 .mail-v3-popover > summary {display:flex;align-items:center;justify-content:center;list-style:none;cursor:pointer;padding:8px 13px;min-width:88px;color:var(--s-text-2);background:var(--s-surface-2);border:1px solid var(--s-line);font-weight:700}
 html[data-theme] body.servgo-mail-v2 .mail-v3-popover > summary::-webkit-details-marker {display:none}
@@ -620,7 +629,7 @@ html[data-theme] body.servgo-mail-v2 .mail-v3-popover > :is(nav,.mail-v3-popover
 html[data-theme] body.servgo-mail-v2 .mail-v3-popover:not([open]) > :is(nav,.mail-v3-popover-content) {display:none}
 html[data-theme] body.servgo-mail-v2 .mail-v3-popover .nav :is(button,a) {min-height:42px;justify-content:flex-start;text-align:left;font-size:13px;display:flex;flex-direction:row;gap:8px}
 html[data-theme] body.servgo-mail-v2 .mail-v3-popover .nav span {font-size:13px;display:inline;max-width:none}
-html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content :is(button,a,.btn) {min-height:42px;width:100%;justify-content:center;white-space:normal}
+html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content :is(button:not(.switch),a,.btn) {min-height:42px;width:100%;justify-content:center;white-space:normal}
 html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content .row {display:flex;flex-direction:column;align-items:stretch;gap:7px;width:100%;overflow:visible;max-width:100%;padding:0}
 html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content .auto {margin:8px 0;padding:10px}
 html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content .mail-campaign-controls {flex-wrap:wrap}
@@ -715,4 +724,282 @@ html[data-theme] body.servgo-mail-campaigns .mail-v4-automation-status {max-widt
  html[data-theme] body.servgo-mail-campaigns.mail-search-active .app > main {padding-bottom:calc(255px + env(safe-area-inset-bottom,0px))}
  html[data-theme] body.servgo-mail-campaigns .mail-v3-search-actions #search-resume {flex:1 1 100%;order:3}
  html[data-theme] body.servgo-mail-campaigns .mail-v3-search-actions #search-resume:not([style*="display: none"]) {min-width:0}
+}
+
+
+/* Mail V5: primary workspace navigation belongs in the page, not in the
+ * bottom overflow sheet. Keep all three destinations visible on mobile. */
+html[data-theme] body.servgo-mail-v2 .mail-workspace-links {
+  display:flex;
+  position:sticky;
+  top:0;
+  z-index:21;
+  align-items:center;
+  justify-content:flex-start;
+  gap:8px;
+  width:100%;
+  margin:0 0 16px;
+  padding:7px 0;
+  background:var(--s-bg);
+}
+html[data-theme] body.servgo-mail-v2 .mail-workspace-links .mail-workspace-link {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex:0 1 auto;
+  min-width:0;
+  min-height:42px;
+  padding:9px 13px;
+  margin:0;
+  text-align:center;
+  line-height:1.25;
+  font-size:12px;
+  font-weight:700;
+  white-space:normal;
+  text-decoration:none;
+  border:1px solid transparent;
+  border-radius:12px;
+  background:var(--s-surface-2);
+  color:var(--s-text-2);
+}
+html[data-theme] body.servgo-mail-v2 .mail-workspace-links .mail-workspace-studio {
+  background:var(--s-accent-soft);
+  color:var(--s-accent);
+}
+html[data-theme] body.servgo-mail-v2 .mail-workspace-links .mail-workspace-logout {
+  margin-left:auto;
+  color:var(--s-muted);
+}
+html[data-theme] body.servgo-mail-v2 .mail-workspace-links .mail-workspace-link:focus-visible {
+  outline:2px solid var(--s-accent);
+  outline-offset:2px;
+}
+
+/* Prevent an ordinary full-width menu-button rule from expanding the
+ * auto-send switch and reducing its adjacent text to one-word lines. */
+html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content .auto {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 52px;
+  align-items:center;
+  gap:10px;
+  width:100%;
+  min-width:0;
+  margin:8px 0;
+  padding:12px;
+}
+html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content .auto > div {
+  min-width:0;
+  width:100%;
+  overflow-wrap:normal;
+  word-break:normal;
+}
+html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content #auto-switch {
+  display:block;
+  width:52px;
+  min-width:52px;
+  max-width:52px;
+  height:30px;
+  min-height:30px;
+  padding:0;
+  margin:0;
+  flex:none;
+  justify-self:end;
+}
+html[data-theme] body.servgo-mail-v2 .mail-v3-popover > .mail-v3-popover-content {
+  width:min(360px,calc(100vw - 24px));
+  min-width:0;
+  max-width:calc(100vw - 24px);
+  overflow-x:hidden;
+  overscroll-behavior:contain;
+}
+html[data-theme] body.servgo-mail-v2 .mail-v3-popover-content :is(a,button) {
+  box-sizing:border-box;
+}
+@media (max-width:650px) {
+  html[data-theme] body.servgo-mail-v2 .mail-workspace-links {
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:6px;
+    padding:5px 0 9px;
+    margin-bottom:10px;
+  }
+  html[data-theme] body.servgo-mail-v2 .mail-workspace-links .mail-workspace-link {
+    flex:none;
+    width:100%;
+    min-height:44px;
+    padding:8px 5px;
+    font-size:11.5px;
+    line-height:1.2;
+    overflow-wrap:normal;
+    word-break:normal;
+  }
+  html[data-theme] body.servgo-mail-v2 .mail-workspace-links .mail-workspace-logout {
+    margin-left:0;
+  }
+  html[data-theme] body.servgo-mail-v2 .mail-v3-popover > .mail-v3-popover-content {
+    max-height:min(58dvh,480px);
+  }
+}
+
+/* On narrow phones the Details trigger is not centered; anchoring the sheet
+ * to its right edge can push the sheet off the left side of the viewport. */
+@media (max-width:650px) {
+  html[data-theme] body.servgo-mail-v2 .mail-v3-popover > :is(nav,.mail-v3-popover-content) {
+    position:fixed;
+    left:12px;
+    right:12px;
+    bottom:calc(112px + env(safe-area-inset-bottom,0px));
+    width:auto;
+    min-width:0;
+    max-width:none;
+    max-height:min(58dvh,480px);
+    margin:0;
+    overflow-x:hidden;
+    overscroll-behavior:contain;
+  }
+}
+
+
+/* ServGo Air V5: same native Onest as BookingBot PWA. Font files are served
+   locally by mail_campaign_ui.py; URLs are CSS-relative so both Mail origins
+   resolve their OWN /api/... path without cross-origin requests. */
+@font-face {
+  font-family: "Onest Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("servgo-air-onest-cyrillic.woff2") format("woff2");
+  unicode-range: U+0400-052F, U+1C80-1C8F, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "Onest Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("servgo-air-onest-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Reuse the published typography, palette, density, button and radius tokens
+   from web/frontend/src/styles/design-system.css. All overrides scoped to Mail. */
+html[data-theme] body.servgo-mail-v2,
+html[data-theme] body.servgo-mail-v2 :is(button, input, textarea, select) {
+  font-family: var(--ds-font);
+  letter-spacing: -0.015em;
+  -webkit-font-smoothing: antialiased;
+}
+html[data-theme] body.servgo-mail-v2 {
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+html[data-theme] body.servgo-mail-v2 :is(.heading h1, .top h1) {
+  font-size: clamp(21px, 2.6vw, 27px);
+  font-weight: 550;
+  letter-spacing: -0.038em;
+  line-height: 1.12;
+}
+html[data-theme] body.servgo-mail-v2 :is(.panel h2, .panel-head, .detail h2, dialog h2) {
+  font-weight: 550;
+  letter-spacing: -0.03em;
+  color: var(--s-text);
+}
+html[data-theme] body.servgo-mail-v2 :is(.brand, .metric strong, .number strong) {
+  font-weight: 500;
+  letter-spacing: -0.04em;
+}
+html[data-theme] body.servgo-mail-v2 :is(.metric small, .number small, .hint, .muted, .campaign small) {
+  font-weight: 350;
+  line-height: 1.45;
+  color: var(--s-muted);
+}
+html[data-theme] body.servgo-mail-v2 :is(.btn, .primary, .secondary, .outline, .danger, .back-admin,
+  .mail-v3-popover > summary, .mail-workspace-links .mail-workspace-link) {
+  font-family: var(--ds-font);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  border-radius: 13px;
+  box-shadow: none;
+}
+html[data-theme] body.servgo-mail-v2 :is(.btn:not(.alt):not(.light):not(.warn):not(.danger), .primary) {
+  background: var(--s-accent-grad);
+  color: var(--s-accent-ink);
+}
+html[data-theme] body.servgo-mail-v2 :is(.btn.alt, .btn.light, .secondary, .outline, .back-admin) {
+  border: 0;
+  background: var(--s-surface-2);
+  color: var(--s-muted);
+}
+html[data-theme] body.servgo-mail-v2 :is(.panel,.metric,.number,.auto) {
+  background: var(--s-surface);
+  border-color: var(--s-line);
+  color: var(--s-text);
+}
+html[data-theme] body.servgo-mail-v2 :is(.field input,.field textarea,.field select,#search-dialog select) {
+  font-family: var(--ds-font);
+  border-radius: 13px;
+  background: var(--s-surface-2);
+  color: var(--s-text);
+  border-color: transparent;
+  font-weight: 350;
+}
+html[data-theme] body.servgo-mail-v2 :is(.field input,.field textarea,.field select,#search-dialog select):focus-visible {
+  outline: 2px solid var(--s-accent);
+  outline-offset: 1px;
+}
+html[data-theme] body.servgo-mail-v2 :is(.mail-v3-dock, .mail-v3-nav) {
+  background: var(--s-bg);
+  border-color: transparent;
+}
+html[data-theme] body.servgo-mail-v2 .mail-v3-nav {
+  gap: 0;
+}
+html[data-theme] body.servgo-mail-v2 .mail-v3-nav a {
+  min-height: 54px;
+  gap: 4px;
+  padding: 3px 1px 5px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--s-muted-2);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+}
+html[data-theme] body.servgo-mail-v2 .mail-v3-nav a[aria-current] {
+  color: var(--s-accent);
+  background: transparent;
+  font-weight: 500;
+}
+html[data-theme] body.servgo-mail-v2 .mail-v3-nav a svg {
+  display: block;
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+html[data-theme] body.servgo-mail-v2 .mail-v3-dock {
+  padding: 3px 8px calc(5px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -8px 25px rgba(45,92,146,.018);
+}
+html[data-theme] body.servgo-mail-v2 .mail-workspace-links .mail-workspace-link {
+  border-radius: 13px;
+  font-weight: 500;
+}
+html[data-theme] body.servgo-mail-v2 .mail-workspace-links .mail-workspace-studio {
+  background: var(--s-accent-soft);
+  color: var(--s-accent);
+}
+@media (max-width: 650px) {
+  html[data-theme] body.servgo-mail-v2 .mail-workspace-links .mail-workspace-link {
+    font-size: 11px;
+    padding-inline: 5px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme] body.servgo-mail-v2 .mail-v3-nav a::after {animation:none;}
 }

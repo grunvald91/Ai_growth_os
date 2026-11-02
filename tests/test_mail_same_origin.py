@@ -164,11 +164,15 @@ class MailPwaTests(unittest.TestCase):
         self.assertNotIn('fetch("/api"+path', mailbox)
         self.assertNotIn('href="/api/mailbox-dashboard', campaigns)
         for page in (campaigns, mailbox):
-            self.assertGreater(page.index('<nav class="sg-pwa-workspace-nav"'), page.index('<div class="mail-v3-popover-content">'))
+            self.assertLess(page.index('<nav class="mail-workspace-links"'), page.index('<div class="mail-v3-popover-content">'))
             self.assertIn("Выйти из почты", page)
+            self.assertEqual(page.count('class="mail-workspace-links"'), 1)
             self.assertIn('href="/workspace/growth"', page)
             self.assertIn('href="/admin"', page)
-            self.assertIn('aria-label="Разделы ServGo"', page)
+            self.assertIn('aria-label="Навигация ServGo"', page)
+            self.assertIn('href="/api/owner-mail/workspace/logout"', page)
+            self.assertIn('href="/workspace/growth"', page)
+            self.assertNotIn('class="sg-pwa-workspace-nav"', page)
             self.assertNotIn('style="position:fixed;bottom:8px', page)
             self.assertNotIn("https://mail.servgo.ru/claim", page)
 

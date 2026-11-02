@@ -10,6 +10,29 @@ from ..database import get_db
 from .owner_mail import mail_owner
 
 router = APIRouter(prefix="/owner-mail", tags=["mail-campaign-ui"])
+# The PWA already bundles the local Onest variable font. Serve the SAME font
+# on both canonical servgo.ru and mail.servgo.ru origins (no Google Fonts).
+# The names are content-hashed by Vite; select only these two known subsets.
+_ONEST_ASSETS = Path(__file__).resolve().parents[2] / "frontend" / "dist" / "assets"
+
+
+def _onest_asset(subset: str) -> Path:
+    if subset not in {"cyrillic", "latin"}:
+        raise HTTPException(404, "Font subset not found")
+    matches = sorted(_ONEST_ASSETS.glob(f"onest-{subset}-wght-normal-*.woff2"))
+    if not matches:
+        raise HTTPException(404, "Onest font asset unavailable")
+    return matches[-1]
+
+
+@router.get("/api/servgo-air-onest-{subset}.woff2", include_in_schema=False)
+def air_onest_font(subset: str):
+    return FileResponse(
+        _onest_asset(subset),
+        media_type="font/woff2",
+        headers={"Cache-Control": "public, max-age=300",
+                 "X-Content-Type-Options": "nosniff"},
+    )
 
 
 # Public static design resources. No mail/customer data is exposed.

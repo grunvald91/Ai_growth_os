@@ -53,34 +53,16 @@ def adapt_mail_html(page: str, *, mailbox: bool = False) -> str:
     if mailbox:
         page = page.replace('href="/"', 'href="/api/owner-mail/workspace"')
         page = page.replace('location.replace("/")', 'location.replace("/mail")')
-    # In V3, workspace exits and links belong to the same lower action sheet,
-    # leaving the page heading as content-only. Growth still uses server-checked SSO.
-    navigation = (
-        '<nav class="sg-pwa-workspace-nav" aria-label="Разделы ServGo">'
-        '<a href="/admin">← ServGo</a>'
-        '<a href="/workspace/growth">Маркетинг</a>'
-        '<a href="/api/owner-mail/workspace/logout">Выйти из почты</a>'
-        '</nav>'
-    )
-    style = (
-        '<style>'
-        '.sg-pwa-workspace-nav{display:flex;align-items:center;flex-wrap:wrap;'
-        'gap:6px 14px;margin:0 0 10px;color:var(--s-muted,#62778b);'
-        'font-size:12px;line-height:1.3}'
-        '.sg-pwa-workspace-nav a{color:inherit;text-decoration:none;'
-        'padding:6px 0;min-height:30px;display:inline-flex;align-items:center}'
-        '.sg-pwa-workspace-nav a:hover,.sg-pwa-workspace-nav a:focus-visible{'
-        'color:var(--s-accent,#2465bd);text-decoration:underline}'
-        '</style>'
-    )
-    # Inject only in the trusted bottom action sheet, never inside data or a URL.
-    # The fallback retains compatibility with any pre-V3 server-side template.
-    action_sheet = '<div class="mail-v3-popover-content">'
-    if action_sheet in page:
-        page = page.replace(action_sheet, action_sheet + navigation, 1)
-    else:
-        page = page.replace('<h1', navigation + '<h1', 1)
-    return page.replace('</head>', style + '</head>', 1)
+    # The shared workspace nav is present directly in both trusted HTML
+    # templates, so it remains visible on mobile even when the bottom action
+    # sheet is closed. Studio uses its existing server-checked SSO entry page.
+    # Legacy mail.servgo.ru keeps /api/logout; on the canonical host the
+    # adapted logout invalidates only the HttpOnly /api/owner-mail cookie.
+    page = page.replace('href="https://servgo.ru/admin"', 'href="/admin"')
+    page = page.replace('href="https://servgo.ru/workspace/growth"', 'href="/workspace/growth"')
+    page = page.replace('href="/api/owner-mail/api/logout"',
+                        'href="/api/owner-mail/workspace/logout"')
+    return page
 
 
 async def _workspace(request: Request, session: AsyncSession, template: str, *, mailbox=False):

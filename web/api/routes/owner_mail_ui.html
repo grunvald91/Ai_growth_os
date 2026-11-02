@@ -58,7 +58,7 @@ dialog{padding:18px;border-radius:18px}dialog .row{justify-content:stretch!impor
 .back-admin{display:inline-flex;align-items:center;gap:4px;margin:0 0 8px;padding:6px 11px;border-radius:12px;background:#eef5ff;color:#176edb;font-size:12px;font-weight:750;text-decoration:none}
 </style>
 <link rel="stylesheet" href="/api/servgo-air-tokens.css?v=1">
-<link rel="stylesheet" href="/api/servgo-mail-air.css?v=2">
+<link rel="stylesheet" href="/api/servgo-mail-air.css?v=3">
 <script src="/api/servgo-air-theme.js?v=1"></script>
 <script src="/api/servgo-mail-theme-picker.js?v=1" defer></script>
 </head>
@@ -71,6 +71,11 @@ dialog{padding:18px;border-radius:18px}dialog .row{justify-content:stretch!impor
   <div class="little"><b>Личный доступ</b>Почта закрыта для клиентов, сотрудников и владельцев подключённых компаний.<br><a href="https://servgo.ru/admin" style="color:#176edb;font-weight:750">← Вернуться в ServGo</a></div>
 </aside>
 <section class="main" id="mail-main-content">
+  <nav class="mail-workspace-links" aria-label="Навигация ServGo">
+    <a class="mail-workspace-link mail-workspace-back" href="https://servgo.ru/admin">← Панель ServGo</a>
+    <a class="mail-workspace-link mail-workspace-studio" href="https://servgo.ru/workspace/growth">✦ AI-студия</a>
+    <a class="mail-workspace-link mail-workspace-logout" href="/api/logout">Выйти из почты</a>
+  </nav>
   <div class="heading">
     <div><a class="back-admin" href="https://servgo.ru/admin">← В админку ServGo</a><div class="mail-eyebrow">Рабочее пространство · Почта</div><h1 id="page-title">Входящие</h1><p id="page-subtitle">Корреспонденция ServGo и ответы компаний</p></div>
     
@@ -97,14 +102,14 @@ dialog{padding:18px;border-radius:18px}dialog .row{justify-content:stretch!impor
     
   </nav>
     </details>
-    <details class="mail-v3-popover mail-v3-more"><summary>⋯ Действия</summary><div class="mail-v3-popover-content"><a class="mail-v3-return" href="https://servgo.ru/admin">← Панель ServGo</a><label class="servgo-mail-theme-picker">Тема <select id="servgo-mail-theme" aria-label="Тема оформления">
+    <details class="mail-v3-popover mail-v3-more"><summary>⋯ Действия</summary><div class="mail-v3-popover-content"><label class="servgo-mail-theme-picker">Тема <select id="servgo-mail-theme" aria-label="Тема оформления">
 <option value="system">Как в системе</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label><button id="refresh" class="outline">↻ Обновить</button><button id="bulk" class="secondary">⇪ Загрузить адреса</button><button id="prepare-all" class="secondary">✦ Создать предложения</button><button id="new" class="secondary">+ Адресат</button></div></details>
     <button id="compose" class="primary" type="button">✉ Написать</button>
   </div>
   <nav class="mail-v3-nav" aria-label="Разделы почты">
-    <a href="/api/campaigns-dashboard#search"><b>⌕</b><span>Поиск</span></a>
-    <a href="/api/campaigns-dashboard#campaigns"><b>↗</b><span>Рассылки</span></a>
-    <a href="/api/mailbox-dashboard#inbox" aria-current="page"><b>✉</b><span>Письма</span></a>
+    <a href="/api/campaigns-dashboard#search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7.5"/><path d="m20 20-4-4"/></svg><span>Поиск</span></a>
+    <a href="/api/campaigns-dashboard#campaigns"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg><span>Рассылки</span></a>
+    <a href="/api/mailbox-dashboard#inbox" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span>Письма</span></a>
   </nav>
 </div>
 <dialog id="create-dialog">

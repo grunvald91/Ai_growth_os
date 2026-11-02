@@ -45,11 +45,14 @@ class MailAirV2ContractTests(unittest.TestCase):
                 self.assertIn(body_class, page.body_classes)
                 self.assertFalse(page.duplicate_ids)
                 self.assertIn("/api/servgo-air-tokens.css?v=1", page.links)
-                self.assertIn("/api/servgo-mail-air.css?v=2", page.links)
+                self.assertIn("/api/servgo-mail-air.css?v=3", page.links)
                 self.assertIn('href="#mail-main-content"', text)
                 self.assertIn('id="mail-main-content"', text)
                 self.assertIn('aria-label="Разделы почты"', text)
                 self.assertIn("servgo-mail-theme", page.ids)
+                self.assertIn('class="mail-workspace-links"', text)
+                self.assertIn('href="https://servgo.ru/workspace/growth"', text)
+                self.assertIn('href="/api/logout"', text)
                 records.append((name, page, text))
         return records
 
@@ -86,6 +89,11 @@ class MailAirV2ContractTests(unittest.TestCase):
         self.assertIn("prefers-reduced-motion", css)
         self.assertIn("safe-area-inset-bottom", css)
         self.assertIn("focus-visible", css)
+        # Switch is never included in the full-width menu-button selector.
+        self.assertIn(".mail-v3-popover-content :is(button:not(.switch),a,.btn)", css)
+        self.assertIn(".mail-v3-popover-content #auto-switch", css)
+        self.assertIn("grid-template-columns:minmax(0,1fr) 52px", css)
+        self.assertIn("grid-template-columns:repeat(3,minmax(0,1fr))", css)
 
 
     def test_v3_bottom_navigation_is_consistent_and_contacts_are_nested(self):
