@@ -44,6 +44,8 @@ def adapt_mail_html(page: str, *, mailbox: bool = False) -> str:
     page = page.replace('"/api', '"/api/owner-mail/api').replace("'/api", "'/api/owner-mail/api")
     # Navigation links must stay in the adapted workspace, not load the
     # unadapted legacy HTML templates at their old paths.
+    page = page.replace('href="/api/owner-mail/api/campaigns-dashboard#',
+                        'href="/api/owner-mail/workspace#')
     page = page.replace('href="/api/owner-mail/api/campaigns-dashboard"',
                         'href="/api/owner-mail/workspace"')
     page = page.replace('href="/api/owner-mail/api/mailbox-dashboard',
@@ -51,9 +53,8 @@ def adapt_mail_html(page: str, *, mailbox: bool = False) -> str:
     if mailbox:
         page = page.replace('href="/"', 'href="/api/owner-mail/workspace"')
         page = page.replace('location.replace("/")', 'location.replace("/mail")')
-    # Same-origin workspace transitions belong in the existing mail heading,
-    # not in a fixed footer that overlaps the mobile navigation. Growth entry
-    # returns through ServGo's server-checked business/SSO flow.
+    # In V3, workspace exits and links belong to the same lower action sheet,
+    # leaving the page heading as content-only. Growth still uses server-checked SSO.
     navigation = (
         '<nav class="sg-pwa-workspace-nav" aria-label="Разделы ServGo">'
         '<a href="/admin">← ServGo</a>'
@@ -72,9 +73,13 @@ def adapt_mail_html(page: str, *, mailbox: bool = False) -> str:
         'color:var(--s-accent,#2465bd);text-decoration:underline}'
         '</style>'
     )
-    # Both trusted templates have a heading. This adds inline breadcrumbs,
-    # leaving all original controls and JS IDs unchanged.
-    page = page.replace('<h1', navigation + '<h1', 1)
+    # Inject only in the trusted bottom action sheet, never inside data or a URL.
+    # The fallback retains compatibility with any pre-V3 server-side template.
+    action_sheet = '<div class="mail-v3-popover-content">'
+    if action_sheet in page:
+        page = page.replace(action_sheet, action_sheet + navigation, 1)
+    else:
+        page = page.replace('<h1', navigation + '<h1', 1)
     return page.replace('</head>', style + '</head>', 1)
 
 

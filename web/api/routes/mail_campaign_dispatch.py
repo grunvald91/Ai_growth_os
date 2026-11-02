@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import email.utils
+import json
 import os
 import smtplib
 from datetime import datetime, timedelta, timezone
@@ -15,6 +16,25 @@ from email.utils import formataddr
 
 from .mail_campaign_store import audit, initialize, utcnow
 from .owner_mail import ADDRESS, db_open, sign
+
+
+def sender_for_campaign(company_id: str) -> tuple[str, str]:
+    """Return a server-verified sender for one organization, or no sender to prevent impersonation."""
+    if not company_id:
+        address = os.getenv("SERVGO_MAIL_FROM", "").strip()
+        return (address, "ServGo") if ADDRESS.fullmatch(address) else ("", "")
+    try:
+        mapping = json.loads(os.getenv("SERVGO_MAIL_COMPANY_SENDERS", "{}"))
+        item = mapping.get(company_id) if isinstance(mapping, dict) else None
+        if not isinstance(item, dict) or item.get("verified") is not True:
+            return "", ""
+        address = str(item.get("email") or "").strip().lower()
+        display = str(item.get("name") or "").strip()
+        if ADDRESS.fullmatch(address) and display and len(display) <= 160 and not any(ord(ch) < 32 for ch in display):
+            return address, display
+    except (ValueError, TypeError):
+        pass
+    return "", ""
 
 
 def reserve_send():
@@ -33,17 +53,28 @@ def reserve_send():
         ).fetchone()[0]
         if attempts >= limit:
             return None
+        try:
+            configured = json.loads(os.getenv("SERVGO_MAIL_COMPANY_SENDERS", "{}"))
+        except (ValueError, TypeError):
+            configured = {}
+        verified_ids = sorted(k for k in configured if sender_for_campaign(k)[0]) if isinstance(configured, dict) else []
+        allowed = " AND (c.company_id=''"
+        if verified_ids:
+            allowed += " OR c.company_id IN (" + ",".join("?" for _ in verified_ids) + ")"
+        allowed += ")"
         candidate = db.execute("""
-            SELECT r.*, c.min_interval_seconds
+            SELECT r.*, c.min_interval_seconds, c.company_id
             FROM campaign_recipient r
             JOIN campaign c ON c.id=r.campaign_id
             WHERE r.status='approved' AND c.status='running'
               AND (c.not_before='' OR c.not_before<=?)
               AND NOT EXISTS (SELECT 1 FROM campaign_exclusions x WHERE x.email=r.email)
-            ORDER BY r.created_at,r.id LIMIT 1
-        """, (current.isoformat(),)).fetchone()
+        """ + allowed + " ORDER BY r.created_at,r.id LIMIT 1", (current.isoformat(), *verified_ids)).fetchone()
         if not candidate:
             return None
+        sender, _display_name = sender_for_campaign(candidate["company_id"])
+        if not sender:
+            return None  # Never send another company's offer from an unverified sender.
         last = db.execute(
             "SELECT max(occurred_at) AS last_time FROM campaign_event "
             "WHERE event='send_attempt'"
@@ -60,12 +91,20 @@ def reserve_send():
         if changed.rowcount != 1:
             return None
         audit(db, candidate["campaign_id"], "send_attempt", candidate["id"])
-        return dict(candidate), sender, message_id
+        message_row = dict(candidate)
+        message_row["sender_display_name"] = _display_name
+        return message_row, sender, message_id
 
 
 def make_message(row, sender, message_id):
     msg = EmailMessage()
-    msg["From"] = formataddr(("ServGo", sender))
+    try:
+        company_id = row["company_id"]
+    except (KeyError, IndexError, TypeError):
+        company_id = ""
+    _sender, fallback_name = sender_for_campaign(company_id)
+    name = row.get("sender_display_name", fallback_name) if isinstance(row, dict) else fallback_name
+    msg["From"] = formataddr((name or "ServGo", sender))
     msg["To"] = row["email"]
     msg["Subject"] = row["subject"]
     msg["Date"] = email.utils.formatdate(localtime=False)

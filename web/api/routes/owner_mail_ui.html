@@ -67,20 +67,13 @@ dialog{padding:18px;border-radius:18px}dialog .row{justify-content:stretch!impor
 <main>
 <aside>
   <div class="brand"><span class="brand-mark">S</span><div>ServGo<div class="sub">Личная почта</div></div></div>
-  <nav class="nav" aria-label="Разделы почты">
-    <button type="button" data-tab="inbox" class="active"><b>✉</b><span>Входящие</span></button>
-    <button type="button" data-tab="outbox"><b>↗</b><span>Исходящие</span></button>
-    <button type="button" data-tab="drafts"><b>✦</b><span>Черновики</span></button>
-    <button type="button" data-tab="prospects"><b>♧</b><span>Адресаты</span></button>
-    <a href="/" class="nav-link"><b>◎</b><span>Кампании</span></a>
-  </nav>
+
   <div class="little"><b>Личный доступ</b>Почта закрыта для клиентов, сотрудников и владельцев подключённых компаний.<br><a href="https://servgo.ru/admin" style="color:#176edb;font-weight:750">← Вернуться в ServGo</a></div>
 </aside>
 <section class="main" id="mail-main-content">
   <div class="heading">
     <div><a class="back-admin" href="https://servgo.ru/admin">← В админку ServGo</a><div class="mail-eyebrow">Рабочее пространство · Почта</div><h1 id="page-title">Входящие</h1><p id="page-subtitle">Корреспонденция ServGo и ответы компаний</p></div>
-    <div class="row"><label class="servgo-mail-theme-picker">Тема <select id="servgo-mail-theme" aria-label="Тема оформления">
-<option value="system">Как в системе</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label><button id="refresh" class="outline">↻ Обновить</button><button id="bulk" class="secondary">⇪ Загрузить адреса</button><button id="prepare-all" class="secondary">✦ Создать предложения</button><button id="new" class="secondary">+ Адресат</button><button id="compose" class="primary">✉ Написать</button></div>
+    
   </div>
   <div class="cards">
     <div class="metric"><small>Адресатов в списке</small><strong id="m-companies">—</strong></div>
@@ -93,6 +86,27 @@ dialog{padding:18px;border-radius:18px}dialog .row{justify-content:stretch!impor
   </div>
 </section>
 </main>
+<div class="mail-v3-dock" aria-label="Управление почтой">
+  <div class="mail-v3-actionbar">
+    <details class="mail-v3-popover mail-v3-folders"><summary>☷ Папки</summary>
+        <nav class="nav" aria-label="Папки почты">
+    <button type="button" data-tab="inbox" class="active"><b>✉</b><span>Входящие</span></button>
+    <button type="button" data-tab="outbox"><b>↗</b><span>Исходящие</span></button>
+    <button type="button" data-tab="drafts"><b>✦</b><span>Черновики</span></button>
+    <button type="button" data-tab="prospects"><b>♧</b><span>Адресаты</span></button>
+    
+  </nav>
+    </details>
+    <details class="mail-v3-popover mail-v3-more"><summary>⋯ Действия</summary><div class="mail-v3-popover-content"><a class="mail-v3-return" href="https://servgo.ru/admin">← Панель ServGo</a><label class="servgo-mail-theme-picker">Тема <select id="servgo-mail-theme" aria-label="Тема оформления">
+<option value="system">Как в системе</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label><button id="refresh" class="outline">↻ Обновить</button><button id="bulk" class="secondary">⇪ Загрузить адреса</button><button id="prepare-all" class="secondary">✦ Создать предложения</button><button id="new" class="secondary">+ Адресат</button></div></details>
+    <button id="compose" class="primary" type="button">✉ Написать</button>
+  </div>
+  <nav class="mail-v3-nav" aria-label="Разделы почты">
+    <a href="/api/campaigns-dashboard#search"><b>⌕</b><span>Поиск</span></a>
+    <a href="/api/campaigns-dashboard#campaigns"><b>↗</b><span>Рассылки</span></a>
+    <a href="/api/mailbox-dashboard#inbox" aria-current="page"><b>✉</b><span>Письма</span></a>
+  </nav>
+</div>
 <dialog id="create-dialog">
   <form method="dialog" id="company-form"><h2>Добавить компанию</h2><p>Укажи адрес компании и имеющиеся сведения. Агент подготовит индивидуальный черновик.</p>
   <div class="field"><label>Название компании</label><input name="company" required minlength="2" maxlength="150" placeholder="Например, студия «Мята»"></div>
@@ -136,11 +150,11 @@ const escapeHtml=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;"
 function notify(message){const t=$("toast");t.textContent=message;t.style.display="block";clearTimeout(window.__toastTimeout);window.__toastTimeout=setTimeout(()=>t.style.display="none",4200)}
 async function api(path,method="GET",body=null){const init={method,credentials:"same-origin",headers:{"Accept":"application/json"}};if(body){init.headers["Content-Type"]="application/json";init.body=JSON.stringify(body)}const response=await fetch("/api"+path,init);let data;try{data=await response.json()}catch{data={detail:"Сервер недоступен"}}if(!response.ok){if(response.status===401){location.replace("/");}throw new Error(typeof data.detail==="string"?data.detail:"Ошибка "+response.status)}return data}
 function withError(task){return Promise.resolve().then(task).catch(e=>notify(e.message))}
-function displayTab(tab){state.tab=tab;state.selected=null;document.querySelectorAll("[data-tab]").forEach(x=>x.classList.toggle("active",x.dataset.tab===tab));$("page-title").textContent=tabs[tab][0];$("page-subtitle").textContent=tabs[tab][1];$("list-title").textContent=tabs[tab][2];render()}
+function displayTab(tab){state.tab=tab;document.querySelectorAll(".mail-v3-popover").forEach(x=>x.open=false);state.selected=null;document.querySelectorAll("[data-tab]").forEach(x=>x.classList.toggle("active",x.dataset.tab===tab));$("page-title").textContent=tabs[tab][0];$("page-subtitle").textContent=tabs[tab][1];$("list-title").textContent=tabs[tab][2];render()}
 function cards(){const prospects=state.prospects;$("m-companies").textContent=prospects.length;$("m-drafts").textContent=prospects.filter(x=>x.subject).length;$("m-sent").textContent=state.outbox.filter(x=>x.status==="smtp_accepted").length;const c=state.status;$("service-status").textContent="Входящие: "+(c.inbox_ready?"подключены":"ожидается IMAP")+" · AI: "+(c.ai_ready?"подключён":"не настроен")}
 function list(){if(state.tab==="inbox")return state.inbox.map(x=>({...x,id:x.uid,label:x.from,extra:x.date,title:x.subject||"(Без темы)"}));if(state.tab==="outbox")return state.outbox.map((x,i)=>({...x,id:i,label:x.email,extra:x.created_at,title:x.subject||"(Без темы)"}));const prospects=state.tab==="drafts"?state.prospects.filter(x=>x.subject):state.prospects;return prospects.map(x=>({...x,id:x.id,label:x.company,extra:x.email,title:x.subject||"Нужен персональный черновик"}))}
 function render(){cards();const entries=list();$("list-count").textContent=entries.length+" шт.";$("list").innerHTML=entries.length?entries.map(x=>'<article class="message '+(state.selected===String(x.id)?"selected":"")+'" data-id="'+escapeHtml(x.id)+'"><strong>'+escapeHtml(x.label)+'</strong><span>'+escapeHtml(x.title)+'</span><div class="meta">'+escapeHtml(x.extra)+'</div></article>').join(""):'<div class="empty"><strong>Здесь пока пусто</strong>'+(state.tab==="inbox"?"Открой почтовые настройки, если IMAP ещё не подключён.":state.tab==="outbox"?'Отправленных писем пока нет.<br><button class="primary" type="button" data-compose>✉ Написать письмо</button>':"Добавь компании или создай первый черновик.")+"</div>";document.querySelectorAll("[data-compose]").forEach(b=>b.onclick=()=>openCompose());$("list-compose").classList.toggle("hide",state.tab!=="outbox");document.querySelectorAll(".message").forEach(node=>node.onclick=()=>{state.selected=node.dataset.id;render();if(matchMedia("(max-width:760px)").matches)$("detail").scrollIntoView({behavior:"smooth",block:"start"})});const item=entries.find(x=>String(x.id)===state.selected);showDetail(item)}
-function updateFab(){$("fab-compose").textContent=state.replyFull?"↩ Ответить":"✉ Написать"}
+function updateFab(){const title=state.replyFull?"↩ Ответить":"✉ Написать";$("fab-compose").textContent=title;$("compose").textContent=title}
 function showDetail(item){state.replyFull=null;updateFab();const detail=$("detail"), label=$("detail-label");if(!item){label.textContent="ServGo";detail.innerHTML='<div class="empty"><strong>Рабочая область</strong>Выберите письмо в списке, чтобы открыть его.</div>';return}if(state.tab==="inbox"){label.textContent="Входящее";detail.innerHTML='<h2>'+escapeHtml(item.title)+'</h2><p>От: '+escapeHtml(item.label)+'</p><p>'+escapeHtml(item.date)+'</p><div class="note" id="message-loading">Открываем текст письма...</div>';withError(async()=>{const full=await api("/message/"+item.uid);if(state.tab==="inbox"&&state.selected===String(item.uid)){const content=document.createElement("div");content.style.cssText="white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;font-size:13px;color:#314869";content.textContent=full.body||"Текстовая часть отсутствует (HTML/вложения не показываются)";const placeholder=$("message-loading");if(placeholder)placeholder.replaceWith(content);const actions=document.createElement("div");actions.className="row reply-row";const reply=document.createElement("button");reply.className="primary";reply.type="button";reply.textContent="↩ Ответить";if(full.reply_to){reply.onclick=()=>openCompose(replyDraft(full));state.replyFull=full;updateFab()}else{reply.disabled=true;reply.title="В письме нет адреса для ответа"}actions.appendChild(reply);content.after(actions)}});return}if(state.tab==="outbox"){label.textContent=item.status==="smtp_accepted"?"Принято SMTP":"Не подтверждено";detail.innerHTML='<h2>'+escapeHtml(item.title)+'</h2><p>Кому: '+escapeHtml(item.email)+(item.company&&item.company!==item.email?' · '+escapeHtml(item.company):'')+'</p><p>'+escapeHtml(item.created_at)+'</p><div class="sent-body"></div><div class="row"><button class="primary" id="again" type="button">✉ Написать ещё раз</button><button class="outline" id="new-letter" type="button">Новое письмо</button></div><div class="note">«Принято SMTP» не гарантирует доставку адресату.'+(item.status!=="smtp_accepted"?' Отправка не подтверждена — проверьте, не дошло ли письмо, прежде чем отправлять снова.':'')+'</div>';detail.querySelector(".sent-body").textContent=item.body||"";$("again").onclick=()=>openCompose({to:item.email,subject:item.subject,body:item.body});$("new-letter").onclick=()=>openCompose();return}const p=state.prospects.find(x=>x.id===item.id);if(!p)return;label.textContent=p.state==="smtp_accepted"?"Отправлено":p.reviewed?"Согласовано":p.subject?"Черновик":"Новый";const hasDraft=!!p.subject;detail.innerHTML='<h2>'+escapeHtml(p.company)+'</h2><p>'+escapeHtml(p.email)+(p.website?' · '+escapeHtml(p.website):'')+'</p><div class="row"><span class="tag '+(p.consent?"good":"warn")+'">'+(p.consent?"Согласие указано":"Нет подтверждения согласия")+'</span>'+(p.excluded?'<span class="tag warn">Исключён</span>':'')+'</div>'+(!hasDraft?'<p>'+escapeHtml(p.notes||"Сведения о компании пока не добавлены.")+'</p><div class="row"><button id="generate" class="primary" '+(p.excluded?"disabled":"")+'>✦ Подготовить ИИ-письмо</button></div>':'<div class="field"><label>Тема</label><input id="subject" maxlength="180" value="'+escapeHtml(p.subject)+'" '+(p.state!=="draft"?"disabled":"")+'></div><div class="field"><label>Текст письма</label><textarea id="body" '+(p.state!=="draft"?"disabled":"")+'>'+escapeHtml(p.body)+'</textarea></div><div class="row">'+(!p.reviewed&&p.state==="draft"?'<button id="approve" class="primary">✓ Проверить и согласовать</button><button id="generate" class="secondary">✦ Переписать ИИ</button>':'')+(p.reviewed&&p.state==="draft"?'<button id="send" class="primary">↗ Отправить письмо</button>':'')+'</div>')+'<p class="table-tip">Отправка доступна только владельцу платформы после проверки текста и подтверждения согласия адресата.</p>'+(p.excluded?'':'<button class="danger" id="exclude">Не связываться с компанией</button>');const gen=$("generate");if(gen)gen.onclick=()=>withError(async()=>{gen.disabled=true;gen.textContent="Готовим письмо…";const d=await api("/draft/"+p.id,"POST");notify(d.critic_warning||"Черновик подготовлен. Проверь факты.");await loadData(false);state.selected=p.id;render()});const app=$("approve");if(app)app.onclick=()=>withError(async()=>{const proof=prompt("Укажи, где и когда получено согласие адресата на рекламное письмо:",p.consent||"");if(!proof||proof.trim().length<6)return;await api("/approve/"+p.id,"POST",{subject:$("subject").value,body:$("body").value,consent:proof});notify("Письмо согласовано");await loadData(false);state.selected=p.id;render()});const send=$("send");if(send)send.onclick=()=>withError(async()=>{if(!confirm("Отправить подтверждённое письмо на "+p.email+"?"))return;send.disabled=true;const result=await api("/send/"+p.id,"POST");notify(result.status==="smtp_accepted"?"Почтовый сервер принял письмо":"Неизвестный результат");await loadData(false);state.selected=p.id;render()});const stop=$("exclude");if(stop)stop.onclick=()=>withError(async()=>{if(!confirm("Больше не связываться с этой компанией?"))return;await api("/exclude/"+p.id,"POST");await loadData(false);state.selected=p.id;render()})}
 async function loadData(draw=true){const responses=await Promise.allSettled([api("/status"),api("/prospects"),api("/inbox"),api("/outbox")]);const [s,p,i,o]=responses;state.status=s.status==="fulfilled"?s.value:{};if(p.status==="fulfilled")state.prospects=p.value;if(i.status==="fulfilled")state.inbox=i.value;if(o.status==="fulfilled")state.outbox=o.value;if(draw)render();if(i.status==="rejected")notify("Входящие: "+i.reason.message)}
 $("bulk").onclick=()=>$("bulk-dialog").showModal();
@@ -168,7 +182,7 @@ function openCompose(prefill={}){
   $("compose-dialog").showModal();
   if (prefill.body) { const body = $("compose-body"); body.focus(); body.setSelectionRange(0, 0); body.scrollTop = 0; }
 }
-$("compose").onclick = () => openCompose();
+$("compose").onclick = () => openCompose(state.replyFull ? replyDraft(state.replyFull) : {});
 $("list-compose").onclick = () => openCompose();
 $("fab-compose").onclick = () => openCompose(state.replyFull ? replyDraft(state.replyFull) : {});
 $("compose-close").onclick = () => $("compose-dialog").close();
@@ -218,7 +232,7 @@ $("compose-form").onsubmit = event => {
     } finally { button.disabled = false; }
   });
 };
-displayTab(location.hash==="#outbox"?"outbox":"inbox");
+displayTab(["outbox","drafts","prospects"].includes(location.hash.slice(1))?location.hash.slice(1):"inbox");
 loadData().then(()=>{if(location.hash==="#compose")openCompose()});
 </script>
 </body>

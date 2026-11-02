@@ -166,7 +166,7 @@ def test_search_collects_cards_finds_email_on_site_and_marks_fit(env):
     by_name = {h["name"]: h for h in view["hits"]}
     assert by_name["Мята"]["email"] == "hello@mint-studio.ru" and by_name["Мята"]["email_source"] == "2ГИС"
     assert by_name["Лотос"]["email"] == "booking@lotos.ru" and by_name["Лотос"]["email_source"] == "сайт"
-    assert by_name["Магазин шин"]["email"] == "" and by_name["Магазин шин"]["fit"] == 0
+    assert by_name["Магазин шин"]["email"] == "" and by_name["Магазин шин"]["fit"] is None
     assert view["counts"] == {"found": 3, "with_email": 2, "fit": 2, "ready": 2}
 
 
@@ -264,7 +264,7 @@ def test_found_companies_are_judged_against_the_chosen_company(env):
     new_job()
     asyncio.run(search.run_job("j1", "салон", "sochi", None, BRIEF))
     judged = [p for p in env.prompts if "Найденная организация" in p]
-    assert len(judged) == 3
+    assert len(judged) == 2  # avoid paying for LLM calls for leads without email
     assert all("Студия маникюра в Сочи" in p and "Отели рядом" in p and "Маникюр" in p for p in judged)
     assert all("profile_source" not in p for p in judged)
 
@@ -400,3 +400,160 @@ def test_background_draft_is_written_on_behalf_of_the_campaigns_company(env, mon
     assert "Студия маникюра в Сочи" in prompts[0] and "servgo_offer" not in prompts[0]
     with owner_mail.db_open() as db:
         assert db.execute("SELECT status FROM campaign_recipient").fetchone()["status"] == "review"
+
+
+def test_requested_count_means_suitable_email_leads_not_any_email(env):
+    serve_two_firms(env)
+    # The first company has a public email but is not a potential customer.
+    env.routes[search.firm_url("sochi", "1")] = (
+        200, firm_page("1", "Магазин шин", CONTACTS_FULL, rubrics=("Шины",)))
+    new_job(want=1)
+    asyncio.run(search.run_job("j1", "салон", "sochi", 1))
+    with owner_mail.db_open() as db:
+        view = search._view(db, "j1")
+    assert view["job"]["status"] == "done"
+    assert len(view["hits"]) == 2
+    assert view["counts"]["ready"] == 1
+    assert search.firm_url("sochi", "3") not in env.asked
+
+
+def test_manual_review_and_selected_import_preserve_unselected_companies(env):
+    serve_two_firms(env)
+    new_job()
+    asyncio.run(search.run_job("j1", "салон", "sochi", None))
+    with owner_mail.db_open() as db:
+        init_campaigns(db)
+    campaign_id = create_campaign(CampaignInput(name="Выбранные"), None)["id"]
+    review = search.review_hit("j1", "1", search.HitReview(fit=False), None)
+    assert next(x for x in review["hits"] if x["firm_id"] == "1")["fit"] == 0
+    result = search.to_campaign("j1", search.ToCampaign(campaign_id=campaign_id, firm_ids=["2"]), None)
+    assert result["added"] == 1 and result["selected"] == 1
+    with owner_mail.db_open() as db:
+        entries = db.execute("SELECT email FROM campaign_recipient").fetchall()
+        untouched = db.execute("SELECT imported FROM search_hit WHERE firm_id='1'").fetchone()
+        imported = db.execute("SELECT imported FROM search_hit WHERE firm_id='2'").fetchone()
+    assert [r["email"] for r in entries] == ["booking@lotos.ru"]
+    assert untouched["imported"] == 0 and imported["imported"] == 1
+
+
+def test_exa_provider_enriches_bounded_websites_without_real_network(env, monkeypatch):
+    monkeypatch.setenv("EXA_API_KEY", "test-exa-not-real")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    class ExaResponse:
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"results": [
+                {"url": "https://lotos.ru", "title": "Лотос"},
+                {"url": "https://lotos.ru/about", "title": "Лотос — о нас"},
+                {"url": "https://mint-studio.ru", "title": "Мята"}]}
+
+    class ExaClient:
+        def __init__(self, **_):
+            self.calls = []
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            return None
+        async def post(self, url, *, headers, json):
+            assert url == "https://api.exa.ai/search"
+            assert headers["x-api-key"] == "test-exa-not-real"
+            assert json["numResults"] <= 50
+            return ExaResponse()
+
+    monkeypatch.setattr(search.httpx, "AsyncClient", ExaClient)
+    new_job()
+    with owner_mail.db_open() as db:
+        db.execute("UPDATE search_job SET provider='exa' WHERE id='j1'")
+    asyncio.run(search.run_exa_job("j1", "салон", "Сочи", None))
+    with owner_mail.db_open() as db:
+        view = search._view(db, "j1")
+    assert view["job"]["status"] == "done"
+    assert len(view["hits"]) == 2
+    assert all(r["source"] == "Exa" for r in view["hits"])
+    assert view["counts"]["ready"] == 2
+
+
+def test_jev_typed_lead_decisions_and_conservative_uncertainty(env, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "mock-openrouter-key")
+    monkeypatch.setenv("SERVGO_MAIL_USE_JEV", "true")
+    monkeypatch.delenv("SERVGO_MAIL_JEV_FALLBACK_TO_HUB", raising=False)
+    ratings = [0.94, 0.51, 0.12]
+    requests = []
+
+    class Reply:
+        def __init__(self, value):
+            self.value = value
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"answers": {"fit": {"type": "noul", "noul": self.value}}}
+
+    class JevClient:
+        def __init__(self, **kwargs):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            return None
+        async def post(self, url, **kwargs):
+            assert url == "https://openrouter.ai/api/alpha/decisions"
+            assert kwargs["headers"]["Authorization"] == "Bearer mock-openrouter-key"
+            assert kwargs["json"]["questions"]["fit"]["type"] == "noul"
+            requests.append(kwargs["json"])
+            return Reply(ratings.pop(0))
+
+    monkeypatch.setattr(search.httpx, "AsyncClient", JevClient)
+    candidate = {"name": "Отель", "rubrics": ["Гостиницы"], "address": "Сочи",
+                 "rating": None, "website": "https://example.org"}
+    outcomes = [asyncio.run(search.judge(candidate, BRIEF)) for _ in range(3)]
+    assert [value for value, _ in outcomes] == [1, None, 0]
+    assert len(requests) == 3
+    assert all("candidate" in x["state"] and "our_company" in x["state"] for x in requests)
+    assert not env.prompts, "Jev results must not trigger a generative per-lead judge"
+
+
+def test_jev_never_runs_by_default_even_if_openrouter_is_configured(env, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "configured-for-other-service")
+    monkeypatch.delenv("SERVGO_MAIL_USE_JEV", raising=False)
+    monkeypatch.setattr(search.httpx, "AsyncClient", FakeClient)
+    value, reason = asyncio.run(search.judge({
+        "name": "Мята", "rubrics": ["Салоны красоты"], "address": "Сочи",
+        "rating": 4.9, "website": "https://example.org"
+    }, BRIEF))
+    assert value == 1 and reason
+    assert env.prompts and not FakeClient.asked
+
+
+def test_unrecognised_2gis_payload_is_not_reported_as_empty_success():
+    payload = page({"data": {"search": {"profile": {"x": {"data": {"pages": 1, "total": 5}}}}}})
+    with pytest.raises(search.Blocked):
+        search.parse_search_page(payload, 1)
+    payload = page({"data": {"search": {
+        "profile": {"x": {"data": {"pages": 1, "total": 5}}},
+        "pagination": {"x": {"1": {"data": []}}}
+    }}})
+    with pytest.raises(search.Blocked):
+        search.parse_search_page(payload, 1)
+
+
+def test_2gis_first_page_404_does_not_look_like_success(env):
+    new_job()
+    asyncio.run(search.run_job("j1", "салон", "sochi", None))
+    with owner_mail.db_open() as db:
+        view = search._view(db, "j1")
+    assert view["job"]["status"] == "blocked"
+    assert "404" in view["job"]["message"]
+
+
+def test_missing_email_is_kept_without_paying_for_ai(env):
+    serve_two_firms(env)
+    new_job()
+    asyncio.run(search.run_job("j1", "салон", "sochi", None))
+    with owner_mail.db_open() as db:
+        view = search._view(db, "j1")
+    no_email = next(x for x in view["hits"] if x["name"] == "Магазин шин")
+    assert no_email["fit"] is None
+    assert "Email не найден" in no_email["fit_reason"]
+    assert len(env.prompts) == 2

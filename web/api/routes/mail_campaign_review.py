@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .mail_campaign_api import campaign
+from .mail_campaign_dispatch import sender_for_campaign
 from .mail_campaign_store import audit, initialize, utcnow
 from .owner_mail import db_open, mail_owner
 
@@ -25,6 +26,7 @@ class EditedMessage(BaseModel):
 
 class CampaignLaunch(BaseModel):
     start_at: datetime | None = None
+    legal_basis_confirmed: bool = False
 
 
 class ReplyTag(BaseModel):
@@ -100,11 +102,16 @@ def launch(campaign_id: str, details: CampaignLaunch, _=Depends(mail_owner)):
     if when and when.tzinfo is None:
         raise HTTPException(422, "Время должно включать часовой пояс")
     start_at = when.astimezone(timezone.utc).isoformat() if when else ""
+    if not details.legal_basis_confirmed:
+        raise HTTPException(422, "Подтвердите законное основание связи с выбранными адресатами")
     with db_open() as db:
         initialize(db)
         c = campaign(db, campaign_id)
         if c["status"] not in ("draft", "paused"):
             raise HTTPException(409, "Кампания уже запущена или завершена")
+        if c["company_id"] and not sender_for_campaign(c["company_id"])[0]:
+            raise HTTPException(409, "Для этой организации не подтверждён адрес отправителя. "
+                                "Настройте SERVGO_MAIL_COMPANY_SENDERS на сервере")
         approved = db.execute(
             "SELECT count(*) FROM campaign_recipient "
             "WHERE campaign_id=? AND status='approved'", (campaign_id,),
@@ -115,6 +122,7 @@ def launch(campaign_id: str, details: CampaignLaunch, _=Depends(mail_owner)):
             "UPDATE campaign SET status='running',not_before=?,updated_at=? WHERE id=?",
             (start_at, utcnow(), campaign_id),
         )
+        audit(db, campaign_id, "legal_basis_confirmed_by_owner")
         audit(db, campaign_id, "launched", info=start_at)
     return {"status": "running", "approved": approved}
 

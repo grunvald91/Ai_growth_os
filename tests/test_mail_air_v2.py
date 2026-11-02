@@ -65,6 +65,7 @@ class MailAirV2ContractTests(unittest.TestCase):
             self.assertIn(key, parsed.ids)
         self.assertIn('fetch("/api"+path', source)
         self.assertIn('confirm("Отправить письмо на "', source)
+        self.assertIn('$("compose").onclick = () => openCompose(state.replyFull ?', source)
         for key in ('data-tab="inbox"', 'data-tab="outbox"',
                     'data-tab="drafts"', 'data-tab="prospects"'):
             self.assertIn(key, source)
@@ -86,6 +87,42 @@ class MailAirV2ContractTests(unittest.TestCase):
         self.assertIn("safe-area-inset-bottom", css)
         self.assertIn("focus-visible", css)
 
+
+    def test_v3_bottom_navigation_is_consistent_and_contacts_are_nested(self):
+        inbox, campaigns = self.pages()
+        for _name, _parsed, source in (inbox, campaigns):
+            self.assertIn('class="mail-v3-dock"', source)
+            self.assertIn('href="/api/campaigns-dashboard#search"', source)
+            self.assertIn('href="/api/campaigns-dashboard#campaigns"', source)
+            self.assertIn('href="/api/mailbox-dashboard#inbox"', source)
+            self.assertIn('class="mail-v3-nav" aria-label="Разделы почты"', source)
+        self.assertIn('aria-label="Папки почты"', inbox[2])
+        self.assertNotIn('>Контакты</a>', inbox[2])
+        self.assertIn('id="search-campaign"', campaigns[2])
+        self.assertIn('id="search-dialog" class="mail-v3-search" hidden', campaigns[2])
+        self.assertEqual(campaigns[2].count('id="search-suggest"'), 1)
+        self.assertIn('id="campaign-action-dock"', campaigns[2])
+        self.assertNotIn('el("search-dialog").showModal()', campaigns[2])
+
+    def test_v4_search_and_send_safety_controls(self):
+        _inbox, campaigns = self.pages()
+        _, parsed, source = campaigns
+        for key in ("search-provider", "search-history", "search-create-campaign",
+                    "search-resume", "search-campaign", "campaign-automation-summary"):
+            self.assertIn(key, parsed.ids)
+        self.assertIn('firm_ids:[...found.picks]', source)
+        self.assertIn('legal_basis_confirmed:true', source)
+        self.assertIn('function loadHistory()', source)
+        self.assertIn('function loadSearchProviders()', source)
+        self.assertIn('search-review-yes', source)
+        self.assertIn('search-review-no', source)
+
+    def test_v3_controls_live_at_the_bottom(self):
+        css = (ROOT / "servgo-mail-air.css").read_text(encoding="utf-8")
+        self.assertIn(".mail-v3-dock {position:fixed;bottom:0", css)
+        self.assertIn(".mail-v3-search-actions {position:fixed", css)
+        self.assertIn(".mail-v3-actionbar #compose {display:inline-flex!important", css)
+        self.assertIn("safe-area-inset-bottom", css)
 
 if __name__ == "__main__":
     unittest.main()

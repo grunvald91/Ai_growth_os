@@ -153,11 +153,18 @@ class MailPwaTests(unittest.TestCase):
         self.assertIn('fetch("/api/owner-mail/api/company-search"+path', campaigns)
         self.assertIn('href="/api/owner-mail/workspace/mailbox#compose"', campaigns)
         self.assertIn('fetch("/api/owner-mail/api"+path', mailbox)
-        self.assertIn('href="/api/owner-mail/workspace"', mailbox)
+        # The three bottom tabs use explicit hashes, including campaigns.
+        self.assertIn('href="/api/owner-mail/workspace#campaigns"', mailbox)
+        for page in (campaigns, mailbox):
+            self.assertIn('href="/api/owner-mail/workspace#search"', page)
+            self.assertIn('href="/api/owner-mail/workspace#campaigns"', page)
+            self.assertIn('href="/api/owner-mail/workspace/mailbox#inbox"', page)
+            self.assertNotIn('href="/api/owner-mail/api/campaigns-dashboard#', page)
         self.assertIn('location.replace("/mail")', mailbox)
         self.assertNotIn('fetch("/api"+path', mailbox)
         self.assertNotIn('href="/api/mailbox-dashboard', campaigns)
         for page in (campaigns, mailbox):
+            self.assertGreater(page.index('<nav class="sg-pwa-workspace-nav"'), page.index('<div class="mail-v3-popover-content">'))
             self.assertIn("Выйти из почты", page)
             self.assertIn('href="/workspace/growth"', page)
             self.assertIn('href="/admin"', page)

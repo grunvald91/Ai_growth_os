@@ -77,6 +77,7 @@ test('admin mail item requires server-confirmed platform owner permission', () =
   assert.match(admin, /fetch\('\/api\/owner-mail\/permission'/)
   assert.match(admin, /res\.ok && \(await res\.json\(\)\)\.allowed === true/)
   assert.match(admin, /mailAllowed && <OwnerMailEntry/)
-  assert.match(admin, /MORE\.filter\(item => mailAllowed \|\| item\.to !== '\/mail'\)/)
+  assert.match(admin, /to: '\/workspace\/mail', label: 'Почта ServGo'/)
+  assert.match(admin, /MORE\.filter\(item => mailAllowed \|\| item\.to !== '\/workspace\/mail'\)/)
   assert.doesNotMatch(admin, /localStorage\.getItem\('userRole'\).*mailAllowed/)
 })

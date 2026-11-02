@@ -29,7 +29,7 @@ const MORE = [
   { to: '/admin/subscriptions', label: 'Абонементы', Icon: Repeat },
   { to: '/admin/sales/settings', label: 'ИИ-продавец', Icon: Bot },
   { to: '/admin/settings', label: 'Настройки', Icon: Settings },
-  { to: '/mail', label: 'Почта ServGo', Icon: Mail },
+  { to: '/workspace/mail', label: 'Почта ServGo', Icon: Mail },
 ]
 
 /**
@@ -134,7 +134,7 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout, mailAllowed = fal
           ))}
           {/* Десктоп: все разделы сразу в боковом меню, без «Ещё» — любой экран в один клик. */}
           <div className="ds-bn-group ds-desk-only">Управление</div>
-          {MORE.filter(item => mailAllowed || item.to !== '/mail').map(({ to, label, Icon }) => (
+          {MORE.filter(item => mailAllowed || item.to !== '/workspace/mail').map(({ to, label, Icon }) => (
             <Link key={to} to={to} className={`ds-bn ds-desk-only${pathname === to ? ' active' : ''}`}>
               <Icon size={21} />
               <span>{label}</span>
@@ -164,7 +164,7 @@ export function AdminBottomNav({ theme, toggleTheme, onLogout, mailAllowed = fal
                 <button className="ds-icon-btn" onClick={() => setMoreOpen(false)} aria-label="Закрыть"><X size={18} /></button>
               </div>
               <nav className="ds-more-list">
-                {MORE.filter(item => mailAllowed || item.to !== '/mail').map(({ to, label, Icon }) => (
+                {MORE.filter(item => mailAllowed || item.to !== '/workspace/mail').map(({ to, label, Icon }) => (
                   <Link key={to} to={to} onClick={() => setMoreOpen(false)} className={`ds-more-item${pathname === to ? ' active' : ''}`}>
                     <Icon size={20} /><span>{label}</span><ChevronRight size={17} className="ds-more-chev" />
                   </Link>
