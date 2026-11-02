@@ -82,6 +82,19 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || needs.test.outputs.sha }}
           fetch-depth: 0  # the drift check compares against the commit's history
+      # One-time additive migration: the code changes and the new 0011 schema must
+      # reach production together. Only a successfully tested main commit may do it.
+      - name: Detect SEO opt-in migration in this release
+        id: seo-migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --name-only HEAD^ HEAD | grep -Fxq 'alembic/versions/0011_seo_factory_opt_in.py'; then
+            test -f alembic/versions/0011_seo_factory_opt_in.py
+            echo "prepare=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prepare=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Skip older commits when a newer main CI is running
         if: github.event_name == 'workflow_run'
         id: freshness
@@ -106,11 +119,11 @@ jobs:
           # SHA256 fingerprint of the server host key, pinned like the booking_bot workflows.
           HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
           SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || needs.test.outputs.sha }}
-          PREPARE: ${{ github.event_name == 'workflow_dispatch' && inputs.prepare && 'true' || 'false' }}
+          PREPARE: ${{ ((github.event_name == 'workflow_dispatch' && inputs.prepare) || (github.event_name == 'workflow_run' && steps.seo-migration.outputs.prepare == 'true')) && 'true' || 'false' }}
         run: |
           set -euo pipefail
           install -m 700 -d ~/.ssh
-          if [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+          if [ "$PREPARE" != "true" ] && [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
             [ "$PREPARE" != "true" ] || { echo "::error::The preparation needs the password path, not the restricted key"; exit 1; }
             # Preferred: the key's forced command only allows "deploy <sha>" or "rollback".
             printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
@@ -134,6 +147,10 @@ jobs:
           SSH_OPTS=(-o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ControlMaster=auto
                     -o ControlPath=/tmp/ssh-growth-%C -o ControlPersist=600)
           run() { sshpass -e ssh "${SSH_OPTS[@]}" "root@$HOST" "$@"; }
+          # Read-only: owner-tuned editorial rules take precedence over code defaults.
+          # Never print actual prompt text (it may contain private company context).
+          # Refuse to migrate while known obsolete quotas remain active in overrides.
+          run "docker exec ai-growth-os-api-1 python -c 'from app.prompts import read_state; p=read_state().get(\"prompts\", {}); keys=sorted(k for k in p if k.startswith((\"article.\", \"critic.marketing\"))); strict=sorted(k for k in keys if any(term in str(p[k].get(\"text\", \"\")).casefold() for term in (\"не меньше 2000 символов\", \"не меньше 4 разделов\", \"800–1500 символов\", \"один короткий абзац\"))); print(\"editorial_override_keys\", keys); print(\"obsolete_editorial_rules\", strict); raise SystemExit(1 if strict else 0)'"
           # Drift check: refuse if the running code has files not in this commit's history.
           run "docker exec ai-growth-os-api-1 sh -c 'cd /app && find app products -type f \( -name \"*.py\" -o -name \"*.json\" -o -name \"*.md\" -o -name \"*.html\" -o -name \"*.css\" -o -name \"*.js\" \) ! -path \"*/__pycache__/*\" -exec sha256sum {} +'" > running.txt
           python3 - "$SHA" <<'PY2'
@@ -167,3 +184,20 @@ jobs:
           git archive --format=tar.gz "$SHA" app alembic/versions pyproject.toml products \
             | run "python3 /opt/ai_growth_os/deploy/deploy_growth.py deploy $SHA"
           run "docker ps --filter label=com.docker.compose.project=ai-growth-os --format '{{.Names}} {{.Image}} {{.Status}}'; curl -s -o /dev/null -w 'health %{http_code}\n' http://127.0.0.1:8091/health"
+          # Single-use canary only on the release that introduced 0011.
+          # An ephemeral test company is published, checked through the live
+          # local HTTP server, and fully deleted (even if the smoke test fails).
+          if [ "${{ steps.seo-migration.outputs.prepare }}" = "true" ]; then
+            if ! git show "$SHA:deploy/ops/20261102/seo_smoke_publish.py" \
+              | run "docker exec -i ai-growth-os-api-1 python - --execute"; then
+              echo "::error::SEO production canary failed; restoring previous application."
+              run "python3 /opt/ai_growth_os/deploy/deploy_growth.py rollback" || true
+              exit 1
+            fi
+            if ! run "curl -fsS --max-time 15 --resolve servgo.ru:443:127.0.0.1 -o /dev/null https://servgo.ru/blog && curl -fsS --max-time 15 --resolve servgo.ru:443:127.0.0.1 -o /dev/null https://servgo.ru/blog/sitemap.xml && curl -fsS --max-time 15 --resolve growth.servgo.ru:443:127.0.0.1 -o /dev/null https://growth.servgo.ru/public/blog/servgo/articles"; then
+              echo "::error::Public HTTPS blog check failed; restoring previous application."
+              run "python3 /opt/ai_growth_os/deploy/deploy_growth.py rollback" || true
+              exit 1
+            fi
+            echo "SEO_RELEASE_SMOKE_OK (temporary company removed)"
+          fi

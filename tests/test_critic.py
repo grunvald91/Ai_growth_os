@@ -504,8 +504,14 @@ async def test_marketing_materials_get_reader_and_sales_focused_critic(task_type
     author_prompt = provider.requests[2].system_prompt
     assert ("ПОЛЬЗА" in critic_prompt and "ЗАХОД" in critic_prompt
             and "ПРИЗЫВ" in critic_prompt) is marketing
-    assert ("ignore cosmetic" in critic_prompt) is not marketing
-    assert ("remove hedging" in author_prompt) is marketing
+    if marketing:
+        assert "Не навязывай длину" in critic_prompt
+        assert "Игнорируй косметические предпочтения" in critic_prompt
+        assert "Preserve the article's natural pace" in author_prompt
+        assert "Keep necessary qualifiers" in author_prompt
+    else:
+        assert "ignore cosmetic" in critic_prompt
+        assert "Keep necessary qualifiers" not in author_prompt
 
 
 def test_descriptive_finding_ids_are_accepted():

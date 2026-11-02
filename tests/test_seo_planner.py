@@ -10,6 +10,7 @@ from app.models.domain import Product, Task, TaskStatus
 from app.privacy import PrivacyGateway
 from app.seo.contracts import QueryCluster, SemanticCore, SeoContentPlan, SourceStatus
 from app.seo.planner import PlanError, plan_content, plan_seeds, validate_plan
+from app.seo.activation import set_enabled
 
 
 class Provider:
@@ -70,6 +71,7 @@ def product(db, tmp_path):
     row = Product(name="ServGo", slug="servgo")
     db.add(row)
     db.commit()
+    set_enabled(db, row.id, enabled=True, actor='test-owner')
     products = tmp_path / "products" / "servgo"
     products.mkdir(parents=True)
     (products / ".claude").mkdir()

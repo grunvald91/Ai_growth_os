@@ -451,21 +451,30 @@ async def make_plan(ctx: Context, params) -> Outcome:
 
 
 async def describe_seo_factory(ctx: Context, params) -> Outcome | Confirmation:
+    from app.seo.activation import is_enabled
+    if not is_enabled(ctx.db, ctx.product.id):
+        href = f"/studio/products/{ctx.product.id}/seo"
+        return Outcome("SEO-завод для этой компании выключен. Подключите его кнопкой в разделе SEO-завод.",
+                       "SEO-завод выключен. Подключите его в настройках компании.",
+                       [{"type": "links", "items": [{"label": "Подключить SEO-завод", "href": href}]}], ok=False)
     focus = getattr(params, "focus", None)
+    horizon_days = getattr(params, "horizon_days", 7)
     return Confirmation(
         title="Запустить SEO-завод?",
         details=([f"Фокус: {focus}."] if focus else []) + [
+            "План на месяц (30 дней)." if horizon_days == 30 else "План на неделю (7 дней).",
             "Команда соберёт реальные запросы клиентов из подсказок Яндекса и Google.",
             "Составит контент-план статей под воронку и поставит статьи в работу.",
             "Каждая статья проверяется критиком; чистые статьи сразу выходят в блог, остальные ждут вас.",
             "Это много обращений к ИИ: чем больше статей в плане, тем дольше и дороже."],
-        params={"focus": focus}, paid=True, confirm_label="Запустить")
+        params={"focus": focus, "horizon_days": horizon_days}, paid=True, confirm_label="Запустить")
 
 
 async def confirm_seo_factory(ctx: Context, stored: dict, via: str) -> Outcome:
     from app.seo.factory import queue_factory
     try:
-        task = queue_factory(ctx.db, ctx.product.id, stored.get("focus"))
+        task = queue_factory(ctx.db, ctx.product.id, stored.get("focus"),
+                             horizon_days=stored.get("horizon_days", 7))
     except LookupError:
         ctx.db.rollback()
         return Outcome("Компания не найдена.", ok=False)

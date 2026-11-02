@@ -16,6 +16,7 @@ from app.dispatcher.registry import CAPABILITIES
 from app.llm.schemas import LLMResponse, LLMUsage
 from app.models.domain import Artifact, Product, Task, TaskStatus
 from app.seo.factory import queue_factory, run_factory_once
+from app.seo.activation import set_enabled
 from app.workflows.article_contracts import ArticleProductionInput
 
 
@@ -66,6 +67,7 @@ def env(tmp_path):
         db.add(product)
         db.commit()
         product_id = product.id
+        set_enabled(db, product_id, enabled=True, actor='fixture-owner')
     yield factory, Settings(products_root=tmp_path / "products"), product_id
     engine.dispose()
 
@@ -102,6 +104,48 @@ async def test_factory_turns_company_profile_into_queued_search_articles(env):
 
 
 @pytest.mark.asyncio
+async def test_one_factory_launch_queues_full_plan_without_three_article_cap(env):
+
+    class SeveralTopics(Provider):
+        async def generate(self, request):
+            if request.metadata["team_role"] == "semantic_researcher":
+                return await super().generate(request)
+            self.requests.append(request)
+            clusters = json.loads(request.messages[0].content)["clusters"][:5]
+            assert len(clusters) >= 4
+            items = [
+                dict(id=f"a{index:03d}", cluster_ids=[cluster["id"]],
+                     primary_query=cluster["queries"][0],
+                     working_title=f"Полезная статья по вопросу номер {index}",
+                     stage=cluster["stage"], intent=cluster["intent"],
+                     reader_problem="Выбрать нужную услугу и понять процесс",
+                     ai_questions=["Что важно знать перед записью?"],
+                     next_step="Посмотреть каталог услуг компании")
+                for index, cluster in enumerate(clusters, 1)
+            ]
+            return LLMResponse(content=json.dumps({"items": items}, ensure_ascii=False),
+                               model="fake", usage=LLMUsage(), stop_reason="end_turn")
+
+    factory, settings, product_id = env
+    with factory() as db:
+        queue_factory(db, product_id)
+    assert await run_factory_once(factory, settings, provider=SeveralTopics(), client=suggest_client()) == 1
+    with factory() as db:
+        jobs = list(db.scalars(select(Task).where(
+            Task.product_id == product_id, Task.title.like("SEO-ARTICLE:%"))))
+        assert len(jobs) >= 4
+        from collections import Counter
+        from app.seo.schedule import day
+        assert all(job.due_at is not None for job in jobs)
+        assert max(Counter(day(job.due_at) for job in jobs).values()) <= 3
+        report = db.scalar(select(Artifact).where(Artifact.kind == "seo_factory_report"))
+        summary = json.loads(report.content)
+        assert summary["articles_queued"] == len(jobs)
+        assert summary["articles_deferred"] == 0
+        assert summary["planning_horizon_days"] == 7
+
+
+@pytest.mark.asyncio
 async def test_search_engines_down_stops_honestly_without_article_tasks(env):
     factory, settings, product_id = env
     with factory() as db:
@@ -121,12 +165,17 @@ async def test_dispatcher_always_asks_first_and_queues_only_after_confirmation(e
     assert verdict(capability.operation, capability.cost) == Verdict.CONFIRM_FIRST
     with factory() as db:
         ctx = Context(db=db, product=db.get(Product, product_id), settings=settings, account="owner")
-        card = await executors.DESCRIBERS["seo_factory"](ctx, capability.params(focus="парикмахерские"))
+        card = await executors.DESCRIBERS["seo_factory"](ctx, capability.params(focus="парикмахерские", horizon_days=30))
         assert isinstance(card, Confirmation) and card.paid and "парикмахерские" in card.details[0]
+        assert card.params["horizon_days"] == 30
+        assert any("месяц" in line for line in card.details)
         assert not list(db.scalars(select(Task).where(Task.assigned_agent == "seo_factory")))
         outcome = await executors.CONFIRMERS["seo_factory"](ctx, card.params, "text")
         assert outcome.ok and outcome.task_id
         assert db.get(Task, outcome.task_id).assigned_agent == "seo_factory"
+        monthly = db.scalar(select(Artifact).where(
+            Artifact.task_id == outcome.task_id, Artifact.kind == "seo_factory_request"))
+        assert json.loads(monthly.content)["horizon_days"] == 30
 
 
 # ---- daily limit of blog articles and light mode ----------------------------------------------------
@@ -172,6 +221,7 @@ def test_only_todays_moscow_day_counts_and_failed_attempts_count(env):
 @pytest.mark.asyncio
 async def test_worker_leaves_blog_articles_for_tomorrow_after_the_daily_limit(env, monkeypatch):
     factory, settings, product_id = env
+    settings = settings.model_copy(update={"seo_articles_per_day": 3})
     ran = []
 
     class Fake:
@@ -179,7 +229,7 @@ async def test_worker_leaves_blog_articles_for_tomorrow_after_the_daily_limit(en
             ran.append(data.seo_brief.plan_item_id if data.seo_brief else None)
             return SimpleNamespace(status="failed", artifact_ids=[])
 
-    monkeypatch.setattr(worker, "build_article_production", lambda db, settings: Fake())
+    monkeypatch.setattr(worker, "build_article_production", lambda db, settings, **kwargs: Fake())
     brief = dict(plan_item_id="a009", primary_query="запись клиентов", stage="awareness", intent="informational",
                  reader_problem="Мастер теряет клиентов.", ai_questions=["как вести запись"], next_step="Онлайн-запись")
     with factory() as db:
@@ -200,6 +250,7 @@ async def test_worker_leaves_blog_articles_for_tomorrow_after_the_daily_limit(en
 @pytest.mark.asyncio
 async def test_daily_limit_is_per_company(env, monkeypatch):
     factory, settings, product_id = env
+    settings = settings.model_copy(update={"seo_articles_per_day": 3})
     ran = []
 
     class Fake:
@@ -207,7 +258,7 @@ async def test_daily_limit_is_per_company(env, monkeypatch):
             ran.append(str(data.product_id))
             return SimpleNamespace(status="failed", artifact_ids=[])
 
-    monkeypatch.setattr(worker, "build_article_production", lambda db, settings: Fake())
+    monkeypatch.setattr(worker, "build_article_production", lambda db, settings, **kwargs: Fake())
     brief = dict(plan_item_id="a010", primary_query="ремонт обуви", stage="awareness", intent="informational",
                  reader_problem="Клиент не знает, где починить обувь.", ai_questions=["где починить обувь"],
                  next_step="Записаться в мастерскую")
@@ -215,6 +266,7 @@ async def test_daily_limit_is_per_company(env, monkeypatch):
         other = Product(name="Мастерская", slug="shoes")
         db.add(other)
         db.commit()
+        set_enabled(db, other.id, enabled=True, actor="fixture-owner")
         for key in "abc":
             seo_task(db, product_id, key, TaskStatus.COMPLETED, datetime.now(timezone.utc))
         waiting = seo_task(db, other.id, "x", TaskStatus.QUEUED)
@@ -266,8 +318,8 @@ async def test_factory_resumes_committed_plan_without_new_llm_calls(env, monkeyp
     original = module.queue_plan
     with factory() as db:
         task_id = queue_factory(db, product_id).id
-    def interrupted(db, plan, clusters):
-        original(db, plan, clusters)
+    def interrupted(db, plan, clusters, **kwargs):
+        original(db, plan, clusters, **kwargs)
         raise RuntimeError("interrupted after queue commit")
     monkeypatch.setattr(module, "queue_plan", interrupted)
     await run_factory_once(factory, settings, provider=Provider(), client=suggest_client())
@@ -282,3 +334,60 @@ async def test_factory_resumes_committed_plan_without_new_llm_calls(env, monkeyp
     with factory() as db:
         assert db.get(Task, task_id).status == TaskStatus.COMPLETED
         assert len(list(db.scalars(select(Task).where(Task.title.like("SEO-ARTICLE:%"))))) == 1
+
+
+def test_servgo_autoschedule_weekly_and_off_by_default(env):
+    from datetime import datetime, timedelta, timezone
+    from app.seo.autoschedule import enqueue_servgo_if_due
+
+    factory, settings, product_id = env
+    now = datetime.now(timezone.utc)
+    enabled = settings.model_copy(update={"seo_servgo_autorun_enabled": True})
+    with factory() as db:
+        assert not enqueue_servgo_if_due(db, settings, now=now)
+        assert enqueue_servgo_if_due(db, enabled, now=now)
+        assert not enqueue_servgo_if_due(db, enabled, now=now)
+        task = db.scalar(select(Task).where(Task.assigned_agent == "seo_factory"))
+        task.status = TaskStatus.COMPLETED
+        db.add(Task(product_id=product_id, title="SEO-ARTICLE:backlog",
+                    assigned_agent="content_factory", status=TaskStatus.QUEUED))
+        db.commit()
+        assert not enqueue_servgo_if_due(db, enabled, now=now + timedelta(days=6))
+        assert enqueue_servgo_if_due(db, enabled, now=now + timedelta(days=8))
+
+
+def test_servgo_autoschedule_honors_owner_opt_out(env):
+    from datetime import datetime, timezone
+    from app.seo.autoschedule import enqueue_servgo_if_due
+    from app.seo.activation import set_enabled
+
+    factory, settings, product_id = env
+    enabled = settings.model_copy(update={"seo_servgo_autorun_enabled": True})
+    with factory() as db:
+        set_enabled(db, product_id, enabled=False, actor="owner")
+        assert not enqueue_servgo_if_due(db, enabled, now=datetime.now(timezone.utc))
+
+
+def test_monthly_factory_request_preserves_horizon(env):
+    factory, _, product_id = env
+    with factory() as db:
+        task = queue_factory(db, product_id, "CRM для салона", horizon_days=30)
+        artifact = db.scalar(select(Artifact).where(
+            Artifact.task_id == task.id, Artifact.kind == "seo_factory_request"))
+        assert json.loads(artifact.content) == {
+            "focus": "CRM для салона", "horizon_days": 30,
+        }
+
+
+def test_seo_article_forces_critic_without_enabling_global_reviews(env):
+    from app.core.composition import build_article_production
+
+    factory, settings, _product_id = env
+    assert settings.agent_critic_enabled is False
+    with factory() as db:
+        general = build_article_production(db, settings, provider=Provider())
+        seo = build_article_production(db, settings, provider=Provider(), force_critic=True)
+        # SEO review should remain compulsory, but general article production
+        # must not incur extra critic calls when the global flag is disabled.
+        assert general.llm.extra_timeout_seconds == 0
+        assert seo.llm.extra_timeout_seconds > 0

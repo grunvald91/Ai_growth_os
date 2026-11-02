@@ -21,7 +21,7 @@ class Contract(BaseModel):
 
 class FaqItem(Contract):
     question: ShortText
-    answer: Annotated[str, Field(min_length=40, max_length=1500)]
+    answer: Annotated[str, Field(min_length=1, max_length=4000)]
 
 
 class SeoBrief(Contract):
@@ -65,16 +65,16 @@ class ArticleStrategy(Contract):
     pain: Text
     search_intent: Text
     angle: Text
-    titles: list[ShortText] = Field(min_length=2, max_length=5)
+    titles: list[ShortText] = Field(min_length=1, max_length=8)
     hypothesis: Text
 
 
 class SEOPlan(Contract):
     primary_query: ShortText
-    related_queries: list[ShortText] = Field(min_length=1, max_length=10)
+    related_queries: list[ShortText] = Field(default_factory=list, max_length=10)
     title: ShortText
     hook: Text
-    outline: list[Text] = Field(min_length=3, max_length=15)
+    outline: list[Text] = Field(min_length=1, max_length=20)
     adaptation_notes: Text
 
 
@@ -104,26 +104,14 @@ class ArticleBodySection(Contract):
 
 
 class ArticleBodyDraft(Contract):
-    sections: list[ArticleBodySection] = Field(min_length=4, max_length=20)
-    proof_needed_notes: list[Text] = Field(min_length=1, max_length=20)
-
-    @model_validator(mode='after')
-    def long_form(self):
-        if sum(len(section.body) for section in self.sections) < 2000:
-            raise ValueError('A full long-form article requires at least 2000 body characters')
-        return self
+    sections: list[ArticleBodySection] = Field(min_length=1, max_length=25)
+    proof_needed_notes: list[Text] = Field(default_factory=list, max_length=20)
 
 
 class ArticleDraft(Contract):
-    sections: list[ArticleSection] = Field(min_length=4, max_length=25)
+    sections: list[ArticleSection] = Field(min_length=1, max_length=25)
     claims: list[GroundedClaim] = Field(default_factory=list, max_length=30)
-    proof_needed_notes: list[Text] = Field(min_length=1, max_length=20)
-
-    @model_validator(mode='after')
-    def long_form(self):
-        if sum(len(section.body) for section in self.sections) < 2000:
-            raise ValueError('A full long-form article requires at least 2000 body characters')
-        return self
+    proof_needed_notes: list[Text] = Field(default_factory=list, max_length=20)
 
 
 class ReaderSection(Contract):
@@ -142,19 +130,17 @@ class HumanEditedArticle(Contract):
     title: ShortText
     lead: Text
     fact_renderings: list[RenderedFact] = Field(default_factory=list, max_length=30)
-    sections: list[ReaderSection] = Field(min_length=4, max_length=20)
+    sections: list[ReaderSection] = Field(min_length=1, max_length=25)
     closing: Text
     editorial_notes: list[Text] = Field(default_factory=list, max_length=10)
     # Search and AI-assistant surface: a short self-contained answer and real questions with answers.
-    direct_answer: Annotated[str, Field(min_length=40, max_length=1200)] | None = None
+    direct_answer: Annotated[str, Field(min_length=1, max_length=2500)] | None = None
     faq: list[FaqItem] = Field(default_factory=list)
-    meta_description: Annotated[str, Field(min_length=40, max_length=320)] | None = None
+    meta_description: Annotated[str, Field(min_length=1, max_length=1000)] | None = None
 
     @model_validator(mode='after')
     def readable_long_form(self):
         body = '\n'.join([self.lead, *(s.body for s in self.sections), self.closing])
-        if len(body) < 2500:
-            raise ValueError('Human-facing article must be a complete long-form read')
         forbidden = ('[HYPOTHESIS]', '[ADVICE]', 'proof_needed_notes', 'schema:', 'agent note')
         if any(token.casefold() in body.casefold() for token in forbidden):
             raise ValueError('Internal workflow labels must not leak into reader-facing copy')
@@ -473,7 +459,7 @@ class ArticleArtifact(Contract):
     draft: ArticleDraft
     reader_article: HumanEditedArticle | None = None
     seo_brief: SeoBrief | None = None
-    full_article: str = Field(min_length=2000, max_length=110000)
+    full_article: str = Field(min_length=1, max_length=110000)
     conversion: ConversionPackage
     grounding_policy: Literal[
         'verbatim_product_facts_and_labeled_advice',

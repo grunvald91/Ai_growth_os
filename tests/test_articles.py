@@ -337,7 +337,7 @@ async def test_copied_derivative_hook_is_repaired_before_persistence(db, product
 async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, tmp_path, mutation):
     outputs = valid_outputs()
     if mutation == 'malformed': outputs[0] = 'not json'
-    elif mutation == 'short': outputs[2]['sections'] = outputs[2]['sections'][:1]
+    elif mutation == 'short': outputs[2]['sections'] = []  # Empty sections are invalid; concise ones are not.
     elif mutation == 'missing_cta': del outputs[3]['cta']
     elif mutation == 'missing_measurement': del outputs[3]['measurement']['customer']
     elif mutation == 'fake_claim': outputs[2]['claims'] = [dict(claim='Guaranteed growth', quote='Guaranteed growth', source_id='invented')]
@@ -948,13 +948,15 @@ async def test_editor_prompts_are_commercially_useful_without_weakening_groundin
     by_role = {r.metadata['team_role']: r for r in provider.requests}
     assert 'подтверждённых audience_pains' in by_role['content_strategist'].system_prompt
     assert 'полезный и для поиска, и для продаж' in by_role['seo_editor'].system_prompt
-    assert 'конкретной узнаваемой ситуации' in by_role['human_editor'].system_prompt
-    assert 'Пиши, сокращай' in by_role['human_editor'].system_prompt
-    assert 'СЦЕНА → БОЛЬ → ЦЕНА ПРОБЛЕМЫ' in by_role['marketing_editor'].system_prompt
-    assert 'Юмор — только к месту' in by_role['marketing_editor'].system_prompt
-    assert 'без шуток' in by_role['marketing_editor'].system_prompt
-    assert 'third-party cases' in by_role['marketing_editor'].system_prompt
-    assert 'Write marketing, not an academic paper' in by_role['marketing_editor'].system_prompt
+    # Verify helpful, source-grounded editing, not a mandatory writing template.
+    assert 'интересной и живой' in by_role['human_editor'].system_prompt
+    assert 'не обедняя смысл' in by_role['human_editor'].system_prompt
+    assert 'не по жёсткой формуле' in by_role['marketing_editor'].system_prompt
+    assert 'уместный юмор' in by_role['marketing_editor'].system_prompt
+    assert 'не придумывай цены' in by_role['marketing_editor'].system_prompt
+    assert 'проверяемого источника' in by_role['marketing_editor'].system_prompt
+    assert 'не по жёсткой формуле' in by_role['marketing_editor'].system_prompt
+    assert 'не придумывай цены' in by_role['marketing_editor'].system_prompt
     assert '30-45 seconds' in by_role['video_director'].system_prompt
     from app.llm.timeouts import PROVIDER_TIMEOUT_SECONDS
     assert by_role['marketing_editor'].metadata['provider_timeout_seconds'] == PROVIDER_TIMEOUT_SECONDS
@@ -1074,11 +1076,12 @@ async def test_required_stage_gets_one_repair_attempt_with_the_problem(db, produ
     assert 'rejected by validation' in strategist[1].system_prompt
 
 
-def test_platform_writer_telegram_follows_quick_post_structure():
+def test_platform_writer_supports_natural_telegram_posts_without_forced_lists():
     from app.prompts import text as prompt_text
     rule = prompt_text('article.rules.platform_writer')
-    for required in ('сначала польза', 'TELEGRAM', 'нумерованным списком', '800–1500',
-                     'ровно один призыв', 'без оговорок', 'TOP-LEVEL FORMAT IS MANDATORY'):
+    for required in ('сначала польза', 'TELEGRAM', 'не по обязательным трём-пяти пунктам',
+                     'Длина определяется смыслом', 'Следующий шаг',
+                     'TOP-LEVEL FORMAT IS MANDATORY'):
         assert required in rule
 
 
@@ -1086,10 +1089,13 @@ def test_article_text_chain_rules_are_value_first_and_keep_hard_constraints():
     from app.prompts import text as prompt_text
     rules = {name: prompt_text(f'article.rules.{name}') for name in (
         'content_strategist', 'seo_editor', 'article_writer', 'conversion_editor',
-        'human_editor', 'marketing_editor', 'repurposing_editor')}
-    assert '3–5 приёмов' in rules['content_strategist']
+        'human_editor', 'marketing_editor', 'platform_writer', 'repurposing_editor')}
+    assert 'полезные приёмы' in rules['content_strategist']
     assert 'конкретное действие' in rules['seo_editor']
-    assert 'не меньше 2000 символов' in rules['article_writer']
+    assert 'Не растягивай текст' in rules['article_writer']
+    assert 'история, сравнение' in rules['seo_editor']
+    assert 'не по обязательным трём-пяти пунктам' in rules['platform_writer']
+    assert 'не навязывай списки' in rules['repurposing_editor'].casefold()
     assert 'kind=advice' in rules['article_writer']
     assert 'ровно один призыв' in rules['conversion_editor']
     assert 'ровно по одному' in rules['human_editor']
@@ -1097,4 +1103,46 @@ def test_article_text_chain_rules_are_value_first_and_keep_hard_constraints():
     assert 'ровно один fact_rendering' in rules['marketing_editor']
     assert 'ровно шесть' in rules['repurposing_editor']
     for name in ('human_editor', 'marketing_editor'):
-        assert 'Не придумывай' in rules[name] or 'не как уже работающую' in rules[name]
+        assert 'не придумывай' in rules[name].casefold()
+
+
+
+def test_editorial_contract_allows_short_useful_article_without_invented_proof_gaps():
+    """No arbitrary 2k/2.5k-character or four-section quotas."""
+    from app.workflows.article_contracts import ArticleBodyDraft, ArticleDraft, HumanEditedArticle
+
+    draft = ArticleBodyDraft.model_validate({
+        "sections": [{
+            "heading": "Что важно",
+            "body": "Сначала определите вопрос читателя, а затем предложите проверяемый ответ.",
+            "kind": "advice",
+        }],
+        "proof_needed_notes": [],
+    })
+    assert len(draft.sections) == 1 and draft.proof_needed_notes == []
+    reader = HumanEditedArticle.model_validate({
+        "language": "ru",
+        "title": "Короткий полезный ответ",
+        "lead": "Простой вопрос не требует длинной статьи ради объёма.",
+        "sections": [{
+            "heading": "Как поступить",
+            "body": "Проверьте условия, сравните варианты, задайте точный вопрос.",
+        }],
+        "closing": "Выбирайте решение по своей задаче.",
+        "direct_answer": "Сравните реальные условия.",
+        "meta_description": "Как разобраться без навязанных обещаний.",
+    })
+    assert len(reader.sections) == 1
+    # Complete, concise content is allowed; missing content is still rejected.
+    with pytest.raises(ValueError):
+        ArticleDraft.model_validate({"sections": [], "proof_needed_notes": []})
+    with pytest.raises(ValueError):
+        ArticleBodyDraft.model_validate({"sections": []})
+
+
+def test_article_common_prompt_does_not_hide_relevant_limitations_or_force_sales_formula():
+    from app.workflows.article_production import ARTICLE_COMMON
+    assert "Preserve meaningful caveats" in ARTICLE_COMMON
+    assert "one introduction or article structure" in ARTICLE_COMMON
+    assert "Существенные ограничения, сомнения и условия не скрывай" in ARTICLE_COMMON
+    assert "без оговорок, извинений" not in ARTICLE_COMMON

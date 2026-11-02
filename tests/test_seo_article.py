@@ -41,12 +41,57 @@ async def test_article_serves_plan_query_and_carries_answer_and_faq(db, product,
     article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
     assert article.seo.primary_query == "как вести запись клиентов"  # the plan's real query, not the model's
     assert article.seo_brief.plan_item_id == "a001"
-    assert "**Коротко:**" in article.full_article and "## Частые вопросы" in article.full_article
+    assert article.reader_article.direct_answer in article.full_article and "## Частые вопросы" in article.full_article
     assert article.reader_article.meta_description and len(article.reader_article.faq) == 3
     geo_roles = {"seo_editor", "article_writer", "human_editor", "marketing_editor"}
     for request in provider.requests:
-        has_rules = "ПОИСК И ИИ-ПОМОЩНИКИ" in request.system_prompt
+        has_rules = "ПОИСК БЕЗ SEO-ПЕРЕСПАМА" in request.system_prompt
         assert has_rules == (request.metadata["team_role"] in geo_roles)
+        if has_rules:
+            assert "поисковый ИИ-помощник" in request.system_prompt
+            assert "Не добавляй искусственные цитаты" in request.system_prompt
+
+
+@pytest.mark.asyncio
+async def test_two_section_article_without_artificial_faq_passes_reader_gate(db, product, tmp_path):
+    outputs = outputs_with_geo()
+    for index in (4, 5):
+        outputs[index]["sections"] = outputs[index]["sections"][:2]
+        outputs[index]["faq"] = []
+        outputs[index]["editorial_notes"] = []
+    provider = SequenceProvider(outputs[:6])
+    workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    result = await workflow.run(request_for(product).model_copy(update={"light": True}))
+    assert result.status == "completed", result.error
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    assert len(article.reader_article.sections) == 2 and article.reader_article.faq == []
+
+
+@pytest.mark.asyncio
+async def test_seo_article_keeps_only_topic_relevant_verified_facts(db, product, tmp_path):
+    from app.workflows.article_production import product_facts
+    root = tmp_path / product.slug / ".claude"
+    root.mkdir(parents=True)
+    context = ("## Product\n"
+               "ServGo помогает владельцам организовать онлайн-запись.\n"
+               "Владельцы управляют календарём и услугами.\n"
+               "Для другой темы доступны функции ведения смен.\n")
+    root.joinpath("product-marketing-context.md").write_text(context, encoding="utf-8")
+    facts = product_facts(context)
+    assert len(facts) == 3
+    selected = next(iter(facts))
+    outputs = outputs_with_geo()
+    for idx in (4, 5):
+        outputs[idx]["fact_renderings"] = [
+            {"source_id": selected, "text": "ServGo помогает владельцам организовать онлайн-запись."}
+        ]
+    workflow = build_article_production(db, Settings(products_root=tmp_path), SequenceProvider(outputs[:6]))
+    result = await workflow.run(request_for(product).model_copy(update={"light": True}))
+    assert result.status == "completed", result.error
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    assert [claim.source_id for claim in article.draft.claims] == [selected]
+    assert len(article.reader_article.fact_renderings) == 1
+    assert "Для другой темы" not in article.full_article
 
 
 @pytest.mark.asyncio
@@ -78,7 +123,7 @@ async def test_plain_articles_are_unchanged(db, product, tmp_path):
     workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
     result = await workflow.run(ArticleProductionInput(product_id=product.id, topic="Booking checklist"))
     assert result.status == "completed", result.error
-    assert all("ПОИСК И ИИ-ПОМОЩНИКИ" not in r.system_prompt for r in provider.requests)
+    assert all("ПОИСК БЕЗ SEO-ПЕРЕСПАМА" not in r.system_prompt for r in provider.requests)
     article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
     assert article.seo_brief is None and "## Частые вопросы" not in article.full_article
 
