@@ -160,6 +160,32 @@ def test_load_factors_in_real_workdays_and_marks_legacy_response_approximate():
     assert "ориентировочный" in approximate.text
 
 
+@pytest.mark.asyncio
+async def test_dispatcher_returns_only_owner_visible_return_candidates(db, linked, platform):
+    from app.dispatcher.executors import show_return_candidates
+    from app.dispatcher.registry import ReturnCandidatesParams
+    client_id = 7
+    platform.bookings = [
+        row(i, TODAY - timedelta(days=offset), client=client_id, status="completed")
+        for i, offset in enumerate((70, 55, 40))
+    ]
+    platform.bookings.append(row(9, TODAY - timedelta(days=2), status="confirmed", client=9))
+    context = Context(db=db, product=linked, settings=env(), account="owner")
+    response = await show_return_candidates(context, ReturnCandidatesParams(days=90))
+    assert "1 из 1" in response.text
+    tables = [block for block in response.blocks if block.get("type") == "table"]
+    assert tables and tables[0]["rows"][0][0] == "Клиент 7"
+    assert "+7999" not in response.text
+    assert platform.calls[0].url.params["date_from"] == (TODAY - timedelta(days=90)).isoformat()
+
+
+def test_ambiguous_company_links_fail_closed(db, linked):
+    from app.schedule.source import source_for
+    db.add(StudioBusinessLink(servgo_business_id=12, product_id=linked.id))
+    db.commit()
+    assert source_for(db, env(), linked, "owner") is None
+
+
 # ---- depth setting --------------------------------------------------------------------------
 
 @pytest.fixture
