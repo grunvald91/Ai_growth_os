@@ -113,6 +113,84 @@ async def test_stories_require_confirmation_and_keep_exact_count(db, product):
     assert any(b["type"] == "task" for b in confirmed["messages"][-1]["blocks"])
 
 
+
+
+# ---- inline editing of a pending create card ---------------------------------------------
+
+@pytest.mark.asyncio
+async def test_edit_stories_card_updates_saved_job_without_creating_work(db, product):
+    from app.dispatcher.editable import EditCreation
+    result = await send(db, product, chip={
+        "label": "Четыре Stories", "capability": "create_creative",
+        "params": {"topic": "Уход за волосами", "format": "story", "frame_count": 4},
+    })
+    original = next(b for b in result["messages"][1]["blocks"] if b["type"] == "confirm")
+    assert original["editable"]["frame_count"] == 4 and original["revision"] == 0
+    assert tasks(db, "content_creative") == []
+    updated = await service.edit_confirmation(db, context(db, product), EditCreation(
+        confirmation_id=original["confirmation_id"], revision=0, format="story",
+        topic="Топ-6 ошибок ухода за волосами", frame_count=6, platform="vk"))
+    card = next(b for b in updated["messages"][0]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["frame_count"] == 6
+    assert card["editable"]["topic"] == "Топ-6 ошибок ухода за волосами"
+    assert card["editable"]["platform"] == "vk"
+    assert card["revision"] == 1
+    assert tasks(db, "content_creative") == []
+    with pytest.raises(PermissionError):
+        await service.edit_confirmation(db, context(db, product), EditCreation(
+            confirmation_id=original["confirmation_id"], revision=0, format="story",
+            topic="Новая тема", frame_count=5))
+    confirmed = await service.confirm(db, context(db, product),
+                                      original["confirmation_id"], accept=True)
+    task = tasks(db, "content_creative")[0]
+    source = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_request"))
+    payload = json.loads(source.content)
+    assert payload["topic"] == "Топ-6 ошибок ухода за волосами"
+    assert payload["frame_count"] == 6 and payload["platform"] == "vk"
+    assert any(block["type"] == "task" for block in confirmed["messages"][-1]["blocks"])
+    with pytest.raises(PermissionError):
+        await service.edit_confirmation(db, context(db, product), EditCreation(
+            confirmation_id=original["confirmation_id"], revision=1,
+            format="story", topic="Слишком поздно"))
+
+
+@pytest.mark.asyncio
+async def test_edit_can_change_stories_into_post_and_preserves_company_isolation(db, product):
+    from app.dispatcher.editable import EditCreation
+    result = await send(db, product, chip={
+        "label": "Stories", "capability": "create_creative",
+        "params": {"topic": "Как выбрать услугу", "format": "story", "frame_count": 5}})
+    block = next(b for b in result["messages"][1]["blocks"] if b["type"] == "confirm")
+    params = dict(confirmation_id=block["confirmation_id"], revision=0,
+                  format="post", topic="Новый пост про услуги", platform="vk")
+    with pytest.raises(LookupError):
+        await service.edit_confirmation(db, context(db, product, "other"),
+                                        EditCreation(**params))
+    outcome = await service.edit_confirmation(db, context(db, product),
+                                               EditCreation(**params))
+    edit = next(b for b in outcome["messages"][0]["blocks"] if b["type"] == "confirm")
+    assert edit["editable"]["format"] == "post"
+    assert edit["editable"]["frame_count"] is None
+    assert edit["editable"]["platform"] == "vk"
+    await service.confirm(db, context(db, product), block["confirmation_id"], accept=True)
+    assert tasks(db, "content_creative") == []
+    assert len(tasks(db, "content_factory")) == 1
+
+
+def test_inline_edit_contract_rejects_bad_format_combinations():
+    from app.dispatcher.editable import EditCreation
+    from pydantic import ValidationError
+    data = {"confirmation_id": "x", "revision": 0, "format": "post", "topic": "Тема"}
+    with pytest.raises(ValidationError):
+        EditCreation(**data, frame_count=4)
+    with pytest.raises(ValidationError):
+        EditCreation(**{**data, "format": "story", "platform": "vc_ru"})
+    with pytest.raises(ValidationError):
+        EditCreation(**{**data, "format": "story", "frame_count": 11})
+    with pytest.raises(ValidationError):
+        EditCreation(**{**data, "topic": "x"})
+
 # ---- blocks -----------------------------------------------------------------------------
 
 def test_blocks_drop_foreign_links_and_misshapen_tables():
@@ -139,12 +217,15 @@ async def test_chip_creates_post_without_calling_the_model(db, product):
     model, provider = llm({"intent": "answer", "reply_text": "x"})
     result = await send(db, product, chip=post_chip(), model=model)
     assert provider.requests == []
-    created = tasks(db, "content_factory")
-    assert len(created) == 1 and created[0].status == TaskStatus.QUEUED
+    assert tasks(db, "content_factory") == []
     user, answer = result["messages"]
     assert user["role"] == "user" and answer["role"] == "assistant"
-    assert answer["blocks"][0]["text"].startswith("Принял.")
-    assert any(block["type"] == "task" and block["task_id"] == str(created[0].id) for block in answer["blocks"])
+    card = next(block for block in answer["blocks"] if block["type"] == "confirm")
+    assert card["editable"]["format"] == "post"
+    assert card["editable"]["topic"] == "Онлайн-запись без звонков"
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    created = tasks(db, "content_factory")
+    assert len(created) == 1 and created[0].status == TaskStatus.QUEUED
     call = db.scalar(select(ToolCall).where(ToolCall.operation == "create_post"))
     assert call is not None and call.task_id == created[0].id and call.status == "executed"
 
@@ -154,9 +235,14 @@ async def test_retry_with_same_key_does_not_repeat_the_action(db, product):
     first = await send(db, product, chip=post_chip(), key="same")
     again = await send(db, product, chip=post_chip(), key="same")
     assert again["replayed"] is True
-    assert len(tasks(db, "content_factory")) == 1
+    assert tasks(db, "content_factory") == []
     assert [m["id"] for m in again["messages"]] == [m["id"] for m in first["messages"]]
     assert db.scalar(select(DispatcherMessage).where(DispatcherMessage.role == "assistant").limit(1)) is not None
+    assert list(db.scalars(select(ToolCall))) == []
+    card = next(b for b in first["messages"][1]["blocks"] if b["type"] == "confirm")
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    assert len(tasks(db, "content_factory")) == 1
     assert len(list(db.scalars(select(ToolCall)))) == 1
 
 
@@ -186,7 +272,8 @@ async def test_text_request_is_routed_by_model_decision(db, product):
                            "params": {"topic": "Как снизить неявки", "channel": "telegram"},
                            "reply_text": "Сделаю"})
     result = await send(db, product, text="напиши пост про неявки", model=model)
-    assert len(tasks(db, "content_factory")) == 1
+    assert tasks(db, "content_factory") == []
+    assert any(b["type"] == "confirm" for b in result["messages"][1]["blocks"])
     request = provider.last_request
     assert request.metadata["team_role"] == "dispatcher"
     assert "create_post" in request.messages[-1].content
@@ -194,7 +281,7 @@ async def test_text_request_is_routed_by_model_decision(db, product):
     assert cost is not None and cost.input_tokens == 120 and cost.product_id == product.id
     stored = db.scalar(select(DispatcherMessage).where(DispatcherMessage.role == "assistant"))
     assert stored.capability == "create_post" and stored.confidence == pytest.approx(0.93)
-    assert stored.model == "fake-dispatcher" and stored.task_id is not None
+    assert stored.model == "fake-dispatcher" and stored.task_id is None
     assert result["messages"][1]["intent"] == "execute"
 
 

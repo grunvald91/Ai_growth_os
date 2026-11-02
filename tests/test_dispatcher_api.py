@@ -108,12 +108,51 @@ def test_message_flow_over_http(env):
     data = response.json()
     assert [m["role"] for m in data["messages"]] == ["user", "assistant"]
     assert data["hints"]
+    card = next(b for b in data["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "post"
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_factory")) is None
+    result = client.post(f"/studio/products/{servgo.id}/dispatch/confirm", json={
+        "confirmation_id": card["confirmation_id"], "accept": True})
+    assert result.status_code == 200
     assert db.scalar(select(Task).where(Task.assigned_agent == "content_factory")) is not None
     state = client.get(f"/studio/products/{servgo.id}/dispatch/state").json()
-    assert len(state["messages"]) == 2
+    assert len(state["messages"]) == 3
     again = client.post(f"/studio/products/{servgo.id}/dispatch/messages", json=body).json()
     assert again["replayed"] is True
     assert len(list(db.scalars(select(Task).where(Task.assigned_agent == "content_factory")))) == 1
+
+
+
+
+def test_inline_edit_endpoint_changes_same_card_without_starting_work(env):
+    db, settings, servgo, other, _ = env
+    client = TestClient(app)
+    response = client.post(f"/studio/products/{servgo.id}/dispatch/messages", json={
+        "mode": "chip", "client_key": "story-card",
+        "chip": {"label": "4 сторис", "capability": "create_creative",
+                 "params": {"format": "story", "topic": "Советы по уходу", "frame_count": "4"}}})
+    assert response.status_code == 200
+    card = next(b for b in response.json()["messages"][-1]["blocks"] if b["type"] == "confirm")
+    request = {"confirmation_id": card["confirmation_id"], "revision": 0,
+               "format": "story", "topic": "Советы по уходу за волосами",
+               "frame_count": 6, "platform": "vk"}
+    edited = client.post(f"/studio/products/{servgo.id}/dispatch/edit", json=request)
+    assert edited.status_code == 200
+    updated = next(b for b in edited.json()["messages"][0]["blocks"] if b["type"] == "confirm")
+    assert updated["revision"] == 1
+    assert updated["editable"]["frame_count"] == 6
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_creative")) is None
+    assert client.post(f"/studio/products/{servgo.id}/dispatch/edit", json=request).status_code == 409
+    assert client.post(f"/studio/products/{other.id}/dispatch/edit", json={
+        **request, "revision": 1}).status_code == 404
+    assert client.post(f"/studio/products/{servgo.id}/dispatch/edit", json={
+        **request, "revision": 1, "frame_count": 11}).status_code == 422
+    assert client.post(f"/studio/products/{servgo.id}/dispatch/edit", json={
+        **request, "revision": 1, "admin": True}).status_code == 422
+    saved = client.post(f"/studio/products/{servgo.id}/dispatch/confirm", json={
+        "confirmation_id": card["confirmation_id"], "accept": True})
+    assert saved.status_code == 200
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_creative")) is not None
 
 
 def test_empty_message_and_unknown_fields_are_rejected(env):
@@ -200,9 +239,13 @@ def test_finished_work_comes_back_over_http_once(env):
     from app.models.domain import TaskStatus
     db, settings, servgo, other, _ = env
     client = TestClient(app)
-    client.post(f"/studio/products/{servgo.id}/dispatch/messages", json={
+    response = client.post(f"/studio/products/{servgo.id}/dispatch/messages", json={
         "mode": "chip", "client_key": "u1", "chip": {"label": "Пост", "capability": "create_post",
                                                     "params": {"topic": "Как снизить неявки"}}})
+    card = next(b for b in response.json()["messages"][-1]["blocks"] if b["type"] == "confirm")
+    confirmed = client.post(f"/studio/products/{servgo.id}/dispatch/confirm", json={
+        "confirmation_id": card["confirmation_id"], "accept": True})
+    assert confirmed.status_code == 200
     assert client.get(f"/studio/products/{servgo.id}/dispatch/updates").json()["messages"] == []
     task = db.scalar(select(Task).where(Task.assigned_agent == "content_factory"))
     task.status = TaskStatus.FAILED

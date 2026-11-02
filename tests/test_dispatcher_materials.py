@@ -311,7 +311,10 @@ from app.models.domain import TaskStatus  # noqa: E402
 
 
 async def started_post(db, product):
-    await chip(db, product, "create_post", {"topic": "Онлайн-запись без звонков", "channel": "telegram"})
+    answer = await chip(db, product, "create_post",
+                        {"topic": "Онлайн-запись без звонков", "channel": "telegram"})
+    card = blocks(answer, "confirm")[0]
+    await service.confirm(db, ctx(db, product), card["confirmation_id"], accept=True)
     return db.scalar(select(Task).where(Task.assigned_agent == "content_factory"))
 
 
