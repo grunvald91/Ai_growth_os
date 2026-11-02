@@ -740,11 +740,12 @@ def test_profile_collect_button_is_last_and_saves_everything_before_draft(studio
     assert 'name="q0_field"' in page
 
     source = "Дополнительные сведения о скидках: 25% постоянным клиентам."
+    question_field = page.split('name="q0_field" value="')[1].split('"')[0]
     updated = client.post(base + "/collect", data={
         "name": "Ноготок Плюс",
         "description": "Салон маникюра в Сочи",
         "text": source,
-        "q0_field": "identity.name",
+        "q0_field": question_field,
         "q0_answer": "Ноготок Плюс",
     }, files=[("files", ("price.txt", b"Service: manicure 2500", "text/plain"))],
                           follow_redirects=False)
