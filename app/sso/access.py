@@ -140,4 +140,3 @@ def servgo_business(settings, user_id: int, business_id: int) -> dict | None:
         _logger.warning("studio_sso_business_failed %s", type(exc).__name__)
         return None
     return data if isinstance(data, dict) and isinstance(data.get("name"), str) else None
-
