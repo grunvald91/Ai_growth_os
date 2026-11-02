@@ -354,4 +354,3 @@ def require_studio_csrf(
     if not (is_legacy_origin or is_servgo_gateway_origin):
         _reject_origin(request, 403, "Cross-origin action rejected", configured)
     return None
-
