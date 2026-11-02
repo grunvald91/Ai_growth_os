@@ -241,12 +241,17 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
                     critic += (f'<a class="btn secondary" href="{html.escape(target, quote=True)}">'
                                'Открыть статью и проверить</a>')
                     critic += '<p>Статья не прошла автоматическую проверку. Причина указана выше.</p>'
+            scheduled = article.get("scheduled_at")
+            scheduled_note = (
+                '<span>Запланировано: ' + html.escape(str(scheduled)) + ' (UTC)</span>'
+                if scheduled else ''
+            )
             article_cards.append(
                 '<li class="seo-article-item">'
                 f'<div class="seo-article-copy"><a href="{html.escape(target, quote=True)}">'
                 f'{html.escape(article["title"])}</a>'
                 f'<span>{html.escape(status or "Статус неизвестен")}</span>'
-                + critic + extra + '</div></li>'
+                + scheduled_note + critic + extra + '</div></li>'
             )
     article_list = (
         f'<details class="seo-run-articles"><summary>Статьи ({len(article_cards)})</summary>'

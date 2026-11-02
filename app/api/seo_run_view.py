@@ -203,6 +203,7 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
             "task_id": str(task.id),
             "title": title,
             "task_status": state,
+            "scheduled_at": task.due_at.isoformat() if task.due_at else None,
             "article_id": str(article.id) if article else None,
             "article_status": article.status.value if article else None,
             "publication_path": published.get(article.id) if article else None,

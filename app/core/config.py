@@ -48,7 +48,8 @@ class Settings(BaseSettings):
     # Disabled until explicitly enabled for a measured rollout; review adds LLM calls.
     agent_critic_enabled: bool = False
     # Owner's decision: at most this many blog articles of the SEO plan are started per day (Moscow time).
-    seo_articles_per_day: int = Field(default=0, ge=0)  # 0 means no daily cap
+    seo_articles_per_day: int = Field(default=3, ge=1)  # max SEO article generations started per Moscow day
+    seo_publications_per_day: int = Field(default=3, ge=1)  # max SEO publications per Moscow day
     # Separate, ServGo-only recurring SEO pilot; OFF until live blog and indexing checks.
     seo_servgo_autorun_enabled: bool = False
     seo_servgo_autorun_interval_days: int = Field(default=7, ge=1, le=90)

@@ -131,7 +131,8 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client, h
     require_enabled(db, product_id)
     # All supported topics of the selected weekly or monthly plan are queued.
     all_items = SeoContentPlan.model_validate_json(plan.content).items
-    queued = queue_plan(db, plan, {c.id: c for c in core.clusters})
+    queued = queue_plan(db, plan, {c.id: c for c in core.clusters},
+                        per_day=settings.seo_publications_per_day)
     ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=REPORT_KIND,
         title=f"SEO-завод: поставлено статей — {len(queued)}",
         content=json.dumps({"seeds": len(core.seeds), "clusters": len(core.clusters),
