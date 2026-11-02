@@ -68,6 +68,13 @@ def render_v4(page, request, pid, switch):
         # Some administrative handlers return a body without a main landmark.
         main = original.find(tag='body')
     content = original.inner(main).replace('class="topbar"','class="v4-module-head"')
+    # Keep special page-level wrappers when transplanting old <main> content:
+    # otherwise v4 drops their class, so dark-mode selector styles never apply.
+    main_classes = set((main[1].get('class') or '').split())
+    wrapper = next((item for item in ('sg-company-picker', 'sg-link-page')
+                    if item in main_classes), None)
+    if wrapper:
+        content = f'<div class="{wrapper}">{content}</div>'
     if request.url.path.startswith('/studio/tune'):
         content = original.outer(original.find(tag='header'))+content
     template = (ASSETS/'growth_os_v4_preview.html').read_text()
