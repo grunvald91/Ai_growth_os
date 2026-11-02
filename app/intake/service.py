@@ -252,6 +252,24 @@ class CompanyIntakeService:
         # Otherwise the old 6/9-page text would remain beside the new 9/9 one.
         if any(row["id"] == source.id for row in state["sources"]):
             return self.get(product_id, session_id, actor=actor)
+        # The owner's current company name/description are a single replaceable
+        # evidence source. Do not leave previous names in the source list after edits.
+        if source.source_type == "owner_message" and source.reference == "growth studio: данные компании":
+            previous_index = next((
+                index for index, row in enumerate(state["sources"])
+                if row.get("source_type") == "owner_message"
+                and row.get("reference") == source.reference
+            ), None)
+            if previous_index is not None:
+                before = state["sources"][previous_index]
+                if self._used_text(state) - len(before["text"]) + len(source.text) > MAX_SOURCE_TEXT:
+                    raise IntakeError("Слишком много материалов в одном сборе. Сначала проверьте текущие данные.")
+                state["sources"][previous_index] = source.model_dump()
+                state["revision"] += 1
+                self._save_state(task.id, product_id, state)
+                task.status = TaskStatus.QUEUED
+                self.db.commit()
+                return self.get(product_id, session_id, actor=actor)
         existing_index = next((
             index for index, row in enumerate(state["sources"])
             if source.source_type == "owner_file" and source.sha256
