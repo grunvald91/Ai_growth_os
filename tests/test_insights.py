@@ -54,7 +54,9 @@ def test_facts_are_counted_by_definition():
     assert by_name["servgo.bookings_total"] == 11  # the cancelled one is not counted
     assert by_name["servgo.bookings_cancelled"] == 1
     assert by_name["servgo.cancelled_share_pct"] == round(100 / 12, 1)
-    assert by_name["servgo.revenue_total"] == 110000 and by_name["servgo.average_check"] == 10000
+    assert by_name["servgo.estimated_booking_value_total"] == 110000
+    assert by_name["servgo.average_booking_value"] == 10000
+    assert by_name["servgo.completed_visits"] == 0  # confirmed != completed
     assert by_name["servgo.clients_unique"] == 5
     assert by_name["servgo.lead_time_median_days"] == 3
     assert by_name["servgo.depth_days"] == 30
@@ -114,6 +116,74 @@ def test_old_platform_without_client_numbers_still_works():
     result = compute(schedule([plain]), TODAY, 30, 14)
     names = {f.name for f in result.facts}
     assert "servgo.clients_unique" not in names and "servgo.lead_time_median_days" not in names
+
+
+def test_estimates_are_not_claimed_as_paid_revenue():
+    day = TODAY - timedelta(days=5)
+    result = compute(schedule([row(1, day, status="confirmed"), row(2, day, status="completed", client=2)]),
+                     TODAY, 30, 14)
+    values = {f.name: f.value for f in result.facts}
+    assert values["servgo.completed_visits"] == 1
+    assert values["servgo.past_bookings_unverified"] == 1
+    assert "servgo.revenue_total" not in values
+    assert "servgo.average_check" not in values
+    assert "НЕ полученная выручка" in " ".join(result.lines)
+
+
+def test_return_delay_uses_only_completed_visits_and_excludes_clients_booked_ahead():
+    dates = [TODAY - timedelta(days=70), TODAY - timedelta(days=55), TODAY - timedelta(days=40)]
+    completed = [row(i, day, client=7, status="completed") for i, day in enumerate(dates)]
+    values = {f.name: f.value for f in compute(schedule(completed), TODAY, 90, 14).facts}
+    assert values["servgo.clients_completed_returning"] == 1
+    assert values["servgo.clients_possible_return_delay"] == 1
+    booked = completed + [row(10, TODAY + timedelta(days=5), client=7, status="confirmed")]
+    values = {f.name: f.value for f in compute(schedule(booked), TODAY, 90, 14).facts}
+    assert values["servgo.clients_possible_return_delay"] == 0
+    unverified = [dict(b, status="confirmed") for b in completed]
+    values = {f.name: f.value for f in compute(schedule(unverified), TODAY, 90, 14).facts}
+    assert "servgo.clients_possible_return_delay" not in values
+
+
+def test_load_factors_in_real_workdays_and_marks_legacy_response_approximate():
+    from app.schedule.views import load_view
+    first = TODAY + timedelta(days=1)
+    last = first + timedelta(days=1)
+    booking = dict(row(1, first, status="confirmed"), duration_minutes=120)
+    data = {"today": TODAY.isoformat(), "working_hours": "09:00–18:00",
+            "break_hours": "12:00–13:00", "bookings": [booking],
+            "resources": [{"id": 1, "name": "Катер 1", "working_dates": [first.isoformat()]}]}
+    actual = load_view(Schedule.model_validate(data), "week", first, last)
+    assert "25%" in actual.text
+    assert "Учтены дежурства" in actual.text
+    data["resources"][0].pop("working_dates")
+    approximate = load_view(Schedule.model_validate(data), "week", first, last)
+    assert "ориентировочный" in approximate.text
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_returns_only_owner_visible_return_candidates(db, linked, platform):
+    from app.dispatcher.executors import show_return_candidates
+    from app.dispatcher.registry import ReturnCandidatesParams
+    client_id = 7
+    platform.bookings = [
+        row(i, TODAY - timedelta(days=offset), client=client_id, status="completed")
+        for i, offset in enumerate((70, 55, 40))
+    ]
+    platform.bookings.append(row(9, TODAY - timedelta(days=2), status="confirmed", client=9))
+    context = Context(db=db, product=linked, settings=env(), account="owner")
+    response = await show_return_candidates(context, ReturnCandidatesParams(days=90))
+    assert "1 из 1" in response.text
+    tables = [block for block in response.blocks if block.get("type") == "table"]
+    assert tables and tables[0]["rows"][0][0] == "Клиент 7"
+    assert "+7999" not in response.text
+    assert platform.calls[0].url.params["date_from"] == (TODAY - timedelta(days=90)).isoformat()
+
+
+def test_ambiguous_company_links_fail_closed(db, linked):
+    from app.schedule.source import source_for
+    db.add(StudioBusinessLink(servgo_business_id=12, product_id=linked.id))
+    db.commit()
+    assert source_for(db, env(), linked, "owner") is None
 
 
 # ---- depth setting --------------------------------------------------------------------------
@@ -430,7 +500,8 @@ def test_add_ons_count_for_money_but_not_as_visits():
     by_name = {f.name: f.value for f in result.facts}
     assert by_name["servgo.bookings_total"] == 1
     assert by_name["servgo.clients_returning"] == 0  # the add-on is not a second visit
-    assert by_name["servgo.revenue_total"] == 13000 and by_name["servgo.average_check"] == 13000
+    assert by_name["servgo.estimated_booking_value_total"] == 13000
+    assert by_name["servgo.average_booking_value"] == 13000
     assert by_name["servgo.service_bookings:Фотограф"] == 1
 
 
@@ -497,7 +568,7 @@ def test_average_check_leaves_out_visits_without_a_price():
     days = [TODAY - timedelta(days=d) for d in (2, 3, 4)]
     rows_ = [row(1, days[0], price=10000), row(2, days[1], price=20000), row(3, days[2], price=None)]
     by_name = {f.name: f.value for f in compute(schedule(rows_), TODAY, 30, 14).facts}
-    assert by_name["servgo.average_check"] == 15000
+    assert by_name["servgo.average_booking_value"] == 15000
 
 
 # ---- narrow questions get narrow answers ------------------------------------------------------
@@ -507,9 +578,9 @@ def test_a_topic_shows_its_own_lines_and_the_basics():
     lines, rows = result.view("cancellations")
     text = " ".join(lines)
     assert "отменено: 1" in text and "Средний чек" not in text and "Клиентов:" not in text
-    assert [r[0] for r in rows] == ["Записей", "Отмен"]
+    assert [r[0] for r in rows] == ["Записей", "Подтверждённые выполненные визиты", "Отмен"]
     money, money_rows = result.view("money")
-    assert "средний чек" in " ".join(money) and "Средний чек" in [r[0] for r in money_rows]
+    assert "Расчётная стоимость записей" in " ".join(money) and "Средняя расчётная стоимость визита" in [r[0] for r in money_rows]
     assert len(result.view("all")[0]) == len(result.lines)
 
 
@@ -527,7 +598,7 @@ async def test_narrow_question_through_the_dispatcher(db, linked, platform):
     chips = [c for b in answer["blocks"] if b["type"] == "chips" for c in b["items"]]
     assert "Показать всё" in {c["label"] for c in chips}
     full = await chip(db, linked, "show_insights", {"topic": "all"}, key="all")
-    assert "средний чек" in full["text"]
+    assert "Расчётная стоимость записей" in full["text"]
 
 
 @pytest.mark.asyncio

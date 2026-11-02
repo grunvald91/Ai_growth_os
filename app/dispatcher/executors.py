@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.dispatcher.readers import ACTIVE, attention, latest_active_video, plans, upcoming_slots, work_rows
 from app.dispatcher.registry import (CAPABILITIES, CHANNEL_LABELS, CancelVideoParams, DepthParams, GoToParams,
-                                     InsightsParams, PostParams, ScheduleParams, VideoParams, page_href, page_label)
+                                     InsightsParams, PostParams, ReturnCandidatesParams, ScheduleParams, VideoParams, page_href, page_label)
 from app.dispatcher.outcome import Confirmation, Context, Outcome, links_block, task_block  # noqa: F401
 from app.models.domain import Approval, Product, Task, ToolCall
 
@@ -114,6 +114,11 @@ async def show_schedule(ctx: Context, params: ScheduleParams) -> Outcome:
     from app.schedule.source import source_for
     source = source_for(ctx.db, ctx.settings, ctx.product, ctx.account)
     if source is None:
+        from app.schedule.source import linked_business_ids
+        if len(linked_business_ids(ctx.db, ctx.product.id)) > 1:
+            return Outcome("С этим профилем связано несколько заведений. Выберите организацию в ServGo, "
+                           "чтобы не смешать данные расписаний.", "Выберите организацию для анализа.",
+                           [_links(ctx, "schedule")], no_data=True)
         return Outcome("Расписание записей я пока не вижу: заведение не связано с этой компанией. "
                        "Открыть его можно в админке ServGo.",
                        "Расписание записей я пока не вижу: заведение не связано с компанией.",
@@ -172,6 +177,8 @@ async def show_insights(ctx: Context, params: InsightsParams) -> Outcome:
     if params.topic != "all":
         chips.append({"label": "Показать всё", "capability": "show_insights",
                       "params": {"days": str(params.days)} if params.days else {}})
+    if params.topic in ("all", "clients"):
+        chips.append({"label": "Кого пригласить повторно", "capability": "show_return_candidates", "params": {}})
     chips.append({"label": "Передать маркетинг-команде", "capability": "send_to_team", "params": {}})
     if insights.depth_days < 90:
         chips.append({"label": "Посмотреть за 90 дней", "capability": "show_insights",
@@ -182,6 +189,49 @@ async def show_insights(ctx: Context, params: InsightsParams) -> Outcome:
     return Outcome("\n".join(lines) + note, " ".join(lines[:2]),
                    [{"type": "table", "columns": ["Показатель", "Значение"], "rows": rows},
                     {"type": "chips", "items": chips}, _links(ctx, "schedule")])
+
+
+async def show_return_candidates(ctx: Context, params: ReturnCandidatesParams) -> Outcome:
+    """Read-only named opportunities for the authenticated owner, never sent to the team."""
+    from datetime import timedelta
+    from app.insights.retention import find_return_candidates
+    from app.insights.settings import AHEAD_DAYS
+    from app.schedule.source import source_for
+    source = source_for(ctx.db, ctx.settings, ctx.product, ctx.account)
+    if source is None:
+        return _no_booking_data(ctx, "no_link")
+    today = datetime.now(ZoneInfo("Europe/Moscow")).date()
+    schedule = await asyncio.to_thread(
+        source.fetch, today - timedelta(days=params.days),
+        today + timedelta(days=AHEAD_DAYS - 1))
+    if schedule is None:
+        return _no_booking_data(ctx, "unavailable")
+    today = schedule.today or today
+    eligible, candidates = find_return_candidates(schedule, today, params.days, AHEAD_DAYS)
+    if not eligible:
+        return Outcome(
+            f"За последние {params.days} дней не нашёл клиентов с минимум тремя "
+            "отмеченными выполненными визитами. Пока нельзя делать вывод о периодичности.",
+            "Для оценки повторных визитов пока недостаточно подтверждённой истории.",
+            [{"type": "links", "items": [{"label": "Клиенты в CRM",
+                                          "href": "https://servgo.ru/admin/contacts"}]}])
+    summary = (f"Возможная задержка повторного визита у {len(candidates)} из {eligible} "
+               f"клиентов с тремя и более выполненными визитами за {params.days} дней. "
+               f"У них нет записи в ближайшие {AHEAD_DAYS} дней. "
+               "Это список для проверки, а не доказательство, что клиент потерян.")
+    rows = [[person.client_name, person.last_visit.strftime("%d.%m.%Y"),
+             f"{person.usual_interval_days:g} дн.", str(person.days_since_visit)]
+            for person in candidates[:20]]
+    blocks = []
+    if rows:
+        blocks.append({"type": "table",
+                       "columns": ["Клиент", "Последний выполненный визит",
+                                   "Обычный интервал", "Дней с визита"], "rows": rows})
+        if len(candidates) > 20:
+            summary += " Показаны первые 20 случаев с наибольшей задержкой."
+    blocks.append({"type": "links", "items": [{"label": "Открыть клиентскую CRM",
+                                              "href": "https://servgo.ru/admin/contacts"}]})
+    return Outcome(summary, f"Возможная задержка у {len(candidates)} клиентов. Список на экране.", blocks)
 
 
 async def set_insights_depth(ctx: Context, params: DepthParams) -> Outcome:
@@ -395,7 +445,7 @@ async def restricted_action(ctx: Context, params) -> Outcome:
 
 EXECUTORS = {
     "show_work": show_work, "show_review": show_review, "show_plan": show_plan, "go_to": go_to,
-    "show_schedule": show_schedule, "show_insights": show_insights,
+    "show_schedule": show_schedule, "show_insights": show_insights, "show_return_candidates": show_return_candidates,
     "set_insights_depth": set_insights_depth, "send_to_team": send_to_team, "create_post": create_post, "make_plan": make_plan,
     "whiteboard_video": whiteboard_video, "cancel_video": cancel_video, "restricted_action": restricted_action,
 }

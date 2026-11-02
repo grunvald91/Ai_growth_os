@@ -49,6 +49,8 @@ class Booking(_Row):
 class Resource(_Row):
     id: int
     name: str
+    # None means an older BookingBot that did not provide resource duty dates.
+    working_dates: list[date] | None = None
 
 
 class FreeSlots(_Row):
@@ -123,5 +125,9 @@ def source_for(db: Session, settings, product: Product, account: str) -> Schedul
     prefix, _, rest = account.partition(":")
     if prefix == "servgo" and rest.isdigit():
         user_id = int(rest)
-    label = f"заведение № {ids[0]}" if len(ids) > 1 else None
-    return ServGoSchedule(settings, ids[0], user_id, label)
+    # A product must map to exactly one venue. Picking the first of several
+    # silently mixes company analytics and is unsafe for business decisions.
+    if len(ids) != 1:
+        _logger.warning("studio_schedule_ambiguous_product_link count=%s", len(ids))
+        return None
+    return ServGoSchedule(settings, ids[0], user_id)
