@@ -54,7 +54,8 @@ def decorate(page: str, request: Request, new: bool) -> str:
                             'padding:12px 18px;border-radius:24px;background:#215da9;color:white;'
                             'font:600 14px system-ui;box-shadow:0 3px 16px #1234}</style></body>')
     match = re.search(r'/studio/products/([0-9a-fA-F-]{36})(?:/|$)', request.url.path)
-    if not match:
+    # A multi-company chooser must never borrow tenant scope from its first card.
+    if not match and request.url.path != '/studio':
         match = re.search(r'/studio/products/([0-9a-fA-F-]{36})', page)
     pid = UUID(match[1]) if match else None
     from app.api.growth_v4 import render_v4

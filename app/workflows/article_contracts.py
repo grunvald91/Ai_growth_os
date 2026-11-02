@@ -104,7 +104,7 @@ class ArticleBodySection(Contract):
 
 
 class ArticleBodyDraft(Contract):
-    sections: list[ArticleBodySection] = Field(min_length=4, max_length=20)
+    sections: list[ArticleBodySection] = Field(min_length=2, max_length=20)
     proof_needed_notes: list[Text] = Field(min_length=1, max_length=20)
 
     @model_validator(mode='after')
@@ -115,7 +115,7 @@ class ArticleBodyDraft(Contract):
 
 
 class ArticleDraft(Contract):
-    sections: list[ArticleSection] = Field(min_length=4, max_length=25)
+    sections: list[ArticleSection] = Field(min_length=2, max_length=25)
     claims: list[GroundedClaim] = Field(default_factory=list, max_length=30)
     proof_needed_notes: list[Text] = Field(min_length=1, max_length=20)
 
@@ -142,7 +142,7 @@ class HumanEditedArticle(Contract):
     title: ShortText
     lead: Text
     fact_renderings: list[RenderedFact] = Field(default_factory=list, max_length=30)
-    sections: list[ReaderSection] = Field(min_length=4, max_length=20)
+    sections: list[ReaderSection] = Field(min_length=2, max_length=20)
     closing: Text
     editorial_notes: list[Text] = Field(default_factory=list, max_length=10)
     # Search and AI-assistant surface: a short self-contained answer and real questions with answers.

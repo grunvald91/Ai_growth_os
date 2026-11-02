@@ -167,27 +167,40 @@ ARTICLE_COMMON = ('Return ONLY JSON matching the schema. '
 
 GEO_STAGES = frozenset({'seo_editor', 'article_writer', 'human_editor', 'marketing_editor'})
 GEO_RULES = (
-    ' ПОИСК И ИИ-ПОМОЩНИКИ. Статья обслуживает конкретный реальный запрос из seo_brief: primary_query используй '
-    'дословно как главный запрос, related_queries раскрой по тексту естественно, без переспама. Название и первый '
-    'абзац отвечают на запрос читателя сразу. Для финальной редактуры обязательны: direct_answer — 2–4 '
-    'самодостаточных предложения с прямым ответом на primary_query, понятные без остального текста (так их '
-    'цитируют поисковые системы и ИИ-ассистенты); faq — не менее трёх вопросов из ai_questions и related_queries '
-    'с короткими конкретными ответами по 2–5 предложений, каждый ответ понятен сам по себе; meta_description — '
-    '40–300 знаков о пользе статьи. Заголовки разделов формулируй как вопросы или чёткие утверждения, называй '
-    'предметы полными именами, а не «это» и «он»; шаги и сравнения давай списками. Не придумывай статистику, '
-    'исследования, цитаты экспертов и цены. Конкретные цифры используй только из проверенных фактов. '
-    'Ведёт статья к шагу из seo_brief.next_step, и только к услугам, которые есть в профиле компании.'
+    ' ПОИСК БЕЗ SEO-ПЕРЕСПАМА. seo_brief.primary_query задаёт реальный вопрос человека, а не фразу '
+    'для механического повторения. Отвечай по смыслу в начале материала; в заголовке можно '
+    'естественно перефразировать запрос. related_queries — подсказки о важных сомнениях, '
+    'а не обязательные слова для встраивания. Выбери форму под тему: объяснение, '
+    'сравнение, сценка, полезные критерии или спокойное руководство. '
+    'Для финальной версии укажи direct_answer — самостоятельный ясный ответ, '
+    'meta_description — понятное описание темы и пользы. '
+    'Читатель или поисковый ИИ-помощник может увидеть один абзац без остальной статьи: '
+    'формулируй ключевые выводы самостоятельно и с достаточным контекстом '
+    '(о какой услуге, ситуации или ограничении речь). Конкретные объяснения, '
+    'проверенные факты компании, полезные примеры и сравнения важнее формальных '
+    'ключевых слов. Отличай гипотетические примеры от реальных данных. '
+    'Не добавляй искусственные цитаты, исследования, ссылки или автора, '
+    'если их нет в исходных данных. Не пиши отдельный текст для робота: '
+    'публичный HTML должен точно соответствовать статье для человека. '
+    'faq необязателен: добавь 1–4 действительно дополнительных вопроса, только если '
+    'они не дублируют уже написанное. Не сочиняй вопросы ради поисковых роботов. '
+    'Подзаголовки помогают чтению, но не обязаны быть одинаковыми или вопросительными; '
+    'маркированные списки нужны лишь там, где список удобнее прозы. '
+    'Никаких выдуманных статистики, цен, исследований и отзывов. '
+    'Из verified_product_facts выбирай ТОЛЬКО прямо относящиеся к теме сведения; '
+    'не заставляй читателя просматривать весь профиль компании. '
+    'Если подходящих подтверждённых фактов нет, оставь fact_renderings пустым. '
+    'Каждый использованный source_id должен существовать в verified_product_facts. '
+    'Переводи интерес к услугам компании ненавязчиво; не называй несуществующие услуги.'
 )
 
 
 def _geo_problem(article, brief) -> str | None:
-    """Reader copy for a plan item must carry the answer and the questions; otherwise it is sent back once."""
+    """Only require genuine search-answer metadata; never manufacture an FAQ quota."""
     if brief is None or not isinstance(article, HumanEditedArticle):
         return None
     if not article.direct_answer:
         return 'direct_answer is required for a search-plan article'
-    if len(article.faq) < 3:
-        return 'faq needs at least three questions with answers for a search-plan article'
     if not article.meta_description:
         return 'meta_description is required for a search-plan article'
     return None
@@ -979,8 +992,10 @@ class ArticleProduction:
                         if geo:
                             raise ValueError(geo)
                         ids = [fact.source_id for fact in candidate.fact_renderings]
-                        if len(ids) != len(set(ids)) or set(ids) != set(sources):
-                            raise ValueError('Revised article must preserve all verified source IDs exactly once')
+                        valid_scope = (set(ids) <= set(sources) if safe_request.seo_brief else
+                                       set(ids) == set(sources))
+                        if len(ids) != len(set(ids)) or not valid_scope:
+                            raise ValueError('Article must reference only verified sources, each at most once')
                     return candidate
 
                 def record_model_call(stage, observed):
@@ -1136,8 +1151,10 @@ class ArticleProduction:
             reader_fact_ids = [item.source_id for item in reader_article.fact_renderings]
             if len(reader_fact_ids) != len(set(reader_fact_ids)):
                 raise ValueError('Human editor duplicated a verified fact source')
-            if set(reader_fact_ids) != set(facts):
-                raise ValueError('Human editor must render exactly the verified product facts')
+            valid_scope = (set(reader_fact_ids) <= set(facts) if safe_request.seo_brief else
+                           set(reader_fact_ids) == set(facts))
+            if not valid_scope:
+                raise ValueError('Human editor used unknown or missing verified product facts')
             for item in reader_article.fact_renderings:
                 if item.source_id not in facts:
                     raise ValueError('Human editor referenced an unknown verified fact')
@@ -1145,6 +1162,7 @@ class ArticleProduction:
             grounded_claims = [
                 GroundedClaim(claim=quote, source_id=source_id, quote=quote)
                 for source_id, quote in facts.items()
+                if not safe_request.seo_brief or source_id in reader_fact_ids
             ]
             fact_sections = []
             if grounded_claims:

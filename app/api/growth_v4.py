@@ -217,9 +217,26 @@ def render_v4(page, request, pid, switch):
     template = template.replace('Демо · API не подключены', f'<a href="{switch}">Старый дизайн</a>')
     company_link = original.find(cls='sg-mobile-project')
     company = (company_link[1].get('aria-label', '').removeprefix('Сменить компанию: ')
-               if company_link else 'Моя компания')
+               if company_link else ('Выберите компанию' if pid is None and current == '/studio' else 'Моя компания'))
     template = template.replace('Студия «Мята»',html.escape(company)).replace('<span class="avatar">М</span>',
                      '<span class="avatar">'+html.escape(company[:1])+'</span>')
+    # The prototype switch button had no click handler in the production page:
+    # its demo script is intentionally stripped above. Open the real, scoped
+    # server-rendered company chooser instead of presenting a dead control.
+    template = template.replace('<button class="biz-switch" id="bizBtn">',
+                                '<a class="biz-switch" id="bizBtn" href="/studio?choose=1" '
+                                'aria-label="Сменить компанию" title="Сменить компанию">', 1)
+    template = template.replace('<svg class="icon sm"><use href="#i-down"/></svg></button>',
+                                '<svg class="icon sm"><use href="#i-down"/></svg></a>', 1)
+    # Always display the active company name on mobile, not only an initial.
+    template = template.replace('</head>',
+        '<style>@media(max-width:780px){'
+        '.biz-switch{min-height:38px;max-width:min(33vw,165px)}'
+        '.biz-switch .avatar{display:none}'
+        '.biz-switch>span:not(.avatar){display:block;min-width:0;max-width:100%}'
+        '.biz-switch strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+        '.biz-switch small{display:none}.biz-switch .icon{display:block}'
+        '}</style></head>', 1)
     template = template.replace('data-page="home"',f'onclick="location.href=\'{base}\'"')
     template = template.replace('<body>', '<body data-growth-design="v4"'+(' class="home-page home-empty"' if home else '')+'>')
     # Retain scripts and outside-main dialogs, avoiding duplicate inline scripts.
