@@ -12,9 +12,11 @@ import re
 def requested_story_count(text: str) -> int | None:
     """Extract an explicit 3–10 screen count; never infer one from duration."""
     words = (text or "").casefold().replace("ё", "е")
-    numerals = {"три": 3, "четыре": 4, "пять": 5, "шесть": 6, "семь": 7,
-                "восемь": 8, "девять": 9, "десять": 10}
-    variants = r"(?:3|4|5|6|7|8|9|10|три|четыре|пять|шесть|семь|восемь|девять|десять)"
+    numerals = {"три": 3, "трех": 3, "четыре": 4, "четырех": 4,
+                "пять": 5, "пяти": 5, "шесть": 6, "шести": 6,
+                "семь": 7, "семи": 7, "восемь": 8, "восьми": 8,
+                "девять": 9, "девяти": 9, "десять": 10, "десяти": 10}
+    variants = r"(?:3|4|5|6|7|8|9|10|" + "|".join(numerals) + r")"
     kinds = r"(?:сторис|истори\w*|экран\w*)"
     before = re.search(r"\b(" + variants + r")\s+(?:\w+\s+){0,2}" + kinds + r"\b", words)
     after = re.search(r"\b" + kinds + r"\s+(?:из\s+)?(" + variants + r")\b", words)
