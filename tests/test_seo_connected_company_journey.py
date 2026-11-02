@@ -216,7 +216,11 @@ async def test_connected_company_article_reaches_own_blog_with_critic_and_demo_s
     )
     assert await content_worker.run_content_once(sf, settings) == 1
     # One final editorial review, never a fresh critique of each intermediate stage.
-    assert generated.critic_calls == 1
+    with sf() as db:
+        review_audit_rows = list(db.scalars(select(Artifact).where(
+            Artifact.kind == "seo_final_review", Artifact.product_id == company_id)))
+        statuses = [json.loads(row.content).get("status") for row in review_audit_rows]
+    assert generated.critic_calls == 1, f"SEO critic not invoked; recorded review statuses: {statuses}"
     with sf() as db:
         article = db.scalar(select(Artifact).where(Artifact.product_id == company_id, Artifact.kind == "article"))
         assert article is not None
