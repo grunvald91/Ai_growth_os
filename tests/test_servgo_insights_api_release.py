@@ -15,10 +15,10 @@ def test_known_hash_allows_a_reviewed_update_but_never_unknown_drift():
     assert classify(None, expected, known) == "conflict"
 
 
-def test_release_is_scoped_to_four_existing_api_routes():
+def test_release_is_scoped_to_three_existing_api_routes():
     assert set(FILES) == {
         "web/api/routes/admin.py", "web/api/routes/crm.py",
-        "web/api/routes/studio_schedule.py", "web/api/routes/studio_sso.py",
+        "web/api/routes/studio_schedule.py",
     }
     assert not any("database" in name or "migration" in name for name in FILES)
 
