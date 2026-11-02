@@ -337,7 +337,7 @@ async def test_copied_derivative_hook_is_repaired_before_persistence(db, product
 async def test_invalid_output_keeps_only_durable_stage_checkpoints(db, product, tmp_path, mutation):
     outputs = valid_outputs()
     if mutation == 'malformed': outputs[0] = 'not json'
-    elif mutation == 'short': outputs[2]['sections'] = outputs[2]['sections'][:1]
+    elif mutation == 'short': outputs[2]['sections'] = []  # Empty sections are invalid; concise ones are not.
     elif mutation == 'missing_cta': del outputs[3]['cta']
     elif mutation == 'missing_measurement': del outputs[3]['measurement']['customer']
     elif mutation == 'fake_claim': outputs[2]['claims'] = [dict(claim='Guaranteed growth', quote='Guaranteed growth', source_id='invented')]
@@ -1077,8 +1077,9 @@ async def test_required_stage_gets_one_repair_attempt_with_the_problem(db, produ
 def test_platform_writer_telegram_follows_quick_post_structure():
     from app.prompts import text as prompt_text
     rule = prompt_text('article.rules.platform_writer')
-    for required in ('сначала польза', 'TELEGRAM', 'нумерованным списком', '800–1500',
-                     'ровно один призыв', 'без оговорок', 'TOP-LEVEL FORMAT IS MANDATORY'):
+    for required in ('сначала польза', 'TELEGRAM', 'нумерованным списком',
+                     'Длина определяется смыслом', 'ровно один призыв',
+                     'TOP-LEVEL FORMAT IS MANDATORY'):
         assert required in rule
 
 
@@ -1087,9 +1088,9 @@ def test_article_text_chain_rules_are_value_first_and_keep_hard_constraints():
     rules = {name: prompt_text(f'article.rules.{name}') for name in (
         'content_strategist', 'seo_editor', 'article_writer', 'conversion_editor',
         'human_editor', 'marketing_editor', 'repurposing_editor')}
-    assert '3–5 приёмов' in rules['content_strategist']
+    assert 'полезные приёмы' in rules['content_strategist']
     assert 'конкретное действие' in rules['seo_editor']
-    assert 'не меньше 2000 символов' in rules['article_writer']
+    assert 'Не растягивай текст' in rules['article_writer']
     assert 'kind=advice' in rules['article_writer']
     assert 'ровно один призыв' in rules['conversion_editor']
     assert 'ровно по одному' in rules['human_editor']
@@ -1097,4 +1098,38 @@ def test_article_text_chain_rules_are_value_first_and_keep_hard_constraints():
     assert 'ровно один fact_rendering' in rules['marketing_editor']
     assert 'ровно шесть' in rules['repurposing_editor']
     for name in ('human_editor', 'marketing_editor'):
-        assert 'Не придумывай' in rules[name] or 'не как уже работающую' in rules[name]
+        assert 'не придумывай' in rules[name].casefold()
+
+
+
+def test_editorial_contract_allows_short_useful_article_without_invented_proof_gaps():
+    """No arbitrary 2k/2.5k-character or four-section quotas."""
+    from app.workflows.article_contracts import ArticleBodyDraft, ArticleDraft, HumanEditedArticle
+
+    draft = ArticleBodyDraft.model_validate({
+        "sections": [{
+            "heading": "Что важно",
+            "body": "Сначала определите вопрос читателя, а затем предложите проверяемый ответ.",
+            "kind": "advice",
+        }],
+        "proof_needed_notes": [],
+    })
+    assert len(draft.sections) == 1 and draft.proof_needed_notes == []
+    reader = HumanEditedArticle.model_validate({
+        "language": "ru",
+        "title": "Короткий полезный ответ",
+        "lead": "Простой вопрос не требует длинной статьи ради объёма.",
+        "sections": [{
+            "heading": "Как поступить",
+            "body": "Проверьте условия, сравните варианты, задайте точный вопрос.",
+        }],
+        "closing": "Выбирайте решение по своей задаче.",
+        "direct_answer": "Сравните реальные условия.",
+        "meta_description": "Как разобраться без навязанных обещаний.",
+    })
+    assert len(reader.sections) == 1
+    # Complete, concise content is allowed; missing content is still rejected.
+    with pytest.raises(ValueError):
+        ArticleDraft.model_validate({"sections": [], "proof_needed_notes": []})
+    with pytest.raises(ValueError):
+        ArticleBodyDraft.model_validate({"sections": []})
