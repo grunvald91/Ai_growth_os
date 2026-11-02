@@ -151,6 +151,29 @@ async def test_one_failed_frame_keeps_remaining_images(company_db):
 
 
 @pytest.mark.asyncio
+async def test_resolved_frame_error_disappears_from_gallery(company_db):
+    from app.api.creative_image_gallery import gallery_html
+
+    db, company, _, root = company_db
+    request = CreativeRequest(mode="creative", product_id=company.id,
+                              topic="Как выбрать букет", format="story",
+                              platform="telegram", image_model="gemini")
+    task = queue_creative(db, request)
+    settings = Settings(_env_file=None, products_root=root, xai_api_key="test")
+    draft = draft_story()
+    assert not await generate_images(db, settings, request, draft, task_id=task.id,
+                                     provider=FakeImages(fail=2))
+    assert await generate_images(db, settings, request, draft, task_id=task.id,
+                                 provider=FakeImages())
+    errors = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_image_error")))
+    assert errors  # A past failure is still available in the audit trail.
+    rendered = gallery_html(company.id, task.id, generated_images(db, company.id, task.id), errors=errors)
+    assert "Скачать все · 3 PNG" in rendered
+    assert "не созданы" not in rendered
+
+
+@pytest.mark.asyncio
 async def test_owner_pages_show_gallery_and_download_png_zip(company_db):
     db, company, other, root = company_db
     request = CreativeRequest(mode="creative", product_id=company.id,

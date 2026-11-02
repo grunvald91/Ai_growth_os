@@ -497,7 +497,7 @@ async def confirm_create_creative(ctx: Context, stored: dict, via: str) -> Outco
     except (ValueError, ValidationError, LookupError):
         ctx.db.rollback()
         return Outcome("Не удалось создать задание. Проверьте тему, формат и площадку.", ok=False)
-    label = {"story": "Stories", "short_video": "Видеосценарий", "static_image": "Бриф изображения"}[params.format]
+    label = {"story": "Stories", "short_video": "Видеосценарий", "static_image": "Изображение"}[params.format]
     amount = f" ({params.frame_count} экранов)" if params.frame_count else ""
     return Outcome(f"Принял. Готовлю {label}{amount} на тему «{params.topic}». Результат появится в заданиях.",
                    blocks=[_task_block(ctx, task, f"{label}{amount}: {params.topic}",

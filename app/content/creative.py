@@ -184,7 +184,7 @@ class CreativeDraft(Strict):
         return self
 
 
-def _preview(draft: CreativeDraft) -> str:
+def _preview(draft: CreativeDraft, *, images_requested: bool = False) -> str:
     label = {"short_video": "Сценарий короткого видео",
              "story": "Stories", "static_image": "Промпт для изображения"}[draft.format]
     lines = [
@@ -206,7 +206,12 @@ def _preview(draft: CreativeDraft) -> str:
     lines += ["Подпись: " + draft.caption, "CTA: " + draft.cta]
     if draft.production_notes:
         lines += ["Проверить: " + "; ".join(draft.production_notes)]
-    lines += ["Это сценарий/визуальный бриф, а не готовый MP4, Stories-файл или фотография."]
+    lines += [(
+        "Готовые изображения, если генерация завершилась успешно, доступны в галерее задания. "
+        "Публикация не выполнялась."
+        if images_requested else
+        "Это сценарий/визуальный бриф, а не готовый MP4, Stories-файл или фотография."
+    )]
     return "\n\n".join(lines)
 
 
@@ -224,7 +229,11 @@ def queue_creative(db, request: CreativeRequest, *, commit=True) -> Task:
         return duplicate
     task = TaskService(db).create(
         product_id=company.id, assigned_agent="content_creative",
-        title=title, description="Text creative brief only; human review, no rendering",
+        title=title, description=(
+            "Creative images and brief; human review before publication"
+            if request.image_model != "none" else
+            "Text creative brief only; human review, no rendering"
+        ),
         status=TaskStatus.QUEUED, priority=100,
     )
     ArtifactService(db).create(
@@ -390,14 +399,14 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             if idx == 0:
                 strategy = result
         draft = result
-        facts_warnings = factual_claim_warnings(_preview(draft), verified)
+        facts_warnings = factual_claim_warnings(_preview(draft, images_requested=request.image_model != "none"), verified)
         ArtifactService(db).create(
             product_id=product.id, task_id=task.id,
             kind="creative_brief", title=draft.title,
             content=json.dumps({
                 **draft.model_dump(mode="json"),
                 "origin": "quick_creative",
-                "preview_text": _preview(draft),
+                "preview_text": _preview(draft, images_requested=request.image_model != "none"),
                 "review_notes": (["Раскадровка; изображения создаются отдельным шагом"]
                                  if request.image_model != "none"
                                  else ["Черновой бриф; видео или изображение не созданы"]),

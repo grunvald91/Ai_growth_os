@@ -14,7 +14,7 @@ from app.content.creative import CREATIVE_PLATFORMS
 FORMATS = ("post", "story", "short_video", "static_image", "package")
 FORMAT_NAMES = {
     "post": "Пост", "story": "Stories", "short_video": "Видеосценарий",
-    "static_image": "Бриф изображения", "package": "Полный пакет",
+    "static_image": "Изображение", "package": "Полный пакет",
 }
 DEFAULT_PLATFORMS = {
     "post": "telegram", "story": "telegram", "short_video": "youtube_shorts",
