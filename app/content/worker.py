@@ -26,10 +26,20 @@ async def run_content_once(session_factory, settings):
             ~Task.title.like(f'{SEO_TASK_PREFIX}%'),
             Task.product_id.in_(enabled) if enabled else False,
         ))
-        exhausted = exhausted_products(db, settings.seo_articles_per_day)
+        exhausted = (exhausted_products(db, settings.seo_articles_per_day)
+                     if settings.seo_articles_per_day > 0 else set())
         if exhausted:
             # A company's blog articles for today are used up; they wait for tomorrow while everything else runs.
             query = query.where(~and_(Task.title.like(f'{SEO_TASK_PREFIX}%'), Task.product_id.in_(exhausted)))
+        # SEO articles enter production only on their assigned calendar date.
+        # Other content workers and old unscheduled jobs are unaffected.
+        from app.seo.schedule import db_time
+        from sqlalchemy import or_
+        query = query.where(or_(
+            ~Task.title.like(f'{SEO_TASK_PREFIX}%'),
+            Task.due_at.is_(None),
+            Task.due_at <= db_time(db, datetime.now(timezone.utc)),
+        ))
         task = db.scalar(query.order_by(Task.priority.desc(), Task.created_at, Task.id).limit(1))
         if task is None:
             return 0
@@ -55,14 +65,14 @@ async def run_content_once(session_factory, settings):
                         raise ValueError('Wrong product')
                     if data.seo_brief is not None:
                         require_enabled(db, product_id)
-                    result = await build_article_production(db, settings).run(
-                        data.model_copy(update={'task_id': task_id})
-                    )
+                    result = await build_article_production(
+                        db, settings, force_critic=True
+                    ).run(data.model_copy(update={'task_id': task_id}))
                     if data.seo_brief is not None and result.status == 'completed':
                         # Clean critic verdict + static checks publish automatically; failures wait for review.
                         from app.seo.publishing import publish_if_clear
                         try:
-                            publish_if_clear(db, result.artifact_ids[0])
+                            publish_if_clear(db, result.artifact_ids[0], daily_limit=settings.seo_publications_per_day)
                         except Exception:
                             db.rollback()
                             logging.getLogger(__name__).exception('SEO article publication failed for task %s', task_id)

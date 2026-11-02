@@ -34,7 +34,8 @@ class LLMService:
                        validate_revision: Callable[[dict], None] | None = None,
                        prepare_original: Callable[[str], dict] | None = None,
                        on_observed: Callable[[str, LLMResponse], None] | None = None,
-                       on_review_progress: Callable[[LLMResponse], None] | None = None) -> LLMResponse:
+                       on_review_progress: Callable[[LLMResponse], None] | None = None,
+                       review_enabled: bool | None = None) -> LLMResponse:
         sanitized_request = self._privacy_gateway.sanitize(request)
 
         def observe(stage: str, reply: LLMResponse) -> LLMResponse:
@@ -45,7 +46,7 @@ class LLMService:
             return reply
 
         original = observe("author", await self._provider.generate(sanitized_request))
-        if not self._critic_enabled:
+        if not self._critic_enabled or review_enabled is False:
             return original
 
         async def review_generate(next_request: LLMRequest) -> LLMResponse:

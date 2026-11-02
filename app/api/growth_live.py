@@ -241,12 +241,17 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
                     critic += (f'<a class="btn secondary" href="{html.escape(target, quote=True)}">'
                                'Открыть статью и проверить</a>')
                     critic += '<p>Статья не прошла автоматическую проверку. Причина указана выше.</p>'
+            scheduled = article.get("scheduled_at")
+            scheduled_note = (
+                '<span>Запланировано: ' + html.escape(str(scheduled)) + ' МСК</span>'
+                if scheduled else ''
+            )
             article_cards.append(
                 '<li class="seo-article-item">'
                 f'<div class="seo-article-copy"><a href="{html.escape(target, quote=True)}">'
                 f'{html.escape(article["title"])}</a>'
                 f'<span>{html.escape(status or "Статус неизвестен")}</span>'
-                + critic + extra + '</div></li>'
+                + scheduled_note + critic + extra + '</div></li>'
             )
     article_list = (
         f'<details class="seo-run-articles"><summary>Статьи ({len(article_cards)})</summary>'
@@ -289,8 +294,8 @@ def seo_queue_confirm(product_id: UUID, db: Session = Depends(get_db)):
         '<h2>Новый запуск SEO-завода</h2>'
         '<p>Завод подготовит поисковые запросы, SEO-план и задания на статьи. '
         'Обработка после постановки в очередь может использовать платные модели. '
-        'Один запуск создаёт не более трёх статей первой партии; '
-        'остальные темы останутся в SEO-плане без генерации. '
+        'Выберите план на неделю или месяц; все уместные темы '
+        'попадут в очередь без искусственного лимита числа статей. '
         'Статьи с положительным заключением ИИ-критика и без ошибок проверки '
         'автоматически публикуются в блоге компании. '
         'Только материалы с замечаниями остаются на проверке. '
@@ -300,6 +305,11 @@ def seo_queue_confirm(product_id: UUID, db: Session = Depends(get_db)):
         '<label class="field" for="seo-focus">Тема или направление (необязательно)</label>'
         '<input id="seo-focus" name="focus" maxlength="300"'
         ' placeholder="Например, онлайн-запись для салонов красоты">'
+        '<label class="field" for="seo-horizon">Период контент-плана</label>'
+        '<select id="seo-horizon" name="horizon_days">'
+        '<option value="7">На 7 дней</option>'
+        '<option value="30">На месяц (30 дней)</option>'
+        '</select>'
         '<div class="seo-run-actions"><button class="btn primary" type="submit">'
         'Подтвердить постановку в очередь</button>'
         f'<a class="btn" href="{base}">Вернуться без запуска</a></div></form>'
@@ -332,8 +342,11 @@ async def seo_queue_submit(product_id: UUID, request: Request,
     focus = values.get('focus', '')
     if not isinstance(focus, str) or len(focus) > 300:
         raise HTTPException(422, 'Уточните тему SEO-завода')
+    horizon = values.get("horizon_days", "7")
+    if not isinstance(horizon, str) or horizon not in ("7", "30"):
+        raise HTTPException(422, 'Период SEO-плана должен быть 7 или 30 дней')
     try:
-        create_seo_run(db, product_id=product_id, focus=focus)
+        create_seo_run(db, product_id=product_id, focus=focus, horizon_days=int(horizon))
     except LookupError:
         raise HTTPException(404, 'Компания не найдена') from None
     except SeoControlError as exc:

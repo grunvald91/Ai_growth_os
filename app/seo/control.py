@@ -28,15 +28,18 @@ def _product_lock(db: Session, product_id: UUID) -> None:
         raise LookupError("Компания не найдена")
 
 
-def create_seo_run(db: Session, *, product_id: UUID, focus: str | None = None) -> Task:
+def create_seo_run(db: Session, *, product_id: UUID, focus: str | None = None,
+                   horizon_days: int = 7) -> Task:
     """One active job per company, serialized on the product row in PostgreSQL."""
     _product_lock(db, product_id)
     normalized = (focus or "").strip()
     if len(normalized) > 300:
         raise SeoControlError("Тема SEO-завода слишком длинная")
+    if horizon_days not in (7, 30):
+        raise SeoControlError("Период SEO-плана: 7 или 30 дней")
     # The existing function deduplicates queued/running tasks.
     try:
-        return queue_factory(db, product_id, normalized or None)
+        return queue_factory(db, product_id, normalized or None, horizon_days=horizon_days)
     except ValueError as exc:
         raise SeoControlError(str(exc)) from exc
 

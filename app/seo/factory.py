@@ -23,8 +23,6 @@ AGENT = "seo_factory"
 REQUEST_KIND = "seo_factory_request"
 REPORT_KIND = "seo_factory_report"
 ATTEMPT_KIND = "seo_factory_attempt"
-# Deliberate pilot: another owner-started run is needed for the next batch.
-MAX_ARTICLES_PER_RUN = 3
 
 
 def recover_stale_factory(db):
@@ -40,8 +38,11 @@ def recover_stale_factory(db):
     db.commit()
 
 
-def queue_factory(db: Session, product_id: UUID, focus: str | None = None, *, commit: bool = True) -> Task:
+def queue_factory(db: Session, product_id: UUID, focus: str | None = None, *,
+                  horizon_days: int = 7, commit: bool = True) -> Task:
     """One active factory run per company, including simultaneous dispatcher/UI requests."""
+    if horizon_days not in (7, 30):
+        raise ValueError("SEO planning horizon must be 7 or 30 days")
     # Serialize *all* producer paths (dispatcher and Studio form) on the
     # company row. The partial unique constraint is not present in old schemas.
     product = db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
@@ -56,7 +57,7 @@ def queue_factory(db: Session, product_id: UUID, focus: str | None = None, *, co
                                   status=TaskStatus.QUEUED, priority=50,
                                   description="Собрать запросы клиентов, составить контент-план под воронку и поставить статьи в работу.")
     ArtifactService(db).create(product_id=product_id, task_id=task.id, kind=REQUEST_KIND, title="Запрос на SEO-завод",
-                               content=json.dumps({"focus": focus}, ensure_ascii=False))
+                               content=json.dumps({"focus": focus, "horizon_days": horizon_days}, ensure_ascii=False))
     if commit:
         db.commit()
     return task
@@ -85,9 +86,13 @@ async def run_factory_once(session_factory, settings, *, provider=None, client: 
         db.commit()
         request = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == REQUEST_KIND))
         try:
-            focus = (json.loads(request.content).get("focus") if request else None) or None
+            parameters = json.loads(request.content) if request else {}
+            focus = parameters.get("focus") or None
+            horizon_days = parameters.get("horizon_days", 7)
+            if horizon_days not in (7, 30):
+                raise ValueError("Invalid SEO planning horizon")
             async with asyncio.timeout(1200):
-                await _execute(db, settings, task_id, product_id, focus, provider, client)
+                await _execute(db, settings, task_id, product_id, focus, provider, client, horizon_days)
         except Exception as exc:
             db.rollback()
             _logger.warning("SEO factory failed: %s", type(exc).__name__)
@@ -104,7 +109,7 @@ async def run_factory_once(session_factory, settings, *, provider=None, client: 
         return 1
 
 
-async def _execute(db, settings, task_id, product_id, focus, provider, client):
+async def _execute(db, settings, task_id, product_id, focus, provider, client, horizon_days=7):
     from app.seo.contracts import SemanticCore, SeoContentPlan
     from app.seo.planner import PLAN_KIND
     from app.seo.service import KIND
@@ -122,18 +127,17 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client):
     plan = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == PLAN_KIND))
     if plan is None:
         plan = await plan_content(db, llm, privacy, product_id, core, products_root=settings.products_root,
-                                  model=settings.llm_model, factory_task_id=task_id)
+                                  model=settings.llm_model, factory_task_id=task_id, horizon_days=horizon_days)
     require_enabled(db, product_id)
-    # A successful SEO plan is not authorization to generate every proposed URL.
-    # Start with a small bounded cohort; other plan items remain unqueued.
+    # All supported topics of the selected weekly or monthly plan are queued.
     all_items = SeoContentPlan.model_validate_json(plan.content).items
-    pilot = {item.id for item in all_items[:MAX_ARTICLES_PER_RUN]}
-    queued = queue_plan(db, plan, {c.id: c for c in core.clusters}, only=pilot)
+    queued = queue_plan(db, plan, {c.id: c for c in core.clusters},
+                        per_day=settings.seo_publications_per_day)
     ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=REPORT_KIND,
         title=f"SEO-завод: поставлено статей — {len(queued)}",
         content=json.dumps({"seeds": len(core.seeds), "clusters": len(core.clusters),
                             "articles_queued": len(queued), "articles_deferred": len(all_items) - len(queued),
-                            "pilot_limit": MAX_ARTICLES_PER_RUN,
+                            "planning_horizon_days": horizon_days,
                             "sources": [s.model_dump() for s in core.sources]}))
     TaskService(db).update(task_id, status=TaskStatus.COMPLETED)
     db.commit()

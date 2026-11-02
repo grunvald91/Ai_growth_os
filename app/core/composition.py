@@ -112,12 +112,15 @@ def build_article_production(
     db: Session,
     settings: Settings,
     provider: LLMProvider | None = None,
+    *,
+    force_critic: bool = False,
 ) -> ArticleProduction:
     provider = provider or build_llm_provider(settings)
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     return ArticleProduction(
         db=db,
-        llm=LLMService(privacy_gateway=privacy, provider=provider, critic_enabled=settings.agent_critic_enabled),
+        llm=LLMService(privacy_gateway=privacy, provider=provider,
+                       critic_enabled=(settings.agent_critic_enabled or force_critic)),
         privacy=privacy,
         products_root=settings.products_root,
         provider_name=settings.llm_provider,

@@ -279,17 +279,52 @@ async def test_publication_recovery_logs_failed_articles(env, tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_changed_reader_does_not_require_new_approval(env, tmp_path):
+async def test_changed_reader_requires_matching_critic_version_before_autopublish(env, tmp_path):
     db, product = env
     article_id = await make_article(db, product, tmp_path)
     row = db.get(Artifact, article_id)
     data = json.loads(row.content)
     data["reader_article"]["lead"] += " Изменённый текст."
-    row.content = json.dumps(data)
+    row.content = json.dumps(data, ensure_ascii=False)
+    db.commit()
+
+    # Automatic publication must not trust a critic verdict for old text.
+    outcome = publish_if_clear(db, article_id)
+    assert not outcome.published
+    assert "content_mismatch" in outcome.reason
+    assert db.get(Artifact, article_id).status == ArtifactStatus.AWAITING_APPROVAL
+    assert not list(db.scalars(select(Publication)))
+
+    # Once the critic reviews THIS version, no manual confirmation is needed.
+    run = db.scalar(select(AgentRun).where(
+        AgentRun.task_id == row.task_id, AgentRun.agent_name == "marketing_editor"))
+    review = db.scalar(select(Artifact).where(
+        Artifact.agent_run_id == run.id, Artifact.kind == "seo_final_review"))
+    article = ArticleArtifact.model_validate_json(row.content)
+    review.content = json.dumps({
+        "status": "no_material_issues",
+        "reader_hash": reader_hash(article.reader_article),
+    })
+    db.commit()
+    refreshed = publish_if_clear(db, article_id)
+    assert refreshed.published
+    assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
+
+
+@pytest.mark.asyncio
+async def test_critic_verdict_without_hash_cannot_autopublish(env, tmp_path):
+    db, product = env
+    article_id = await make_article(db, product, tmp_path)
+    row = db.get(Artifact, article_id)
+    run = db.scalar(select(AgentRun).where(
+        AgentRun.task_id == row.task_id, AgentRun.agent_name == "marketing_editor"))
+    review = db.scalar(select(Artifact).where(
+        Artifact.agent_run_id == run.id, Artifact.kind == "seo_final_review"))
+    review.content = json.dumps({"status": "no_material_issues"})
     db.commit()
     outcome = publish_if_clear(db, article_id)
-    assert outcome.published
-    assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
+    assert not outcome.published and "content_mismatch" in outcome.reason
+    assert not list(db.scalars(select(Publication)))
 
 
 @pytest.mark.asyncio
@@ -434,3 +469,70 @@ async def test_business_blog_uses_verified_link_and_own_booking_route(env, tmp_p
             assert client.get("/public/blog/businesses/0/articles").status_code == 404
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_reasoned_author_rejection_after_one_critic_can_autopublish(env, tmp_path):
+    db, product = env
+    article_id = await make_article(db, product, tmp_path, critic_status="all_rejected")
+    row = db.get(Artifact, article_id)
+    run = db.scalar(select(AgentRun).where(
+        AgentRun.task_id == row.task_id, AgentRun.agent_name == "marketing_editor"))
+    review = db.scalar(select(Artifact).where(
+        Artifact.agent_run_id == run.id, Artifact.kind == "seo_final_review"))
+    review.content = json.dumps({
+        "status": "all_rejected",
+        "reader_hash": reader_hash(ArticleArtifact.model_validate_json(row.content).reader_article),
+        "findings": [{"id": "f1", "severity": "major", "problem": "Unnecessary stylistic change"}],
+        "decisions": [{"id": "f1", "decision": "reject",
+                       "rationale": "The requirement is already covered in this reader-facing draft"}],
+    })
+    db.commit()
+    assert publish_if_clear(db, article_id).published
+    assert len(list(db.scalars(select(Publication)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_unsubstantiated_all_rejected_status_still_blocks_publication(env, tmp_path):
+    db, product = env
+    article_id = await make_article(db, product, tmp_path, critic_status="all_rejected")
+    outcome = publish_if_clear(db, article_id)
+    assert not outcome.published
+    assert "unresolved_critic_findings" in outcome.reason
+    assert not list(db.scalars(select(Publication)))
+
+
+
+@pytest.mark.asyncio
+async def test_fabricated_servgo_price_rejected_by_author_requires_owner_review(env, tmp_path):
+    """An AI author's unsupported dismissal of a critical false price is not a release approval."""
+    db, company = env
+    article_id = await make_article(db, company, tmp_path, critic_status="all_rejected")
+    row = db.get(Artifact, article_id)
+    article = ArticleArtifact.model_validate_json(row.content)
+    article.reader_article.sections[0].body += " ServGo стоит 2 990 ₽ в месяц."
+    article.full_article += " ServGo стоит 2 990 ₽ в месяц."
+    row.content = article.model_dump_json()
+    run = db.scalar(select(AgentRun).where(
+        AgentRun.task_id == row.task_id, AgentRun.agent_name == "marketing_editor"))
+    review = db.scalar(select(Artifact).where(
+        Artifact.agent_run_id == run.id, Artifact.kind == "seo_final_review"))
+    review.content = json.dumps({
+        "status": "all_rejected",
+        "reader_hash": reader_hash(article.reader_article),
+        "findings": [{
+            "id": "false-price", "severity": "critical",
+            "problem": "The article quotes an unverified ServGo subscription price",
+            "evidence": "2 990 ₽ в месяц",
+            "suggestion": "Remove the invented pricing claim",
+        }],
+        "decisions": [{
+            "id": "false-price", "decision": "reject",
+            "rationale": "The author asserts the price without any approved source",
+        }],
+    }, ensure_ascii=False)
+    db.commit()
+    blocked = publish_if_clear(db, article_id)
+    assert not blocked.published and "critical_finding_unresolved" in blocked.reason
+    assert db.get(Artifact, article_id).status == ArtifactStatus.AWAITING_APPROVAL
+    assert not list(db.scalars(select(Publication)))
