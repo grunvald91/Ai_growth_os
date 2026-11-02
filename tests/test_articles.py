@@ -1092,6 +1092,9 @@ def test_article_text_chain_rules_are_value_first_and_keep_hard_constraints():
     assert 'полезные приёмы' in rules['content_strategist']
     assert 'конкретное действие' in rules['seo_editor']
     assert 'Не растягивай текст' in rules['article_writer']
+    assert 'история, сравнение' in rules['seo_editor']
+    assert 'не по обязательным трём-пяти пунктам' in rules['platform_writer']
+    assert 'не навязывай списки' in rules['repurposing_editor'].casefold()
     assert 'kind=advice' in rules['article_writer']
     assert 'ровно один призыв' in rules['conversion_editor']
     assert 'ровно по одному' in rules['human_editor']
