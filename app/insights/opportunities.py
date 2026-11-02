@@ -52,7 +52,7 @@ def suggest_clients(history: Schedule, today: date, service_id: int, resource_id
 
     candidates: list[tuple[tuple, ClientSuggestion]] = []
     for client_id, by_date in visits.items():
-        if client_id in booked_ahead:
+        if client_id in booked_ahead or client_id in history.paused_client_ids:
             continue
         visit_days = sorted(by_date)
         last_day = visit_days[-1]
