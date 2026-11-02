@@ -6,7 +6,7 @@ keep their duplicate protection, owner approvals and audit records. Nothing here
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -288,7 +288,7 @@ async def prepare_slot_offer(ctx: Context, params: SlotOfferParams) -> Outcome:
     if source is None:
         return _no_booking_data(ctx, "no_link")
     today = datetime.now(ZoneInfo("Europe/Moscow")).date()
-    if not today <= params.day <= today + __import__("datetime").timedelta(days=6):
+    if not today <= params.day <= today + timedelta(days=6):
         return Outcome("Для подготовки предложения выберите время в ближайшие семь дней.",
                        "Выберите ближайшую дату.", ok=False)
     schedule = await asyncio.to_thread(source.fetch, params.day, params.day,
