@@ -102,6 +102,11 @@ def stylesheet():
 def javascript():
     return Response((ASSETS/'growth-live.js').read_text(), media_type='application/javascript')
 
+@router.get('/studio/assets/create-studio.js')
+def create_studio_javascript():
+    return Response((ASSETS/'create-studio.js').read_text(), media_type='application/javascript',
+                    headers={'Cache-Control': 'no-cache'})
+
 
 # Explicit allowlist: v4 can only serve these reviewed same-origin design resources.
 @router.get('/studio/assets/servgo-air-tokens.css', include_in_schema=False)
