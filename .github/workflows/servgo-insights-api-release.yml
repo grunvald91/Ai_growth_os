@@ -50,7 +50,7 @@ jobs:
       - name: Offline guard tests
         run: python -m pytest -q tests/test_servgo_insights_api_release.py
       - name: Read-only server preflight (always)
-        run: python scripts/servgo_insights_api_release.py
+        run: python -m scripts.servgo_insights_api_release
 
   deploy:
     if: >-
@@ -76,4 +76,4 @@ jobs:
       - name: Install pinned SSH library
         run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
       - name: Revalidate live file hashes, deploy four API files and verify health
-        run: python scripts/servgo_insights_api_release.py
+        run: python -m scripts.servgo_insights_api_release
