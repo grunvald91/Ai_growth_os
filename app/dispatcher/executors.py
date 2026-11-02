@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.dispatcher.readers import ACTIVE, attention, latest_active_video, plans, upcoming_slots, work_rows
 from app.dispatcher.registry import (CAPABILITIES, CHANNEL_LABELS, CancelVideoParams, CreativeParams, DepthParams, GoToParams,
-                                     InsightsParams, PostParams, ScheduleParams, VideoParams, page_href, page_label)
+                                     InsightsParams, PackageParams, PostParams, ScheduleParams, VideoParams, page_href, page_label)
 from app.dispatcher.outcome import Confirmation, Context, Outcome, links_block, task_block  # noqa: F401
 from app.models.domain import Approval, Product, Task, ToolCall
 
@@ -246,6 +246,8 @@ async def describe_create_creative(ctx: Context, params: CreativeParams) -> Conf
     details = [f"Тема: {params.topic}.", f"Формат: {item}."]
     if params.frame_count is not None:
         details.append(f"Экранов: {params.frame_count}.")
+    platform = params.platform or {"story": "telegram", "short_video": "youtube_shorts", "static_image": "telegram"}[params.format]
+    details.append(f"Площадка: {platform}.")
     details.append("Сейчас этот процесс создаёт раскадровку и промпты; файлы изображений и MP4 не генерируются.")
     details.append("Без отдельного согласования ничего не публикуется.")
     return Confirmation(title=f"Подготовить {item}?", details=details,
@@ -258,7 +260,8 @@ async def confirm_create_creative(ctx: Context, stored: dict, via: str) -> Outco
     try:
         params = CreativeParams.model_validate(stored)
         command = CreativeRequest(mode="creative", product_id=ctx.product.id, topic=params.topic,
-                                  format=params.format, platform=params.platform,
+                                  format=params.format,
+                                  platform=params.platform or {"story": "telegram", "short_video": "youtube_shorts", "static_image": "telegram"}[params.format],
                                   frame_count=params.frame_count, audience=params.audience)
         task = queue_creative(ctx.db, command)
     except (ValueError, ValidationError, LookupError):
@@ -269,6 +272,27 @@ async def confirm_create_creative(ctx: Context, stored: dict, via: str) -> Outco
     return Outcome(f"Принял. Готовлю {label}{amount} на тему «{params.topic}». Результат появится в заданиях.",
                    blocks=[_task_block(ctx, task, f"{label}{amount}: {params.topic}",
                                        f"/studio/products/{ctx.product.id}/tasks/{task.id}")], task_id=task.id)
+
+
+async def describe_create_package(ctx: Context, params: PackageParams) -> Confirmation:
+    return Confirmation(title="Создать полный пакет?",
+        details=[f"Тема: {params.topic}.", "Включены статья, адаптации и видеосценарии.",
+                 "Готовый анимированный MP4 не входит и отдельно оплачивается.",
+                 "Публикация не запускается автоматически."],
+        params=params.model_dump(exclude_none=True), confirm_label="Создать")
+
+
+async def confirm_create_package(ctx: Context, stored: dict, via: str) -> Outcome:
+    from app.content.service import queue_content
+    try:
+        params = PackageParams.model_validate(stored)
+        task = queue_content(ctx.db, ctx.product.id, params.topic, format="package")
+    except (ValueError, LookupError):
+        ctx.db.rollback()
+        return Outcome("Не удалось создать пакет. Уточните тему.", ok=False)
+    return Outcome(f"Принял. Готовлю полный пакет на тему «{params.topic}».",
+        blocks=[_task_block(ctx, task, f"Полный пакет: {params.topic}",
+                            f"/studio/products/{ctx.product.id}/tasks/{task.id}")], task_id=task.id)
 
 
 async def make_plan(ctx: Context, params) -> Outcome:
@@ -432,9 +456,11 @@ EXECUTORS = {
 }
 # Abilities that always ask first: describe what will happen, run it only after a confirmation.
 DESCRIBERS = {"approve_plan": describe_approve_plan, "seo_factory": describe_seo_factory,
-              "create_creative": describe_create_creative}
+              "create_creative": describe_create_creative,
+              "create_package": describe_create_package}
 CONFIRMERS = {"approve_plan": confirm_approve_plan, "whiteboard_video": confirm_whiteboard_video,
               "create_creative": confirm_create_creative,
+              "create_package": confirm_create_package,
               "seo_factory": confirm_seo_factory}
 
 # Materials and publication live in their own module; it imports the shared types from `outcome`, not from here.
