@@ -135,7 +135,7 @@ jobs:
             web/api/schemas.py
 
       - name: Install API dependencies for protected Mail PWA tests
-        run: python -m pip install --disable-pip-version-check -r web/api/requirements.txt aiosqlite
+        run: python -m pip install --disable-pip-version-check -r web/api/requirements.txt aiosqlite pytest
 
       - name: Verify canonical Mail SSO, owner-only access and API URL rewrites
         env:
