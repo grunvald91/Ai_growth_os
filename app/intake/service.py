@@ -263,6 +263,13 @@ class CompanyIntakeService:
                 # A failed retry must not destroy useful previously-read text.
                 return self.get(product_id, session_id, actor=actor)
             previous = state["sources"][existing_index]
+            # Never downgrade the same file from complete to incomplete, or
+            # replace a longer partial extraction with a shorter one.
+            # A complete extraction is preferred over a partial extraction.
+            prior_quality = (previous.get("status") == "read", len(previous["text"]))
+            incoming_quality = (source.status == "read", len(source.text))
+            if incoming_quality <= prior_quality:
+                return self.get(product_id, session_id, actor=actor)
             new_total = self._used_text(state) - len(previous["text"]) + len(source.text)
             if new_total > MAX_SOURCE_TEXT:
                 raise IntakeError("Слишком много материалов в одном сборе. Сначала проверьте текущие данные.")
