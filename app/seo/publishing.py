@@ -21,7 +21,7 @@ from app.workflows.article_contracts import ArticleArtifact
 from app.seo.activation import SeoFactoryActivation, is_enabled
 
 CHANNEL = "own_site"
-CLEAN_CRITIC_STATUSES = frozenset({"no_material_issues", "revised"})
+CLEAN_CRITIC_STATUSES = frozenset({"no_material_issues", "revised", "all_rejected"})
 FINAL_EDITOR = "marketing_editor"
 DECIDER = "policy:critic_reviewed"
 _logger = logging.getLogger(__name__)
@@ -78,7 +78,21 @@ def critic_verdict(db: Session, task_id, reader=None) -> str:
                 continue
             if reader is None or data.get("reader_hash") != reader_hash(reader):
                 return "content_mismatch"
-            return str(data.get("status", "missing"))
+            status = str(data.get("status", "missing"))
+            if status == "all_rejected":
+                # Author may disagree with the critic, but only if every
+                # finding was individually assessed in the recorded audit.
+                findings, decisions = data.get("findings"), data.get("decisions")
+                if not isinstance(findings, list) or not findings or not isinstance(decisions, list):
+                    return "unresolved_critic_findings"
+                ids = [f.get("id") for f in findings if isinstance(f, dict)]
+                assessments = {d.get("id"): d for d in decisions if isinstance(d, dict)}
+                if (len(ids) != len(findings) or len(set(ids)) != len(ids)
+                    or len(assessments) != len(findings) or set(ids) != set(assessments)
+                    or any(d.get("decision") != "reject" or len(str(d.get("rationale") or "").strip()) < 5
+                           for d in assessments.values())):
+                    return "unresolved_critic_findings"
+            return status
         except (TypeError, ValueError):
             continue
     return "missing"
