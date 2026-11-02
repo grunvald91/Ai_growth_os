@@ -63,9 +63,13 @@ class PostParams(_Params):
 class CreativeParams(_Params):
     topic: str = Field(min_length=3, max_length=300, description="Тема материала. Если тема не названа, сначала спроси её или предложи темы.")
     format: Literal["story", "short_video", "static_image"] = Field(description="Stories, видеосценарий или одиночный визуальный бриф.")
-    platform: Literal["telegram", "vk", "instagram_reels", "youtube_shorts", "vk_clips", "dzen"] = "telegram"
+    platform: Literal["telegram", "vk", "instagram_reels", "youtube_shorts", "vk_clips", "dzen"] | None = Field(default=None, description="Если не указана, автоматически выбирается подходящая площадка по формату.")
     frame_count: int | None = Field(default=None, ge=3, le=10, description="Строгое число экранов Stories, если владелец его назвал. Например, четыре — 4. Для других форматов не указывать.")
     audience: str | None = Field(default=None, max_length=300)
+
+
+class PackageParams(_Params):
+    topic: str = Field(min_length=3, max_length=300, description="Тема полного контент-пакета. Если не названа, сначала уточни или предложи тему.")
 
 
 class VideoParams(_Params):
@@ -226,6 +230,11 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                "для изображения telegram/vk/dzen/instagram_reels. Если тема не названа — уточни, не выдумывай. "
                "Перед запуском показывай пользователю формат, число экранов и тему.",
                ToolOperation.GENERATE_DRAFT, Cost.CHEAP, CreativeParams, always_confirm=True),
+    Capability("create_package", "Создать полный пакет",
+               "Подготовить по одной теме статью и адаптации для разных площадок, креативные брифы "
+               "и видеосценарии. Готовый MP4 пока не входит. Если тема не названа, уточни её. "
+               "Обязательно показать подтверждение перед запуском.",
+               ToolOperation.GENERATE_DRAFT, Cost.CHEAP, PackageParams, always_confirm=True),
     Capability("make_plan", "Составить контент-план",
                "Поставить в работу составление нового контент-плана. Он ничего не публикует: план утверждается отдельно.",
                ToolOperation.GENERATE_DRAFT, Cost.CHEAP, NoParams),
