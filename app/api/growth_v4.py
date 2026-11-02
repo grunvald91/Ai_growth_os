@@ -184,9 +184,11 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
           aria-label="Создание через диспетчера">
           <div class="dp-feed" id="dp-feed" role="log" aria-live="polite" aria-label="Ответы диспетчера"></div>
           <div class="command-dock">
-            <div class="voice-hold-overlay" id="dp-voice-overlay" aria-hidden="true">
-              <div class="voice-hold-instruction" id="dp-voice-overlay-text">Отпустите, чтобы отправить</div>
-              <div class="voice-hold-scale" aria-hidden="true"><span class="voice-hold-dot"></span></div>
+            <div class="voice-hold-overlay vg" id="dp-voice-overlay" aria-hidden="true">
+              <div class="vg__glow"></div>
+              <div class="vg__label" id="dp-voice-overlay-text">Отпустите, чтобы отправить</div>
+              <canvas class="vg__bars" id="vgBars" aria-hidden="true"></canvas>
+              <div class="vg__knob" id="vgKnob" aria-hidden="true"></div>
             </div>
             <div class="dp-live" id="dp-live" hidden>
               <span id="dp-live-label">Слушаю…</span><p id="dp-live-text"></p>
@@ -298,10 +300,11 @@ def render_v4(page, request, pid, switch):
                    'Помогу создать контент, запустить работу команды или разобраться в показателях бизнеса.</p></div>'
                    +inner.outer(inner.find(ident='dp-feed'))+
                    '<div class="command-dock">'
-                   '<div class="voice-hold-overlay" id="dp-voice-overlay" aria-hidden="true">'
-                   '<div class="voice-hold-instruction" id="dp-voice-overlay-text">'
-                   'Отпустите, чтобы отправить</div>'
-                   '<div class="voice-hold-scale" aria-hidden="true"><span class="voice-hold-dot"></span></div>'
+                   '<div class="voice-hold-overlay vg" id="dp-voice-overlay" aria-hidden="true">'
+                   '<div class="vg__glow"></div>'
+                   '<div class="vg__label" id="dp-voice-overlay-text">Отпустите, чтобы отправить</div>'
+                   '<canvas class="vg__bars" id="vgBars" aria-hidden="true"></canvas>'
+                   '<div class="vg__knob" id="vgKnob" aria-hidden="true"></div>'
                    '</div>'+inner.outer(inner.find(ident='dp-live'))+
                    inner.outer(inner.find(ident='dp-voice-note'))+
                    '<div class="command-topicbar">'
@@ -420,10 +423,13 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>images-20261102', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>voice-glow-20261102', extras)
     if pid and current == base+'/create':
         extras += '<script src="/studio/assets/create-studio.js?v=images-20261102"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=images-20261102"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=voice-glow-20261102"></script>'
+    if pid and (home or current == base+'/create'):
+        # The glow measures the existing recorder stream; load before dispatcher.js.
+        extras = '<script src="/studio/assets/voice-glow.js?v=1"></script>' + extras
     if pid:
         button = Document(template).find(ident='notifyBtn')
         template = template.replace(Document(template).outer(button), notice_html(pid).replace('<span aria-hidden="true">🔔</span>', icon('bell')))
@@ -431,7 +437,7 @@ def render_v4(page, request, pid, switch):
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=16">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=17">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=6">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
