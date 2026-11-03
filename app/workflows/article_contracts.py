@@ -32,6 +32,7 @@ class SeoBrief(Contract):
     stage: Literal['awareness', 'consideration', 'decision']
     intent: Literal['informational', 'commercial', 'transactional', 'navigational']
     reader_problem: Text
+    target_segment: ShortText | None = None
     ai_questions: list[ShortText] = Field(min_length=1)
     next_step: ShortText
 
