@@ -37,7 +37,19 @@ def test_rewrite_code_requires_real_critic_and_original_backup():
     source = path.read_text(encoding="utf-8")
     assert "status not in CLEAN_CRITIC_STATUSES" in source
     assert "seo_article_revision_backup" in source
-    assert "fresh_hash != original_hash" in source
+    assert "staged = []" in source
+    assert "db.commit()" in source
+    assert "with_for_update()" in source
+    assert "Article changed since read-only preflight" in source
     assert "row.status != ArtifactStatus.PUBLISHED" in source
     assert "Expected exactly the two inspected published pages" in source
     assert 'parser.add_argument("--apply"' in source
+
+
+def test_rewrite_applies_only_after_all_articles_reviewed():
+    import inspect
+    from app.seo.revise_servgo_published import run
+    source = inspect.getsource(run)
+    assert source.index("prepared = [await revise_one") < source.index("staged = []")
+    assert source.index("staged = []") < source.index("db.commit()")
+    assert "Expected exactly the two inspected published pages" in source
