@@ -31,7 +31,9 @@ def record_stage(db: Session, product_id: UUID, task_id: UUID, stage: str) -> No
     """Persist progress before external calls; no customer prompts or credentials in logs."""
     ArtifactService(db).create(
         product_id=product_id, task_id=task_id, kind=STAGE_KIND,
-        title="SEO stage", content=json.dumps({"stage": stage}),
+        title="SEO stage", content=json.dumps({
+            "stage": stage, "recorded_at": datetime.now(timezone.utc).isoformat(),
+        }),
     )
     db.commit()
     _logger.info("seo_factory_stage task=%s stage=%s", task_id, stage)
@@ -130,9 +132,15 @@ async def run_factory_once(session_factory, settings, *, provider=None, client: 
                 await _execute(db, settings, task_id, product_id, focus, provider, client, horizon_days)
         except Exception as exc:
             db.rollback()
-            stage_artifact = db.scalar(select(Artifact).where(
+            stage_rows = list(db.scalars(select(Artifact).where(
                 Artifact.task_id == task_id, Artifact.kind == STAGE_KIND,
-            ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+            )))
+            # DB creation timestamps may have only second precision; UUID ordering is not time ordering.
+            stage_artifact = max(
+                stage_rows,
+                key=lambda row: json.loads(row.content).get("recorded_at")
+                or row.created_at.isoformat(),
+            ) if stage_rows else None
             try:
                 stage = json.loads(stage_artifact.content).get("stage") if stage_artifact else "starting"
             except (TypeError, ValueError):
@@ -198,4 +206,5 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client, h
                             "planning_horizon_days": horizon_days,
                             "sources": [s.model_dump() for s in core.sources]}))
     TaskService(db).update(task_id, status=TaskStatus.COMPLETED)
+    record_stage(db, product_id, task_id, "completed")
     db.commit()
