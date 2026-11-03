@@ -18,7 +18,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
     <link rel="stylesheet" href="/static/css/landing.css?v=12">
-    <link rel="stylesheet" href="/static/css/blog.css?v=2">
+    <link rel="stylesheet" href="/static/css/blog.css?v=3">
     {% if article %}
     <script type="application/ld+json">
     {
@@ -209,7 +209,20 @@
                 {% for section in article.sections %}
                     <section aria-labelledby="section-{{ loop.index }}">
                         <h2 id="section-{{ loop.index }}">{{ section.title }}</h2>
-                        {% for paragraph in section.paragraphs %}<p>{{ paragraph }}</p>{% endfor %}
+                        {% if section.blocks %}
+                            {% for block in section.blocks %}
+                                {% if block.type == 'paragraph' %}<p>{{ block.text }}</p>
+                                {% elif block.type == 'list' %}
+                                    {% if block.ordered %}
+                                        <ol class="blog-ordered-list">{% for point in block["items"] %}<li>{{ point }}</li>{% endfor %}</ol>
+                                    {% else %}
+                                        <ul>{% for point in block["items"] %}<li>{{ point }}</li>{% endfor %}</ul>
+                                    {% endif %}
+                                {% endif %}
+                            {% endfor %}
+                        {% else %}
+                            {% for paragraph in section.paragraphs %}<p>{{ paragraph }}</p>{% endfor %}
+                        {% endif %}
                         {% if section.figure %}
                         <figure class="blog-inline-figure">
                             <img src="/static/blog/{{ section.figure }}" alt="{{ section.figure_alt }}"
@@ -236,7 +249,7 @@
                             </table>
                         </div>
                         {% endif %}
-                        {% if section.bullets %}
+                        {% if section.bullets and not section.blocks %}
                         <ul>{% for bullet in section.bullets %}<li>{{ bullet }}</li>{% endfor %}</ul>
                         {% endif %}
                         {% if section.example %}

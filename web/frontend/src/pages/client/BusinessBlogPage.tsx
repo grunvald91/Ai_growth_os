@@ -93,8 +93,16 @@ export function BusinessBlogPage() {
                 {article.sections.map((section, index) => (
                   <section key={index} className="bf-block">
                     <h2 className="bf-h2">{section.title}</h2>
-                    {section.paragraphs.map((paragraph, i) => <p key={i}>{paragraph}</p>)}
-                    {section.bullets.length > 0 && <ul>{section.bullets.map((bullet, i) => <li key={i}>{bullet}</li>)}</ul>}
+                    {section.blocks?.length
+                      ? section.blocks.map((block, i) => block.type === 'paragraph'
+                        ? <p key={i}>{block.text}</p>
+                        : block.ordered
+                          ? <ol key={i}>{block.items.map((item, j) => <li key={j}>{item}</li>)}</ol>
+                          : <ul key={i}>{block.items.map((item, j) => <li key={j}>{item}</li>)}</ul>)
+                      : <>
+                          {section.paragraphs.map((paragraph, i) => <p key={i}>{paragraph}</p>)}
+                          {section.bullets.length > 0 && <ul>{section.bullets.map((bullet, i) => <li key={i}>{bullet}</li>)}</ul>}
+                        </>}
                   </section>
                 ))}
                 {(article.company_facts?.length ?? 0) > 0 && (

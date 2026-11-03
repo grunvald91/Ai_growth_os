@@ -251,3 +251,15 @@
 /* Обложка статей платформы, у которых ещё нет иллюстрации: тема крупным шрифтом. */
 .blog-page .blog-art-text { position:relative; z-index:1; font-size:clamp(22px,2.6vw,34px); font-weight:800; letter-spacing:-.03em; color:var(--blue); text-align:center; line-height:1.15; padding:0 18px; }
 .blog-page .blog-faq h3 { font-size:18px; margin:22px 0 8px; }
+
+/* Numbered steps are semantic, not green checkmarks. Keep long SEO guides scannable. */
+.blog-page .blog-article-body .blog-ordered-list {
+    list-style: decimal;
+    padding-left: 25px;
+    margin: 8px 0 25px;
+}
+.blog-page .blog-article-body .blog-ordered-list li {
+    padding: 5px 0 5px 3px;
+}
+.blog-page .blog-article-body .blog-ordered-list li::before { content: none; }
+.blog-page .blog-article-body section > p { max-width: 76ch; }

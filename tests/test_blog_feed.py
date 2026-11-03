@@ -37,6 +37,21 @@ class NormalizeTest(unittest.TestCase):
         self.assertEqual(a["date_label"], "28 октября 2026")
         self.assertTrue(a["from_feed"])
 
+    def test_ordered_source_blocks_keep_interleaved_paragraphs(self):
+        raw = {**RAW, "sections": [{
+            "title": "Как выбрать",
+            "paragraphs": ["Начало", "Конец"],
+            "bullets": ["Шаг один", "Шаг два"],
+            "blocks": [
+                {"type": "paragraph", "text": "Начало"},
+                {"type": "list", "ordered": True, "items": ["Шаг один", "Шаг два"]},
+                {"type": "paragraph", "text": "Конец"},
+            ],
+        }]}
+        article = blog_feed.normalize(raw)
+        self.assertEqual(article["sections"][0]["blocks"][1]["items"], ["Шаг один", "Шаг два"])
+        self.assertTrue(article["sections"][0]["blocks"][1]["ordered"])
+
     def test_broken_items_dropped(self):
         self.assertIsNone(blog_feed.normalize({**RAW, "slug": "../x"}))
         self.assertIsNone(blog_feed.normalize({**RAW, "sections": []}))
@@ -61,6 +76,27 @@ class BlogFeedPagesTest(unittest.IsolatedAsyncioTestCase):
         types = [json.loads(m)["@type"] for m in re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.S)]
         self.assertEqual(types, ["BlogPosting", "FAQPage"])
         self.assertIn('rel="canonical" href="https://servgo.ru/blog/kak-vybrat-crm"', html)
+
+    async def test_rendered_seo_list_stays_between_paragraphs(self):
+        raw = {**RAW, "sections": [{
+            "title": "Проверка",
+            "paragraphs": ["До списка", "После списка"],
+            "bullets": ["Первый шаг", "Второй шаг"],
+            "blocks": [
+                {"type": "paragraph", "text": "До списка"},
+                {"type": "list", "ordered": True, "items": ["Первый шаг", "Второй шаг"]},
+                {"type": "paragraph", "text": "После списка"},
+            ],
+        }]}
+        async def blocked_feed(*a, **kw):
+            return [blog_feed.normalize(raw)]
+        with patch('webapp.blog_feed.feed_articles', blocked_feed):
+            async with TestClient(TestServer(create_webapp())) as c:
+                html = await (await c.get('/blog/kak-vybrat-crm')).text()
+        self.assertIn('<ol class="blog-ordered-list">', html)
+        self.assertLess(html.index('До списка'), html.index('Первый шаг'))
+        self.assertLess(html.index('Первый шаг'), html.index('После списка'))
+        self.assertEqual(html.count('Первый шаг'), 1)
 
     async def test_list_sitemap_and_llms(self):
         async with TestClient(TestServer(create_webapp())) as c:

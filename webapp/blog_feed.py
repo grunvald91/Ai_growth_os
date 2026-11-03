@@ -47,14 +47,24 @@ def normalize(raw: dict) -> dict | None:
             return None
         title, lead = str(raw["title"]).strip(), str(raw["lead"]).strip()
         updated, label = _date(str(raw.get("updated_at") or raw["published_at"]))
-        sections = [
-            {
-                "title": str(s["title"]),
-                "paragraphs": [str(p) for p in s.get("paragraphs", [])],
-                "bullets": [str(b) for b in s.get("bullets", [])],
-            }
-            for s in raw.get("sections", [])
-        ]
+        sections = []
+        for section in raw.get("sections", []):
+            blocks = []
+            for block in section.get("blocks", []):
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "paragraph" and isinstance(block.get("text"), str):
+                    blocks.append({"type": "paragraph", "text": block["text"]})
+                elif block.get("type") == "list" and isinstance(block.get("items"), list):
+                    items = [str(item) for item in block["items"] if str(item).strip()]
+                    if items:
+                        blocks.append({"type": "list", "ordered": bool(block.get("ordered")), "items": items})
+            sections.append({
+                "title": str(section["title"]),
+                "paragraphs": [str(p) for p in section.get("paragraphs", [])],
+                "bullets": [str(p) for p in section.get("bullets", [])],
+                "blocks": blocks,
+            })
         faq = [
             {"question": str(i["question"]), "answer": str(i["answer"])}
             for i in raw.get("faq", [])

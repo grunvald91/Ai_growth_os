@@ -27,7 +27,10 @@ export interface BusinessBlogFeed {
 
 export interface BusinessBlogArticle extends BlogArticleSummary {
   direct_answer: string
-  sections: { title: string; paragraphs: string[]; bullets: string[] }[]
+  sections: { title: string; paragraphs: string[]; bullets: string[]; blocks?: (
+    | { type: 'paragraph'; text: string }
+    | { type: 'list'; ordered: boolean; items: string[] }
+  )[] }[]
   company_facts?: string[]
   closing: string
   faq: { question: string; answer: string }[]
