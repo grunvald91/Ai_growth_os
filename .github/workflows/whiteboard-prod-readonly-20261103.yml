@@ -1,0 +1,107 @@
+name: One-time read-only whiteboard incident diagnostic 2026-11-03
+on:
+  push:
+    branches: [diag/whiteboard-prod-20261103]
+    paths: ['.github/workflows/whiteboard-prod-readonly-20261103.yml']
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: whiteboard-incident-20261103
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    if: github.repository == 'grunvald91/Ai_growth_os' && github.ref == 'refs/heads/diag/whiteboard-prod-20261103'
+    env:
+      SSHPASS: \${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: \${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+      GH_TOKEN: \${{ github.token }}
+    steps:
+      - name: Inspect only last whiteboard tasks, sanitized DB history and worker health
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > /tmp/whiteboard-diagnose.py <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from sqlalchemy import select
+          from app.core.config import Settings
+          from app.db.session import SessionLocal
+          from app.models.domain import Task, Artifact
+          from app.content.whiteboard.jobs import AGENT, job_directory
+
+          cfg = Settings()
+          print('utc_now', datetime.now(timezone.utc).isoformat())
+          print('release_sha', cfg.release_sha)
+          print('configured_auto_resume_attempts', cfg.whiteboard_auto_resume_attempts)
+          print('products_root_exists', Path(cfg.products_root).is_dir())
+          with SessionLocal() as db:
+              jobs = list(db.scalars(select(Task).where(Task.assigned_agent == AGENT)
+                   .order_by(Task.created_at.desc(), Task.id.desc()).limit(10)))
+              print('jobs_inspected', len(jobs))
+              for idx, task in enumerate(jobs, 1):
+                  raw = db.scalar(select(Artifact.content).where(
+                      Artifact.task_id == task.id, Artifact.kind == 'whiteboard_job_state'))
+                  value = json.loads(raw) if raw else {}
+                  root = job_directory(cfg.products_root, task.product_id, task.id)
+                  video = root / 'output' / 'video.mp4'
+                  manifest = root / 'stages' / 'manifest.json'
+                  stages = {}
+                  try:
+                      if manifest.is_file():
+                          data = json.loads(manifest.read_text(encoding='utf-8'))
+                          stages = {str(k): str(v.get('status')) for k,v in data.get('stages', {}).items()}
+                  except Exception as exc:
+                      stages = {'read_error':type(exc).__name__}
+                  errors = []
+                  for e in (value.get('errors') or [])[-12:]:
+                      errors.append({k:e.get(k) for k in ('at','code','stage','calls','http_status','exception_type','auto_resume','refunded') if k in e})
+                  result = {
+                    'recency_rank':idx, 'job_suffix':str(task.id)[-8:],
+                    'created_at':str(task.created_at), 'updated_at':str(task.updated_at),
+                    'status':str(task.status.value if hasattr(task.status,'value') else task.status),
+                    'stage':value.get('stage'), 'failed_stage':value.get('failed_stage'),
+                    'error':value.get('error'), 'last_error':value.get('last_error'),
+                    'calls':value.get('calls'), 'extra_calls':value.get('extra_calls',0),
+                    'auto_resumes':value.get('auto_resumes',0), 'auto_resume_limit':value.get('auto_resume_limit'),
+                    'retry_at':value.get('retry_at'), 'resumes':value.get('resumes',0),
+                    'diagnostic':{k:v for k,v in (value.get('diagnostic') or {}).items()
+                        if k in ('exception_type','http_status','validation_types')},
+                    'errors':errors, 'mp4_exists':video.is_file(),
+                    'mp4_bytes':video.stat().st_size if video.is_file() else None,
+                    'artifact_registered':bool(value.get('artifact_id')),
+                    'checkpoint_statuses':stages,
+                  }
+                  print('job',json.dumps(result,ensure_ascii=False,default=str,sort_keys=True))
+          PY
+          echo "## Whiteboard incident diagnostics (sanitized, read-only)" > /tmp/whiteboard-report.txt
+          if [ -z "$SSHPASS" ]; then
+            echo "SERVER_SSH_PASSWORD not configured: cannot inspect production" >> /tmp/whiteboard-report.txt
+          else
+            sudo apt-get install -y -qq sshpass >/dev/null
+            install -m 700 -d ~/.ssh
+            ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/whiteboard-scanned || true
+            while read -r line; do
+              printf '%s\n' "$line" > /tmp/whiteboard-one
+              if ssh-keygen -lf /tmp/whiteboard-one 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+                printf '%s\n' "$line" >> ~/.ssh/known_hosts
+              fi
+            done < /tmp/whiteboard-scanned
+            if [ ! -s ~/.ssh/known_hosts ]; then
+              echo "Host fingerprint mismatch or SSH unavailable" >> /tmp/whiteboard-report.txt
+            else
+              sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+                "bash -lc 'echo ====container_status====; docker ps --filter label=com.docker.compose.project=ai-growth-os --format \"{{.Names}}|{{.Status}}\"; echo ====worker_failed_log_count_24h====; docker logs --since 24h --tail 2000 ai-growth-os-worker-1 2>&1 | grep -c whiteboard_failed || true; echo ====database====; docker exec -i ai-growth-os-api-1 python -'" \
+                < /tmp/whiteboard-diagnose.py >> /tmp/whiteboard-report.txt 2>&1 || echo "SSH/diagnostic execution failed (inspect workflow failure)" >> /tmp/whiteboard-report.txt
+            fi
+          fi
+          cat /tmp/whiteboard-report.txt
+          gh api --method POST "/repos/$GITHUB_REPOSITORY/issues/233/comments" -f body="$(cat /tmp/whiteboard-report.txt)"
