@@ -22,12 +22,14 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.content_studio import MATERIAL_KINDS, _owner_product, _studio_form, studio_page_shell
 from app.db.session import get_db
+from app.core.config import get_settings
 from app.models.domain import Artifact, Experiment, Task
 from app.api.growth_campaigns import campaign_list_card
 from app.services.campaign_readiness import load_resources
 from app.api.seo_run_view import seo_runs
 from app.seo.control import SeoControlError, create_seo_run, change_seo_run
-from app.seo.activation import is_enabled, set_enabled
+from app.seo.activation import (is_enabled, set_enabled, editorial_preferences,
+                                set_editorial_preferences)
 from app.seo.visibility import VisibilityError, change_article_visibility
 from app.seo.insights import company_seo_insights
 from app.seo.search_metrics import company_search_metrics, inspect_google_article
@@ -399,6 +401,29 @@ async def seo_activation(product_id: UUID, request: Request, db: Session = Depen
     return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
 
 
+@router.post('/studio/products/{product_id}/seo/preferences')
+async def seo_preferences_submit(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+    """Change only the authenticated owner's company preferences; never opt in implicitly."""
+    _owner_product(db, product_id)
+    if getattr(request.state, 'studio_sso_role', None) not in (None, 'owner', 'co_owner'):
+        raise HTTPException(403, 'Настройки SEO доступны владельцу компании')
+    values = await _studio_form(request)
+    try:
+        timezone_name = str(values.get('timezone_name', ''))
+        interval = int(values.get('autorun_interval_days', ''))
+        horizon = int(values.get('autorun_horizon_days', ''))
+        published = int(values.get('publications_per_day', ''))
+        articles = int(values.get('articles_per_day', ''))
+        set_editorial_preferences(
+            db, product_id, timezone_name=timezone_name,
+            autorun_interval_days=interval, autorun_horizon_days=horizon,
+            publications_per_day=published, articles_per_day=articles,
+            actor=getattr(request.state, 'studio_login', 'studio_owner'))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, str(exc) if str(exc) else 'Проверьте настройки расписания') from None
+    return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
+
+
 @router.post('/studio/products/{product_id}/seo/queue')
 async def seo_queue_submit(product_id: UUID, request: Request,
                            db: Session = Depends(get_db)):
@@ -651,6 +676,11 @@ def seo_status(product_id: UUID, db: Session = Depends(get_db)):
 def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
     enabled = is_enabled(db, product_id)
+    platform = get_settings()
+    prefs = editorial_preferences(db, product_id,
+        default_interval_days=platform.seo_autorun_interval_days,
+        default_publications_per_day=platform.seo_publications_per_day,
+        default_articles_per_day=platform.seo_articles_per_day)
     runs = seo_runs(db, product_id)
     report = company_seo_insights(db, product_id)
     rows = list(db.scalars(select(Artifact).where(
@@ -686,11 +716,35 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
            + '</button></form>')
         + '<details class="seo-help"><summary>Как работает подключение</summary>'
           '<p>Подключение само по себе не запускает платную генерацию. '
-          'План создаётся на 7 или 30 дней, с лимитом до трёх статей на день. '
+          'План создаётся на 7 или 30 дней, частота работы и число публикаций задаются для этой компании. '
           'Перед публикацией текст проходит проверку ИИ-критиком. '
           'При отключении отменяются ожидающие задания, '
           'уже опубликованные статьи остаются.</p></details>'
         + '</section>'
+    )
+    # The settings panel stays collapsed on mobile; saving preferences alone
+    # does not activate paid generation. The global operator flag remains OFF
+    # until canary acceptance.
+    preferences_form = (
+        f'<details class="seo-help"><summary>Расписание и частота публикаций</summary>'
+        f'<form method="post" action="{base}/seo/preferences" class="seo-preferences">'
+        '<label class="field">Часовой пояс IANA '
+        f'<input name="timezone_name" maxlength="64" required value="{html.escape(prefs.timezone_name, quote=True)}"'
+        ' placeholder="Europe/Moscow"></label>'
+        '<label class="field">Через сколько дней обновлять SEO-план '
+        f'<input type="number" name="autorun_interval_days" min="1" max="90" required value="{prefs.autorun_interval_days}"></label>'
+        '<label class="field">Горизонт автоматического плана '
+        f'<select name="autorun_horizon_days">'
+        f'<option value="7" {"selected" if prefs.autorun_horizon_days == 7 else ""}>7 дней</option>'
+        f'<option value="30" {"selected" if prefs.autorun_horizon_days == 30 else ""}>30 дней</option>'
+        '</select></label>'
+        '<label class="field">Публикаций в день '
+        f'<input type="number" name="publications_per_day" min="1" max="30" required value="{prefs.publications_per_day}"></label>'
+        '<label class="field">Генераций статей в день '
+        f'<input type="number" name="articles_per_day" min="1" max="30" required value="{prefs.articles_per_day}"></label>'
+        '<p>Сохранение расписания не включает SEO-завод. '
+        'Глобальный автозапуск включается только после сквозной проверки.</p>'
+        '<button class="btn primary" type="submit">Сохранить расписание</button></form></details>'
     )
     available_actions = (
         f'<nav class="seo-action-row" aria-label="Управление SEO-заводом">'
@@ -708,7 +762,7 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
         f'{artifact_content(row.content)}</article>' for row in rows
     )
     content = (
-        activation_form + available_actions
+        activation_form + preferences_form + available_actions
         + '<p class="seo-publish-destination">' + destination + '</p>'
         + '<div class="seo-dash-stats" aria-label="SEO-статистика">'
           f'<div><span>Запусков</span><strong>{len(runs)}</strong></div>'
