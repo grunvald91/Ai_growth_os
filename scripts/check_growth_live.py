@@ -101,10 +101,15 @@ def main():
                 page.emulate_media(reduced_motion='no-preference')
                 page.goto(base+'/create')
                 page.screenshot(path='/tmp/growth-v4-create.png',full_page=True)
+                # The v4 page uses the dispatcher composer; the legacy POST path
+                # is exercised via its own real classic form rather than a selector
+                # that does not exist in the v4 document.
+                page.goto(base+'/create?design=classic')
                 page.locator('[name="topic"]').fill('Тест реальной очереди')
                 page.locator('form button[type="submit"]').click()
                 page.wait_for_url('**/tasks/*')
                 assert len(list(db.scalars(select(Task)))) == 1
+                page.goto(page.url.split('?')[0]+'?design=v4')
                 expect(page.locator('.topbar')).to_be_visible()
                 page.goto(base+'/work')
                 expect(page.locator('.v4-records .board-card')).to_have_count(1)
