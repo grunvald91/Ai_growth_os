@@ -41,7 +41,7 @@ def merge_profile(current: dict, packaged: dict) -> tuple[dict, dict]:
         merged["identity"]["category"] = new["identity"]["category"]
 
     added = {"offers": 0, "facts": 0, "audience": 0, "positioning": False,
-             "catalog_fields": 0, "unknowns": 0}
+             "catalog_fields": 0, "unknowns": 0, "stock_corrections": 0}
     offers = merged["offer"]["products_services"]
     offer_by_name = {v["name"]: v for v in offers}
     # Only catalogue first-party ServGo modules from the tested and versioned
@@ -62,6 +62,32 @@ def merge_profile(current: dict, packaged: dict) -> tuple[dict, dict]:
             if existing_offer.get(field) in (None, "", []) and packaged_offer.get(field):
                 existing_offer[field] = packaged_offer[field]
                 added["catalog_fields"] += 1
+        # The previous package mislabeled a working module as unavailable.
+        # Change only that exact stock record; never overwrite the owner's
+        # custom text or custom release-status evidence. This transition is
+        # explicitly backed by the owner's first-party confirmation.
+        if (packaged_offer["product_family"] == "Смена"
+            and packaged_offer.get("release_status") == "live"
+            and "owner-confirmation:servgo:2026-11-03:shifts-operational"
+                in packaged_offer.get("evidence_refs", [])
+            and existing_offer.get("release_status") == "unverified"
+            and existing_offer.get("evidence_refs") == []
+            and existing_offer.get("description", "").startswith(
+                "Модуль учёта смен рассматривается как направление платформы.")
+        ):
+            for field in ("description", "release_status", "evidence_refs",
+                          "conversion_action"):
+                existing_offer[field] = packaged_offer[field]
+            added["stock_corrections"] += 1
+        if (packaged_offer["product_family"] == "SEO-завод"
+            and "общий переключатель по умолчанию отключён" in packaged_offer["description"]
+            and existing_offer.get("description", "").startswith(
+                "В Growth реализованы отдельное включение SEO для каждой компании")
+            and "Автоматический еженедельный запуск пока привязан к ServGo" in
+                existing_offer.get("description", "")
+        ):
+            existing_offer["description"] = packaged_offer["description"]
+            added["stock_corrections"] += 1
 
 
     facts = merged["proof"]["approved_facts"]
@@ -74,6 +100,27 @@ def merge_profile(current: dict, packaged: dict) -> tuple[dict, dict]:
             facts.append(fact)
             present.add(fact["statement"])
             added["facts"] += 1
+
+    # Previous packaged proof said autorun is ServGo-only. Correct only that
+    # exact obsolete statement, preserving all custom owner-authored facts.
+    old_autorun = "Недельный авторежим сейчас настроен только для ServGo;"
+    new_autorun = "Недельный авторежим реализован для всех включивших SEO компаний, но глобально выключен до приёмки;"
+    for fact in facts:
+        statement = fact.get("statement", "")
+        if old_autorun in statement:
+            candidate = statement.replace(old_autorun, new_autorun)
+            if any(x.get("statement") == candidate for x in new["proof"]["approved_facts"]):
+                fact["statement"] = candidate
+                added["stock_corrections"] += 1
+    # Avoid duplicate proof after replacing the previous stock assertion.
+    deduplicated = []
+    seen_facts = set()
+    for fact in facts:
+        key = fact["statement"]
+        if key not in seen_facts:
+            deduplicated.append(fact)
+            seen_facts.add(key)
+    merged["proof"]["approved_facts"] = deduplicated
 
     for key in ("primary_segments", "pains", "jobs_to_be_done"):
         values = merged["customers"][key]
@@ -91,8 +138,17 @@ def merge_profile(current: dict, packaged: dict) -> tuple[dict, dict]:
         ).strip()
         added["positioning"] = True
 
+    # Remove only the exact obsolete question introduced by the previous
+    # package, and retain independent questions written by the owner.
+    stale = ("Проверен ли боевой выпуск «Смены», включая Telegram mini-app, "
+             "QR/selfie и учёт рабочего времени? Без подтверждённых исходников "
+             "и smoke-теста не рекламировать как действующий модуль.")
+    if any(q["question"] == stale for q in merged["unknowns"]):
+        merged["unknowns"] = [q for q in merged["unknowns"] if q["question"] != stale]
+        added["stock_corrections"] += 1
     for question in new.get("unknowns", []):
-        if "«Смены»" in question["question"] and question not in merged["unknowns"]:
+        if ("Какие конкретные возможности действующей «Смены»" in question["question"]
+            and question not in merged["unknowns"]):
             merged["unknowns"].append(question)
             added["unknowns"] += 1
 
