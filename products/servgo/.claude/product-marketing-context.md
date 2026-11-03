@@ -78,7 +78,7 @@ audience signal -> content hypothesis -> asset -> lead/booking evidence -> decis
 The owner has a business-scoped CRM with contacts from bookings, manual contacts, visit history and counts, notes, status and follow-up date. This supports thoughtful service and possible re-engagement of previous customers, without claiming guaranteed or measured increased retention.
 Evidence: booking_bot/web/api/routes/crm.py; booking_bot/web/frontend/src/pages/admin/ContactsPage.tsx.
 
-ServGo Mail separately supports owner-approved email campaigns and unsubscribe. CRM-to-Mail recipient synchronization and automated reactivation sequences are NOT confirmed. Do not promise them. Promotional messages require documented lawful permission or other applicable basis, and opt-outs must be respected.
+ServGo Mail separately supports owner-approved email campaigns and unsubscribe. CRM-to-Mail recipient synchronization and automated reactivation sequences are NOT confirmed. Do not promise them. For advertising sent by telecom networks in Russia, obtain the recipient's prior consent to advertising and honor opt-outs (Federal Law 38-FZ, Article 18). A customer contact record is not by itself marketing consent.
 Evidence: booking_bot/web/api/routes/mail_campaign_api.py; booking_bot/web/api/routes/mail_campaign_review.py; booking_bot/web/api/routes/mail_campaign_unsubscribe.py.
 
 ## SEO editorial segmentation
