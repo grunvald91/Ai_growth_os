@@ -1,0 +1,58 @@
+name: One-time ServGo collected search-query audit
+on:
+  push:
+    branches: [audit/seo-buyer-queries-20261103]
+    paths: [.github/workflows/seo-buyer-queries-readonly-20261103.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Read-only company semantic core and B2B search suggestions
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || exit 1
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null >/tmp/k
+          while IFS= read -r line; do
+            printf '%s\n' "$line" >/tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done </tmp/k
+          test -s ~/.ssh/known_hosts
+          sshpass -e ssh -o StrictHostKeyChecking=yes "root@$HOST" 'docker exec -i ai-growth-os-api-1 python -' <<'PY'
+          import json
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Product,Artifact,Publication
+          from app.seo.contracts import SemanticCore
+          with SessionLocal() as db:
+              prod=db.scalar(select(Product).where(Product.slug=="servgo"))
+              if not prod: raise SystemExit("servgo_absent")
+              rows=list(db.scalars(select(Artifact).where(
+                  Artifact.product_id==prod.id,Artifact.kind=="semantic_core")
+                  .order_by(Artifact.created_at.desc(),Artifact.id.desc()).limit(8)))
+              print("CORES="+str(len(rows)))
+              needle=("запис","психолог","маникюр","клиент","crm","салон","журнал","расписан","программ","мастер","бизнес")
+              for idx,row in enumerate(rows):
+                  try: core=SemanticCore.model_validate_json(row.content)
+                  except ValueError: continue
+                  found=[]
+                  for c in core.clusters:
+                      for q in c.queries:
+                          if any(word in q.casefold() for word in needle):
+                              found.append({"query":q,"cluster":c.id,"stage":c.stage,"intent":c.intent})
+                  print("CORE="+json.dumps({"index":idx,"clusters":len(core.clusters),
+                      "matching":found[:100]},ensure_ascii=False))
+              pubs=list(db.scalars(select(Publication).where(
+                 Publication.product_id==prod.id,Publication.channel=="own_site",
+                 Publication.status=="published").order_by(Publication.published_at.desc()).limit(12)))
+              print("PUBLISHED="+json.dumps([r.external_reference for r in pubs],ensure_ascii=False))
+          PY
