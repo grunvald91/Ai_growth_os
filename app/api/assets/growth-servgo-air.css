@@ -886,3 +886,31 @@ body[data-growth-design="v4"] .route-content .wb-downloads>.btn.secondary{backgr
     display: none;
   }
 }
+
+
+/* Visual review: whiteboard owns its heading; avoid a duplicate route-level title.
+   Missing-provider warnings must be legible in both dark and light themes. */
+body[data-growth-design="v4"] #main:has(.wb-create) > .route-page-head {
+  display: none !important;
+}
+body[data-growth-design="v4"] .route-content .wb-create .sg-warning {
+  display: block;
+  border: 0;
+  border-left: 3px solid var(--s-warning);
+  border-radius: 10px;
+  padding: 11px 13px;
+  background: var(--s-surface-2);
+  color: var(--s-text) !important;
+  -webkit-text-fill-color: var(--s-text) !important;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: none;
+}
+body[data-growth-design="v4"] .route-content .wb-result .wb-repair .btn.secondary {
+  color: var(--s-text);
+  background: var(--s-surface-2);
+  border: 0;
+  border-radius: 12px;
+  min-height: 44px;
+  padding: 11px 14px;
+}
