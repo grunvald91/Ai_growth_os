@@ -31,6 +31,13 @@ def merge_profile(current: dict, packaged: dict) -> tuple[dict, dict]:
     old = parse_company_profile(current).model_dump(mode="json")
     new = parse_company_profile(packaged).model_dump(mode="json")
     merged = json.loads(json.dumps(old, ensure_ascii=False))
+    # Replace ONLY previous stock descriptions, preserving owner-written copy.
+    old_one_liner = "ServGo is an online service booking/reservation system for small service businesses."
+    old_category = "B2B SaaS / online booking for service businesses"
+    if merged["identity"].get("one_liner") == old_one_liner:
+        merged["identity"]["one_liner"] = new["identity"]["one_liner"]
+    if merged["identity"].get("category") == old_category:
+        merged["identity"]["category"] = new["identity"]["category"]
 
     added = {"offers": 0, "facts": 0, "audience": 0, "positioning": False}
     offers = merged["offer"]["products_services"]
