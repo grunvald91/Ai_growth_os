@@ -237,9 +237,9 @@ async def test_servgo_planner_receives_release_status_for_all_five_product_famil
     families = {entry["product_family"] for entry in company["offer_catalog"]}
     assert families == {"BookingBot", "Growth", "Mail", "Смена", "SEO-завод"}
     shifts = next(x for x in company["offer_catalog"] if x["product_family"] == "Смена")
-    assert shifts["release_status"] == "unverified"
-    assert shifts["conversion_action"] is None
-    assert not shifts["evidence_refs"]
+    assert shifts["release_status"] == "live"
+    assert shifts["conversion_action"] is not None
+    assert shifts["evidence_refs"][0].startswith("owner-confirmation:servgo")
     assert any(x["release_status"] == "limited" for x in company["offer_catalog"])
     assert len(company["buyer_segments"]) > 0
 
