@@ -11,8 +11,8 @@ from app.sso.models import StudioBusinessLink
 from app.workflows.article_contracts import ArticleArtifact
 
 router = APIRouter(prefix="/public/blog", tags=["public-blog"])
-_BULLET = re.compile(r"^\\s*(?:(\d{1,2})[.)]|[-*•])\\s+(.*\\S)\\s*$")
-_INLINE_ENUM = re.compile(r"(?<![\\w.])([1-9]\\d?)[.)]\\s+(?=\\S)")
+_BULLET = re.compile(r"^\s*(?:(\d{1,2})[.)]|[-*•])\s+(.*\S)\s*$")
+_INLINE_ENUM = re.compile(r"(?<![\w.])([1-9]\d?)[.)]\s+(?=\S)")
 _CATEGORY = {"awareness": "Советы", "consideration": "Сравнение и выбор", "decision": "Запуск"}
 
 
