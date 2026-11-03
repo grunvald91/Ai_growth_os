@@ -4,9 +4,16 @@ Status: current marketing context for AI Growth OS. Keep verified product capabi
 
 ## Product
 
-ServGo is an online service booking/reservation system for small service businesses.
+ServGo is an appointment scheduling and booking-management system for small service businesses. Owners can manage appointments manually in a visual calendar even without customer self-booking. A separate online booking flow is available for businesses that want it.
 
-Current known client flow includes:
+Verified admin-panel workflow:
+- visual appointment calendar with day and week views;
+- manual new appointment: service, specialist or room, date/time, client name, optional phone and notes;
+- appointment details are visible and entries can be rescheduled;
+- this is useful without customers booking themselves; a toggle to disable the public booking page is NOT yet verified.
+Evidence: booking_bot/web/frontend/src/pages/admin/SchedulePage.tsx (ManualBookingSheet and SchedulePage).
+
+Verified client-facing flow includes:
 - business/service selection;
 - optional specialist selection;
 - date/time-slot selection;
@@ -26,14 +33,16 @@ Evidence: booking_bot/web/api/routes/ai.py; booking_bot/web/api/sales/tools.py; 
 
 ## Positioning
 
-Position ServGo around the full business job: attract the right client, move them into a clear booking flow, and then learn which content and channels actually create bookings.
+Position ServGo first around the owner's operational job: visual schedule, manual client appointments and account of visits, with optional self-service online booking. Marketing/AI attribution remain product direction rather than guaranteed live capabilities.
 
 Working product direction: **ServGo Growth — clients, booking and marketing in one system.**
 
 This is the intended combined-product positioning, not a claim that every marketing/attribution capability is already live inside the booking product. Current content may describe the desired end-to-end customer journey, but must distinguish verified booking capabilities from AI-marketing capabilities still being integrated.
 
 Primary value story:
-- less manual back-and-forth around booking;
+- a visual owner-operated schedule and manual customer appointments even without public online booking;
+- fewer scattered records and easier retrieval of appointment details;
+- less manual back-and-forth when online self-booking is useful;
 - a clearer path from interest to a selected service/time;
 - marketing content built around real customer pains rather than generic posting;
 - a future closed measurement loop from content -> lead -> booking -> repeat/revenue.
@@ -63,6 +72,12 @@ Use ServGo as the first real product to validate AI Growth OS and the ServGo Gro
 The goal is to prove a closed evidence loop:
 
 audience signal -> content hypothesis -> asset -> lead/booking evidence -> decision -> next content.
+
+## SEO editorial segmentation
+
+- For searches about electronic appointment journals, admin calendars, specialist schedules or manual booking, explain the existing admin-panel scenario first; do not assume online self-booking is necessary.
+- For customer searches about how to book a service, answer the customer's question; keep software selection for business owners as another article with its own real search query.
+- Do not assert that the public booking page can be turned off; this control is not verified. Never fabricate performance numbers, search volume or customer cases.
 
 ## Candidate business segments
 
