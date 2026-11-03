@@ -313,7 +313,7 @@ async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, pr
                               unavailable_offer_families=tuple(
                                   offer["product_family"] for offer in company["offer_catalog"]
                                   if offer["release_status"] in {"in_development", "unverified"}
-                                  and offer["product_family"]))))
+                                  and offer["product_family"])))
         artifact = ArtifactService(db).create(product_id=product_id, task_id=factory_task_id or task_id, kind=PLAN_KIND,
                                               title=f"Контент-план SEO ({len(plan.items)} статей)",
                                               content=plan.model_dump_json())
