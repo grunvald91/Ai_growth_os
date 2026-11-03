@@ -149,9 +149,21 @@ def main():
                     expect(page.locator('#wb-create-form [name="topic"]')).to_be_visible()
                     expect(page.locator('#wb-create-form [name="duration_seconds"]')).to_be_visible()
                     expect(page.locator('#wb-create-form button[type="submit"]')).to_be_visible()
-                    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),width
                     page.screenshot(path=f'/tmp/v4-simple-video-create-{width}.png',
                                     full_page=True,animations='disabled')
+                    overflow=page.evaluate("""() => ({
+                      width: innerWidth, scroll: document.documentElement.scrollWidth,
+                      offenders: [...document.querySelectorAll('body *')].filter(el => {
+                        const r=el.getBoundingClientRect();
+                        return r.width>0 && (r.right>innerWidth+1 || r.left< -1) &&
+                          getComputedStyle(el).position !== 'fixed';
+                      }).slice(0,16).map(el => ({
+                        tag:el.tagName,class:el.className?.baseVal||el.className,
+                        width:Math.round(el.getBoundingClientRect().width),
+                        right:Math.round(el.getBoundingClientRect().right)
+                      }))
+                    })""")
+                    assert overflow['scroll']<=overflow['width'],overflow
                 for width in (360,390,1440):
                     page.set_viewport_size({'width':width,'height':844})
                     page.goto(base+'/whiteboard/'+str(video.id)+'?design=v4')
