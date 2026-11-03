@@ -1,9 +1,10 @@
 """Seed queries and the funnel content plan. Every plan item must rest on real collected queries."""
 import json
+import logging
 from pathlib import Path
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
 from app.llm.schemas import LLMMessage, LLMRequest
@@ -44,8 +45,31 @@ PLAN_PROMPT = (
 )
 
 
+_logger = logging.getLogger(__name__)
+
+
 class PlanError(ValueError):
     pass
+
+
+def plan_error_code(exc: Exception) -> str:
+    """Machine-readable failure reason, without any model-generated customer text."""
+    if isinstance(exc, ValidationError):
+        return "plan_schema_invalid"
+    message = str(exc)
+    if message.startswith("Unknown cluster "):
+        return "plan_unknown_cluster"
+    if message.startswith("Stage or intent "):
+        return "plan_cluster_intent_mismatch"
+    if message.startswith("Primary query of "):
+        return "plan_query_not_in_cluster"
+    if message.startswith("Primary query repeated "):
+        return "plan_duplicate_query"
+    if message.startswith("Every collected query "):
+        return "plan_no_new_queries"
+    if message.startswith("The company profile "):
+        return "plan_missing_company_profile"
+    return "plan_validation_failed"
 
 
 def planned_queries(db: Session, product_id: UUID) -> set[str]:
@@ -132,7 +156,8 @@ async def plan_seeds(db: Session, llm: LLMService, privacy: PrivacyGateway, prod
 
 async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, product_id: UUID, core: SemanticCore, *,
                        products_root: Path, model: str, factory_task_id: UUID | None = None,
-                       horizon_days: int = 7) -> Artifact:
+                       horizon_days: int = 7,
+                       fallback_models: tuple[str, ...] = ()) -> Artifact:
     product = db.get(Product, product_id)
     if product is None:
         raise LookupError("Product not found")
@@ -152,8 +177,35 @@ async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, pr
     task_id = task.id
     db.commit()
     try:
-        plan = await _ask(llm, model=model, prompt=PLAN_PROMPT, payload=payload, schema=SeoContentPlan,
-                          role="seo_editor", validate=lambda p: validate_plan(p, core, frozenset(taken)))
+        # A syntactically valid JSON response can still contradict actual search
+        # clusters. In that case try an explicitly configured different model,
+        # never invent search data or silently accept the invalid plan.
+        candidates = list(dict.fromkeys((model, *fallback_models)))
+        plan = None
+        for index, candidate in enumerate(candidates):
+            try:
+                plan = await _ask(
+                    llm, model=candidate, prompt=PLAN_PROMPT, payload=payload,
+                    schema=SeoContentPlan, role="seo_editor",
+                    validate=lambda p: validate_plan(p, core, frozenset(taken)),
+                )
+                break
+            except (PlanError, ValidationError) as exc:
+                code = plan_error_code(exc)
+                _logger.warning(
+                    "seo_plan_invalid model=%s validation_code=%s alternate_available=%s",
+                    candidate, code, index + 1 < len(candidates),
+                )
+                if factory_task_id is not None:
+                    ArtifactService(db).create(
+                        product_id=product_id, task_id=factory_task_id,
+                        kind="seo_plan_validation", title="SEO plan validation",
+                        content=json.dumps({"model": candidate, "error_code": code,
+                                            "attempt": index + 1}),
+                    )
+                    db.commit()
+                if index + 1 == len(candidates):
+                    raise
         artifact = ArtifactService(db).create(product_id=product_id, task_id=factory_task_id or task_id, kind=PLAN_KIND,
                                               title=f"Контент-план SEO ({len(plan.items)} статей)",
                                               content=plan.model_dump_json())
