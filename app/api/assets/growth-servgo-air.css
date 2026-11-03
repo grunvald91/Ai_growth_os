@@ -1180,3 +1180,28 @@ html[data-theme="dark"] body[data-growth-design="v4"] .route-content .wb-downloa
   color:var(--s-accent-ink);
   background:var(--s-accent-grad);
 }
+
+/* Keep mobile topic picker close control unwrapped and topic rows dense. */
+@media (max-width: 780px) {
+  body[data-growth-design="v4"] #wb-topic-dialog #wb-topic-close {
+    flex: 0 0 auto;
+    min-width: 70px;
+    padding: 8px 10px;
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+  body[data-growth-design="v4"] #wb-topic-dialog > div:first-child h3 {
+    min-width: 0;
+    flex: 1 1 auto;
+    font-size: 14px;
+  }
+  body[data-growth-design="v4"] #wb-topic-options label {
+    gap: 9px !important;
+    padding: 9px 10px !important;
+    background: var(--s-surface-2);
+    border-color: var(--s-line-2) !important;
+  }
+  body[data-growth-design="v4"] #wb-topic-options label > span { min-width: 0; }
+  body[data-growth-design="v4"] #wb-topic-options label strong { font-size: 12px; line-height: 1.35; }
+  body[data-growth-design="v4"] #wb-topic-options label small { font-size: 11px; line-height: 1.3; }
+}

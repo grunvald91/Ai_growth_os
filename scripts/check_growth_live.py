@@ -164,6 +164,9 @@ def main():
                         page.locator('#wb-suggest-btn').click()
                         picker = page.locator('#wb-topic-dialog')
                         expect(picker).to_be_visible()
+                        close_button=page.locator('#wb-topic-close')
+                        assert close_button.evaluate("e=>getComputedStyle(e).whiteSpace")=='nowrap'
+                        assert close_button.evaluate("e=>e.scrollHeight<=e.clientHeight+1")
                         rect = picker.bounding_box()
                         assert rect and rect['x']>=0 and rect['x']+rect['width']<=width+1,(width,rect)
                         page.screenshot(path=f'/tmp/v4-simple-video-topic-{width}.png',full_page=True,animations='disabled')
