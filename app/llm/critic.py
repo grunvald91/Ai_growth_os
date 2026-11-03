@@ -192,11 +192,12 @@ def _critic_prompt(request: LLMRequest) -> str:
 
 def _author_prompt(request: LLMRequest) -> str:
     base = prompt_text("critic.marketing_author" if _is_marketing(request) else "critic.fact_author")
-    return (base + " Для SEO-статьи исправь принятые фактические и структурные ошибки, "
-            "сохрани релевантность основному поисковому вопросу и источники; "
-            "разбей перечисления на строки, убери дубли. Не добавляй новых "
-            "неподтверждённых фактов. Одна доработка, без повторного вызова критика.")
-            if request.metadata.get("seo_article") else base
+    if request.metadata.get("seo_article"):
+        return (base + " Для SEO-статьи исправь принятые фактические и структурные ошибки, "
+                "сохрани релевантность основному поисковому вопросу и источники; "
+                "разбей перечисления на строки, убери дубли. Не добавляй новых "
+                "неподтверждённых фактов. Одна доработка, без повторного вызова критика.")
+    return base
 
 
 class ReviewAuditPersistenceError(RuntimeError):
