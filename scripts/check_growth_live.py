@@ -165,6 +165,9 @@ def main():
                         action=page.locator('#wb-create-form button[type="submit"]').bounding_box()
                         mobile_nav=page.locator('#mobileNav').bounding_box()
                         assert action and mobile_nav and action['y']+action['height']<=mobile_nav['y']+1,(width,action,mobile_nav)
+                        assert page.locator('.wb-more-grid summary').count()==2
+                        history=page.locator('.wb-library-head').bounding_box()
+                        assert history and history['y']<mobile_nav['y'],(width,history,mobile_nav)
                     page.screenshot(path=f'/tmp/v4-simple-video-create-{width}.png',
                                     full_page=True,animations='disabled')
                     overflow=page.evaluate("""() => ({
@@ -191,9 +194,12 @@ def main():
                     assert box['width']<=24 and box['height']<=24,box
                     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
                     expect(page.locator('.wb-cost')).to_contain_text('Точная стоимость')
+                    nav=page.locator('#mobileNav').bounding_box()
+                    before=page.locator('.wb-actions .btn.primary').bounding_box()
+                    if width <= 780:
+                        assert before and before['y']+before['height']<=nav['y']+1,(width,before,nav)
                     page.locator('.wb-actions .btn.primary').scroll_into_view_if_needed()
                     bounds=page.locator('.wb-actions .btn.primary').bounding_box()
-                    nav=page.locator('#mobileNav').bounding_box()
                     if nav: assert bounds['y']+bounds['height']<=nav['y'],(bounds,nav)
                     consent.check()
                     expect(consent).to_be_checked()
@@ -216,6 +222,12 @@ def main():
                         expect(page.locator('.wb-result-player video')).to_be_visible()
                         expect(page.locator('.wb-downloads a')).to_have_count(4)
                         expect(page.locator('.wb-result-technical')).to_be_visible()
+                        player=page.locator('.wb-result-player').bounding_box()
+                        downloads=page.locator('.wb-downloads').bounding_box()
+                        nav=page.locator('#mobileNav').bounding_box()
+                        if nav:
+                            assert player and player['y']+player['height']<nav['y'],(player,nav)
+                            assert downloads and downloads['y']+downloads['height']<nav['y'],(downloads,nav)
                         page.screenshot(path='/tmp/v4-simple-video-result-390.png',
                                         full_page=True,animations='disabled')
                     page.screenshot(path=f'/tmp/v4-video-{status.value}.png',full_page=True,animations='disabled')
