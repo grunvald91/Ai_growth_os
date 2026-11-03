@@ -242,6 +242,9 @@ def job_html(state, product_id, *, error=None):
             f'{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p></header>')
     if completed:
         # The actual playable file must be the focal point, not the log or API metadata.
+        length_label = '1 мин · 6 сцен' if state['request'].get('scenes', 3) == 6 else '30 сек · 3 сцены'
+        body += (f'<div class="wb-result-meta" aria-label="Формат ролика">'
+                 f'<span>{length_label}</span><span>9:16</span><span>Русский голос · MP4</span></div>')
         body += (f'<div class="wb-result-player"><video controls playsinline preload="metadata" '
                  f'aria-label="Готовое видео: {esc(state["request"]["topic"])}" '
                  f'poster="{base}/files/video.png">'
@@ -251,7 +254,8 @@ def job_html(state, product_id, *, error=None):
                  '<p class="wb-result-notice">Перед публикацией проверьте рисунки, факты, озвучку и субтитры.</p>'
                  '<nav class="wb-downloads" aria-label="Скачать материалы видео">' + ''.join(
                      f'<a class="btn {"primary" if name == "video.mp4" else "secondary"}" '
-                     f'href="{base}/files/{name}?download=true" download>{label}</a>'
+                     f'href="{base}/files/{name}?download=true" download><span class="wb-file-icon" aria-hidden="true">'
+                     f'{dict([("video.mp4","↓"), ("video.srt","≡"), ("video.png","▣"), ("video.json","◷")])[name]}</span>{label}</a>'
                      for name, label in [('video.mp4', 'Скачать MP4'), ('video.srt', 'Субтитры'),
                                          ('video.png', 'Обложка'), ('video.json', 'Тайминг')]
                  ) + '</nav>'
