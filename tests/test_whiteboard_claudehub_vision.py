@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from app.content.whiteboard.adapters import (ClaudeHubRegionProvider, OpenRouterRegionProvider,
-                                              OpenRouterSpeechProvider, json_object_text)
+                                              OpenRouterSpeechProvider, InvalidRegionResponse, json_object_text)
 from app.content.whiteboard.checkpoints import CheckpointStore
 from app.content.whiteboard.contracts import WhiteboardRegion, WhiteboardRegionPlan
 from app.content.whiteboard.jobs import owner_task, records
@@ -83,6 +83,67 @@ async def test_region_request_goes_to_claudehub_only_with_the_vision_model_and_a
     assert seen[0].headers['authorization'] == 'Bearer hub-key'
     assert json.loads(seen[0].content)['model'] == CLAUDEHUB_VISION_MODEL
 
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('content', [
+    'not JSON',
+    '{"regions": [}',
+    '{"regions": [{"beat_index": 0, "box": [0, 0, 1100, 1000]}]}',
+    None,
+])
+async def test_invalid_vision_response_is_classified_without_a_second_paid_call(content):
+    calls = []
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(200, json={'choices': [{'message': {'content': content}}]})
+    async with httpx.AsyncClient(base_url=HUB + '/', transport=httpx.MockTransport(handler)) as http:
+        with pytest.raises(InvalidRegionResponse, match='invalid region JSON'):
+            await ClaudeHubRegionProvider(api_key='k', base_url=HUB, model=CLAUDEHUB_VISION_MODEL,
+                                          client=http).detect(scene(), PNG)
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('as_content', [
+    lambda payload: [{'type': 'text', 'text': payload}],
+    lambda payload: json.loads(payload),
+])
+async def test_vision_accepts_typed_text_or_object_without_another_call(as_content):
+    calls = []
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(200, json={'choices': [{'message': {'content': as_content(plan_json())}}]})
+    async with httpx.AsyncClient(base_url=HUB + '/', transport=httpx.MockTransport(handler)) as http:
+        plan = await ClaudeHubRegionProvider(api_key='k', base_url=HUB, model=CLAUDEHUB_VISION_MODEL,
+                                             client=http).detect(scene(), PNG)
+    plan.check_for(scene())
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_beat_regions_reach_offline_repair_instead_of_failing_adapter():
+    def handler(req):
+        return httpx.Response(200, json={'choices': [{'message': {'content':
+            '{"regions":[{"beat_index":0,"box":[0,0,1000,500]}]}'
+        }}]})
+    async with httpx.AsyncClient(base_url=HUB + '/', transport=httpx.MockTransport(handler)) as http:
+        plan = await ClaudeHubRegionProvider(api_key='k', base_url=HUB, model=CLAUDEHUB_VISION_MODEL,
+                                             client=http).detect(scene(), PNG)
+    assert len(plan.regions) == 1
+    # The pipeline's complete_diagram_regions repairs this with zero new provider calls.
+    with pytest.raises(ValueError, match='Every narration beat'):
+        plan.check_for(scene())
+
+
+@pytest.mark.asyncio
+async def test_vision_http_error_is_not_misclassified_as_repairable_format():
+    def handler(req):
+        return httpx.Response(502)
+    async with httpx.AsyncClient(base_url=HUB + '/', transport=httpx.MockTransport(handler)) as http:
+        with pytest.raises(httpx.HTTPStatusError):
+            await ClaudeHubRegionProvider(api_key='k', base_url=HUB, model=CLAUDEHUB_VISION_MODEL,
+                                          client=http).detect(scene(), PNG)
 
 def test_claudehub_chat_refuses_untrusted_hosts():
     for url in ('https://openrouter.ai/api/v1', 'http://api.claudehub.fun/v1', 'https://evil.example/v1'):
