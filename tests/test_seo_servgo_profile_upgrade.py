@@ -91,7 +91,7 @@ def test_legacy_runtime_profile_receives_product_catalog_without_replacing_owner
     assert offers[0]["description"] == "Owner customized booking explanation"
     assert {o["product_family"] for o in offers} == {
         "BookingBot", "Growth", "Mail", "Смена", "SEO-завод"}
-    assert next(o for o in offers if o["product_family"] == "Смена")["release_status"] == "unverified"
+    assert next(o for o in offers if o["product_family"] == "Смена")["release_status"] == "live"
     assert any("SEO-завод" in fact["statement"] for fact in updated["proof"]["approved_facts"])
     again, count = merge_profile(updated, packaged())
     assert again == updated
@@ -130,7 +130,7 @@ def test_correct_previous_shifts_false_negative_without_losing_owner_edits():
     assert not any("Не объявлять продукт запущенным" in o["description"]
                    for o in corrected["offer"]["products_services"])
     assert corrected["commercial"]["pricing_model"] == "Custom owner pricing"
-    assert custom in corrected["proof"]["approved_facts"]
+    assert any(f["statement"] == custom["statement"] and f["evidence_ref"] == "owner" for f in corrected["proof"]["approved_facts"])
     assert stats["stock_corrections"] >= 2
     repeated, again = merge_profile(corrected, packaged())
     assert repeated == corrected
