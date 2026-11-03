@@ -16,7 +16,7 @@ from app.workflows.article_production import ArticleProduction
 from app.workflows.daily_growth_review import DailyGrowthReview
 from app.workflows.team_cycle import TeamCycle
 
-SAFE_LLM_METADATA_FIELDS = {"reasoning_effort", "team_role", "task_type", "conversation_id", "provider_timeout_seconds", "routing_phase", "routing_complexity", "requires_web_search"}
+SAFE_LLM_METADATA_FIELDS = {"reasoning_effort", "team_role", "task_type", "conversation_id", "provider_timeout_seconds", "routing_phase", "routing_complexity", "requires_web_search", "seo_article"}
 
 
 # One review by a second model, as everywhere: it reads the whole task (every source in full and every extracted
