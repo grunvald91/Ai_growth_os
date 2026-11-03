@@ -8,6 +8,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,7 +19,7 @@ from app.seo.clustering import normalize
 from app.services.approvals import ApprovalService
 from app.tools import ToolOperation
 from app.workflows.article_contracts import ArticleArtifact
-from app.seo.activation import SeoFactoryActivation, is_enabled
+from app.seo.activation import SeoFactoryActivation, is_enabled, editorial_preferences
 from app.seo.schedule import PUBLICATIONS_PER_DAY, db_time, published_today
 
 CHANNEL = "own_site"
@@ -231,7 +232,8 @@ def publish_if_clear(db: Session, article_id, *, now: datetime | None = None,
             (task.due_at.replace(tzinfo=timezone.utc) if task.due_at.tzinfo is None else task.due_at)
             > now):
         return Outcome(False, "scheduled_for_later")
-    if published_today(db, row.product_id, now=now) >= daily_limit:
+    prefs = editorial_preferences(db, row.product_id, default_publications_per_day=daily_limit)
+    if published_today(db, row.product_id, now=now, tz=ZoneInfo(prefs.timezone_name)) >= prefs.publications_per_day:
         return Outcome(False, "daily_publication_limit")
     article = ArticleArtifact.model_validate_json(row.content)
     problems = (static_problems(article) + unsupported_servgo_pricing(db, row, article)
@@ -326,7 +328,8 @@ def publish_owner_approved(db: Session, *, now: datetime | None = None,
                 (task.due_at.replace(tzinfo=timezone.utc) if task.due_at.tzinfo is None else task.due_at)
                 > release_time):
             continue
-        if published_today(db, row.product_id, now=release_time) >= daily_limit:
+        prefs = editorial_preferences(db, row.product_id, default_publications_per_day=daily_limit)
+        if published_today(db, row.product_id, now=release_time, tz=ZoneInfo(prefs.timezone_name)) >= prefs.publications_per_day:
             continue
         owner_said_yes = row.status == ArtifactStatus.APPROVED or (
             approval.status == "approved" and str(approval.decided_by or "").startswith("owner:"))
