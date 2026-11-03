@@ -61,8 +61,17 @@ class EngineResult:
     requests: int = 0
     failed: int = 0
     empty: int = 0
+    invalid: int = 0
     queries: set[str] = field(default_factory=set)
     completed: set[str] = field(default_factory=set)
+
+
+def _has_suggestion_shape(body: str) -> bool:
+    try:
+        data = json.loads(body)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(data, list) and len(data) >= 2 and isinstance(data[1], list)
 
 
 def parse_suggestions(body: str) -> list[str]:
@@ -100,6 +109,7 @@ async def collect(seeds: Iterable[str], *, client: httpx.AsyncClient | None = No
         if engine in results:
             results[engine] = EngineResult(engine, requests=saved["requests"], failed=saved["failed"],
                                           empty=saved.get("empty", 0),
+                                          invalid=saved.get("invalid", 0),
                                           queries=set(saved["queries"]), completed=set(saved["completed"]))
     gate = asyncio.Semaphore(concurrency)
 
@@ -114,8 +124,10 @@ async def collect(seeds: Iterable[str], *, client: httpx.AsyncClient | None = No
                 suggestions = parse_suggestions(response.text)
                 if suggestions:
                     result.queries.update(suggestions)
-                else:
+                elif _has_suggestion_shape(response.text):
                     result.empty += 1
+                else:
+                    result.invalid += 1
             except (httpx.HTTPError, ValueError) as exc:
                 result.failed += 1
                 _logger.info("suggest_failed engine=%s error=%s", engine, type(exc).__name__)
