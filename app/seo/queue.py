@@ -13,7 +13,7 @@ from app.seo.contracts import PlanItem, SeoContentPlan
 from app.seo.planner import PLAN_KIND
 from app.workflows.article_contracts import ArticleProductionInput, SeoBrief
 from app.seo.activation import require_enabled, editorial_preferences
-from app.seo.schedule import available_slots, PUBLICATIONS_PER_DAY
+from app.seo.schedule import available_slots, PUBLICATIONS_PER_DAY, db_time
 from app.models.domain import Product
 
 SEO_TASK_PREFIX = "SEO-ARTICLE:"
@@ -85,37 +85,71 @@ def queue_plan(db: Session, plan_artifact: Artifact, clusters_by_id: dict, *,
 OWNER_TZ = ZoneInfo("Europe/Moscow")
 
 
-def _started_today(db: Session, now: datetime | None):
-    """SEO article tasks started today, Moscow time. Failed attempts count: they spent model calls."""
-    now = now or datetime.now(timezone.utc)
-    local = now.astimezone(OWNER_TZ)
-    day_start = local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
-    if db.bind.dialect.name == "sqlite":
-        day_start = day_start.replace(tzinfo=None)
+def _recent_starts(db: Session, now: datetime):
+    """Return SEO starts over the last 48h; enough for any IANA local day.
+
+    A start marker is written before the model call. Failed attempts consume
+    capacity, but queued work never does. A bounded timestamp predicate keeps
+    historic tasks out of the hot worker path.
+    """
     started = select(Artifact.created_at).where(Artifact.task_id == Task.id,
         Artifact.kind == "seo_article_started").limit(1).scalar_subquery()
-    legacy_start = select(func.min(AgentRun.started_at)).where(AgentRun.task_id == Task.id).scalar_subquery()
-    return db.scalars(select(Task).where(
-        Task.assigned_agent == "content_factory", Task.title.like(f"{SEO_TASK_PREFIX}%"),
-        func.coalesce(started, legacy_start) >= day_start))
+    legacy_start = select(func.min(AgentRun.started_at)).where(
+        AgentRun.task_id == Task.id).scalar_subquery()
+    timestamp = func.coalesce(started, legacy_start).label("seo_started_at")
+    return list(db.execute(select(Task, timestamp).where(
+        Task.assigned_agent == "content_factory",
+        Task.title.like(f"{SEO_TASK_PREFIX}%"),
+        timestamp >= db_time(db, now - timedelta(days=2)),
+    )))
+
+
+def _today_start(now: datetime, timezone_name: str) -> datetime:
+    local = now.astimezone(ZoneInfo(timezone_name))
+    return local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
+
+def _started_in_local_day(started, now, timezone_name: str) -> bool:
+    if started is None:
+        return False
+    actual = started.replace(tzinfo=timezone.utc) if started.tzinfo is None else started.astimezone(timezone.utc)
+    return _today_start(now, timezone_name) <= actual <= now
 
 
 def articles_started_today(db: Session, now: datetime | None = None, product_id: UUID | None = None) -> int:
-    return sum(1 for t in _started_today(db, now) if product_id is None or t.product_id == product_id)
+    now = now or datetime.now(timezone.utc)
+    # Legacy cross-company count keeps the historical Moscow default; callers
+    # inspecting a single company use that company's own calendar.
+    tz = (editorial_preferences(db, product_id).timezone_name
+          if product_id is not None else OWNER_TZ.key)
+    return sum(1 for task, timestamp in _recent_starts(db, now)
+               if (product_id is None or task.product_id == product_id)
+               and _started_in_local_day(timestamp, now, tz))
 
 
 def exhausted_products(db: Session, limit: int, now: datetime | None = None) -> set[UUID]:
-    """Companies whose daily article limit is used up. The limit is per company, so one business never
-    takes another's articles."""
+    """Compare each company's daily spend to its own generation limit and timezone."""
+    now = now or datetime.now(timezone.utc)
+    preferences = {}
     counts: dict[UUID, int] = {}
-    for task in _started_today(db, now):
-        counts[task.product_id] = counts.get(task.product_id, 0) + 1
-    return {product_id for product_id, count in counts.items() if count >= limit}
+    exhausted = set()
+    for task, timestamp in _recent_starts(db, now):
+        p = preferences.get(task.product_id)
+        if p is None:
+            p = editorial_preferences(db, task.product_id, default_articles_per_day=limit)
+            preferences[task.product_id] = p
+        if _started_in_local_day(timestamp, now, p.timezone_name):
+            counts[task.product_id] = counts.get(task.product_id, 0) + 1
+            if counts[task.product_id] >= p.articles_per_day:
+                exhausted.add(task.product_id)
+    return exhausted
 
 
 def quota_exhausted(db: Session, limit: int, now: datetime | None = None, product_id: UUID | None = None) -> bool:
-    return articles_started_today(db, now, product_id) >= limit
-
+    if product_id is not None:
+        p = editorial_preferences(db, product_id, default_articles_per_day=limit)
+        return articles_started_today(db, now, product_id) >= p.articles_per_day
+    return articles_started_today(db, now) >= limit
 
 
 def record_article_start(db, task):
