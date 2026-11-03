@@ -29,7 +29,7 @@ def test_merge_preserves_owner_custom_and_is_idempotent():
     assert merged["identity"]["category"] == "Custom owner category"
     assert merged["commercial"]["pricing_model"] == "Owner-priced"
     assert "Owner positioning" in merged["brand"]["positioning"]
-    assert "повторных обращений" in merged["brand"]["positioning"]
+    assert "повторные обращения" in merged["brand"]["positioning"]
     assert any(f["statement"] == "Owner verified fact" for f in merged["proof"]["approved_facts"])
     assert any(x["question"] == "Owner secret unknown" for x in merged["unknowns"])
     assert "Owner segment" in merged["customers"]["primary_segments"]
