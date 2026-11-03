@@ -87,3 +87,16 @@ async def test_missing_or_unusable_model_response_uses_backup(error):
     assert reply.model == "backup"
     assert primary.models == ["primary"]
     assert backup.models == ["backup"]
+
+
+@pytest.mark.asyncio
+async def test_explicit_backup_model_skips_previous_domain_invalid_model():
+    primary = RecordingProvider(error=AssertionError("must not call previous model"))
+    backup = RecordingProvider(result=LLMResponse(content='{"ok":true}', model="backup"))
+    routed = FallbackProvider(providers=[("primary", primary), ("backup", backup)])
+    result = await routed.generate(LLMRequest(
+        messages=[LLMMessage(role="user", content="valid plan please")], model="backup",
+    ))
+    assert result.model == "backup"
+    assert primary.models == []
+    assert backup.models == ["backup"]
