@@ -24,6 +24,11 @@ from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+class InvalidRegionResponse(ValueError):
+    """Successful vision reply had no valid region plan; it can be split offline."""
+
 _INLINE_IMAGE = re.compile(r"^data:image/[A-Za-z0-9.+-]+;base64,")
 
 
@@ -434,11 +439,22 @@ class OpenRouterRegionProvider(OpenRouterBase):
         }
         response = await self.post("chat/completions", payload)
         try:
-            content = json_object_text(response.json()["choices"][0]["message"]["content"])
-            regions = WhiteboardRegionPlan.model_validate_json(content)
+            content = response.json()["choices"][0]["message"]["content"]
+            # ClaudeHub may return a single typed text block instead of a string.
+            if (isinstance(content, list) and len(content) == 1
+                    and isinstance(content[0], dict) and content[0].get("type") == "text"):
+                content = content[0].get("text")
+            if isinstance(content, dict):
+                regions = WhiteboardRegionPlan.model_validate(content)
+            elif isinstance(content, str):
+                regions = WhiteboardRegionPlan.model_validate_json(json_object_text(content))
+            else:
+                raise TypeError("Unsupported vision response content")
         except (KeyError, IndexError, TypeError, json.JSONDecodeError, ValueError) as exc:
-            raise ValueError("Vision provider returned invalid region JSON") from exc
-        regions.check_for(scene)
+            # Do not call a paid vision model twice for a response-format problem.
+            # The pipeline can construct a disjoint, review-flagged plan locally.
+            raise InvalidRegionResponse("Vision provider returned invalid region JSON") from exc
+        # Missing beat coverage is recoverable by complete_diagram_regions downstream.
         return regions
 
 
