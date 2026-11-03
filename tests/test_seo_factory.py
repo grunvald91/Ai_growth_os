@@ -517,3 +517,62 @@ def test_seo_article_forces_critic_without_enabling_global_reviews(env):
         # must not incur extra critic calls when the global flag is disabled.
         assert general.llm.extra_timeout_seconds == 0
         assert seo.llm.extra_timeout_seconds > 0
+
+
+def test_opted_in_weekly_autorun_queues_one_per_company_without_cross_tenant_leaks(env):
+    from datetime import datetime, timedelta, timezone
+    from app.seo.autoschedule import enqueue_enabled_if_due
+    from app.models.domain import Product, Artifact
+    from sqlalchemy import select
+    import json
+
+    factory, defaults, servgo = env
+    now = datetime.now(timezone.utc)
+    enabled = defaults.model_copy(update={"seo_autorun_enabled": True})
+    with factory() as db:
+        second = Product(name="Ремонтная мастерская", slug="repair-shop")
+        demo = Product(name="Demo salon", slug="demo-salon")
+        db.add_all([second, demo])
+        db.commit()
+        set_enabled(db, second.id, enabled=True, actor="owner:second")
+        # Explicit activation is required even with the global switch on.
+        assert not enqueue_enabled_if_due(db, defaults, now=now)
+        assert enqueue_enabled_if_due(db, enabled, now=now)
+        assert enqueue_enabled_if_due(db, enabled, now=now)
+        assert not enqueue_enabled_if_due(db, enabled, now=now)
+        jobs = list(db.scalars(select(Task).where(Task.assigned_agent == "seo_factory")))
+        assert {job.product_id for job in jobs} == {servgo, second.id}
+        assert all(job.product_id != demo.id for job in jobs)
+        for job in jobs:
+            request = db.scalar(select(Artifact).where(
+                Artifact.task_id == job.id, Artifact.kind == "seo_factory_request"))
+            assert json.loads(request.content)["horizon_days"] == 7
+            assert json.loads(request.content)["focus"] is None  # no ServGo prompt for other businesses
+            job.status = TaskStatus.COMPLETED
+        db.commit()
+        assert not enqueue_enabled_if_due(db, enabled, now=now + timedelta(days=6))
+        set_enabled(db, second.id, enabled=False, actor="owner:second")
+        assert enqueue_enabled_if_due(db, enabled, now=now + timedelta(days=8))
+        fresh = list(db.scalars(select(Task).where(Task.assigned_agent == "seo_factory")))
+        assert sum(task.product_id == servgo for task in fresh) == 2
+        assert sum(task.product_id == second.id for task in fresh) == 1
+
+
+def test_global_weekly_autorun_interval_and_servgo_legacy_pilot_are_separate(env):
+    from datetime import datetime, timedelta, timezone
+    from app.seo.autoschedule import enqueue_enabled_if_due
+    from sqlalchemy import select
+
+    factory, defaults, servgo = env
+    now = datetime.now(timezone.utc)
+    pilot = defaults.model_copy(update={"seo_servgo_autorun_enabled": True})
+    long_interval = defaults.model_copy(update={
+        "seo_autorun_enabled": True, "seo_autorun_interval_days": 30})
+    with factory() as db:
+        assert enqueue_enabled_if_due(db, pilot, now=now)
+        assert not enqueue_enabled_if_due(db, pilot, now=now)
+        task = db.scalar(select(Task).where(Task.assigned_agent == "seo_factory"))
+        task.status = TaskStatus.COMPLETED
+        db.commit()
+        assert not enqueue_enabled_if_due(db, long_interval, now=now + timedelta(days=8))
+        assert enqueue_enabled_if_due(db, long_interval, now=now + timedelta(days=31))
