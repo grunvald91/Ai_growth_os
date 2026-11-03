@@ -15,6 +15,7 @@ from pydantic import Field
 
 from sqlalchemy import select
 
+from app.company_profile import load_company_profile
 from app.core.composition import build_llm_provider
 from app.core.config import get_settings
 from app.db.session import SessionLocal
@@ -34,7 +35,7 @@ from app.workflows.article_contracts import (
 # The previous 90-second limit cut off the first live review without a verdict.
 # Keep the independent critic mandatory; allow a bounded gateway-latency budget.
 REVIEW_TIMEOUT_SECONDS = 240
-AUTHOR_REVISION_TIMEOUT_SECONDS = 180
+AUTHOR_REVISION_TIMEOUT_SECONDS = 300
 
 class EditableOwnerArticle(Contract):
     """Only reader-facing prose is editable by the reviewer.
@@ -53,6 +54,25 @@ class EditableOwnerArticle(Contract):
 
 
 _EDITABLE_FIELDS = frozenset(EditableOwnerArticle.model_fields)
+
+
+def approved_company_claims(products_root) -> list[dict]:
+    """The reviewer gets the current tenant's complete approved evidence.
+
+    Never substitute an abbreviated hand-written product feature summary:
+    the first production critic incorrectly flagged supported room selection
+    and booking comments because the summary omitted those approved facts.
+    """
+    loaded = load_company_profile(products_root, "servgo")
+    if loaded.profile is None or loaded.validation_errors:
+        raise ValueError("Active verified ServGo profile unavailable for editorial review")
+    facts = [
+        {"statement": fact.statement, "evidence_ref": fact.evidence_ref}
+        for fact in loaded.profile.proof.approved_facts
+    ]
+    if not facts:
+        raise ValueError("No approved company facts; cannot review product feature claims")
+    return facts
 
 
 def editable_payload(reader: HumanEditedArticle) -> dict:
@@ -163,6 +183,7 @@ async def _review(entry: dict, apply: bool) -> dict:
                 "query": entry["query"], "new_slug": entry["new"]}
 
     settings = get_settings()
+    verified_facts = approved_company_claims(settings.products_root)
     provider = build_llm_provider(settings)
     reader = candidate.reader_article
     # Reviewer receives the full intended article exactly once, plus separately
@@ -174,8 +195,14 @@ async def _review(entry: dict, apply: bool) -> dict:
             "ServGo, a B2B system used by service business owners. The reader is "
             "the owner or manager of a psychologist practice or beauty salon. "
             "The article must answer a REAL collected owner search query, not "
-            "explain how a patient/consumer books a service. Check all company "
-            "features against the VERIFIED facts; a generic industry example "
+            "explain how a patient/consumer books a service. Treat the entire "
+            "approved_company_facts collection as source evidence: it is loaded "
+            "from the current company's verified profile, NOT a short feature list. "
+            "Do not flag confirmed selection of a room/hall or booking comments "
+            "as unverified when these actions appear in approved facts. Distinguish "
+            "manual room choice within a booking from automated reservation of an "
+            "external rented office. Check every company feature against its "
+            "approved statement and evidence reference; a generic industry example "
             "must not be presented as a feature of ServGo. Do not claim automated "
             "room booking, automatic slot buffers, CRM-to-Mail sync, outcomes or "
             "unverified pricing. Check accurate scope, helpful procedures, privacy "
@@ -194,11 +221,11 @@ async def _review(entry: dict, apply: bool) -> dict:
             "immutable_approved_fact_renderings": [
                 fact.model_dump(mode="json") for fact in reader.fact_renderings
             ],
-            "verified_company_features": [
-                "ServGo admin visual day/week calendar; owner can manually enter and move bookings",
-                "Business-scoped CRM records contacts, visit history, notes, last/next visit and next contact",
-                "Customer self-booking is available as a separate option",
-                "No verified automatic room reservation, gap-setting feature or CRM-to-Mail synchronization",
+            "approved_company_facts": verified_facts,
+            "unverified_automation_boundaries": [
+                "No confirmed automatic reservation of a separately rented therapy room",
+                "No confirmed automatic appointment gap/buffer setting",
+                "No confirmed CRM-to-Mail synchronization or automated reacquisition",
             ],
         }, ensure_ascii=False))],
         model=settings.llm_model, max_tokens=15000,
