@@ -17,7 +17,7 @@ from app.seo.queue import queue_plan
 from app.seo.service import SeoSuggestionsUnavailable, build_semantic_core
 from app.services.artifacts import ArtifactService
 from app.services.tasks import TaskService
-from app.seo.activation import require_enabled, enabled_product_ids
+from app.seo.activation import require_enabled, enabled_product_ids, editorial_preferences
 
 _logger = logging.getLogger(__name__)
 AGENT = "seo_factory"
@@ -213,8 +213,12 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client, h
     # All supported topics of the selected weekly or monthly plan are queued.
     all_items = SeoContentPlan.model_validate_json(plan.content).items
     record_stage(db, product_id, task_id, "queue_articles")
+    prefs = editorial_preferences(
+        db, product_id,
+        default_publications_per_day=settings.seo_publications_per_day,
+        default_articles_per_day=settings.seo_articles_per_day)
     queued = queue_plan(db, plan, {c.id: c for c in core.clusters},
-                        per_day=settings.seo_publications_per_day)
+                        per_day=prefs.publications_per_day, timezone_name=prefs.timezone_name)
     ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=REPORT_KIND,
         title=f"SEO-завод: поставлено статей — {len(queued)}",
         content=json.dumps({"seeds": len(core.seeds), "clusters": len(core.clusters),
