@@ -188,6 +188,7 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
         "search_invalid_responses": "Поисковые источники вернули некорректный формат",
         "search_upstream_failures": "Не удалось получить подсказки от поисковых источников",
         "model_unusable_response": "Модель не вернула пригодный ответ",
+        "plan_validation_failed": "SEO-план от ИИ не прошёл проверку соответствия реальным поисковым данным",
         "provider_http_error": "Ошибка провайдера ИИ",
         "upstream_timeout": "Превышено время ожидания",
         "network_failure": "Сетевая ошибка",
@@ -199,8 +200,20 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
              if current_stage else '')
     code = row.get("last_error_code")
     error_caption = error_names.get(code, code or row.get("last_error") or "")
+    plan_issue_names = {
+        "unknown_cluster": "указана несуществующая группа запросов",
+        "cluster_stage_intent_mismatch": "не совпадают этап воронки и намерение запроса",
+        "query_not_in_collected_clusters": "ключевой запрос не найден среди собранных подсказок",
+        "duplicate_or_previously_written_query": "повторена тема, которая уже запланирована или написана",
+        "no_fresh_clusters": "новых тем в поисковой семантике не осталось",
+        "empty_company_profile": "не заполнен профиль компании",
+        "other_plan_validation": "ошибка соответствия плана проверенным данным",
+    }
+    plan_issue = row.get("last_error_plan_issue")
+    if plan_issue and row.get("status") == "failed":
+        error_caption += ": " + plan_issue_names.get(plan_issue, plan_issue)
     error = (f'<p role="status">Последняя ошибка: {html.escape(error_caption)}</p>'
-             if row.get("last_error") else '')
+             if row.get("last_error") and row.get("status") == "failed" else '')
     search_progress = ''.join(
         '<li>' + html.escape(str(engine)) + ': '
         + 'запросов ' + html.escape(str(info.get("requests", 0)))

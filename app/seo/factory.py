@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.composition import build_seo_llm
 from app.llm.errors import ProviderEmptyResponseError, ProviderMalformedResponseError
 from app.models.domain import Artifact, Product, Task, TaskStatus
-from app.seo.planner import plan_content, plan_seeds
+from app.seo.planner import PlanError, plan_content, plan_seeds
 from app.seo.queue import queue_plan
 from app.seo.service import SeoSuggestionsUnavailable, build_semantic_core
 from app.services.artifacts import ArtifactService
@@ -44,6 +44,8 @@ def failure_details(exc: Exception) -> dict:
     status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
     if isinstance(exc, SeoSuggestionsUnavailable):
         code = exc.reason
+    elif isinstance(exc, PlanError):
+        code = "plan_validation_failed"
     elif isinstance(exc, (ProviderEmptyResponseError, ProviderMalformedResponseError)):
         code = "model_unusable_response"
     elif isinstance(exc, httpx.HTTPStatusError):
@@ -56,8 +58,22 @@ def failure_details(exc: Exception) -> dict:
         code = "invalid_data_or_configuration"
     else:
         code = "internal_exception"
+    # Store only a bounded category, not full LLM output, private prompts or profile.
+    plan_issue = None
+    if isinstance(exc, PlanError):
+        message = str(exc)
+        plan_issue = (
+            "unknown_cluster" if message.startswith("Unknown cluster") else
+            "cluster_stage_intent_mismatch" if message.startswith("Stage or intent") else
+            "query_not_in_collected_clusters" if message.startswith("Primary query of") else
+            "duplicate_or_previously_written_query" if message.startswith("Primary query repeated") else
+            "no_fresh_clusters" if message.startswith("Every collected query") else
+            "empty_company_profile" if message.startswith("The company profile") else
+            "other_plan_validation"
+        )
     return {
         "error": type(exc).__name__, "error_code": code,
+        **({"plan_issue": plan_issue} if plan_issue else {}),
         **({"http_status": status} if status is not None else {}),
     }
 

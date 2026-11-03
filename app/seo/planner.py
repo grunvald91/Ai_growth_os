@@ -100,15 +100,44 @@ async def _ask(llm: LLMService, *, model: str, prompt: str, payload: dict, schem
     def check(data: dict) -> None:
         validate(schema.model_validate(data))
 
-    response = await llm.generate(
-        LLMRequest(system_prompt=f"{prompt} Schema: {json.dumps(schema.model_json_schema())}",
-                   messages=[LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False))],
-                   model=model, max_tokens=16000, response_schema=schema.model_json_schema(),
-                   metadata={"reasoning_effort": "low", "team_role": role, "task_type": "seo_content_plan"}),
-        validate_revision=check)
+    request = LLMRequest(
+        system_prompt=f"{prompt} Schema: {json.dumps(schema.model_json_schema())}",
+        messages=[LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False))],
+        model=model, max_tokens=16000, response_schema=schema.model_json_schema(),
+        metadata={"reasoning_effort": "low", "team_role": role, "task_type": "seo_content_plan"},
+    )
+    # The article has its own required editorial critic. A structured search plan
+    # has a deterministic integrity validator instead of another full critic pass.
+    is_plan = schema is SeoContentPlan
+    response = await llm.generate(request, validate_revision=check,
+                                  review_enabled=False if is_plan else None)
     parsed = schema.model_validate_json(response.content)
-    validate(parsed)
-    return parsed
+    try:
+        validate(parsed)
+        return parsed
+    except PlanError as exc:
+        if not is_plan:
+            raise
+        # One bounded corrective generation; the engine does not silently
+        # invent clusters, demand, or replace the real collected queries.
+        corrected = request.model_copy(update={
+            "messages": [
+                *request.messages,
+                LLMMessage(
+                    role="user",
+                    content="The previous proposed plan failed deterministic validation: "
+                            + str(exc)[:450]
+                            + ". Regenerate a corrected plan. Every cluster id and primary "
+                              "query must exist verbatim in the provided real search data, "
+                              "and stage/intent must equal that cluster. Keep all distinct "
+                              "relevant topics without duplicating primary queries.",
+                ),
+            ],
+        })
+        repaired = await llm.generate(corrected, validate_revision=check, review_enabled=False)
+        revised = schema.model_validate_json(repaired.content)
+        validate(revised)
+        return revised
 
 
 def _company(db: Session, product: Product, products_root: Path, privacy: PrivacyGateway) -> dict:

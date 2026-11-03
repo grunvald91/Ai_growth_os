@@ -109,6 +109,7 @@ def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
                               else None),
         "last_error": failure.get("error"),
         "last_error_code": failure.get("error_code"),
+        "last_error_plan_issue": failure.get("plan_issue"),
         "last_error_stage": failure.get("stage"),
         "last_error_http_status": failure.get("http_status"),
         "last_error_retryable": failure.get("retryable"),
