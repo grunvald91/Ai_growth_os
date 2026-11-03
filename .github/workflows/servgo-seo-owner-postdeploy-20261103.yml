@@ -1,0 +1,107 @@
+name: ServGo SEO owner calendar - one-shot production data release
+on:
+  push:
+    branches: [ops/servgo-seo-postdeploy-20261103]
+    paths: [.github/workflows/servgo-seo-owner-postdeploy-20261103.yml]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-seo-owner-20261103-live
+  cancel-in-progress: false
+jobs:
+  apply-reviewed-seo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+      EXPECTED_SHA: 010d3fde46645ed1953ab28d6313be384ed4b4be
+    steps:
+      - name: Apply reviewed ServGo editorial update only to the exact production release
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD unavailable"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null >/tmp/seo-hostkeys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" >/tmp/seo-key
+            ssh-keygen -lf /tmp/seo-key 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done </tmp/seo-hostkeys
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Pinned server host key mismatch"; exit 1; }
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -o ConnectTimeout=20 "root@$HOST" "EXPECTED_SHA='$EXPECTED_SHA' bash -s" <<'REMOTE'
+          set -euo pipefail
+          container=ai-growth-os-api-1
+          echo "=== Wait only for the exact tested production release ==="
+          matched=0
+          for attempt in $(seq 1 35); do
+            live="$(docker exec "$container" printenv RELEASE_SHA 2>/dev/null || true)"
+            if [ "$live" = "$EXPECTED_SHA" ]; then
+              matched=1
+              break
+            fi
+            sleep 20
+          done
+          [ "$matched" = "1" ] || { echo "::error::Exact production release not deployed"; exit 1; }
+          echo "RELEASE_SHA_VERIFIED=$EXPECTED_SHA"
+          echo "=== Dry-run profile upgrade ==="
+          profile_check="$(docker exec "$container" python -m app.seo.upgrade_servgo_profile)"
+          printf '%s\n' "$profile_check"
+          previous_sha="$(printf '%s\n' "$profile_check" | python3 -c 'import json,sys; s=sys.stdin.read().strip(); assert s.startswith("SERVGO_PROFILE_UPGRADE="); print(json.loads(s.split("=",1)[1])["previous_sha256"])')"
+          [ -n "$previous_sha" ] || exit 1
+          echo "=== Dry-run both existing published pages ==="
+          docker exec "$container" python -m app.seo.revise_servgo_published
+          echo "=== Review and update published pages as a single transaction ==="
+          timeout 680 docker exec "$container" python -m app.seo.revise_servgo_published --apply
+          echo "=== Update ServGo marketing profile using the preflight hash ==="
+          docker exec "$container" python -m app.seo.upgrade_servgo_profile --apply --expected-sha256 "$previous_sha"
+          echo "=== Verify database reader versions and owner profile ==="
+          docker exec -i "$container" python - <<'PY'
+          import json
+          from sqlalchemy import select
+          from app.core.config import get_settings
+          from app.company_profile import load_company_profile
+          from app.db.session import SessionLocal
+          from app.models.domain import Product, Artifact, Publication
+          from app.workflows.article_contracts import ArticleArtifact
+          from app.seo.revise_servgo_published import REWRITES, REVISION_NOTE
+          result=load_company_profile(get_settings().products_root,"servgo")
+          if result.profile is None:
+              raise SystemExit("Runtime company profile not readable")
+          rendered=json.dumps(result.profile.model_dump(mode="json"),ensure_ascii=False)
+          if not all(term in rendered for term in ("ручная запись", "база клиентов", "историей")):
+              raise SystemExit("Owner-managed scheduling/CRM facts not active")
+          with SessionLocal() as db:
+              product=db.scalar(select(Product).where(Product.slug=="servgo"))
+              if product is None: raise SystemExit("ServGo product missing")
+              rows=list(db.execute(select(Artifact,Publication).join(
+                  Publication,Publication.artifact_id==Artifact.id).where(
+                  Publication.product_id==product.id,
+                  Publication.channel=="own_site",Publication.status=="published",
+                  Publication.external_reference.in_(tuple(REWRITES)))))
+              if len(rows)!=2 or {p.external_reference for _,p in rows}!=set(REWRITES):
+                  raise SystemExit("Wrong number of published ServGo pages")
+              for artifact,pub in rows:
+                  article=ArticleArtifact.model_validate_json(artifact.content)
+                  if REVISION_NOTE not in article.reader_article.editorial_notes:
+                      raise SystemExit("Missing revision marker: "+pub.external_reference)
+                  if not article.reader_article.meta_description or not article.reader_article.direct_answer:
+                      raise SystemExit("Incomplete SEO article: "+pub.external_reference)
+                  print("ARTICLE_LIVE="+json.dumps({
+                      "slug":pub.external_reference,
+                      "title":article.reader_article.title,
+                      "sections":len(article.reader_article.sections),
+                      "artifact_version":artifact.version
+                  },ensure_ascii=False))
+          print("SERVGO_PROFILE_LIVE_OK")
+          PY
+          echo "=== HTTPS smoke checks ==="
+          for path in /blog /blog/zapis-k-psihologu /blog/zapisatsya-na-manikyur-onlayn /blog/sitemap.xml; do
+            status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 --resolve servgo.ru:443:127.0.0.1 "https://servgo.ru$path")"
+            echo "HTTPS $path => $status"
+            [ "$status" = "200" ] || exit 1
+          done
+          echo "SERVGO_SEO_POSTDEPLOY_SUCCESS"
+          REMOTE
