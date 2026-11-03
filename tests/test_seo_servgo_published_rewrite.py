@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.workflows.article_contracts import HumanEditedArticle
-from scripts.seo_revise_servgo_published import REWRITES, CTA, build_reader
+from app.seo.revise_servgo_published import REWRITES, CTA, build_reader
 
 
 def test_two_known_published_slugs_only():
@@ -32,7 +32,7 @@ def test_editorial_rewrite_is_readable_search_article_not_fake_client_booking(sl
 
 def test_rewrite_code_requires_real_critic_and_original_backup():
     from pathlib import Path
-    path = Path(__file__).resolve().parents[1] / "scripts/seo_revise_servgo_published.py"
+    path = Path(__file__).resolve().parents[1] / "app/seo/revise_servgo_published.py"
     source = path.read_text(encoding="utf-8")
     assert "status not in CLEAN_CRITIC_STATUSES" in source
     assert "seo_article_revision_backup" in source
