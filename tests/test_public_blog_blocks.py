@@ -39,3 +39,19 @@ def test_escaped_text_is_not_interpreted_as_html():
     items = body_blocks(text)[0]["items"]
     assert items[0] == "<script>alert(1)</script>"
     # Public clients HTML-escape each text field; parser itself never renders HTML.
+
+def test_inline_dash_items_are_real_bullets():
+    text = "Что помогает: — ответ клиенту; — понятное подтверждение; — напоминание."
+    assert body_blocks(text) == [
+        {"type": "paragraph", "text": "Что помогает:"},
+        {"type": "list", "ordered": False,
+         "items": ["ответ клиенту", "понятное подтверждение", "напоминание."]},
+    ]
+
+
+def test_legacy_single_line_prose_gets_readable_paragraphs_without_losing_sentences():
+    text = " ".join(["Предложение номер %d сообщает важное условие клиенту." % i for i in range(25)])
+    blocks = body_blocks(text)
+    assert len(blocks) >= 2
+    assert all(block["type"] == "paragraph" for block in blocks)
+    assert " ".join(block["text"] for block in blocks) == text
