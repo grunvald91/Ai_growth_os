@@ -18,12 +18,43 @@ _SENTENCES = re.compile(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z«])")
 _CATEGORY = {"awareness": "Советы", "consideration": "Сравнение и выбор", "decision": "Запуск"}
 
 
-def body_blocks(body: str) -> list[dict]:
-    """Preserve paragraph/list order; recover numbered points embedded in prose.
+_INLINE_MARK = re.compile(r"(\\*\\*\\*[^*\\n]+\\*\\*\\*|\\*\\*[^*\\n]+\\*\\*|\\*[^*\\n]+\\*)")
+_SUBHEADING = re.compile(r"^#{3,4}\\s+(.+?)\\s*$")
+_QUOTE = re.compile(r"^>\\s+(.+?)\\s*$")
 
-    Legacy SEO articles were emitted as one long line with '1. ... 2. ...'
-    inside a paragraph. Only split clearly sequential enumerations; do not
-    mistake dates, measurements or isolated numbers for a list.
+
+def inline_spans(text: str) -> list[dict] | None:
+    """Safe formatting tokens. Never return HTML from content controlled by an LLM.
+
+    The consuming template auto-escapes each text span, including HTML-looking
+    input; only the template creates <strong>/<em> tags.
+    """
+    parts = []
+    last = 0
+    for match in _INLINE_MARK.finditer(text):
+        if match.start() > last:
+            parts.append({"text": text[last:match.start()], "style": "text"})
+        token = match.group()
+        if token.startswith("***"):
+            style, inner = "strong_em", token[3:-3]
+        elif token.startswith("**"):
+            style, inner = "strong", token[2:-2]
+        else:
+            style, inner = "em", token[1:-1]
+        parts.append({"text": inner, "style": style})
+        last = match.end()
+    if not parts:
+        return None
+    if last < len(text):
+        parts.append({"text": text[last:], "style": "text"})
+    return parts
+
+
+def body_blocks(body: str) -> list[dict]:
+    """Typed paragraphs, H3 subheadings, quotes and lists with safe inline spans.
+
+    Both old plain-text articles and new Markdown-lite articles use exactly
+    the same public API; no raw HTML or trust-based |safe rendering.
     """
     blocks: list[dict] = []
 
@@ -31,27 +62,55 @@ def body_blocks(body: str) -> list[dict]:
         text = text.strip()
         if not text:
             return
-        # Preserve every sentence but keep old one-line article bodies readable.
         sentences = _SENTENCES.split(text) if len(text) > 650 else [text]
         current = ""
         for sentence in sentences:
             if current and len(current) + len(sentence) > 540:
-                blocks.append({"type": "paragraph", "text": current})
+                block = {"type": "paragraph", "text": current}
+                spans = inline_spans(current)
+                if spans:
+                    block["spans"] = spans
+                blocks.append(block)
                 current = sentence
             else:
                 current = (current + " " + sentence).strip()
         if current:
-            blocks.append({"type": "paragraph", "text": current})
+            block = {"type": "paragraph", "text": current}
+            spans = inline_spans(current)
+            if spans:
+                block["spans"] = spans
+            blocks.append(block)
 
     def item(text: str, ordered: bool) -> None:
         if blocks and blocks[-1]["type"] == "list" and blocks[-1]["ordered"] == ordered:
-            blocks[-1]["items"].append(text)
+            block = blocks[-1]
+            block["items"].append(text)
         else:
-            blocks.append({"type": "list", "ordered": ordered, "items": [text]})
+            block = {"type": "list", "ordered": ordered, "items": [text]}
+            blocks.append(block)
+        spans = inline_spans(text)
+        if spans or "item_spans" in block:
+            if "item_spans" not in block:
+                block["item_spans"] = [
+                    [{"text": v, "style": "text"}] for v in block["items"][:-1]
+                ]
+            block["item_spans"].append(spans or [{"text": text, "style": "text"}])
 
-    for raw in body.replace("\r\n", "\n").split("\n"):
+    for raw in body.replace("\\r\\n", "\\n").split("\\n"):
         line = raw.strip()
         if not line:
+            continue
+        subheading = _SUBHEADING.match(line)
+        if subheading:
+            blocks.append({"type": "subheading", "text": subheading.group(1)})
+            continue
+        quote = _QUOTE.match(line)
+        if quote:
+            block = {"type": "quote", "text": quote.group(1)}
+            spans = inline_spans(block["text"])
+            if spans:
+                block["spans"] = spans
+            blocks.append(block)
             continue
         markers = list(_INLINE_ENUM.finditer(line))
         if len(markers) >= 2 and [int(m.group(1)) for m in markers] == list(range(1, len(markers) + 1)):
