@@ -2,6 +2,7 @@ import httpx
 import pytest
 
 from app.llm.fallback import FallbackProvider
+from app.llm.errors import ProviderEmptyResponseError, ProviderMalformedResponseError
 from app.llm.schemas import LLMMessage, LLMRequest, LLMResponse
 
 
@@ -69,3 +70,20 @@ async def test_fallback_does_not_mask_nontransient_400():
 
     assert primary.models == ["deepseek-v4.1-flash"]
     assert fallback.models == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [
+    ProviderEmptyResponseError("provider_empty_assistant_content"),
+    ProviderMalformedResponseError("provider_invalid_json"),
+    _http_error(404),
+    httpx.ReadTimeout("timeout", request=httpx.Request("POST", "https://provider.invalid")),
+])
+async def test_missing_or_unusable_model_response_uses_backup(error):
+    primary = RecordingProvider(error=error)
+    backup = RecordingProvider(result=LLMResponse(content='{"ok":true}', model="backup"))
+    fallback = FallbackProvider(providers=[("primary", primary), ("backup", backup)])
+    reply = await fallback.generate(LLMRequest(messages=[LLMMessage(role="user", content="query")]))
+    assert reply.model == "backup"
+    assert primary.models == ["primary"]
+    assert backup.models == ["backup"]
