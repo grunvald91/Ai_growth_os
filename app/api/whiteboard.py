@@ -389,7 +389,7 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
     science_mode = fields.get('science_mode', 'auto')
     duration_options = ''.join(
         f'<option value="{value}"' + (' selected' if length == str(value) else '') + f'>{label}</option>'
-        for value, label in [(30, '30 секунд · 3 сцены'), (60, '1 минута · 6 сцен')]
+        for value, label in [(30, '30 с · 3 сцены'), (60, '60 с · 6 сцен')]
     )
     science_options = ''.join(
         f'<option value="{value}"' + (' selected' if science_mode == value else '') + f'>{label}</option>'
@@ -441,9 +441,9 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
             <label class="sg-field" for="wb-duration"><span>Длительность</span>
               <select id="wb-duration" name="duration_seconds">{duration_options}</select>
             </label>
-            <label class="sg-field" for="wb-cta"><span>Призыв в конце <small>· необязательно</small></span>
+            <label class="sg-field" for="wb-cta"><span>Призыв <small>· необязательно</small></span>
               <input id="wb-cta" type="text" name="call_to_action" maxlength="200"
-                placeholder="По умолчанию — подписаться и поставить лайк"
+                placeholder="Подписка и лайк — по умолчанию"
                 value="{esc(fields.get('call_to_action', ''))}">
             </label>
           </div>
