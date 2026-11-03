@@ -72,7 +72,8 @@ jobs:
               company=_company(db,p,settings.products_root,PrivacyGateway())
               catalog=company["offer_catalog"]
               assert expected.issubset({o["product_family"] for o in catalog})
-              assert any(o["product_family"] == "Смена" and o["release_status"] == "live"\n                 and o["conversion_action"] for o in catalog)
+              assert any(o["product_family"] == "Смена" and o["release_status"] == "live"
+                 and o["conversion_action"] for o in catalog)
           print("SERVGO_CATALOG_RUNTIME_VERIFIED families=5 live_owner_confirmed_shifts=1 independent_tenant_profiles_unmodified=1")
           PY
           echo "SERVGO_PROFILE_SYNC_COMPLETE"
