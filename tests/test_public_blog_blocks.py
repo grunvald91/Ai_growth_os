@@ -55,3 +55,37 @@ def test_legacy_single_line_prose_gets_readable_paragraphs_without_losing_senten
     assert len(blocks) >= 2
     assert all(block["type"] == "paragraph" for block in blocks)
     assert " ".join(block["text"] for block in blocks) == text
+
+
+def test_rich_typography_keeps_semantic_order_and_escapes_html_in_client():
+    body = (
+        "### Как выбрать расписание\n"
+        "Это **важный критерий**, а *не обещание результата*.\n"
+        "- **Журнал:** записи у администратора\n"
+        "- *Самостоятельная запись* — по необходимости\n"
+        "> **Совет:** начните с правил записи\n"
+        "Финальный абзац без разметки."
+    )
+    blocks = body_blocks(body)
+    assert [b["type"] for b in blocks] == [
+        "subheading", "paragraph", "list", "quote", "paragraph"
+    ]
+    assert blocks[0]["text"] == "Как выбрать расписание"
+    assert [span["style"] for span in blocks[1]["spans"]] == ["text", "strong", "text", "em", "text"]
+    assert blocks[2]["item_spans"][0][0] == {"text": "Журнал:", "style": "strong"}
+    assert blocks[3]["spans"][0] == {"text": "Совет:", "style": "strong"}
+    assert "spans" not in blocks[4]
+
+
+def test_rich_formatting_does_not_create_executable_html():
+    text = "**<img src=x onerror=alert(1)>** и *курсив*."
+    blocks = body_blocks(text)
+    assert len(blocks) == 1
+    assert blocks[0]["spans"][0] == {"text": "<img src=x onerror=alert(1)>", "style": "strong"}
+    assert "html" not in blocks[0]  # only safe data, never HTML string
+
+
+def test_backwards_compatibility_of_plain_lists():
+    assert body_blocks("1. Один\n2. Два") == [
+        {"type": "list", "ordered": True, "items": ["Один", "Два"]}
+    ]
