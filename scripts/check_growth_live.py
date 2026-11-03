@@ -134,6 +134,18 @@ def main():
                     duration_seconds=60,scenes=6,call_to_action='Подпишитесь на канал'),
                     configured_models(Settings(_env_file=None,whiteboard_storyboard_model="fixture/story",whiteboard_image_model="gemini-3.1-flash-image",whiteboard_speech_model="fixture/speech",whiteboard_regions_model="fixture/regions")),max_api_calls=34,visual_review=True,image_provider='claudehub')
                 page.evaluate("localStorage.setItem('servgo-desktop-theme','light')")
+                # ServGo Air creation: real form, company-scoped picker, safe mobile layout.
+                for width in (360,390,430,1440):
+                    page.set_viewport_size({'width':width,'height':844})
+                    response=page.goto(base+'/whiteboard?design=v4')
+                    assert response.status==200
+                    expect(page.locator('.wb-create-head')).to_be_visible()
+                    expect(page.locator('#wb-create-form [name="topic"]')).to_be_visible()
+                    expect(page.locator('#wb-create-form [name="duration_seconds"]')).to_be_visible()
+                    expect(page.locator('#wb-create-form button[type="submit"]')).to_be_visible()
+                    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),width
+                    page.screenshot(path=f'/tmp/v4-simple-video-create-{width}.png',
+                                    full_page=True,animations='disabled')
                 for width in (360,390,1440):
                     page.set_viewport_size({'width':width,'height':844})
                     page.goto(base+'/whiteboard/'+str(video.id)+'?design=v4')
@@ -164,6 +176,12 @@ def main():
                     page.goto(base+'/whiteboard/'+str(video.id))
                     expect(page.locator('.wb-job')).to_be_visible()
                     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),status
+                    if status == TaskStatus.COMPLETED:
+                        expect(page.locator('.wb-result-player video')).to_be_visible()
+                        expect(page.locator('.wb-downloads a')).to_have_count(4)
+                        expect(page.locator('.wb-result-technical')).to_be_visible()
+                        page.screenshot(path='/tmp/v4-simple-video-result-390.png',
+                                        full_page=True,animations='disabled')
                     page.screenshot(path=f'/tmp/v4-video-{status.value}.png',full_page=True,animations='disabled')
                 # Persist a long history, matching the populated production screen.
                 from app.dispatcher import service
