@@ -53,16 +53,16 @@ def body_blocks(body: str) -> list[dict]:
         line = raw.strip()
         if not line:
             continue
-        match = _BULLET.match(line)
-        if match:
-            item(match.group(2), ordered=match.group(1) is not None)
-            continue
         markers = list(_INLINE_ENUM.finditer(line))
         if len(markers) >= 2 and [int(m.group(1)) for m in markers] == list(range(1, len(markers) + 1)):
             paragraph(line[:markers[0].start()])
             for i, marker in enumerate(markers):
                 end = markers[i + 1].start() if i + 1 < len(markers) else len(line)
                 item(line[marker.end():end].strip(), ordered=True)
+            continue
+        match = _BULLET.match(line)
+        if match:
+            item(match.group(2), ordered=match.group(1) is not None)
             continue
         dashes = list(_INLINE_DASH.finditer(line))
         if len(dashes) >= 2:
