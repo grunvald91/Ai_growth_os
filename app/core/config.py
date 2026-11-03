@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # Owner's decision: at most this many blog articles of the SEO plan are started per day (Moscow time).
     seo_articles_per_day: int = Field(default=3, ge=1)
     seo_publications_per_day: int = Field(default=3, ge=1)
+    # Global safe rollout switch; individual owners also must enable SEO.
+    # Keep it OFF until three real end-to-end production canaries pass.
+    seo_autorun_enabled: bool = False
+    seo_autorun_interval_days: int = Field(default=7, ge=1, le=90)
     seo_servgo_autorun_enabled: bool = False
     seo_servgo_autorun_interval_days: int = Field(default=7, ge=1, le=90)
     # Critic bounds. The reviewer sees the complete task, so oversized contexts
