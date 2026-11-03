@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import re
+import httpx
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from app.llm.lenient import relax
+from app.llm.errors import ProviderEmptyResponseError, ProviderMalformedResponseError
 from app.llm.audit import persist_critic_audit, persist_observed_llm_call
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
@@ -1421,6 +1423,10 @@ class ArticleProduction:
             self.db.commit()
             if isinstance(exc, asyncio.CancelledError):
                 raise
+            transient = isinstance(exc, (TimeoutError, httpx.TransportError,
+                ProviderEmptyResponseError, ProviderMalformedResponseError))
+            if isinstance(exc, httpx.HTTPStatusError):
+                transient = exc.response.status_code in {408, 425, 429, 500, 502, 503, 504}
             return ArticleProductionResult(
                 product_id=product_id,
                 task_id=task_id,
@@ -1428,6 +1434,7 @@ class ArticleProduction:
                 checkpoint_artifact_ids=checkpoint_ids,
                 status='failed',
                 error=error,
+                retryable=transient,
             )
 
     def _sanitize(self, value):

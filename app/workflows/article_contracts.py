@@ -490,3 +490,4 @@ class ArticleProductionResult(Contract):
     approval_ids: list[UUID] = Field(default_factory=list)
     status: Literal['completed', 'failed']
     error: str | None = None
+    retryable: bool = False  # true only for verified transient provider failures
