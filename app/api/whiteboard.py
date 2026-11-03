@@ -176,7 +176,7 @@ def page(product, title, body, *, status=200, refresh=False):
     if refresh:
         headers['Refresh'] = '8'
     return HTMLResponse(studio_page_shell(product, active='create', title=title,
-        subtitle='Рисованное объяснение с русской озвучкой · 30 секунд или минута · 9:16', body=body), status_code=status, headers=headers)
+        subtitle='Готовый вертикальный MP4 с озвучкой · 30 секунд или минута', body=body), status_code=status, headers=headers)
 
 
 def approval_card(state, product_id, error=None):
@@ -371,53 +371,118 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
     visual_review = fields.get('visual_review', 'once')
     length = str(fields.get('duration_seconds', '30'))
     science_mode = fields.get('science_mode', 'auto')
-    body = '<section class="sg-surface"><h2>Создать анимацию с озвучкой</h2><p>Вертикальное видео на 30 секунд или на минуту: русская озвучка, MP4, обложка и субтитры. В конце видео зовёт подписаться, поставить лайк или сделать то, что вы напишете. Перед запуском вы подтвердите платную генерацию. Доступ к моделям проверяется перед платным запуском.</p>'
-    body += f'<p class="sg-notice sg-duration-note" role="note">⏱ {esc(duration_notice(durations or {}, "whiteboard"))}</p>'
-    if error:
-        body += f'<p class="sg-warning" role="alert">{esc(error)}</p>'
-    body += (f'<form method="post" action="{base}" class="sg-form" id="wb-create-form">'
-             '<input type="hidden" name="wb_topic_choice" value="">'
-             '<input type="hidden" name="wb_paid_start" value="">'
-             '<input type="hidden" name="wb_paid_consent" value="">'
-             '<label class="sg-field"><span>Что объяснить в видео?</span><textarea name="topic" minlength="8" maxlength="400" rows="3" required '
-             f'placeholder="Например: почему пилот добавляет тягу при посадке на авианосец">{esc(fields.get("topic", ""))}</textarea></label>'
-             '<button class="btn secondary" type="button" id="wb-suggest-btn">Предложить темы для моей компании</button>'
-             '<label class="sg-field"><span>Готовый сценарий (необязательно)</span>'
-             f'<textarea name="source_script" rows="6" maxlength="12000" placeholder="Вставьте исходный текст ролика">{esc(fields.get("source_script", ""))}</textarea>'
-             '<small>Сценарист сохранит смысл и адаптирует текст под длительность. Важные утверждения не должны изменяться.</small></label>'
-             '<label class="sg-field"><span>Дополнительная информация (необязательно)</span>'
-             f'<textarea name="background_notes" rows="4" maxlength="6000" placeholder="Целевая аудитория, контекст, ограничения">{esc(fields.get("background_notes", ""))}</textarea></label>'
-             '<label class="sg-field"><span>Материалы для проверки фактов (необязательно)</span>'
-             f'<textarea name="reference_materials" rows="4" maxlength="6000" placeholder="Названия источников, ссылки, выдержки">{esc(fields.get("reference_materials", ""))}</textarea>'
-             '<small>Материалы пользователя сами по себе не считаются независимым подтверждением фактов.</small></label>'
-             '<label class="sg-field"><span>Научная проверка</span><select name="science_mode">' + ''.join(
-                 f'<option value="{value}"' + (' selected' if science_mode == value else '') + f'>{label}</option>'
-                 for value, label in [('auto', 'Автоматически по теме'), ('scientific', 'Научный сюжет — обязательно проверять'), ('general', 'Обычный сюжет (научные утверждения всё равно проверяются)')]) +
-             '</select><small>Неподтверждённые научные утверждения остановят производство до рисунков и озвучки.</small></label>'
-             '<label class="sg-field"><span>Длина видео</span><select name="duration_seconds">' + ''.join(
-                 f'<option value="{value}"' + (' selected' if length == str(value) else '') + f'>{label}</option>'
-                 for value, label in [(30, 'Около 30 секунд — 3 сцены'), (60, 'Около минуты — 6 сцен, объяснение подробнее')]) +
-             '</select><small>Минутное видео делается дольше и требует примерно вдвое больше платных вызовов.</small></label>'
-             '<label class="sg-field"><span>Призыв в конце видео</span><input type="text" name="call_to_action" maxlength="200" '
-             'placeholder="Пусто — призыв подписаться на канал и поставить лайк" '
-             f'value="{esc(fields.get("call_to_action", ""))}"><small>Это прозвучит последней репликой. Например: «Напишите в комментариях, что объяснить дальше».</small></label>'
-             '<details><summary>Настройки генерации</summary>'
-             '<label class="sg-field"><span>Вариант генерации</span><select name="profile">' + ''.join(
-                 f'<option value="{value}"' + (' selected' if profile == value else '') + f'>{label}</option>'
-                 for value, label in [('gemini_ru', 'Gemini 3.1 Flash Image / ClaudeHub — рисунки, Grok — озвучка'), ('configured', 'Gemini / ClaudeHub — рисунки, остальные модели из настроек сервера')]) +
-             '</select><small>Выбор сохраняется только для этого задания. Модели и голос можно проверить перед подтверждением.</small></label>'
-             '<label class="sg-field"><span>Проверка рисунков</span><select name="visual_review">' + ''.join(
-                 f'<option value="{value}"' + (' selected' if visual_review == value else '') + f'>{label}</option>'
-                 for value, label in [('once', 'Критик один раз, автор выбирает исправления'), ('off', 'Без критика')]) +
-             '</select><small>Проверяются механика, расположение деталей, соответствие озвучке и читаемость. Если каждую сцену придётся перерисовать, нужно больше вызовов: для 30 секунд 19, для минуты 34.</small></label>'
-             '<label class="sg-field"><span>Максимум платных API-вызовов</span><select name="max_api_calls">' + ''.join(
-                 f'<option value="{value}"' + (' selected' if maximum == str(value) else '') + f'>{label}</option>'
-                 for value, label in [('auto', 'Столько, сколько нужно для выбранных настроек'),
-                                      (19, '19'), (25, '25'), (34, '34'), (45, '45')]) +
-             '</select><small>Это лимит обращений к моделям; точная сумма списаний неизвестна. Для видео на 30 секунд без проверки рисунков нужно 14 вызовов, с проверкой 19; для минуты 26 и 34.</small></label></details>'
-             '<button class="btn primary">Сохранить и перейти к подтверждению</button></form></section>')
-    body += topic_picker_html(product_id)
-    return body
+    duration_options = ''.join(
+        f'<option value="{value}"' + (' selected' if length == str(value) else '') + f'>{label}</option>'
+        for value, label in [(30, '30 секунд · 3 сцены'), (60, '1 минута · 6 сцен')]
+    )
+    science_options = ''.join(
+        f'<option value="{value}"' + (' selected' if science_mode == value else '') + f'>{label}</option>'
+        for value, label in [('auto', 'Автоматически по теме'),
+                             ('scientific', 'Научный сюжет — обязательно проверять'),
+                             ('general', 'Обычный сюжет (научные утверждения проверяются)')]
+    )
+    profile_options = ''.join(
+        f'<option value="{value}"' + (' selected' if profile == value else '') + f'>{label}</option>'
+        for value, label in [('gemini_ru', 'Gemini 3.1 Flash Image / ClaudeHub — рисунки, Grok — озвучка'),
+                             ('configured', 'Gemini / ClaudeHub — рисунки, остальные модели из настроек сервера')]
+    )
+    review_options = ''.join(
+        f'<option value="{value}"' + (' selected' if visual_review == value else '') + f'>{label}</option>'
+        for value, label in [('once', 'Критик один раз, автор выбирает исправления'),
+                             ('off', 'Без критика')]
+    )
+    call_options = ''.join(
+        f'<option value="{value}"' + (' selected' if maximum == str(value) else '') + f'>{label}</option>'
+        for value, label in [('auto', 'Автоматически под выбранные настройки'),
+                             (19, '19'), (25, '25'), (34, '34'), (45, '45')]
+    )
+    feedback = f'<p class="sg-warning" role="alert">{esc(error)}</p>' if error else ''
+    return f"""
+    <section class="sg-surface wb-create wb-screen" aria-labelledby="wb-create-title">
+      <header class="wb-create-head">
+        <p class="wb-eyebrow">Студия · Создание видео</p>
+        <h2 id="wb-create-title">Простое видео с озвучкой</h2>
+        <p>Опишите идею. ИИ-команда подготовит сценарий, рисунки, озвучку и готовый MP4.</p>
+        <div class="wb-specs" aria-label="Формат ролика">
+          <span>Вертикальное · 9:16</span><span>Русская озвучка</span><span>MP4 и субтитры</span>
+        </div>
+      </header>
+      {feedback}
+      <form method="post" action="{base}" class="sg-form wb-create-form" id="wb-create-form">
+        <input type="hidden" name="wb_topic_choice" value="">
+        <input type="hidden" name="wb_paid_start" value="">
+        <input type="hidden" name="wb_paid_consent" value="">
+        <div class="wb-create-main">
+          <div class="wb-create-question">
+            <label class="sg-field" for="wb-create-topic"><span>О чём будет видео?</span>
+              <textarea id="wb-create-topic" name="topic" minlength="8" maxlength="400" rows="3" required
+                placeholder="Например: почему горячий предмет массивнее холодного">{esc(fields.get('topic', ''))}</textarea>
+            </label>
+            <button class="btn secondary wb-suggest" type="button" id="wb-suggest-btn">Предложить темы для моей компании</button>
+          </div>
+          <div class="wb-create-settings">
+            <label class="sg-field" for="wb-duration"><span>Длительность</span>
+              <select id="wb-duration" name="duration_seconds">{duration_options}</select>
+            </label>
+            <label class="sg-field" for="wb-cta"><span>Призыв в конце <small>· необязательно</small></span>
+              <input id="wb-cta" type="text" name="call_to_action" maxlength="200"
+                placeholder="По умолчанию — подписаться и поставить лайк"
+                value="{esc(fields.get('call_to_action', ''))}">
+            </label>
+          </div>
+        </div>
+        <details class="wb-create-more">
+          <summary>Свой сценарий и дополнительные материалы <span>Необязательно</span></summary>
+          <div class="wb-create-fields">
+            <label class="sg-field"><span>Готовый сценарий</span>
+              <textarea name="source_script" rows="5" maxlength="12000"
+                placeholder="Вставьте исходный текст ролика">{esc(fields.get('source_script', ''))}</textarea>
+              <small>Сценарист сохранит смысл и адаптирует текст под длительность. Важные утверждения не должны изменяться.</small>
+            </label>
+            <label class="sg-field"><span>Дополнительная информация</span>
+              <textarea name="background_notes" rows="3" maxlength="6000"
+                placeholder="Аудитория, контекст и ограничения">{esc(fields.get('background_notes', ''))}</textarea>
+            </label>
+            <label class="sg-field"><span>Материалы для проверки фактов</span>
+              <textarea name="reference_materials" rows="3" maxlength="6000"
+                placeholder="Источники, ссылки, выдержки">{esc(fields.get('reference_materials', ''))}</textarea>
+              <small>Предоставленные материалы сами по себе не считаются независимым подтверждением фактов.</small>
+            </label>
+          </div>
+        </details>
+        <details class="wb-create-more">
+          <summary>Настройки генерации <span>Автоматические по умолчанию</span></summary>
+          <div class="wb-create-fields">
+            <label class="sg-field"><span>Научная проверка</span>
+              <select name="science_mode">{science_options}</select>
+              <small>Неподтверждённые научные утверждения остановят производство до рисунков и озвучки.</small>
+            </label>
+            <label class="sg-field"><span>Вариант генерации</span>
+              <select name="profile">{profile_options}</select>
+              <small>Выбор сохраняется для этого задания. Модели и голос можно проверить до платного запуска.</small>
+            </label>
+            <label class="sg-field"><span>Проверка рисунков</span>
+              <select name="visual_review">{review_options}</select>
+              <small>Один проход критика с выборочной перерисовкой. Для 30 секунд может потребоваться 19 вызовов, для минуты — 34.</small>
+            </label>
+            <label class="sg-field"><span>Максимум платных API-вызовов</span>
+              <select name="max_api_calls">{call_options}</select>
+              <small>Ограничение числа обращений, а не стоимости в деньгах. Для 30 секунд без критика нужно 14 вызовов, с критиком — 19; для минуты 26 и 34.</small>
+            </label>
+          </div>
+        </details>
+        <footer class="wb-create-actions">
+          <div class="wb-create-hint">
+            <strong>Сначала — проверка задания</strong>
+            <span>Платная генерация начнётся после отдельного подтверждения.</span>
+          </div>
+          <button class="btn primary" type="submit">Продолжить к подтверждению</button>
+        </footer>
+      </form>
+      <p class="wb-duration-caption">{esc(duration_notice(durations or {}, 'whiteboard'))}</p>
+    </section>
+    {topic_picker_html(product_id)}
+    """
 
 
 def history_html(states, product_id):
