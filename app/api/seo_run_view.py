@@ -20,6 +20,7 @@ SEO_AGENT = "seo_factory"
 SEO_KINDS = (
     "seo_factory_report", "seo_factory_request", "seo_factory_attempt",
     "semantic_core", "seo_content_plan",
+    "seo_factory_stage", "seo_suggest_checkpoint",
 )
 SEO_STATUS_NAMES = {
     "queued": "В очереди",
