@@ -96,3 +96,66 @@ def test_legacy_runtime_profile_receives_product_catalog_without_replacing_owner
     again, count = merge_profile(updated, packaged())
     assert again == updated
     assert count["offers"] == 0 and count["catalog_fields"] == 0
+
+
+
+def test_correct_previous_shifts_false_negative_without_losing_owner_edits():
+    current = copy.deepcopy(packaged())
+    shift = next(o for o in current["offer"]["products_services"]
+                 if o.get("product_family") == "Смена")
+    shift["release_status"] = "unverified"
+    shift["evidence_refs"] = []
+    shift["conversion_action"] = None
+    shift["description"] = (
+        "Модуль учёта смен рассматривается как направление платформы. "
+        "Действующая версия, точный функционал и доступность для клиентов не подтверждены "
+        "текущим аудитом исходного кода и продакшена. Не объявлять продукт запущенным "
+        "и не предлагать его подключить до отдельной технической проверки."
+    )
+    current["unknowns"].append({"question":
+        "Проверен ли боевой выпуск «Смены», включая Telegram mini-app, QR/selfie "
+        "и учёт рабочего времени? Без подтверждённых исходников и smoke-теста "
+        "не рекламировать как действующий модуль."})
+    custom = {"statement": "Owner independent verified statement", "evidence_ref": "owner"}
+    current["proof"]["approved_facts"].append(custom)
+    current["commercial"]["pricing_model"] = "Custom owner pricing"
+    corrected, stats = merge_profile(current, packaged())
+    actual = next(o for o in corrected["offer"]["products_services"]
+                  if o.get("product_family") == "Смена")
+    assert actual["release_status"] == "live"
+    assert "owner-confirmation:servgo" in actual["evidence_refs"][0]
+    assert "Работающий модуль" in actual["description"]
+    assert any("«Смена» работает" in f["statement"]
+               for f in corrected["proof"]["approved_facts"])
+    assert not any("Не объявлять продукт запущенным" in o["description"]
+                   for o in corrected["offer"]["products_services"])
+    assert corrected["commercial"]["pricing_model"] == "Custom owner pricing"
+    assert custom in corrected["proof"]["approved_facts"]
+    assert stats["stock_corrections"] >= 2
+    repeated, again = merge_profile(corrected, packaged())
+    assert repeated == corrected
+    assert again["stock_corrections"] == 0
+
+
+def test_manual_owner_shifts_description_is_not_overwritten():
+    current = copy.deepcopy(packaged())
+    shift = next(o for o in current["offer"]["products_services"]
+                 if o.get("product_family") == "Смена")
+    shift["release_status"] = "unverified"
+    shift["evidence_refs"] = []
+    shift["description"] = "Custom owner edited description; availability requires signoff"
+    shift["conversion_action"] = None
+    updated, _ = merge_profile(current, packaged())
+    actual = next(o for o in updated["offer"]["products_services"]
+                  if o.get("product_family") == "Смена")
+    assert actual["description"] == "Custom owner edited description; availability requires signoff"
+    assert actual["release_status"] == "unverified"
+
+
+def test_live_shifts_uses_owner_confirmation_not_unverified_repository():
+    data = packaged()
+    shift = next(o for o in data["offer"]["products_services"]
+                 if o.get("product_family") == "Смена")
+    assert shift["release_status"] == "live"
+    assert shift["evidence_refs"] == ["owner-confirmation:servgo:2026-11-03:shifts-operational"]
+    assert "не подтверждены текущим аудитом" not in shift["description"]
