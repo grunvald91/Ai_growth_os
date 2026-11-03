@@ -10,10 +10,11 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.composition import build_seo_llm
+from app.llm.errors import ProviderEmptyResponseError, ProviderMalformedResponseError
 from app.models.domain import Artifact, Product, Task, TaskStatus
 from app.seo.planner import plan_content, plan_seeds
 from app.seo.queue import queue_plan
-from app.seo.service import build_semantic_core
+from app.seo.service import SeoSuggestionsUnavailable, build_semantic_core
 from app.services.artifacts import ArtifactService
 from app.services.tasks import TaskService
 from app.seo.activation import require_enabled, enabled_product_ids
@@ -23,6 +24,42 @@ AGENT = "seo_factory"
 REQUEST_KIND = "seo_factory_request"
 REPORT_KIND = "seo_factory_report"
 ATTEMPT_KIND = "seo_factory_attempt"
+STAGE_KIND = "seo_factory_stage"
+
+
+def record_stage(db: Session, product_id: UUID, task_id: UUID, stage: str) -> None:
+    """Persist progress before external calls; no customer prompts or credentials in logs."""
+    ArtifactService(db).create(
+        product_id=product_id, task_id=task_id, kind=STAGE_KIND,
+        title="SEO stage", content=json.dumps({
+            "stage": stage, "recorded_at": datetime.now(timezone.utc).isoformat(),
+        }),
+    )
+    db.commit()
+    _logger.info("seo_factory_stage task=%s stage=%s", task_id, stage)
+
+
+def failure_details(exc: Exception) -> dict:
+    """Only machine-readable, non-sensitive error metadata; never persist provider bodies."""
+    status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    if isinstance(exc, SeoSuggestionsUnavailable):
+        code = exc.reason
+    elif isinstance(exc, (ProviderEmptyResponseError, ProviderMalformedResponseError)):
+        code = "model_unusable_response"
+    elif isinstance(exc, httpx.HTTPStatusError):
+        code = "provider_http_error"
+    elif isinstance(exc, (httpx.TimeoutException, TimeoutError)):
+        code = "upstream_timeout"
+    elif isinstance(exc, httpx.TransportError):
+        code = "network_failure"
+    elif isinstance(exc, ValueError):
+        code = "invalid_data_or_configuration"
+    else:
+        code = "internal_exception"
+    return {
+        "error": type(exc).__name__, "error_code": code,
+        **({"http_status": status} if status is not None else {}),
+    }
 
 
 def recover_stale_factory(db):
@@ -95,15 +132,40 @@ async def run_factory_once(session_factory, settings, *, provider=None, client: 
                 await _execute(db, settings, task_id, product_id, focus, provider, client, horizon_days)
         except Exception as exc:
             db.rollback()
-            _logger.warning("SEO factory failed: %s", type(exc).__name__)
-            ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=REPORT_KIND,
-                title="SEO-завод остановился", content=json.dumps({"error": type(exc).__name__}))
+            stage_rows = list(db.scalars(select(Artifact).where(
+                Artifact.task_id == task_id, Artifact.kind == STAGE_KIND,
+            )))
+            # DB creation timestamps may have only second precision; UUID ordering is not time ordering.
+            stage_artifact = max(
+                stage_rows,
+                key=lambda row: json.loads(row.content).get("recorded_at")
+                or row.created_at.isoformat(),
+            ) if stage_rows else None
+            try:
+                stage = json.loads(stage_artifact.content).get("stage") if stage_artifact else "starting"
+            except (TypeError, ValueError):
+                stage = "unknown"
+            details = failure_details(exc)
             from app.seo.planner import PLAN_KIND
             attempts = list(db.scalars(select(Artifact.id).where(
                 Artifact.task_id == task_id, Artifact.kind == ATTEMPT_KIND)))
-            resumable = db.scalar(select(Artifact.id).where(Artifact.task_id == task_id,
-                                                           Artifact.kind == PLAN_KIND)) is not None
-            retry = len(attempts) < 3 and (resumable or isinstance(exc, TimeoutError))
+            resumable = db.scalar(select(Artifact.id).where(
+                Artifact.task_id == task_id, Artifact.kind == PLAN_KIND,
+            )) is not None
+            transient = isinstance(exc, (TimeoutError, httpx.TransportError,
+                                          ProviderEmptyResponseError, ProviderMalformedResponseError))
+            if isinstance(exc, httpx.HTTPStatusError):
+                transient = exc.response.status_code in {404, 408, 425, 429, 500, 502, 503, 504}
+            retry = len(attempts) < 3 and (resumable or transient)
+            details.update(stage=stage, attempt=len(attempts), retryable=retry)
+            _logger.warning(
+                "seo_factory_failed task=%s stage=%s code=%s error_type=%s attempt=%s retry=%s",
+                task_id, stage, details["error_code"], details["error"], len(attempts), retry,
+            )
+            ArtifactService(db).create(
+                product_id=product_id, task_id=task_id, kind=REPORT_KIND,
+                title="SEO-завод остановился", content=json.dumps(details),
+            )
             TaskService(db).update(task_id, status=TaskStatus.QUEUED if retry else TaskStatus.FAILED)
             db.commit()
         return 1
@@ -114,6 +176,7 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client, h
     from app.seo.planner import PLAN_KIND
     from app.seo.service import KIND
     require_enabled(db, product_id)
+    record_stage(db, product_id, task_id, "prepare_queries")
     llm, privacy = build_seo_llm(settings, provider)
     core_artifact = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == KIND))
     if core_artifact is None:
@@ -122,15 +185,18 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client, h
         seeds = (json.loads(checkpoint.content)["seeds"] if checkpoint else
                  await plan_seeds(db, llm, privacy, product_id, products_root=settings.products_root,
                                   model=settings.llm_model, focus=focus))
+        record_stage(db, product_id, task_id, "collect_suggestions")
         core_artifact = await build_semantic_core(db, product_id, seeds, client=client, task_id=task_id)
     core = SemanticCore.model_validate_json(core_artifact.content)
     plan = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == PLAN_KIND))
     if plan is None:
+        record_stage(db, product_id, task_id, "build_plan")
         plan = await plan_content(db, llm, privacy, product_id, core, products_root=settings.products_root,
                                   model=settings.llm_model, factory_task_id=task_id, horizon_days=horizon_days)
     require_enabled(db, product_id)
     # All supported topics of the selected weekly or monthly plan are queued.
     all_items = SeoContentPlan.model_validate_json(plan.content).items
+    record_stage(db, product_id, task_id, "queue_articles")
     queued = queue_plan(db, plan, {c.id: c for c in core.clusters},
                         per_day=settings.seo_publications_per_day)
     ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=REPORT_KIND,
@@ -140,4 +206,5 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client, h
                             "planning_horizon_days": horizon_days,
                             "sources": [s.model_dump() for s in core.sources]}))
     TaskService(db).update(task_id, status=TaskStatus.COMPLETED)
+    record_stage(db, product_id, task_id, "completed")
     db.commit()

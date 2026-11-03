@@ -154,7 +154,11 @@ async def test_search_engines_down_stops_honestly_without_article_tasks(env):
     with factory() as db:
         assert db.scalar(select(Task).where(Task.assigned_agent == "seo_factory")).status == TaskStatus.FAILED
         report = db.scalar(select(Artifact).where(Artifact.kind == "seo_factory_report"))
-        assert json.loads(report.content) == {"error": "RuntimeError"}
+        diagnostic = json.loads(report.content)
+        assert diagnostic["error"] == "SeoSuggestionsUnavailable"
+        assert diagnostic["error_code"] == "search_upstream_failures"
+        assert diagnostic["stage"] == "collect_suggestions"
+        assert diagnostic["retryable"] is False
         assert not list(db.scalars(select(Task).where(Task.assigned_agent == "content_factory")))
 
 
@@ -177,6 +181,63 @@ async def test_dispatcher_always_asks_first_and_queues_only_after_confirmation(e
             Artifact.task_id == outcome.task_id, Artifact.kind == "seo_factory_request"))
         assert json.loads(monthly.content)["horizon_days"] == 30
 
+
+
+@pytest.mark.asyncio
+async def test_long_specific_seed_recovers_from_real_short_source_suggestions(env):
+    """Regression: ServGo got HTTP 200 + [] on long AI-generated searches."""
+    class LongSeedProvider(Provider):
+        async def generate(self, request):
+            if request.metadata["team_role"] == "semantic_researcher":
+                return LLMResponse(content=json.dumps({"seeds": [
+                    "как записаться на маникюр онлайн без переписки",
+                    "программа для автоматизации записи в салоне красоты",
+                    "онлайн запись к косметологу или парикмахеру",
+                ]}), model="fake", usage=LLMUsage(), stop_reason="end_turn")
+            return await super().generate(request)
+
+    def suggestions(request):
+        prefix = request.url.params.get("part") or request.url.params.get("q")
+        results = [prefix + " цена", prefix + " отзывы"] if (
+            len(prefix.split()) <= 4 and "маникюр" in prefix
+        ) else []
+        return httpx.Response(200, text=json.dumps([prefix, results]))
+
+    factory, settings, product_id = env
+    with factory() as db:
+        task_id = queue_factory(db, product_id, horizon_days=7).id
+    async with httpx.AsyncClient(transport=httpx.MockTransport(suggestions)) as client:
+        assert await run_factory_once(factory, settings, provider=LongSeedProvider(), client=client) == 1
+    with factory() as db:
+        assert db.get(Task, task_id).status == TaskStatus.COMPLETED
+        for kind in ["semantic_core", "seo_content_plan", "seo_factory_stage"]:
+            assert db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == kind))
+        checkpoint = db.scalar(select(Artifact).where(
+            Artifact.task_id == task_id, Artifact.kind == "seo_suggest_checkpoint"))
+        summary = json.loads(checkpoint.content)["results"]
+        assert sum(v.get("empty", 0) for v in summary.values()) > 0
+        assert sum(len(v["queries"]) for v in summary.values()) > 0
+        assert list(db.scalars(select(Task).where(
+            Task.product_id == product_id, Task.assigned_agent == "content_factory",
+            Task.title.like("SEO-ARTICLE:%"))))
+
+
+def test_factory_stage_summary_is_company_scoped(env):
+    from app.api.seo_run_view import seo_runs
+    factory, _, product_id = env
+    with factory() as db:
+        task = queue_factory(db, product_id)
+        ArtifactService(db).create(product_id=product_id, task_id=task.id,
+            kind="seo_factory_stage", title="stage", content=json.dumps({"stage": "collect_suggestions"}))
+        ArtifactService(db).create(product_id=product_id, task_id=task.id,
+            kind="seo_factory_report", title="error", content=json.dumps({
+                "error": "ProviderEmptyResponseError", "error_code": "model_unusable_response",
+                "stage": "prepare_queries"}))
+        db.commit()
+        row = seo_runs(db, product_id)[0]
+        assert row["current_stage"] == "collect_suggestions"
+        assert row["last_error_code"] == "model_unusable_response"
+        assert row["last_error_stage"] == "prepare_queries"
 
 # ---- daily limit of blog articles and light mode ----------------------------------------------------
 

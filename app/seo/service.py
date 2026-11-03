@@ -16,6 +16,14 @@ from app.services.artifacts import ArtifactService
 KIND = "semantic_core"
 
 
+class SeoSuggestionsUnavailable(RuntimeError):
+    """No verified search suggestions. The reason is safe to persist in run diagnostics."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
 async def build_semantic_core(db: Session, product_id: UUID, seeds: list[str], *,
                               client: httpx.AsyncClient | None = None, task_id: UUID | None = None) -> Artifact:
     product = db.get(Product, product_id)
@@ -37,6 +45,7 @@ async def build_semantic_core(db: Session, product_id: UUID, seeds: list[str], *
             return
         content = json.dumps({"seeds": seeds, "results": {engine: {
             "requests": result.requests, "failed": result.failed,
+            "empty": result.empty, "invalid": result.invalid,
             "queries": sorted(result.queries), "completed": sorted(result.completed)
         } for engine, result in results.items()}}, ensure_ascii=False)
         if checkpoint is None:
@@ -47,7 +56,13 @@ async def build_semantic_core(db: Session, product_id: UUID, seeds: list[str], *
         db.commit()
     results = await collect(seeds, client=client, initial=initial, on_batch=save_batch)
     if not any(r.queries for r in results.values()):
-        raise RuntimeError("Search engines did not answer; no semantic core was built")
+        if any(r.invalid for r in results.values()):
+            reason = "search_invalid_responses"
+        elif any(r.failed for r in results.values()):
+            reason = "search_upstream_failures"
+        else:
+            reason = "search_no_suggestions"
+        raise SeoSuggestionsUnavailable(reason)
     core = SemanticCore(
         seeds=seeds, collected_at=datetime.now(timezone.utc),
         sources=[SourceStatus(engine=r.engine, requests=r.requests, failed_requests=r.failed,

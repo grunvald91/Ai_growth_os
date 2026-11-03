@@ -20,6 +20,7 @@ SEO_AGENT = "seo_factory"
 SEO_KINDS = (
     "seo_factory_report", "seo_factory_request", "seo_factory_attempt",
     "semantic_core", "seo_content_plan",
+    "seo_factory_stage", "seo_suggest_checkpoint",
 )
 SEO_STATUS_NAMES = {
     "queued": "В очереди",
@@ -71,8 +72,25 @@ def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
                     and r["articles_queued"] >= 0), None)
     # The last error of a currently failed/requeued task is an observation,
     # not a claim about the next retry's result.
-    error = next((r.get("error") for r in result_reports
-                  if isinstance(r.get("error"), str)), None)
+    failure = next((r for r in result_reports if isinstance(r.get("error"), str)), {})
+    stages = sorted((a for a in artifacts if a.kind == "seo_factory_stage"),
+                    key=lambda a: _report_data(a.content).get("recorded_at")
+                    or a.created_at.isoformat(), reverse=True)
+    stage_data = _report_data(stages[0].content) if stages else {}
+    checkpoints = sorted((a for a in artifacts if a.kind == "seo_suggest_checkpoint"),
+                         key=lambda a: (a.created_at, a.id), reverse=True)
+    checkpoint = _report_data(checkpoints[0].content) if checkpoints else {}
+    source_progress = {
+        engine: {
+            "requests": data.get("requests", 0),
+            "failed": data.get("failed", 0),
+            "empty": data.get("empty", 0),
+            "invalid": data.get("invalid", 0),
+            "queries_found": len(data.get("queries", [])),
+        }
+        for engine, data in checkpoint.get("results", {}).items()
+        if isinstance(data, dict)
+    }
     state = task.status.value if hasattr(task.status, "value") else str(task.status)
     return {
         "id": str(task.id),
@@ -89,7 +107,13 @@ def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
         "sources_confirmed": (len(success["sources"])
                               if success is not None and isinstance(success.get("sources"), list)
                               else None),
-        "last_error": error,
+        "last_error": failure.get("error"),
+        "last_error_code": failure.get("error_code"),
+        "last_error_stage": failure.get("stage"),
+        "last_error_http_status": failure.get("http_status"),
+        "last_error_retryable": failure.get("retryable"),
+        "current_stage": stage_data.get("stage"),
+        "source_progress": source_progress,
         # Task/AgentRun currently have no authoritative provider billing value.
         "cost_amount": None,
         "cost_status": "not_recorded",
