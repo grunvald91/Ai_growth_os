@@ -8,12 +8,12 @@ permissions:
 jobs:
   revise:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 32
     env:
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
       HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
       HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
-      RELEASE: 0d380bfa5fadc46a6c9d0630650c6d8cbc838cdf
+      RELEASE: 22623a8c507d2bd8f18524e9de89538021065791
     steps:
       - name: Verify production revision and publish critic-reviewed articles
         shell: bash
@@ -41,6 +41,69 @@ jobs:
           test "$(systemctl is-active booking-bot)" = active
           grep -q 'kak-psihologu-organizovat-zapis-klientov' /opt/booking_bot/webapp/server.py
           docker exec ai-growth-os-api-1 python -m app.seo.revise_servgo_owner_articles
-          timeout 650 docker exec ai-growth-os-api-1 python -m app.seo.revise_servgo_owner_articles --apply
+          timeout 1200 docker exec ai-growth-os-api-1 python -m app.seo.revise_servgo_owner_articles --apply
           echo "REVIEWED_ARTICLES_COMMITTED"
+          echo "=== Verify database content, search intent, reviewer verdict and backups ==="
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Artifact, ArtifactStatus, Product, Publication
+          from app.seo.revise_servgo_owner_articles import CONTENT, REVISION_NOTE
+          from app.seo.publishing import CLEAN_CRITIC_STATUSES, critic_verdict
+          from app.workflows.article_contracts import ArticleArtifact
+          with SessionLocal() as db:
+              product=db.scalar(select(Product).where(Product.slug=="servgo"))
+              assert product is not None
+              target={data["new_slug"] for data in CONTENT.values()}
+              old=set(CONTENT)
+              rows=list(db.execute(select(Artifact, Publication).join(
+                  Publication, Publication.artifact_id==Artifact.id).where(
+                  Publication.product_id==product.id, Publication.channel=="own_site",
+                  Publication.status=="published",
+                  Publication.external_reference.in_(target | old))))
+              assert len(rows)==2 and {p.external_reference for _,p in rows}==target, "Article slugs not replaced atomically"
+              for artifact,pub in rows:
+                  article=ArticleArtifact.model_validate_json(artifact.content)
+                  data=next(v for v in CONTENT.values() if v["new_slug"]==pub.external_reference)
+                  assert artifact.status==ArtifactStatus.PUBLISHED
+                  assert article.seo.primary_query==data["primary_query"]
+                  assert article.seo_brief.primary_query==data["primary_query"]
+                  assert article.seo_brief.target_segment
+                  assert REVISION_NOTE in article.reader_article.editorial_notes
+                  verdict=critic_verdict(db, artifact.task_id, article.reader_article)
+                  assert verdict in CLEAN_CRITIC_STATUSES, ("No verified critic",verdict)
+                  body="\n".join(section.body for section in article.reader_article.sections)
+                  assert "**" in body and "### " in body and "> " in body, "Missing article typography"
+                  original_slug=next(k for k,v in CONTENT.items() if v["new_slug"]==pub.external_reference)
+                  backup=db.scalar(select(Artifact).where(
+                      Artifact.product_id==product.id,
+                      Artifact.kind=="seo_article_revision_backup",
+                      Artifact.title=="Pre-owner-intent revision "+original_slug).limit(1))
+                  assert backup is not None, "Original version backup missing"
+                  print("OWNER_ARTICLE_DB_VERIFIED",pub.external_reference,"version",artifact.version,"critic",verdict)
+          PY
+          echo "=== Check public HTML, redirects and sitemap after cache expiry ==="
+          d="$(mktemp -d)"
+          trap 'rm -rf "$d"' EXIT
+          ready=0
+          for n in $(seq 1 45); do
+            a=$(curl -sS -o "$d/psych" -w '%{http_code}' --max-time 12 --resolve servgo.ru:443:127.0.0.1 'https://servgo.ru/blog/kak-psihologu-organizovat-zapis-klientov' || true)
+            b=$(curl -sS -o "$d/beauty" -w '%{http_code}' --max-time 12 --resolve servgo.ru:443:127.0.0.1 'https://servgo.ru/blog/kak-masteru-manikyura-vesti-zapis-klientov' || true)
+            c=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 --resolve servgo.ru:443:127.0.0.1 'https://servgo.ru/blog/zapis-k-psihologu' || true)
+            e=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 12 --resolve servgo.ru:443:127.0.0.1 'https://servgo.ru/blog/zapisatsya-na-manikyur-onlayn' || true)
+            if [ "$a" = 200 ] && [ "$b" = 200 ] && [ "$c" = 301 ] && [ "$e" = 301 ] &&
+                grep -Fq '<strong>' "$d/psych" &&
+                grep -Fq '<em>' "$d/beauty" &&
+                grep -Fq 'class="blog-subheading"' "$d/psych"; then
+              ready=1
+              break
+            fi
+            sleep 10
+          done
+          printf 'PUBLIC_RESULTS new=%s,%s redirects=%s,%s rich_markup=%s\n' "$a" "$b" "$c" "$e" "$ready"
+          test "$ready" = 1
+          curl -fsS --max-time 15 --resolve servgo.ru:443:127.0.0.1 'https://servgo.ru/blog/sitemap.xml' -o "$d/sitemap"
+          grep -Fq 'kak-psihologu-organizovat-zapis-klientov' "$d/sitemap"
+          grep -Fq 'kak-masteru-manikyura-vesti-zapis-klientov' "$d/sitemap"
+          echo "SERVGO_OWNER_ARTICLES_PRODUCTION_VERIFIED"
           REMOTE
