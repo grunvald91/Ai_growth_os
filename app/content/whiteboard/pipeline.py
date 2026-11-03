@@ -11,6 +11,7 @@ import hashlib
 import json
 
 from app.content.whiteboard.science import FactReview, evidence_supported, requires_science_review
+from .adapters import InvalidRegionResponse
 from app.content.whiteboard.contracts import (
     WhiteboardOutput, WhiteboardRegionPlan, WhiteboardRequest,
     WhiteboardScene, WhiteboardSceneAssets, WhiteboardStoryboard,
@@ -223,15 +224,29 @@ class WhiteboardPipeline:
             if not self.visual_review:
                 completed += 1
             self._report('regions', completed, total, scene=scene_index)
+            from .layout import complete_diagram_regions
+            invalid_json_audit = None
+
+            async def detect_or_split():
+                nonlocal invalid_json_audit
+                try:
+                    return await self.regions.detect(scene, image)
+                except InvalidRegionResponse:
+                    # The vision call already counts towards the approved budget.
+                    # Do not make another paid call for malformed JSON.
+                    plan, invalid_json_audit = complete_diagram_regions(scene, image, None)
+                    return plan
+
             if self.checkpoints is not None:
                 regions = await self.checkpoints.json_stage(
-                    prefix + '-regions', lambda: self.regions.detect(scene, image), WhiteboardRegionPlan,
+                    prefix + '-regions', detect_or_split, WhiteboardRegionPlan,
                 )
             else:
-                regions = await self.regions.detect(scene, image)
-            # Unusable plans are repaired or replaced offline; see layout.fallback_regions.
-            from .layout import complete_diagram_regions
+                regions = await detect_or_split()
+            # Even parseable plans may omit beats or draw overlapping regions.
             regions, layout_repair = complete_diagram_regions(scene, image, regions)
+            if invalid_json_audit is not None:
+                layout_repair = invalid_json_audit
             if layout_repair is not None and visual_audit is not None:
                 visual_audit.setdefault('region_layout', []).append({'scene_index':scene_index, **layout_repair})
                 if self.progress:
