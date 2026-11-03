@@ -173,6 +173,8 @@ REWRITES = {
         ],
     },
 }
+REVISION_NOTE = "servgo-seo-refactor-20261103"
+
 CTA = {
     "/blog/zapis-k-psihologu": (
         "Ведёте практику психолога? Посмотрите, как вручную записывать клиентов "
@@ -216,7 +218,7 @@ def checked_article(original: ArticleArtifact, slug: str, reader: HumanEditedArt
 
 
 def build_reader(slug: str, original: ArticleArtifact) -> HumanEditedArticle:
-    data = {**REWRITES[slug],
+    data = {**REWRITES[slug], "editorial_notes": [REVISION_NOTE],
             "fact_renderings": [
                 fact.model_dump(mode="json")
                 for fact in original.reader_article.fact_renderings
@@ -228,6 +230,8 @@ async def revise_one(product_id, artifact_id, slug: str, original_hash: str, app
     with SessionLocal() as db:
         row = db.get(Artifact, artifact_id)
         original = ArticleArtifact.model_validate_json(row.content)
+        if REVISION_NOTE in (original.reader_article.editorial_notes if original.reader_article else []):
+            return {"slug": slug, "state": "already_revised"}
         reader = build_reader(slug, original)
         draft = checked_article(original, slug, reader)
         problems = static_problems(draft) + unsupported_servgo_pricing(db, row, draft)

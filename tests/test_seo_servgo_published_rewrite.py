@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.workflows.article_contracts import HumanEditedArticle
-from app.seo.revise_servgo_published import REWRITES, CTA, build_reader
+from app.seo.revise_servgo_published import REWRITES, CTA, REVISION_NOTE, build_reader
 
 
 def test_two_known_published_slugs_only():
@@ -21,6 +21,7 @@ def test_editorial_rewrite_is_readable_search_article_not_fake_client_booking(sl
     reader = build_reader(slug, old)
     assert isinstance(reader, HumanEditedArticle)
     assert reader.language == "ru"
+    assert REVISION_NOTE in reader.editorial_notes
     assert reader.direct_answer and reader.meta_description
     assert len(reader.sections) >= 3
     assert any("\n1. " in section.body for section in reader.sections)
