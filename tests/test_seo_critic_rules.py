@@ -48,8 +48,9 @@ def test_servgo_company_profile_contains_proven_owner_calendar_facts():
     assert any("визуальное расписание" in fact for fact in facts)
     assert any("запись вручную" in fact for fact in facts)
     assert "В админ-панели ServGo" in render_company_profile(profile)
-    assert "owner-managed appointment journals" in SEED_PROMPT
-    assert "appointment journal" in PLAN_PROMPT
+    assert "the BUSINESS described in the company profile" in SEED_PROMPT
+    assert "the company's own potential PAYING customer" in PLAN_PROMPT
+    assert "not a generic platform" in PLAN_PROMPT
     assert "внутренний электронный журнал" in SERVGO_EDITORIAL_RULES
 
 
@@ -60,7 +61,7 @@ def test_servgo_crm_value_and_mailing_boundaries_in_prompts():
     assert "истории посещений" in SERVGO_EDITORIAL_RULES
     assert "Связку CRM→Mail" in SERVGO_EDITORIAL_RULES
     assert "автоматическая CRM-to-Mail" in SERVGO_CRITIC_RULES
-    assert "customer databases" in SEED_PROMPT
+    assert "buyer_segments and offer" in SEED_PROMPT
 
 
 
