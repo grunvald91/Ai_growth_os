@@ -222,6 +222,71 @@ async def test_long_specific_seed_recovers_from_real_short_source_suggestions(en
             Task.title.like("SEO-ARTICLE:%"))))
 
 
+
+@pytest.mark.asyncio
+async def test_invalid_ai_plan_gets_one_correction_then_queues_articles(env):
+    """An invented cluster must be repaired by the model, never silently accepted."""
+    class CorrectingPlan(Provider):
+        def __init__(self):
+            super().__init__()
+            self.plan_attempts = 0
+
+        async def generate(self, request):
+            response = await super().generate(request)
+            if request.metadata["team_role"] == "seo_editor":
+                self.plan_attempts += 1
+                if self.plan_attempts == 1:
+                    data = json.loads(response.content)
+                    data["items"][0]["cluster_ids"] = ["c99999"]
+                    return LLMResponse(content=json.dumps(data), model="fake",
+                                       usage=LLMUsage(), stop_reason="end_turn")
+            return response
+
+    factory, settings, product_id = env
+    provider = CorrectingPlan()
+    with factory() as db:
+        task_id = queue_factory(db, product_id, horizon_days=7).id
+    async with suggest_client() as client:
+        assert await run_factory_once(factory, settings, provider=provider, client=client) == 1
+    assert provider.plan_attempts == 2
+    with factory() as db:
+        assert db.get(Task, task_id).status == TaskStatus.COMPLETED
+        assert db.scalar(select(Artifact).where(
+            Artifact.task_id == task_id, Artifact.kind == "seo_content_plan"))
+        assert list(db.scalars(select(Task).where(
+            Task.product_id == product_id, Task.title.like("SEO-ARTICLE:%"))))
+
+
+@pytest.mark.asyncio
+async def test_persisting_invalid_ai_plan_reports_specific_error_without_publishing(env):
+    """After one bounded correction, retain the stage and safe integrity error."""
+    class BrokenPlan(Provider):
+        async def generate(self, request):
+            response = await super().generate(request)
+            if request.metadata["team_role"] != "seo_editor":
+                return response
+            data = json.loads(response.content)
+            data["items"][0]["cluster_ids"] = ["c99999"]
+            return LLMResponse(content=json.dumps(data), model="fake",
+                               usage=LLMUsage(), stop_reason="end_turn")
+
+    factory, settings, product_id = env
+    with factory() as db:
+        task_id = queue_factory(db, product_id, horizon_days=7).id
+    async with suggest_client() as client:
+        assert await run_factory_once(factory, settings, provider=BrokenPlan(), client=client) == 1
+    with factory() as db:
+        assert db.get(Task, task_id).status == TaskStatus.FAILED
+        report = db.scalar(select(Artifact).where(
+            Artifact.task_id == task_id, Artifact.kind == "seo_factory_report"))
+        error = json.loads(report.content)
+        assert error["error"] == "PlanError"
+        assert error["error_code"] == "plan_validation_failed"
+        assert error["plan_issue"] == "unknown_cluster"
+        assert error["stage"] == "build_plan"
+        assert not list(db.scalars(select(Task).where(Task.title.like("SEO-ARTICLE:%"))))
+
+
 def test_factory_stage_summary_is_company_scoped(env):
     from app.api.seo_run_view import seo_runs
     factory, _, product_id = env
