@@ -18,10 +18,10 @@ jobs:
     timeout-minutes: 8
     if: github.repository == 'grunvald91/Ai_growth_os' && github.ref == 'refs/heads/diag/whiteboard-prod-20261103'
     env:
-      SSHPASS: \${{ secrets.SERVER_SSH_PASSWORD }}
-      HOST: \${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
       HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
-      GH_TOKEN: \${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Inspect only last whiteboard tasks, sanitized DB history and worker health
         shell: bash
