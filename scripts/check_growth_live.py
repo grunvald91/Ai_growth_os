@@ -160,6 +160,11 @@ def main():
                     expect(page.locator('#wb-create-form [name="topic"]')).to_be_visible()
                     expect(page.locator('#wb-create-form [name="duration_seconds"]')).to_be_visible()
                     expect(page.locator('#wb-create-form button[type="submit"]')).to_be_visible()
+                    if width <= 780:
+                        page.evaluate('scrollTo(0,0)')
+                        action=page.locator('#wb-create-form button[type="submit"]').bounding_box()
+                        mobile_nav=page.locator('#mobileNav').bounding_box()
+                        assert action and mobile_nav and action['y']+action['height']<=mobile_nav['y']+1,(width,action,mobile_nav)
                     page.screenshot(path=f'/tmp/v4-simple-video-create-{width}.png',
                                     full_page=True,animations='disabled')
                     overflow=page.evaluate("""() => ({
