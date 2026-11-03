@@ -96,7 +96,8 @@ async def test_plan_saved_as_artifact_with_completed_task(db, product, tmp_path)
 
 @pytest.mark.asyncio
 async def test_invented_plan_fails_task_and_saves_nothing(db, product, tmp_path):
-    provider = Provider({"items": [item(primary_query="выдуманный запрос")]})
+    provider = Provider({"items": [item(primary_query="выдуманный запрос")]},
+                        {"items": [item(primary_query="выдуманный запрос")]})
     with pytest.raises(PlanError):
         second = await plan_content(db, service(provider), PrivacyGateway(), product.id, core(),
                            products_root=tmp_path / "products", model="fake")
