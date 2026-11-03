@@ -126,3 +126,43 @@ def test_existing_publications_reserve_slots_in_new_plans(env):
     slots = available_slots(db, company.id, 3, now=NOW)
     assert [day(s) for s in slots].count(day(NOW)) == 2
     assert day(slots[-1]) == day(NOW) + timedelta(days=1)
+
+
+
+def test_company_timezones_have_different_local_days_and_independent_daily_capacity(env):
+    from zoneinfo import ZoneInfo
+    from app.seo.activation import set_editorial_preferences
+    db, first, second = env
+    set_editorial_preferences(db, first.id, timezone_name="Asia/Tokyo",
+        autorun_interval_days=7, autorun_horizon_days=7,
+        publications_per_day=1, articles_per_day=1, actor="owner-first")
+    set_editorial_preferences(db, second.id, timezone_name="America/Los_Angeles",
+        autorun_interval_days=7, autorun_horizon_days=7,
+        publications_per_day=4, articles_per_day=4, actor="owner-second")
+    now = datetime(2026, 11, 3, 19, 0, tzinfo=timezone.utc)
+    tokyo = ZoneInfo("Asia/Tokyo")
+    la = ZoneInfo("America/Los_Angeles")
+    assert day(now, tz=tokyo) != day(now, tz=la)
+    a, ac = plan(db, first, 60, 3)
+    b, bc = plan(db, second, 70, 4)
+    atasks = queue_plan(db, a, ac, now=now)
+    btasks = queue_plan(db, b, bc, now=now)
+    assert len({day(x.due_at, tz=tokyo) for x in atasks}) == 3
+    assert len({day(x.due_at, tz=la) for x in btasks}) == 1
+    assert all(x.due_at >= now for x in atasks + btasks)
+
+
+def test_company_publication_count_uses_local_timezone(env):
+    from zoneinfo import ZoneInfo
+    db, first, second = env
+    now = datetime(2026, 11, 3, 21, 0, tzinfo=timezone.utc)
+    page = Artifact(product_id=first.id, kind="article", title="At Moscow midnight", content="{}")
+    db.add(page)
+    db.flush()
+    db.add(Publication(product_id=first.id, artifact_id=page.id, channel="own_site",
+                       status="published", published_at=now - timedelta(hours=1)))
+    db.commit()
+    # UTC date Nov 3, Moscow date Nov 4; the same publication belongs to
+    # different days at the two local midnight boundaries.
+    assert published_today(db, first.id, now=now, tz=ZoneInfo("Europe/Moscow")) == 0
+    assert published_today(db, first.id, now=now, tz=ZoneInfo("America/Los_Angeles")) == 1

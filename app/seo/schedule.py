@@ -24,14 +24,14 @@ def utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
-def day(value: datetime) -> date:
-    return utc(value).astimezone(OWNER_TZ).date()
+def day(value: datetime, *, tz: ZoneInfo = OWNER_TZ) -> date:
+    return utc(value).astimezone(tz).date()
 
 
-def day_bounds(value: datetime) -> tuple[datetime, datetime]:
-    local_date = day(value)
-    start = datetime.combine(local_date, time.min, tzinfo=OWNER_TZ)
-    stop = datetime.combine(local_date + timedelta(days=1), time.min, tzinfo=OWNER_TZ)
+def day_bounds(value: datetime, *, tz: ZoneInfo = OWNER_TZ) -> tuple[datetime, datetime]:
+    local_date = day(value, tz=tz)
+    start = datetime.combine(local_date, time.min, tzinfo=tz)
+    stop = datetime.combine(local_date + timedelta(days=1), time.min, tzinfo=tz)
     return start.astimezone(timezone.utc), stop.astimezone(timezone.utc)
 
 
@@ -40,10 +40,11 @@ def db_time(db, value: datetime) -> datetime:
     return value.replace(tzinfo=None) if db.bind.dialect.name == "sqlite" else value
 
 
-def published_today(db, product_id, *, now: datetime | None = None) -> int:
+def published_today(db, product_id, *, now: datetime | None = None,
+                    tz: ZoneInfo = OWNER_TZ) -> int:
     """Count every publication created that day, including subsequently hidden ones."""
     now = utc(now or datetime.now(timezone.utc))
-    start, end = day_bounds(now)
+    start, end = day_bounds(now, tz=tz)
     return len(list(db.scalars(select(Publication.id).where(
         Publication.product_id == product_id, Publication.channel == "own_site",
         Publication.published_at >= db_time(db, start),
@@ -52,7 +53,7 @@ def published_today(db, product_id, *, now: datetime | None = None) -> int:
 
 
 def available_slots(db, product_id, count: int, *, limit: int = PUBLICATIONS_PER_DAY,
-                    now: datetime | None = None) -> list[datetime]:
+                    now: datetime | None = None, tz: ZoneInfo = OWNER_TZ) -> list[datetime]:
     """Reserve full calendar capacity across plans and already-published pages.
 
     Must be invoked while holding a row-level lock on this company's Product.
@@ -62,7 +63,7 @@ def available_slots(db, product_id, count: int, *, limit: int = PUBLICATIONS_PER
     if count < 0 or limit < 1:
         raise ValueError("Invalid SEO scheduling capacity")
     now = utc(now or datetime.now(timezone.utc))
-    today = day(now)
+    today = day(now, tz=tz)
     occupied: dict[date, set[str]] = defaultdict(set)
     tasks = list(db.scalars(select(Task).where(
         Task.product_id == product_id, Task.assigned_agent == "content_factory",
@@ -73,17 +74,17 @@ def available_slots(db, product_id, count: int, *, limit: int = PUBLICATIONS_PER
     )))
     scheduled_by_task = {}
     for task in tasks:
-        scheduled = day(task.due_at)
+        scheduled = day(task.due_at, tz=tz)
         scheduled_by_task[task.id] = scheduled
         if scheduled >= today:
             occupied[scheduled].add(f"task:{task.id}")
-    day_start, _ = day_bounds(now)
+    day_start, _ = day_bounds(now, tz=tz)
     publications = db.execute(select(Publication.id, Publication.published_at, Artifact.task_id)
         .join(Artifact, Publication.artifact_id == Artifact.id)
         .where(Publication.product_id == product_id, Publication.channel == "own_site",
                Publication.published_at >= db_time(db, day_start))).all()
     for publication_id, published_at, task_id in publications:
-        published_date = day(published_at)
+        published_date = day(published_at, tz=tz)
         if published_date >= today:
             # A scheduled article published on its due day consumes one slot,
             # not two. A late publication consumes the actual day's slot too.
@@ -96,7 +97,7 @@ def available_slots(db, product_id, count: int, *, limit: int = PUBLICATIONS_PER
     while len(due) < count:
         available = max(0, limit - len(occupied[date_cursor]))
         for _ in range(min(available, count - len(due))):
-            morning = datetime.combine(date_cursor, time(hour=PUBLICATION_HOUR), tzinfo=OWNER_TZ)
+            morning = datetime.combine(date_cursor, time(hour=PUBLICATION_HOUR), tzinfo=tz)
             planned = max(now, morning.astimezone(timezone.utc)) if date_cursor == today else morning.astimezone(timezone.utc)
             due.append(planned)
             occupied[date_cursor].add(f"new:{len(due)}")

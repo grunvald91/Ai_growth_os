@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.domain import Product, Task, TaskStatus
-from app.seo.activation import SeoFactoryActivation, is_enabled
+from app.seo.activation import SeoFactoryActivation, is_enabled, editorial_preferences
 from app.seo.factory import AGENT, queue_factory
 
 
@@ -19,7 +19,7 @@ def _utc(value: datetime) -> datetime:
 
 
 def _queue_locked_if_due(db: Session, product_id, *, now: datetime, interval_days: int,
-                         focus: str | None = None) -> bool:
+                         focus: str | None = None, horizon_days: int = 7) -> bool:
     """Call only while holding this company's Product row lock."""
     if not is_enabled(db, product_id):
         return False
@@ -34,7 +34,7 @@ def _queue_locked_if_due(db: Session, product_id, *, now: datetime, interval_day
     ).limit(1))
     if active is not None:
         return False
-    queue_factory(db, product_id, focus=focus, horizon_days=7)
+    queue_factory(db, product_id, focus=focus, horizon_days=horizon_days)
     return True
 
 
@@ -49,8 +49,13 @@ def enqueue_servgo_if_due(db: Session, settings, *, now: datetime | None = None)
     product = db.scalar(select(Product.id).where(Product.slug == "servgo").with_for_update())
     if product is None:
         return False
+    prefs = editorial_preferences(
+        db, product, default_interval_days=settings.seo_servgo_autorun_interval_days,
+        default_publications_per_day=settings.seo_publications_per_day,
+        default_articles_per_day=settings.seo_articles_per_day)
     return _queue_locked_if_due(
-        db, product, now=now, interval_days=settings.seo_servgo_autorun_interval_days,
+        db, product, now=now, interval_days=prefs.autorun_interval_days,
+        horizon_days=prefs.autorun_horizon_days,
         focus=("Органический трафик для продаж ServGo: вопросы владельцев сервисных "
                "организаций об онлайн-записи, расписании, автоматизации, предоплате, "
                "маркетинге и сравнении решений, без неподтверждённых обещаний."),
@@ -77,8 +82,13 @@ def enqueue_enabled_if_due(db: Session, settings, *, now: datetime | None = None
         locked = db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
         if locked is None:
             continue
+        prefs = editorial_preferences(
+            db, locked, default_interval_days=settings.seo_autorun_interval_days,
+            default_publications_per_day=settings.seo_publications_per_day,
+            default_articles_per_day=settings.seo_articles_per_day)
         if _queue_locked_if_due(
-            db, locked, now=now, interval_days=settings.seo_autorun_interval_days,
+            db, locked, now=now, interval_days=prefs.autorun_interval_days,
+            horizon_days=prefs.autorun_horizon_days,
         ):
             return True
     return False
