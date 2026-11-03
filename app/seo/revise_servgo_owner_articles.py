@@ -25,6 +25,11 @@ from app.seo.publishing import (
 from app.seo.service import latest_semantic_core
 from app.workflows.article_contracts import ArticleArtifact, HumanEditedArticle, SeoBrief
 
+# The previous 90-second limit cut off the first live review without a verdict.
+# Keep the independent critic mandatory; allow a bounded gateway-latency budget.
+REVIEW_TIMEOUT_SECONDS = 240
+AUTHOR_REVISION_TIMEOUT_SECONDS = 180
+
 REVISION_NOTE = "servgo-buyer-intent-typography-20261103-v2"
 PREVIOUS_NOTE = "servgo-seo-refactor-20261103"
 BUYER = "Владельцы и управляющие небольших сервисных бизнесов с записью по времени"
@@ -164,12 +169,23 @@ async def _review(entry: dict, apply: bool) -> dict:
                              stop_reason="end_turn"),
         generate=provider.generate,
         validate_revision=validate_revision,
-        review_timeout=90, revision_timeout=120,
+        review_timeout=REVIEW_TIMEOUT_SECONDS,
+        revision_timeout=AUTHOR_REVISION_TIMEOUT_SECONDS,
         max_context_chars=150_000, max_original_chars=80_000,
     )
     review = reply.quality_review or {}
     status = review.get("status")
     if status not in CLEAN_CRITIC_STATUSES:
+        # second_opinion converts infrastructure errors into review_unavailable.
+        # Expose only error class in logs; never output provider credentials.
+        # The article must not be published without independent review.
+        reason_class = str(review.get("failure_reason") or "unknown").partition(":")[0]
+        print("SERVGO_OWNER_CRITIC_BLOCKED=" + json.dumps({
+            "slug": entry["old"], "status": status,
+            "failure_class": reason_class,
+            "extra_calls": review.get("extra_calls"),
+            "attempted_extra_calls": review.get("attempted_extra_calls"),
+        }, ensure_ascii=False), flush=True)
         raise ValueError("Critic rejected owner article: " + str(status))
     if any(f.get("severity") == "critical" and not any(
         d.get("id") == f.get("id") and d.get("decision") == "accept"
