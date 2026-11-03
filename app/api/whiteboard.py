@@ -234,10 +234,31 @@ def job_html(state, product_id, *, error=None):
               'retry_wait': 'Пауза перед автоматическим продолжением'}
     code = state.get('error')
     warning = error or MESSAGES.get(code)
-    body = (f'<section class="sg-surface wb-job"><h2>{esc(state["request"]["topic"])}</h2>'
-            f'<p role="status">{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p>'
-            f'<p>{esc(stages.get(state.get("stage"), "Подготовка задания"))} · '
-            f'API-вызовы: {state["calls"]} из {state.get("call_limit_total", state["max_api_calls"])}</p>')
+    completed = state['status'] == 'completed'
+    body = (f'<section class="sg-surface wb-job{" wb-result" if completed else ""}">'
+            '<header class="wb-job-head"><p class="wb-eyebrow">Простое видео</p>'
+            f'<h2>{esc(state["request"]["topic"])}</h2>'
+            f'<p role="status" class="wb-status{" wb-status-ready" if completed else ""}">'
+            f'{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p></header>')
+    if completed:
+        # The actual playable file must be the focal point, not the log or API metadata.
+        body += (f'<div class="wb-result-player"><video controls playsinline preload="metadata" '
+                 f'aria-label="Готовое видео: {esc(state["request"]["topic"])}" '
+                 f'poster="{base}/files/video.png">'
+                 f'<source src="{base}/files/video.mp4" type="video/mp4">'
+                 f'<track kind="subtitles" srclang="ru" label="Русский" src="{base}/files/video.vtt">'
+                 'Ваш браузер не поддерживает воспроизведение MP4.</video></div>'
+                 '<p class="wb-result-notice">Проверьте рисунки, научные утверждения, текст, озвучку '
+                 'и субтитры перед публикацией. Публикация выполняется отдельно.</p>'
+                 '<nav class="wb-downloads" aria-label="Скачать материалы видео">' + ''.join(
+                     f'<a class="btn {"primary" if name == "video.mp4" else "secondary"}" '
+                     f'href="{base}/files/{name}?download=true" download>{label}</a>'
+                     for name, label in [('video.mp4', 'Скачать MP4'), ('video.srt', 'Субтитры'),
+                                         ('video.png', 'Обложка'), ('video.json', 'Тайминг')]
+                 ) + '</nav>'
+                 '<details class="wb-result-technical"><summary>Подробности создания</summary>')
+    body += (f'<p class="wb-stage-line">{esc(stages.get(state.get("stage"), "Подготовка задания"))} · '
+             f'API-вызовы: {state["calls"]} из {state.get("call_limit_total", state["max_api_calls"])}</p>')
     scene = state.get('scene_index')
     beat = state.get('beat_index')
     scene_total = state['request'].get('scenes', 3)
@@ -345,21 +366,14 @@ def job_html(state, product_id, *, error=None):
         body += (f'<form method="post" action="{base}/cancel"><button class="btn secondary">Остановить задание</button></form>')
     if state['status'] in {'queued', 'running'}:
         body += '<p>Можно закрыть страницу. Генерация продолжится; статус обновляется автоматически. Задание останется в списке ваших анимаций.</p>'
-    if state['status'] == 'completed':
-        body += (f'<video controls playsinline preload="metadata" poster="{base}/files/video.png" '
-                 f'style="width:min(100%,360px);max-height:70vh" src="{base}/files/video.mp4">'
-                 f'<track kind="subtitles" srclang="ru" label="Русский" src="{base}/files/video.vtt">'
-                 '</video>'
-                 '<p>Проверьте рисунки, факты, русский текст, озвучку и субтитры перед публикацией. Публикация выполняется отдельно.</p>'
-                 '<div class="sg-form-bottom">' + ''.join(
-                     f'<a class="btn secondary" href="{base}/files/{name}?download=true" download>{label}</a>'
-                     for name, label in [('video.mp4', 'Скачать MP4'), ('video.srt', 'Субтитры'),
-                                         ('video.png', 'Обложка'), ('video.json', 'Тайминг')]) + '</div>')
+    if completed:
+        body += '</details>'
         if not state.get('visual_repair_from'):
-            body += (f'<form method="post" action="{base}/repair" class="sg-form">'
-                     '<button class="btn secondary">Переделать рисунки, сохранить озвучку</button>'
-                     '<small>Сначала создаётся запрос на проверку и исправление рисунков. Платные вызовы начнутся только после подтверждения; сценарий и звук не генерируются заново.</small></form>')
-    body += f'<p><a href="/studio/products/{product_id}/whiteboard">К простым видео</a></p></section>'
+            body += (f'<form method="post" action="{base}/repair" class="sg-form wb-repair">'
+                     '<button type="submit" class="btn secondary">Переделать рисунки, сохранить озвучку</button>'
+                     '<small>Проверка и исправление рисунков — отдельное задание. Платные вызовы '
+                     'начнутся только после подтверждения; сценарий и звук не генерируются заново.</small></form>')
+    body += f'<p class="wb-return"><a href="/studio/products/{product_id}/whiteboard">К списку видео</a></p></section>'
     return body
 
 
@@ -487,11 +501,11 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
 
 def history_html(states, product_id):
     base = f'/studio/products/{product_id}/whiteboard'
-    body = '<section class="sg-surface"><h2>Ваши анимации</h2><div id="whiteboard-jobs" aria-live="polite">'
+    body = '<section class="sg-surface wb-library" aria-labelledby="wb-library-title"><div class="wb-library-head"><h2 id="wb-library-title">Мои видео</h2><p>К каждому ролику можно вернуться позже.</p></div><div id="whiteboard-jobs" aria-live="polite">'
     for state in states:
         url = f'{base}/{state["task_id"]}'
-        body += (f'<article><p><a href="{url}">{esc(state["request"]["topic"])}</a></p>'
-                 f'<p>{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p>')
+        body += (f'<article class="wb-library-item"><p class="wb-library-title"><a href="{url}">{esc(state["request"]["topic"])}</a></p>'
+                 f'<p class="wb-library-status">{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p>')
         if state['status'] == 'completed':
             body += (f'<p><a class="btn primary" href="{url}">Посмотреть видео</a> '
                      f'<a class="btn secondary" href="{url}/files/video.mp4?download=true" download>Скачать MP4</a></p>')
@@ -516,13 +530,13 @@ def history_html(states, product_id):
           const fragment = document.createDocumentFragment();
           for (const state of states) {
             if (!/^[0-9a-f-]{36}$/.test(state.task_id)) continue;
-            const article = document.createElement('article');
-            const title = document.createElement('p');
+            const article = document.createElement('article'); article.className = 'wb-library-item';
+            const title = document.createElement('p'); title.className = 'wb-library-title';
             const link = document.createElement('a');
             link.href = base + '/' + state.task_id;
             link.textContent = state.request.topic;
             title.append(link); article.append(title);
-            const status = document.createElement('p');
+            const status = document.createElement('p'); status.className = 'wb-library-status';
             status.textContent = names[state.status] || 'Обновление статуса';
             article.append(status);
             if (state.status === 'completed') {
