@@ -4,7 +4,7 @@ Deterministic fake search and language-model responses. No paid calls, network,
 demo-company activation or production writes.
 """
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -194,6 +194,11 @@ async def test_connected_company_article_reaches_own_blog_with_critic_and_demo_s
              Task.assigned_agent == "content_factory", Task.title.like("SEO-ARTICLE:%")))
         assert article_job is not None and article_job.status == TaskStatus.QUEUED
         assert db.scalar(select(Task).where(Task.product_id == demo_id)) is None
+        # This test checks article/critic/publishing, not the SEO calendar's
+        # fixed 09:00 Moscow start. Make this single fixture ready to execute
+        # even when GitHub Actions runs before 09:00 MSK.
+        article_job.due_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
 
     class CriticUnavailableProvider(SequenceProvider):
         """Stage-specific responses survive retries; reviewer outage remains fail-closed."""
