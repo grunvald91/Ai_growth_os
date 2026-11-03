@@ -13,7 +13,7 @@ jobs:
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
       HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
       HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
-      RELEASE: 22623a8c507d2bd8f18524e9de89538021065791
+      RELEASE: 1ab13f01723b3d2f2d40a8966ff06b7ffa8b9529
     steps:
       - name: Verify production revision and publish critic-reviewed articles
         shell: bash
