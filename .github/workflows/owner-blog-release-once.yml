@@ -1,0 +1,46 @@
+name: ServGo owner article release (one time)
+on:
+  push:
+    branches: [ops/servgo-buyer-articles-prod-20261103]
+    paths: [.github/workflows/owner-blog-release-once.yml]
+permissions:
+  contents: read
+jobs:
+  revise:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+      RELEASE: 0d380bfa5fadc46a6c9d0630650c6d8cbc838cdf
+    steps:
+      - name: Verify production revision and publish critic-reviewed articles
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" >/tmp/key
+            ssh-keygen -lf /tmp/key 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done </tmp/keys
+          test -s ~/.ssh/known_hosts
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ServerAliveInterval=20 \
+            "root@$HOST" "RELEASE='$RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          current=''
+          for i in $(seq 1 45); do
+            current=$(docker exec ai-growth-os-api-1 printenv RELEASE_SHA 2>/dev/null || true)
+            if [ "$current" = "$RELEASE" ]; then break; fi
+            sleep 15
+          done
+          test "$current" = "$RELEASE"
+          test "$(systemctl is-active booking-bot)" = active
+          grep -q 'kak-psihologu-organizovat-zapis-klientov' /opt/booking_bot/webapp/server.py
+          docker exec ai-growth-os-api-1 python -m app.seo.revise_servgo_owner_articles
+          timeout 650 docker exec ai-growth-os-api-1 python -m app.seo.revise_servgo_owner_articles --apply
+          echo "REVIEWED_ARTICLES_COMMITTED"
+          REMOTE
