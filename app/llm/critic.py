@@ -163,12 +163,40 @@ def _is_marketing(request: LLMRequest) -> bool:
     return request.metadata.get("task_type") in MARKETING_TASK_TYPES
 
 
+SEO_CRITIC_RULES = (
+    " Дополнительная проверка поисковой статьи. Установи фактический вопрос "
+    "из seo_brief.primary_query, тип намерения и основного читателя. Если статья "
+    "о записи к психологу отвечает в основном на вопрос о CRM для психолога, "
+    "это существенное несовпадение намерения. Не требуй механического "
+    "повторения ключевой фразы. Ищи конкретные фактические ошибки: неверный "
+    "порядок операций, неподтверждённые цены, сроки, преимущества, проценты, "
+    "обещания ИИ и несуществующие функции. Важное условие продукта сравнивай "
+    "с verified_product_facts; то, чего там нет, не превращай в факт. "
+    "Проверь каждый нумерованный список: число пунктов, порядок, отсутствие "
+    "противоречий и отдельные строки для пунктов. Отметь чрезмерные повторы, "
+    "длинные неструктурированные фрагменты и смешение двух независимых статей "
+    "в одном тексте, если они мешают читателю быстро получить ответ. "
+    "Применяй информационный стиль: ясно, конкретно, без лишних слов, "
+    "но не удаляй существенные факты ради краткости. "
+    "Фактологическая ошибка в важном условии — critical; существенное "
+    "несовпадение намерения или нечитаемость — major. "
+    "Каждая ошибка должна содержать точную цитату/место и исправление. "
+    "Не выдумывай новый факт, чтобы исправить старый. "
+)
+
+
 def _critic_prompt(request: LLMRequest) -> str:
-    return prompt_text("critic.marketing" if _is_marketing(request) else "critic.fact")
+    base = prompt_text("critic.marketing" if _is_marketing(request) else "critic.fact")
+    return base + SEO_CRITIC_RULES if request.metadata.get("seo_article") else base
 
 
 def _author_prompt(request: LLMRequest) -> str:
-    return prompt_text("critic.marketing_author" if _is_marketing(request) else "critic.fact_author")
+    base = prompt_text("critic.marketing_author" if _is_marketing(request) else "critic.fact_author")
+    return (base + " Для SEO-статьи исправь принятые фактические и структурные ошибки, "
+            "сохрани релевантность основному поисковому вопросу и источники; "
+            "разбей перечисления на строки, убери дубли. Не добавляй новых "
+            "неподтверждённых фактов. Одна доработка, без повторного вызова критика.")
+            if request.metadata.get("seo_article") else base
 
 
 class ReviewAuditPersistenceError(RuntimeError):
