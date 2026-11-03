@@ -16,6 +16,14 @@ Current known client flow includes:
 - owner manually verifies receipt before the booking is confirmed;
 - booking status page and notifications.
 
+Verified client-facing AI chat is available in BookingBot for participating businesses, subject to owner settings:
+- it uses the selected business's configured service catalog, descriptions, instructions, durations and prices when present;
+- it can answer service-selection questions and check the available appointment slots through business-scoped tools;
+- it can prepare a booking for the customer to review; creating the booking requires explicit customer confirmation and applicable business permissions;
+- it can hand over the conversation to a human operator;
+- it must NOT be described as a licensed professional consultation or as knowing business details that the owner has not entered.
+Evidence: booking_bot/web/api/routes/ai.py; booking_bot/web/api/sales/tools.py; booking_bot/web/api/sales/policy.py; booking_bot/web/frontend/src/pages/client/ChatPage.tsx.
+
 ## Positioning
 
 Position ServGo around the full business job: attract the right client, move them into a clear booking flow, and then learn which content and channels actually create bookings.
