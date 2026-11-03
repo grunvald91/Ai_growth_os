@@ -12,7 +12,7 @@ from app.models.domain import AgentRun, Artifact, Task, TaskStatus
 from app.seo.contracts import PlanItem, SeoContentPlan
 from app.seo.planner import PLAN_KIND
 from app.workflows.article_contracts import ArticleProductionInput, SeoBrief
-from app.seo.activation import require_enabled
+from app.seo.activation import require_enabled, editorial_preferences
 from app.seo.schedule import available_slots, PUBLICATIONS_PER_DAY
 from app.models.domain import Product
 
@@ -49,14 +49,17 @@ def queue_plan_item(db: Session, product_id: UUID, plan_artifact_id: UUID, item:
 
 
 def queue_plan(db: Session, plan_artifact: Artifact, clusters_by_id: dict, *,
-               only: set[str] | None = None, per_day: int = PUBLICATIONS_PER_DAY,
-               now: datetime | None = None) -> list[Task]:
+               only: set[str] | None = None, per_day: int | None = None,
+               now: datetime | None = None, timezone_name: str | None = None) -> list[Task]:
     require_enabled(db, plan_artifact.product_id)
     # Same Product lock is shared by all SEO plan publishers and article releases.
     # One transaction covers the entire schedule to avoid duplicate days in concurrent plans.
     if db.scalar(select(Product.id).where(
             Product.id == plan_artifact.product_id).with_for_update()) is None:
         raise LookupError("Company not found")
+    prefs = editorial_preferences(db, plan_artifact.product_id)
+    per_day = prefs.publications_per_day if per_day is None else per_day
+    tz = ZoneInfo(timezone_name or prefs.timezone_name)
     plan = SeoContentPlan.model_validate_json(plan_artifact.content)
     selected = [item for item in plan.items if only is None or item.id in only]
     titles = {f"{SEO_TASK_PREFIX}{plan_artifact.id}:{item.id}" for item in selected}
@@ -64,7 +67,7 @@ def queue_plan(db: Session, plan_artifact: Artifact, clusters_by_id: dict, *,
         Task.product_id == plan_artifact.product_id,
         Task.assigned_agent == "content_factory", Task.title.in_(titles)))}
     new_count = sum(f"{SEO_TASK_PREFIX}{plan_artifact.id}:{item.id}" not in existing for item in selected)
-    calendar = iter(available_slots(db, plan_artifact.product_id, new_count, limit=per_day, now=now))
+    calendar = iter(available_slots(db, plan_artifact.product_id, new_count, limit=per_day, now=now, tz=tz))
     tasks = []
     for item in selected:
         title = f"{SEO_TASK_PREFIX}{plan_artifact.id}:{item.id}"
