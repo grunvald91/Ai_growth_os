@@ -12,7 +12,7 @@ from pathlib import Path
 import json
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class _Strict(BaseModel):
@@ -51,6 +51,24 @@ class ServiceOffer(_Strict):
     name: str
     description: str
     pricing: VerifiedFact | None = None
+    # None is an ordinary legacy owner-declared service, not evidence of a
+    # deployed product. New product catalogs can explicitly mark maturity.
+    release_status: Literal["live", "limited", "in_development", "unverified"] | None = None
+    product_family: str | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    buyer_segment: str | None = None
+    conversion_action: str | None = None
+    landing_page: str | None = None
+
+    @model_validator(mode="after")
+    def verify_marketable_status(self):
+        if self.release_status in {"live", "limited"} and not any(
+            ref.strip() for ref in self.evidence_refs
+        ):
+            raise ValueError("Advertised live/limited offer requires source evidence")
+        if self.release_status in {"in_development", "unverified"} and self.landing_page:
+            raise ValueError("Unavailable offer cannot be assigned a sales destination")
+        return self
 
 
 class Offer(_Strict):

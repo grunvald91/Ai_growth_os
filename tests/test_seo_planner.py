@@ -214,3 +214,53 @@ async def test_tenant_minimal_profile_drives_seeds_and_plan_without_servgo_assum
     plan_payload = json.loads(planner.requests[0].messages[0].content)
     assert plan_payload["company"]["buyer_segments"] == ["Владельцы неисправного инструмента"]
     assert plan_payload["company"]["declared_offers"] == []
+
+
+def test_plan_rejects_an_unreleased_module_as_available_for_purchase():
+    draft = plan(item(next_step="Подключить Смена прямо сейчас"))
+    with pytest.raises(PlanError, match="unavailable product"):
+        validate_plan(draft, core(), unavailable_offer_families=("Смена",))
+    validate_plan(plan(item(next_step="Посмотреть действующий календарь BookingBot")),
+                  core(), unavailable_offer_families=("Смена",))
+
+
+@pytest.mark.asyncio
+async def test_servgo_planner_receives_release_status_for_all_five_product_families(db, product, tmp_path):
+    from shutil import copyfile
+    from pathlib import Path
+    reference = Path(__file__).resolve().parents[1] / "products/servgo/company-profile.json"
+    copyfile(reference, tmp_path / "products" / "servgo" / "company-profile.json")
+    provider = Provider({"seeds": ["запись клиентов", "CRM для салона", "маркетинг бизнеса"]})
+    await plan_seeds(db, service(provider), PrivacyGateway(), product.id,
+                     products_root=tmp_path / "products", model="fake")
+    company = json.loads(provider.requests[0].messages[0].content)["company"]
+    families = {entry["product_family"] for entry in company["offer_catalog"]}
+    assert families == {"BookingBot", "Growth", "Mail", "Смена", "SEO-завод"}
+    shifts = next(x for x in company["offer_catalog"] if x["product_family"] == "Смена")
+    assert shifts["release_status"] == "unverified"
+    assert shifts["conversion_action"] is None
+    assert not shifts["evidence_refs"]
+    assert any(x["release_status"] == "limited" for x in company["offer_catalog"])
+    assert len(company["buyer_segments"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_other_tenant_has_no_servgo_catalog(db, tmp_path):
+    company = Product(name="Мастерская", slug="service-tools")
+    db.add(company)
+    db.commit()
+    root = tmp_path / "products"
+    folder = root / "service-tools"
+    folder.mkdir(parents=True)
+    (folder / "company-profile.json").write_text(json.dumps({
+        "schema_version": "1.0", "identity": {"name": "Мастерская", "industry": "ремонт"},
+        "offer": {"products_services": [{"name": "Ремонт дрелей",
+                    "description": "Диагностика неисправностей"}]},
+    }, ensure_ascii=False), encoding="utf-8")
+    provider = Provider({"seeds": ["ремонт дрели", "мастер по ремонту", "сервис инструментов"]})
+    await plan_seeds(db, service(provider), PrivacyGateway(), company.id,
+                     products_root=root, model="fake")
+    catalog = json.loads(provider.requests[0].messages[0].content)["company"]["offer_catalog"]
+    assert len(catalog) == 1 and catalog[0]["name"] == "Ремонт дрелей"
+    assert catalog[0]["release_status"] == "unspecified"
+    assert all("ServGo" not in str(row) for row in catalog)

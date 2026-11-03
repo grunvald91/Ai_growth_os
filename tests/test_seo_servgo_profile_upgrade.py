@@ -72,3 +72,27 @@ def test_dry_run_backup_hash_guard_and_repeat(tmp_path):
     assert (p / result["backup"]).read_bytes() == before
     assert not upgrade(target, source, apply=False)["changed"]
     assert not upgrade(target, source, apply=True)["applied"]
+
+
+def test_legacy_runtime_profile_receives_product_catalog_without_replacing_owner_text():
+    current = copy.deepcopy(packaged())
+    current["offer"]["products_services"] = current["offer"]["products_services"][:4]
+    for offer in current["offer"]["products_services"]:
+        for key in ("release_status", "product_family", "evidence_refs",
+                    "buyer_segment", "conversion_action"):
+            offer.pop(key, None)
+    current["offer"]["products_services"][0]["description"] = "Owner customized booking explanation"
+    current["proof"]["approved_facts"] = []
+    current["unknowns"] = []
+    updated, stats = merge_profile(current, packaged())
+    offers = updated["offer"]["products_services"]
+    assert stats["offers"] == 4
+    assert stats["catalog_fields"] >= 4
+    assert offers[0]["description"] == "Owner customized booking explanation"
+    assert {o["product_family"] for o in offers} == {
+        "BookingBot", "Growth", "Mail", "Смена", "SEO-завод"}
+    assert next(o for o in offers if o["product_family"] == "Смена")["release_status"] == "unverified"
+    assert any("SEO-завод" in fact["statement"] for fact in updated["proof"]["approved_facts"])
+    again, count = merge_profile(updated, packaged())
+    assert again == updated
+    assert count["offers"] == 0 and count["catalog_fields"] == 0

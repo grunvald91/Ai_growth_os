@@ -40,19 +40,34 @@ def merge_profile(current: dict, packaged: dict) -> tuple[dict, dict]:
     if merged["identity"].get("category") == old_category:
         merged["identity"]["category"] = new["identity"]["category"]
 
-    added = {"offers": 0, "facts": 0, "audience": 0, "positioning": False}
+    added = {"offers": 0, "facts": 0, "audience": 0, "positioning": False,
+             "catalog_fields": 0, "unknowns": 0}
     offers = merged["offer"]["products_services"]
-    offer_names = {v["name"] for v in offers}
-    for offer in new["offer"]["products_services"]:
-        if offer["name"] in ("ServGo: внутреннее расписание и ручная запись",
-                             "ServGo CRM: собственная база клиентов") and offer["name"] not in offer_names:
-            offers.append(offer)
-            offer_names.add(offer["name"])
+    offer_by_name = {v["name"]: v for v in offers}
+    # Only catalogue first-party ServGo modules from the tested and versioned
+    # package, never overwrite owner-written descriptions, pricing or a status
+    # that the owner has explicitly selected. Other tenants are untouched.
+    approved_families = {"BookingBot", "Growth", "Mail", "Смена", "SEO-завод"}
+    for packaged_offer in new["offer"]["products_services"]:
+        if packaged_offer.get("product_family") not in approved_families:
+            continue
+        existing_offer = offer_by_name.get(packaged_offer["name"])
+        if existing_offer is None:
+            offers.append(packaged_offer)
+            offer_by_name[packaged_offer["name"]] = packaged_offer
             added["offers"] += 1
+            continue
+        for field in ("product_family", "release_status", "evidence_refs",
+                      "buyer_segment", "conversion_action"):
+            if existing_offer.get(field) in (None, "", []) and packaged_offer.get(field):
+                existing_offer[field] = packaged_offer[field]
+                added["catalog_fields"] += 1
+
 
     facts = merged["proof"]["approved_facts"]
     present = {f["statement"] for f in facts}
-    verified_paths = ("SchedulePage.tsx", "web/api/routes/crm.py", "mail_campaign_")
+    verified_paths = ("SchedulePage.tsx", "web/api/routes/crm.py", "mail_campaign_",
+                      "Ai_growth_os/app/api/content_studio.py", "Ai_growth_os/app/seo/suggest.py")
     for fact in new["proof"]["approved_facts"]:
         evidence = str(fact.get("evidence_ref") or "")
         if any(part in evidence for part in verified_paths) and fact["statement"] not in present:
@@ -75,6 +90,11 @@ def merge_profile(current: dict, packaged: dict) -> tuple[dict, dict]:
             original_positioning.rstrip() + POSITIONING_ADDENDUM
         ).strip()
         added["positioning"] = True
+
+    for question in new.get("unknowns", []):
+        if "«Смены»" in question["question"] and question not in merged["unknowns"]:
+            merged["unknowns"].append(question)
+            added["unknowns"] += 1
 
     # Do not replace the owner's one_liner, pricing, service segments, contact
     # address, brand voice, hypotheses, metrics or source history.
