@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.company_profile import load_company_profile
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
-from app.models.domain import Artifact, Product, TaskStatus
+from app.models.domain import Artifact, Product, Publication, TaskStatus
 from app.privacy import PrivacyGateway
 from app.seo.clustering import normalize
 from app.seo.contracts import SemanticCore, SeoContentPlan, SeedList
@@ -101,6 +101,21 @@ def planned_queries(db: Session, product_id: UUID) -> set[str]:
         for item in items:
             if status_by_title.get(f"{SEO_TASK_PREFIX}{row.id}:{item.id}") in {TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.WAITING_APPROVAL, TaskStatus.COMPLETED}:
                 taken.add(normalize(item.primary_query))
+    # An editorial correction can replace a published page's old consumer
+    # primary query with a verified owner query. Preserve that new query as
+    # taken even when the original plan artifact predates the correction.
+    for row in db.scalars(select(Artifact).join(
+            Publication, Publication.artifact_id == Artifact.id).where(
+            Publication.product_id == product_id,
+            Publication.channel == "own_site", Publication.status == "published",
+            Artifact.kind == "article")):
+        from app.workflows.article_contracts import ArticleArtifact
+        try:
+            article = ArticleArtifact.model_validate_json(row.content)
+        except ValueError:
+            continue
+        if article.seo_brief:
+            taken.add(normalize(article.seo_brief.primary_query))
     return taken
 
 
