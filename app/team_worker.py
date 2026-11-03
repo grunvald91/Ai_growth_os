@@ -212,9 +212,9 @@ async def run_once() -> int:
         tick_calendar(db, settings)
     if await run_planner_once(SessionLocal, settings):
         return 1
-    from app.seo.autoschedule import enqueue_servgo_if_due
+    from app.seo.autoschedule import enqueue_enabled_if_due
     with SessionLocal() as db:
-        enqueue_servgo_if_due(db, settings)
+        enqueue_enabled_if_due(db, settings)
     from app.seo.factory import run_factory_once
     if await run_factory_once(SessionLocal, settings):
         return 1
