@@ -141,7 +141,9 @@ async def _review(entry: dict, apply: bool) -> dict:
         messages=[LLMMessage(role="user", content=json.dumps({
             "buyer": BUYER, "primary_query": entry["query"],
             "reader_problem": CONTENT[entry["old"]]["reader_problem"],
-            "candidate": reader.model_dump(mode="json"),
+            # second_opinion supplies the full candidate separately to the
+            # reviewer. Avoid duplicating the entire article in original_task:
+            # it increases token cost and latency without adding evidence.
             "verified_company_features": [
                 "ServGo admin visual day/week calendar; owner can manually enter and move bookings",
                 "Business-scoped CRM records contacts, visit history, notes, last/next visit and next contact",
