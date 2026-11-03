@@ -176,8 +176,43 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
     def state(label: str, done: bool) -> str:
         return (f'<li>{html.escape(label)}: '
                 f'<strong>{"Есть результат" if done else "Пока нет результата"}</strong></li>')
-    error = (f'<p role="status">Последняя ошибка: {html.escape(row["last_error"])}</p>'
-             if row["last_error"] else '')
+    stage_names = {
+        "starting": "Запуск обработчика",
+        "prepare_queries": "Подготовка поисковых запросов",
+        "collect_suggestions": "Получение реальных поисковых подсказок",
+        "build_plan": "Создание SEO-плана",
+        "queue_articles": "Постановка статей в очередь",
+    }
+    error_names = {
+        "search_no_suggestions": "Поисковики не дали подсказок для выбранных формулировок",
+        "search_invalid_responses": "Поисковые источники вернули некорректный формат",
+        "search_upstream_failures": "Не удалось получить подсказки от поисковых источников",
+        "model_unusable_response": "Модель не вернула пригодный ответ",
+        "provider_http_error": "Ошибка провайдера ИИ",
+        "upstream_timeout": "Превышено время ожидания",
+        "network_failure": "Сетевая ошибка",
+        "invalid_data_or_configuration": "Некорректные данные или настройка",
+        "internal_exception": "Внутренняя ошибка",
+    }
+    current_stage = row.get("current_stage") or row.get("last_error_stage")
+    stage = (f'<p>Этап: {html.escape(stage_names.get(current_stage, current_stage))}</p>'
+             if current_stage else '')
+    code = row.get("last_error_code")
+    error_caption = error_names.get(code, code or row.get("last_error") or "")
+    error = (f'<p role="status">Последняя ошибка: {html.escape(error_caption)}</p>'
+             if row.get("last_error") else '')
+    search_progress = ''.join(
+        '<li>' + html.escape(str(engine)) + ': '
+        + 'запросов ' + html.escape(str(info.get("requests", 0)))
+        + ', подсказок ' + html.escape(str(info.get("queries_found", 0)))
+        + ', пустых ответов ' + html.escape(str(info.get("empty", 0)))
+        + ', ошибок ' + html.escape(str(info.get("failed", 0)))
+        + ', некорректных ответов ' + html.escape(str(info.get("invalid", 0)))
+        + '</li>'
+        for engine, info in (row.get("source_progress") or {}).items()
+    )
+    search_progress = ('<details><summary>Поисковые источники</summary><ul>'
+                       + search_progress + '</ul></details>') if search_progress else ''
     queued = (f'<p>Статей поставлено в очередь: <b>{row["articles_queued"]}</b></p>'
               if row["articles_queued"] is not None else
               '<p>Количество поставленных статей пока не подтверждено.</p>')
@@ -280,7 +315,7 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
         f'<div class="seo-run-head"><h3>{html.escape(row["title"])}</h3>'
         f'<span class="seo-run-status">{html.escape(row["status_label"])}</span></div>'
         f'<p>Последнее обновление: {html.escape(row["updated_at"] or "неизвестно")}</p>'
-        + attempts + queued + error
+        + stage + attempts + queued + error + search_progress
         + '<details class="seo-run-details"><summary>Этапы и источники данных</summary>'
         + '<ul>'
         + state('Семантическое ядро', row['semantic_ready'])
