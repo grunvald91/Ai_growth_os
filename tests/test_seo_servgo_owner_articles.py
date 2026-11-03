@@ -89,3 +89,54 @@ def test_published_owner_guides_require_real_critic_even_if_gateway_slow():
     assert "raise ValueError(\"Critic rejected owner article:" in source
     assert "status not in CLEAN_CRITIC_STATUSES" in source
     assert "second_opinion(" in source
+
+
+@pytest.mark.parametrize("slug", sorted(CONTENT))
+def test_critic_can_edit_prose_but_cannot_edit_verified_company_facts(slug):
+    from app.seo.revise_servgo_owner_articles import (
+        EditableOwnerArticle, editable_payload, apply_editorial_copy,
+    )
+    profile = CONTENT[slug]
+    original = HumanEditedArticle.model_validate({
+        **{key: profile[key] for key in (
+            "title", "lead", "direct_answer", "meta_description",
+            "sections", "closing", "faq")},
+        "language": "ru",
+        "fact_renderings": [
+            {"source_id": "source-1",
+             "text": "В ServGo администратор может добавить запись вручную."}
+        ],
+        "editorial_notes": ["prior-reviewed", REVISION_NOTE],
+    })
+    editable = editable_payload(original)
+    assert "fact_renderings" not in editable
+    assert "editorial_notes" not in editable
+    assert EditableOwnerArticle.model_validate(editable)
+    revised = apply_editorial_copy(original, {
+        **editable, "title": "Как владельцу организовать рабочую запись клиентов",
+        "lead": "Новое описание **понятного процесса** для владельца бизнеса.",
+    })
+    assert revised.title == "Как владельцу организовать рабочую запись клиентов"
+    assert revised.fact_renderings == original.fact_renderings
+    assert revised.editorial_notes == original.editorial_notes
+    assert revised.lead != original.lead
+
+    # The reviewer contract itself rejects any attempted source substitution.
+    with pytest.raises(ValueError):
+        apply_editorial_copy(original, {
+            **editable, "fact_renderings": [{"source_id": "invented", "text": "Реклама"}]
+        })
+    with pytest.raises(ValueError):
+        apply_editorial_copy(original, {**editable, "direct_answer": ""})
+
+
+def test_critic_receives_locked_evidence_but_revision_schema_is_editable_only():
+    from inspect import getsource
+    from app.seo.revise_servgo_owner_articles import _review
+    source = getsource(_review)
+    assert '"immutable_approved_fact_renderings"' in source
+    assert 'response_schema=EditableOwnerArticle.model_json_schema()' in source
+    assert "content=json.dumps(editable, ensure_ascii=False)" in source
+    assert "apply_editorial_copy(reader, value)" in source
+    assert "Critical finding cites immutable verified fact" in source
+    assert "status not in CLEAN_CRITIC_STATUSES" in source
