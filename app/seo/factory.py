@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.composition import build_seo_llm
 from app.llm.errors import ProviderEmptyResponseError, ProviderMalformedResponseError
 from app.models.domain import Artifact, Product, Task, TaskStatus
-from app.seo.planner import plan_content, plan_seeds
+from app.seo.planner import PlanError, plan_content, plan_error_code, plan_seeds
 from app.seo.queue import queue_plan
 from app.seo.service import SeoSuggestionsUnavailable, build_semantic_core
 from app.services.artifacts import ArtifactService
@@ -44,6 +44,8 @@ def failure_details(exc: Exception) -> dict:
     status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
     if isinstance(exc, SeoSuggestionsUnavailable):
         code = exc.reason
+    elif isinstance(exc, PlanError):
+        code = plan_error_code(exc)
     elif isinstance(exc, (ProviderEmptyResponseError, ProviderMalformedResponseError)):
         code = "model_unusable_response"
     elif isinstance(exc, httpx.HTTPStatusError):
@@ -191,8 +193,28 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client, h
     plan = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == PLAN_KIND))
     if plan is None:
         record_stage(db, product_id, task_id, "build_plan")
-        plan = await plan_content(db, llm, privacy, product_id, core, products_root=settings.products_root,
-                                  model=settings.llm_model, factory_task_id=task_id, horizon_days=horizon_days)
+        configured_backups = tuple(dict.fromkeys(
+            name.strip() for name in settings.llm_fallback_models.split(",")
+            if name.strip() and name.strip() != settings.llm_model
+        )) if provider is None and settings.llm_provider == "xai" else ()
+        # On a resumed, previously domain-invalid SEO plan, avoid paying for
+        # the same model again; prefer the already-configured backup first.
+        prior_reports = list(db.scalars(select(Artifact).where(
+            Artifact.product_id == product_id, Artifact.task_id == task_id,
+            Artifact.kind == REPORT_KIND,
+        )))
+        previous_invalid = any(
+            json.loads(report.content).get("error") == "PlanError"
+            and json.loads(report.content).get("stage") == "build_plan"
+            for report in prior_reports
+        )
+        model = configured_backups[0] if previous_invalid and configured_backups else settings.llm_model
+        alternate_models = configured_backups[1:] if model != settings.llm_model else configured_backups
+        plan = await plan_content(
+            db, llm, privacy, product_id, core, products_root=settings.products_root,
+            model=model, fallback_models=alternate_models,
+            factory_task_id=task_id, horizon_days=horizon_days,
+        )
     require_enabled(db, product_id)
     # All supported topics of the selected weekly or monthly plan are queued.
     all_items = SeoContentPlan.model_validate_json(plan.content).items
