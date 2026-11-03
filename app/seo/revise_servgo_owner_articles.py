@@ -9,6 +9,9 @@ import asyncio
 import hashlib
 import json
 from datetime import datetime, timezone
+from typing import Annotated, Literal
+
+from pydantic import Field
 
 from sqlalchemy import select
 
@@ -23,12 +26,52 @@ from app.seo.publishing import (
     CLEAN_CRITIC_STATUSES, reader_hash, static_problems, unsupported_servgo_pricing,
 )
 from app.seo.service import latest_semantic_core
-from app.workflows.article_contracts import ArticleArtifact, HumanEditedArticle, SeoBrief
+from app.workflows.article_contracts import (
+    ArticleArtifact, Contract, FaqItem, HumanEditedArticle, ReaderSection,
+    SeoBrief, ShortText, Text,
+)
 
 # The previous 90-second limit cut off the first live review without a verdict.
 # Keep the independent critic mandatory; allow a bounded gateway-latency budget.
 REVIEW_TIMEOUT_SECONDS = 240
 AUTHOR_REVISION_TIMEOUT_SECONDS = 180
+
+class EditableOwnerArticle(Contract):
+    """Only reader-facing prose is editable by the reviewer.
+
+    Verified product facts and application-generated editorial audit notes are
+    NOT editable fields. The critic still sees them as read-only source context.
+    """
+    language: Literal["ru", "en"]
+    title: ShortText
+    lead: Text
+    sections: list[ReaderSection] = Field(min_length=1, max_length=25)
+    closing: Text
+    direct_answer: Annotated[str, Field(min_length=1, max_length=2500)]
+    faq: list[FaqItem] = Field(default_factory=list)
+    meta_description: Annotated[str, Field(min_length=1, max_length=1000)]
+
+
+_EDITABLE_FIELDS = frozenset(EditableOwnerArticle.model_fields)
+
+
+def editable_payload(reader: HumanEditedArticle) -> dict:
+    return {k: v for k, v in reader.model_dump(mode="json").items()
+            if k in _EDITABLE_FIELDS}
+
+
+def apply_editorial_copy(original: HumanEditedArticle, edit: dict) -> HumanEditedArticle:
+    """Merge revised prose onto the immutable company-evidence fields.
+
+    No AI-generated value can replace source IDs, verified fact renderings,
+    or earlier review/audit markers. The completed article is revalidated.
+    """
+    copy = EditableOwnerArticle.model_validate(edit)
+    return HumanEditedArticle.model_validate({
+        **original.model_dump(mode="json"),
+        **copy.model_dump(mode="json"),
+    })
+
 
 REVISION_NOTE = "servgo-buyer-intent-typography-20261103-v2"
 PREVIOUS_NOTE = "servgo-seo-refactor-20261103"
@@ -122,6 +165,9 @@ async def _review(entry: dict, apply: bool) -> dict:
     settings = get_settings()
     provider = build_llm_provider(settings)
     reader = candidate.reader_article
+    # Reviewer receives the full intended article exactly once, plus separately
+    # pinned source evidence. It can edit prose but not the evidence contract.
+    editable = editable_payload(reader)
     request = LLMRequest(
         system_prompt=(
             "You are reviewing the final buyer-facing SEO article for the company "
@@ -135,15 +181,19 @@ async def _review(entry: dict, apply: bool) -> dict:
             "unverified pricing. Check accurate scope, helpful procedures, privacy "
             "caveats, semantic H2/H3, restrained **bold**, *italic*, > callouts, "
             "numbered lists and natural Russian. No fixed word quota. "
-            "If editing, preserve evidence and actual buyer intent. Return "
-            "HumanEditedArticle JSON schema."
+            "The output schema contains ONLY editable prose. Verified product "
+            "facts and editorial audit notes are immutable, supplied as read-only "
+            "source context, and must never be changed by the author. If a "
+            "verified fact itself appears mistaken, mark it as critical rather "
+            "than silently rewriting it. Preserve actual buyer intent."
         ),
         messages=[LLMMessage(role="user", content=json.dumps({
             "buyer": BUYER, "primary_query": entry["query"],
             "reader_problem": CONTENT[entry["old"]]["reader_problem"],
-            # second_opinion supplies the full candidate separately to the
-            # reviewer. Avoid duplicating the entire article in original_task:
-            # it increases token cost and latency without adding evidence.
+            # The draft is supplied once through second_opinion's candidate.
+            "immutable_approved_fact_renderings": [
+                fact.model_dump(mode="json") for fact in reader.fact_renderings
+            ],
             "verified_company_features": [
                 "ServGo admin visual day/week calendar; owner can manually enter and move bookings",
                 "Business-scoped CRM records contacts, visit history, notes, last/next visit and next contact",
@@ -152,23 +202,29 @@ async def _review(entry: dict, apply: bool) -> dict:
             ],
         }, ensure_ascii=False))],
         model=settings.llm_model, max_tokens=15000,
-        response_schema=HumanEditedArticle.model_json_schema(),
+        response_schema=EditableOwnerArticle.model_json_schema(),
         metadata={"reasoning_effort": "low", "team_role": "marketing_editor",
                   "task_type": "article_production", "seo_article": True,
                   "company_slug": "servgo"},
     )
 
+    validation_failure = {"category": None}
+
     def validate_revision(value):
-        changed = HumanEditedArticle.model_validate(value)
-        if changed.fact_renderings != reader.fact_renderings:
-            raise ValueError("Reviewer may not substitute verified fact renderings")
-        if not changed.direct_answer or not changed.meta_description:
-            raise ValueError("Missing search-answer metadata")
+        try:
+            revised = apply_editorial_copy(reader, value)
+            if not revised.direct_answer or not revised.meta_description:
+                raise ValueError("Missing search-answer metadata")
+        except Exception as exc:
+            # Diagnostic category only; never log untrusted article JSON or
+            # provider error bodies from the editorial revision.
+            validation_failure["category"] = type(exc).__name__
+            raise
 
     reply = await second_opinion(
         request=request,
-        original=LLMResponse(content=reader.model_dump_json(), model="owner_editor",
-                             stop_reason="end_turn"),
+        original=LLMResponse(content=json.dumps(editable, ensure_ascii=False),
+                             model="owner_editor", stop_reason="end_turn"),
         generate=provider.generate,
         validate_revision=validate_revision,
         review_timeout=REVIEW_TIMEOUT_SECONDS,
@@ -187,6 +243,11 @@ async def _review(entry: dict, apply: bool) -> dict:
             "failure_class": reason_class,
             "extra_calls": review.get("extra_calls"),
             "attempted_extra_calls": review.get("attempted_extra_calls"),
+            "revision_validation": validation_failure["category"],
+            "findings": [
+                {"severity": f.get("severity"), "problem": str(f.get("problem") or "")[:260]}
+                for f in (review.get("findings") or [])[:6] if isinstance(f, dict)
+            ],
         }, ensure_ascii=False), flush=True)
         raise ValueError("Critic rejected owner article: " + str(status))
     if any(f.get("severity") == "critical" and not any(
@@ -194,8 +255,16 @@ async def _review(entry: dict, apply: bool) -> dict:
         for d in review.get("decisions", []))
            for f in review.get("findings", [])):
         raise ValueError("Unresolved critical finding")
-    improved = HumanEditedArticle.model_validate_json(reply.content)
-    validate_revision(improved.model_dump(mode="json"))
+    improved = apply_editorial_copy(reader, EditableOwnerArticle.model_validate_json(
+        reply.content).model_dump(mode="json"))
+    # A critical complaint against a locked verified fact cannot be resolved
+    # by only rewriting prose; block and request a new source-backed review.
+    for finding in review.get("findings") or []:
+        if finding.get("severity") != "critical":
+            continue
+        evidence = str(finding.get("evidence") or "")
+        if any(fact.text and fact.text in evidence for fact in reader.fact_renderings):
+            raise ValueError("Critical finding cites immutable verified fact; manual source correction required")
     candidate.reader_article = improved
     # Refresh the public full text if reviewer legitimately edited prose.
     parts = ["# " + improved.title, improved.lead,
