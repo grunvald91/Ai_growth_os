@@ -24,7 +24,7 @@ def test_editorial_rewrite_is_readable_search_article_not_fake_client_booking(sl
     assert REVISION_NOTE in reader.editorial_notes
     assert reader.direct_answer and reader.meta_description
     assert len(reader.sections) >= 3
-    assert any("\n1. " in section.body for section in reader.sections)
+    assert any(any(line.startswith("1. ") for line in section.body.splitlines()) for section in reader.sections)
     assert all(section.heading and section.body for section in reader.sections)
     assert "Telegram @Grunvald" in CTA[slug]
     assert "Запишитесь к психологу онлайн с помощью ServGo" not in CTA[slug]

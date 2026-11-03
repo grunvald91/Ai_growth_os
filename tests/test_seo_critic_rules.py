@@ -61,3 +61,21 @@ def test_servgo_crm_value_and_mailing_boundaries_in_prompts():
     assert "Связку CRM→Mail" in SERVGO_EDITORIAL_RULES
     assert "автоматическая CRM-to-Mail" in SERVGO_CRITIC_RULES
     assert "customer databases" in SEED_PROMPT
+
+
+
+def test_servgo_critic_rules_survive_real_privacy_gateway():
+    from app.core.composition import SAFE_LLM_METADATA_FIELDS
+    from app.privacy import PrivacyGateway
+
+    gateway = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
+    request = LLMRequest(
+        messages=[LLMMessage(role="user", content="draft")],
+        metadata={"task_type": "article_production", "team_role": "marketing_editor",
+                  "seo_article": True, "company_slug": "servgo",
+                  "unrelated_secret": "remove-me"},
+    )
+    safe = gateway.sanitize(request)
+    assert safe.metadata["company_slug"] == "servgo"
+    assert "unrelated_secret" not in safe.metadata
+    assert "онлайн-запись как обязательная" in _critic_prompt(safe)

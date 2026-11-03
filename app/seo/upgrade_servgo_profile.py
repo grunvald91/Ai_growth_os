@@ -73,7 +73,7 @@ def merge_profile(current: dict, packaged: dict) -> tuple[dict, dict]:
     return parse_company_profile(merged).model_dump(mode="json"), added
 
 
-def upgrade(target: Path, packaged: Path, *, apply: bool) -> dict:
+def upgrade(target: Path, packaged: Path, *, apply: bool, expected_sha256: str | None = None) -> dict:
     target, packaged = Path(target), Path(packaged)
     if target.is_symlink() or target.parent.is_symlink() or packaged.is_symlink():
         raise ValueError("Profile symlink is forbidden")
@@ -85,6 +85,8 @@ def upgrade(target: Path, packaged: Path, *, apply: bool) -> dict:
         fcntl.flock(fd, fcntl.LOCK_EX)
         before = target.read_bytes()
         sha = hashlib.sha256(before).hexdigest()
+        if apply and expected_sha256 is not None and sha != expected_sha256:
+            raise ValueError("Live ServGo profile changed since preflight")
         data = json.loads(before.decode("utf-8"))
         reference = json.loads(packaged.read_text(encoding="utf-8"))
         merged, stats = merge_profile(data, reference)
@@ -131,12 +133,13 @@ def upgrade(target: Path, packaged: Path, *, apply: bool) -> dict:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--expected-sha256", help="Preflight hash of the live profile; checked on --apply")
     args = parser.parse_args()
     from app.core.config import get_settings
     target = get_settings().products_root / "servgo/company-profile.json"
     reference = Path("/app/products/servgo/company-profile.json")
     print("SERVGO_PROFILE_UPGRADE=" + json.dumps(
-        upgrade(target, reference, apply=args.apply), ensure_ascii=False
+        upgrade(target, reference, apply=args.apply, expected_sha256=args.expected_sha256), ensure_ascii=False
     ))
 
 
