@@ -228,7 +228,11 @@ def main():
                     }""")
                     assert metrics['scrollable'] and not metrics['overflow'],metrics
                     assert metrics['feedTop']-metrics['headerBottom']<75,metrics
-                    assert metrics['feedBottom']<=metrics['formTop'],metrics
+                    # The transparent floating composer intentionally overlaps
+                    # the scroll region; the dedicated voice UI smoke checks
+                    # that the latest message stays readable above it.
+                    assert metrics['feedBottom']<=metrics['dockBottom']+1,metrics
+                    assert metrics['formTop']>=metrics['feedTop'],metrics
                     assert metrics['dockBottom']<=metrics['navTop']+1,metrics
                     page.locator('#dp-feed').evaluate('e=>e.scrollTop=0')
                     assert page.locator('#dp-feed').evaluate('e=>e.scrollTop')==0
