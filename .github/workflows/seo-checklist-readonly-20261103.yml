@@ -1,0 +1,98 @@
+name: ServGo SEO checklist — one-time read-only production audit
+on:
+  push:
+    branches: [audit/seo-checklist-readonly-20261103]
+    paths: [.github/workflows/seo-checklist-readonly-20261103.yml]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Collect actual database and public HTTP evidence without publishing anything
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          sudo apt-get install -qq -y sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null >/tmp/keys
+          while IFS= read -r key; do
+            printf '%s\n' "$key" >/tmp/key
+            if ssh-keygen -lf /tmp/key 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$key" >> ~/.ssh/known_hosts
+            fi
+          done </tmp/keys
+          test -s ~/.ssh/known_hosts
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 \
+            "root@$HOST" 'bash -s' <<'REMOTE'
+          set -uo pipefail
+          echo "=== release ==="
+          docker exec ai-growth-os-api-1 printenv RELEASE_SHA || true
+          echo "=== running services ==="
+          systemctl is-active booking-bot || true
+          echo "=== public HTTPS results ==="
+          for item in \
+            'servgo.ru /' \
+            'servgo.ru /blog' \
+            'servgo.ru /blog/zapis-k-psihologu' \
+            'servgo.ru /blog/zapisatsya-na-manikyur-onlayn' \
+            'servgo.ru /blog/kak-psihologu-organizovat-zapis-klientov' \
+            'servgo.ru /blog/kak-masteru-manikyura-vesti-zapis-klientov' \
+            'servgo.ru /robots.txt' \
+            'servgo.ru /blog/sitemap.xml' \
+            'servgo.ru /sitemap.xml' \
+            'growth.servgo.ru /public/blog/servgo/articles'; do
+            set -- $item
+            printf '%s%s ' "$1" "$2"
+            curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' \
+              --max-time 12 --resolve "$1:443:127.0.0.1" "https://$1$2" || echo 'unavailable'
+          done
+          echo "=== SEO page metadata and robots ==="
+          for path in /blog /blog/zapis-k-psihologu; do
+            file="$(mktemp)"
+            curl -fsS --max-time 12 --resolve servgo.ru:443:127.0.0.1 \
+              "https://servgo.ru$path" -o "$file" || true
+            for key in 'rel="canonical"' 'name="robots"' '<h1' '<strong>' 'class="blog-subheading"' 'href="/#launch"'; do
+              grep -Fq "$key" "$file" && present=true || present=false
+              echo "META $path $key=$present"
+            done
+            rm -f "$file"
+          done
+          echo "=== search API configs + published articles (safe aggregates only) ==="
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          import os
+          from sqlalchemy import func, select
+          from app.db.session import SessionLocal
+          from app.models.domain import Product, Publication, Artifact
+          from app.seo.service import latest_semantic_core
+          from app.seo.activation import SeoFactoryActivation
+          with SessionLocal() as db:
+              product=db.scalar(select(Product).where(Product.slug=="servgo"))
+              assert product
+              print("SERVGO_PROFILE=true")
+              print("PRODUCTS_COUNT=",db.scalar(select(func.count(Product.id))))
+              print("SEO_ENABLED_PRODUCTS=",db.scalar(select(func.count(SeoFactoryActivation.product_id)).where(SeoFactoryActivation.enabled.is_(True))))
+              pubs=list(db.execute(select(Artifact,Publication).join(Publication,Publication.artifact_id==Artifact.id).where(Publication.product_id==product.id,Publication.channel=="own_site",Publication.status=="published")))
+              print("SERVGO_PUBLISHED_COUNT=",len(pubs))
+              print("SERVGO_PUBLISHED_PATHS=",sorted(p.external_reference for _,p in pubs))
+              core=latest_semantic_core(db,product.id)
+              if core:
+                  print("SEMANTIC_CORE_DATE=",core.collected_at.isoformat())
+                  print("SEMANTIC_CORE_ENGINES=",[(s.engine,s.queries_found,s.failed_requests) for s in core.sources])
+                  print("SEMANTIC_CORE_CLUSTERS=",len(core.clusters))
+                  phrases=("онлайн запись","программа для записи","свободные окна","продвижение малого бизнеса","использовать ии","автоматизация салона")
+                  matches=sorted(set(q for c in core.clusters for q in c.queries if any(p in q.casefold() for p in phrases)))
+                  print("MATCHING_REAL_QUERIES=",matches[:40])
+              else:
+                  print("SEMANTIC_CORE_MISSING")
+          for name in ("SERVGO_GSC_READONLY_TOKEN","SERVGO_GSC_SITE_URL","SERVGO_YANDEX_WEBMASTER_TOKEN","SERVGO_YANDEX_WEBMASTER_USER_ID","SERVGO_YANDEX_WEBMASTER_HOST_ID"):
+              print("CONNECTED_SETTING",name,bool(os.environ.get(name)))
+          PY
+          echo "SEO_READONLY_AUDIT_FINISHED"
+          REMOTE
