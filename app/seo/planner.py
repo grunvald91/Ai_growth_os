@@ -29,7 +29,10 @@ SEED_PROMPT = (
     "buyer_segments and offer first, then the named industry and its typical customer "
     "problems. If the profile is sparse, suggest ordinary search topics based on "
     "general activities of that industry, not invented specific company services, "
-    "results, pricing or proprietary features. If even the industry is unclear, "
+    "results, pricing or proprietary features. For a structured offer_catalog, "
+    "do not treat in_development or unverified products as products available "
+    "to purchase; focus on demonstrated capabilities and actual customers. "
+    "If even the industry is unclear, "
     "do not invent an industry. Focus seed phrases on practical problems, evaluation "
     "and purchase decisions of the company's likely buyer. For software used by "
     "psychologists, a query about how a patient books an appointment is NOT a "
@@ -61,6 +64,14 @@ PLAN_PROMPT = (
     "is sparse, explain typical processes, decision criteria and potential choices "
     "common to its category WITHOUT attributing any feature or service to this company. "
     "Only verified profile facts can support company-specific promises. "
+    "When company.offer_catalog gives explicit release_status: live means use only "
+    "evidence-backed capabilities, limited means explain exact functional scope, "
+    "in_development/unverified must NEVER be described as launched or offered for "
+    "registration/demo. Missing status is an owner-declared offer, not proof of "
+    "production availability. Product families such as BookingBot, Growth, Mail, "
+    "Shifts or SEO must not be mixed or given features of one another. "
+    "Never fabricate landing URLs, guaranteed rankings, delivery, conversion or "
+    "unverified integrations. "
     "Never invent search queries, volumes, rankings, proof, prices or features. "
     "Plan across the requested 7/30-day horizon from relevant real clusters, "
     "covering awareness, consideration and decision where supported. Do not impose "
@@ -126,7 +137,8 @@ def fresh_core(core: SemanticCore, taken: set[str]) -> SemanticCore:
 
 
 def validate_plan(plan: SeoContentPlan, core: SemanticCore, taken: frozenset[str] = frozenset(),
-                  buyer_segments: tuple[str, ...] = (), *, b2b_provider: bool = False) -> None:
+                  buyer_segments: tuple[str, ...] = (), *, b2b_provider: bool = False,
+                  unavailable_offer_families: tuple[str, ...] = ()) -> None:
     clusters = {c.id: c for c in core.clusters}
     seen_queries: set[str] = set(taken)
     for item in plan.items:
@@ -148,6 +160,15 @@ def validate_plan(plan: SeoContentPlan, core: SemanticCore, taken: frozenset[str
             raise PlanError(f"Consumer appointment query is not a B2B buyer query: {item.primary_query}")
         if buyer_segments and item.target_segment not in buyer_segments:
             raise PlanError(f"Plan item {item.id} does not target a declared buyer segment")
+        # Fail closed on a direct sales CTA for an explicitly unavailable
+        # product; descriptive articles about future workflows remain possible.
+        step = item.next_step.casefold()
+        sales_pitch = any(verb in step for verb in (
+            "подключ", "попроб", "купить", "приобрест", "зарегистрир", "демонстрац",
+            "записаться", "start trial", "buy", "subscribe",
+        ))
+        if sales_pitch and any(family.casefold() in step for family in unavailable_offer_families):
+            raise PlanError("Plan offers an unavailable product as a ready-to-buy CTA")
 
 
 async def _ask(llm: LLMService, *, model: str, prompt: str, payload: dict, schema: type[BaseModel],
@@ -210,6 +231,7 @@ def _company(db: Session, product: Product, products_root: Path, privacy: Privac
         "buyer_segments": [],
         "industry": None,
         "declared_offers": [],
+        "offer_catalog": [],
     }
     if loaded.profile:
         p = loaded.profile
@@ -221,6 +243,27 @@ def _company(db: Session, product: Product, products_root: Path, privacy: Privac
         company["industry"] = privacy.sanitize_text(industry) if industry else None
         company["declared_offers"] = [
             privacy.sanitize_text(offer.name)
+            for offer in p.offer.products_services if offer.name.strip()
+        ]
+        # Explicit maturity/evidence are loaded from THIS company's profile.
+        # Legacy owner-declared offers may omit release_status: never infer live.
+        company["offer_catalog"] = [
+            {
+                "name": privacy.sanitize_text(offer.name),
+                "product_family": privacy.sanitize_text(offer.product_family)
+                    if offer.product_family else None,
+                "release_status": offer.release_status or "unspecified",
+                "description": privacy.sanitize_text(offer.description),
+                "evidence_refs": [privacy.sanitize_text(ref) for ref in offer.evidence_refs],
+                "buyer_segment": privacy.sanitize_text(offer.buyer_segment)
+                    if offer.buyer_segment else None,
+                "conversion_action": privacy.sanitize_text(offer.conversion_action)
+                    if offer.conversion_action and offer.release_status not in {"in_development", "unverified"}
+                    else None,
+                "landing_page": privacy.sanitize_text(offer.landing_page)
+                    if offer.landing_page and offer.release_status not in {"in_development", "unverified"}
+                    else None,
+            }
             for offer in p.offer.products_services if offer.name.strip()
         ]
     return company
@@ -266,7 +309,11 @@ async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, pr
         plan = await _ask(llm, model=model, prompt=PLAN_PROMPT, payload=payload, schema=SeoContentPlan,
                           role="seo_editor", validate=lambda p: validate_plan(
                               p, core, frozenset(taken), tuple(company["buyer_segments"]),
-                              b2b_provider="b2b" in str(company["industry"] or "").casefold()))
+                              b2b_provider="b2b" in str(company["industry"] or "").casefold(),
+                              unavailable_offer_families=tuple(
+                                  offer["product_family"] for offer in company["offer_catalog"]
+                                  if offer["release_status"] in {"in_development", "unverified"}
+                                  and offer["product_family"]))))
         artifact = ArtifactService(db).create(product_id=product_id, task_id=factory_task_id or task_id, kind=PLAN_KIND,
                                               title=f"Контент-план SEO ({len(plan.items)} статей)",
                                               content=plan.model_dump_json())
