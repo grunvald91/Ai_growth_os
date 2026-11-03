@@ -123,6 +123,7 @@ def main():
                 expect(page.locator('.dp-msg.bot').first).to_be_visible()
                 page.set_viewport_size({'width':390,'height':844})
                 page.screenshot(path='/tmp/growth-v4-conversation.png',full_page=True)
+                page.evaluate("window.ServGoTheme.setPreference('light')")
                 page.locator('#themeTop').click()
                 assert page.locator('body').evaluate("e=>e.classList.contains('dark')")
                 page.reload()
