@@ -26,7 +26,13 @@ class FallbackProvider:
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
         last_error: Exception | None = None
-        for index, (model, provider) in enumerate(self._providers):
+        # An explicit model choice can start at a configured backup. This is
+        # needed when a structurally valid reply fails downstream SEO domain
+        # validation: repeating the already-rejected model adds cost, not value.
+        start = next((i for i, (name, _) in enumerate(self._providers)
+                      if name == request.model), 0)
+        for index in range(start, len(self._providers)):
+            model, provider = self._providers[index]
             candidate = request.model_copy(update={"model": model})
             try:
                 return await provider.generate(candidate)

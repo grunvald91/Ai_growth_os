@@ -142,7 +142,11 @@ def build_seo_llm(settings: Settings, provider: LLMProvider | None = None) -> tu
     """The model service used by the SEO factory: same privacy gateway and critic settings as the article pipeline."""
     provider = provider or build_llm_provider(settings)
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
-    return LLMService(privacy_gateway=privacy, provider=provider, critic_enabled=settings.agent_critic_enabled), privacy
+    # Search seeds and plan objects are checked against deterministic source/domain
+    # contracts. An extra free-form critic/revision can alter valid cluster IDs and
+    # adds another paid model call; the final SEO *article* still uses its own
+    # mandatory critic and publishing safeguards.
+    return LLMService(privacy_gateway=privacy, provider=provider, critic_enabled=False), privacy
 
 
 def build_article_production(

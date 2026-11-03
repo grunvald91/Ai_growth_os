@@ -193,6 +193,14 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
         "network_failure": "Сетевая ошибка",
         "invalid_data_or_configuration": "Некорректные данные или настройка",
         "internal_exception": "Внутренняя ошибка",
+        "plan_unknown_cluster": "ИИ указал несуществующую группу запросов",
+        "plan_cluster_intent_mismatch": "Категория и смысл запроса не совпали с поисковой группой",
+        "plan_query_not_in_cluster": "ИИ предложил запрос, не подтверждённый поисковыми источниками",
+        "plan_duplicate_query": "ИИ повторил поисковый запрос",
+        "plan_schema_invalid": "ИИ вернул план с неправильной структурой",
+        "plan_validation_failed": "План не прошёл проверку фактов и соответствия",
+        "plan_no_new_queries": "Новые поисковые запросы уже охвачены статьями",
+        "plan_missing_company_profile": "В профиле компании не хватает информации",
     }
     current_stage = row.get("current_stage") or row.get("last_error_stage")
     stage = (f'<p>Этап: {html.escape(stage_names.get(current_stage, current_stage))}</p>'
@@ -200,7 +208,14 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
     code = row.get("last_error_code")
     error_caption = error_names.get(code, code or row.get("last_error") or "")
     error = (f'<p role="status">Последняя ошибка: {html.escape(error_caption)}</p>'
-             if row.get("last_error") else '')
+             if row.get("last_error") and row.get("status") == "failed" else '')
+    plan_codes = row.get("invalid_plan_codes") or []
+    rejected_plans = (
+        '<p class="seo-plan-checks">Отклонено неверных ответов ИИ: '
+        + html.escape(str(row.get("invalid_plan_attempts", 0)))
+        + '. Причины: ' + ', '.join(html.escape(error_names.get(c, c)) for c in plan_codes)
+        + '</p>'
+    ) if plan_codes else ''
     search_progress = ''.join(
         '<li>' + html.escape(str(engine)) + ': '
         + 'запросов ' + html.escape(str(info.get("requests", 0)))
@@ -315,7 +330,7 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
         f'<div class="seo-run-head"><h3>{html.escape(row["title"])}</h3>'
         f'<span class="seo-run-status">{html.escape(row["status_label"])}</span></div>'
         f'<p>Последнее обновление: {html.escape(row["updated_at"] or "неизвестно")}</p>'
-        + stage + attempts + queued + error + search_progress
+        + stage + attempts + queued + error + rejected_plans + search_progress
         + '<details class="seo-run-details"><summary>Этапы и источники данных</summary>'
         + '<ul>'
         + state('Семантическое ядро', row['semantic_ready'])
