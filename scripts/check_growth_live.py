@@ -184,8 +184,10 @@ def main():
                     page.evaluate('scrollTo(0,0)')
                     page.screenshot(path=f'/tmp/v4-video-approval-{width}.png',full_page=True,animations='disabled')
                 page.set_viewport_size({'width':390,'height':844})
-                page.locator('#themeTop').click()
-                assert page.locator('.wb-heading h2').evaluate("e=>getComputedStyle(e).color")=='rgb(237, 243, 251)'
+                page.evaluate("window.ServGoTheme.setPreference('dark')")
+                assert page.locator('body').evaluate("e=>e.classList.contains('dark')")
+                assert page.locator('.wb-heading h2').evaluate(
+                    "e=>{const c=getComputedStyle(e).color;return c!=='rgb(27, 45, 66)' && c!=='rgb(0, 0, 0)' }")
                 page.screenshot(path='/tmp/v4-video-approval-dark.png',full_page=True,animations='disabled')
                 from app.models.domain import TaskStatus
                 page.set_viewport_size({'width':390,'height':844})
