@@ -170,6 +170,8 @@ async def run_factory_once(session_factory, settings, *, provider=None, client: 
             )) is not None
             transient = isinstance(exc, (TimeoutError, httpx.TransportError,
                                           ProviderEmptyResponseError, ProviderMalformedResponseError))
+            if isinstance(exc, SeoSuggestionsUnavailable):
+                transient = exc.reason in {"search_upstream_failures", "search_invalid_responses"}
             if isinstance(exc, httpx.HTTPStatusError):
                 transient = exc.response.status_code in {404, 408, 425, 429, 500, 502, 503, 504}
             retry = len(attempts) < 3 and (resumable or transient)

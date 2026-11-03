@@ -264,3 +264,17 @@ async def test_other_tenant_has_no_servgo_catalog(db, tmp_path):
     assert len(catalog) == 1 and catalog[0]["name"] == "Ремонт дрелей"
     assert catalog[0]["release_status"] == "unspecified"
     assert all("ServGo" not in str(row) for row in catalog)
+
+
+def test_b2b_online_booking_for_consumer_is_not_buyer_intent():
+    consumer_core = SemanticCore(seeds=["онлайн-запись к психологу"],
+        collected_at=datetime.now(timezone.utc),
+        sources=[SourceStatus(engine="yandex", requests=1, failed_requests=0, queries_found=1)],
+        clusters=[QueryCluster(id="c001", head_query="онлайн-запись к психологу",
+            stage="awareness", intent="informational",
+            queries=["онлайн-запись к психологу"], engines=["yandex"])])
+    candidate = plan(item(primary_query="онлайн-запись к психологу",
+        reader_problem="Пациент выбирает время консультации"))
+    with pytest.raises(PlanError, match="Consumer appointment query"):
+        validate_plan(candidate, consumer_core, b2b_provider=True)
+    validate_plan(candidate, consumer_core, b2b_provider=False)

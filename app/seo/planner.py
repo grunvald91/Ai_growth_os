@@ -89,7 +89,7 @@ class PlanError(ValueError):
 # Guard a clear buyer mismatch for explicitly declared B2B companies.
 # For actual B2C service providers the same customer query can be relevant.
 _CONSUMER_APPOINTMENT = re.compile(
-    r"^(?:как\s+)?(?:записаться\s+(?:к|на|в)\s+|запись\s+(?:к|на)\s+)",
+    r"^(?:как\s+)?(?:записаться\s+(?:к|на|в)\s+|запись\s+(?:к|на)\s+|онлайн[- ]запись\s+(?:к|на)\s+)",
     re.IGNORECASE,
 )
 
@@ -132,8 +132,13 @@ def planned_queries(db: Session, product_id: UUID) -> set[str]:
 
 def fresh_core(core: SemanticCore, taken: set[str]) -> SemanticCore:
     """Drops clusters an earlier article already covers, so a new run never repeats a topic."""
-    return core.model_copy(update={"clusters": [
-        c for c in core.clusters if not taken & {normalize(q) for q in c.queries}]})
+    remaining_clusters = []
+    for cluster in core.clusters:
+        queries = [query for query in cluster.queries if normalize(query) not in taken]
+        if queries:
+            head = cluster.head_query if normalize(cluster.head_query) not in taken else queries[0]
+            remaining_clusters.append(cluster.model_copy(update={"queries": queries, "head_query": head}))
+    return core.model_copy(update={"clusters": remaining_clusters})
 
 
 def validate_plan(plan: SeoContentPlan, core: SemanticCore, taken: frozenset[str] = frozenset(),
@@ -309,7 +314,10 @@ async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, pr
         plan = await _ask(llm, model=model, prompt=PLAN_PROMPT, payload=payload, schema=SeoContentPlan,
                           role="seo_editor", validate=lambda p: validate_plan(
                               p, core, frozenset(taken), tuple(company["buyer_segments"]),
-                              b2b_provider="b2b" in str(company["industry"] or "").casefold(),
+                              b2b_provider=("b2b" in str(company["industry"] or "").casefold()
+                                   or any(marker in segment.casefold()
+                                       for segment in company["buyer_segments"]
+                                       for marker in ("владельц", "управляющ", "предпринимател", "бизнес", "b2b"))),
                               unavailable_offer_families=tuple(
                                   offer["product_family"] for offer in company["offer_catalog"]
                                   if offer["release_status"] in {"in_development", "unverified"}

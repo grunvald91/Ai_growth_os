@@ -911,9 +911,11 @@ def validate_grounding(draft: ArticleDraft, facts: dict[str, str]) -> None:
 
 class ArticleProduction:
     def __init__(self, *, db: Session, llm: LLMService, privacy: PrivacyGateway,
-                 products_root: Path, provider_name: str, model: str):
+                 products_root: Path, provider_name: str, model: str,
+                 seo_default_articles_per_day: int = 3):
         self.db, self.llm, self.privacy = db, llm, privacy
         self.products_root, self.provider_name, self.model = products_root, provider_name, model
+        self.seo_default_articles_per_day = seo_default_articles_per_day
 
     async def run(self, request: ArticleProductionInput) -> ArticleProductionResult:
         """Owns transactions; use a dedicated clean session. No raw failure data persists."""
@@ -927,6 +929,18 @@ class ArticleProduction:
         if request.experiment_id and (experiment is None or experiment.product_id != product.id):
             raise LookupError('Experiment not found for product')
         if request.task_id:
+            if request.seo_brief is not None:
+                # Lock Product before Task: opt-out and concurrent daily-budget
+                # checks serialize without inversions or duplicate model spend.
+                self.db.scalar(select(Product.id).where(Product.id == product.id).with_for_update())
+                from app.seo.activation import require_enabled
+                require_enabled(self.db, product.id)
+                if self.seo_default_articles_per_day > 0:
+                    from app.seo.queue import quota_exhausted, SeoQuotaDeferred
+                    if quota_exhausted(self.db, self.seo_default_articles_per_day,
+                                       product_id=product.id):
+                        self.db.rollback()
+                        raise SeoQuotaDeferred("Company SEO generation budget exhausted")
             task = self.db.get(Task, request.task_id)
             if task is None or task.product_id != product.id:
                 raise LookupError('Task not found for product')
@@ -935,6 +949,9 @@ class ArticleProduction:
             if claimed.rowcount != 1:
                 self.db.rollback()
                 raise ValueError('Article task must be queued')
+            if request.seo_brief is not None and task.title.startswith('SEO-ARTICLE:'):
+                from app.seo.queue import record_article_start
+                record_article_start(self.db, task)
         else:
             task = TaskService(self.db).create(product_id=product.id, title='Article production',
                                               assigned_agent='content_strategist', status=TaskStatus.RUNNING)

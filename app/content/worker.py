@@ -15,7 +15,7 @@ from app.workflows.article_contracts import ArticleProductionInput, ShortVideoDe
 
 async def run_content_once(session_factory, settings):
     with session_factory() as db:
-        from app.seo.queue import SEO_TASK_PREFIX, exhausted_products
+        from app.seo.queue import SEO_TASK_PREFIX, exhausted_products, SeoQuotaDeferred
         from app.seo.activation import enabled_product_ids, require_enabled
         query = select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer', 'content_editor', 'content_creative']),
             Task.status == TaskStatus.QUEUED)
@@ -51,8 +51,7 @@ async def run_content_once(session_factory, settings):
                     raise ValueError('Missing content request')
                 if task.title.startswith(SEO_TASK_PREFIX):
                     require_enabled(db, product_id)
-                    from app.seo.queue import record_article_start
-                    record_article_start(db, task)
+                    # The workflow records the start after winning the task claim.
                 raw = json.loads(request.content)
                 if raw.get("mode") == "post":
                     data = QuickPostRequest.model_validate(raw)
@@ -77,6 +76,10 @@ async def run_content_once(session_factory, settings):
                             db.rollback()
                             logging.getLogger(__name__).exception('SEO article publication failed for task %s', task_id)
                 return 1
+            except SeoQuotaDeferred:
+                # Another worker took the last daily slot; keep this task queued.
+                db.rollback()
+                return 0
             except (Exception, asyncio.CancelledError) as exc:
                 db.rollback()
                 db.execute(update(Task).where(Task.id == task_id, Task.status == TaskStatus.QUEUED).values(status=TaskStatus.FAILED))
