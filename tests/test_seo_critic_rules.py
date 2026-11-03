@@ -51,3 +51,13 @@ def test_servgo_company_profile_contains_proven_owner_calendar_facts():
     assert "owner-managed appointment journals" in SEED_PROMPT
     assert "appointment journal" in PLAN_PROMPT
     assert "внутренний электронный журнал" in SERVGO_EDITORIAL_RULES
+
+
+def test_servgo_crm_value_and_mailing_boundaries_in_prompts():
+    from app.workflows.article_production import SERVGO_EDITORIAL_RULES
+    from app.llm.critic import SERVGO_CRITIC_RULES
+    from app.seo.planner import SEED_PROMPT
+    assert "истории посещений" in SERVGO_EDITORIAL_RULES
+    assert "Связку CRM→Mail" in SERVGO_EDITORIAL_RULES
+    assert "автоматическая CRM-to-Mail" in SERVGO_CRITIC_RULES
+    assert "customer databases" in SEED_PROMPT

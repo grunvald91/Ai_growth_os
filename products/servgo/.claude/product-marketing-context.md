@@ -73,9 +73,18 @@ The goal is to prove a closed evidence loop:
 
 audience signal -> content hypothesis -> asset -> lead/booking evidence -> decision -> next content.
 
+## Verified customer database and retention workflow
+
+The owner has a business-scoped CRM with contacts from bookings, manual contacts, visit history and counts, notes, status and follow-up date. This supports thoughtful service and possible re-engagement of previous customers, without claiming guaranteed or measured increased retention.
+Evidence: booking_bot/web/api/routes/crm.py; booking_bot/web/frontend/src/pages/admin/ContactsPage.tsx.
+
+ServGo Mail separately supports owner-approved email campaigns and unsubscribe. CRM-to-Mail recipient synchronization and automated reactivation sequences are NOT confirmed. Do not promise them. Promotional messages require documented lawful permission or other applicable basis, and opt-outs must be respected.
+Evidence: booking_bot/web/api/routes/mail_campaign_api.py; booking_bot/web/api/routes/mail_campaign_review.py; booking_bot/web/api/routes/mail_campaign_unsubscribe.py.
+
 ## SEO editorial segmentation
 
 - For searches about electronic appointment journals, admin calendars, specialist schedules or manual booking, explain the existing admin-panel scenario first; do not assume online self-booking is necessary.
+- For business-owner queries about customer databases, CRM, repeat bookings and retention, lead with the own customer list, appointment history and individual follow-up, without unverified mass messaging.
 - For customer searches about how to book a service, answer the customer's question; keep software selection for business owners as another article with its own real search query.
 - Do not assert that the public booking page can be turned off; this control is not verified. Never fabricate performance numbers, search volume or customer cases.
 
