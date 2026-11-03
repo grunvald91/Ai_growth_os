@@ -1,4 +1,4 @@
-name: ServGo SEO post-recovery status (read-only)
+name: ServGo SEO post-recovery articles status (read-only)
 on:
   push:
     branches: [audit/seo-servgo-readonly-20261103]
