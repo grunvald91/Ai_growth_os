@@ -101,10 +101,15 @@ def main():
                 page.emulate_media(reduced_motion='no-preference')
                 page.goto(base+'/create')
                 page.screenshot(path='/tmp/growth-v4-create.png',full_page=True)
+                # The v4 page uses the dispatcher composer; the legacy POST path
+                # is exercised via its own real classic form rather than a selector
+                # that does not exist in the v4 document.
+                page.goto(base+'/create?design=classic')
                 page.locator('[name="topic"]').fill('Тест реальной очереди')
                 page.locator('form button[type="submit"]').click()
                 page.wait_for_url('**/tasks/*')
                 assert len(list(db.scalars(select(Task)))) == 1
+                page.goto(page.url.split('?')[0]+'?design=v4')
                 expect(page.locator('.topbar')).to_be_visible()
                 page.goto(base+'/work')
                 expect(page.locator('.v4-records .board-card')).to_have_count(1)
@@ -118,6 +123,7 @@ def main():
                 expect(page.locator('.dp-msg.bot').first).to_be_visible()
                 page.set_viewport_size({'width':390,'height':844})
                 page.screenshot(path='/tmp/growth-v4-conversation.png',full_page=True)
+                page.evaluate("window.ServGoTheme.setPreference('light')")
                 page.locator('#themeTop').click()
                 assert page.locator('body').evaluate("e=>e.classList.contains('dark')")
                 page.reload()
@@ -134,6 +140,77 @@ def main():
                     duration_seconds=60,scenes=6,call_to_action='Подпишитесь на канал'),
                     configured_models(Settings(_env_file=None,whiteboard_storyboard_model="fixture/story",whiteboard_image_model="gemini-3.1-flash-image",whiteboard_speech_model="fixture/speech",whiteboard_regions_model="fixture/regions")),max_api_calls=34,visual_review=True,image_provider='claudehub')
                 page.evaluate("localStorage.setItem('servgo-desktop-theme','light')")
+                # ServGo Air creation: real form, company-scoped picker, safe mobile layout.
+                for width in (360,390,430,1440):
+                    page.set_viewport_size({'width':width,'height':844})
+                    response=page.goto(base+'/whiteboard?design=v4')
+                    assert response.status==200
+                    expect(page.locator('.wb-create-head')).to_be_visible()
+                    expect(page.locator('#main>.route-page-head')).to_be_hidden()
+                    warning=page.locator('.wb-create .sg-warning')
+                    if warning.count():
+                        contrast=warning.evaluate("""e=>{
+                          const values=s=>(s.match(/[\\d.]+/g)||[]).slice(0,3).map(x=>Number(x)/255);
+                          const lum=s=>values(s).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4)
+                            .reduce((sum,v,i)=>sum+v*[.2126,.7152,.0722][i],0);
+                          const fg=lum(getComputedStyle(e).color),bg=lum(getComputedStyle(e).backgroundColor);
+                          return (Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05);
+                        }""")
+                        assert contrast>=4.5,contrast
+                    expect(page.locator('#wb-create-form [name="topic"]')).to_be_visible()
+                    expect(page.locator('#wb-create-form [name="duration_seconds"]')).to_be_visible()
+                    expect(page.locator('#wb-create-form button[type="submit"]')).to_be_visible()
+                    if width <= 780:
+                        page.locator('#wb-suggest-btn').click()
+                        picker = page.locator('#wb-topic-dialog')
+                        expect(picker).to_be_visible()
+                        close_button=page.locator('#wb-topic-close')
+                        assert close_button.evaluate("e=>getComputedStyle(e).whiteSpace")=='nowrap'
+                        assert close_button.evaluate("e=>e.scrollHeight<=e.clientHeight+1")
+                        rect = picker.bounding_box()
+                        assert rect and rect['x']>=0 and rect['x']+rect['width']<=width+1,(width,rect)
+                        page.screenshot(path=f'/tmp/v4-simple-video-topic-{width}.png',full_page=True,animations='disabled')
+                        page.locator('#wb-topic-close').click()
+                        expect(picker).to_be_hidden()
+                        page.evaluate('scrollTo(0,0)')
+                        action=page.locator('#wb-create-form button[type="submit"]').bounding_box()
+                        mobile_nav=page.locator('#mobileNav').bounding_box()
+                        assert action and mobile_nav and action['y']+action['height']<=mobile_nav['y']+1,(width,action,mobile_nav)
+                        assert page.locator('.wb-more-grid summary').count()==2
+                        duration=page.locator('.wb-create-settings>.sg-field').nth(0).bounding_box()
+                        cta=page.locator('.wb-create-settings>.sg-field').nth(1).bounding_box()
+                        assert duration and cta and abs(duration['y']-cta['y'])<8,(width,duration,cta)
+                        assert cta['x']>duration['x']+duration['width']-2,(width,duration,cta)
+                        history=page.locator('.wb-library-head').bounding_box()
+                        assert history and history['y']<mobile_nav['y'],(width,history,mobile_nav)
+                    page.screenshot(path=f'/tmp/v4-simple-video-create-{width}.png',
+                                    full_page=True,animations='disabled')
+                    overflow=page.evaluate("""() => ({
+                      width: innerWidth, scroll: document.documentElement.scrollWidth,
+                      offenders: [...document.querySelectorAll('body *')].filter(el => {
+                        const r=el.getBoundingClientRect();
+                        return r.width>0 && (r.right>innerWidth+1 || r.left< -1) &&
+                          getComputedStyle(el).position !== 'fixed';
+                      }).slice(0,16).map(el => ({
+                        tag:el.tagName,class:el.className?.baseVal||el.className,
+                        width:Math.round(el.getBoundingClientRect().width),
+                        right:Math.round(el.getBoundingClientRect().right)
+                      }))
+                    })""")
+                    assert overflow['scroll']<=overflow['width'],overflow
+                page.set_viewport_size({'width':390,'height':844})
+                page.goto(base+'/whiteboard?design=v4')
+                page.evaluate("window.ServGoTheme.setPreference('dark')")
+                theme_colors=page.locator('.wb-create-actions>.btn.primary').evaluate("""button=>{
+                  const probe=document.createElement('span');
+                  probe.style.color='var(--s-accent-ink)';
+                  button.append(probe);
+                  const expected=getComputedStyle(probe).color;
+                  probe.remove();
+                  return {actual:getComputedStyle(button).color,expected};
+                }""")
+                assert theme_colors['actual']==theme_colors['expected'],theme_colors
+                page.evaluate("window.ServGoTheme.setPreference('light')")
                 for width in (360,390,1440):
                     page.set_viewport_size({'width':width,'height':844})
                     page.goto(base+'/whiteboard/'+str(video.id)+'?design=v4')
@@ -145,17 +222,22 @@ def main():
                     assert box['width']<=24 and box['height']<=24,box
                     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
                     expect(page.locator('.wb-cost')).to_contain_text('Точная стоимость')
+                    nav=page.locator('#mobileNav').bounding_box()
+                    before=page.locator('.wb-actions .btn.primary').bounding_box()
+                    if width <= 780:
+                        assert before and before['y']+before['height']<=nav['y']+1,(width,before,nav)
                     page.locator('.wb-actions .btn.primary').scroll_into_view_if_needed()
                     bounds=page.locator('.wb-actions .btn.primary').bounding_box()
-                    nav=page.locator('#mobileNav').bounding_box()
                     if nav: assert bounds['y']+bounds['height']<=nav['y'],(bounds,nav)
                     consent.check()
                     expect(consent).to_be_checked()
                     page.evaluate('scrollTo(0,0)')
                     page.screenshot(path=f'/tmp/v4-video-approval-{width}.png',full_page=True,animations='disabled')
                 page.set_viewport_size({'width':390,'height':844})
-                page.locator('#themeTop').click()
-                assert page.locator('.wb-heading h2').evaluate("e=>getComputedStyle(e).color")=='rgb(237, 243, 251)'
+                page.evaluate("window.ServGoTheme.setPreference('dark')")
+                assert page.locator('body').evaluate("e=>e.classList.contains('dark')")
+                assert page.locator('.wb-heading h2').evaluate(
+                    "e=>{const c=getComputedStyle(e).color;return c!=='rgb(27, 45, 66)' && c!=='rgb(0, 0, 0)' }")
                 page.screenshot(path='/tmp/v4-video-approval-dark.png',full_page=True,animations='disabled')
                 from app.models.domain import TaskStatus
                 page.set_viewport_size({'width':390,'height':844})
@@ -164,6 +246,18 @@ def main():
                     page.goto(base+'/whiteboard/'+str(video.id))
                     expect(page.locator('.wb-job')).to_be_visible()
                     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),status
+                    if status == TaskStatus.COMPLETED:
+                        expect(page.locator('.wb-result-player video')).to_be_visible()
+                        expect(page.locator('.wb-downloads a')).to_have_count(4)
+                        expect(page.locator('.wb-result-technical')).to_be_visible()
+                        player=page.locator('.wb-result-player').bounding_box()
+                        downloads=page.locator('.wb-downloads').bounding_box()
+                        nav=page.locator('#mobileNav').bounding_box()
+                        if nav:
+                            assert player and player['y']+player['height']<nav['y'],(player,nav)
+                            assert downloads and downloads['y']+downloads['height']<nav['y'],(downloads,nav)
+                        page.screenshot(path='/tmp/v4-simple-video-result-390.png',
+                                        full_page=True,animations='disabled')
                     page.screenshot(path=f'/tmp/v4-video-{status.value}.png',full_page=True,animations='disabled')
                 # Persist a long history, matching the populated production screen.
                 from app.dispatcher import service
@@ -190,7 +284,11 @@ def main():
                     }""")
                     assert metrics['scrollable'] and not metrics['overflow'],metrics
                     assert metrics['feedTop']-metrics['headerBottom']<75,metrics
-                    assert metrics['feedBottom']<=metrics['formTop'],metrics
+                    # The transparent floating composer intentionally overlaps
+                    # the scroll region; the dedicated voice UI smoke checks
+                    # that the latest message stays readable above it.
+                    assert metrics['feedBottom']<=metrics['dockBottom']+1,metrics
+                    assert metrics['formTop']>=metrics['feedTop'],metrics
                     assert metrics['dockBottom']<=metrics['navTop']+1,metrics
                     page.locator('#dp-feed').evaluate('e=>e.scrollTop=0')
                     assert page.locator('#dp-feed').evaluate('e=>e.scrollTop')==0

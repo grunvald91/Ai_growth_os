@@ -93,6 +93,58 @@ def fake_factory(settings, payload, store):
                               regions=FakeRegions(), renderer=FakeRenderer(), sanitizer=PrivacyGateway(), checkpoints=store)
 
 
+def test_simple_video_creation_uses_servgo_ui_without_changing_payload_contract():
+    # No paid provider calls and no database are needed to render the creation UI.
+    html = api.creation_form(uuid4(), fields={
+        'topic': '<Тема & видео>', 'source_script': 'Мой сценарий', 'duration_seconds': '60',
+        'visual_review': 'once', 'max_api_calls': 'auto'
+    }, durations={})
+    assert 'class="sg-surface wb-create wb-screen"' in html
+    assert 'id="wb-create-title">Простое видео' in html
+    assert 'id="wb-create-form"' in html and 'id="wb-suggest-btn"' in html
+    assert '<Тема & видео>' not in html and '&lt;Тема &amp; видео&gt;' in html
+    assert 'name="duration_seconds"' in html and '<option value="60" selected>' in html
+    assert html.index('wb-create-question') < html.index('wb-more-grid')
+    assert 'class="wb-topic-top"' in html
+    assert 'class="wb-specs wb-pipeline"' in html and 'wb-duration-more' in html
+    for name in ('topic', 'source_script', 'background_notes', 'reference_materials',
+                 'science_mode', 'duration_seconds', 'call_to_action', 'profile',
+                 'visual_review', 'max_api_calls', 'wb_topic_choice',
+                 'wb_paid_start', 'wb_paid_consent'):
+        assert f'name="{name}"' in html, name
+    assert 'id="wb-topic-dialog"' in html
+    assert 'Продолжить к подтверждению' in html
+    assert 'Без платного запуска до вашего согласия.' in html
+
+
+def test_simple_video_result_prioritizes_player_and_preserves_downloads():
+    task_id = uuid4()
+    product_id = uuid4()
+    state = {
+        'task_id': str(task_id), 'status': 'completed',
+        'request': {'topic': 'Физика в жизни', 'scenes': 3}, 'calls': 14,
+        'max_api_calls': 19, 'progress_total': 14, 'progress_done': 14,
+        'stage': 'completed',
+    }
+    html = api.job_html(state, product_id)
+    base = f'/studio/products/{product_id}/whiteboard/{task_id}'
+    assert 'class="sg-surface wb-job wb-result"' in html
+    assert 'class="wb-result-player"' in html
+    assert '<video controls' in html and f'{base}/files/video.mp4' in html
+    assert f'{base}/files/video.vtt' in html
+    assert html.index('wb-result-player') < html.index('wb-result-technical')
+    assert 'class="wb-downloads"' in html
+    assert 'class="wb-result-meta"' in html
+    assert html.index('wb-result-meta') < html.index('wb-result-player')
+    for name in ('video.mp4', 'video.srt', 'video.png', 'video.json'):
+        assert f'{base}/files/{name}?download=true' in html
+    assert 'Завершено этапов: 14 из 14' in html
+    assert f'action="{base}/repair"' in html
+    assert f'href="/studio/products/{product_id}/whiteboard"' in html
+    # A completed result must not trigger paid generation without a separate approval.
+    assert f'action="{base}/approve"' not in html
+
+
 def test_queue_immutable_review_dedupes_and_cannot_approve_stale_digest(environment):
     factory, settings, product_id, _ = environment
     first = new_job(environment); second = new_job(environment)
@@ -183,7 +235,7 @@ async def test_full_owner_interface_worker_and_real_mp4(environment, tmp_path, m
         return pipeline
     with client() as browser:
         index = browser.get(f'/studio/products/{product_id}/whiteboard')
-        assert index.status_code == 200 and 'Сохранить и перейти' in index.text
+        assert index.status_code == 200 and 'Продолжить к подтверждению' in index.text
         response = browser.post(f'/studio/products/{product_id}/whiteboard',
                                 data={'topic': 'Как работает онлайн-запись', 'max_api_calls': '14'}, follow_redirects=False)
         assert response.status_code == 303
@@ -200,6 +252,9 @@ async def test_full_owner_interface_worker_and_real_mp4(environment, tmp_path, m
         assert await run_whiteboard_once(factory, settings, factory=real_factory, readiness=ready) == 0
         page = browser.get(url)
         assert page.status_code == 200 and '<video controls' in page.text
+        assert 'class="wb-result-player"' in page.text
+        assert 'class="wb-downloads"' in page.text
+        assert page.text.index('wb-result-player') < page.text.index('wb-result-technical')
         assert '13 из 14' in page.text and 'Скачать MP4' in page.text
         assert 'Завершено этапов: 14 из 14' in page.text
         assert '/files/video.vtt' in page.text

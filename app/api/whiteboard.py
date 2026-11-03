@@ -176,7 +176,7 @@ def page(product, title, body, *, status=200, refresh=False):
     if refresh:
         headers['Refresh'] = '8'
     return HTMLResponse(studio_page_shell(product, active='create', title=title,
-        subtitle='Рисованное объяснение с русской озвучкой · 30 секунд или минута · 9:16', body=body), status_code=status, headers=headers)
+        subtitle='Готовый вертикальный MP4 с озвучкой · 30 секунд или минута', body=body), status_code=status, headers=headers)
 
 
 def approval_card(state, product_id, error=None):
@@ -205,12 +205,12 @@ def approval_card(state, product_id, error=None):
             f'<h2>{esc(state["request"]["topic"])}</h2></header>{warning}'
             '<div class="wb-facts"><div><span>Длительность</span>'
             f'<strong>{duration}</strong></div><div><span>Сценарий</span><strong>{scenes} сцен</strong></div>'
-            f'<div><span>Лимит генерации</span><strong>До {state["max_api_calls"]} API-вызовов</strong></div></div>{cta_html}{source_description}'
+            f'<div><span>Лимит генерации</span><strong>До {state["max_api_calls"]} API-вызовов</strong></div></div>{cta_html}'
             '<section class="wb-cost"><h3>Платная генерация</h3><p>Точная стоимость в долларах пока неизвестна. '
-            'Лимит ограничивает число API-вызовов, а не сумму списаний.</p>'
-            '<p>После временного сбоя генерация продолжается автоматически в пределах подтверждённого лимита.</p></section>'
+            'Ограничено число API-вызовов, а не сумма списаний. '
+            'После сбоя генерация автоматически продолжится только в подтверждённом лимите.</p></section>'
             '<details class="wb-details"><summary>Как будет создано видео</summary>'
-            f'{review}{provider}<h3>Модели и голос</h3><ul>{models}</ul>'
+            f'{source_description}{review}{provider}<h3>Модели и голос</h3><ul>{models}</ul>'
             f'<p>Голос: {esc(state["request"]["voice"])}</p></details>'
             f'<footer class="wb-actions"><form method="post" action="{base}/approve" class="sg-form">'
             f'<input type="hidden" name="request_digest" value="{esc(state["request_digest"])}">'
@@ -234,10 +234,35 @@ def job_html(state, product_id, *, error=None):
               'retry_wait': 'Пауза перед автоматическим продолжением'}
     code = state.get('error')
     warning = error or MESSAGES.get(code)
-    body = (f'<section class="sg-surface wb-job"><h2>{esc(state["request"]["topic"])}</h2>'
-            f'<p role="status">{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p>'
-            f'<p>{esc(stages.get(state.get("stage"), "Подготовка задания"))} · '
-            f'API-вызовы: {state["calls"]} из {state.get("call_limit_total", state["max_api_calls"])}</p>')
+    completed = state['status'] == 'completed'
+    body = (f'<section class="sg-surface wb-job{" wb-result" if completed else ""}">'
+            '<header class="wb-job-head"><p class="wb-eyebrow">Простое видео</p>'
+            f'<h2>{esc(state["request"]["topic"])}</h2>'
+            f'<p role="status" class="wb-status{" wb-status-ready" if completed else ""}">'
+            f'{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p></header>')
+    if completed:
+        # The actual playable file must be the focal point, not the log or API metadata.
+        length_label = '1 мин · 6 сцен' if state['request'].get('scenes', 3) == 6 else '30 сек · 3 сцены'
+        file_icons = {'video.mp4': '↓', 'video.srt': '≡', 'video.png': '▣', 'video.json': '◷'}
+        body += (f'<div class="wb-result-meta" aria-label="Формат ролика">'
+                 f'<span>{length_label}</span><span>9:16</span><span>Русский голос · MP4</span></div>')
+        body += (f'<div class="wb-result-player"><video controls playsinline preload="metadata" '
+                 f'aria-label="Готовое видео: {esc(state["request"]["topic"])}" '
+                 f'poster="{base}/files/video.png">'
+                 f'<source src="{base}/files/video.mp4" type="video/mp4">'
+                 f'<track kind="subtitles" srclang="ru" label="Русский" src="{base}/files/video.vtt">'
+                 'Ваш браузер не поддерживает воспроизведение MP4.</video></div>'
+                 '<p class="wb-result-notice">Перед публикацией проверьте рисунки, факты, озвучку и субтитры.</p>'
+                 '<nav class="wb-downloads" aria-label="Скачать материалы видео">' + ''.join(
+                     f'<a class="btn {"primary" if name == "video.mp4" else "secondary"}" '
+                     f'href="{base}/files/{name}?download=true" download><span class="wb-file-icon" aria-hidden="true">'
+                     f'{file_icons[name]}</span>{label}</a>'
+                     for name, label in [('video.mp4', 'Скачать MP4'), ('video.srt', 'Субтитры'),
+                                         ('video.png', 'Обложка'), ('video.json', 'Тайминг')]
+                 ) + '</nav>'
+                 '<details class="wb-result-technical"><summary>Подробности создания</summary>')
+    body += (f'<p class="wb-stage-line">{esc(stages.get(state.get("stage"), "Подготовка задания"))} · '
+             f'API-вызовы: {state["calls"]} из {state.get("call_limit_total", state["max_api_calls"])}</p>')
     scene = state.get('scene_index')
     beat = state.get('beat_index')
     scene_total = state['request'].get('scenes', 3)
@@ -345,21 +370,13 @@ def job_html(state, product_id, *, error=None):
         body += (f'<form method="post" action="{base}/cancel"><button class="btn secondary">Остановить задание</button></form>')
     if state['status'] in {'queued', 'running'}:
         body += '<p>Можно закрыть страницу. Генерация продолжится; статус обновляется автоматически. Задание останется в списке ваших анимаций.</p>'
-    if state['status'] == 'completed':
-        body += (f'<video controls playsinline preload="metadata" poster="{base}/files/video.png" '
-                 f'style="width:min(100%,360px);max-height:70vh" src="{base}/files/video.mp4">'
-                 f'<track kind="subtitles" srclang="ru" label="Русский" src="{base}/files/video.vtt">'
-                 '</video>'
-                 '<p>Проверьте рисунки, факты, русский текст, озвучку и субтитры перед публикацией. Публикация выполняется отдельно.</p>'
-                 '<div class="sg-form-bottom">' + ''.join(
-                     f'<a class="btn secondary" href="{base}/files/{name}?download=true" download>{label}</a>'
-                     for name, label in [('video.mp4', 'Скачать MP4'), ('video.srt', 'Субтитры'),
-                                         ('video.png', 'Обложка'), ('video.json', 'Тайминг')]) + '</div>')
+    if completed:
+        body += '</details>'
         if not state.get('visual_repair_from'):
-            body += (f'<form method="post" action="{base}/repair" class="sg-form">'
-                     '<button class="btn secondary">Переделать рисунки, сохранить озвучку</button>'
-                     '<small>Сначала создаётся запрос на проверку и исправление рисунков. Платные вызовы начнутся только после подтверждения; сценарий и звук не генерируются заново.</small></form>')
-    body += f'<p><a href="/studio/products/{product_id}/whiteboard">К простым видео</a></p></section>'
+            body += (f'<form method="post" action="{base}/repair" class="sg-form wb-repair">'
+                     '<button type="submit" class="btn secondary">Переделать рисунки</button>'
+                     '<small>Сценарий и озвучка сохранятся. Платные вызовы — только после подтверждения.</small></form>')
+    body += f'<p class="wb-return"><a href="/studio/products/{product_id}/whiteboard">К списку видео</a></p></section>'
     return body
 
 
@@ -371,62 +388,132 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
     visual_review = fields.get('visual_review', 'once')
     length = str(fields.get('duration_seconds', '30'))
     science_mode = fields.get('science_mode', 'auto')
-    body = '<section class="sg-surface"><h2>Создать анимацию с озвучкой</h2><p>Вертикальное видео на 30 секунд или на минуту: русская озвучка, MP4, обложка и субтитры. В конце видео зовёт подписаться, поставить лайк или сделать то, что вы напишете. Перед запуском вы подтвердите платную генерацию. Доступ к моделям проверяется перед платным запуском.</p>'
-    body += f'<p class="sg-notice sg-duration-note" role="note">⏱ {esc(duration_notice(durations or {}, "whiteboard"))}</p>'
-    if error:
-        body += f'<p class="sg-warning" role="alert">{esc(error)}</p>'
-    body += (f'<form method="post" action="{base}" class="sg-form" id="wb-create-form">'
-             '<input type="hidden" name="wb_topic_choice" value="">'
-             '<input type="hidden" name="wb_paid_start" value="">'
-             '<input type="hidden" name="wb_paid_consent" value="">'
-             '<label class="sg-field"><span>Что объяснить в видео?</span><textarea name="topic" minlength="8" maxlength="400" rows="3" required '
-             f'placeholder="Например: почему пилот добавляет тягу при посадке на авианосец">{esc(fields.get("topic", ""))}</textarea></label>'
-             '<button class="btn secondary" type="button" id="wb-suggest-btn">Предложить темы для моей компании</button>'
-             '<label class="sg-field"><span>Готовый сценарий (необязательно)</span>'
-             f'<textarea name="source_script" rows="6" maxlength="12000" placeholder="Вставьте исходный текст ролика">{esc(fields.get("source_script", ""))}</textarea>'
-             '<small>Сценарист сохранит смысл и адаптирует текст под длительность. Важные утверждения не должны изменяться.</small></label>'
-             '<label class="sg-field"><span>Дополнительная информация (необязательно)</span>'
-             f'<textarea name="background_notes" rows="4" maxlength="6000" placeholder="Целевая аудитория, контекст, ограничения">{esc(fields.get("background_notes", ""))}</textarea></label>'
-             '<label class="sg-field"><span>Материалы для проверки фактов (необязательно)</span>'
-             f'<textarea name="reference_materials" rows="4" maxlength="6000" placeholder="Названия источников, ссылки, выдержки">{esc(fields.get("reference_materials", ""))}</textarea>'
-             '<small>Материалы пользователя сами по себе не считаются независимым подтверждением фактов.</small></label>'
-             '<label class="sg-field"><span>Научная проверка</span><select name="science_mode">' + ''.join(
-                 f'<option value="{value}"' + (' selected' if science_mode == value else '') + f'>{label}</option>'
-                 for value, label in [('auto', 'Автоматически по теме'), ('scientific', 'Научный сюжет — обязательно проверять'), ('general', 'Обычный сюжет (научные утверждения всё равно проверяются)')]) +
-             '</select><small>Неподтверждённые научные утверждения остановят производство до рисунков и озвучки.</small></label>'
-             '<label class="sg-field"><span>Длина видео</span><select name="duration_seconds">' + ''.join(
-                 f'<option value="{value}"' + (' selected' if length == str(value) else '') + f'>{label}</option>'
-                 for value, label in [(30, 'Около 30 секунд — 3 сцены'), (60, 'Около минуты — 6 сцен, объяснение подробнее')]) +
-             '</select><small>Минутное видео делается дольше и требует примерно вдвое больше платных вызовов.</small></label>'
-             '<label class="sg-field"><span>Призыв в конце видео</span><input type="text" name="call_to_action" maxlength="200" '
-             'placeholder="Пусто — призыв подписаться на канал и поставить лайк" '
-             f'value="{esc(fields.get("call_to_action", ""))}"><small>Это прозвучит последней репликой. Например: «Напишите в комментариях, что объяснить дальше».</small></label>'
-             '<details><summary>Настройки генерации</summary>'
-             '<label class="sg-field"><span>Вариант генерации</span><select name="profile">' + ''.join(
-                 f'<option value="{value}"' + (' selected' if profile == value else '') + f'>{label}</option>'
-                 for value, label in [('gemini_ru', 'Gemini 3.1 Flash Image / ClaudeHub — рисунки, Grok — озвучка'), ('configured', 'Gemini / ClaudeHub — рисунки, остальные модели из настроек сервера')]) +
-             '</select><small>Выбор сохраняется только для этого задания. Модели и голос можно проверить перед подтверждением.</small></label>'
-             '<label class="sg-field"><span>Проверка рисунков</span><select name="visual_review">' + ''.join(
-                 f'<option value="{value}"' + (' selected' if visual_review == value else '') + f'>{label}</option>'
-                 for value, label in [('once', 'Критик один раз, автор выбирает исправления'), ('off', 'Без критика')]) +
-             '</select><small>Проверяются механика, расположение деталей, соответствие озвучке и читаемость. Если каждую сцену придётся перерисовать, нужно больше вызовов: для 30 секунд 19, для минуты 34.</small></label>'
-             '<label class="sg-field"><span>Максимум платных API-вызовов</span><select name="max_api_calls">' + ''.join(
-                 f'<option value="{value}"' + (' selected' if maximum == str(value) else '') + f'>{label}</option>'
-                 for value, label in [('auto', 'Столько, сколько нужно для выбранных настроек'),
-                                      (19, '19'), (25, '25'), (34, '34'), (45, '45')]) +
-             '</select><small>Это лимит обращений к моделям; точная сумма списаний неизвестна. Для видео на 30 секунд без проверки рисунков нужно 14 вызовов, с проверкой 19; для минуты 26 и 34.</small></label></details>'
-             '<button class="btn primary">Сохранить и перейти к подтверждению</button></form></section>')
-    body += topic_picker_html(product_id)
-    return body
+    duration_options = ''.join(
+        f'<option value="{value}"' + (' selected' if length == str(value) else '') + f'>{label}</option>'
+        for value, label in [(30, '30 с · 3 сцены'), (60, '60 с · 6 сцен')]
+    )
+    science_options = ''.join(
+        f'<option value="{value}"' + (' selected' if science_mode == value else '') + f'>{label}</option>'
+        for value, label in [('auto', 'Автоматически по теме'),
+                             ('scientific', 'Научный сюжет — обязательно проверять'),
+                             ('general', 'Обычный сюжет (научные утверждения проверяются)')]
+    )
+    profile_options = ''.join(
+        f'<option value="{value}"' + (' selected' if profile == value else '') + f'>{label}</option>'
+        for value, label in [('gemini_ru', 'Gemini 3.1 Flash Image / ClaudeHub — рисунки, Grok — озвучка'),
+                             ('configured', 'Gemini / ClaudeHub — рисунки, остальные модели из настроек сервера')]
+    )
+    review_options = ''.join(
+        f'<option value="{value}"' + (' selected' if visual_review == value else '') + f'>{label}</option>'
+        for value, label in [('once', 'Критик один раз, автор выбирает исправления'),
+                             ('off', 'Без критика')]
+    )
+    call_options = ''.join(
+        f'<option value="{value}"' + (' selected' if maximum == str(value) else '') + f'>{label}</option>'
+        for value, label in [('auto', 'Автоматически под выбранные настройки'),
+                             (19, '19'), (25, '25'), (34, '34'), (45, '45')]
+    )
+    feedback = f'<p class="sg-warning" role="alert">{esc(error)}</p>' if error else ''
+    return f"""
+    <section class="sg-surface wb-create wb-screen" aria-labelledby="wb-create-title">
+      <header class="wb-create-head">
+        <p class="wb-eyebrow">Видеостудия · 9:16</p>
+        <h2 id="wb-create-title">Простое видео</h2>
+        <p>Из идеи в готовый ролик: рисунки, русский голос и MP4.</p>
+        <div class="wb-specs wb-pipeline" aria-label="Этапы создания">
+          <span>Сценарий</span><span>Рисунки</span><span>Озвучка</span><span>MP4</span>
+        </div>
+      </header>
+      {feedback}
+      <form method="post" action="{base}" class="sg-form wb-create-form" id="wb-create-form">
+        <input type="hidden" name="wb_topic_choice" value="">
+        <input type="hidden" name="wb_paid_start" value="">
+        <input type="hidden" name="wb_paid_consent" value="">
+        <div class="wb-create-main">
+          <div class="wb-create-question">
+            <div class="wb-topic-top">
+              <label for="wb-create-topic">О чём видео?</label>
+              <button class="btn secondary wb-suggest" type="button" id="wb-suggest-btn">✦ Подобрать тему</button>
+            </div>
+            <textarea id="wb-create-topic" name="topic" minlength="8" maxlength="400" rows="2" required
+              placeholder="Например: почему горячий предмет массивнее холодного">{esc(fields.get('topic', ''))}</textarea>
+          </div>
+          <div class="wb-create-settings">
+            <label class="sg-field" for="wb-duration"><span>Длительность</span>
+              <select id="wb-duration" name="duration_seconds">{duration_options}</select>
+            </label>
+            <label class="sg-field" for="wb-cta"><span>Призыв <small>· необязательно</small></span>
+              <input id="wb-cta" type="text" name="call_to_action" maxlength="200"
+                placeholder="Подписка и лайк — по умолчанию"
+                value="{esc(fields.get('call_to_action', ''))}">
+            </label>
+          </div>
+        </div>
+        <div class="wb-more-grid">
+        <details class="wb-create-more">
+          <summary>Сценарий и материалы <span>+ добавить</span></summary>
+          <div class="wb-create-fields">
+            <label class="sg-field"><span>Готовый сценарий</span>
+              <textarea name="source_script" rows="5" maxlength="12000"
+                placeholder="Вставьте исходный текст ролика">{esc(fields.get('source_script', ''))}</textarea>
+              <small>Сценарист сохранит смысл и адаптирует текст под длительность. Важные утверждения не должны изменяться.</small>
+            </label>
+            <label class="sg-field"><span>Дополнительная информация</span>
+              <textarea name="background_notes" rows="3" maxlength="6000"
+                placeholder="Аудитория, контекст и ограничения">{esc(fields.get('background_notes', ''))}</textarea>
+            </label>
+            <label class="sg-field"><span>Материалы для проверки фактов</span>
+              <textarea name="reference_materials" rows="3" maxlength="6000"
+                placeholder="Источники, ссылки, выдержки">{esc(fields.get('reference_materials', ''))}</textarea>
+              <small>Предоставленные материалы сами по себе не считаются независимым подтверждением фактов.</small>
+            </label>
+          </div>
+        </details>
+        <details class="wb-create-more">
+          <summary>Настройки <span>Авто</span></summary>
+          <div class="wb-create-fields">
+            <label class="sg-field"><span>Научная проверка</span>
+              <select name="science_mode">{science_options}</select>
+              <small>Неподтверждённые научные утверждения остановят производство до рисунков и озвучки.</small>
+            </label>
+            <label class="sg-field"><span>Вариант генерации</span>
+              <select name="profile">{profile_options}</select>
+              <small>Выбор сохраняется для этого задания. Модели и голос можно проверить до платного запуска.</small>
+            </label>
+            <label class="sg-field"><span>Проверка рисунков</span>
+              <select name="visual_review">{review_options}</select>
+              <small>Один проход критика с выборочной перерисовкой. Для 30 секунд может потребоваться 19 вызовов, для минуты — 34.</small>
+            </label>
+            <label class="sg-field"><span>Максимум платных API-вызовов</span>
+              <select name="max_api_calls">{call_options}</select>
+              <small>Ограничение числа обращений, а не стоимости в деньгах. Для 30 секунд без критика нужно 14 вызовов, с критиком — 19; для минуты 26 и 34.</small>
+            </label>
+          </div>
+        </details>
+        </div>
+        <footer class="wb-create-actions">
+          <div class="wb-create-hint">
+            <strong>Сначала — подтверждение</strong>
+            <span>Без платного запуска до вашего согласия.</span>
+          </div>
+          <button class="btn primary" type="submit">Продолжить к подтверждению</button>
+        </footer>
+      </form>
+      <details class="wb-duration-more"><summary>Сколько займёт создание?</summary>
+        <p>{esc(duration_notice(durations or {}, 'whiteboard'))}</p>
+      </details>
+    </section>
+    {topic_picker_html(product_id)}
+    """
 
 
 def history_html(states, product_id):
     base = f'/studio/products/{product_id}/whiteboard'
-    body = '<section class="sg-surface"><h2>Ваши анимации</h2><div id="whiteboard-jobs" aria-live="polite">'
+    body = '<section class="sg-surface wb-library" aria-labelledby="wb-library-title"><div class="wb-library-head"><h2 id="wb-library-title">Мои видео</h2><span class="wb-library-count">' + str(len(states)) + '</span></div><div id="whiteboard-jobs" aria-live="polite">'
     for state in states:
         url = f'{base}/{state["task_id"]}'
-        body += (f'<article><p><a href="{url}">{esc(state["request"]["topic"])}</a></p>'
-                 f'<p>{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p>')
+        body += (f'<article class="wb-library-item"><p class="wb-library-title"><span class="wb-list-icon" aria-hidden="true">▶</span><a href="{url}">{esc(state["request"]["topic"])}</a></p>'
+                 f'<p class="wb-library-status">{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p>')
         if state['status'] == 'completed':
             body += (f'<p><a class="btn primary" href="{url}">Посмотреть видео</a> '
                      f'<a class="btn secondary" href="{url}/files/video.mp4?download=true" download>Скачать MP4</a></p>')
@@ -441,23 +528,27 @@ def history_html(states, product_id):
       const base = ''' + json.dumps(base) + ''';
       const endpoint = ''' + json.dumps(f'/studio/products/{product_id}/whiteboard/jobs.json') + ''';
       const names = ''' + json.dumps(STATUS_NAMES, ensure_ascii=False) + ''';
+      const counter = document.querySelector('.wb-library-count');
       async function refresh() {
         if (document.hidden) return;
         try {
           const response = await fetch(endpoint, {credentials:'same-origin', cache:'no-store'});
           if (!response.ok) return;
           const states = await response.json();
-          if (!Array.isArray(states) || !states.length) return;
+          if (!Array.isArray(states)) return;
           const fragment = document.createDocumentFragment();
+          let shown = 0;
           for (const state of states) {
-            if (!/^[0-9a-f-]{36}$/.test(state.task_id)) continue;
-            const article = document.createElement('article');
-            const title = document.createElement('p');
+            if (!/^[0-9a-f-]{36}$/.test(state.task_id) || !state.request || typeof state.request.topic !== 'string') continue;
+            shown += 1;
+            const article = document.createElement('article'); article.className = 'wb-library-item';
+            const title = document.createElement('p'); title.className = 'wb-library-title';
             const link = document.createElement('a');
             link.href = base + '/' + state.task_id;
             link.textContent = state.request.topic;
-            title.append(link); article.append(title);
-            const status = document.createElement('p');
+            const glyph = document.createElement('span'); glyph.className = 'wb-list-icon'; glyph.textContent = '▶'; glyph.setAttribute('aria-hidden', 'true');
+            title.append(glyph, link); article.append(title);
+            const status = document.createElement('p'); status.className = 'wb-library-status';
             status.textContent = names[state.status] || 'Обновление статуса';
             article.append(status);
             if (state.status === 'completed') {
@@ -471,7 +562,13 @@ def history_html(states, product_id):
             }
             fragment.append(article);
           }
+          if (!shown) {
+            const empty = document.createElement('p');
+            empty.textContent = 'Здесь появятся ваши задания.';
+            fragment.append(empty);
+          }
           root.replaceChildren(fragment);
+          if (counter) counter.textContent = String(shown);
         } catch (_) {}
       }
       setInterval(refresh, 8000);
@@ -573,7 +670,8 @@ async def studio_create(product_id: UUID, request: Request, db: Session = Depend
 @router.get('/studio/products/{product_id}/whiteboard/{task_id}', response_class=HTMLResponse)
 def studio_job(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
     state = _load(db, product_id, task_id)
-    return page(_owner_product(db, product_id), 'Генерация видео', job_html(state, product_id),
+    title = 'Готовое видео' if state['status'] == 'completed' else 'Генерация видео'
+    return page(_owner_product(db, product_id), title, job_html(state, product_id),
                 refresh=state['status'] in {'queued', 'running'})
 
 
