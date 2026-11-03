@@ -243,6 +243,7 @@ def job_html(state, product_id, *, error=None):
     if completed:
         # The actual playable file must be the focal point, not the log or API metadata.
         length_label = '1 мин · 6 сцен' if state['request'].get('scenes', 3) == 6 else '30 сек · 3 сцены'
+        file_icons = {'video.mp4': '↓', 'video.srt': '≡', 'video.png': '▣', 'video.json': '◷'}
         body += (f'<div class="wb-result-meta" aria-label="Формат ролика">'
                  f'<span>{length_label}</span><span>9:16</span><span>Русский голос · MP4</span></div>')
         body += (f'<div class="wb-result-player"><video controls playsinline preload="metadata" '
@@ -255,7 +256,7 @@ def job_html(state, product_id, *, error=None):
                  '<nav class="wb-downloads" aria-label="Скачать материалы видео">' + ''.join(
                      f'<a class="btn {"primary" if name == "video.mp4" else "secondary"}" '
                      f'href="{base}/files/{name}?download=true" download><span class="wb-file-icon" aria-hidden="true">'
-                     f'{dict([("video.mp4","↓"), ("video.srt","≡"), ("video.png","▣"), ("video.json","◷")])[name]}</span>{label}</a>'
+                     f'{file_icons[name]}</span>{label}</a>'
                      for name, label in [('video.mp4', 'Скачать MP4'), ('video.srt', 'Субтитры'),
                                          ('video.png', 'Обложка'), ('video.json', 'Тайминг')]
                  ) + '</nav>'
@@ -527,16 +528,19 @@ def history_html(states, product_id):
       const base = ''' + json.dumps(base) + ''';
       const endpoint = ''' + json.dumps(f'/studio/products/{product_id}/whiteboard/jobs.json') + ''';
       const names = ''' + json.dumps(STATUS_NAMES, ensure_ascii=False) + ''';
+      const counter = document.querySelector('.wb-library-count');
       async function refresh() {
         if (document.hidden) return;
         try {
           const response = await fetch(endpoint, {credentials:'same-origin', cache:'no-store'});
           if (!response.ok) return;
           const states = await response.json();
-          if (!Array.isArray(states) || !states.length) return;
+          if (!Array.isArray(states)) return;
           const fragment = document.createDocumentFragment();
+          let shown = 0;
           for (const state of states) {
-            if (!/^[0-9a-f-]{36}$/.test(state.task_id)) continue;
+            if (!/^[0-9a-f-]{36}$/.test(state.task_id) || !state.request || typeof state.request.topic !== 'string') continue;
+            shown += 1;
             const article = document.createElement('article'); article.className = 'wb-library-item';
             const title = document.createElement('p'); title.className = 'wb-library-title';
             const link = document.createElement('a');
@@ -558,7 +562,13 @@ def history_html(states, product_id):
             }
             fragment.append(article);
           }
+          if (!shown) {
+            const empty = document.createElement('p');
+            empty.textContent = 'Здесь появятся ваши задания.';
+            fragment.append(empty);
+          }
           root.replaceChildren(fragment);
+          if (counter) counter.textContent = String(shown);
         } catch (_) {}
       }
       setInterval(refresh, 8000);

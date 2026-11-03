@@ -1143,3 +1143,32 @@ body[data-growth-design="v4"] .route-content .wb-result .wb-repair .btn.secondar
  .wb-approval .wb-actions .btn{min-height:41px;padding:9px 10px;font-size:12px;border-radius:9px}
  .wb-approval .wb-back{min-height:32px;font-size:11px}
 }
+
+
+/* Mobile picker and tap-target QA for simple-video flow. */
+@media (max-width: 780px) {
+  body[data-growth-design="v4"] #wb-topic-dialog {
+    box-sizing: border-box;
+    width: min(95vw, 500px) !important;
+    max-height: 88dvh !important;
+    margin: auto;
+    padding: 12px !important;
+    overflow-y: auto;
+    border: 1px solid var(--s-line) !important;
+    border-radius: 14px !important;
+    background: var(--s-surface) !important;
+    color: var(--s-text) !important;
+  }
+  body[data-growth-design="v4"] #wb-topic-dialog h3 { font-size: 16px; line-height: 1.25; margin: 0; }
+  body[data-growth-design="v4"] #wb-topic-dialog p { font-size: 12px; line-height: 1.4; }
+  body[data-growth-design="v4"] #wb-topic-options { max-height: 31dvh !important; gap: 6px !important; }
+  body[data-growth-design="v4"] #wb-topic-dialog .btn { min-height: 40px; font-size: 12px; white-space: normal; }
+  body[data-growth-design="v4"] #wb-topic-launch { min-height: 44px !important; }
+  body[data-growth-design="v4"] .route-content .wb-create .wb-suggest { min-height: 40px; }
+  .wb-more-grid .wb-create-more > summary { min-height: 40px; }
+  .wb-create-actions > .btn { min-height: 44px; }
+  .wb-result .wb-downloads > .btn { min-height: 42px; }
+  .wb-result .wb-downloads > .btn.primary { min-height: 44px; }
+  .wb-library-item > p .btn { min-height: 38px; }
+  .wb-result .wb-return a { min-height: 40px; }
+}

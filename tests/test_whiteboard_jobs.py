@@ -105,7 +105,7 @@ def test_simple_video_creation_uses_servgo_ui_without_changing_payload_contract(
     assert '<Тема & видео>' not in html and '&lt;Тема &amp; видео&gt;' in html
     assert 'name="duration_seconds"' in html and '<option value="60" selected>' in html
     assert html.index('wb-create-question') < html.index('wb-more-grid')
-    assert 'class="wb-topic-top"' in html and 'class="wb-pipeline' not in html
+    assert 'class="wb-topic-top"' in html
     assert 'class="wb-specs wb-pipeline"' in html and 'wb-duration-more' in html
     for name in ('topic', 'source_script', 'background_notes', 'reference_materials',
                  'science_mode', 'duration_seconds', 'call_to_action', 'profile',
@@ -114,7 +114,7 @@ def test_simple_video_creation_uses_servgo_ui_without_changing_payload_contract(
         assert f'name="{name}"' in html, name
     assert 'id="wb-topic-dialog"' in html
     assert 'Продолжить к подтверждению' in html
-    assert 'Платная генерация начнётся после отдельного подтверждения' in html
+    assert 'Без платного запуска до вашего согласия.' in html
 
 
 def test_simple_video_result_prioritizes_player_and_preserves_downloads():

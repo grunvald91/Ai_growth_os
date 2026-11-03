@@ -37,6 +37,7 @@ jobs:
           path: |
             /tmp/servgo-growth-voice-ui/
             /tmp/v4-simple-video-create-*.png
+            /tmp/v4-simple-video-topic-*.png
             /tmp/v4-simple-video-result-*.png
             /tmp/v4-video-approval-*.png
             /tmp/v4-video-*.png

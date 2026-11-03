@@ -4,6 +4,7 @@ from typing import Literal
 
 import httpx
 
+from app.llm.errors import ProviderEmptyResponseError, ProviderMalformedResponseError
 from app.llm.limits import output_ceiling, rejects_ceiling
 from app.llm.schemas import LLMRequest, LLMResponse, LLMUsage
 from app.llm.timeouts import PROVIDER_TIMEOUT_SECONDS
@@ -112,16 +113,19 @@ class XAIProvider:
                 await asyncio.sleep(_RETRY_DELAYS_SECONDS[attempt])
 
             if response is None:
-                raise RuntimeError("xAI request did not produce a response")
-            data = response.json()
+                raise ProviderEmptyResponseError("provider_returned_no_response")
+            try:
+                data = response.json()
+            except ValueError as exc:
+                raise ProviderMalformedResponseError("provider_invalid_json") from exc
 
         try:
             choice = data["choices"][0]
             content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise ValueError("xAI response did not contain assistant content") from exc
-        if not isinstance(content, str) or not content:
-            raise ValueError("xAI response content is empty")
+            raise ProviderMalformedResponseError("provider_missing_assistant_content") from exc
+        if not isinstance(content, str) or not content.strip():
+            raise ProviderEmptyResponseError("provider_empty_assistant_content")
 
         reported_usage = data.get("usage")
         # Absent or partial usage is UNKNOWN, not an observed 0/0 billable call.

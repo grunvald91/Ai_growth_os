@@ -247,8 +247,8 @@ def test_form_offers_length_and_call_to_action(environment):
     _, _, product, _ = environment
     with client() as browser:
         page = browser.get(f'/studio/products/{product}/whiteboard').text
-    assert 'name="duration_seconds"' in page and 'Около минуты' in page
-    assert 'name="call_to_action"' in page and 'подписаться на канал и поставить лайк' in page
+    assert 'name="duration_seconds"' in page and '60 с · 6 сцен' in page
+    assert 'name="call_to_action"' in page and 'Подписка и лайк — по умолчанию' in page
     assert 'value="auto" selected' in page
 
 
