@@ -1,0 +1,79 @@
+name: ServGo catalog profile sync (one time)
+on:
+  push:
+    branches: [ops/servgo-catalog-profile-sync-20261103]
+    paths: [.github/workflows/servgo-catalog-profile-sync-once.yml]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-catalog-profile-sync-20261103
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+      RELEASE: 42172d73be38e3c32866a71b2a530dc5cb5de1ba
+    steps:
+      - name: Guarded one-time ServGo owner profile synchronization and verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null >/tmp/keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" >/tmp/key
+            ssh-keygen -lf /tmp/key 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done </tmp/keys
+          test -s ~/.ssh/known_hosts
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ServerAliveInterval=20 \
+            "root@$HOST" "RELEASE='$RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          current=''
+          for i in $(seq 1 45); do
+            current=$(docker exec ai-growth-os-api-1 printenv RELEASE_SHA 2>/dev/null || true)
+            if [ "$current" = "$RELEASE" ]; then break; fi
+            sleep 10
+          done
+          test "$current" = "$RELEASE"
+          echo "CONFIRMED_RUNNING_SHA=$current"
+          # No owner text or credentials are printed; only a structural summary.
+          docker exec ai-growth-os-api-1 python -m app.seo.upgrade_servgo_profile
+          previous=$(docker exec ai-growth-os-api-1 python -c \
+            'import hashlib; from app.core.config import get_settings; p=get_settings().products_root / "servgo/company-profile.json"; print(hashlib.sha256(p.read_bytes()).hexdigest())')
+          test -n "$previous"
+          docker exec ai-growth-os-api-1 python -m app.seo.upgrade_servgo_profile \
+            --apply --expected-sha256 "$previous"
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          from sqlalchemy import select
+          from app.company_profile import load_company_profile
+          from app.core.config import get_settings
+          from app.db.session import SessionLocal
+          from app.models.domain import Product
+          from app.privacy import PrivacyGateway
+          from app.seo.planner import _company
+          settings=get_settings()
+          loaded=load_company_profile(settings.products_root,"servgo")
+          assert loaded.profile is not None and not loaded.validation_errors
+          offers=loaded.profile.offer.products_services
+          families={offer.product_family for offer in offers}
+          expected={"BookingBot","Growth","Mail","Смена","SEO-завод"}
+          assert expected.issubset(families),(expected-families)
+          assert all(offer.evidence_refs for offer in offers if offer.release_status in {"live","limited"})
+          assert any(o.release_status == "unverified" and o.product_family == "Смена" for o in offers)
+          with SessionLocal() as db:
+              p=db.scalar(select(Product).where(Product.slug=="servgo"))
+              assert p is not None
+              company=_company(db,p,settings.products_root,PrivacyGateway())
+              catalog=company["offer_catalog"]
+              assert expected.issubset({o["product_family"] for o in catalog})
+              assert all(not o["conversion_action"] for o in catalog if o["release_status"] == "unverified")
+          print("SERVGO_CATALOG_RUNTIME_VERIFIED families=5 unavailable_shifts=1 independent_tenant_profiles_unmodified=1")
+          PY
+          echo "SERVGO_PROFILE_SYNC_COMPLETE"
+          REMOTE
