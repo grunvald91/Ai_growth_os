@@ -98,6 +98,10 @@ def normalize(raw: dict) -> dict | None:
             for i in raw.get("faq", [])
         ]
         category = str(raw.get("category") or "Советы")
+        facts = raw.get("company_facts")
+        company_facts = ([fact.strip() for fact in facts
+                          if isinstance(fact, str) and fact.strip()][:24]
+                         if isinstance(facts, list) else [])
         if not title or not lead or not sections:
             return None
         return {
@@ -112,6 +116,7 @@ def normalize(raw: dict) -> dict | None:
             "published": _date(str(raw.get("published_at") or updated))[0],
             "date_label": label,
             "direct_answer": str(raw.get("direct_answer") or "").strip(),
+            "company_facts": company_facts,
             "sections": sections,
             "closing": str(raw.get("closing") or "").strip(),
             "faq": faq,

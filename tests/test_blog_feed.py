@@ -37,6 +37,13 @@ class NormalizeTest(unittest.TestCase):
         self.assertEqual(a["date_label"], "28 октября 2026")
         self.assertTrue(a["from_feed"])
 
+    def test_verified_company_facts_pass_through_without_html(self):
+        raw = {**RAW, "company_facts": [
+            "Собственная база клиентов.", "<script>alert(1)</script>", "", 17]}
+        article = blog_feed.normalize(raw)
+        self.assertEqual(article["company_facts"], [
+            "Собственная база клиентов.", "<script>alert(1)</script>"])
+
     def test_ordered_source_blocks_keep_interleaved_paragraphs(self):
         raw = {**RAW, "sections": [{
             "title": "Как выбрать",
@@ -107,6 +114,18 @@ class BlogFeedPagesTest(unittest.IsolatedAsyncioTestCase):
         types = [json.loads(m)["@type"] for m in re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.S)]
         self.assertEqual(types, ["BlogPosting", "FAQPage"])
         self.assertIn('rel="canonical" href="https://servgo.ru/blog/kak-vybrat-crm"', html)
+
+    async def test_live_article_renders_verified_facts_as_escaped_text(self):
+        raw = {**RAW, "company_facts": [
+            "Подтверждённая возможность", "<script>alert(1)</script>"]}
+        async def with_facts(*a, **kw):
+            return [blog_feed.normalize(raw)]
+        with patch("webapp.blog_feed.feed_articles", with_facts):
+            async with TestClient(TestServer(create_webapp())) as c:
+                html = await (await c.get("/blog/kak-vybrat-crm")).text()
+        self.assertIn("Подтверждённая возможность", html)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+        self.assertNotIn("<script>alert(1)</script>", html)
 
     async def test_rendered_seo_list_stays_between_paragraphs(self):
         raw = {**RAW, "sections": [{

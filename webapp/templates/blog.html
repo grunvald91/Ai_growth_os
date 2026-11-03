@@ -217,6 +217,12 @@
                     <ul>{% for point in article.summary %}<li>{{ point }}</li>{% endfor %}</ul>
                 </aside>
                 {% endif %}
+                {% if article.from_feed and article.company_facts %}
+                <section class="blog-verified-facts" aria-labelledby="verified-facts-title">
+                    <h2 id="verified-facts-title">Проверенные возможности</h2>
+                    <ul>{% for fact in article.company_facts %}<li>{{ fact }}</li>{% endfor %}</ul>
+                </section>
+                {% endif %}
                 {% if article.method_note %}<p class="blog-method-note">{{ article.method_note }}</p>{% endif %}
                 {% for section in article.sections %}
                     <section aria-labelledby="section-{{ loop.index }}">

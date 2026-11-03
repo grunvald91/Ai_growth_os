@@ -1,0 +1,37 @@
+name: SEO blog facts regression CI
+on:
+  pull_request:
+    paths:
+      - webapp/blog_feed.py
+      - webapp/templates/blog.html
+      - tests/test_blog_feed.py
+      - .github/workflows/seo-blog-facts-ci.yml
+permissions:
+  contents: read
+concurrency:
+  group: seo-blog-facts-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt pytest aiosqlite jinja2 fastapi
+      - name: Compile blog and test modules
+        run: python -m py_compile webapp/blog_feed.py webapp/server.py tests/test_blog_feed.py
+      - name: Test blog feed, HTML escaping and SEO commercial links
+        env:
+          BOT_TOKEN: "123:test"
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+        run: python -m pytest -q tests/test_blog_feed.py tests/test_seo_commercial.py
+      - name: Check patch whitespace
+        run: git diff --check origin/main...HEAD
