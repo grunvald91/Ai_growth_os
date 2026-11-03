@@ -303,5 +303,5 @@ def test_servgo_catalog_declares_all_families_with_evidence_for_promoted_modules
         if offer.release_status in ("live", "limited"):
             assert offer.evidence_refs
     assert set(by_family) == {"BookingBot", "Growth", "Mail", "Смена", "SEO-завод"}
-    assert all(offer.release_status == "unverified" for offer in by_family["Смена"])
-    assert all(offer.landing_page is None for offer in by_family["Смена"])
+    assert all(offer.release_status == "live" for offer in by_family["Смена"])
+    assert all(offer.evidence_refs and offer.landing_page is None for offer in by_family["Смена"])
