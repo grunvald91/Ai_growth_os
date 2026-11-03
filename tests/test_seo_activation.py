@@ -116,3 +116,71 @@ def test_owner_toggle_is_post_only_and_queue_blocked_until_enable(env):
             assert not is_enabled(db, real.id)
     finally:
         app.dependency_overrides.clear()
+
+
+
+def test_owner_can_configure_each_company_without_implicit_seo_activation(env):
+    from app.seo.activation import editorial_preferences, set_editorial_preferences
+    db, real, demo = env
+    configured = set_editorial_preferences(
+        db, real.id, timezone_name="Asia/Almaty",
+        autorun_interval_days=14, autorun_horizon_days=30,
+        publications_per_day=5, articles_per_day=2, actor="owner")
+    assert configured.timezone_name == "Asia/Almaty"
+    assert configured.autorun_interval_days == 14
+    assert configured.autorun_horizon_days == 30
+    assert configured.publications_per_day == 5
+    assert configured.articles_per_day == 2
+    assert not is_enabled(db, real.id)
+    untouched = editorial_preferences(db, demo.id)
+    assert untouched.timezone_name == "Europe/Moscow"
+    assert untouched.publications_per_day == 3
+    assert not is_enabled(db, demo.id)
+    assert list(db.scalars(select(Task))) == []
+
+
+@pytest.mark.parametrize("changes", [
+    {"timezone_name": "Nowhere/Unknown"},
+    {"autorun_interval_days": 0},
+    {"autorun_horizon_days": 16},
+    {"publications_per_day": 0},
+    {"articles_per_day": 31},
+])
+def test_bad_company_calendar_preferences_do_not_change_stored_values(env, changes):
+    from app.seo.activation import editorial_preferences, set_editorial_preferences
+    db, real, _ = env
+    values = {
+        "timezone_name": "Europe/Moscow", "autorun_interval_days": 7,
+        "autorun_horizon_days": 7, "publications_per_day": 3, "articles_per_day": 3,
+        "actor": "owner",
+    }
+    values.update(changes)
+    with pytest.raises(ValueError):
+        set_editorial_preferences(db, real.id, **values)
+    assert not is_enabled(db, real.id)
+    assert editorial_preferences(db, real.id).publications_per_day == 3
+
+
+def test_company_owner_can_set_schedule_via_existing_protected_studio_page(env):
+    from app.seo.activation import editorial_preferences
+    db, real, demo = env
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_settings] = lambda: Settings(app_env="development", _env_file=None)
+    try:
+        with TestClient(app) as client:
+            path = f"/studio/products/{real.id}/seo"
+            page = client.get(path)
+            assert page.status_code == 200 and "Расписание и частота публикаций" in page.text
+            form = {"timezone_name": "Asia/Dubai", "autorun_interval_days": "14",
+                    "autorun_horizon_days": "30", "publications_per_day": "5",
+                    "articles_per_day": "2"}
+            updated = client.post(path + "/preferences", data=form, follow_redirects=False)
+            assert updated.status_code == 303
+            prefs = editorial_preferences(db, real.id)
+            assert prefs.timezone_name == "Asia/Dubai"
+            assert prefs.autorun_horizon_days == 30
+            assert prefs.publications_per_day == 5
+            assert not is_enabled(db, real.id) and not is_enabled(db, demo.id)
+            assert client.post(path + "/preferences", data={**form, "timezone_name": "Fake/City"}).status_code == 422
+    finally:
+        app.dependency_overrides.clear()
