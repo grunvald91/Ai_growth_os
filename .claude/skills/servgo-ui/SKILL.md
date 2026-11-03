@@ -29,6 +29,12 @@ In this repository inspect:
 6. **Render and inspect** at 360px/390px/430px, short phone viewport, >=1024px desktop, real interactions, populated and empty/loading/error states; compare to BookingBot baseline. Screenshots must use synthetic data. Static CSS checks alone do not prove visual correctness.
 7. **Run focused tests**, inspect the patch, follow local `AGENTS.md` for CI and permissions, and report exactly which real UI and functional checks passed or could not run.
 
+## Generation mode
+
+For any new Studio component, start from the real workflow and design a useful **working** element, not a showcase illustration. Use BookingBot's hierarchy and selected states, but let complex content retain its proper form (editor, calendar, table, charts). Choose an existing Studio component or semantic token before adding new CSS, and avoid a new card border/shadow for every item. For exploratory layout requests, compare two compact arrangements and implement the appropriate one; for a concrete change, implement directly.
+
+The canonical skill contains [component recipes](https://github.com/grunvald91/booking_bot/blob/main/.claude/skills/servgo-ui/references/component-recipes.md) tied to real BookingBot selectors. Before both PRs merge, use their matching feature-branch version. If a cross-repository reference is not accessible in the current checkout, report it and inspect the locally available tokens/adapter; **do not claim pixel-exact equivalence without the baseline**.
+
 ## Change procedure
 
 - Identify actual route + associated CSS/JS and tests before editing.
