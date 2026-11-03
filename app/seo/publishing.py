@@ -197,7 +197,8 @@ def duplicate_page_problems(db: Session, row: Artifact, article: ArticleArtifact
 
 
 def publish_if_clear(db: Session, article_id, *, now: datetime | None = None,
-                     daily_limit: int = PUBLICATIONS_PER_DAY) -> Outcome:
+                     daily_limit: int = PUBLICATIONS_PER_DAY,
+                     internal_canary: bool = False) -> Outcome:
     """Publish immediately when the AI critic and basic article checks pass."""
     row = db.get(Artifact, article_id)
     if row is None or row.kind != "article":
@@ -239,7 +240,11 @@ def publish_if_clear(db: Session, article_id, *, now: datetime | None = None,
     if not is_enabled(db, row.product_id):
         return Outcome(False, "seo_disabled")
     if not public_blog_ready(db, row.product_id):
-        return Outcome(False, "public_blog_unavailable")
+        # The one-time ephemeral Growth HTTP smoke has no BookingBot customer
+        # site by design. Its explicit flag never permits regular tenants.
+        product = db.get(Product, row.product_id)
+        if not (internal_canary and product.slug.startswith("seo-release-canary-")):
+            return Outcome(False, "public_blog_unavailable")
     from app.models.domain import Task
     task = db.get(Task, row.task_id) if row.task_id else None
     if task is not None and task.due_at is not None and (

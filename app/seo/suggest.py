@@ -137,8 +137,10 @@ async def collect(seeds: Iterable[str], *, client: httpx.AsyncClient | None = No
 
     try:
         # Round-robin engines; create only one bounded batch of coroutines at a time.
-        jobs = [(engine, probe) for probe in probes for engine in engines
-                if probe not in results[engine].completed][:max_requests]
+        # The request budget is TOTAL per semantic-core run, not an extra
+        # allowance on each checkpoint replay. Retry failures within that cap.
+        jobs = [(engine, probe) for probe in probes for engine in engines][:max_requests]
+        jobs = [(engine, probe) for engine, probe in jobs if probe not in results[engine].completed]
         try:
             async with asyncio.timeout(total_timeout):
                 for offset in range(0, len(jobs), concurrency):

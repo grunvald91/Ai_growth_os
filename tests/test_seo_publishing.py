@@ -581,6 +581,7 @@ async def test_unlinked_tenant_cannot_be_marked_published(env, tmp_path):
     set_enabled(db, tenant.id, enabled=True, actor="fixture-owner")
     article_id = await make_article(db, tenant, tmp_path)
     assert publish_if_clear(db, article_id).reason == "public_blog_unavailable"
+    assert publish_if_clear(db, article_id, internal_canary=True).reason == "public_blog_unavailable"
     assert db.scalar(select(Publication).where(Publication.product_id == tenant.id)) is None
     db.add(StudioBusinessLink(servgo_business_id=91234, product_id=tenant.id))
     db.commit()
