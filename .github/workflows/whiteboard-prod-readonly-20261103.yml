@@ -32,10 +32,11 @@ jobs:
           import json
           from datetime import datetime, timezone
           from pathlib import Path
+          import subprocess
           from sqlalchemy import select
           from app.core.config import Settings
           from app.db.session import SessionLocal
-          from app.models.domain import Task, Artifact
+          from app.models.domain import Task, Artifact, Approval
           from app.content.whiteboard.jobs import AGENT, job_directory
 
           cfg = Settings()
@@ -45,7 +46,7 @@ jobs:
           print('products_root_exists', Path(cfg.products_root).is_dir())
           with SessionLocal() as db:
               jobs = list(db.scalars(select(Task).where(Task.assigned_agent == AGENT)
-                   .order_by(Task.created_at.desc(), Task.id.desc()).limit(10)))
+                   .order_by(Task.created_at.desc(), Task.id.desc()).limit(1)))
               print('jobs_inspected', len(jobs))
               for idx, task in enumerate(jobs, 1):
                   raw = db.scalar(select(Artifact.content).where(
@@ -63,9 +64,24 @@ jobs:
                       stages = {'read_error':type(exc).__name__}
                   errors = []
                   for e in (value.get('errors') or [])[-12:]:
-                      errors.append({k:e.get(k) for k in ('at','code','stage','calls','http_status','exception_type','auto_resume','refunded') if k in e})
+                      errors.append({k:e.get(k) for k in ('at','code','stage','calls','http_status','exception_type','auto_resume','refunded','reason') if k in e})
+                  source = db.scalar(select(Artifact).where(Artifact.task_id == task.id, Artifact.kind == 'whiteboard_request'))
+                  approved_payload = json.loads(source.content) if source is not None else {}
+                  approvals = list(db.scalars(select(Approval).where(Approval.artifact_id == source.id)
+                                .order_by(Approval.decided_at.asc()))) if source is not None else []
+                  probe = None
+                  if video.is_file():
+                      p = subprocess.run(['ffprobe','-v','error','-show_entries',
+                          'format=duration,size:stream=codec_name,width,height', '-of','json',str(video)],
+                          capture_output=True,text=True,timeout=20)
+                      probe = json.loads(p.stdout) if p.returncode == 0 else {'ffprobe_error':p.returncode}
                   result = {
                     'recency_rank':idx, 'job_suffix':str(task.id)[-8:],
+                    'approved_max_api_calls':approved_payload.get('max_api_calls'),
+                    'approvals':[{'action':a.action_type,'status':a.status,'decided_at':str(a.decided_at),
+                        'reason':a.reason if a.action_type in ('whiteboard_auto_resume','whiteboard_resume') else None}
+                        for a in approvals if a.action_type in ('whiteboard_auto_resume','whiteboard_resume')],
+                    'ffprobe':probe,
                     'created_at':str(task.created_at), 'updated_at':str(task.updated_at),
                     'status':str(task.status.value if hasattr(task.status,'value') else task.status),
                     'stage':value.get('stage'), 'failed_stage':value.get('failed_stage'),
