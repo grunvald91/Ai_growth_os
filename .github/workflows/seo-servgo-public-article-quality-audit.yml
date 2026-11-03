@@ -38,12 +38,13 @@ jobs:
               rows=list(db.execute(select(Artifact,Publication).join(
                   Publication,Publication.artifact_id==Artifact.id).where(
                   Publication.product_id==p.id,Publication.channel=='own_site',
-                  Publication.status=='published').order_by(Publication.published_at.desc()).limit(3)))
+                  Publication.status=='published').order_by(Publication.published_at.desc()).limit(20)))
               print('PUBLISHED_COUNT_SAMPLE='+str(len(rows)))
               for art,pub in rows:
                   a=ArticleArtifact.model_validate_json(art.content)
                   reader=a.reader_article
                   if not reader: continue
+                  print('ARTICLE_FULL='+json.dumps({'slug':pub.external_reference,'reader':reader.model_dump(mode='json'),'primary_query':a.seo.primary_query,'conversion':a.conversion.model_dump(mode='json')},ensure_ascii=False,default=str))
                   parts=[reader.lead,reader.direct_answer or '',*(s.body for s in reader.sections),reader.closing]
                   print('ARTICLE_METRICS='+json.dumps({
                      'slug':pub.external_reference,'primary_query':a.seo.primary_query,
