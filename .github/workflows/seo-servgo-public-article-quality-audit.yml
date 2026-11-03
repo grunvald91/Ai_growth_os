@@ -1,0 +1,65 @@
+name: ServGo public article content and review audit
+on:
+  push:
+    branches: [audit/seo-servgo-readonly-20261103]
+    paths: [.github/workflows/seo-servgo-public-article-quality-audit.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Review published ServGo SEO article metadata and public text
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null >/tmp/k
+          while IFS= read -r line; do
+            printf '%s\n' "$line" >/tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done </tmp/k
+          test -s ~/.ssh/known_hosts
+          sshpass -e ssh -o StrictHostKeyChecking=yes "root@$HOST" 'docker exec -i ai-growth-os-api-1 python -' <<'PY'
+          import json,re
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Product, Publication, Artifact
+          from app.workflows.article_contracts import ArticleArtifact
+          from app.seo.publishing import critic_verdict
+          with SessionLocal() as db:
+              p=db.scalar(select(Product).where(Product.slug=='servgo'))
+              rows=list(db.execute(select(Artifact,Publication).join(
+                  Publication,Publication.artifact_id==Artifact.id).where(
+                  Publication.product_id==p.id,Publication.channel=='own_site',
+                  Publication.status=='published').order_by(Publication.published_at.desc()).limit(3)))
+              print('PUBLISHED_COUNT_SAMPLE='+str(len(rows)))
+              for art,pub in rows:
+                  a=ArticleArtifact.model_validate_json(art.content)
+                  reader=a.reader_article
+                  if not reader: continue
+                  parts=[reader.lead,reader.direct_answer or '',*(s.body for s in reader.sections),reader.closing]
+                  print('ARTICLE_METRICS='+json.dumps({
+                     'slug':pub.external_reference,'primary_query':a.seo.primary_query,
+                     'title':reader.title,'meta':reader.meta_description,
+                     'total_chars':sum(len(x) for x in parts),
+                     'sections':len(reader.sections),'faq':len(reader.faq),
+                     'critic_verdict':critic_verdict(db,art.task_id,reader),
+                     'section_lengths':[dict(
+                         heading=s.heading,chars=len(s.body),
+                         longest_line=max((len(line) for line in s.body.splitlines()),default=0),
+                         bullet_lines=sum(1 for line in s.body.splitlines()
+                                          if re.match(r'^\\s*(?:[-*•]|\\d+[.)])\\s',line)),
+                         snippet=s.body[:900]) for s in reader.sections],
+                     'lead':reader.lead[:800],'direct_answer':(reader.direct_answer or '')[:600],
+                     'closing':reader.closing[:500],
+                     'verified_fact_count':len(reader.fact_renderings),
+                     'review_proof_notes':len(a.proof_needed_notes) if hasattr(a,'proof_needed_notes') else None
+                   },ensure_ascii=False,default=str))
+          PY
