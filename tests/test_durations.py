@@ -60,4 +60,4 @@ def test_speed_page_and_forms_show_estimates(owner_studio):  # noqa: F811
     assert page.status_code == 200
     assert "kimi-2.7" in page.text and "p90" in page.text
     assert "Сколько ждать результат" in client.get(f"/studio/products/{company.id}/create").text
-    assert "Рисованное видео: обычно" in client.get(f"/studio/products/{company.id}/whiteboard").text
+    assert "Простое видео: обычно" in client.get(f"/studio/products/{company.id}/whiteboard").text

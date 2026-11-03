@@ -22,6 +22,20 @@
    const current=themeApi.getPreference();
    themeApi.setPreference(available[(available.indexOf(current)+1)%available.length]);
  });
+ // Keep internal SEO and video drilldowns in the *current* WebView.
+ // Some embedded mobile browsers hand native anchor navigations to their host;
+ // location.assign after preventDefault avoids asking the host to open/close a tab.
+ // This does not affect external links, downloads, special targets or modified clicks.
+ document.addEventListener('click',e=>{
+  if(e.defaultPrevented||e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;
+  const anchor=e.target instanceof Element ? e.target.closest('a[href]') : null;
+  if(!anchor||anchor.hasAttribute('download')||(anchor.target&&anchor.target!=='_self'))return;
+  let destination;
+  try{destination=new URL(anchor.href,location.href)}catch(_){return}
+  if(destination.origin!==location.origin||!/^\/studio\/products\/[0-9a-f-]{36}\/(?:seo|whiteboard)(?:\/|$)/i.test(destination.pathname))return;
+  e.preventDefault();
+  location.assign(destination.pathname+destination.search+destination.hash);
+ },true);
  document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.mobile-nav details[open]').forEach(d=>d.open=false);closeSearch()}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();search()}});
  const product=location.pathname.match(/\/studio\/products\/([0-9a-f-]{36})/i);
  const base=product?'/studio/products/'+product[1]:null;

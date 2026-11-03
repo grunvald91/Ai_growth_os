@@ -88,7 +88,7 @@ def _completed(ctx: Context, task: Task, title: str, href: str) -> tuple[str, li
             {"type": "links", "items": [{"label": "Открыть план", "href": f"{base}/plan?view=draft"}]}]
     item = card(ctx, result)
     if result.kind == "whiteboard_video":
-        item = {**item, "kind": "Рисованное видео", "href": f"{base}/whiteboard/{task.id}"}
+        item = {**item, "kind": "Простое видео", "href": f"{base}/whiteboard/{task.id}"}
     blocks: list[dict] = [item]
     if result.status == ArtifactStatus.AWAITING_APPROVAL and result.kind in KIND_LABELS:
         blocks.append({"type": "chips", "items": [{"label": "Утвердить", "capability": "approve_material",

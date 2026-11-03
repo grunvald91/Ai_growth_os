@@ -155,6 +155,51 @@ def main():
                 page.goto(f'{origin}/studio/products/{product.id}?design=v4', wait_until='load')
                 result['checks'].append({'page': 'company-switcher',
                     'widths': [360, 390, 780, 1280], 'visible': True, 'chooser_opens': True})
+                # Navigation must work by clicking inside the mobile drawer;
+                # testing page.goto() alone would miss WebView link handling.
+                page.locator('#mobileNav details>summary').click()
+                seo_link=page.locator('#mobileNav .v4-more a[href$="/seo"]')
+                assert seo_link.is_visible(), 'SEO-zavod link missing from mobile drawer'
+                with page.expect_navigation() as seo_navigation:
+                    seo_link.click()
+                assert seo_navigation.value.status==200
+                assert page.url.split('?')[0]==f'{origin}/studio/products/{product.id}/seo'
+                assert page.locator('.seo-activation').count()==1
+                # The same link must work with a fresh embedded-style browser page,
+                # without any target=_blank popup or page.close() side-effect.
+                page.goto(f'{origin}/studio/products/{product.id}?design=v4', wait_until='load')
+                from app.content.whiteboard.contracts import WhiteboardRequest
+                from app.content.whiteboard.runtime import configured_models
+                from app.content.whiteboard.jobs import queue_job
+                video=queue_job(session,WhiteboardRequest(product_id=product.id,
+                    topic='Проверка открытия последнего простого видео в студии',
+                    duration_seconds=30,scenes=3,call_to_action='Подпишитесь на канал'),
+                    configured_models(Settings(_env_file=None,
+                      whiteboard_storyboard_model='fixture/story',
+                      whiteboard_image_model='gemini-3.1-flash-image',
+                      whiteboard_speech_model='fixture/speech',
+                      whiteboard_regions_model='fixture/regions')),
+                    max_api_calls=34,visual_review=True,image_provider='claudehub')
+                session.commit()
+                page.goto(f'{origin}/studio/products/{product.id}?design=v4', wait_until='load')
+                page.locator('[data-sg-notifications] summary').click()
+                notification=page.locator(
+                    f'[data-sg-notify-list] a[href$="/whiteboard/{video.id}"]')
+                notification.wait_for(state='visible',timeout=10000)
+                assert notification.get_attribute('target') is None
+                with page.expect_navigation() as video_navigation:
+                    notification.click()
+                assert video_navigation.value.status==200
+                assert page.url.split('?')[0]==(
+                    f'{origin}/studio/products/{product.id}/whiteboard/{video.id}')
+                assert page.locator('.wb-approval').count()==1
+                assert page.locator('body').evaluate(
+                    "e=>e.getAttribute('data-growth-design')")=='v4'
+                result['checks'].append({'page':'mobile-seo-and-video-links',
+                    'width':390,'seo_click_works':True,
+                    'video_notification_click_works':True,'same_tab_navigation':True,
+                    'no_paid_provider_calls':True})
+                page.goto(f'{origin}/studio/products/{product.id}?design=v4', wait_until='load')
                 assert page.locator('#dp-mic').count()==0, 'v4 must have no microphone button'
                 assert page.locator('#dp-press-hint').count()==0, 'hint belongs inside composer'
                 assert page.locator('#dp-input').get_attribute('placeholder')=='Нажмите — текст · удерживайте — голос'
