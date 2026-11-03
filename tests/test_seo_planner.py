@@ -159,3 +159,57 @@ async def test_plan_without_article_task_does_not_reserve_query(db, product, tmp
     await plan_content(db, service(Provider({"items": [item()]})), PrivacyGateway(), product.id, core(),
                        products_root=tmp_path / "products", model="fake")
     assert planned_queries(db, product.id) == set()
+
+@pytest.mark.asyncio
+async def test_domain_invalid_primary_plan_uses_configured_backup(db, product, tmp_path):
+    """Only a domain-valid alternative may become a queued SEO plan."""
+    primary = Provider({"items": [item(primary_query="выдуманный запрос")]})
+    backup = Provider({"items": [item()]})
+
+    class RoutingProvider:
+        async def generate(self, request):
+            if request.model == "backup":
+                return await backup.generate(request)
+            return await primary.generate(request)
+
+    output = await plan_content(
+        db, service(RoutingProvider()), PrivacyGateway(), product.id, core(),
+        products_root=tmp_path / "products", model="primary",
+        fallback_models=("backup",),
+    )
+    assert output.kind == "seo_content_plan"
+    assert len(primary.requests) == 1
+    assert len(backup.requests) == 1
+    assert db.query(Task).one().status == TaskStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_all_invalid_models_fail_without_saving_plan(db, product, tmp_path):
+    primary = Provider({"items": [item(primary_query="выдуманный запрос")]})
+    backup = Provider({"items": [item(cluster_ids=["c999"])]})
+
+    class RoutingProvider:
+        async def generate(self, request):
+            return await (backup if request.model == "backup" else primary).generate(request)
+
+    with pytest.raises(PlanError, match="Unknown cluster"):
+        await plan_content(
+            db, service(RoutingProvider()), PrivacyGateway(), product.id, core(),
+            products_root=tmp_path / "products", model="primary",
+            fallback_models=("backup",),
+        )
+    assert len(primary.requests) == 1 and len(backup.requests) == 1
+    assert db.query(Task).one().status == TaskStatus.FAILED
+    from app.models.domain import Artifact
+    assert not db.query(Artifact).filter(Artifact.kind == "seo_content_plan").all()
+
+
+def test_plan_error_codes_are_safe_and_specific():
+    from app.seo.planner import plan_error_code
+    with pytest.raises(PlanError) as caught:
+        validate_plan(plan(item(cluster_ids=["c999"])), core())
+    assert plan_error_code(caught.value) == "plan_unknown_cluster"
+    with pytest.raises(PlanError) as caught:
+        validate_plan(plan(item(primary_query="выдуманный запрос")), core())
+    assert plan_error_code(caught.value) == "plan_query_not_in_cluster"
+
