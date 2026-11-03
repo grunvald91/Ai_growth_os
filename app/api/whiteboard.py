@@ -205,12 +205,12 @@ def approval_card(state, product_id, error=None):
             f'<h2>{esc(state["request"]["topic"])}</h2></header>{warning}'
             '<div class="wb-facts"><div><span>Длительность</span>'
             f'<strong>{duration}</strong></div><div><span>Сценарий</span><strong>{scenes} сцен</strong></div>'
-            f'<div><span>Лимит генерации</span><strong>До {state["max_api_calls"]} API-вызовов</strong></div></div>{cta_html}{source_description}'
+            f'<div><span>Лимит генерации</span><strong>До {state["max_api_calls"]} API-вызовов</strong></div></div>{cta_html}'
             '<section class="wb-cost"><h3>Платная генерация</h3><p>Точная стоимость в долларах пока неизвестна. '
             'Лимит ограничивает число API-вызовов, а не сумму списаний.</p>'
             '<p>После временного сбоя генерация продолжается автоматически в пределах подтверждённого лимита.</p></section>'
             '<details class="wb-details"><summary>Как будет создано видео</summary>'
-            f'{review}{provider}<h3>Модели и голос</h3><ul>{models}</ul>'
+            f'{source_description}{review}{provider}<h3>Модели и голос</h3><ul>{models}</ul>'
             f'<p>Голос: {esc(state["request"]["voice"])}</p></details>'
             f'<footer class="wb-actions"><form method="post" action="{base}/approve" class="sg-form">'
             f'<input type="hidden" name="request_digest" value="{esc(state["request_digest"])}">'
@@ -248,8 +248,7 @@ def job_html(state, product_id, *, error=None):
                  f'<source src="{base}/files/video.mp4" type="video/mp4">'
                  f'<track kind="subtitles" srclang="ru" label="Русский" src="{base}/files/video.vtt">'
                  'Ваш браузер не поддерживает воспроизведение MP4.</video></div>'
-                 '<p class="wb-result-notice">Проверьте рисунки, научные утверждения, текст, озвучку '
-                 'и субтитры перед публикацией. Публикация выполняется отдельно.</p>'
+                 '<p class="wb-result-notice">Перед публикацией проверьте рисунки, факты, озвучку и субтитры.</p>'
                  '<nav class="wb-downloads" aria-label="Скачать материалы видео">' + ''.join(
                      f'<a class="btn {"primary" if name == "video.mp4" else "secondary"}" '
                      f'href="{base}/files/{name}?download=true" download>{label}</a>'
@@ -370,9 +369,8 @@ def job_html(state, product_id, *, error=None):
         body += '</details>'
         if not state.get('visual_repair_from'):
             body += (f'<form method="post" action="{base}/repair" class="sg-form wb-repair">'
-                     '<button type="submit" class="btn secondary">Переделать рисунки, сохранить озвучку</button>'
-                     '<small>Проверка и исправление рисунков — отдельное задание. Платные вызовы '
-                     'начнутся только после подтверждения; сценарий и звук не генерируются заново.</small></form>')
+                     '<button type="submit" class="btn secondary">Переделать рисунки</button>'
+                     '<small>Сценарий и озвучка сохранятся. Платные вызовы — только после подтверждения.</small></form>')
     body += f'<p class="wb-return"><a href="/studio/products/{product_id}/whiteboard">К списку видео</a></p></section>'
     return body
 
@@ -414,11 +412,11 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
     return f"""
     <section class="sg-surface wb-create wb-screen" aria-labelledby="wb-create-title">
       <header class="wb-create-head">
-        <p class="wb-eyebrow">Студия · Создание видео</p>
-        <h2 id="wb-create-title">Простое видео с озвучкой</h2>
-        <p>Опишите идею. ИИ-команда подготовит сценарий, рисунки, озвучку и готовый MP4.</p>
-        <div class="wb-specs" aria-label="Формат ролика">
-          <span>Вертикальное · 9:16</span><span>Русская озвучка</span><span>MP4 и субтитры</span>
+        <p class="wb-eyebrow">Видеостудия · 9:16</p>
+        <h2 id="wb-create-title">Простое видео</h2>
+        <p>Из идеи в готовый ролик: рисунки, русский голос и MP4.</p>
+        <div class="wb-specs wb-pipeline" aria-label="Этапы создания">
+          <span>Сценарий</span><span>Рисунки</span><span>Озвучка</span><span>MP4</span>
         </div>
       </header>
       {feedback}
@@ -428,11 +426,12 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
         <input type="hidden" name="wb_paid_consent" value="">
         <div class="wb-create-main">
           <div class="wb-create-question">
-            <label class="sg-field" for="wb-create-topic"><span>О чём будет видео?</span>
-              <textarea id="wb-create-topic" name="topic" minlength="8" maxlength="400" rows="3" required
-                placeholder="Например: почему горячий предмет массивнее холодного">{esc(fields.get('topic', ''))}</textarea>
-            </label>
-            <button class="btn secondary wb-suggest" type="button" id="wb-suggest-btn">Предложить темы для моей компании</button>
+            <div class="wb-topic-top">
+              <label for="wb-create-topic">О чём видео?</label>
+              <button class="btn secondary wb-suggest" type="button" id="wb-suggest-btn">✦ Подобрать тему</button>
+            </div>
+            <textarea id="wb-create-topic" name="topic" minlength="8" maxlength="400" rows="2" required
+              placeholder="Например: почему горячий предмет массивнее холодного">{esc(fields.get('topic', ''))}</textarea>
           </div>
           <div class="wb-create-settings">
             <label class="sg-field" for="wb-duration"><span>Длительность</span>
@@ -445,8 +444,9 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
             </label>
           </div>
         </div>
+        <div class="wb-more-grid">
         <details class="wb-create-more">
-          <summary>Свой сценарий и дополнительные материалы <span>Необязательно</span></summary>
+          <summary>Сценарий и материалы <span>+ добавить</span></summary>
           <div class="wb-create-fields">
             <label class="sg-field"><span>Готовый сценарий</span>
               <textarea name="source_script" rows="5" maxlength="12000"
@@ -465,7 +465,7 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
           </div>
         </details>
         <details class="wb-create-more">
-          <summary>Настройки генерации <span>Автоматические по умолчанию</span></summary>
+          <summary>Настройки <span>Авто</span></summary>
           <div class="wb-create-fields">
             <label class="sg-field"><span>Научная проверка</span>
               <select name="science_mode">{science_options}</select>
@@ -485,15 +485,18 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
             </label>
           </div>
         </details>
+        </div>
         <footer class="wb-create-actions">
           <div class="wb-create-hint">
-            <strong>Сначала — проверка задания</strong>
-            <span>Платная генерация начнётся после отдельного подтверждения.</span>
+            <strong>Сначала — подтверждение</strong>
+            <span>Без платного запуска до вашего согласия.</span>
           </div>
           <button class="btn primary" type="submit">Продолжить к подтверждению</button>
         </footer>
       </form>
-      <p class="wb-duration-caption">{esc(duration_notice(durations or {}, 'whiteboard'))}</p>
+      <details class="wb-duration-more"><summary>Сколько займёт создание?</summary>
+        <p>{esc(duration_notice(durations or {}, 'whiteboard'))}</p>
+      </details>
     </section>
     {topic_picker_html(product_id)}
     """
@@ -501,10 +504,10 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
 
 def history_html(states, product_id):
     base = f'/studio/products/{product_id}/whiteboard'
-    body = '<section class="sg-surface wb-library" aria-labelledby="wb-library-title"><div class="wb-library-head"><h2 id="wb-library-title">Мои видео</h2><p>К каждому ролику можно вернуться позже.</p></div><div id="whiteboard-jobs" aria-live="polite">'
+    body = '<section class="sg-surface wb-library" aria-labelledby="wb-library-title"><div class="wb-library-head"><h2 id="wb-library-title">Мои видео</h2><span class="wb-library-count">' + str(len(states)) + '</span></div><div id="whiteboard-jobs" aria-live="polite">'
     for state in states:
         url = f'{base}/{state["task_id"]}'
-        body += (f'<article class="wb-library-item"><p class="wb-library-title"><a href="{url}">{esc(state["request"]["topic"])}</a></p>'
+        body += (f'<article class="wb-library-item"><p class="wb-library-title"><span class="wb-list-icon" aria-hidden="true">▶</span><a href="{url}">{esc(state["request"]["topic"])}</a></p>'
                  f'<p class="wb-library-status">{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p>')
         if state['status'] == 'completed':
             body += (f'<p><a class="btn primary" href="{url}">Посмотреть видео</a> '
@@ -535,7 +538,8 @@ def history_html(states, product_id):
             const link = document.createElement('a');
             link.href = base + '/' + state.task_id;
             link.textContent = state.request.topic;
-            title.append(link); article.append(title);
+            const glyph = document.createElement('span'); glyph.className = 'wb-list-icon'; glyph.textContent = '▶'; glyph.setAttribute('aria-hidden', 'true');
+            title.append(glyph, link); article.append(title);
             const status = document.createElement('p'); status.className = 'wb-library-status';
             status.textContent = names[state.status] || 'Обновление статуса';
             article.append(status);
