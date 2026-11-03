@@ -3,7 +3,10 @@ on:
   pull_request:
     paths:
       - 'app/api/growth_v4.py'
+      - 'app/api/whiteboard.py'
+      - 'app/api/assets/growth-servgo-air.css'
       - 'app/api/assets/growth-live.*'
+      - 'scripts/check_growth_live.py'
       - 'app/api/dispatcher_assets/dispatcher.js'
       - 'scripts/check_growth_voice_ui.py'
       - '.github/workflows/servgo-growth-voice-check.yml'
@@ -24,11 +27,18 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Check hold-to-talk, dispatch retry and 390px bottom navigation
         run: python scripts/check_growth_voice_ui.py
+      - name: Check real Studio routes and simple-video creation/result
+        run: python scripts/check_growth_live.py
       - name: Save browser diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: growth-voice-ui-smoke
-          path: /tmp/servgo-growth-voice-ui/
+          path: |
+            /tmp/servgo-growth-voice-ui/
+            /tmp/v4-simple-video-create-*.png
+            /tmp/v4-simple-video-result-*.png
+            /tmp/v4-video-approval-*.png
+            /tmp/v4-video-*.png
           retention-days: 7
           if-no-files-found: warn
