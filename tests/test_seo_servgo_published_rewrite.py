@@ -1,0 +1,42 @@
+"""One-time published ServGo article corrections must remain safely review-gated."""
+from types import SimpleNamespace
+
+import pytest
+
+from app.workflows.article_contracts import HumanEditedArticle
+from scripts.seo_revise_servgo_published import REWRITES, CTA, build_reader
+
+
+def test_two_known_published_slugs_only():
+    assert set(REWRITES) == {
+        "/blog/zapis-k-psihologu",
+        "/blog/zapisatsya-na-manikyur-onlayn",
+    }
+    assert set(CTA) == set(REWRITES)
+
+
+@pytest.mark.parametrize("slug", sorted(REWRITES))
+def test_editorial_rewrite_is_readable_search_article_not_fake_client_booking(slug):
+    old = SimpleNamespace(reader_article=SimpleNamespace(fact_renderings=[]))
+    reader = build_reader(slug, old)
+    assert isinstance(reader, HumanEditedArticle)
+    assert reader.language == "ru"
+    assert reader.direct_answer and reader.meta_description
+    assert len(reader.sections) >= 3
+    assert any("\n1. " in section.body for section in reader.sections)
+    assert all(section.heading and section.body for section in reader.sections)
+    assert "Telegram @Grunvald" in CTA[slug]
+    assert "Запишитесь к психологу онлайн с помощью ServGo" not in CTA[slug]
+    assert "Запишитесь на маникюр онлайн через ServGo" not in CTA[slug]
+
+
+def test_rewrite_code_requires_real_critic_and_original_backup():
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / "scripts/seo_revise_servgo_published.py"
+    source = path.read_text(encoding="utf-8")
+    assert "status not in CLEAN_CRITIC_STATUSES" in source
+    assert "seo_article_revision_backup" in source
+    assert "fresh_hash != original_hash" in source
+    assert "row.status != ArtifactStatus.PUBLISHED" in source
+    assert "Expected exactly the two inspected published pages" in source
+    assert 'parser.add_argument("--apply"' in source
