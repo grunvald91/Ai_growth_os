@@ -52,6 +52,37 @@ class NormalizeTest(unittest.TestCase):
         self.assertEqual(article["sections"][0]["blocks"][1]["items"], ["Шаг один", "Шаг два"])
         self.assertTrue(article["sections"][0]["blocks"][1]["ordered"])
 
+    def test_safe_rich_blocks_normalized(self):
+        raw = {**RAW, "sections": [{
+            "title": "Правила",
+            "blocks": [
+                {"type": "subheading", "text": "Уточните длительность"},
+                {"type": "paragraph", "text": "**Важное** условие",
+                 "spans": [{"text": "Важное", "style": "strong"},
+                           {"text": " условие", "style": "text"}]},
+                {"type": "quote", "text": "*Рекомендация*",
+                 "spans": [{"text": "Рекомендация", "style": "em"}]},
+                {"type": "list", "ordered": False,
+                 "items": ["**Расписание**", "Клиентская база"],
+                 "item_spans": [[{"text": "Расписание", "style": "strong"}],
+                                [{"text": "Клиентская база", "style": "text"}]]},
+            ],
+        }]}
+        blocks = blog_feed.normalize(raw)["sections"][0]["blocks"]
+        self.assertEqual([b["type"] for b in blocks],
+                         ["subheading", "paragraph", "quote", "list"])
+        self.assertEqual(blocks[1]["spans"][0]["style"], "strong")
+        self.assertEqual(blocks[-1]["item_spans"][0][0]["text"], "Расписание")
+
+    def test_external_html_style_is_not_accepted(self):
+        raw = {**RAW, "sections": [{
+            "title": "Проверка",
+            "blocks": [{"type": "paragraph", "text": "Простой текст",
+                        "spans": [{"text": "Простой текст", "style": "raw_html"}]}],
+        }]}
+        block = blog_feed.normalize(raw)["sections"][0]["blocks"][0]
+        self.assertNotIn("spans", block)
+
     def test_broken_items_dropped(self):
         self.assertIsNone(blog_feed.normalize({**RAW, "slug": "../x"}))
         self.assertIsNone(blog_feed.normalize({**RAW, "sections": []}))
@@ -98,6 +129,30 @@ class BlogFeedPagesTest(unittest.IsolatedAsyncioTestCase):
         self.assertLess(html.index('Первый шаг'), html.index('После списка'))
         self.assertEqual(html.count('Первый шаг'), 1)
 
+    async def test_rich_emphasis_and_heading_render_with_html_escaped(self):
+        raw = {**RAW, "sections": [{
+            "title": "Структура записи",
+            "blocks": [
+                {"type": "subheading", "text": "Сначала правила"},
+                {"type": "paragraph", "text": "**<script>alert(1)</script>** и *проверка*",
+                 "spans": [{"text": "<script>alert(1)</script>", "style": "strong"},
+                           {"text": " и ", "style": "text"},
+                           {"text": "проверка", "style": "em"}]},
+                {"type": "quote", "text": "Сохраняйте историю",
+                 "spans": [{"text": "Сохраняйте историю", "style": "strong"}]},
+            ],
+        }]}
+        async def formatted_feed(*a, **kw):
+            return [blog_feed.normalize(raw)]
+        with patch("webapp.blog_feed.feed_articles", formatted_feed):
+            async with TestClient(TestServer(create_webapp())) as c:
+                html = await (await c.get("/blog/kak-vybrat-crm")).text()
+        self.assertIn('<h3 class="blog-subheading">Сначала правила</h3>', html)
+        self.assertIn("<strong>&lt;script&gt;alert(1)&lt;/script&gt;</strong>", html)
+        self.assertIn("<em>проверка</em>", html)
+        self.assertIn('<blockquote class="blog-editorial-note">', html)
+        self.assertNotIn("<script>alert(1)</script>", html)
+
     async def test_list_sitemap_and_llms(self):
         async with TestClient(TestServer(create_webapp())) as c:
             self.assertIn('kak-vybrat-crm', await (await c.get('/blog')).text())
@@ -117,6 +172,30 @@ class BlogFeedPagesTest(unittest.IsolatedAsyncioTestCase):
         self.patch.start()
         self.assertEqual(res.status, 200)
         self.assertEqual(download.call_count, 1)
+
+    async def test_old_consumer_url_redirects_after_owner_guide_goes_live(self):
+        raw = {**RAW,
+               "slug": "kak-psihologu-organizovat-zapis-klientov",
+               "title": "Как психологу организовать запись клиентов"}
+        async def owner_feed(*a, **kw):
+            return [blog_feed.normalize(raw)]
+        with patch("webapp.blog_feed.feed_articles", owner_feed):
+            async with TestClient(TestServer(create_webapp())) as c:
+                res = await c.get("/blog/zapis-k-psihologu", allow_redirects=False)
+                new = await c.get("/blog/kak-psihologu-organizovat-zapis-klientov")
+        self.assertEqual(res.status, 301)
+        self.assertEqual(res.headers["Location"],
+                         "https://servgo.ru/blog/kak-psihologu-organizovat-zapis-klientov")
+        self.assertEqual(new.status, 200)
+
+    async def test_no_redirect_before_new_page_exists(self):
+        raw = {**RAW, "slug": "zapis-k-psihologu"}
+        async def still_old_feed(*a, **kw):
+            return [blog_feed.normalize(raw)]
+        with patch("webapp.blog_feed.feed_articles", still_old_feed):
+            async with TestClient(TestServer(create_webapp())) as c:
+                res = await c.get("/blog/zapis-k-psihologu", allow_redirects=False)
+        self.assertEqual(res.status, 200)
 
     async def test_unknown_slug_404(self):
         async with TestClient(TestServer(create_webapp())) as c:

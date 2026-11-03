@@ -969,6 +969,14 @@ async def blog_sitemap_handler(request: web.Request) -> web.Response:
     return web.Response(text=xml, content_type='application/xml')
 
 
+# Permanent redirects activate only after replacement articles appear in the
+# public feed. Until then old pages continue to serve without broken links.
+_SERVGO_OWNER_ARTICLE_REDIRECTS = {
+    "zapis-k-psihologu": "kak-psihologu-organizovat-zapis-klientov",
+    "zapisatsya-na-manikyur-onlayn": "kak-masteru-manikyura-vesti-zapis-klientov",
+}
+
+
 async def blog_handler(request: web.Request) -> web.Response:
     """Server-rendered, indexable editorial blog and individual articles."""
     from webapp.blog_content import (
@@ -987,6 +995,10 @@ async def blog_handler(request: web.Request) -> web.Response:
     everything = await all_articles(BLOG_ARTICLES)
     by_slug = {item["slug"]: item for item in everything}
     slug = request.match_info.get("article_slug")
+    if slug in _SERVGO_OWNER_ARTICLE_REDIRECTS:
+        new_slug = _SERVGO_OWNER_ARTICLE_REDIRECTS[slug]
+        if new_slug in by_slug:
+            raise web.HTTPMovedPermanently(f"{BLOG_PUBLIC_ORIGIN}/blog/{new_slug}")
     article = None
     query = ""
     topic = "all"

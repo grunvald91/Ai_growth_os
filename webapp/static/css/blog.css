@@ -105,6 +105,24 @@
 .blog-page .blog-article-body h2 { scroll-margin-top:100px; margin:42px 0 17px; font-weight:800; line-height:1.22; letter-spacing:-.028em; font-size:clamp(22px,2.3vw,29px); }
 .blog-page .blog-article-body h2:first-child { margin-top:0; }
 .blog-page .blog-article-body p { font-size:16px; line-height:1.85; margin:0 0 17px; color:#374256; }
+
+/* Editorial hierarchy inside generated long-form articles; only safe markup
+   emitted by the template, not HTML supplied by a content model. */
+.blog-page .blog-article-body .blog-subheading {
+    font-size:clamp(18px,1.9vw,23px); font-weight:750; line-height:1.35;
+    letter-spacing:-.018em; color:var(--navy); margin:27px 0 11px;
+}
+.blog-page .blog-article-body strong { font-weight:800; color:var(--navy); }
+.blog-page .blog-article-body em { font-style:italic; color:#45516a; }
+.blog-page .blog-article-body .blog-editorial-note {
+    margin:23px 0; padding:15px 20px; border:0; border-left:3px solid var(--blue);
+    background:var(--bg); color:var(--navy); border-radius:0 12px 12px 0;
+    font-size:clamp(15px,1.55vw,17px); line-height:1.7;
+}
+.blog-page .blog-article-body .blog-ordered-list { padding-left:22px; list-style:decimal; }
+.blog-page .blog-article-body .blog-ordered-list li { padding:6px 0 6px 7px; }
+.blog-page .blog-article-body .blog-ordered-list li::before { content:none; }
+
 .blog-page .blog-article-body ul { margin:0 0 27px; padding:0; list-style:none; }
 .blog-page .blog-article-body li { position:relative; font-size:15px; line-height:1.7; color:#374256; padding:7px 0 7px 30px; }
 .blog-page .blog-article-body li:before { position:absolute; content:'✓'; left:0; color:var(--mint); font-weight:800; }

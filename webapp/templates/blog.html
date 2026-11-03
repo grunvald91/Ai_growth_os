@@ -1,5 +1,17 @@
 <!DOCTYPE html>
 <html lang="ru">
+{% macro rich(content, spans) -%}
+    {%- if spans -%}
+        {%- for span in spans -%}
+            {%- if span.style == 'strong' -%}<strong>{{ span.text }}</strong>
+            {%- elif span.style == 'em' -%}<em>{{ span.text }}</em>
+            {%- elif span.style == 'strong_em' -%}<strong><em>{{ span.text }}</em></strong>
+            {%- else -%}{{ span.text }}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- else -%}{{ content }}{%- endif -%}
+{%- endmacro %}
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,7 +30,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
     <link rel="stylesheet" href="/static/css/landing.css?v=12">
-    <link rel="stylesheet" href="/static/css/blog.css?v=3">
+    <link rel="stylesheet" href="/static/css/blog.css?v=4">
     {% if article %}
     <script type="application/ld+json">
     {
@@ -211,12 +223,14 @@
                         <h2 id="section-{{ loop.index }}">{{ section.title }}</h2>
                         {% if section.blocks %}
                             {% for block in section.blocks %}
-                                {% if block.type == 'paragraph' %}<p>{{ block.text }}</p>
+                                {% if block.type == 'paragraph' %}<p>{{ rich(block.text, block.spans) }}</p>
+                                {% elif block.type == 'subheading' %}<h3 class="blog-subheading">{{ block.text }}</h3>
+                                {% elif block.type == 'quote' %}<blockquote class="blog-editorial-note">{{ rich(block.text, block.spans) }}</blockquote>
                                 {% elif block.type == 'list' %}
                                     {% if block.ordered %}
-                                        <ol class="blog-ordered-list">{% for point in block["items"] %}<li>{{ point }}</li>{% endfor %}</ol>
+                                        <ol class="blog-ordered-list">{% for point in block["items"] %}<li>{{ rich(point, block.item_spans[loop.index0] if block.item_spans else none) }}</li>{% endfor %}</ol>
                                     {% else %}
-                                        <ul>{% for point in block["items"] %}<li>{{ point }}</li>{% endfor %}</ul>
+                                        <ul>{% for point in block["items"] %}<li>{{ rich(point, block.item_spans[loop.index0] if block.item_spans else none) }}</li>{% endfor %}</ul>
                                     {% endif %}
                                 {% endif %}
                             {% endfor %}

@@ -39,6 +39,24 @@ def _date(value: str) -> tuple[str, str]:
     return parsed.date().isoformat(), f"{parsed.day} {_MONTHS[parsed.month - 1]} {parsed.year}"
 
 
+_SPAN_STYLES = frozenset({"text", "strong", "em", "strong_em"})
+
+
+def _safe_spans(value: object) -> list[dict]:
+    """Accept only text + enumerated marks, never raw HTML from external feeds."""
+    if not isinstance(value, list) or len(value) > 120:
+        return []
+    result = []
+    for span in value:
+        if (not isinstance(span, dict)
+                or not isinstance(span.get("text"), str)
+                or len(span["text"]) > 8000
+                or span.get("style") not in _SPAN_STYLES):
+            return []
+        result.append({"text": span["text"], "style": span["style"]})
+    return result
+
+
 def normalize(raw: dict) -> dict | None:
     """Приводит запись ленты к форме встроенных статей; битые записи отбрасывает."""
     try:
@@ -53,12 +71,22 @@ def normalize(raw: dict) -> dict | None:
             for block in section.get("blocks", []):
                 if not isinstance(block, dict):
                     continue
-                if block.get("type") == "paragraph" and isinstance(block.get("text"), str):
-                    blocks.append({"type": "paragraph", "text": block["text"]})
+                if block.get("type") in {"paragraph", "quote", "subheading"} and isinstance(block.get("text"), str):
+                    parsed = {"type": block["type"], "text": block["text"]}
+                    spans = _safe_spans(block.get("spans"))
+                    if spans and block["type"] != "subheading":
+                        parsed["spans"] = spans
+                    blocks.append(parsed)
                 elif block.get("type") == "list" and isinstance(block.get("items"), list):
                     items = [str(item) for item in block["items"] if str(item).strip()]
                     if items:
-                        blocks.append({"type": "list", "ordered": bool(block.get("ordered")), "items": items})
+                        parsed = {"type": "list", "ordered": bool(block.get("ordered")), "items": items}
+                        marked = block.get("item_spans")
+                        if isinstance(marked, list) and len(marked) == len(items):
+                            item_spans = [_safe_spans(value) for value in marked]
+                            if all(item_spans):
+                                parsed["item_spans"] = item_spans
+                        blocks.append(parsed)
             sections.append({
                 "title": str(section["title"]),
                 "paragraphs": [str(p) for p in section.get("paragraphs", [])],
