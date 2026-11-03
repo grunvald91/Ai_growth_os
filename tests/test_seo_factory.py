@@ -576,3 +576,49 @@ def test_global_weekly_autorun_interval_and_servgo_legacy_pilot_are_separate(env
         db.commit()
         assert not enqueue_enabled_if_due(db, long_interval, now=now + timedelta(days=8))
         assert enqueue_enabled_if_due(db, long_interval, now=now + timedelta(days=31))
+
+
+
+def test_autorun_uses_individual_company_interval_horizon_and_keeps_demo_off(env):
+    from app.seo.autoschedule import enqueue_enabled_if_due
+    from app.seo.activation import set_editorial_preferences
+    from app.models.domain import Product, Artifact
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import select
+    import json
+
+    factory, defaults, servgo_id = env
+    settings = defaults.model_copy(update={"seo_autorun_enabled": True})
+    now = datetime.now(timezone.utc)
+    with factory() as db:
+        second = Product(name="Другой бизнес", slug="different-shop")
+        demo = Product(name="Демо", slug="demo-tenant")
+        db.add_all([second, demo])
+        db.commit()
+        set_enabled(db, second.id, enabled=True, actor="owner-second")
+        set_editorial_preferences(db, servgo_id, timezone_name="Europe/Moscow",
+            autorun_interval_days=14, autorun_horizon_days=30,
+            publications_per_day=2, articles_per_day=1, actor="owner-servgo")
+        set_editorial_preferences(db, second.id, timezone_name="Asia/Tokyo",
+            autorun_interval_days=7, autorun_horizon_days=7,
+            publications_per_day=4, articles_per_day=4, actor="owner-second")
+        assert enqueue_enabled_if_due(db, settings, now=now)
+        assert enqueue_enabled_if_due(db, settings, now=now)
+        assert not enqueue_enabled_if_due(db, settings, now=now)
+        jobs=list(db.scalars(select(Task).where(Task.assigned_agent == "seo_factory")))
+        assert {j.product_id for j in jobs} == {servgo_id, second.id}
+        horizons={}
+        for job in jobs:
+            request=db.scalar(select(Artifact).where(Artifact.task_id == job.id,
+                        Artifact.kind == "seo_factory_request"))
+            horizons[job.product_id] = json.loads(request.content)["horizon_days"]
+            job.status = TaskStatus.COMPLETED
+        db.commit()
+        assert horizons[servgo_id] == 30
+        assert horizons[second.id] == 7
+        assert not enqueue_enabled_if_due(db, settings, now=now + timedelta(days=6))
+        assert enqueue_enabled_if_due(db, settings, now=now + timedelta(days=8))
+        assert not enqueue_enabled_if_due(db, settings, now=now + timedelta(days=8))
+        assert enqueue_enabled_if_due(db, settings, now=now + timedelta(days=15))
+        assert all(job.product_id != demo.id for job in db.scalars(
+            select(Task).where(Task.assigned_agent == "seo_factory")))
