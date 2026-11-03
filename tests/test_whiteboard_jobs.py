@@ -100,11 +100,13 @@ def test_simple_video_creation_uses_servgo_ui_without_changing_payload_contract(
         'visual_review': 'once', 'max_api_calls': 'auto'
     }, durations={})
     assert 'class="sg-surface wb-create wb-screen"' in html
-    assert 'id="wb-create-title">Простое видео с озвучкой' in html
+    assert 'id="wb-create-title">Простое видео' in html
     assert 'id="wb-create-form"' in html and 'id="wb-suggest-btn"' in html
     assert '<Тема & видео>' not in html and '&lt;Тема &amp; видео&gt;' in html
     assert 'name="duration_seconds"' in html and '<option value="60" selected>' in html
-    assert html.index('wb-create-question') < html.index('wb-create-more')
+    assert html.index('wb-create-question') < html.index('wb-more-grid')
+    assert 'class="wb-topic-top"' in html and 'class="wb-pipeline' not in html
+    assert 'class="wb-specs wb-pipeline"' in html and 'wb-duration-more' in html
     for name in ('topic', 'source_script', 'background_notes', 'reference_materials',
                  'science_mode', 'duration_seconds', 'call_to_action', 'profile',
                  'visual_review', 'max_api_calls', 'wb_topic_choice',
@@ -132,6 +134,8 @@ def test_simple_video_result_prioritizes_player_and_preserves_downloads():
     assert f'{base}/files/video.vtt' in html
     assert html.index('wb-result-player') < html.index('wb-result-technical')
     assert 'class="wb-downloads"' in html
+    assert 'class="wb-result-meta"' in html
+    assert html.index('wb-result-meta') < html.index('wb-result-player')
     for name in ('video.mp4', 'video.srt', 'video.png', 'video.json'):
         assert f'{base}/files/{name}?download=true' in html
     assert 'Завершено этапов: 14 из 14' in html
