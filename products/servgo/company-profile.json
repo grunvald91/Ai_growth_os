@@ -15,19 +15,101 @@
     "products_services": [
       {
         "name": "ServGo: внутреннее расписание и ручная запись",
-        "description": "Администратор ведёт визуальное расписание по дням и неделям, создаёт запись вручную, выбирая услугу, специалиста или зал, дату и время, указывает имя, телефон клиента и комментарий. Запись можно перенести. Сценарий полезен компаниям, которым не нужна самостоятельная онлайн-запись клиентов. Переключатель отключения публичной записи пока не подтверждён."
+        "description": "Администратор ведёт визуальное расписание по дням и неделям, создаёт запись вручную, выбирая услугу, специалиста или зал, дату и время, указывает имя, телефон клиента и комментарий. Запись можно перенести. Сценарий полезен компаниям, которым не нужна самостоятельная онлайн-запись клиентов. Переключатель отключения публичной записи пока не подтверждён.",
+        "product_family": "BookingBot",
+        "release_status": "live",
+        "evidence_refs": [
+          "booking_bot/web/frontend/src/pages/admin/SchedulePage.tsx",
+          "booking_bot/web/api/routes/studio_schedule.py"
+        ],
+        "buyer_segment": "Владельцы и управляющие малого бизнеса в сфере услуг",
+        "conversion_action": "Запросить демонстрацию существующих функций ServGo"
       },
       {
         "name": "ServGo CRM: собственная база клиентов",
-        "description": "У каждой организации есть собственный список контактов; включаются клиенты с записями и контакты, добавленные вручную. Видны количество и история записей, последние и будущие визиты, заметки, статусы и дата следующего контакта. Автоматическая синхронизация CRM с Mail и автоматические повторные рассылки не подтверждены."
+        "description": "У каждой организации есть собственный список контактов; включаются клиенты с записями и контакты, добавленные вручную. Видны количество и история записей, последние и будущие визиты, заметки, статусы и дата следующего контакта. Автоматическая синхронизация CRM с Mail и автоматические повторные рассылки не подтверждены.",
+        "product_family": "BookingBot",
+        "release_status": "live",
+        "evidence_refs": [
+          "booking_bot/web/api/routes/crm.py",
+          "booking_bot/web/frontend/src/pages/admin/ContactsPage.tsx"
+        ],
+        "buyer_segment": "Владельцы и управляющие малого бизнеса в сфере услуг",
+        "conversion_action": "Запросить демонстрацию существующих функций ServGo"
       },
       {
         "name": "ServGo online booking",
-        "description": "Client flow includes business/service selection, optional specialist selection, date/time-slot selection, contact details and confirmation. Client flow includes optional prepayment instructions; the customer can mark payment as sent and attach proof. The owner manually verifies receipt before the booking is confirmed. Client flow includes a booking status page and notifications."
+        "description": "Client flow includes business/service selection, optional specialist selection, date/time-slot selection, contact details and confirmation. Client flow includes optional prepayment instructions; the customer can mark payment as sent and attach proof. The owner manually verifies receipt before the booking is confirmed. Client flow includes a booking status page and notifications.",
+        "product_family": "BookingBot",
+        "release_status": "live",
+        "evidence_refs": [
+          "booking_bot/web/api/routes/client.py",
+          "booking_bot/web/frontend/src/components/ClientShell.tsx"
+        ],
+        "buyer_segment": "Владельцы и управляющие малого бизнеса в сфере услуг",
+        "conversion_action": "Запросить демонстрацию существующих функций ServGo"
       },
       {
         "name": "ServGo client AI booking chat",
-        "description": "Where enabled by the business owner, the AI chat uses that business's configured services, descriptions, prices and booking slots to answer questions, help choose a service and prepare a booking for customer confirmation. It can hand over to an operator. It cannot know details the business did not configure and is not a professional medical or psychological consultation."
+        "description": "Where enabled by the business owner, the AI chat uses that business's configured services, descriptions, prices and booking slots to answer questions, help choose a service and prepare a booking for customer confirmation. It can hand over to an operator. It cannot know details the business did not configure and is not a professional medical or psychological consultation.",
+        "product_family": "BookingBot",
+        "release_status": "limited",
+        "evidence_refs": [
+          "booking_bot/web/api/routes/ai.py",
+          "booking_bot/web/api/sales/policy.py"
+        ],
+        "buyer_segment": "Владельцы и управляющие малого бизнеса в сфере услуг",
+        "conversion_action": "Запросить демонстрацию существующих функций ServGo"
+      },
+      {
+        "name": "ServGo Growth — ИИ-студия маркетинга",
+        "description": "Существуют интерфейс Студии, задачи создания контента, редакторский конвейер и подготовка материалов. Фактическая успешность конкретной генерации и доступность публикации зависят от модели, подключённых каналов и состояния конвейера. Не представлять как гарантированный полностью автономный маркетинг, сквозную SEO-to-lead аналитику или доказанный рост продаж.",
+        "product_family": "Growth",
+        "release_status": "limited",
+        "evidence_refs": [
+          "Ai_growth_os/app/api/content_studio.py",
+          "Ai_growth_os/app/workflows/article_production.py",
+          "Ai_growth_os/app/api/growth_v4.py"
+        ],
+        "buyer_segment": "Владельцы и управляющие малого бизнеса в сфере услуг",
+        "conversion_action": "Запросить демонстрацию доступных возможностей Growth"
+      },
+      {
+        "name": "ServGo Mail — почтовые кампании",
+        "description": "Реализованы создание кампаний, управление получателями, подготовка и согласование рассылки, запуск/остановка и отказ от писем. Полная проверка доставки и конфигурации каждого отправителя требуется отдельно. Нельзя приписывать автоматическую синхронизацию с CRM, автоматический возврат клиентов или гарантированную доставляемость.",
+        "product_family": "Mail",
+        "release_status": "limited",
+        "evidence_refs": [
+          "booking_bot/web/api/routes/mail_campaign_api.py",
+          "booking_bot/web/api/routes/mail_campaign_review.py",
+          "booking_bot/web/api/routes/mail_campaign_unsubscribe.py"
+        ],
+        "buyer_segment": "Владельцы и управляющие малого бизнеса в сфере услуг",
+        "conversion_action": "Запросить демонстрацию настроенных функций Mail"
+      },
+      {
+        "name": "ServGo «Смена» — учёт смен сотрудников",
+        "description": "Модуль учёта смен рассматривается как направление платформы. Действующая версия, точный функционал и доступность для клиентов не подтверждены текущим аудитом исходного кода и продакшена. Не объявлять продукт запущенным и не предлагать его подключить до отдельной технической проверки.",
+        "product_family": "Смена",
+        "release_status": "unverified",
+        "evidence_refs": [],
+        "buyer_segment": "Владельцы и управляющие малого бизнеса в сфере услуг",
+        "conversion_action": null
+      },
+      {
+        "name": "ServGo SEO-завод — поисковые статьи для компаний",
+        "description": "В Growth реализованы отдельное включение SEO для каждой компании, сбор реальных поисковых подсказок Яндекса/Google, кластеризация, планирование и подготовка статей с проверкой критиком. Публичная публикация для ServGo подтверждена для двух старых страниц. Автоматический еженедельный запуск пока привязан к ServGo, коммерческие CTA и поисковая аналитика проходят доработку; не обещать универсальный автономный SEO, гарантированную индексацию, показы или лиды.",
+        "product_family": "SEO-завод",
+        "release_status": "limited",
+        "evidence_refs": [
+          "Ai_growth_os/app/seo/activation.py",
+          "Ai_growth_os/app/seo/suggest.py",
+          "Ai_growth_os/app/seo/planner.py",
+          "Ai_growth_os/app/seo/autoschedule.py",
+          "Ai_growth_os/app/seo/publishing.py"
+        ],
+        "buyer_segment": "Владельцы и управляющие малого бизнеса в сфере услуг",
+        "conversion_action": "Запросить демонстрацию доступного пилотного SEO-завода"
       }
     ],
     "primary_conversion_action": "Запросить демонстрацию ServGo: написать в Telegram @Grunvald или на почту grunvaldlab@gmail.com"
@@ -89,6 +171,14 @@
       {
         "statement": "ServGo Mail поддерживает почтовые кампании, согласование писем и отказ от дальнейших писем; автоматическая синхронизация CRM с Mail не подтверждена.",
         "evidence_ref": "booking_bot/web/api/routes/mail_campaign_api.py; booking_bot/web/api/routes/mail_campaign_review.py; booking_bot/web/api/routes/mail_campaign_unsubscribe.py"
+      },
+      {
+        "statement": "В Growth реализована Студия для подготовки контента; этапы генерации зависят от доступности ИИ-провайдера, результат проходит редакторскую проверку. Надёжность всего конвейера и сквозная атрибуция не подтверждены.",
+        "evidence_ref": "Ai_growth_os/app/api/content_studio.py; Ai_growth_os/app/workflows/article_production.py; Ai_growth_os/app/llm/critic.py"
+      },
+      {
+        "statement": "SEO-завод собирает поисковые подсказки из Яндекса и Google, создаёт семантические кластеры и планы по компании. Недельный авторежим сейчас настроен только для ServGo; статистика частотности и гарантированное привлечение лидов не подтверждены.",
+        "evidence_ref": "Ai_growth_os/app/seo/suggest.py; Ai_growth_os/app/seo/service.py; Ai_growth_os/app/seo/autoschedule.py"
       }
     ],
     "approved_numbers": []
@@ -173,6 +263,9 @@
     },
     {
       "question": "Есть ли безопасная CRM-to-Mail синхронизация согласившихся адресатов и автоматические повторные кампании? Не считать их реализованными без проверки."
+    },
+    {
+      "question": "Проверен ли боевой выпуск «Смены», включая Telegram mini-app, QR/selfie и учёт рабочего времени? Без подтверждённых исходников и smoke-теста не рекламировать как действующий модуль."
     }
   ],
   "customers": {
