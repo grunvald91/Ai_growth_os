@@ -65,7 +65,7 @@ jobs:
           expected={"BookingBot","Growth","Mail","Смена","SEO-завод"}
           assert expected.issubset(families),(expected-families)
           assert all(offer.evidence_refs for offer in offers if offer.release_status in {"live","limited"})
-          assert any(o.release_status == "live" and o.product_family == "Смена"\n             and any("owner-confirmation:servgo" in e for e in o.evidence_refs) for o in offers)
+          assert any(o.release_status == "live" and o.product_family == "Смена" and any("owner-confirmation:servgo" in e for e in o.evidence_refs) for o in offers)
           with SessionLocal() as db:
               p=db.scalar(select(Product).where(Product.slug=="servgo"))
               assert p is not None
