@@ -75,3 +75,17 @@ def test_review_and_publication_are_opt_in_atomic():
     assert "reader_hash" in commit_code
     assert "pub.external_reference = entry[\"new\"]" in commit_code
     assert "db.commit()" in commit_code
+
+
+def test_published_owner_guides_require_real_critic_even_if_gateway_slow():
+    import inspect
+    from app.seo import revise_servgo_owner_articles as release
+    source = inspect.getsource(release._review)
+    assert 90 < release.REVIEW_TIMEOUT_SECONDS <= 300
+    assert 120 < release.AUTHOR_REVISION_TIMEOUT_SECONDS <= 240
+    assert "review_timeout=REVIEW_TIMEOUT_SECONDS" in source
+    assert "revision_timeout=AUTHOR_REVISION_TIMEOUT_SECONDS" in source
+    assert "failure_reason" in source  # safe failure class appears in the run log
+    assert "raise ValueError(\"Critic rejected owner article:" in source
+    assert "status not in CLEAN_CRITIC_STATUSES" in source
+    assert "second_opinion(" in source
