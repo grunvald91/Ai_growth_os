@@ -50,7 +50,7 @@ def test_servgo_company_profile_contains_proven_owner_calendar_facts():
     assert "В админ-панели ServGo" in render_company_profile(profile)
     assert "the BUSINESS described in the company profile" in SEED_PROMPT
     assert "the company's own potential PAYING customer" in PLAN_PROMPT
-    assert "not a generic platform" in PLAN_PROMPT
+    assert "never a generic platform" in PLAN_PROMPT
     assert "внутренний электронный журнал" in SERVGO_EDITORIAL_RULES
 
 
