@@ -146,6 +146,17 @@ def main():
                     response=page.goto(base+'/whiteboard?design=v4')
                     assert response.status==200
                     expect(page.locator('.wb-create-head')).to_be_visible()
+                    expect(page.locator('#main>.route-page-head')).to_be_hidden()
+                    warning=page.locator('.wb-create .sg-warning')
+                    if warning.count():
+                        contrast=warning.evaluate("""e=>{
+                          const values=s=>(s.match(/[\\d.]+/g)||[]).slice(0,3).map(x=>Number(x)/255);
+                          const lum=s=>values(s).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4)
+                            .reduce((sum,v,i)=>sum+v*[.2126,.7152,.0722][i],0);
+                          const fg=lum(getComputedStyle(e).color),bg=lum(getComputedStyle(e).backgroundColor);
+                          return (Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05);
+                        }""")
+                        assert contrast>=4.5,contrast
                     expect(page.locator('#wb-create-form [name="topic"]')).to_be_visible()
                     expect(page.locator('#wb-create-form [name="duration_seconds"]')).to_be_visible()
                     expect(page.locator('#wb-create-form button[type="submit"]')).to_be_visible()
