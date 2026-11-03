@@ -1,0 +1,130 @@
+name: One-shot ServGo SEO live status (read-only)
+
+on:
+  push:
+    branches: [audit/seo-servgo-readonly-20261103]
+    paths: [.github/workflows/seo-servgo-readonly-audit.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: one-shot-servgo-seo-status-20261103
+  cancel-in-progress: true
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Read production job statuses without changing data
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD unavailable"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/seo-host-keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/seo-host-key
+            ssh-keygen -lf /tmp/seo-host-key 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/seo-host-keys
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Pinned server host key mismatch"; exit 1; }
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo '=== Growth live containers ==='
+          docker ps --filter label=com.docker.compose.project=ai-growth-os --format '{{.Names}} {{.Status}}' | grep -E 'worker|api|postgres' || true
+          echo '=== ServGo SEO company state (production read-only) ==='
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          import json
+          from collections import Counter
+          from datetime import datetime, timezone
+          from zoneinfo import ZoneInfo
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Product, Task, TaskStatus, Artifact, Publication
+          from app.seo.activation import SeoFactoryActivation
+          from app.api.seo_run_view import seo_runs
+          TZ=ZoneInfo('Europe/Moscow')
+          def when(v):
+              if not v: return None
+              if v.tzinfo is None: v=v.replace(tzinfo=timezone.utc)
+              return v.astimezone(TZ).strftime('%Y-%m-%d %H:%M:%S %Z')
+          def short(v,limit=170):
+              return str(v or '').replace('\n',' ').replace('\r',' ')[:limit]
+          with SessionLocal() as db:
+              prod=db.scalar(select(Product).where(Product.slug=='servgo'))
+              if prod is None:
+                  print('SEO_AUDIT_JSON='+json.dumps({'error':'servgo_product_absent'}))
+                  raise SystemExit(2)
+              activation=db.get(SeoFactoryActivation,prod.id)
+              jobs=list(db.scalars(select(Task).where(
+                  Task.product_id==prod.id,Task.assigned_agent=='seo_factory'
+              ).order_by(Task.created_at.desc(),Task.id.desc()).limit(8)))
+              articles=list(db.scalars(select(Task).where(
+                  Task.product_id==prod.id,
+                  Task.assigned_agent=='content_factory',
+                  Task.title.like('SEO-ARTICLE:%')
+              ).order_by(Task.created_at.desc(),Task.id.desc()).limit(150)))
+              pubs=list(db.scalars(select(Publication).where(
+                  Publication.product_id==prod.id,
+                  Publication.channel=='own_site'
+              ).order_by(Publication.published_at.desc()).limit(30)))
+              running=list(db.scalars(select(Task).where(
+                  Task.product_id==prod.id,Task.status==TaskStatus.RUNNING
+              ).order_by(Task.updated_at.desc()).limit(12)))
+              rows=seo_runs(db,prod.id,limit=8)
+              by_id={str(t.id):t for t in jobs}
+              simplified_runs=[]
+              for row in rows:
+                  job=by_id.get(row['id'])
+                  simplified_runs.append({
+                      'id':row['id'],'status':row['status'],
+                      'created_msk':when(job.created_at) if job else None,
+                      'updated_msk':when(job.updated_at) if job else None,
+                      'attempts':row['attempts'],
+                      'semantic_ready':row['semantic_ready'],
+                      'plan_ready':row['plan_ready'],
+                      'articles_queued':row['articles_queued'],
+                      'articles_deferred':row['articles_deferred'],
+                      'sources_confirmed':row['sources_confirmed'],
+                      'last_error_type':short(row['last_error'],100),
+                      'article_count_displayed':len(row['articles']),
+                      'articles':[{
+                          'title':short(x['title'],95),
+                          'status':x['task_status'],
+                          'scheduled_msk':x['scheduled_at'],
+                          'article_status':x['article_status'],
+                          'critic_status':x['critic_status'],
+                          'publication_path':short(x['publication_path'],130)
+                      } for x in row['articles'][:18]],
+                  })
+              results={
+                  'observed_at_msk':when(datetime.now(timezone.utc)),
+                  'company':prod.name,
+                  'product_id':str(prod.id),
+                  'seo_enabled':bool(activation and activation.enabled),
+                  'seo_activation_changed_msk':when(activation.changed_at) if activation else None,
+                  'factory_run_count_recent':len(jobs),
+                  'factory_runs':simplified_runs,
+                  'seo_article_count_last_150':len(articles),
+                  'seo_article_status_counts':dict(Counter(t.status.value for t in articles)),
+                  'upcoming_scheduled':[{'due_msk':when(t.due_at),'status':t.status.value} for t in sorted(
+                      [t for t in articles if t.due_at is not None and t.status==TaskStatus.QUEUED],
+                      key=lambda t:t.due_at)[:15]],
+                  'recent_publication_count_last_30':len(pubs),
+                  'recent_publications':[{'status':p.status,'published_msk':when(p.published_at),
+                                           'path':short(p.external_reference,130)} for p in pubs[:8]],
+                  'running_company_tasks':[{'agent':short(t.assigned_agent,80),
+                                            'status':t.status.value,'updated_msk':when(t.updated_at),
+                                            'title':short(t.description or t.title,110)} for t in running],
+              }
+              print('SEO_AUDIT_JSON='+json.dumps(results,ensure_ascii=False,default=str))
+          PY
+          echo '=== worker recent SEO error counts (no raw log content) ==='
+          docker logs --since 2h ai-growth-os-worker-1 2>&1 | grep -ic 'SEO factory failed' || true
+          REMOTE
