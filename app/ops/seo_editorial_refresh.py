@@ -265,8 +265,18 @@ async def main() -> int:
         print("SEO_EDITORIAL_RESULT=" + json.dumps(report, ensure_ascii=False), flush=True)
         return 0
     except Exception as exc:
-        print("SEO_EDITORIAL_ERROR=" + type(exc).__name__
-              + ":" + str(exc)[:150], flush=True)
+        # Provider exception strings can contain response bodies; do not emit them
+        # into publicly accessible Actions logs. Known validation codes are safe.
+        code = str(exc).split(":", 1)[0] if isinstance(exc, ValueError) else ""
+        safe_codes = {
+            "original_title_or_language_changed", "verified_facts_changed",
+            "search_answer_or_description_missing", "article_not_materially_shorter",
+            "essential_guidance_may_be_missing", "section_count_increased",
+            "missing_source_seo_article", "incomplete_editorial_rewrite",
+            "fresh_critic_version_check_failed", "slug_is_not_in_owner_approved_scope",
+        }
+        detail = code if code in safe_codes else type(exc).__name__
+        print("SEO_EDITORIAL_ERROR=" + detail, flush=True)
         return 1
 
 
