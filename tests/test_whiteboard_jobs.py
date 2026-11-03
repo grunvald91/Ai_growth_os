@@ -231,7 +231,7 @@ async def test_full_owner_interface_worker_and_real_mp4(environment, tmp_path, m
         return pipeline
     with client() as browser:
         index = browser.get(f'/studio/products/{product_id}/whiteboard')
-        assert index.status_code == 200 and 'Сохранить и перейти' in index.text
+        assert index.status_code == 200 and 'Продолжить к подтверждению' in index.text
         response = browser.post(f'/studio/products/{product_id}/whiteboard',
                                 data={'topic': 'Как работает онлайн-запись', 'max_api_calls': '14'}, follow_redirects=False)
         assert response.status_code == 303
