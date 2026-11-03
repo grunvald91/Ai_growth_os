@@ -652,7 +652,8 @@ async def studio_create(product_id: UUID, request: Request, db: Session = Depend
 @router.get('/studio/products/{product_id}/whiteboard/{task_id}', response_class=HTMLResponse)
 def studio_job(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
     state = _load(db, product_id, task_id)
-    return page(_owner_product(db, product_id), 'Генерация видео', job_html(state, product_id),
+    title = 'Готовое видео' if state['status'] == 'completed' else 'Генерация видео'
+    return page(_owner_product(db, product_id), title, job_html(state, product_id),
                 refresh=state['status'] in {'queued', 'running'})
 
 
