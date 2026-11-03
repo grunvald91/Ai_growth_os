@@ -1,5 +1,6 @@
 """Seed queries and the funnel content plan. Every plan item must rest on real collected queries."""
 import json
+import re
 from pathlib import Path
 from uuid import UUID
 
@@ -74,6 +75,14 @@ class PlanError(ValueError):
     pass
 
 
+# Guard a clear buyer mismatch for explicitly declared B2B companies.
+# For actual B2C service providers the same customer query can be relevant.
+_CONSUMER_APPOINTMENT = re.compile(
+    r"^(?:как\s+)?(?:записаться\s+(?:к|на|в)\s+|запись\s+(?:к|на)\s+)",
+    re.IGNORECASE,
+)
+
+
 def planned_queries(db: Session, product_id: UUID) -> set[str]:
     """Primary queries of earlier plans of this company whose article is written or still in work.
     A query whose article failed or was cancelled is free again."""
@@ -101,7 +110,7 @@ def fresh_core(core: SemanticCore, taken: set[str]) -> SemanticCore:
         c for c in core.clusters if not taken & {normalize(q) for q in c.queries}]})
 
 
-def validate_plan(plan: SeoContentPlan, core: SemanticCore, taken: frozenset[str] = frozenset(),\n                  buyer_segments: tuple[str, ...] = ()) -> None:
+def validate_plan(plan: SeoContentPlan, core: SemanticCore, taken: frozenset[str] = frozenset(),\n                  buyer_segments: tuple[str, ...] = (), *, b2b_provider: bool = False) -> None:
     clusters = {c.id: c for c in core.clusters}
     seen_queries: set[str] = set(taken)
     for item in plan.items:
@@ -119,6 +128,8 @@ def validate_plan(plan: SeoContentPlan, core: SemanticCore, taken: frozenset[str
         if key in seen_queries:
             raise PlanError(f"Primary query repeated or already written: {item.primary_query}")
         seen_queries.add(key)
+        if b2b_provider and _CONSUMER_APPOINTMENT.search(key):
+            raise PlanError(f"Consumer appointment query is not a B2B buyer query: {item.primary_query}")
         if buyer_segments and item.target_segment not in buyer_segments:
             raise PlanError(f"Plan item {item.id} does not target a declared buyer segment")
 
@@ -238,7 +249,8 @@ async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, pr
     try:
         plan = await _ask(llm, model=model, prompt=PLAN_PROMPT, payload=payload, schema=SeoContentPlan,
                           role="seo_editor", validate=lambda p: validate_plan(
-                              p, core, frozenset(taken), tuple(company["buyer_segments"])))
+                              p, core, frozenset(taken), tuple(company["buyer_segments"]),
+                              b2b_provider="b2b" in str(company["industry"] or "").casefold()))
         artifact = ArtifactService(db).create(product_id=product_id, task_id=factory_task_id or task_id, kind=PLAN_KIND,
                                               title=f"Контент-план SEO ({len(plan.items)} статей)",
                                               content=plan.model_dump_json())
