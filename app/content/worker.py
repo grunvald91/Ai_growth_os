@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from sqlalchemy import and_, select, update
 from app.content.render import asset_path, render_video
@@ -67,6 +67,25 @@ async def run_content_once(session_factory, settings):
                     result = await build_article_production(
                         db, settings, force_critic=True
                     ).run(data.model_copy(update={'task_id': task_id}))
+                    if (data.seo_brief is not None and result.status == 'failed'
+                            and getattr(result, 'retryable', False)):
+                        # No more than ONE automatic retry; do not rerun a
+                        # validation/factual failure or previously finished page.
+                        started = list(db.scalars(select(Artifact.id).where(
+                            Artifact.task_id == task_id,
+                            Artifact.kind == 'seo_article_started')))
+                        if len(started) < 2:
+                            retry_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+                            moved = db.execute(update(Task).where(
+                                Task.id == task_id, Task.product_id == product_id,
+                                Task.status == TaskStatus.FAILED).values(
+                                status=TaskStatus.QUEUED,
+                                due_at=db_time(db, retry_at)))
+                            if moved.rowcount == 1:
+                                ArtifactService(db).create(product_id=product_id, task_id=task_id,
+                                    kind='seo_article_retry_scheduled', title='SEO retry after transient failure',
+                                    content=json.dumps({'retry_delay_minutes': 10, 'reason': 'provider_transient'}))
+                            db.commit()
                     if data.seo_brief is not None and result.status == 'completed':
                         # Clean critic verdict + static checks publish automatically; failures wait for review.
                         from app.seo.publishing import publish_if_clear

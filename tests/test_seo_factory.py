@@ -673,3 +673,102 @@ async def test_seo_quota_is_rechecked_under_product_lock_before_model_spend(env,
             await workflow.run(request)
         assert db.get(Task, pending.id).status == TaskStatus.QUEUED
         assert articles_started_today(db, product_id=product_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_transient_article_provider_error_schedules_only_one_delayed_retry(env, monkeypatch):
+    from app.content import worker
+    from app.core.composition import build_article_production
+    from app.services.tasks import TaskService
+    from app.services.artifacts import ArtifactService
+    from test_seo_article import BRIEF
+    from datetime import datetime, timedelta, timezone
+    factory, settings, product_id = env
+    settings = settings.model_copy(update={"seo_articles_per_day": 3})
+    calls = []
+
+    class TransientProvider:
+        async def generate(self, request):
+            calls.append(request)
+            raise httpx.ReadTimeout("temporary provider outage")
+
+    monkeypatch.setattr(worker, "build_article_production",
+        lambda db, cfg, **kwargs: build_article_production(
+            db, cfg, provider=TransientProvider(), **kwargs))
+
+    with factory() as db:
+        task = TaskService(db).create(product_id=product_id,
+            title="SEO-ARTICLE:transient", assigned_agent="content_factory",
+            status=TaskStatus.QUEUED)
+        ArtifactService(db).create(product_id=product_id, task_id=task.id,
+            kind="content_request", title="SEO request",
+            content=ArticleProductionInput(
+                product_id=product_id, topic="Как вести запись клиентов",
+                channel="own_site", light=True, seo_brief=BRIEF).model_dump_json())
+        db.commit()
+        task_id = task.id
+    assert await worker.run_content_once(factory, settings) == 1
+    with factory() as db:
+        task = db.get(Task, task_id)
+        assert task.status == TaskStatus.QUEUED
+        due = task.due_at
+        assert due is not None
+        assert len(list(db.scalars(select(Artifact).where(
+            Artifact.task_id == task_id, Artifact.kind == "seo_article_started")))) == 1
+        assert len(list(db.scalars(select(Artifact).where(
+            Artifact.task_id == task_id,
+            Artifact.kind == "seo_article_retry_scheduled")))) == 1
+    assert await worker.run_content_once(factory, settings) == 0
+    assert len(calls) == 1
+
+    # Simulate the 10-minute cooldown expiring without sleeping or network.
+    with factory() as db:
+        task = db.get(Task, task_id)
+        task.due_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+    assert await worker.run_content_once(factory, settings) == 1
+    with factory() as db:
+        task = db.get(Task, task_id)
+        assert task.status == TaskStatus.FAILED
+        assert len(list(db.scalars(select(Artifact).where(
+            Artifact.task_id == task_id, Artifact.kind == "seo_article_started")))) == 2
+        assert len(list(db.scalars(select(Artifact).where(
+            Artifact.task_id == task_id,
+            Artifact.kind == "seo_article_retry_scheduled")))) == 1
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_nontransient_article_error_fails_without_retry(env, monkeypatch):
+    from app.content import worker
+    from app.core.composition import build_article_production
+    from app.services.tasks import TaskService
+    from app.services.artifacts import ArtifactService
+    from test_seo_article import BRIEF
+    factory, settings, product_id = env
+
+    class InvalidResponseProvider:
+        async def generate(self, request):
+            raise ValueError("bad article contract")
+
+    monkeypatch.setattr(worker, "build_article_production",
+        lambda db, cfg, **kwargs: build_article_production(
+            db, cfg, provider=InvalidResponseProvider(), **kwargs))
+
+    with factory() as db:
+        task = TaskService(db).create(product_id=product_id,
+            title="SEO-ARTICLE:validation", assigned_agent="content_factory",
+            status=TaskStatus.QUEUED)
+        ArtifactService(db).create(product_id=product_id, task_id=task.id,
+            kind="content_request", title="SEO request",
+            content=ArticleProductionInput(
+                product_id=product_id, topic="Как вести запись клиентов",
+                channel="own_site", light=True, seo_brief=BRIEF).model_dump_json())
+        db.commit()
+        task_id = task.id
+    assert await worker.run_content_once(factory, settings) == 1
+    with factory() as db:
+        assert db.get(Task, task_id).status == TaskStatus.FAILED
+        assert not list(db.scalars(select(Artifact).where(
+            Artifact.task_id == task_id,
+            Artifact.kind == "seo_article_retry_scheduled")))
