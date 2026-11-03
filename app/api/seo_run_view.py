@@ -74,7 +74,8 @@ def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
     # not a claim about the next retry's result.
     failure = next((r for r in result_reports if isinstance(r.get("error"), str)), {})
     stages = sorted((a for a in artifacts if a.kind == "seo_factory_stage"),
-                    key=lambda a: (a.created_at, a.id), reverse=True)
+                    key=lambda a: _report_data(a.content).get("recorded_at")
+                    or a.created_at.isoformat(), reverse=True)
     stage_data = _report_data(stages[0].content) if stages else {}
     checkpoints = sorted((a for a in artifacts if a.kind == "seo_suggest_checkpoint"),
                          key=lambda a: (a.created_at, a.id), reverse=True)
