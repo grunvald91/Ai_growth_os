@@ -15,6 +15,7 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from app.models.domain import AgentRun, Approval, Artifact, Publication, Task
+from app.seo.activation import editorial_preferences
 
 SEO_AGENT = "seo_factory"
 SEO_KINDS = (
@@ -209,6 +210,7 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
     approval_by_article = {}
     for approval in approvals:
         approval_by_article.setdefault(approval.artifact_id, approval)
+    company_timezone = ZoneInfo(editorial_preferences(db, product_id).timezone_name)
     by_run = defaultdict(list)
     for task in article_tasks:
         parts_of_title = task.title.split(":", 2)
@@ -232,7 +234,7 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
             "task_status": state,
             "scheduled_at": (
                 (task.due_at.replace(tzinfo=timezone.utc) if task.due_at.tzinfo is None
-                 else task.due_at).astimezone(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M")
+                 else task.due_at).astimezone(company_timezone).strftime("%d.%m.%Y %H:%M")
                 if task.due_at else None
             ),
             "article_id": str(article.id) if article else None,
