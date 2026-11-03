@@ -95,6 +95,7 @@ def load_context(db: Session, product: Product, products_root: Path) -> dict:
             query = query.where(Artifact.kind.not_in([
                 'company_intake_sources', 'company_profile_draft', 'company_profile_review',
                 'company_profile_previous', 'company_profile_apply_intent',
+                'seo_article_revision_backup',
             ]))
         # Active experiments first, then recent history; metrics by observation time.
         if model is Experiment:

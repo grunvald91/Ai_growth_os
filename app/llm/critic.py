@@ -185,9 +185,29 @@ SEO_CRITIC_RULES = (
 )
 
 
+SERVGO_CRITIC_RULES = (
+    ' Для статьи о ServGo проверь отдельно, не представлена ли самостоятельная '
+    'онлайн-запись как обязательная для каждого малого бизнеса. Когда владелец '
+    'ищет электронный журнал, расписание или ручную запись, статья должна '
+    'описывать действующую админ-панель, а не навязывать онлайн-запись. '
+    'Когда посетитель ищет как записаться к специалисту, не заменяй ответ '
+    'продажей CRM владельцу. Не утверждай, что клиентскую запись можно '
+    'отключить, если это не подтверждено в verified_product_facts. '
+    'При запросах о базе клиентов проверь, что отражены карточки, история '
+    'записей и работа с повторными обращениями, но не приписаны '
+    'автоматическая CRM-to-Mail синхронизация, массовые кампании по базе '
+    'или измеренные показатели возврата. Для рекламы учитывай разрешение '
+    'адресатов и отказ от рассылки.'
+)
+
+
 def _critic_prompt(request: LLMRequest) -> str:
     base = prompt_text("critic.marketing" if _is_marketing(request) else "critic.fact")
-    return base + SEO_CRITIC_RULES if request.metadata.get("seo_article") else base
+    if not request.metadata.get("seo_article"):
+        return base
+    return base + SEO_CRITIC_RULES + (
+        SERVGO_CRITIC_RULES if request.metadata.get("company_slug") == "servgo" else ""
+    )
 
 
 def _author_prompt(request: LLMRequest) -> str:

@@ -23,3 +23,59 @@ def test_non_seo_critic_unchanged():
     request = LLMRequest(messages=[LLMMessage(role="user", content="draft")],
                          metadata={"task_type": "article_production", "team_role": "marketing_editor"})
     assert "seo_brief.primary_query" not in _critic_prompt(request)
+
+def test_servgo_seo_critic_checks_manual_schedule_not_online_only():
+    request = LLMRequest(
+        messages=[LLMMessage(role="user", content="draft")],
+        metadata={"task_type": "article_production", "team_role": "marketing_editor",
+                  "seo_article": True, "company_slug": "servgo"},
+    )
+    assert "онлайн-запись как обязательная" in _critic_prompt(request)
+    other = request.model_copy(update={"metadata": {**request.metadata, "company_slug": "other"}})
+    assert "онлайн-запись как обязательная" not in _critic_prompt(other)
+
+
+def test_servgo_company_profile_contains_proven_owner_calendar_facts():
+    import json
+    from pathlib import Path
+    from app.company_profile import CompanyProfile, render_company_profile
+    from app.seo.planner import SEED_PROMPT, PLAN_PROMPT
+    from app.workflows.article_production import SERVGO_EDITORIAL_RULES
+
+    file = Path(__file__).resolve().parents[1] / "products/servgo/company-profile.json"
+    profile = CompanyProfile.model_validate(json.loads(file.read_text(encoding="utf-8")))
+    facts = [fact.statement for fact in profile.proof.approved_facts]
+    assert any("визуальное расписание" in fact for fact in facts)
+    assert any("запись вручную" in fact for fact in facts)
+    assert "В админ-панели ServGo" in render_company_profile(profile)
+    assert "owner-managed appointment journals" in SEED_PROMPT
+    assert "appointment journal" in PLAN_PROMPT
+    assert "внутренний электронный журнал" in SERVGO_EDITORIAL_RULES
+
+
+def test_servgo_crm_value_and_mailing_boundaries_in_prompts():
+    from app.workflows.article_production import SERVGO_EDITORIAL_RULES
+    from app.llm.critic import SERVGO_CRITIC_RULES
+    from app.seo.planner import SEED_PROMPT
+    assert "истории посещений" in SERVGO_EDITORIAL_RULES
+    assert "Связку CRM→Mail" in SERVGO_EDITORIAL_RULES
+    assert "автоматическая CRM-to-Mail" in SERVGO_CRITIC_RULES
+    assert "customer databases" in SEED_PROMPT
+
+
+
+def test_servgo_critic_rules_survive_real_privacy_gateway():
+    from app.core.composition import SAFE_LLM_METADATA_FIELDS
+    from app.privacy import PrivacyGateway
+
+    gateway = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
+    request = LLMRequest(
+        messages=[LLMMessage(role="user", content="draft")],
+        metadata={"task_type": "article_production", "team_role": "marketing_editor",
+                  "seo_article": True, "company_slug": "servgo",
+                  "unrelated_secret": "remove-me"},
+    )
+    safe = gateway.sanitize(request)
+    assert safe.metadata["company_slug"] == "servgo"
+    assert "unrelated_secret" not in safe.metadata
+    assert "онлайн-запись как обязательная" in _critic_prompt(safe)
