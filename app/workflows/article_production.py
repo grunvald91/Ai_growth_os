@@ -169,6 +169,22 @@ ARTICLE_COMMON = ('Return ONLY JSON matching the schema. '
 
 
 GEO_STAGES = frozenset({'seo_editor', 'article_writer', 'human_editor', 'marketing_editor'})
+SERVGO_EDITORIAL_RULES = (
+    ' Для SEO-материалов именно о ServGo различай две задачи владельца: '
+    'внутренний электронный журнал, расписание и ручная запись администратором '
+    'и самостоятельная онлайн-запись посетителей. Второе необязательно. '
+    'При запросах о журнале клиентов, графике мастеров, управлении расписанием '
+    'и программе записи сначала покажи действующую админ-панель: '
+    'календарь день/неделя, ручная запись с услугой, временем, специалистом, '
+    'именем и телефоном, просмотр деталей записи и перенос. '
+    'Не утверждай, что публичную форму можно отключить: это не проверено. '
+    'При клиентском запросе о записи к психологу или на маникюр сначала помоги '
+    'самому посетителю, не подменяй ответ рекламой программы для владельца. '
+    'Одна статья — одно поисковое намерение; заявляй только подтверждённые '
+    'в verified_product_facts возможности и не выдумывай измеренные результаты.'
+)
+
+
 GEO_RULES = (
     ' ПОИСК БЕЗ SEO-ПЕРЕСПАМА. seo_brief.primary_query задаёт реальный вопрос человека, а не фразу '
     'для механического повторения. Отвечай по смыслу в начале материала; в заголовке можно '
@@ -999,6 +1015,7 @@ class ArticleProduction:
                     + prompt_text('article.common')
                     + stage_rule
                     + (GEO_RULES if safe_request.seo_brief and name in GEO_STAGES else '')
+                    + (SERVGO_EDITORIAL_RULES if product.slug == 'servgo' and safe_request.seo_brief and name in GEO_STAGES else '')
                     + '\nSchema: ' + json.dumps(schema.model_json_schema())
                 )
                 fallback_reason = None
@@ -1048,6 +1065,7 @@ class ArticleProduction:
                                 'reasoning_effort': 'low',
                                 'team_role': name,
                                 'seo_article': bool(safe_request.seo_brief),
+                                'company_slug': product.slug,
                                 'task_type': 'article_production',
                                 'provider_timeout_seconds': PROVIDER_TIMEOUT_SECONDS,
                             }), validate_revision=validate_stage_revision,
