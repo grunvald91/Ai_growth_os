@@ -71,7 +71,7 @@ def merge_profile(current: dict, packaged: dict) -> tuple[dict, dict]:
             and "owner-confirmation:servgo:2026-11-03:shifts-operational"
                 in packaged_offer.get("evidence_refs", [])
             and existing_offer.get("release_status") == "unverified"
-            and existing_offer.get("evidence_refs") == []
+            and existing_offer.get("evidence_refs") in ([], packaged_offer.get("evidence_refs"))
             and existing_offer.get("description", "").startswith(
                 "Модуль учёта смен рассматривается как направление платформы.")
         ):
@@ -93,7 +93,8 @@ def merge_profile(current: dict, packaged: dict) -> tuple[dict, dict]:
     facts = merged["proof"]["approved_facts"]
     present = {f["statement"] for f in facts}
     verified_paths = ("SchedulePage.tsx", "web/api/routes/crm.py", "mail_campaign_",
-                      "Ai_growth_os/app/api/content_studio.py", "Ai_growth_os/app/seo/suggest.py")
+                      "Ai_growth_os/app/api/content_studio.py", "Ai_growth_os/app/seo/suggest.py",
+                      "owner-confirmation:servgo:2026-11-03:shifts-operational")
     for fact in new["proof"]["approved_facts"]:
         evidence = str(fact.get("evidence_ref") or "")
         if any(part in evidence for part in verified_paths) and fact["statement"] not in present:
