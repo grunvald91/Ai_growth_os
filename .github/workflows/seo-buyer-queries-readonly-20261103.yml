@@ -40,7 +40,7 @@ jobs:
                   Artifact.product_id==prod.id,Artifact.kind=="semantic_core")
                   .order_by(Artifact.created_at.desc(),Artifact.id.desc()).limit(8)))
               print("CORES="+str(len(rows)))
-              needle=("запис","психолог","маникюр","клиент","crm","салон","журнал","расписан","программ","мастер","бизнес")
+              needle=("для психолог","психологу","запись клиентов","записи клиентов","клиентами","клиентов","электронн","журнал","расписан","crm","автоматизац","программа для","для мастера","для маникюра","для салона","как организовать")
               for idx,row in enumerate(rows):
                   try: core=SemanticCore.model_validate_json(row.content)
                   except ValueError: continue
@@ -50,7 +50,7 @@ jobs:
                           if any(word in q.casefold() for word in needle):
                               found.append({"query":q,"cluster":c.id,"stage":c.stage,"intent":c.intent})
                   print("CORE="+json.dumps({"index":idx,"clusters":len(core.clusters),
-                      "matching":found[:100]},ensure_ascii=False))
+                      "matching":found[:120]},ensure_ascii=False))
               pubs=list(db.scalars(select(Publication).where(
                  Publication.product_id==prod.id,Publication.channel=="own_site",
                  Publication.status=="published").order_by(Publication.published_at.desc()).limit(12)))
