@@ -829,3 +829,45 @@ body[data-growth-design="v4"] .route-content .wb-downloads>.btn.secondary{backgr
  .wb-downloads>.btn.primary{grid-column:1/-1}
 }
 @media(prefers-reduced-motion:reduce){.wb-create-more>summary::after{transition:none}}
+
+
+/* Narrow phones: all header actions must fit alongside the company context.
+   The business switch remains a real 40px tap target with visible avatar. */
+@media (max-width: 400px) {
+  body[data-growth-design="v4"] .topbar {
+    gap: 6px;
+    padding-inline: 8px;
+    max-width: 100vw;
+  }
+  body[data-growth-design="v4"] .topbar .crumbs {
+    min-width: 0;
+    flex: 1 1 40px;
+  }
+  body[data-growth-design="v4"] .topbar .top-actions {
+    min-width: 0;
+    flex: 0 1 auto;
+    gap: 3px;
+  }
+  body[data-growth-design="v4"] .topbar .top-actions .biz-switch {
+    box-sizing: border-box;
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    height: 40px;
+    padding: 4px;
+    gap: 0;
+    flex: 0 0 40px;
+    align-items: center;
+    justify-content: center;
+  }
+  body[data-growth-design="v4"] .topbar .top-actions .biz-switch > .avatar {
+    display: grid;
+    flex: 0 0 29px;
+    width: 29px;
+    height: 29px;
+  }
+  body[data-growth-design="v4"] .topbar .top-actions .biz-switch > span:not(.avatar),
+  body[data-growth-design="v4"] .topbar .top-actions .biz-switch > svg {
+    display: none;
+  }
+}
