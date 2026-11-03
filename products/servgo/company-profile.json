@@ -16,6 +16,10 @@
       {
         "name": "ServGo online booking",
         "description": "Client flow includes business/service selection, optional specialist selection, date/time-slot selection, contact details and confirmation. Client flow includes optional prepayment instructions; the customer can mark payment as sent and attach proof. The owner manually verifies receipt before the booking is confirmed. Client flow includes a booking status page and notifications."
+      },
+      {
+        "name": "ServGo client AI booking chat",
+        "description": "Where enabled by the business owner, the AI chat uses that business's configured services, descriptions, prices and booking slots to answer questions, help choose a service and prepare a booking for customer confirmation. It can hand over to an operator. It cannot know details the business did not configure and is not a professional medical or psychological consultation."
       }
     ],
     "primary_conversion_action": "Запросить демонстрацию ServGo: написать в Telegram @Grunvald или на почту grunvaldlab@gmail.com"
@@ -45,6 +49,10 @@
       {
         "statement": "Client flow includes a booking status page and notifications.",
         "evidence_ref": "products/servgo/.claude/product-marketing-context.md#product"
+      },
+      {
+        "statement": "Where the owner allows it, the ServGo client AI chat can use configured business services, descriptions and availability to answer service questions and prepare a booking that requires explicit customer confirmation; human handoff is available.",
+        "evidence_ref": "booking_bot/web/api/routes/ai.py; booking_bot/web/api/sales/tools.py; booking_bot/web/api/sales/policy.py"
       }
     ],
     "approved_numbers": []
