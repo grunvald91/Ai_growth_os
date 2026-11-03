@@ -1,0 +1,72 @@
+name: ServGo SEO post-recovery status (read-only)
+on:
+  push:
+    branches: [audit/seo-servgo-readonly-20261103]
+    paths: [.github/workflows/seo-servgo-final-status-readonly.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Confirm latest SEO factory and queued articles
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/key
+            ssh-keygen -lf /tmp/key 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/keys
+          [ -s ~/.ssh/known_hosts ] || exit 1
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'docker exec -i ai-growth-os-api-1 python -' <<'PY'
+          import json
+          from datetime import datetime,timezone
+          from zoneinfo import ZoneInfo
+          from uuid import UUID
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Product,Task,TaskStatus,Artifact
+          from app.api.seo_run_view import seo_runs
+          from collections import Counter
+          def report(x):
+              print('SEO_CURRENT='+json.dumps(x,ensure_ascii=False,default=str),flush=True)
+          with SessionLocal() as db:
+              p=db.scalar(select(Product).where(Product.slug=='servgo'))
+              if not p: raise SystemExit('ServGo product absent')
+              rows=seo_runs(db,p.id,limit=5)
+              run=next((r for r in rows if r['id']=='2144a9c0-4e83-4e56-80b2-be61b3c738b3'),None)
+              if not run: raise SystemExit('Original job absent')
+              active=list(db.scalars(select(Task).where(Task.product_id==p.id,Task.status==TaskStatus.RUNNING).limit(20)))
+              stage=list(db.scalars(select(Artifact).where(Artifact.task_id==UUID(run['id']),
+                  Artifact.kind=='seo_factory_stage').order_by(Artifact.created_at.desc()).limit(15)))
+              all_seo_articles=list(db.scalars(select(Task).where(
+                   Task.product_id==p.id,Task.title.like('SEO-ARTICLE:%'))))
+              report({
+                'time_msk':datetime.now(timezone.utc).astimezone(ZoneInfo('Europe/Moscow')).isoformat(),
+                'status':run['status'], 'attempts':run['attempts'],
+                'current_stage':run['current_stage'], 'semantic_ready':run['semantic_ready'],
+                'plan_ready':run['plan_ready'], 'articles_queued':run['articles_queued'],
+                'article_rows':len(run['articles']), 'last_error':run['last_error'],
+                'last_error_code':run['last_error_code'],'last_error_stage':run['last_error_stage'],
+                'source_progress':run['source_progress'],
+                'article_status_counts':dict(Counter(t.status.value for t in all_seo_articles)),
+                'scheduled_articles':[{
+                    'title':a['title'][:90], 'status':a['task_status'],
+                    'scheduled_msk':a['scheduled_at'], 'publication_path':a['publication_path']
+                  } for a in run['articles'][:15]],
+                'active_jobs':[{'agent':t.assigned_agent,'title':t.title[:90]}
+                  for t in active],
+                'stage_events':len(stage),
+              })
+          PY
+          echo '=== Recent worker failure categories (no payloads) ==='
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            "docker logs --since 35m ai-growth-os-worker-1 2>&1 | grep -E 'seo_factory_failed|llm_fallback' | tail -n 10" || true
