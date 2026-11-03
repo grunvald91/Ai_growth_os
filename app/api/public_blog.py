@@ -13,6 +13,8 @@ from app.workflows.article_contracts import ArticleArtifact
 router = APIRouter(prefix="/public/blog", tags=["public-blog"])
 _BULLET = re.compile(r"^\s*(?:(\d{1,2})[.)]|[-*•])\s+(.*\S)\s*$")
 _INLINE_ENUM = re.compile(r"(?<![\w.])([1-9]\d?)[.)]\s+(?=\S)")
+_INLINE_DASH = re.compile(r"(?<=[:;])\s*[—•]\s+(?=\S)")
+_SENTENCES = re.compile(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z«])")
 _CATEGORY = {"awareness": "Советы", "consideration": "Сравнение и выбор", "decision": "Запуск"}
 
 
@@ -27,8 +29,19 @@ def body_blocks(body: str) -> list[dict]:
 
     def paragraph(text: str) -> None:
         text = text.strip()
-        if text:
-            blocks.append({"type": "paragraph", "text": text})
+        if not text:
+            return
+        # Preserve every sentence but keep old one-line article bodies readable.
+        sentences = _SENTENCES.split(text) if len(text) > 650 else [text]
+        current = ""
+        for sentence in sentences:
+            if current and len(current) + len(sentence) > 540:
+                blocks.append({"type": "paragraph", "text": current})
+                current = sentence
+            else:
+                current = (current + " " + sentence).strip()
+        if current:
+            blocks.append({"type": "paragraph", "text": current})
 
     def item(text: str, ordered: bool) -> None:
         if blocks and blocks[-1]["type"] == "list" and blocks[-1]["ordered"] == ordered:
@@ -50,6 +63,13 @@ def body_blocks(body: str) -> list[dict]:
             for i, marker in enumerate(markers):
                 end = markers[i + 1].start() if i + 1 < len(markers) else len(line)
                 item(line[marker.end():end].strip(), ordered=True)
+            continue
+        dashes = list(_INLINE_DASH.finditer(line))
+        if len(dashes) >= 2:
+            paragraph(line[:dashes[0].start()])
+            for i, marker in enumerate(dashes):
+                end = dashes[i + 1].start() if i + 1 < len(dashes) else len(line)
+                item(line[marker.end():end].strip(" ;"), ordered=False)
             continue
         paragraph(line)
     return blocks
