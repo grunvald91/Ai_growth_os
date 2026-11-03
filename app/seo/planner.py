@@ -125,7 +125,8 @@ def fresh_core(core: SemanticCore, taken: set[str]) -> SemanticCore:
         c for c in core.clusters if not taken & {normalize(q) for q in c.queries}]})
 
 
-def validate_plan(plan: SeoContentPlan, core: SemanticCore, taken: frozenset[str] = frozenset(),\n                  buyer_segments: tuple[str, ...] = (), *, b2b_provider: bool = False) -> None:
+def validate_plan(plan: SeoContentPlan, core: SemanticCore, taken: frozenset[str] = frozenset(),
+                  buyer_segments: tuple[str, ...] = (), *, b2b_provider: bool = False) -> None:
     clusters = {c.id: c for c in core.clusters}
     seen_queries: set[str] = set(taken)
     for item in plan.items:
