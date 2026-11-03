@@ -274,3 +274,34 @@ def test_verified_facts_are_separate_from_hypotheses_and_unknowns():
     payload["unknowns"] = [{"statement": "CFOs are the buyer"}]
     with pytest.raises(ValidationError):
         parse_company_profile(payload)
+
+
+def test_marketable_offers_need_evidence_and_unavailable_offers_cannot_fake_sales_pages():
+    from app.company_profile import ServiceOffer
+    with pytest.raises(ValidationError, match="source evidence"):
+        ServiceOffer(name="Growth", description="Generator", release_status="live")
+    with pytest.raises(ValidationError, match="sales destination"):
+        ServiceOffer(name="Shifts", description="Unverified", release_status="unverified",
+                     landing_page="https://example.com/buy")
+    legacy = ServiceOffer(name="Flower shop", description="Bouquets")
+    assert legacy.release_status is None
+    limited = ServiceOffer(name="SEO pilot", description="Pilot only", release_status="limited",
+                           evidence_refs=["app/seo/factory.py"])
+    assert limited.release_status == "limited"
+
+
+def test_servgo_catalog_declares_all_families_with_evidence_for_promoted_modules():
+    from pathlib import Path
+    from app.company_profile import load_company_profile
+    root = Path(__file__).resolve().parents[1] / "products"
+    p = load_company_profile(root, "servgo").profile
+    assert p is not None
+    by_family = {}
+    for offer in p.offer.products_services:
+        assert offer.product_family and offer.release_status
+        by_family.setdefault(offer.product_family, []).append(offer)
+        if offer.release_status in ("live", "limited"):
+            assert offer.evidence_refs
+    assert set(by_family) == {"BookingBot", "Growth", "Mail", "Смена", "SEO-завод"}
+    assert all(offer.release_status == "unverified" for offer in by_family["Смена"])
+    assert all(offer.landing_page is None for offer in by_family["Смена"])
