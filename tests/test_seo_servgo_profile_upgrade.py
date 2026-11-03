@@ -72,4 +72,3 @@ def test_dry_run_backup_hash_guard_and_repeat(tmp_path):
     assert (p / result["backup"]).read_bytes() == before
     assert not upgrade(target, source, apply=False)["changed"]
     assert not upgrade(target, source, apply=True)["applied"]
-
