@@ -166,6 +166,10 @@ def main():
                         mobile_nav=page.locator('#mobileNav').bounding_box()
                         assert action and mobile_nav and action['y']+action['height']<=mobile_nav['y']+1,(width,action,mobile_nav)
                         assert page.locator('.wb-more-grid summary').count()==2
+                        duration=page.locator('.wb-create-settings>.sg-field').nth(0).bounding_box()
+                        cta=page.locator('.wb-create-settings>.sg-field').nth(1).bounding_box()
+                        assert duration and cta and abs(duration['y']-cta['y'])<8,(width,duration,cta)
+                        assert cta['x']>duration['x']+duration['width']-2,(width,duration,cta)
                         history=page.locator('.wb-library-head').bounding_box()
                         assert history and history['y']<mobile_nav['y'],(width,history,mobile_nav)
                     page.screenshot(path=f'/tmp/v4-simple-video-create-{width}.png',
