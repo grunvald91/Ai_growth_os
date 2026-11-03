@@ -1172,3 +1172,11 @@ body[data-growth-design="v4"] .route-content .wb-result .wb-repair .btn.secondar
   .wb-library-item > p .btn { min-height: 38px; }
   .wb-result .wb-return a { min-height: 40px; }
 }
+
+/* Dark-mode primary controls use the semantic accent and its contrasting ink.
+   Light mode intentionally retains the existing BookingBot-style gradient. */
+html[data-theme="dark"] body[data-growth-design="v4"] .route-content .wb-create-actions>.btn.primary,
+html[data-theme="dark"] body[data-growth-design="v4"] .route-content .wb-downloads>.btn.primary {
+  color:var(--s-accent-ink);
+  background:var(--s-accent-grad);
+}

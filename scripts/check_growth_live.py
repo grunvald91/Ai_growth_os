@@ -195,6 +195,19 @@ def main():
                       }))
                     })""")
                     assert overflow['scroll']<=overflow['width'],overflow
+                page.set_viewport_size({'width':390,'height':844})
+                page.goto(base+'/whiteboard?design=v4')
+                page.evaluate("window.ServGoTheme.setPreference('dark')")
+                theme_colors=page.locator('.wb-create-actions>.btn.primary').evaluate("""button=>{
+                  const probe=document.createElement('span');
+                  probe.style.color='var(--s-accent-ink)';
+                  button.append(probe);
+                  const expected=getComputedStyle(probe).color;
+                  probe.remove();
+                  return {actual:getComputedStyle(button).color,expected};
+                }""")
+                assert theme_colors['actual']==theme_colors['expected'],theme_colors
+                page.evaluate("window.ServGoTheme.setPreference('light')")
                 for width in (360,390,1440):
                     page.set_viewport_size({'width':width,'height':844})
                     page.goto(base+'/whiteboard/'+str(video.id)+'?design=v4')
