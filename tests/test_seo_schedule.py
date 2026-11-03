@@ -164,5 +164,5 @@ def test_company_publication_count_uses_local_timezone(env):
     db.commit()
     # UTC date Nov 3, Moscow date Nov 4; the same publication belongs to
     # different days at the two local midnight boundaries.
-    assert published_today(db, first.id, now=now, tz=ZoneInfo("Europe/Moscow")) == 1
+    assert published_today(db, first.id, now=now, tz=ZoneInfo("Europe/Moscow")) == 0
     assert published_today(db, first.id, now=now, tz=ZoneInfo("America/Los_Angeles")) == 1
