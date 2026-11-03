@@ -818,7 +818,13 @@ body[data-growth-design="v4"] .route-content .wb-downloads>.btn.secondary{backgr
  .wb-create-main{grid-template-columns:1fr;gap:15px}
  .wb-create-fields{grid-template-columns:1fr;gap:15px}
  .wb-create-fields>.sg-field{grid-column:1/-1}
- .wb-create-actions{flex-direction:column;align-items:stretch;gap:11px;position:relative;padding:16px 0 6px}
+ .wb-create-actions{
+   flex-direction:column;align-items:stretch;gap:7px;
+   position:sticky;bottom:calc(66px + env(safe-area-inset-bottom,0px));z-index:6;
+   padding:11px 0 8px;background:var(--s-bg);
+   box-shadow:0 -8px 18px rgba(12,32,58,.06);
+ }
+ .wb-create-hint strong{display:none}
  .wb-create-actions>.btn{width:100%;min-height:46px}
  .wb-library-item{grid-template-columns:1fr;gap:4px;padding:12px}
  .wb-library-status{justify-self:start}
