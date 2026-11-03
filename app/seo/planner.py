@@ -1,10 +1,11 @@
 """Seed queries and the funnel content plan. Every plan item must rest on real collected queries."""
 import json
+import logging
 import re
 from pathlib import Path
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
 from app.company_profile import load_company_profile
@@ -19,6 +20,8 @@ from app.services.tasks import TaskService
 from app.workflows.context import load_context
 
 PLAN_KIND = "seo_content_plan"
+PLAN_VALIDATION_KIND = "seo_plan_validation"
+_logger = logging.getLogger(__name__)
 
 SEED_PROMPT = (
     "You research organic search demand for the BUSINESS described in the company profile, "
@@ -84,6 +87,31 @@ PLAN_PROMPT = (
 
 class PlanError(ValueError):
     pass
+
+
+def plan_error_code(exc: Exception) -> str:
+    """Stable reason codes only: never persist untrusted model text."""
+    if isinstance(exc, ValidationError):
+        return "plan_schema_invalid"
+    message = str(exc)
+    if message.startswith("Unknown cluster"):
+        return "plan_unknown_cluster"
+    if message.startswith("Stage or intent"):
+        return "plan_cluster_intent_mismatch"
+    if message.startswith("Primary query of"):
+        return "plan_query_not_in_cluster"
+    if message.startswith("Primary query repeated"):
+        return "plan_duplicate_query"
+    if message.startswith("Every collected query"):
+        return "plan_no_fresh_queries"
+    if message.startswith("Consumer appointment"):
+        return "plan_wrong_buyer"
+    if message.startswith("Plan item"):
+        return "plan_wrong_buyer_segment"
+    if message.startswith("Plan offers"):
+        return "plan_unavailable_product"
+    return "plan_validation_failed"
+
 
 
 # Guard a clear buyer mismatch for explicitly declared B2B companies.
@@ -285,7 +313,8 @@ async def plan_seeds(db: Session, llm: LLMService, privacy: PrivacyGateway, prod
 
 async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, product_id: UUID, core: SemanticCore, *,
                        products_root: Path, model: str, factory_task_id: UUID | None = None,
-                       horizon_days: int = 7) -> Artifact:
+                       horizon_days: int = 7,
+                       fallback_models: tuple[str, ...] = ()) -> Artifact:
     product = db.get(Product, product_id)
     if product is None:
         raise LookupError("Product not found")
@@ -306,14 +335,45 @@ async def plan_content(db: Session, llm: LLMService, privacy: PrivacyGateway, pr
     task_id = task.id
     db.commit()
     try:
-        plan = await _ask(llm, model=model, prompt=PLAN_PROMPT, payload=payload, schema=SeoContentPlan,
-                          role="seo_editor", validate=lambda p: validate_plan(
-                              p, core, frozenset(taken), tuple(company["buyer_segments"]),
-                              b2b_provider="b2b" in str(company["industry"] or "").casefold(),
-                              unavailable_offer_families=tuple(
-                                  offer["product_family"] for offer in company["offer_catalog"]
-                                  if offer["release_status"] in {"in_development", "unverified"}
-                                  and offer["product_family"])))
+        # Domain validation never accepts invented cluster ids or unapproved
+        # products. A different configured model may retry *once* after the
+        # primary's bounded self-correction failed; this is not another critic.
+        excluded = tuple(
+            offer["product_family"] for offer in company["offer_catalog"]
+            if offer["release_status"] in {"in_development", "unverified"}
+            and offer["product_family"])
+        def verify_plan(candidate):
+            return validate_plan(
+                candidate, core, frozenset(taken), tuple(company["buyer_segments"]),
+                b2b_provider="b2b" in str(company["industry"] or "").casefold(),
+                unavailable_offer_families=excluded,
+            )
+
+        candidates = tuple(dict.fromkeys((model, *fallback_models)))[:2]
+        plan = None
+        for index, candidate_model in enumerate(candidates):
+            try:
+                plan = await _ask(
+                    llm, model=candidate_model, prompt=PLAN_PROMPT, payload=payload,
+                    schema=SeoContentPlan, role="seo_editor", validate=verify_plan)
+                break
+            except (PlanError, ValidationError) as exc:
+                code = plan_error_code(exc)
+                _logger.warning("seo_plan_invalid model=%s code=%s alternate_available=%s",
+                                candidate_model, code, index + 1 < len(candidates))
+                if factory_task_id is not None:
+                    ArtifactService(db).create(
+                        product_id=product_id, task_id=factory_task_id,
+                        kind=PLAN_VALIDATION_KIND, title="SEO plan rejected",
+                        content=json.dumps({
+                            "model": candidate_model, "error_code": code,
+                            "attempt": index + 1,
+                        }),
+                    )
+                    db.commit()
+                if index + 1 == len(candidates):
+                    raise
+        assert plan is not None
         artifact = ArtifactService(db).create(product_id=product_id, task_id=factory_task_id or task_id, kind=PLAN_KIND,
                                               title=f"Контент-план SEO ({len(plan.items)} статей)",
                                               content=plan.model_dump_json())
