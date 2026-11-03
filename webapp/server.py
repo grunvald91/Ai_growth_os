@@ -126,6 +126,17 @@ def validate_landing_request_payload(data: dict) -> dict:
         raise ValueError("Укажите телефон или email")
     if email and not LANDING_EMAIL_RE.match(email):
         raise ValueError("Проверьте email")
+    # Commercial SEO applications require explicit contact-data consent.
+    # The legacy general landing flow stays backwards compatible.
+    seo_source = data.get("utm_source") == "servgo_blog"
+    if seo_source and data.get("consent") is not True:
+        raise ValueError("Подтвердите согласие на обработку данных для ответа на заявку")
+    module = str(data.get("seo_module") or "platform")
+    if module not in {"platform", "booking", "growth", "mail", "shifts", "seo"}:
+        module = "platform"
+    requested_module = str(data.get("requested_module") or module)
+    if requested_module not in {"platform", "booking", "growth", "mail", "shifts", "seo"}:
+        requested_module = "platform"
 
     return {
         "name": name,
@@ -135,6 +146,9 @@ def validate_landing_request_payload(data: dict) -> dict:
         "self_reported_source": self_reported_source,
         "experiment_id": _clean_landing_field(data.get("experiment_id"), 100),
         "utm_source": _clean_landing_field(data.get("utm_source"), 255),
+        "seo_module": module if seo_source else "",
+        "requested_module": requested_module,
+        "consent": data.get("consent") is True,
         "utm_medium": _clean_landing_field(data.get("utm_medium"), 255),
         "utm_campaign": _clean_landing_field(data.get("utm_campaign"), 255),
         "utm_content": _clean_landing_field(data.get("utm_content"), 255),
@@ -166,6 +180,9 @@ def format_landing_request_message(payload: dict) -> str:
         "Атрибуция:",
         f"Experiment: {payload.get('experiment_id') or 'нет'}",
         f"UTM: source={payload.get('utm_source') or '-'}; medium={payload.get('utm_medium') or '-'}; campaign={payload.get('utm_campaign') or '-'}",
+        f"SEO статья: {payload.get('utm_content') or '-'}" if payload.get("utm_source") == "servgo_blog" else "SEO статья: -",
+        f"Интересующий модуль: {payload.get('requested_module') or '-'}",
+        f"Согласие на связь: {'да' if payload.get('consent') else 'нет'}",
         f"Landing: {payload.get('landing_path') or '-'}",
         f"Referrer: {payload.get('referrer') or '-'}",
         "",
@@ -176,10 +193,23 @@ def format_landing_request_message(payload: dict) -> str:
 
 
 async def persist_landing_marketing_lead(payload: dict) -> int:
-    """Persist the lead before notification so experiment attribution is queryable."""
-    confidence = "high" if payload.get("experiment_id") or payload.get("utm_campaign") else (
+    """Store a contact request, verifying SEO attribution against a real click."""
+    seo_source = payload.get("utm_source") == "servgo_blog"
+    verified = False
+    if seo_source:
+        from webapp.seo_commercial import verify_click
+        from database.database import engine
+        module = payload.get("seo_module") or "platform"
+        verified = (
+            payload.get("utm_medium") == "seo"
+            and payload.get("utm_campaign") == f"seo_{module}"
+            and await verify_click(engine, payload.get("utm_term") or "",
+                                   payload.get("utm_content") or "", module)
+        )
+    confidence = ("verified" if verified else "unverified") if seo_source else (
+        "high" if payload.get("experiment_id") or payload.get("utm_campaign") else (
         "medium" if payload.get("self_reported_source") or payload.get("referrer") else "low"
-    )
+    ))
     async with async_session_maker() as session:
         lead = MarketingLead(
             name=payload["name"],
@@ -199,12 +229,25 @@ async def persist_landing_marketing_lead(payload: dict) -> int:
             landing_path=payload.get("landing_path") or None,
             self_reported_source=payload.get("self_reported_source") or None,
             attribution_confidence=confidence,
-            status="new",
+            status="pending" if seo_source else "new",
         )
         session.add(lead)
         await session.commit()
         await session.refresh(lead)
         return lead.id
+
+
+async def mark_received_seo_lead(lead_id: int) -> bool:
+    """Accepted only after contact was actually delivered and persisted."""
+    from sqlalchemy import update
+    async with async_session_maker() as session:
+        result = await session.execute(
+            update(MarketingLead).where(
+                MarketingLead.id == lead_id,
+                MarketingLead.status == "pending",
+            ).values(status="received"))
+        await session.commit()
+        return result.rowcount == 1
 
 
 def send_landing_request_email(payload: dict, *, subject: str | None = None, message_body: str | None = None) -> bool:
@@ -308,6 +351,8 @@ async def api_landing_connect_request(request: web.Request) -> web.Response:
         return await request.app["onboarding_submit_handler"](request)
     if onboarding_operation == "view":
         return await request.app["onboarding_review_handler"](request)
+    if request.query.get("seo") == "report":
+        return await request.app["seo_report_handler"](request)
     try:
         payload = validate_landing_request_payload(await request.json())
     except ValueError as exc:
@@ -315,6 +360,11 @@ async def api_landing_connect_request(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"error": "Некорректные данные заявки"}, status=400)
 
+    is_seo_lead = payload.get("utm_source") == "servgo_blog"
+    if is_seo_lead:
+        origin = request.headers.get("Origin")
+        if origin and origin not in {"https://servgo.ru", "https://promo.servgo.ru"}:
+            return web.json_response({"error": "Недопустимый источник заявки"}, status=403)
     email_sent = False
     telegram_sent = False
     tracking_saved = False
@@ -325,6 +375,10 @@ async def api_landing_connect_request(request: web.Request) -> web.Response:
         tracking_saved = True
     except Exception as exc:
         logger.error(f"Landing request attribution persistence failed: {exc}")
+    if is_seo_lead and not tracking_saved:
+        # An unsaved business request must not be called a successful conversion.
+        return web.json_response({"error": "Не удалось сохранить заявку. Повторите позже."},
+                                 status=503)
 
     try:
         email_sent = await asyncio.to_thread(send_landing_request_email, payload)
@@ -353,6 +407,15 @@ async def api_landing_connect_request(request: web.Request) -> web.Response:
             {"error": "Не удалось отправить заявку. Попробуйте написать в Telegram."},
             status=502,
         )
+
+    if is_seo_lead:
+        try:
+            if not await mark_received_seo_lead(lead_id):
+                raise RuntimeError("SEO lead status transition unavailable")
+        except Exception:
+            logger.exception("SEO commercial request was delivered but acceptance state failed")
+            return web.json_response({"error": "Не удалось подтвердить приём заявки. Свяжитесь с поддержкой."},
+                                     status=503)
 
     return web.json_response(
         {
@@ -1026,10 +1089,12 @@ async def blog_handler(request: web.Request) -> web.Response:
         related = []
         canonical = f"{BLOG_PUBLIC_ORIGIN}/blog"
 
+    from webapp.seo_commercial import article_cta_url
     template = _niche_jinja_env.get_template("blog.html")
     html = template.render(
         origin=BLOG_PUBLIC_ORIGIN,
         canonical=canonical,
+        commercial_cta_url=article_cta_url(article["slug"]) if article else None,
         article=article,
         articles=articles,
         related=related,
@@ -1139,6 +1204,7 @@ async def robots_handler(request: web.Request) -> web.Response:
         "Allow: /\n"
         "Disallow: /api/\n"
         "Disallow: /auth/\n"
+        "Disallow: /blog/cta/\n"
         "\n"
         "Sitemap: https://promo.servgo.ru/sitemap.xml\n"
         f"Sitemap: {BLOG_PUBLIC_ORIGIN}/blog/sitemap.xml\n"
@@ -3676,6 +3742,15 @@ def create_webapp() -> web.Application:
     app.router.add_get('/blog/sitemap.xml', blog_sitemap_handler)
     app.router.add_get('/blog', blog_handler)
     app.router.add_get('/blog/{article_slug:[a-z0-9-]+}', blog_handler)
+    # The anonymous CTA redirect and admin report reuse the same public
+    # blog host and existing /api/landing/connect-request nginx route.
+    from webapp.seo_commercial import register_seo_commercial_routes
+    from database.database import engine as seo_commercial_engine
+    from webapp.blog_content import BLOG_PUBLIC_ORIGIN
+    register_seo_commercial_routes(
+        app, engine=seo_commercial_engine, get_user=get_authenticated_telegram_user,
+        admin_ids=ADMIN_IDS, public_origin=BLOG_PUBLIC_ORIGIN,
+    )
 
     # SEO / индексация — регистрируем до catch-all /{slug}, иначе
     # serve_niche_landing поймает /sitemap.xml и /robots.txt и вернёт 404.

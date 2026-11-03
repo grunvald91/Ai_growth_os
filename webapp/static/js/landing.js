@@ -9,6 +9,8 @@ function readGrowthAttribution() {
         utm_campaign: params.get("utm_campaign") || "",
         utm_content: params.get("utm_content") || "",
         utm_term: params.get("utm_term") || "",
+        seo_module: ["platform", "booking", "growth", "mail", "shifts", "seo"].includes(params.get("seo_module"))
+            ? params.get("seo_module") : "",
         referrer: document.referrer || "",
         landing_path: window.location.pathname || "/",
     };
@@ -19,7 +21,8 @@ function readGrowthAttribution() {
         current.utm_medium ||
         current.utm_campaign ||
         current.utm_content ||
-        current.utm_term
+        current.utm_term ||
+        current.seo_module
     );
 
     if (hasCampaignData) {
@@ -104,6 +107,10 @@ function openConnectModal(event) {
     if (connectForm.elements.intent) {
         connectForm.elements.intent.value = freeSeat ? "free_seat" : "";
     }
+    const fromBlog = readGrowthAttribution();
+    if (connectForm.elements.seo_module && fromBlog.utm_source === "servgo_blog") {
+        connectForm.elements.seo_module.value = fromBlog.seo_module || "platform";
+    }
     const title = connectModal.querySelector("[data-connect-title]");
     if (title) {
         title.textContent = freeSeat ? title.dataset.freeSeatText : title.dataset.defaultText;
@@ -127,6 +134,10 @@ function closeConnectModal() {
 openConnectButtons.forEach((button) => {
     button.addEventListener("click", openConnectModal);
 });
+if (new URLSearchParams(window.location.search).get("utm_source") === "servgo_blog") {
+    // A public SEO CTA leads directly to the existing real connection form.
+    openConnectModal();
+}
 
 closeConnectButtons.forEach((button) => {
     button.addEventListener("click", closeConnectModal);
@@ -157,6 +168,8 @@ connectForm?.addEventListener("submit", async (event) => {
         self_reported_source: String(formData.get("self_reported_source") || "").trim(),
         niche: String(formData.get("niche") || "").trim(),
         intent: String(formData.get("intent") || "").trim(),
+        requested_module: String(formData.get("seo_module") || "platform").trim(),
+        consent: formData.get("consent") === "yes",
         ...attribution,
     };
 
@@ -169,6 +182,12 @@ connectForm?.addEventListener("submit", async (event) => {
     if (!payload.phone && !payload.email) {
         setConnectStatus("Укажите телефон или email", "error");
         connectForm.elements.phone?.focus();
+        return;
+    }
+
+    if (!payload.consent) {
+        setConnectStatus("Подтвердите согласие на использование контактных данных для ответа", "error");
+        connectForm.elements.consent?.focus();
         return;
     }
 

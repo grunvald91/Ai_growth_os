@@ -281,3 +281,20 @@
 }
 .blog-page .blog-article-body .blog-ordered-list li::before { content: none; }
 .blog-page .blog-article-body section > p { max-width: 76ch; }
+
+/* CTA to the real platform request form; modules are optional compact links. */
+.blog-page .blog-cta-actions {
+    display:flex; flex-direction:column; align-items:flex-end; gap:12px;
+    min-width:min(100%, 270px); max-width:360px;
+}
+.blog-page .blog-cta-actions .primary-action { text-align:center; white-space:normal; }
+.blog-page .blog-cta-modules { width:100%; color:#D3DDF6; font-size:13px; }
+.blog-page .blog-cta-modules summary { cursor:pointer; font-weight:600; text-align:right; }
+.blog-page .blog-cta-modules nav { display:flex; gap:6px 12px; flex-wrap:wrap; justify-content:flex-end; margin-top:10px; }
+.blog-page .blog-cta-modules a { color:#fff; text-decoration:underline; text-underline-offset:3px; font-size:12px; }
+.blog-page .blog-cta-modules a:focus-visible { outline:2px solid #fff; outline-offset:3px; }
+@media (max-width: 720px) {
+    .blog-page .blog-cta-actions { align-items:stretch; max-width:none; margin-top:18px; }
+    .blog-page .blog-cta-modules summary { text-align:left; }
+    .blog-page .blog-cta-modules nav { justify-content:flex-start; }
+}

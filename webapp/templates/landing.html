@@ -341,9 +341,22 @@
                     <label class="field"><span>Телефон</span><input type="tel" name="phone" autocomplete="tel"></label>
                     <label class="field"><span>Email</span><input type="email" name="email" autocomplete="email"></label>
                 </div>
+                <label class="field"><span>Что вас интересует?</span>
+                    <select name="seo_module">
+                        <option value="platform">ServGo — вся платформа</option>
+                        <option value="booking">Запись и расписание</option>
+                        <option value="growth">Growth — маркетинг</option>
+                        <option value="mail">Mail — почтовые кампании</option>
+                        <option value="shifts">Смена — учёт смен</option>
+                        <option value="seo">SEO-завод — статьи и поиск</option>
+                    </select>
+                </label>
                 <label class="field"><span>Комментарий</span><textarea name="comment" rows="4" placeholder="Коротко о бизнесе или удобном времени для связи"></textarea></label>
                 <label class="field"><span>Откуда вы узнали о ServGo?</span><input type="text" name="self_reported_source" maxlength="500" placeholder="Например: Telegram, поиск, знакомый, Instagram"></label>
                 <p class="form-hint">Обязательно укажите имя и телефон или email. Источник помогает понять, какие эксперименты реально приводят клиентов.</p>
+                <label class="field connect-consent"><span><input type="checkbox" name="consent" value="yes" required>
+                    Согласен(на) на обработку указанных контактных данных для ответа на заявку ServGo.
+                    Отправка формы не означает подписку на рекламные сообщения.</span></label>
                 <div class="form-status" data-connect-form-status role="status" aria-live="polite"></div>
                 <div class="form-actions">
                     <button class="btn btn-soft" type="button" data-close-connect-form>Отмена</button>
@@ -353,6 +366,6 @@
         </div>
     </div>
 
-    <script src="/static/js/landing.js?v=9"></script>
+    <script src="/static/js/landing.js?v=10"></script>
 </body>
 </html>

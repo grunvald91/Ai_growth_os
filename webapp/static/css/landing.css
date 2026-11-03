@@ -1010,3 +1010,25 @@ button { font: inherit; cursor: pointer; }
     .section { padding: 48px 18px; }
     .final-content { padding: 40px 24px; }
 }
+
+/* Compact and readable commercial enquiry form, including on small phones. */
+.connect-modal { max-height: min(92dvh, 850px); overflow-y: auto; overscroll-behavior: contain; }
+.connect-form select {
+    width: 100%; min-height: 44px; padding: 10px 12px; border-radius: 11px;
+    border: 1px solid var(--line-dk); color: var(--navy); background: #fff;
+    font-family: var(--font); font-size: 14px;
+}
+.connect-form .connect-consent > span {
+    display: flex; flex-direction: row; align-items: flex-start;
+    gap: 9px; line-height: 1.5; font-size: 12px;
+}
+.connect-form .connect-consent input[type="checkbox"] {
+    display: inline-block; width: 18px; height: 18px;
+    flex: 0 0 18px; margin: 1px 0 0; padding: 0;
+}
+@media (max-width: 520px) {
+    .connect-modal { padding: 22px 18px; border-radius: 16px; }
+    .connect-modal h2 { font-size: 20px; margin: 8px 0 16px; }
+    .connect-form { gap: 10px; }
+    .connect-form input, .connect-form textarea { padding: 9px 11px; }
+}

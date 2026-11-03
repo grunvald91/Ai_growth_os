@@ -333,7 +333,21 @@
                     <h2>{{ article.cta_title or 'Хотите применить эти идеи на практике?' }}</h2>
                     <p>{{ article.cta_text or 'Маркетинг и запись клиентов могут работать в одной системе.' }}</p>
                 </div>
-                <a class="primary-action" href="{{ article.cta_href or '/#launch' }}">{{ article.cta_label or 'Узнать о ServGo' }} <span aria-hidden="true">↗</span></a>
+                <div class="blog-cta-actions">
+                    <a class="primary-action" rel="nofollow" href="{{ commercial_cta_url or '/#launch' }}">Обсудить подключение ServGo <span aria-hidden="true">↗</span></a>
+                    {% if article.from_feed %}
+                    <details class="blog-cta-modules">
+                        <summary>Интересует конкретная возможность?</summary>
+                        <nav aria-label="Запросить информацию о модуле ServGo">
+                            <a rel="nofollow" href="{{ commercial_cta_url }}?module=booking">Запись и расписание</a>
+                            <a rel="nofollow" href="{{ commercial_cta_url }}?module=growth">Growth</a>
+                            <a rel="nofollow" href="{{ commercial_cta_url }}?module=mail">Mail</a>
+                            <a rel="nofollow" href="{{ commercial_cta_url }}?module=shifts">Смена</a>
+                            <a rel="nofollow" href="{{ commercial_cta_url }}?module=seo">SEO-завод</a>
+                        </nav>
+                    </details>
+                    {% endif %}
+                </div>
             </aside>
         </div>
     {% endif %}
