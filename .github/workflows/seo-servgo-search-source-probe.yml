@@ -1,0 +1,46 @@
+name: One-shot SEO search source response probe
+on:
+  push:
+    branches: [audit/seo-servgo-readonly-20261103]
+    paths: [.github/workflows/seo-servgo-search-source-probe.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Inspect upstream response format with public sample query
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/keys
+          while read -r line; do
+            echo "$line" > /tmp/key
+            ssh-keygen -lf /tmp/key 2>/dev/null | grep -q "SHA256:$HOST_FP " && echo "$line" >> ~/.ssh/known_hosts
+          done < /tmp/keys
+          test -s ~/.ssh/known_hosts
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'docker exec -i ai-growth-os-api-1 python -' <<'PY'
+          import asyncio
+          import httpx
+          import json
+          from app.seo.suggest import ENDPOINTS,parse_suggestions
+          async def go():
+              async with httpx.AsyncClient(timeout=12,follow_redirects=False) as client:
+                  for name,(url,fixed,param) in ENDPOINTS.items():
+                      try:
+                          r=await client.get(url,params={**fixed,param:'запись клиентов'})
+                          raw=r.text[:280].replace('\n',' ')
+                          print('PROBE='+json.dumps(dict(engine=name,http=r.status_code,
+                              content_type=r.headers.get('content-type'),length=len(r.content),
+                              response_prefix=raw,parsed=len(parse_suggestions(r.text))),ensure_ascii=False))
+                      except Exception as e:
+                          print('PROBE='+json.dumps(dict(engine=name,error_type=type(e).__name__)))
+          asyncio.run(go())
+          PY
