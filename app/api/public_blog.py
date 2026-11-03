@@ -11,18 +11,55 @@ from app.sso.models import StudioBusinessLink
 from app.workflows.article_contracts import ArticleArtifact
 
 router = APIRouter(prefix="/public/blog", tags=["public-blog"])
-_BULLET = re.compile(r"^\s*(?:[-*•]|\d{1,2}[.)])\s+(.*\S)\s*$")
+_BULLET = re.compile(r"^\\s*(?:(\d{1,2})[.)]|[-*•])\\s+(.*\\S)\\s*$")
+_INLINE_ENUM = re.compile(r"(?<![\\w.])([1-9]\\d?)[.)]\\s+(?=\\S)")
 _CATEGORY = {"awareness": "Советы", "consideration": "Сравнение и выбор", "decision": "Запуск"}
 
 
-def split_body(body: str) -> tuple[list[str], list[str]]:
-    paragraphs, bullets = [], []
-    for line in body.replace("\r\n", "\n").split("\n"):
-        if not line.strip():
+def body_blocks(body: str) -> list[dict]:
+    """Preserve paragraph/list order; recover numbered points embedded in prose.
+
+    Legacy SEO articles were emitted as one long line with '1. ... 2. ...'
+    inside a paragraph. Only split clearly sequential enumerations; do not
+    mistake dates, measurements or isolated numbers for a list.
+    """
+    blocks: list[dict] = []
+
+    def paragraph(text: str) -> None:
+        text = text.strip()
+        if text:
+            blocks.append({"type": "paragraph", "text": text})
+
+    def item(text: str, ordered: bool) -> None:
+        if blocks and blocks[-1]["type"] == "list" and blocks[-1]["ordered"] == ordered:
+            blocks[-1]["items"].append(text)
+        else:
+            blocks.append({"type": "list", "ordered": ordered, "items": [text]})
+
+    for raw in body.replace("\r\n", "\n").split("\n"):
+        line = raw.strip()
+        if not line:
             continue
         match = _BULLET.match(line)
-        (bullets if match else paragraphs).append(match.group(1) if match else line.strip())
-    return paragraphs, bullets
+        if match:
+            item(match.group(2), ordered=match.group(1) is not None)
+            continue
+        markers = list(_INLINE_ENUM.finditer(line))
+        if len(markers) >= 2 and [int(m.group(1)) for m in markers] == list(range(1, len(markers) + 1)):
+            paragraph(line[:markers[0].start()])
+            for i, marker in enumerate(markers):
+                end = markers[i + 1].start() if i + 1 < len(markers) else len(line)
+                item(line[marker.end():end].strip(), ordered=True)
+            continue
+        paragraph(line)
+    return blocks
+
+
+def split_body(body: str) -> tuple[list[str], list[str]]:
+    """Backward-compatible fields for older blog clients."""
+    blocks = body_blocks(body)
+    return ([block["text"] for block in blocks if block["type"] == "paragraph"],
+            [item for block in blocks if block["type"] == "list" for item in block["items"]])
 
 
 def _article(row: Artifact, publication: Publication) -> dict:
@@ -30,8 +67,10 @@ def _article(row: Artifact, publication: Publication) -> dict:
     reader = article.reader_article
     sections = []
     for section in reader.sections:
+        blocks = body_blocks(section.body)
         paragraphs, bullets = split_body(section.body)
-        sections.append({"title": section.heading, "paragraphs": paragraphs, "bullets": bullets})
+        sections.append({"title": section.heading, "blocks": blocks,
+                         "paragraphs": paragraphs, "bullets": bullets})
     return {
         "slug": publication.external_reference.removeprefix("/blog/"),
         "title": reader.title,
