@@ -50,6 +50,7 @@ class PlanItem(Contract):
     working_title: Annotated[str, Field(min_length=5, max_length=300)]
     stage: FunnelStage
     intent: Intent
+    target_segment: str | None = None  # the actual buyer, never the customer of the buyer
     reader_problem: Annotated[str, Field(min_length=10, max_length=1500)]
     ai_questions: list[Query] = Field(min_length=1)  # what a person would ask an AI assistant on this topic
     next_step: Annotated[str, Field(min_length=5, max_length=600)]  # where the article leads the reader

@@ -160,3 +160,57 @@ async def test_plan_without_article_task_does_not_reserve_query(db, product, tmp
     await plan_content(db, service(Provider({"items": [item()]})), PrivacyGateway(), product.id, core(),
                        products_root=tmp_path / "products", model="fake")
     assert planned_queries(db, product.id) == set()
+
+
+def test_b2b_consumer_query_is_rejected_but_b2c_customer_query_is_allowed():
+    consumer_core = SemanticCore(
+        seeds=["запись к психологу"],
+        collected_at=datetime.now(timezone.utc),
+        sources=[SourceStatus(engine="yandex", requests=1, failed_requests=0, queries_found=1)],
+        clusters=[QueryCluster(id="c001", head_query="запись к психологу",
+                               stage="awareness", intent="informational",
+                               queries=["запись к психологу"], engines=["yandex"])],
+    )
+    proposed = plan(item(primary_query="запись к психологу", target_segment="Пациенты",
+                         reader_problem="Пациент хочет узнать, как согласовать консультацию"))
+    with pytest.raises(PlanError, match="Consumer appointment query"):
+        validate_plan(proposed, consumer_core, buyer_segments=("Пациенты",), b2b_provider=True)
+    validate_plan(proposed, consumer_core, buyer_segments=("Пациенты",), b2b_provider=False)
+
+
+def test_plan_rejects_wrong_tenant_customer_segment():
+    with pytest.raises(PlanError, match="declared buyer segment"):
+        validate_plan(plan(item(target_segment="Пациенты")), core(),
+                      buyer_segments=("Владелец салона",))
+
+
+@pytest.mark.asyncio
+async def test_tenant_minimal_profile_drives_seeds_and_plan_without_servgo_assumptions(db, tmp_path):
+    product = Product(name="Мастерская", slug="repair-workshop")
+    db.add(product)
+    db.commit()
+    root = tmp_path / "products"
+    directory = root / product.slug
+    directory.mkdir(parents=True)
+    (directory / "company-profile.json").write_text(json.dumps({
+        "schema_version": "1.0",
+        "identity": {"name": "Мастерская", "category": "ремонт электроинструмента"},
+        "customers": {"primary_segments": ["Владельцы неисправного инструмента"]},
+    }, ensure_ascii=False), encoding="utf-8")
+    provider = Provider({"seeds": ["ремонт шуруповерта", "сервис аккумулятора", "диагностика дрели"]})
+    await plan_seeds(db, service(provider), PrivacyGateway(), product.id,
+                     products_root=root, model="fake")
+    payload = json.loads(provider.requests[0].messages[0].content)
+    assert payload["company"]["industry"] == "ремонт электроинструмента"
+    assert payload["company"]["buyer_segments"] == ["Владельцы неисправного инструмента"]
+    assert payload["company"]["declared_offers"] == []  # unknown service is NOT a company fact
+    assert "ServGo" not in payload["company"]["name"]
+
+    valid = item(target_segment="Владельцы неисправного инструмента",
+                 reader_problem="Владелец инструмента хочет вести его на диагностику")
+    planner = Provider({"items": [valid]})
+    await plan_content(db, service(planner), PrivacyGateway(), product.id, core(),
+                       products_root=root, model="fake")
+    plan_payload = json.loads(planner.requests[0].messages[0].content)
+    assert plan_payload["company"]["buyer_segments"] == ["Владельцы неисправного инструмента"]
+    assert plan_payload["company"]["declared_offers"] == []

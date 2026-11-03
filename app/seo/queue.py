@@ -22,6 +22,7 @@ SEO_TASK_PREFIX = "SEO-ARTICLE:"
 def brief_for(item: PlanItem, related: list[str]) -> SeoBrief:
     return SeoBrief(plan_item_id=item.id, primary_query=item.primary_query, related_queries=related,
                     stage=item.stage, intent=item.intent, reader_problem=item.reader_problem,
+                    target_segment=item.target_segment,
                     ai_questions=item.ai_questions, next_step=item.next_step)
 
 
