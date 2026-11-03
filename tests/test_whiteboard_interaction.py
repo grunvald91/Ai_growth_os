@@ -98,7 +98,7 @@ def test_index_exposes_return_path_and_russian_job_status(environment, monkeypat
     monkeypatch.setattr(api, 'preflight', should_not_contact_provider)
     with client() as browser:
         response = browser.get(f'/studio/products/{product_id}/whiteboard')
-        assert response.status_code == 200 and 'Ваши анимации' in response.text
+        assert response.status_code == 200 and 'Мои видео' in response.text
         assert 'Ожидает подтверждения' in response.text and f'/whiteboard/{task_id}' in response.text
         assert 'value="gemini_ru" selected' in response.text
         assert 'Скачать MP4</a>' not in response.text
