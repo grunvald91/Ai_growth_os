@@ -137,7 +137,7 @@ def perform(session_factory=SessionLocal, http_get=None) -> bool:
                                     "reader_hash": reader_hash(article.reader_article)}),
             ))
             db.commit()
-            result = publish_if_clear(db, row.id)
+            result = publish_if_clear(db, row.id, internal_canary=True)
             if not result.published or not result.slug:
                 raise AssertionError("CANARY_PUBLISH_BLOCKED: " + result.reason)
             article_slug = result.slug

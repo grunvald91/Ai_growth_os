@@ -50,6 +50,18 @@ def slugify(text: str) -> str:
     return out[:80].strip("-") or "article"
 
 
+def public_blog_ready(db: Session, product_id) -> bool:
+    """Do not mark tenant SEO articles published without a linked ServGo blog."""
+    product = db.get(Product, product_id)
+    if product is None:
+        return False
+    if product.slug == "servgo":
+        return True
+    from app.sso.models import StudioBusinessLink
+    return db.scalar(select(StudioBusinessLink.servgo_business_id).where(
+        StudioBusinessLink.product_id == product_id).limit(1)) is not None
+
+
 def unique_slug(db: Session, product_id, text: str) -> str:
     taken = {p.external_reference for p in db.scalars(
         select(Publication).where(Publication.product_id == product_id, Publication.channel == CHANNEL))}
@@ -185,7 +197,8 @@ def duplicate_page_problems(db: Session, row: Artifact, article: ArticleArtifact
 
 
 def publish_if_clear(db: Session, article_id, *, now: datetime | None = None,
-                     daily_limit: int = PUBLICATIONS_PER_DAY) -> Outcome:
+                     daily_limit: int = PUBLICATIONS_PER_DAY,
+                     internal_canary: bool = False) -> Outcome:
     """Publish immediately when the AI critic and basic article checks pass."""
     row = db.get(Artifact, article_id)
     if row is None or row.kind != "article":
@@ -226,6 +239,12 @@ def publish_if_clear(db: Session, article_id, *, now: datetime | None = None,
         return Outcome(False, "owner_rejected")
     if not is_enabled(db, row.product_id):
         return Outcome(False, "seo_disabled")
+    if not public_blog_ready(db, row.product_id):
+        # The one-time ephemeral Growth HTTP smoke has no BookingBot customer
+        # site by design. Its explicit flag never permits regular tenants.
+        product = db.get(Product, row.product_id)
+        if not (internal_canary and product.slug.startswith("seo-release-canary-")):
+            return Outcome(False, "public_blog_unavailable")
     from app.models.domain import Task
     task = db.get(Task, row.task_id) if row.task_id else None
     if task is not None and task.due_at is not None and (
@@ -319,7 +338,7 @@ def publish_owner_approved(db: Session, *, now: datetime | None = None,
             continue
         if approval.decided_by == DECIDER:
             continue
-        if not is_enabled(db, row.product_id):
+        if not is_enabled(db, row.product_id) or not public_blog_ready(db, row.product_id):
             continue
         from app.models.domain import Task
         task = db.get(Task, row.task_id) if row.task_id else None
@@ -346,6 +365,12 @@ def publish_owner_approved(db: Session, *, now: datetime | None = None,
         # basic page completeness: public_blog dereferences reader_article.
         problems = (static_problems(article) + unsupported_servgo_pricing(db, row, article)
                 + duplicate_page_problems(db, row, article))
+        # Explicit owner approval cannot bypass a missing, stale or critical review.
+        # The critic must have reviewed the exact reader-facing version.
+        verdict = critic_verdict(db, row.task_id, article.reader_article)
+        if verdict not in CLEAN_CRITIC_STATUSES:
+            _logger.info("SEO manual publication held: critic_status=%s article=%s", verdict, row.id)
+            continue
         if problems:
             _logger.warning("SEO owner-approved article failed static checks %s: %s",
                             row.id, "; ".join(problems))

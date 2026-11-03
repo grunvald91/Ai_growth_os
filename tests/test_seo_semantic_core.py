@@ -96,3 +96,27 @@ async def test_all_engines_down_builds_nothing(db):
     with pytest.raises(RuntimeError):
         await build_semantic_core(db, product.id, ["запись клиентов"], client=client)
     assert latest_semantic_core(db, product.id) is None
+
+
+@pytest.mark.asyncio
+async def test_failed_suggestion_probes_are_retried_from_checkpoint():
+    from app.seo.suggest import collect
+    status = {"fail": True, "calls": 0}
+    def handler(request):
+        status["calls"] += 1
+        if status["fail"]:
+            return httpx.Response(503)
+        query = request.url.params.get("part") or request.url.params.get("q")
+        return httpx.Response(200, text=json.dumps([query, [query + " отзывы"]], ensure_ascii=False))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        failed = await collect(["ремонт обуви"], client=client, max_requests=4)
+        assert sum(len(v.completed) for v in failed.values()) == 0
+        assert sum(v.failed for v in failed.values()) == 4
+        checkpoint = {engine: dict(requests=v.requests, failed=v.failed, empty=v.empty,
+            invalid=v.invalid, queries=list(v.queries), completed=list(v.completed))
+            for engine, v in failed.items()}
+        status["fail"] = False
+        recovered = await collect(["ремонт обуви"], client=client, max_requests=4, initial=checkpoint)
+    assert sum(len(v.completed) for v in recovered.values()) == 4
+    assert any(v.queries for v in recovered.values())
+    assert status["calls"] == 8

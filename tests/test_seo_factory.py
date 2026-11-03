@@ -150,15 +150,17 @@ async def test_search_engines_down_stops_honestly_without_article_tasks(env):
     factory, settings, product_id = env
     with factory() as db:
         queue_factory(db, product_id)
-    await run_factory_once(factory, settings, provider=Provider(), client=suggest_client(fail=True))
-    with factory() as db:
-        assert db.scalar(select(Task).where(Task.assigned_agent == "seo_factory")).status == TaskStatus.FAILED
-        report = db.scalar(select(Artifact).where(Artifact.kind == "seo_factory_report"))
-        diagnostic = json.loads(report.content)
-        assert diagnostic["error"] == "SeoSuggestionsUnavailable"
-        assert diagnostic["error_code"] == "search_upstream_failures"
-        assert diagnostic["stage"] == "collect_suggestions"
-        assert diagnostic["retryable"] is False
+    for attempt in range(3):
+        await run_factory_once(factory, settings, provider=Provider(), client=suggest_client(fail=True))
+        with factory() as db:
+            expected = TaskStatus.QUEUED if attempt < 2 else TaskStatus.FAILED
+            assert db.scalar(select(Task).where(Task.assigned_agent == "seo_factory")).status == expected
+            reports = list(db.scalars(select(Artifact).where(Artifact.kind == "seo_factory_report")))
+            diagnostic = json.loads(reports[-1].content)
+            assert diagnostic["error"] == "SeoSuggestionsUnavailable"
+            assert diagnostic["error_code"] == "search_upstream_failures"
+            assert diagnostic["stage"] == "collect_suggestions"
+            assert diagnostic["retryable"] is (attempt < 2)
         assert not list(db.scalars(select(Task).where(Task.assigned_agent == "content_factory")))
 
 
@@ -622,3 +624,52 @@ def test_autorun_uses_individual_company_interval_horizon_and_keeps_demo_off(env
         assert enqueue_enabled_if_due(db, settings, now=now + timedelta(days=15))
         assert all(job.product_id != demo.id for job in db.scalars(
             select(Task).where(Task.assigned_agent == "seo_factory")))
+
+
+def test_seo_generation_attempt_quota_counts_retries(env):
+    from app.seo.queue import record_article_start, articles_started_today
+    factory, _, product_id = env
+    with factory() as db:
+        task = seo_task(db, product_id, "retried", TaskStatus.FAILED)
+        assert articles_started_today(db, product_id=product_id) == 1
+        record_article_start(db, task)
+        assert articles_started_today(db, product_id=product_id) == 2
+
+
+def test_fresh_core_preserves_unwritten_queries_from_partial_cluster():
+    from app.seo.planner import fresh_core
+    from app.seo.contracts import SemanticCore, SourceStatus, QueryCluster
+    core = SemanticCore(seeds=["ремонт обуви"], collected_at=datetime.now(timezone.utc),
+        sources=[SourceStatus(engine="yandex", requests=1, failed_requests=0, queries_found=2)],
+        clusters=[QueryCluster(id="c001", head_query="ремонт обуви цена",
+            queries=["ремонт обуви цена", "ремонт обуви срочно"],
+            intent="commercial", stage="consideration", engines=["yandex"])])
+    remaining = fresh_core(core, {"ремонт обуви цена"})
+    assert len(remaining.clusters) == 1
+    assert remaining.clusters[0].head_query == "ремонт обуви срочно"
+    assert remaining.clusters[0].queries == ["ремонт обуви срочно"]
+
+
+@pytest.mark.asyncio
+async def test_seo_quota_is_rechecked_under_product_lock_before_model_spend(env, tmp_path):
+    from app.core.composition import build_article_production
+    from app.seo.queue import SeoQuotaDeferred, articles_started_today
+    from app.services.tasks import TaskService
+    from test_seo_article import BRIEF
+    factory, settings, product_id = env
+    settings = settings.model_copy(update={"seo_articles_per_day": 1})
+    with factory() as db:
+        seo_task(db, product_id, "already-started", TaskStatus.FAILED)
+        pending = TaskService(db).create(product_id=product_id, title="SEO-ARTICLE:next",
+            assigned_agent="content_factory", status=TaskStatus.QUEUED)
+        db.commit()
+        request = ArticleProductionInput(product_id=product_id, topic="Следующая SEO-статья",
+            channel="own_site", light=True, seo_brief=BRIEF, task_id=pending.id)
+        class MustNotCallProvider:
+            async def generate(self, request):
+                raise AssertionError("No model calls allowed after daily quota")
+        workflow = build_article_production(db, settings, provider=MustNotCallProvider(), force_critic=True)
+        with pytest.raises(SeoQuotaDeferred):
+            await workflow.run(request)
+        assert db.get(Task, pending.id).status == TaskStatus.QUEUED
+        assert articles_started_today(db, product_id=product_id) == 1

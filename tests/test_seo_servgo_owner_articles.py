@@ -130,6 +130,19 @@ def test_critic_can_edit_prose_but_cannot_edit_verified_company_facts(slug):
         apply_editorial_copy(original, {**editable, "direct_answer": ""})
 
 
+def test_critic_uses_all_current_approved_facts_not_stale_shortlist(tmp_path):
+    from pathlib import Path
+    from app.seo.revise_servgo_owner_articles import approved_company_claims
+    source_root = Path(__file__).resolve().parents[1] / "products"
+    facts = approved_company_claims(source_root)
+    statements = [item["statement"].casefold() for item in facts]
+    assert any("выбрать услугу, специалиста или зал" in v for v in statements)
+    assert len(facts) > 4
+    assert all(fact["evidence_ref"] for fact in facts)
+    with pytest.raises(ValueError, match="verified ServGo profile"):
+        approved_company_claims(tmp_path)
+
+
 def test_critic_receives_locked_evidence_but_revision_schema_is_editable_only():
     from inspect import getsource
     from app.seo.revise_servgo_owner_articles import _review
@@ -140,3 +153,12 @@ def test_critic_receives_locked_evidence_but_revision_schema_is_editable_only():
     assert "apply_editorial_copy(reader, value)" in source
     assert "Critical finding cites immutable verified fact" in source
     assert "status not in CLEAN_CRITIC_STATUSES" in source
+
+
+def test_owner_review_prompt_has_verified_evidence_from_current_profile():
+    from inspect import getsource
+    from app.seo.revise_servgo_owner_articles import _review
+    source = getsource(_review)
+    assert "approved_company_claims(settings.products_root)" in source
+    assert '"approved_company_facts": verified_facts' in source
+    assert '"verified_company_features"' not in source

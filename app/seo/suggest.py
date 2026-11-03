@@ -124,17 +124,21 @@ async def collect(seeds: Iterable[str], *, client: httpx.AsyncClient | None = No
                 suggestions = parse_suggestions(response.text)
                 if suggestions:
                     result.queries.update(suggestions)
+                    result.completed.add(probe)
                 elif _has_suggestion_shape(response.text):
                     result.empty += 1
+                    result.completed.add(probe)
                 else:
                     result.invalid += 1
             except (httpx.HTTPError, ValueError) as exc:
                 result.failed += 1
                 _logger.info("suggest_failed engine=%s error=%s", engine, type(exc).__name__)
-            result.completed.add(probe)
+            # Transient and malformed responses remain eligible for retry.
 
     try:
         # Round-robin engines; create only one bounded batch of coroutines at a time.
+        # The request budget is TOTAL per semantic-core run, not an extra
+        # allowance on each checkpoint replay. Retry failures within that cap.
         jobs = [(engine, probe) for probe in probes for engine in engines][:max_requests]
         jobs = [(engine, probe) for engine, probe in jobs if probe not in results[engine].completed]
         try:

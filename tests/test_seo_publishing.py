@@ -147,6 +147,15 @@ async def test_held_article_goes_live_after_the_owner_approves_it(env, tmp_path)
     publish_if_clear(db, article_id)
     assert publish_owner_approved(db) == 0  # optional fallback after critic did not pass
     approve_material(db, tmp_path, product.id, article_id)
+    assert publish_owner_approved(db) == 0  # owner cannot bypass absent critic
+    row = db.get(Artifact, article_id)
+    run = db.scalar(select(AgentRun).where(
+        AgentRun.task_id == row.task_id, AgentRun.agent_name == "marketing_editor"))
+    review = db.scalar(select(Artifact).where(
+        Artifact.agent_run_id == run.id, Artifact.kind == "seo_final_review"))
+    review.content = json.dumps({"status": "no_material_issues", "reader_hash": reader_hash(
+        ArticleArtifact.model_validate_json(row.content).reader_article)})
+    db.commit()
     assert publish_owner_approved(db) == 1
     publication = db.scalar(select(Publication))
     assert publication.external_reference == "/blog/kak-vesti-zapis-klientov"
@@ -156,7 +165,7 @@ async def test_held_article_goes_live_after_the_owner_approves_it(env, tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_owner_can_explicitly_publish_a_held_article_without_version_gate(env, tmp_path):
+async def test_owner_cannot_bypass_an_unresolved_critic_review(env, tmp_path):
     from app.content.review import approve_material
     db, product = env
     article_id = await make_article(db, product, tmp_path, critic_status="all_rejected")
@@ -164,8 +173,8 @@ async def test_owner_can_explicitly_publish_a_held_article_without_version_gate(
     assert not outcome.published and "critic review" in outcome.reason
     assert not list(db.scalars(select(Publication)))
     approve_material(db, tmp_path, product.id, article_id)
-    assert publish_owner_approved(db) == 1
-    assert db.get(Artifact, article_id).status == ArtifactStatus.PUBLISHED
+    assert publish_owner_approved(db) == 0
+    assert not list(db.scalars(select(Publication)))
 
 
 @pytest.mark.asyncio
@@ -560,4 +569,37 @@ async def test_unverified_servgo_tariff_blocked_even_when_critic_missed_it(env, 
     db.commit()
     blocked = publish_if_clear(db, article_id)
     assert not blocked.published and "unverified ServGo price" in blocked.reason
+    assert not list(db.scalars(select(Publication)))
+
+
+@pytest.mark.asyncio
+async def test_unlinked_tenant_cannot_be_marked_published(env, tmp_path):
+    db, _ = env
+    tenant = Product(name="Unlinked SEO tenant", slug="seo-unlinked-tenant")
+    db.add(tenant)
+    db.commit()
+    set_enabled(db, tenant.id, enabled=True, actor="fixture-owner")
+    article_id = await make_article(db, tenant, tmp_path)
+    assert publish_if_clear(db, article_id).reason == "public_blog_unavailable"
+    assert publish_if_clear(db, article_id, internal_canary=True).reason == "public_blog_unavailable"
+    assert db.scalar(select(Publication).where(Publication.product_id == tenant.id)) is None
+    db.add(StudioBusinessLink(servgo_business_id=91234, product_id=tenant.id))
+    db.commit()
+    assert publish_if_clear(db, article_id).published
+
+
+@pytest.mark.asyncio
+async def test_owner_cannot_publish_a_stale_reader_version(env, tmp_path):
+    from app.content.review import approve_material
+    db, product = env
+    article_id = await make_article(db, product, tmp_path, critic_status="no_material_issues")
+    row = db.get(Artifact, article_id)
+    row.status = ArtifactStatus.AWAITING_APPROVAL
+    db.commit()
+    approve_material(db, tmp_path, product.id, article_id)
+    value = ArticleArtifact.model_validate_json(row.content)
+    value.reader_article.lead += " Updated since review."
+    row.content = value.model_dump_json()
+    db.commit()
+    assert publish_owner_approved(db) == 0
     assert not list(db.scalars(select(Publication)))

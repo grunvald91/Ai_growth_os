@@ -16,6 +16,7 @@ from pydantic import Field
 from sqlalchemy import select
 
 from app.core.composition import build_llm_provider
+from app.company_profile import load_company_profile
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.llm.critic import second_opinion
@@ -53,6 +54,18 @@ class EditableOwnerArticle(Contract):
 
 
 _EDITABLE_FIELDS = frozenset(EditableOwnerArticle.model_fields)
+
+
+def approved_company_claims(products_root) -> list[dict[str, str]]:
+    """Load all current verified ServGo facts rather than a stale short list."""
+    loaded = load_company_profile(products_root, "servgo")
+    if loaded.profile is None:
+        raise ValueError("Current verified ServGo profile unavailable for editorial review")
+    facts = [{"statement": fact.statement, "evidence_ref": fact.evidence_ref}
+             for fact in loaded.profile.proof.approved_facts]
+    if not facts:
+        raise ValueError("No approved company facts; cannot review product feature claims")
+    return facts
 
 
 def editable_payload(reader: HumanEditedArticle) -> dict:
@@ -163,6 +176,7 @@ async def _review(entry: dict, apply: bool) -> dict:
                 "query": entry["query"], "new_slug": entry["new"]}
 
     settings = get_settings()
+    verified_facts = approved_company_claims(settings.products_root)
     provider = build_llm_provider(settings)
     reader = candidate.reader_article
     # Reviewer receives the full intended article exactly once, plus separately
@@ -194,11 +208,11 @@ async def _review(entry: dict, apply: bool) -> dict:
             "immutable_approved_fact_renderings": [
                 fact.model_dump(mode="json") for fact in reader.fact_renderings
             ],
-            "verified_company_features": [
-                "ServGo admin visual day/week calendar; owner can manually enter and move bookings",
-                "Business-scoped CRM records contacts, visit history, notes, last/next visit and next contact",
-                "Customer self-booking is available as a separate option",
-                "No verified automatic room reservation, gap-setting feature or CRM-to-Mail synchronization",
+            "approved_company_facts": verified_facts,
+            "unverified_automation_boundaries": [
+                "No confirmed automatic reservation of a separately rented therapy room",
+                "No confirmed automatic appointment gap/buffer setting",
+                "No confirmed CRM-to-Mail synchronization or automated reacquisition",
             ],
         }, ensure_ascii=False))],
         model=settings.llm_model, max_tokens=15000,

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, exists
 from sqlalchemy.orm import Session
 
 from app.content.service import queue_content
@@ -17,6 +17,11 @@ from app.seo.schedule import available_slots, PUBLICATIONS_PER_DAY, db_time
 from app.models.domain import Product
 
 SEO_TASK_PREFIX = "SEO-ARTICLE:"
+
+
+class SeoQuotaDeferred(RuntimeError):
+    """SEO task remains queued when the company daily budget is exhausted."""
+
 
 
 def brief_for(item: PlanItem, related: list[str]) -> SeoBrief:
@@ -86,22 +91,23 @@ OWNER_TZ = ZoneInfo("Europe/Moscow")
 
 
 def _recent_starts(db: Session, now: datetime):
-    """Return SEO starts over the last 48h; enough for any IANA local day.
-
-    A start marker is written before the model call. Failed attempts consume
-    capacity, but queued work never does. A bounded timestamp predicate keeps
-    historic tasks out of the hot worker path.
-    """
-    started = select(Artifact.created_at).where(Artifact.task_id == Task.id,
-        Artifact.kind == "seo_article_started").limit(1).scalar_subquery()
-    legacy_start = select(func.min(AgentRun.started_at)).where(
-        AgentRun.task_id == Task.id).scalar_subquery()
-    timestamp = func.coalesce(started, legacy_start).label("seo_started_at")
-    return list(db.execute(select(Task, timestamp).where(
-        Task.assigned_agent == "content_factory",
-        Task.title.like(f"{SEO_TASK_PREFIX}%"),
-        timestamp >= db_time(db, now - timedelta(days=2)),
-    )))
+    """Count every recorded attempt; preserve legacy AgentRun fallback."""
+    cutoff = db_time(db, now - timedelta(days=2))
+    markers = list(db.execute(select(Task, Artifact.created_at)
+        .join(Artifact, Artifact.task_id == Task.id)
+        .where(Task.assigned_agent == "content_factory",
+               Task.title.like(f"{SEO_TASK_PREFIX}%"),
+               Artifact.kind == "seo_article_started",
+               Artifact.created_at >= cutoff)))
+    has_marker = exists(select(Artifact.id).where(
+        Artifact.task_id == Task.id, Artifact.kind == "seo_article_started"))
+    legacy = list(db.execute(select(Task, func.min(AgentRun.started_at))
+        .join(AgentRun, AgentRun.task_id == Task.id)
+        .where(Task.assigned_agent == "content_factory",
+               Task.title.like(f"{SEO_TASK_PREFIX}%"),
+               AgentRun.started_at >= cutoff, ~has_marker)
+        .group_by(Task.id)))
+    return markers + legacy
 
 
 def _today_start(now: datetime, timezone_name: str) -> datetime:
@@ -153,9 +159,8 @@ def quota_exhausted(db: Session, limit: int, now: datetime | None = None, produc
 
 
 def record_article_start(db, task):
+    """Persist an event for each claimed generation attempt, even after failure."""
     from app.services.artifacts import ArtifactService
-    if db.scalar(select(Artifact.id).where(Artifact.task_id == task.id,
-                                         Artifact.kind == "seo_article_started")) is None:
-        ArtifactService(db).create(product_id=task.product_id, task_id=task.id,
-            kind="seo_article_started", title="SEO article started", content="{}")
-        db.commit()
+    ArtifactService(db).create(product_id=task.product_id, task_id=task.id,
+        kind="seo_article_started", title="SEO article started", content="{}")
+    db.commit()

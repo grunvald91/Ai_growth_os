@@ -133,7 +133,8 @@ async def test_next_plan_skips_topics_already_written(db, product, tmp_path):
                        products_root=tmp_path / "products", model="fake")
     queue_plan(db, second, {c.id: c for c in core().clusters})
     sent = json.loads(provider.requests[0].messages[0].content)
-    assert [c["id"] for c in sent["clusters"]] == ["c002"]  # c001 already has its article
+    assert [c["id"] for c in sent["clusters"]] == ["c001", "c002"]
+    assert sent["clusters"][0]["queries"] == ["как вести запись клиентов в салоне"]
     # a failed article frees its query for a later plan
     from sqlalchemy import select
     db.scalar(select(Task).where(Task.title == f"{SEO_TASK_PREFIX}{first.id}:a001")).status = TaskStatus.FAILED
@@ -144,7 +145,10 @@ async def test_next_plan_skips_topics_already_written(db, product, tmp_path):
 
 @pytest.mark.asyncio
 async def test_plan_stops_when_everything_is_covered(db, product, tmp_path):
-    saved = await plan_content(db, service(Provider({"items": [item(), c002_item()]})), PrivacyGateway(), product.id, core(),
+    # Include BOTH distinct queries of c001; using only its first query
+    # must no longer discard the remaining buyer query as already covered.
+    extra_item = item(id="a003", primary_query="как вести запись клиентов в салоне")
+    saved = await plan_content(db, service(Provider({"items": [item(), extra_item, c002_item()]})), PrivacyGateway(), product.id, core(),
                        products_root=tmp_path / "products", model="fake")
     from app.seo.queue import queue_plan
     queue_plan(db, saved, {c.id: c for c in core().clusters})
@@ -264,3 +268,17 @@ async def test_other_tenant_has_no_servgo_catalog(db, tmp_path):
     assert len(catalog) == 1 and catalog[0]["name"] == "Ремонт дрелей"
     assert catalog[0]["release_status"] == "unspecified"
     assert all("ServGo" not in str(row) for row in catalog)
+
+
+def test_b2b_online_booking_for_consumer_is_not_buyer_intent():
+    consumer_core = SemanticCore(seeds=["онлайн-запись к психологу"],
+        collected_at=datetime.now(timezone.utc),
+        sources=[SourceStatus(engine="yandex", requests=1, failed_requests=0, queries_found=1)],
+        clusters=[QueryCluster(id="c001", head_query="онлайн-запись к психологу",
+            stage="awareness", intent="informational",
+            queries=["онлайн-запись к психологу"], engines=["yandex"])])
+    candidate = plan(item(primary_query="онлайн-запись к психологу",
+        reader_problem="Пациент выбирает время консультации"))
+    with pytest.raises(PlanError, match="Consumer appointment query"):
+        validate_plan(candidate, consumer_core, b2b_provider=True)
+    validate_plan(candidate, consumer_core, b2b_provider=False)
