@@ -192,6 +192,7 @@ async def test_long_specific_seed_recovers_from_real_short_source_suggestions(en
                 return LLMResponse(content=json.dumps({"seeds": [
                     "как записаться на маникюр онлайн без переписки",
                     "программа для автоматизации записи в салоне красоты",
+                    "онлайн запись к косметологу или парикмахеру",
                 ]}), model="fake", usage=LLMUsage(), stop_reason="end_turn")
             return await super().generate(request)
 
