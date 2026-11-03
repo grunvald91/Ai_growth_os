@@ -316,6 +316,64 @@ async def test_worker_finishes_inside_the_calculated_limit(environment, seconds,
     assert heard[-1] == DEFAULT_CALL_TO_ACTION and len(heard) == 2 * scenes + 1
 
 
+@pytest.mark.asyncio
+async def test_malformed_regions_do_not_exhaust_the_26_call_minute_video_budget(environment):
+    from app.content.whiteboard.adapters import InvalidRegionResponse
+    from app.content.whiteboard.pipeline import WhiteboardPipeline
+
+    factory, settings, product, _ = environment
+    with client() as browser:
+        task_id = UUID(create(browser, product, duration_seconds=60).json()['task_id'])
+    approve(environment, task_id)
+    region_attempts = []
+
+    class Planner:
+        async def plan(self, request):
+            return with_call_to_action(story(request.scenes), request)
+
+    class Regions:
+        async def detect(self, scene, image):
+            region_attempts.append(scene.title)
+            if len(region_attempts) == 1:
+                # The vision provider answered but its payload could not be decoded.
+                raise InvalidRegionResponse('Vision provider returned invalid region JSON')
+            count = len(scene.beats)
+            return WhiteboardRegionPlan(regions=[WhiteboardRegion(
+                beat_index=i, box=(0, i * 1000 // count, 1000, (i + 1) * 1000 // count))
+                for i in range(count)])
+
+    class Speech:
+        async def synthesize(self, text, *, language, voice):
+            return b'ID3' + text.encode()
+
+    class Renderer:
+        async def render(self, scenes, destination, request):
+            assert len(scenes) == 6
+            assert all(len(item.narration_chunks) == len(item.scene.beats) for item in scenes)
+            destination.write_bytes(b'video')
+            return float(request.duration_seconds)
+
+    def build(job_settings, payload, store):
+        return WhiteboardPipeline(
+            storyboard=Planner(), images=FakeImages(), speech=Speech(), regions=Regions(),
+            renderer=Renderer(), sanitizer=PrivacyGateway(), checkpoints=store,
+            max_api_calls=payload.max_api_calls)
+
+    assert await run_whiteboard_once(factory, settings, factory=build, readiness=ready) == 1
+    with factory() as db:
+        task = owner_task(db, product, task_id)
+        _, saved, _, payload = records(db, task)
+        state = json.loads(saved.content)
+    assert task.status == TaskStatus.COMPLETED, state
+    assert len(region_attempts) == 6
+    assert state['calls'] == payload.max_api_calls == 26
+    assert state.get('auto_resumes', 0) == 0
+    assert not state.get('errors')
+    assert any(entry['scene_index'] == 0 and entry['reason'] == 'invalid_region_json'
+               and entry['human_review_required'] and entry['provider_calls'] == 0
+               for entry in state.get('region_layout', []))
+
+
 # --- review fixes ------------------------------------------------------------
 
 def three_beat_scene():

@@ -66,6 +66,9 @@ def complete_diagram_regions(scene, image_png, plan):
         if image.width * image.height > 10_000_000:
             raise ValueError('Image exceeds layout bounds')
         ink = image.convert('L').point(lambda value: 255 if value < 220 else 0)
+    if plan is None:
+        # The provider answered, but its JSON cannot be validated. No new paid call.
+        return fallback_regions(scene, ink, 'invalid_region_json')
     try:
         plan.check_for(scene)
     except ValueError:
