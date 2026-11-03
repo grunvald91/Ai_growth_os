@@ -103,7 +103,7 @@ def task_title(task: Task, request: Artifact | None = None) -> str:
             pass
     topic = str(data.get("topic") or "").strip()
     if task.assigned_agent == "whiteboard_renderer":
-        return task.description or "Рисованное видеообъяснение"
+        return re.sub(r'^Рисованное видео:', 'Простое видео:', task.description or 'Простое видео', flags=re.I)
     if task.assigned_agent == "editorial_planner":
         return "Новый контент-план"
     if task.assigned_agent == "content_renderer":
@@ -299,7 +299,7 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
     for task in awaiting:
         notes.append({
             "kind": "review",
-            "text": "Подтвердите создание рисованного видео (платные API)",
+            "text": "Подтвердите создание простого видео (платные API)",
             "resource_kind": "video",
             "resource_title": "Создание простого видео",
             "resource_status": "Требует подтверждения",
