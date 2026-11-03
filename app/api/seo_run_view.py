@@ -20,7 +20,7 @@ SEO_AGENT = "seo_factory"
 SEO_KINDS = (
     "seo_factory_report", "seo_factory_request", "seo_factory_attempt",
     "semantic_core", "seo_content_plan",
-    "seo_factory_stage", "seo_suggest_checkpoint",
+    "seo_factory_stage", "seo_suggest_checkpoint", "seo_plan_validation",
 )
 SEO_STATUS_NAMES = {
     "queued": "В очереди",
@@ -80,6 +80,11 @@ def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
     checkpoints = sorted((a for a in artifacts if a.kind == "seo_suggest_checkpoint"),
                          key=lambda a: (a.created_at, a.id), reverse=True)
     checkpoint = _report_data(checkpoints[0].content) if checkpoints else {}
+    rejected_plans = [a for a in artifacts if a.kind == "seo_plan_validation"]
+    validation_codes = [
+        _report_data(a.content).get("error_code")
+        for a in rejected_plans if isinstance(_report_data(a.content).get("error_code"), str)
+    ]
     source_progress = {
         engine: {
             "requests": data.get("requests", 0),
@@ -114,6 +119,8 @@ def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
         "last_error_retryable": failure.get("retryable"),
         "current_stage": stage_data.get("stage"),
         "source_progress": source_progress,
+        "invalid_plan_attempts": len(rejected_plans),
+        "invalid_plan_codes": list(dict.fromkeys(validation_codes)),
         # Task/AgentRun currently have no authoritative provider billing value.
         "cost_amount": None,
         "cost_status": "not_recorded",
