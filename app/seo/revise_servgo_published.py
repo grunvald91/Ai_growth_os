@@ -1,6 +1,6 @@
 """One-time reviewed corrections for two existing ServGo consumer-intent SEO pages.
 
-No automatic execution on import/deploy. --check is offline and read-only;
+No automatic execution on import/deploy. Without --apply this runs read-only;
 --apply requires the configured LLM critic and writes only after it passes.
 The original ArticleArtifact is preserved in an append-only backup Artifact.
 """
@@ -286,7 +286,6 @@ async def revise_one(product_id, artifact_id, slug: str, original_hash: str, app
     def validate(data):
         checked_article(original, slug, HumanEditedArticle.model_validate(data))
 
-    from app.llm.critic import second_opinion
     review_reply = await second_opinion(
         request=request, original=original_reply, generate=provider.generate,
         validate_revision=validate,
@@ -305,72 +304,106 @@ async def revise_one(product_id, artifact_id, slug: str, original_hash: str, app
     revised = HumanEditedArticle.model_validate_json(review_reply.content)
     candidate = checked_article(original, slug, revised)
 
-    with SessionLocal() as db:
-        row = db.get(Artifact, artifact_id)
-        fresh_hash = hashlib.sha256(row.content.encode("utf-8")).hexdigest()
-        if fresh_hash != original_hash or row.status != ArtifactStatus.PUBLISHED:
-            raise ValueError("Article changed since read-only preflight")
-        pub = db.scalar(select(Publication).where(
-            Publication.product_id == product_id,
-            Publication.artifact_id == artifact_id,
-            Publication.channel == "own_site", Publication.status == "published",
-            Publication.external_reference == slug
-        ).limit(1))
-        if pub is None:
-            raise ValueError("Published article reference changed")
-        if static_problems(candidate) + unsupported_servgo_pricing(db, row, candidate):
-            raise ValueError("Revised article failed static checks")
-        # Original full record is retained in DB for possible audited rollback.
-        backup = Artifact(product_id=product_id, task_id=row.task_id,
-                          kind="seo_article_revision_backup", title="Before editorial fix: " + slug,
-                          content=row.content, status=ArtifactStatus.DRAFT)
-        db.add(backup)
-        now = datetime.now(timezone.utc)
-        reviewer = AgentRun(task_id=row.task_id, agent_name="marketing_editor",
-                            status="completed", provider=settings.llm_provider,
-                            model="manual_editor+critic", started_at=now, finished_at=now,
-                            input_references=[{"kind": "artifact", "id": str(row.id)}],
-                            output_references=[{"kind": "artifact", "id": str(row.id)}])
-        db.add(reviewer)
-        db.flush()
-        db.add(Artifact(product_id=product_id, task_id=row.task_id,
-                        agent_run_id=reviewer.id, kind="seo_final_review",
-                        title="Review of published editorial correction",
-                        content=json.dumps({**verdict, "reader_hash": reader_hash(revised)},
-                                           ensure_ascii=False), status=ArtifactStatus.DRAFT))
-        row.content = candidate.model_dump_json()
-        row.title = revised.title
-        row.version = (row.version or 1) + 1
-        db.commit()
-        return {"slug": slug, "state": "revised_published", "critic": status,
-                "backup_artifact_id": str(backup.id), "version": row.version}
+    # All reviewed revisions are prepared before any published content changes.
+    # One failing review must never leave a partially rewritten blog.
+    return {"slug": slug, "state": "reviewed_ready_to_commit",
+            "critic": status, "candidate": candidate.model_dump_json(),
+            "review": verdict, "original_sha256": original_hash}
 
 
 async def run(apply: bool) -> list[dict]:
     with SessionLocal() as db:
-        p = db.scalar(select(Product).where(Product.slug == "servgo"))
-        if p is None:
+        product = db.scalar(select(Product).where(Product.slug == "servgo"))
+        if product is None:
             raise LookupError("ServGo product profile missing")
-        found = list(db.execute(
+        published = list(db.execute(
             select(Artifact, Publication).join(
                 Publication, Publication.artifact_id == Artifact.id
             ).where(
-                Publication.product_id == p.id, Publication.channel == "own_site",
+                Publication.product_id == product.id,
+                Publication.channel == "own_site",
                 Publication.status == "published",
                 Publication.external_reference.in_(tuple(REWRITES))
             ).order_by(Publication.published_at)
         ))
-        if len(found) != len(REWRITES):
+        if (len(published) != len(REWRITES) or
+            {pub.external_reference for _, pub in published} != set(REWRITES)):
             raise ValueError("Expected exactly the two inspected published pages")
         entries = [
-            (p.id, art.id, pub.external_reference,
-             hashlib.sha256(art.content.encode("utf-8")).hexdigest())
-            for art, pub in found
+            (product.id, article.id, publication.external_reference,
+             hashlib.sha256(article.content.encode("utf-8")).hexdigest())
+            for article, publication in published
         ]
-    results = []
-    for args in entries:
-        results.append(await revise_one(*args, apply=apply))
-    return results
+
+    # Phase 1: validate and critic-review ALL replacements with zero DB mutation.
+    prepared = [await revise_one(*args, apply=apply) for args in entries]
+    if not apply:
+        return prepared
+
+    # Phase 2: publish everything atomically, or roll back all changes.
+    outcomes = []
+    with SessionLocal() as db:
+        staged = []
+        for (product_id, artifact_id, slug, original_hash), revision in zip(entries, prepared):
+            if revision["state"] == "already_revised":
+                outcomes.append({"slug": slug, "state": "already_revised"})
+                continue
+            if revision["state"] != "reviewed_ready_to_commit":
+                raise ValueError("Article did not pass the editorial critic")
+            row = db.scalar(select(Artifact).where(Artifact.id == artifact_id).with_for_update())
+            if row is None or row.product_id != product_id or row.status != ArtifactStatus.PUBLISHED:
+                raise ValueError("Published article changed during review")
+            if hashlib.sha256(row.content.encode("utf-8")).hexdigest() != original_hash:
+                raise ValueError("Article changed since read-only preflight")
+            pub = db.scalar(select(Publication).where(
+                Publication.product_id == product_id,
+                Publication.artifact_id == artifact_id,
+                Publication.channel == "own_site", Publication.status == "published",
+                Publication.external_reference == slug
+            ).limit(1))
+            if pub is None:
+                raise ValueError("Published article reference changed")
+            candidate = ArticleArtifact.model_validate_json(revision["candidate"])
+            errors = static_problems(candidate) + unsupported_servgo_pricing(db, row, candidate)
+            if errors:
+                raise ValueError("Revised article failed static checks: " + "; ".join(errors))
+            staged.append((row, product_id, slug, revision, candidate))
+
+        for row, product_id, slug, revision, candidate in staged:
+            backup = Artifact(
+                product_id=product_id, task_id=row.task_id,
+                kind="seo_article_revision_backup", title="Before editorial fix: " + slug,
+                content=row.content, status=ArtifactStatus.DRAFT,
+            )
+            db.add(backup)
+            now = datetime.now(timezone.utc)
+            reviewer = AgentRun(
+                task_id=row.task_id, agent_name="marketing_editor", status="completed",
+                provider=get_settings().llm_provider, model="manual_editor+critic",
+                started_at=now, finished_at=now,
+                input_references=[{"kind": "artifact", "id": str(row.id)}],
+                output_references=[{"kind": "artifact", "id": str(row.id)}],
+            )
+            db.add(reviewer)
+            db.flush()
+            db.add(Artifact(
+                product_id=product_id, task_id=row.task_id, agent_run_id=reviewer.id,
+                kind="seo_final_review", title="Review of published editorial correction",
+                content=json.dumps(
+                    {**revision["review"], "reader_hash": reader_hash(candidate.reader_article)},
+                    ensure_ascii=False
+                ), status=ArtifactStatus.DRAFT,
+            ))
+            row.content = candidate.model_dump_json()
+            row.title = candidate.reader_article.title
+            row.version = (row.version or 1) + 1
+            db.flush()
+            outcomes.append({
+                "slug": slug, "state": "revised_published", "critic": revision["critic"],
+                "backup_artifact_id": str(backup.id), "version": row.version
+            })
+        db.commit()
+    return outcomes
 
 
 def main():
