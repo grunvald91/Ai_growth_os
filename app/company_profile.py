@@ -54,6 +54,7 @@ class ServiceOffer(_Strict):
     # None is an ordinary legacy owner-declared service, not evidence of a
     # deployed product. New product catalogs can explicitly mark maturity.
     release_status: Literal["live", "limited", "in_development", "unverified"] | None = None
+    product_family: str | None = None
     evidence_refs: list[str] = Field(default_factory=list)
     buyer_segment: str | None = None
     conversion_action: str | None = None
