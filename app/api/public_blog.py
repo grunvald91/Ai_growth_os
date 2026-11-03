@@ -18,9 +18,9 @@ _SENTENCES = re.compile(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z«])")
 _CATEGORY = {"awareness": "Советы", "consideration": "Сравнение и выбор", "decision": "Запуск"}
 
 
-_INLINE_MARK = re.compile(r"(\\*\\*\\*[^*\\n]+\\*\\*\\*|\\*\\*[^*\\n]+\\*\\*|\\*[^*\\n]+\\*)")
-_SUBHEADING = re.compile(r"^#{3,4}\\s+(.+?)\\s*$")
-_QUOTE = re.compile(r"^>\\s+(.+?)\\s*$")
+_INLINE_MARK = re.compile(r"(\*\*\*[^*\n]+\*\*\*|\*\*[^*\n]+\*\*|\*[^*\n]+\*)")
+_SUBHEADING = re.compile(r"^#{3,4}\s+(.+?)\s*$")
+_QUOTE = re.compile(r"^>\s+(.+?)\s*$")
 
 
 def inline_spans(text: str) -> list[dict] | None:
@@ -96,7 +96,7 @@ def body_blocks(body: str) -> list[dict]:
                 ]
             block["item_spans"].append(spans or [{"text": text, "style": "text"}])
 
-    for raw in body.replace("\\r\\n", "\\n").split("\\n"):
+    for raw in body.replace("\r\n", "\n").split("\n"):
         line = raw.strip()
         if not line:
             continue
