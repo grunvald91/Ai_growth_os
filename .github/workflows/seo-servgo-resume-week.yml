@@ -38,7 +38,7 @@ jobs:
           set -euo pipefail
           image=$(docker inspect -f '{{.Config.Image}}' ai-growth-os-api-1)
           case "$image" in
-            *2b4e4ff55e9d*) echo "VERIFIED_RELEASE=2b4e4ff55e9d" ;;
+            *be37c746a5fb*) echo "VERIFIED_RELEASE=be37c746a5fb" ;;
             *) echo "ERROR: expected patched application not running"; exit 1 ;;
           esac
           docker exec -i ai-growth-os-api-1 python - <<'PY'
