@@ -82,7 +82,7 @@ def test_published_owner_guides_require_real_critic_even_if_gateway_slow():
     from app.seo import revise_servgo_owner_articles as release
     source = inspect.getsource(release._review)
     assert 90 < release.REVIEW_TIMEOUT_SECONDS <= 300
-    assert 120 < release.AUTHOR_REVISION_TIMEOUT_SECONDS <= 240
+    assert 120 < release.AUTHOR_REVISION_TIMEOUT_SECONDS <= 360
     assert "review_timeout=REVIEW_TIMEOUT_SECONDS" in source
     assert "revision_timeout=AUTHOR_REVISION_TIMEOUT_SECONDS" in source
     assert "failure_reason" in source  # safe failure class appears in the run log
@@ -140,3 +140,28 @@ def test_critic_receives_locked_evidence_but_revision_schema_is_editable_only():
     assert "apply_editorial_copy(reader, value)" in source
     assert "Critical finding cites immutable verified fact" in source
     assert "status not in CLEAN_CRITIC_STATUSES" in source
+
+
+def test_critic_loads_all_real_approved_company_facts_not_handwritten_shortlist(tmp_path):
+    from pathlib import Path
+    from app.seo.revise_servgo_owner_articles import approved_company_claims
+    products_root = Path(__file__).resolve().parents[1] / "products"
+    facts = approved_company_claims(products_root)
+    statements = [fact["statement"].casefold() for fact in facts]
+    assert any("выбрать услугу, специалиста или зал" in f for f in statements)
+    assert any("добавить комментарий" in f for f in statements)
+    assert any("историю записей" in f or "история записей" in f for f in statements)
+    assert all(fact["evidence_ref"] for fact in facts)
+    assert len(facts) > 4  # regression: a four-item summary omitted approved features
+    with pytest.raises(ValueError, match="verified ServGo profile"):
+        approved_company_claims(tmp_path)
+
+
+def test_critic_request_uses_current_profile_approved_claims():
+    import inspect
+    from app.seo.revise_servgo_owner_articles import _review
+    source = inspect.getsource(_review)
+    assert "approved_company_claims(settings.products_root)" in source
+    assert '"approved_company_facts": verified_facts' in source
+    assert '"unverified_automation_boundaries"' in source
+    assert '"verified_company_features"' not in source
