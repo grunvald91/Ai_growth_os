@@ -54,7 +54,13 @@ def main():
         post_material = Artifact(
             product_id=product.id, kind="channel_text", title="Contrast test post",
             content=json.dumps({"body": "Readable publication", "channel": "telegram"}))
-        session.add_all([script_material, post_material])
+        creative_material = Artifact(
+            product_id=product.id, kind="creative_brief", title="Contrast test frames",
+            content=json.dumps({"platform": "instagram_reels", "frames": [{
+                "number": 1, "on_screen_text": "Screen text",
+                "purpose": "Frame title", "action_or_animation": "Frame description",
+                "visual_prompt": "Frame prompt", "spoken_text": "Frame speech"}]}))
+        session.add_all([script_material, post_material, creative_material])
         session.commit()
         app.dependency_overrides[get_db] = lambda: session
         app.dependency_overrides[get_settings] = lambda: Settings(app_env="development", _env_file=None)
@@ -610,7 +616,11 @@ def main():
                             (".story-shot p", ".story-shot"),
                             (".story-prompt", ".story-prompt")]),
                         (post_material, [
-                            (".material-detail-body .article-text", ".material-detail-body .article-text")]),
+                            (".material-detail-body .article-text", ".material-detail-body .article-text"),
+                            (".sg-native-post-label", ".sg-post-preview")]),
+                        (creative_material, [
+                            (".sg-storyboard-card p", ".sg-storyboard-card"),
+                            (".sg-storyboard-screen span", ".sg-storyboard-screen")]),
                     ):
                         page.goto(
                             f"{origin}/studio/products/{product.id}/materials/{material.id}?design=v4",
@@ -635,7 +645,7 @@ def main():
                             assert contrast["ratio"] >= 4.5, (
                                 f"{theme}: {selector} contrast {contrast}")
                 result["checks"].append({"page":"material-detail-v4",
-                    "themes":["dark","light"],"script_and_post_contrast_at_least_4_5":True})
+                    "themes":["dark","light"],"script_post_frames_contrast_at_least_4_5":True})
                 browser.close()
         finally:
             server.should_exit=True
