@@ -12,7 +12,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -63,7 +63,11 @@ def _website(raw: object) -> str:
         p = urlsplit(raw.strip())
         if p.scheme not in ("http", "https") or not p.hostname or p.username or p.password:
             return ""
-        return raw.strip()[:500]
+        if p.port not in (None, 80, 443):
+            return ""
+        # Public website checks within ServGo use HTTPS. Yandex often lists
+        # historical http:// URLs; convert before handing them to the crawler.
+        return urlunsplit(("https", p.hostname, p.path, p.query, ""))[:500]
     except ValueError:
         return ""
 
