@@ -168,7 +168,7 @@ with SessionLocal() as db:
                 AgentRun.task_id == task.id).order_by(AgentRun.created_at.desc()).limit(12)))
             def error_class(run):
                 raw = (run.error or "").strip()
-                return ":".join(raw.split(":")[:2])[:100] if raw else None
+                return (raw[:500] if raw.startswith("invalid_article_output:") else ":".join(raw.split(":")[:2])[:100]) if raw else None
             row = {"query": item.primary_query, "task_status": str(task.status),
                 "article_status": str(article.status) if article else None,
                 "critic": verdict, "stages": [{"agent": run.agent_name, "status": run.status,
