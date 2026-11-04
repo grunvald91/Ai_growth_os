@@ -51,7 +51,7 @@ export function LoginPage() {
     // Already authenticated users should not be asked to sign in again.
     if (!localStorage.getItem('token') ||
         localStorage.getItem('servgoExplicitLogout') === '1' ||
-        sessionStorage.getItem('servgoExplicitLogout') === '1') return
+        sessionStorage.getItem('servgoExplicitLogout') === '1') { /* do not auto-enter yet */ }
     let active = true
     const handleSavedLogin = () => {
       if (!active || !localStorage.getItem('token')) return
