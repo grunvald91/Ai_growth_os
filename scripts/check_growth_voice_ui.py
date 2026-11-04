@@ -144,6 +144,10 @@ def main():
                 page.locator('#sgDailyDrawer').wait_for(state='visible')
                 page.locator('#sgDailyContent .sg-daily-stats').wait_for(state='visible')
                 assert page.locator('body').evaluate("e => e.classList.contains('sg-daily-open')")
+                page.mouse.click(382, 500)  # backdrop, outside the 358px drawer
+                assert page.locator('#sgDailyHandle').is_visible()
+                assert page.locator('#sgDailyDrawer').is_hidden()
+                page.locator('#sgDailyHandle').click()
                 page.locator('#sgDailyClose').click()
                 assert page.locator('#sgDailyHandle').is_visible()
                 # Computed visibility catches hidden/oversized header controls.
