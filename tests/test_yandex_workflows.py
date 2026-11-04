@@ -21,7 +21,7 @@ def test_market_research_produces_attributed_directory_evidence():
 
 def test_selection_does_not_accept_unrelated_organization():
     assert not _source_rows([{"id": "123", "name": "Test"}], {"other"})
-    assert SourceSelection(query="салоны", city="Сочи", ids=["123"]).ids == ["123"]
+    assert SourceSelection(query="салоны", city="Сочи", tokens=["signed.token"]).tokens == ["signed.token"]
 
 
 @pytest.mark.asyncio
