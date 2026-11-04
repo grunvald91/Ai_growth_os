@@ -9,6 +9,7 @@ on:
       - 'tests/test_studio_sso.py'
       - 'tests/test_studio_identity.py'
       - 'tests/test_studio_auth_login.py'
+      - 'web/frontend/tests/admin-business-switch.test.mjs'
       - 'tests/test_public_company_seo_pages.py'
       - 'tests/test_seo_public_release_smoke.py'
       - 'scripts/seo_public_release_smoke.py'
@@ -73,7 +74,7 @@ jobs:
 
       - name: Test PWA, booking preselection and offline safety
         working-directory: web/frontend
-        run: node --test tests/sw-security.test.mjs tests/offline-store.test.mjs tests/prepayment-modal.test.mjs tests/booking-entry.test.mjs tests/auth-route.test.mjs tests/seo-referral-link.test.mjs tests/studio-workspace-entry.test.mjs
+        run: node --test tests/sw-security.test.mjs tests/offline-store.test.mjs tests/prepayment-modal.test.mjs tests/booking-entry.test.mjs tests/auth-route.test.mjs tests/seo-referral-link.test.mjs tests/studio-workspace-entry.test.mjs tests/admin-business-switch.test.mjs
 
       - name: Verify ServGo theme migration and synchronization
         working-directory: web/frontend
