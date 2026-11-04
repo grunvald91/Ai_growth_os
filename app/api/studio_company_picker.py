@@ -51,6 +51,17 @@ body[data-growth-design="v4"] .sg-company-choice-copy small{color:var(--s-muted)
 body[data-growth-design="v4"] .sg-company-avatar{background:var(--s-accent-soft);color:var(--s-accent)}
 body[data-growth-design="v4"] .sg-company-arrow{color:var(--s-accent)}
 body[data-growth-design="v4"] .sg-company-foot a{color:var(--s-muted)}
+.sg-company-action{width:100%;font:inherit;cursor:pointer;text-align:left}
+.sg-company-action:disabled{cursor:wait;opacity:.65}
+.sg-growth-connected[hidden]{display:none}
+html[data-theme="dark"] .sg-company-picker{
+  --picker-text:#f0f5fc;--picker-muted:#b6c4d5;--picker-card:#1e2b40;
+  --picker-border:#2a3b55;--picker-accent:#7aabff}
+@media(prefers-color-scheme:dark){
+  html:not([data-theme="light"]) .sg-company-picker{
+    --picker-text:#f0f5fc;--picker-muted:#b6c4d5;--picker-card:#1e2b40;
+    --picker-border:#2a3b55;--picker-accent:#7aabff}
+}
 @media(max-width:600px){
   .sg-company-picker{padding:18px 16px 96px}
   .sg-company-head{margin-bottom:18px}
@@ -62,7 +73,9 @@ body[data-growth-design="v4"] .sg-company-foot a{color:var(--s-muted)}
 """
 
 
-def selector_html(products, *, can_add: bool = False, can_link: bool = False) -> str:
+def selector_html(products, *, can_add: bool = False, can_link: bool = False,
+                  unified_user_id: int | None = None,
+                  linked_business_ids: tuple[int, ...] = ()) -> str:
     entries = "".join(
         '<a class="sg-company-choice" href="/studio/products/' + _esc(product.id) + '">'
         '<span class="sg-company-avatar" aria-hidden="true">' + _esc((product.name or "?").strip()[:1].upper()) + '</span>'
@@ -79,13 +92,30 @@ def selector_html(products, *, can_add: bool = False, can_link: bool = False) ->
                     '<span class="sg-company-arrow" aria-hidden="true">›</span></a>')
     if not entries:
         entries = '<div class="sg-company-empty">Пока нет организаций, к которым у вас есть доступ.</div>'
-    connect = '<a href="/studio/identity">Объединить профиль с ServGo</a>' if can_link else ''
+    unified = unified_user_id is not None
+    connect = ('<a href="/workspace/studio-entry">Все организации ServGo</a>' if unified
+               else '<a href="/studio/identity">Объединить профиль с ServGo</a>' if can_link else '')
+    # The initial Growth list remains a no-JS fallback. On canonical SSO
+    # the browser fetches the CURRENT ServGo business list with its JWT;
+    # merely having an old Growth link does not grant any new access.
+    if unified:
+        safe_ids = ','.join(str(int(value)) for value in linked_business_ids)
+        chooser = ('<section id="sg-servgo-organisations" data-user-id="' + _esc(unified_user_id)
+                   + '" data-linked-businesses="' + _esc(safe_ids) + '">'
+                   '<p role="status" class="sg-company-caption">Загружаем все организации ServGo…</p>'
+                   '</section>'
+                   '<section id="sg-growth-connected"><p class="sg-company-caption">'
+                   'Уже подключённые рабочие пространства Growth:</p>'
+                   '<div class="sg-company-items">' + entries + '</div></section>')
+    else:
+        chooser = '<div class="sg-company-items">' + entries + '</div>'
+    script = '<script defer src="/studio/assets/servgo-organisations.js"></script>' if unified else ''
     return (
         '<!doctype html><html lang="ru"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>Компании · ServGo</title><link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">'
         '<link rel="stylesheet" href="/studio/assets/studio.css?v=14">'
-        '<style>' + CSS + '</style></head><body>'
+        '<style>' + CSS + '</style>' + script + '</head><body>'
         '<main class="sg-company-picker">'
         '<div class="sg-company-head">'
         '<a class="sg-official-brand" href="/studio" aria-label="ServGo">'
@@ -94,7 +124,7 @@ def selector_html(products, *, can_add: bool = False, can_link: bool = False) ->
         '<a class="sg-company-back" href="https://servgo.ru/admin">← В админку ServGo</a></div>'
         '<h1 class="sg-company-title">Ваши компании</h1>'
         '<p class="sg-company-caption">Выберите организацию для работы в Growth Studio.</p>'
-        '<div class="sg-company-items">' + entries + '</div>'
+        + chooser +
         '<div class="sg-company-foot">' + connect +
         '<a href="/studio/logout">Выйти из студии</a></div>'
         '</main></body></html>'
