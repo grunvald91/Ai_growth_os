@@ -53,13 +53,23 @@ export function LoginPage() {
         localStorage.getItem('servgoExplicitLogout') === '1' ||
         sessionStorage.getItem('servgoExplicitLogout') === '1') return
     let active = true
+    const handleSavedLogin = () => {
+      if (!active || !localStorage.getItem('token')) return
+      void api.getMe().then(() => {
+        if (active && pendingLoginDestination() === STUDIO_ENTRY) {
+          consumeLoginDestination()
+          navigate(STUDIO_ENTRY, { replace: true })
+        }
+      }).catch(() => {})
+    }
     void api.getMe().then(() => {
       if (active && pendingLoginDestination() === STUDIO_ENTRY) {
         consumeLoginDestination()
         navigate(STUDIO_ENTRY, { replace: true })
       }
     }).catch(() => { /* The normal login page remains available. */ })
-    return () => { active = false }
+    window.addEventListener('servgo-login-saved', handleSavedLogin)
+    return () => { active = false; window.removeEventListener('servgo-login-saved', handleSavedLogin) }
   }, [navigate, studioNext])
 
   useEffect(() => {
