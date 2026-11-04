@@ -193,6 +193,13 @@ def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str] | No
     session = tickets.read_session(settings, request.cookies.get(tickets.COOKIE))
     if session is None or not tickets.configured(settings):
         return None
+    from app.api.studio_sso import _canonical_pwa
+    if _canonical_pwa(request, settings):
+        from app.sso.browser_identity import COOKIE as ID_COOKIE, read_identity
+        current = read_identity(settings, request.cookies.get(ID_COOKIE))
+        if (current is None or current[0] != session.user_id or
+                not session.identity_hash or not secrets.compare_digest(current[1], session.identity_hash)):
+            return None
     if db is None or not _sso_link_current(db, session):
         return None  # The studio owner disconnected or re-linked this business: the old session ends.
     business_ids = access.servgo_business_ids(settings, session.user_id)
@@ -285,6 +292,15 @@ def require_studio_auth(
     if not _auth_configured(settings, users):
         request.state.studio_product_ids = None
         return None  # Developer loopback only; never a production exemption.
+    # The canonical PWA is authenticated only by the active ServGo account.
+    # Never fall back to an unrelated Growth password/Basic cookie on this host.
+    from app.api.studio_sso import _canonical_pwa
+    if _canonical_pwa(request, settings):
+        sso = _sso_login(request, settings, db)
+        if sso is None:
+            _login_required(request)
+        return _apply_scope(request, *sso, users=users)
+
     # A signed login session wins over credentials the browser remembers for Basic auth,
     # so signing in with another account through the form really switches the user.
     # It also wins over a ServGo sign-in: a link someone else sent can never push the
