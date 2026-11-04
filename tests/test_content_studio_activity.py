@@ -288,3 +288,35 @@ def test_video_review_notice_has_unrepeated_title_and_real_safe_destination(owne
     assert "Рисованное видео: Рисованное видео:" not in item["text"]
     assert item["url"] == f"/studio/products/{company.id}/whiteboard/{task.id}"
     assert notice_items(db, other.id) == []
+
+
+def test_failed_creative_with_saved_brief_can_resume_original_task(owner_studio):
+    from app.content.creative import CreativeRequest
+    from test_content_creative import creative_payload
+    client, db, company, other = owner_studio
+    task = Task(product_id=company.id, assigned_agent="content_creative",
+                title="CREATIVE: story", status=TaskStatus.FAILED)
+    db.add(task)
+    db.flush()
+    request = CreativeRequest(mode="creative", product_id=company.id,
+                              topic="Три совета", format="story",
+                              platform="instagram_reels", frame_count=3)
+    db.add_all([
+        Artifact(product_id=company.id, task_id=task.id, kind="creative_request",
+                 title="Три совета", content=request.model_dump_json()),
+        Artifact(product_id=company.id, task_id=task.id, kind="creative_brief",
+                 title="Раскадровка",
+                 content=json.dumps(creative_payload("story", "instagram_reels"),
+                                    ensure_ascii=False)),
+    ])
+    db.commit()
+    base = f"/studio/products/{company.id}/tasks/{task.id}"
+    detail = client.get(base)
+    assert detail.status_code == 200
+    assert "Продолжить с сохранённых этапов" in detail.text
+    assert client.post(f"/studio/products/{other.id}/tasks/{task.id}/retry").status_code == 404
+    resumed = client.post(base + "/retry", follow_redirects=False)
+    assert resumed.status_code == 303
+    assert resumed.headers["location"] == base
+    assert db.get(Task, task.id).status == TaskStatus.QUEUED
+    assert client.post(base + "/retry").status_code == 409

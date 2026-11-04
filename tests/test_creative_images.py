@@ -397,3 +397,80 @@ async def test_provider_rejects_remote_image_url():
                 Settings(_env_file=None, openai_api_key="test"),
                 OPENAI_MODEL, "A picture", "1:1", client=http,
             )
+
+
+@pytest.mark.asyncio
+async def test_orphaned_valid_frame_is_adopted_without_another_paid_image_call(company_db):
+    db, company, _, root = company_db
+    request = CreativeRequest(mode="creative", product_id=company.id,
+                              topic="Как выбрать букет", format="story",
+                              platform="telegram", image_model="gemini")
+    task = queue_creative(db, request)
+    folder = image_folder(root, company.id, task.id)
+    folder.mkdir(parents=True)
+    (folder / "frame-01.png").write_bytes(png_output(source_picture(), ratio="9:16"))
+    image_service = FakeImages()
+    config = Settings(_env_file=None, products_root=root, xai_api_key="test")
+    assert await generate_images(db, config, request, draft_story(), task_id=task.id,
+                                 provider=image_service)
+    assert len(image_service.calls) == 2
+    assert len(generated_images(db, company.id, task.id)) == 3
+
+
+@pytest.mark.asyncio
+async def test_missing_saved_frame_blocks_billed_regeneration(company_db):
+    db, company, _, root = company_db
+    request = CreativeRequest(mode="creative", product_id=company.id,
+                              topic="Как выбрать букет", format="story",
+                              platform="telegram", image_model="gemini")
+    task = queue_creative(db, request)
+    config = Settings(_env_file=None, products_root=root, xai_api_key="test")
+    assert await generate_images(db, config, request, draft_story(), task_id=task.id,
+                                 provider=FakeImages())
+    (image_folder(root, company.id, task.id) / "frame-02.png").unlink()
+    image_service = FakeImages()
+    with pytest.raises(LookupError, match="Image not found"):
+        await generate_images(db, config, request, draft_story(), task_id=task.id,
+                              provider=image_service)
+    assert len(image_service.calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_frame_resumes_with_one_missing_image_and_no_new_text_calls(monkeypatch, company_db):
+    db, company, _, root = company_db
+    request = CreativeRequest(mode="creative", product_id=company.id,
+                              topic="Как выбрать букет", format="story",
+                              platform="telegram", image_model="gemini", frame_count=3)
+    task = queue_creative(db, request)
+    settings = Settings(_env_file=None, products_root=root,
+                        xai_api_key="test", agent_critic_enabled=False)
+    text_calls = []
+    image_calls = []
+
+    class Provider:
+        async def generate(self, call):
+            text_calls.append(call)
+            from test_content_creative import strategy_payload
+            output = strategy_payload() if len(text_calls) == 1 else draft_story().model_dump(mode="json")
+            return LLMResponse(content=json.dumps(output, ensure_ascii=False),
+                               model="fake", usage=LLMUsage(input_tokens=10, output_tokens=20))
+
+    async def image_provider(settings, model, prompt, ratio):
+        image_calls.append(prompt)
+        if len(image_calls) == 2:
+            raise ValueError("image unavailable once")
+        return png_output(source_picture(), ratio=ratio)
+
+    monkeypatch.setattr("app.content.creative_images.request_image", image_provider)
+    assert not await run_creative_once(db, settings, request, task_id=task.id, provider=Provider())
+    assert db.get(Task, task.id).status == TaskStatus.FAILED
+    assert len(text_calls) == 2 and len(image_calls) == 3
+    assert len(generated_images(db, company.id, task.id)) == 2
+    task.status = TaskStatus.QUEUED
+    db.commit()
+    assert await run_creative_once(db, settings, request, task_id=task.id, provider=Provider())
+    assert len(text_calls) == 2 and len(image_calls) == 4
+    assert len(generated_images(db, company.id, task.id)) == 3
+    assert len(list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_brief")))) == 1
+    assert db.get(Task, task.id).status == TaskStatus.COMPLETED
