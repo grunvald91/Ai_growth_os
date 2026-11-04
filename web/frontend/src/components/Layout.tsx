@@ -81,7 +81,7 @@ export function Layout() {
   const handleLogout = async () => {
     sessionStorage.setItem('servgoExplicitLogout', '1')
     try { await clearLogin() }
-    catch { alert('Не удалось удалить офлайн-данные. Закройте другие вкладки ServGo и повторите выход.'); return }
+    catch { alert('Выход не завершён на сервере. Проверьте соединение и нажмите «Выйти» ещё раз.'); return }
     window.location.href = '/'
   }
 

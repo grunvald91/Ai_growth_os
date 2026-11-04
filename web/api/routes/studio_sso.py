@@ -19,13 +19,14 @@ import secrets
 import time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import Business, BusinessOwner, Employee, Service, User, get_db
 from ..deps import get_current_user
+from ..studio_identity import ensure_identity
 
 router = APIRouter()
 
@@ -59,7 +60,7 @@ def _b64(data: bytes) -> str:
 
 def make_ticket(*, user_id: int, business_id: int, role: str, name: str, now: Optional[float] = None) -> str:
     payload = _b64(json.dumps({
-        "v": 1, "aud": AUDIENCE, "uid": user_id, "biz": business_id, "role": role, "name": name[:120],
+        "v": 1, "aud": AUDIENCE, "origin": CANONICAL_STUDIO_URL, "uid": user_id, "biz": business_id, "role": role, "name": name[:120],
         "jti": secrets.token_urlsafe(16), "exp": int((now if now is not None else time.time()) + TICKET_TTL_SECONDS),
     }, separators=(",", ":"), ensure_ascii=False).encode())
     signature = _b64(hmac.new(_secret("STUDIO_SSO_SECRET"), payload.encode(), hashlib.sha256).digest())
@@ -76,7 +77,8 @@ async def studio_role(db: AsyncSession, user_id: int, business_id: int) -> Optio
     link = await db.scalar(select(BusinessOwner).where(
         BusinessOwner.business_id == business_id, BusinessOwner.user_id == user_id))
     if link is not None:
-        return link.role if link.role in ("owner", "co_owner") else "co_owner"
+        # Unknown/invalid values must never silently grant co-owner rights.
+        return link.role if link.role in ("owner", "co_owner") else None
     if not business.studio_admin_access:
         return None
     user = await db.get(User, user_id)
@@ -146,13 +148,15 @@ class TicketOut(BaseModel):
 
 
 @router.post("/studio/ticket", response_model=TicketOut)
-async def studio_ticket(data: TicketIn, user: User = Depends(get_current_user),
-                        db: AsyncSession = Depends(get_db)):
+async def studio_ticket(data: TicketIn, request: Request, response: Response,
+                        user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """One-time link into the studio for a business the person is allowed to manage."""
     role = await studio_role(db, user.id, data.business_id)
     if role is None:
         raise HTTPException(status_code=403, detail="No access to the marketing studio for this business")
     business = await db.get(Business, data.business_id)
+    # Refresh a pre-upgrade JWT login without rotating an already-valid browser identity.
+    ensure_identity(response, user.id, request.cookies.get("sg_identity"))
     ticket = make_ticket(user_id=user.id, business_id=business.id, role=role, name=business.name or "")
     return TicketOut(url=f"{studio_public_url()}/studio/sso?t={ticket}")
 

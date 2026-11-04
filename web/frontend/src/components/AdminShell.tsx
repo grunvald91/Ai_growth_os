@@ -75,7 +75,7 @@ export function AdminShell({
   const handleLogout = async () => {
     sessionStorage.setItem('servgoExplicitLogout', '1')
     try { await clearLogin() }
-    catch { alert('Не удалось удалить офлайн-данные. Закройте другие вкладки ServGo и повторите выход.'); return }
+    catch { alert('Серверный выход не завершён. Проверьте интернет и повторите.'); return }
     navigate('/login', { replace: true })
   }
   return createPortal(

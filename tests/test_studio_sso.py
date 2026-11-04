@@ -13,6 +13,7 @@ from unittest import mock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -101,8 +102,20 @@ class StudioSsoTest(unittest.IsolatedAsyncioTestCase):
         claims = read_ticket(body['url'])
         self.assertEqual((claims['uid'], claims['biz'], claims['role'], claims['aud']),
                          (self.u['owner'], self.business_id, 'owner', 'growth-studio'))
+        self.assertEqual(claims['origin'], 'https://servgo.ru')
         self.assertLessEqual(claims['exp'] - time.time(), 60)
         self.assertGreater(claims['exp'] - time.time(), 50)
+
+    async def test_studio_ticket_binds_to_the_current_servgo_browser_identity(self):
+        from web.api.studio_identity import read
+        response = self.ticket("owner")
+        self.assertEqual(response.status_code, 200)
+        cookie = response.headers.get("set-cookie", "")
+        self.assertIn("sg_identity=", cookie)
+        self.assertIn("httponly", cookie.lower())
+        self.assertIn("secure", cookie.lower())
+        identity = cookie.split("sg_identity=", 1)[1].split(";", 1)[0]
+        self.assertEqual(read(identity), self.u["owner"])
 
     async def test_ticket_always_uses_servgo_pwa_regardless_of_legacy_flag(self):
         with mock.patch.dict(os.environ, {'SERVGO_GROWTH_GATEWAY_ENABLED': 'true'}):
@@ -133,6 +146,22 @@ class StudioSsoTest(unittest.IsolatedAsyncioTestCase):
     async def test_co_owner_is_allowed_stranger_is_not(self):
         self.assertEqual(read_ticket(self.ticket('co').json()['url'])['role'], 'co_owner')
         self.assertEqual(self.ticket('stranger').status_code, 403)
+
+    async def test_unknown_owner_role_fails_closed_for_all_studio_endpoints(self):
+        # The DB column allows arbitrary strings; never promote such rows.
+        async with self.sessions() as db:
+            link = await db.scalar(select(BusinessOwner).where(
+                BusinessOwner.business_id == self.business_id,
+                BusinessOwner.user_id == self.u['co']))
+            link.role = 'viewer'
+            await db.commit()
+        self.assertEqual(self.ticket('co').status_code, 403)
+        listing = self.client.get('/studio/businesses')
+        self.assertEqual(listing.status_code, 200)
+        self.assertNotIn(self.business_id, [item['id'] for item in listing.json()])
+        denied = self.access('co')
+        self.assertEqual(denied.status_code, 200)
+        self.assertEqual(denied.json(), {'allowed': False, 'role': None})
 
     async def test_administrator_needs_the_owner_switch(self):
         self.assertEqual(self.ticket('admin').status_code, 403)

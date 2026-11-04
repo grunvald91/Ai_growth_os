@@ -23,6 +23,7 @@ from database.account_link import AccountLinkError, merge_yandex_account, phones
 from database.models import EmailIdentity, YandexIdentity
 from ..database import get_db, User, Business, BusinessOwner
 from ..deps import create_token, get_current_user, get_current_user_optional
+from ..studio_identity import set_identity, ensure_identity, clear_identity
 from ..schemas import (
     LoginPhoneIn,
     VerifyCodeIn,
@@ -241,6 +242,7 @@ async def request_code(body: LoginPhoneIn, db: AsyncSession = Depends(get_db)):
 @router.post("/verify", response_model=TokenOut)
 async def verify_code(
     body: VerifyCodeIn,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     authorization: Optional[str] = Header(None),
 ):
@@ -281,6 +283,7 @@ async def verify_code(
 
     role = await _role_for_user(db, user)
     token = create_token(user.id, role=role)
+    set_identity(response, user.id)
     return TokenOut(
         token=token,
         user=UserOut.model_validate(user),
@@ -370,12 +373,14 @@ async def telegram_login_widget(
         signed_in=await get_current_user_optional(authorization, db),
     )
     await _set_shared_auth_cookie(response, shared_auth)
+    set_identity(response, token_out.user.id)
     return token_out
 
 
 @router.get("/session", response_model=TokenOut)
 async def session_from_shared_cookie(
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     """Exchange a valid shared auth cookie for this SPA's JWT."""
@@ -387,13 +392,15 @@ async def session_from_shared_cookie(
     if not shared_session:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
 
-    return await _token_for_telegram_user(
+    out = await _token_for_telegram_user(
         db,
         int(shared_session["telegram_id"]),
         first_name=shared_session.get("first_name"),
         last_name=shared_session.get("last_name"),
         username=shared_session.get("username"),
     )
+    ensure_identity(response, out.user.id, request.cookies.get("sg_identity"))
+    return out
 
 
 @router.post("/telegram", response_model=TokenOut)
@@ -423,6 +430,7 @@ async def telegram_auth(
     shared_auth = _shared_auth_from_init_data(body.init_data, tg_user)
     if shared_auth:
         await _set_shared_auth_cookie(response, shared_auth)
+    set_identity(response, token_out.user.id)
     return token_out
 
 
@@ -437,12 +445,14 @@ async def logout(response: Response):
         path=cookie_options.get("path", "/"),
         domain=cookie_options.get("domain"),
     )
+    clear_identity(response)
     return {"ok": True}
 
 
 # ---------- GET /auth/me ----------
 
 @router.get("/me", response_model=UserOut)
-async def me(user: User = Depends(get_current_user)):
-    """Return the current authenticated user."""
+async def me(request: Request, response: Response, user: User = Depends(get_current_user)):
+    """Return the current authenticated user and hydrate an older active login."""
+    ensure_identity(response, user.id, request.cookies.get("sg_identity"))
     return UserOut.model_validate(user)

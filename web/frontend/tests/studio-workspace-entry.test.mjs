@@ -8,7 +8,7 @@ const js = urlSource.replace('raw: string', 'raw').replace('): boolean', ')')
 const { isTrustedStudioTicketUrl } = await import('data:text/javascript,' + encodeURIComponent(js))
 
 test('accepts only fixed trusted one-time Studio ticket destinations', () => {
-  assert.equal(isTrustedStudioTicketUrl('https://growth.servgo.ru/studio/sso?t=a.b_c-9'), true)
+  assert.equal(isTrustedStudioTicketUrl('https://growth.servgo.ru/studio/sso?t=a.b_c-9'), false)
   assert.equal(isTrustedStudioTicketUrl('https://servgo.ru/studio/sso?t=a.b_c-9'), true)
   for (const bad of [
     'http://servgo.ru/studio/sso?t=abc',

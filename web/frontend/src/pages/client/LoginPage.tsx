@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Phone, Send } from 'lucide-react'
-import { postLoginPath } from '../../utils/postLogin'
+import { consumeLoginDestination, pendingLoginDestination, postLoginPath, rememberLoginDestination, STUDIO_ENTRY } from '../../utils/postLogin'
 import { api, type TelegramLoginPayload } from '../../api/client'
 import { errorMessage, saveLogin } from '../../authUtils'
 import { ClientShell } from '../../components/ClientShell'
@@ -28,6 +28,7 @@ export function LoginPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const yandexProblem = YANDEX_PROBLEMS[searchParams.get('yandex') || '']
+  const studioNext = searchParams.get('next')
   // Пришли из профиля Яндекс-аккаунта, чтобы объединить его с Telegram: сразу показываем кнопку Telegram.
   const joinTelegram = searchParams.get('join') === 'telegram'
   const [mode, setMode] = useState<'phone' | 'code'>('phone')
@@ -43,6 +44,29 @@ export function LoginPage() {
   const [widget, setWidget] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [widgetAttempt, setWidgetAttempt] = useState(0)
   const [widgetSource, setWidgetSource] = useState(0)
+
+  useEffect(() => {
+    if (studioNext !== STUDIO_ENTRY) return
+    rememberLoginDestination(studioNext)
+    let active = true
+    const handleSavedLogin = () => {
+      if (!active || !localStorage.getItem('token')) return
+      void api.getMe().then(() => {
+        if (active && pendingLoginDestination() === STUDIO_ENTRY) {
+          consumeLoginDestination()
+          navigate(STUDIO_ENTRY, { replace: true })
+        }
+      }).catch(() => {})
+    }
+    if (localStorage.getItem('token')) void api.getMe().then(() => {
+      if (active && pendingLoginDestination() === STUDIO_ENTRY) {
+        consumeLoginDestination()
+        navigate(STUDIO_ENTRY, { replace: true })
+      }
+    }).catch(() => { /* The normal login page remains available. */ })
+    window.addEventListener('servgo-login-saved', handleSavedLogin)
+    return () => { active = false; window.removeEventListener('servgo-login-saved', handleSavedLogin) }
+  }, [navigate, studioNext])
 
   useEffect(() => {
     if (joinTelegram) telegramWidgetRef.current?.scrollIntoView({ block: 'center' })
@@ -153,7 +177,7 @@ export function LoginPage() {
         try {
           const res = await api.verifyCode(phone, fullCode)
           saveLogin(res)
-          navigate(res.role === 'admin' || res.role === 'owner' ? '/admin' : '/')
+          navigate(await postLoginPath(res.role), { replace: true })
         } catch (err) {
           setError(errorMessage(err))
           setCode(['', '', '', '', '', ''])
@@ -178,6 +202,11 @@ export function LoginPage() {
   return (
     <ClientShell backTo="/" title="Вход">
       <div className="ds-form-narrow" style={{ paddingTop: 4 }}>
+        {studioNext === STUDIO_ENTRY && (
+          <p role="status" className="ds-hint" style={{ marginBottom: 16 }}>
+            Войдите в ваш аккаунт ServGo. После входа откроется Studio для доступной компании.
+          </p>
+        )}
         {yandexProblem && <p role="alert" style={{ color: 'var(--s-danger)', marginBottom: 12 }}>{yandexProblem}</p>}
         <div style={{ marginBottom: 16 }}><YandexLoginButton /></div>
         <EmailAuthForm />
