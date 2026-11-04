@@ -1,0 +1,132 @@
+"""Bounded, server-side Yandex Maps *organization* lookup.
+
+No response data is persisted here. The key stays in the Growth service. This is
+not Yandex Cloud Search API or a source of business email addresses.
+
+Paid/commercial usage and data-storage permissions must be confirmed separately.
+"""
+from __future__ import annotations
+
+import os
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlsplit
+
+import httpx
+
+ENDPOINT = "https://search-maps.yandex.ru/v1/"
+_TRUE = {"1", "true", "yes", "on"}
+
+
+class YandexOrganizationsError(Exception):
+    """Sanitized provider failure. Never attach request URLs containing apikey."""
+
+
+def _enabled(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in _TRUE
+
+
+def capability() -> dict:
+    """Do not imply an API key proves commercial or storage entitlement."""
+    return {
+        "key_configured": bool(os.getenv("API_YANDEX", "").strip()),
+        "license_confirmed": _enabled("SERVGO_YANDEX_PPO_LICENSE_CONFIRMED"),
+        "storage_allowed": _enabled("SERVGO_YANDEX_PPO_STORAGE_ALLOWED"),
+        "enabled": bool(os.getenv("API_YANDEX", "").strip())
+                   and _enabled("SERVGO_YANDEX_PPO_LICENSE_CONFIRMED"),
+        "daily_budget": budget(),
+    }
+
+
+def budget() -> int:
+    try:
+        return max(1, min(1000, int(os.getenv("SERVGO_YANDEX_PPO_DAILY_BUDGET", "50"))))
+    except ValueError:
+        return 50
+
+
+def _reserve_request(quota_path: Path) -> None:
+    """Atomic shared-host budget. Counts attempts, not just successful responses."""
+    quota_path.parent.mkdir(parents=True, exist_ok=True)
+    day = datetime.now(timezone.utc).date().isoformat()
+    try:
+        with sqlite3.connect(quota_path, timeout=15) as db:
+            db.execute("CREATE TABLE IF NOT EXISTS yandex_ppo_usage (day TEXT PRIMARY KEY, used INTEGER NOT NULL)")
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("INSERT OR IGNORE INTO yandex_ppo_usage (day,used) VALUES (?,0)", (day,))
+            changed = db.execute(
+                "UPDATE yandex_ppo_usage SET used=used+1 WHERE day=? AND used<?",
+                (day, budget()),
+            ).rowcount
+            if not changed:
+                raise YandexOrganizationsError("Суточный бюджет запросов Яндекса исчерпан")
+            db.execute("DELETE FROM yandex_ppo_usage WHERE day<?", (day,))
+    except sqlite3.Error:
+        raise YandexOrganizationsError("Не удалось проверить бюджет Яндекс API") from None
+
+
+def _website(raw: object) -> str:
+    if not isinstance(raw, str):
+        return ""
+    try:
+        p = urlsplit(raw.strip())
+        if p.scheme not in ("http", "https") or not p.hostname or p.username or p.password:
+            return ""
+        return raw.strip()[:500]
+    except ValueError:
+        return ""
+
+
+def normalize(payload: dict) -> dict:
+    """Use only the documented CompanyMetaData fields; email is not provided."""
+    result = []
+    if not isinstance(payload, dict) or not isinstance(payload.get("features"), list):
+        raise YandexOrganizationsError("Яндекс вернул неожиданный формат ответа")
+    for feature in payload["features"]:
+        meta = (feature.get("properties") or {}).get("CompanyMetaData") if isinstance(feature, dict) else None
+        if not isinstance(meta, dict) or not meta.get("name") or not meta.get("id"):
+            continue
+        categories = meta.get("Categories") or []
+        phones = meta.get("Phones") or []
+        result.append({
+            "id": str(meta["id"])[:80],
+            "name": str(meta["name"])[:200],
+            "address": str(meta.get("address") or "")[:300],
+            "website": _website(meta.get("url")),
+            "categories": [str(c["name"])[:100] for c in categories
+                           if isinstance(c, dict) and isinstance(c.get("name"), str)][:20],
+            "phones": [str(p["formatted"])[:80] for p in phones
+                       if isinstance(p, dict) and isinstance(p.get("formatted"), str)][:10],
+            "email": None,
+            "source": "Яндекс Карты",
+        })
+    return {"organizations": result, "source": "Яндекс Карты",
+            "storage_allowed": capability()["storage_allowed"]}
+
+
+async def search(query: str, city: str, *, quota_path: Path, results: int = 25,
+                 skip: int = 0, transport: httpx.AsyncBaseTransport | None = None) -> dict:
+    config = capability()
+    if not config["enabled"]:
+        raise YandexOrganizationsError("Поиск Яндекса не активирован: проверьте ключ и лицензию")
+    if not 2 <= len(query.strip()) <= 100 or not 2 <= len(city.strip()) <= 80:
+        raise YandexOrganizationsError("Укажите нишу и город")
+    if not 1 <= results <= 50 or not 0 <= skip <= 1000 or skip % results != 0:
+        raise YandexOrganizationsError("Неверные параметры страницы")
+    _reserve_request(quota_path)
+    params = {"apikey": os.environ["API_YANDEX"].strip(), "text": f"{query.strip()} {city.strip()}",
+              "lang": "ru_RU", "type": "biz", "results": results, "skip": skip}
+    try:
+        async with httpx.AsyncClient(timeout=18, follow_redirects=False, transport=transport) as client:
+            response = await client.get(ENDPOINT, params=params)
+            if response.status_code != 200:
+                raise YandexOrganizationsError(f"Яндекс API: HTTP {response.status_code}")
+            data = response.json()
+    except (httpx.HTTPError, ValueError):
+        # httpx exceptions may include the complete URL with the credential.
+        raise YandexOrganizationsError("Запрос к Яндекс API не выполнен") from None
+    value = normalize(data)
+    value["page_size"] = results
+    value["skip"] = skip
+    return value
