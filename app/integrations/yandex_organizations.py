@@ -93,7 +93,7 @@ def normalize(payload: dict) -> dict:
         org_id = str(meta["id"])[:80]
         result.append({
             "id": org_id,
-            "maps_url": "https://yandex.ru/maps/org/" + org_id if re.fullmatch(r"\\d{1,25}", org_id) else "",
+            "maps_url": "https://yandex.ru/maps/org/" + org_id if re.fullmatch(r"\d{1,25}", org_id) else "",
             "name": str(meta["name"])[:200],
             "address": str(meta.get("address") or "")[:300],
             "website": _website(meta.get("url")),
