@@ -67,3 +67,40 @@ def test_existing_company_profile_loads_lookup_script():
     rendered = _collect_company_form(item, "ИНН")
     assert 'data-ym-company-form' in rendered
     assert '<script src="/studio/assets/yandex-company.js" defer></script>' in rendered
+
+
+@pytest.mark.asyncio
+async def test_market_save_uses_signed_snapshot_without_second_request(monkeypatch):
+    from app.api import yandex_discovery
+    item = example()
+    product_id = uuid4()
+    token = yandex_evidence.sign_organization(
+        item, scope=str(product_id), query="автосервис", city="Сочи")
+    class Database:
+        def get(self, model, pk):
+            return SimpleNamespace(id=pk)
+        def commit(self):
+            pass
+    saved = []
+    class Artifacts:
+        def __init__(self, db):
+            pass
+        def create(self, **kwargs):
+            saved.append(kwargs)
+            return SimpleNamespace(id=uuid4())
+    async def unexpected_request(*args, **kwargs):
+        raise AssertionError("Saving must not repeat a Yandex API call")
+    monkeypatch.setattr(yandex_discovery, "ArtifactService", Artifacts)
+    monkeypatch.setattr(yandex_discovery, "_lookup", unexpected_request)
+    value = await yandex_discovery.save_market_sources(
+        product_id, yandex_discovery.SourceSelection(
+            query="автосервис", city="Сочи", tokens=[token]), db=Database())
+    assert value["saved"] == 1
+    assert saved[0]["kind"] == "research_source_bundle"
+    assert "Морская 1" in saved[0]["content"]
+    # A valid signature from another company is not a valid selection here.
+    with pytest.raises(Exception) as exc:
+        await yandex_discovery.save_market_sources(
+            uuid4(), yandex_discovery.SourceSelection(
+                query="автосервис", city="Сочи", tokens=[token]), db=Database())
+    assert getattr(exc.value, "status_code", None) == 422
