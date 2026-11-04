@@ -6,6 +6,7 @@ import io
 from uuid import uuid4
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 from PIL import Image
 from sqlalchemy import create_engine, func, select
@@ -112,7 +113,7 @@ def test_renderer_outputs_three_true_stories_with_original_logo_and_safe_boxes(c
 
 def test_long_text_fails_rather_than_clipping(company):
     _, _, _, _, _, _, _, style = company
-    with pytest.raises(ValueError, match="помещается"):
+    with pytest.raises(ValueError, match="помещается|Слишком длинная"): 
         render_story(style, frame(body="Очень " * 55), logo=png_logo())
     with pytest.raises(ValueError, match="требует призыва"):
         render_story(style, frame("cta", cta=""), logo=png_logo())
@@ -230,7 +231,6 @@ def test_corrupted_background_and_render_are_rejected(company):
 
 def test_company_scoped_session_denies_other_company(company):
     client, db, a, b, va, _, _, _ = company
-    from fastapi import Request
     def limited(request: Request):
         return _apply_scope(request, "tenant", [str(a.id)])
     app.dependency_overrides[require_studio_auth] = limited

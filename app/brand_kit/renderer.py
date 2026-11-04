@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationInfo, field_validator
 
 from app.brand_kit.contracts import BrandStyle, Strict, contrast_ratio
 
@@ -30,7 +30,7 @@ class StoryFrame(Strict):
 
     @field_validator("heading", "body", "cta")
     @classmethod
-    def readable_copy(cls, value: str) -> str:
+    def readable_copy(cls, value: str, info: ValidationInfo) -> str:
         value = unicodedata.normalize("NFC", value).replace("\r\n", "\n")
         if any(unicodedata.category(c) in ("Cc", "Cf") and c != "\n" for c in value):
             raise ValueError("Недопустимые управляющие символы в тексте")
@@ -38,7 +38,10 @@ class StoryFrame(Strict):
             raise ValueError("Слишком много переносов в тексте")
         if any(len(line) > 130 for line in value.split("\n")):
             raise ValueError("Слишком длинная строка")
-        return value.strip()
+        value = value.strip()
+        if info.field_name == "heading" and not value:
+            raise ValueError("Заголовок не может быть пустым")
+        return value
 
 
 @dataclass(frozen=True)
