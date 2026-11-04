@@ -307,3 +307,136 @@ def test_story_and_image_prompts_are_value_first():
     assert "core_takeaway" in prompt_text("creative.strategist")
     assert "один конкретный шаг" in prompt_text("article.rules.story_director")
     assert "обещает пользу" in prompt_text("article.rules.visual_designer")
+
+
+def test_creative_json_parser_accepts_safe_wrappers_but_not_truncated_prose():
+    from app.content.creative import parse_creative_json
+    value = strategy_payload()
+    plain = json.dumps(value, ensure_ascii=False)
+    fence = chr(96) * 3
+    assert parse_creative_json(plain) == value
+    assert parse_creative_json(fence + "json\n" + plain + "\n" + fence) == value
+    assert parse_creative_json(fence + "\n" + plain + "\n" + fence) == value
+    assert parse_creative_json(json.dumps(plain, ensure_ascii=False)) == value
+    with pytest.raises(json.JSONDecodeError):
+        parse_creative_json(plain[:-5])
+    with pytest.raises(json.JSONDecodeError):
+        parse_creative_json("Пояснение\n" + plain)
+    with pytest.raises(ValueError, match="JSON object"):
+        parse_creative_json("[1, 2]")
+    with pytest.raises(ValueError, match="too large"):
+        parse_creative_json(" " * 65001)
+
+
+@pytest.mark.asyncio
+async def test_failed_strategy_records_exact_stage_and_retry_only_creates_real_runs(db, tmp_path):
+    from app.models.domain import AgentRun
+    product = Product(name="Ремонт", slug="creative-strategy-malformed-json")
+    db.add(product)
+    db.commit()
+    request = CreativeRequest(mode="creative", product_id=product.id,
+                              topic="Три совета по уходу", format="story",
+                              platform="instagram_reels", frame_count=3)
+    task = queue_creative(db, request)
+    answers = ["{invalid", "{invalid", strategy_payload(),
+               creative_payload("story", "instagram_reels")]
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+        async def generate(self, call):
+            self.calls.append(call)
+            result = answers.pop(0)
+            return LLMResponse(
+                content=result if isinstance(result, str) else json.dumps(result, ensure_ascii=False),
+                model="fake", usage=LLMUsage(input_tokens=10, output_tokens=20))
+
+    provider = Provider()
+    cfg = Settings(_env_file=None, products_root=tmp_path, agent_critic_enabled=False)
+    assert not await run_creative_once(db, cfg, request, task_id=task.id, provider=provider)
+    assert db.get(Task, task.id).status == TaskStatus.FAILED
+    runs = list(db.scalars(select(AgentRun).where(AgentRun.task_id == task.id)))
+    assert len(runs) == 1 and runs[0].agent_name == "creative_strategist"
+    details = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_stage_error")))
+    assert len(details) == 1
+    metadata = json.loads(details[0].content)
+    assert metadata["stage"] == "creative_strategist"
+    assert metadata["exception_type"] == "JSONDecodeError"
+    assert "json_position" in metadata and "output_length" in metadata
+    assert "invalid" not in details[0].content
+
+    task.status = TaskStatus.QUEUED
+    db.commit()
+    assert await run_creative_once(db, cfg, request, task_id=task.id, provider=provider)
+    assert db.get(Task, task.id).status == TaskStatus.COMPLETED
+    assert len(provider.calls) == 4
+    assert len(list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_brief")))) == 1
+
+
+@pytest.mark.asyncio
+async def test_director_failure_resume_reuses_completed_strategy_without_another_paid_call(db, tmp_path):
+    product = Product(name="Ремонт", slug="creative-director-malformed-json")
+    db.add(product)
+    db.commit()
+    request = CreativeRequest(mode="creative", product_id=product.id,
+                              topic="Три совета по уходу", format="story",
+                              platform="instagram_reels", frame_count=3)
+    task = queue_creative(db, request)
+    answers = [strategy_payload(), "bad JSON", "bad JSON",
+               creative_payload("story", "instagram_reels")]
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+        async def generate(self, call):
+            self.calls.append(call)
+            result = answers.pop(0)
+            return LLMResponse(
+                content=result if isinstance(result, str) else json.dumps(result, ensure_ascii=False),
+                model="fake", usage=LLMUsage(input_tokens=10, output_tokens=20))
+
+    provider = Provider()
+    cfg = Settings(_env_file=None, products_root=tmp_path, agent_critic_enabled=False)
+    assert not await run_creative_once(db, cfg, request, task_id=task.id, provider=provider)
+    checkpoints = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "content_stage_output")))
+    assert len(checkpoints) == 1 and checkpoints[0].title == "creative_strategist: draft"
+    task.status = TaskStatus.QUEUED
+    db.commit()
+    assert await run_creative_once(db, cfg, request, task_id=task.id, provider=provider)
+    assert len(provider.calls) == 4
+    assert [call.metadata["team_role"] for call in provider.calls] == [
+        "creative_strategist", "creative_director", "creative_director", "creative_director",
+    ]
+    assert db.get(Task, task.id).status == TaskStatus.COMPLETED
+    assert len(list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_brief")))) == 1
+
+
+@pytest.mark.asyncio
+async def test_fenced_creative_stages_do_not_trigger_extra_repair_calls(db, tmp_path):
+    company = Product(name="Ремонт", slug="creative-fenced-json")
+    db.add(company)
+    db.commit()
+    request = CreativeRequest(mode="creative", product_id=company.id,
+                              topic="Три совета", format="story", platform="instagram_reels")
+    task = queue_creative(db, request)
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+        async def generate(self, call):
+            self.calls.append(call)
+            obj = strategy_payload() if len(self.calls) == 1 else creative_payload("story", "instagram_reels")
+            return LLMResponse(content=chr(96)*3 + "json\n" + json.dumps(obj, ensure_ascii=False)
+                               + "\n" + chr(96)*3, model="fake",
+                               usage=LLMUsage(input_tokens=10, output_tokens=20))
+
+    provider = Provider()
+    assert await run_creative_once(db, Settings(_env_file=None, products_root=tmp_path,
+                                                agent_critic_enabled=False),
+                                   request, task_id=task.id, provider=provider)
+    assert len(provider.calls) == 2
+    assert db.get(Task, task.id).status == TaskStatus.COMPLETED
