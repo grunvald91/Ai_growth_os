@@ -184,7 +184,12 @@
   });
   if (readSeen() !== localDate()) {
     drawer.dataset.first = 'true';
-    showDrawer();
-    refresh().then(function (ok) { if (ok) saveSeen(); });
+    // Allow initial offscreen style to paint so the very first entrance slides in.
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        showDrawer();
+        refresh().then(function (ok) { if (ok) saveSeen(); });
+      });
+    });
   }
 })();
