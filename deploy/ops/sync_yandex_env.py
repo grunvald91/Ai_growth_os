@@ -27,7 +27,11 @@ def atomic_write(path: Path, contents: str, *, default_mode: int = 0o600) -> Non
             handle.write(contents)
             handle.flush()
             os.fsync(handle.fileno())
-            os.fchmod(handle.fileno(), stat.S_IMODE(old_stat.st_mode) if old_stat else default_mode)
+            mode = stat.S_IMODE(old_stat.st_mode) if old_stat else default_mode
+            # Enforce root-only access even if an old .env was too permissive.
+            if path == ENV:
+                mode &= 0o600
+            os.fchmod(handle.fileno(), mode)
             if old_stat:
                 os.fchown(handle.fileno(), old_stat.st_uid, old_stat.st_gid)
         os.replace(name, path)
