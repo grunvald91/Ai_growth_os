@@ -76,47 +76,58 @@ def forget(user_id: int | None = None, business_id: int | None = None) -> None:
                 _BUSINESS_IDS_CACHE.pop(key, None)
 
 
-def servgo_business_ids(settings, user_id: int, *, now: float | None = None,
-                        fresh: bool = False) -> frozenset[int] | None:
-    """Authorized business IDs, never derived from the Growth database alone.
+def servgo_business_roles(settings, user_id: int) -> dict[int, str] | None:
+    """Fetch current authorized businesses AND roles in one authenticated request.
 
-    None means the authenticated internal list is unavailable (old ServGo
-    deployment, timeout or invalid response). Callers must then keep only the
-    business authorized by the original signed SSO ticket.
+    Returns None only when the list endpoint is unavailable or malformed; callers
+    can then authorize the original ticket company using a separate live check.
+    An empty dict is authoritative and revokes all access immediately.
     """
     key = settings.servgo_internal_key or ""
     if len(key) < 32:
         return None
+    url = settings.servgo_api_url.rstrip("/") + "/internal/studio/businesses"
+    try:
+        with httpx.Client(timeout=TIMEOUT_SECONDS, transport=_transport) as client:
+            response = client.get(url, params={"user_id": user_id}, headers={"X-Studio-Key": key})
+        if response.status_code != 200:
+            return None
+        data = response.json()
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
+        _logger.warning("studio_sso_business_roles_failed %s", type(exc).__name__)
+        return None
+    if not isinstance(data, list) or len(data) > 2000:
+        return None
+    roles: dict[int, str] = {}
+    for item in data:
+        if (not isinstance(item, dict) or type(item.get("id")) is not int
+                or item["id"] <= 0 or item.get("role") not in {"owner", "co_owner", "administrator"}
+                or item["id"] in roles):
+            return None
+        roles[item["id"]] = item["role"]
+    return roles
+
+
+def servgo_business_ids(settings, user_id: int, *, now: float | None = None,
+                        fresh: bool = False) -> frozenset[int] | None:
+    """Backwards-compatible authorized ID view, with optional short-lived cache.
+
+    Never use the cached version for a protected authorization decision.
+    """
     cache_key = (settings.servgo_api_url.rstrip("/"), user_id)
     current = now if now is not None else time.monotonic()
     cached = _BUSINESS_IDS_CACHE.get(cache_key)
     if not fresh and cached and cached[0] > current:
         return cached[1]
-    try:
-        with httpx.Client(timeout=TIMEOUT_SECONDS, transport=_transport) as client:
-            response = client.get(cache_key[0] + "/internal/studio/businesses",
-                                  params={"user_id": user_id}, headers={"X-Studio-Key": key})
-        if response.status_code != 200:
-            return None
-        data = response.json()
-    except (httpx.HTTPError, ValueError, TypeError) as exc:
-        _logger.warning("studio_sso_business_list_failed %s", type(exc).__name__)
+    roles = servgo_business_roles(settings, user_id)
+    if roles is None:
         return None
-    if not isinstance(data, list) or len(data) > 2000:
-        return None
-    ids: set[int] = set()
-    for item in data:
-        if (not isinstance(item, dict) or type(item.get("id")) is not int
-                or item["id"] <= 0 or item.get("role") not in {"owner", "co_owner", "administrator"}):
-            return None
-        ids.add(item["id"])
-    if len(_BUSINESS_IDS_CACHE) > 2000:
-        _BUSINESS_IDS_CACHE.clear()
-    result = frozenset(ids)
+    result = frozenset(roles)
     if result:
+        if len(_BUSINESS_IDS_CACHE) > 2000:
+            _BUSINESS_IDS_CACHE.clear()
         _BUSINESS_IDS_CACHE[cache_key] = (current + CACHE_SECONDS, result)
     else:
-        # Do not delay recovery when the owner grants access again.
         _BUSINESS_IDS_CACHE.pop(cache_key, None)
     return result
 
