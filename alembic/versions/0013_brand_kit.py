@@ -33,6 +33,7 @@ def upgrade():
         sa.Column("height", sa.Integer(), nullable=False),
         *_timestamps(),
         sa.UniqueConstraint("product_id", "id", name="uq_brand_asset_owner_id"),
+        sa.UniqueConstraint("product_id", "kind", "sha256", name="uq_brand_asset_dedupe"),
     )
     op.create_index("ix_brand_assets_product_id", "brand_assets", ["product_id"])
     op.create_table(
