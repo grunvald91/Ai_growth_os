@@ -156,6 +156,20 @@ JS = r"""
 (function(){
  const widget=document.querySelector('[data-sg-notifications]');
  if(!widget)return;
+ // The same notification dropdown is used by classic Studio and Growth v4.
+ // A tap outside closes it without blocking the tap's intended action.
+ document.addEventListener('pointerdown',event=>{
+   if(widget.open && event.target instanceof Node && !widget.contains(event.target)){
+     widget.open=false;
+   }
+ });
+ document.addEventListener('keydown',event=>{
+   if(event.key==='Escape' && widget.open){
+     const hadFocus=widget.contains(document.activeElement);
+     widget.open=false;
+     if(hadFocus)widget.querySelector('summary')?.focus();
+   }
+ });
  const endpoint=widget.getAttribute('data-feed-url');
  const count=widget.querySelector('[data-sg-count]');
  const list=widget.querySelector('[data-sg-notify-list]');
