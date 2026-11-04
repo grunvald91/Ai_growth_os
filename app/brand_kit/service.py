@@ -96,12 +96,17 @@ def store_asset(db, root: Path, product_id: UUID, kind: str, raw: bytes) -> Bran
         raise ValueError("Файл не является корректным изображением") from exc
     media_type, extension = IMAGE_FORMATS[fmt]
     digest = hashlib.sha256(raw).hexdigest()
+    # Serialize allocations per company, including concurrent uploads on PostgreSQL.
+    db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
     previous = db.scalar(select(BrandAsset).where(
         BrandAsset.product_id == product_id, BrandAsset.kind == kind,
         BrandAsset.sha256 == digest))
     if previous is not None:
         verified_asset(db, root, product_id, previous.id)
         return previous
+    from app.brand_kit.quotas import enforce_quota
+    enforce_quota(db, product_id, BrandAsset, additional_bytes=len(raw),
+                  max_files=32, max_bytes=48_000_000)
     asset_id = uuid4()
     filename = str(asset_id) + extension
     folder = _asset_dir(root, product_id, create=True)
