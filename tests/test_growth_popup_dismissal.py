@@ -29,7 +29,7 @@ def test_v4_mobile_more_and_search_dismiss_on_outside_pointer():
 def test_classic_mobile_more_dismisses_outside_instead_of_backdrop_only():
     js = content_studio_design.STUDIO_JS
     assert "document.querySelectorAll('[data-m-more][open]')" in js
-    assert "!menu.contains(event.target)" in js
+    assert "event.target===menu || !menu.contains(event.target)" in js
     assert "menu.open=false" in js
     assert "if(event.key!=='Escape')return" in js
 
