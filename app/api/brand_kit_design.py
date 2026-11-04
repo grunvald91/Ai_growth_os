@@ -12,7 +12,7 @@ from starlette.datastructures import UploadFile
 
 from app.api.content_studio import _owner_product
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
-from app.api.multipart_limits import limited_multipart_form
+from app.api.multipart_limits import IMAGE_UPLOAD_SLOTS, limited_multipart_form
 from app.brand_kit.contracts import Strict
 from app.brand_kit.design_service import (
     MAX_BACKGROUND_UPLOAD, create_composition, delete_story_render, delete_unused_background, store_background,
@@ -45,20 +45,22 @@ async def upload_story_background(product_id: UUID, request: Request,
                                   db: Session = Depends(get_db),
                                   settings = Depends(get_settings)):
     _owner_product(db, product_id)
-    form = await limited_multipart_form(
-        request, max_body=MAX_BACKGROUND_UPLOAD + 16_000,
-        max_files=1, max_fields=2)
-    source = form.get("file")
-    if not isinstance(source, UploadFile):
-        raise HTTPException(422, "Выберите файл PNG, JPEG или WebP")
-    try:
-        data = await source.read(MAX_BACKGROUND_UPLOAD + 1)
-        record = await run_in_threadpool(
-            store_background, db, settings.products_root, product_id, data)
-    except (LookupError, ValueError) as exc:
-        raise _error(exc) from None
-    finally:
-        await source.close()
+    async with IMAGE_UPLOAD_SLOTS:
+        form = await limited_multipart_form(
+            request, max_body=MAX_BACKGROUND_UPLOAD + 16_000,
+            max_files=1, max_fields=2)
+        source = form.get("file")
+        if not isinstance(source, UploadFile):
+            await form.close()
+            raise HTTPException(422, "Выберите файл PNG, JPEG или WebP")
+        try:
+            data = await source.read(MAX_BACKGROUND_UPLOAD + 1)
+            record = await run_in_threadpool(
+                store_background, db, settings.products_root, product_id, data)
+        except (LookupError, ValueError) as exc:
+            raise _error(exc) from None
+        finally:
+            await form.close()
     return JSONResponse({
         "id": str(record.id), "width": record.width, "height": record.height,
         "source": "upload",
