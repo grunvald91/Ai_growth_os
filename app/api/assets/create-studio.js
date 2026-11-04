@@ -119,13 +119,22 @@
   const historyClose=document.getElementById('sg-create-history-close');
   const historyOpen=document.getElementById('sg-create-history-open');
   if(history && historyClose && historyOpen){
-    function showHistory(open){
+    function showHistory(open,focusHandle=true){
       root.classList.toggle('sg-history-collapsed',!open);
       history.setAttribute('aria-hidden',String(!open));
       historyClose.setAttribute('aria-expanded',String(open));
       historyOpen.setAttribute('aria-expanded',String(open));
-      (open ? historyClose : historyOpen).focus({preventScroll:true});
+      if(focusHandle)(open ? historyClose : historyOpen).focus({preventScroll:true});
     }
+    // Outside taps dismiss the floating conversation without stealing focus
+    // from the format chooser, textarea, voice recorder or other target.
+    document.addEventListener('pointerdown',event=>{
+      if(root.classList.contains('has-feed') &&
+         !root.classList.contains('sg-history-collapsed') &&
+         event.target instanceof Node && !history.contains(event.target)){
+        showHistory(false,false);
+      }
+    });
     function attachGrip(button,open,swipeDirection){
       let startY=null;
       let activePointer=null;
