@@ -6,6 +6,7 @@ Every successful login rotates it; logout clears it. Never accept this cookie as
 an API authentication credential.
 """
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -60,7 +61,7 @@ def read(token: str | None, *, now: int | None = None) -> int | None:
             not isinstance(data.get("n"), str) or len(data["n"]) < 24):
             return None
         return data["u"]
-    except (ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError, UnicodeError, binascii.Error, AttributeError):
         return None
 
 
