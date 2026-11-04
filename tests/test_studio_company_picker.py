@@ -60,3 +60,43 @@ def test_v4_preserves_secure_account_link_page_wrapper():
     wrapped = render_v4(page, request, None, "/studio/identity?design=classic")
     assert '<div class="sg-link-page">' in wrapped
     assert 'action="/studio/identity"' in wrapped
+
+
+def test_unified_picker_reuses_existing_platform_product_only_with_admin_scope():
+    platform = _company("ServGo")
+    tenant = _company("Авто точка")
+    owner_html = selector_html([tenant], unified_user_id=7, linked_business_ids=(12,))
+    assert 'id="sg-servgo-organisations"' in owner_html
+    assert 'data-user-id="7"' in owner_html
+    assert 'data-linked-businesses="12"' in owner_html
+    assert 'data-platform-product=' not in owner_html
+    assert "Подключить существующие права администратора Growth" in owner_html
+    assert '/studio/assets/servgo-organisations.js' in owner_html
+
+    admin_html = selector_html([tenant, platform], unified_user_id=7,
+                               linked_business_ids=(12,), platform_product=platform)
+    assert f'data-platform-product="{platform.id}"' in admin_html
+    assert 'data-platform-name="ServGo"' in admin_html
+    assert "Подключить существующие права администратора Growth" not in admin_html
+    # Neither a new Growth product nor an extra BookingBot business is created.
+    assert '/studio/new' not in admin_html
+
+
+def test_legacy_picker_does_not_load_canonical_organisation_script():
+    platform = _company("ServGo")
+    legacy_html = selector_html([platform], can_add=True)
+    assert 'id="sg-servgo-organisations"' not in legacy_html
+    assert '/studio/assets/servgo-organisations.js' not in legacy_html
+    assert 'Добавить компанию' in legacy_html
+
+
+def test_canonical_organisation_script_takes_platform_project_from_server_only():
+    from app.api.studio_servgo_org_js import JS
+    assert "mount.dataset.platformProduct" in JS
+    assert "mount.dataset.platformName" in JS
+    assert "platformButton.href = '/studio/products/'" in JS
+    assert "fetch('/api/studio/businesses'" in JS
+    assert "fetch('/api/studio/ticket'" in JS
+    assert "window.location.assign(url.href)" in JS
+    assert "url.origin !== window.location.origin" in JS
+    assert 'platformButton' in JS and 'servgo_operator' not in JS
