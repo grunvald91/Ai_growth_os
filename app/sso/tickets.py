@@ -19,6 +19,7 @@ AUDIENCE = "growth-studio"
 MIN_SECRET_LENGTH = 32
 MAX_TICKET_LIFETIME = 120  # ServGo issues 60 seconds; anything much longer is not from ServGo.
 ROLES = {"owner", "co_owner", "administrator"}
+CANONICAL_ORIGIN = "https://servgo.ru"
 
 
 class SsoError(Exception):
@@ -33,6 +34,7 @@ class Claims:
     name: str
     jti: str
     expires: int
+    origin: str | None = None
 
 
 def _unb64(text: str) -> bytes:
@@ -63,11 +65,14 @@ def verify_ticket(settings, token: str | None, *, now: float | None = None) -> C
         if data["v"] != 1 or data["aud"] != AUDIENCE:
             raise SsoError("wrong audience")
         claims = Claims(user_id=int(data["uid"]), business_id=int(data["biz"]), role=str(data["role"]),
-                        name=str(data.get("name", ""))[:120], jti=str(data["jti"]), expires=int(data["exp"]))
+                        name=str(data.get("name", ""))[:120], jti=str(data["jti"]), expires=int(data["exp"]),
+                         origin=data.get("origin"))
     except SsoError:
         raise
     except (ValueError, KeyError, TypeError):
         raise SsoError("malformed") from None
+    if claims.origin is not None and claims.origin != CANONICAL_ORIGIN:
+        raise SsoError("untrusted origin")
     if claims.expires < current:
         raise SsoError("expired")
     if claims.expires - current > MAX_TICKET_LIFETIME:
@@ -128,15 +133,20 @@ def read_session(settings, token: str | None, *, now: float | None = None) -> Se
 INTENT_TTL = 15 * 60  # time to read the question "create the company?"; the one-minute link would not be enough
 
 
-def issue_intent(settings, claims: Claims, *, now: float | None = None) -> str:
+def issue_intent(settings, claims: Claims, *, now: float | None = None,
+                 identity_hash: str | None = None) -> str:
     """A signed, short-lived note that this person was just confirmed by ServGo and may be asked to create a company."""
+    if identity_hash is not None and (len(identity_hash) != 64 or any(c not in "0123456789abcdef" for c in identity_hash)):
+        raise ValueError("Invalid setup identity fingerprint")
     current = now if now is not None else time.time()
     payload = _b64(json.dumps({"u": claims.user_id, "b": claims.business_id, "r": claims.role, "n": claims.name,
-                               "j": claims.jti, "e": int(current + INTENT_TTL)}, separators=(",", ":")).encode())
+                               "j": claims.jti, "e": int(current + INTENT_TTL), "i": identity_hash},
+                              separators=(",", ":")).encode())
     return f"{payload}.{_sign(settings, 'create:' + payload)}"
 
 
-def read_intent(settings, token: str | None, *, now: float | None = None) -> Claims:
+def read_intent(settings, token: str | None, *, now: float | None = None,
+                identity_hash: str | None = None, require_identity: bool = False) -> Claims:
     if not token or token.count(".") != 1 or len(token) > 1500:
         raise SsoError("malformed")
     payload, signature = token.split(".")
@@ -144,6 +154,9 @@ def read_intent(settings, token: str | None, *, now: float | None = None) -> Cla
         raise SsoError("bad signature")
     try:
         data = json.loads(_unb64(payload))
+        if require_identity and (not identity_hash or not isinstance(data.get("i"), str) or
+                                 not hmac.compare_digest(data["i"], identity_hash)):
+            raise SsoError("browser identity changed")
         claims = Claims(user_id=int(data["u"]), business_id=int(data["b"]), role=str(data["r"]),
                         name=str(data.get("n", ""))[:120], jti=str(data["j"]), expires=int(data["e"]))
     except (ValueError, KeyError, TypeError):
