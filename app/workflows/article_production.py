@@ -481,9 +481,64 @@ OPTIONAL_DERIVATIVE_STAGES = {
 }
 
 
+def _decode_stage_json(content: str):
+    """Lossless extraction of one JSON payload from common model wrappers.
+
+    Never invent missing keys/values: the existing Pydantic contract and
+    grounding checks remain authoritative for the extracted object.
+    """
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as original:
+        source = content.strip()
+        if len(source) > 150_000:
+            raise original
+        fenced = re.fullmatch(r"```(?:json)?\\s*([\\s\\S]*?)\\s*```", source, re.IGNORECASE)
+        if fenced is not None:
+            source = fenced.group(1).strip()
+        else:
+            opening = source.find("{")
+            closing = source.rfind("}")
+            # One bounded prose wrapper is okay; multiple JSON objects are not.
+            if opening < 0 or closing <= opening or opening > 400 or len(source) - closing > 400:
+                raise original
+            source = source[opening:closing + 1]
+        try:
+            return json.loads(source)
+        except json.JSONDecodeError:
+            pass
+        output = []
+        quoted = False
+        escaped = False
+        for index, ch in enumerate(source):
+            if quoted:
+                if ch in "\\n\\r\\t":
+                    output.append({"\\n": "\\\\n", "\\r": "\\\\r", "\\t": "\\\\t"}[ch])
+                    continue
+                if escaped:
+                    escaped = False
+                elif ch == "\\\\":
+                    escaped = True
+                elif ch == '"':
+                    quoted = False
+            elif ch == '"':
+                quoted = True
+            elif ch == ",":
+                lookahead = index + 1
+                while lookahead < len(source) and source[lookahead].isspace():
+                    lookahead += 1
+                if lookahead < len(source) and source[lookahead] in "}]":
+                    continue
+            output.append(ch)
+        try:
+            return json.loads("".join(output))
+        except json.JSONDecodeError:
+            raise original from None
+
+
 def _parse_stage_payload(schema, content: str):
     """Accept strict JSON plus common harmless gateway/model wrappers."""
-    value = json.loads(content)
+    value = _decode_stage_json(content)
     for _ in range(5):
         if isinstance(value, str):
             try:
