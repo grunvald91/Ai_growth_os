@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.api.content_studio import _owner_product, studio_page_shell
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
-from app.api.multipart_limits import limited_multipart_form
+from app.api.multipart_limits import IMAGE_UPLOAD_SLOTS, limited_multipart_form
 from app.brand_kit.contracts import ACCENTS, FONTS, GENERATORS, BrandStyle
 from app.brand_kit.models import BrandAsset
 from app.brand_kit.service import (
@@ -81,8 +81,9 @@ def _select(name: str, values, value, *, labels=None) -> str:
 
 def _brand_body(product_id, db: Session, error: str = "", *, can_approve: bool = True) -> str:
     active, versions, latest = read_state(db, product_id)
-    style = BrandStyle.model_validate(latest.config) if latest else BrandStyle()
     previewing_draft = bool(latest and latest.status == "draft")
+    preview_version = latest if previewing_draft else (active or latest)
+    style = BrandStyle.model_validate(preview_version.config) if preview_version else BrandStyle()
     base = f"/studio/products/{product_id}/brand-kit"
     assets = list(db.scalars(select(BrandAsset).where(
         BrandAsset.product_id == product_id
@@ -298,18 +299,21 @@ async def upload_brand_asset(product_id: UUID, request: Request,
                              db: Session = Depends(get_db),
                              settings = Depends(get_settings)):
     _owner_product(db, product_id)
-    form = await limited_multipart_form(
-        request, max_body=MAX_FILE_BYTES + 12_000, max_files=1, max_fields=3)
-    upload = form.get("file")
-    if not isinstance(upload, UploadFile):
-        raise HTTPException(422, "Выберите изображение")
-    try:
-        raw = await upload.read(MAX_FILE_BYTES + 1)
-        await run_in_threadpool(store_asset, db, settings.products_root, product_id, str(form.get("kind")), raw)
-    except (ValueError, LookupError) as exc:
-        raise _bad_request(exc) from None
-    finally:
-        await upload.close()
+    async with IMAGE_UPLOAD_SLOTS:
+        form = await limited_multipart_form(
+            request, max_body=MAX_FILE_BYTES + 12_000, max_files=1, max_fields=3)
+        upload = form.get("file")
+        if not isinstance(upload, UploadFile):
+            await form.close()
+            raise HTTPException(422, "Выберите изображение")
+        try:
+            raw = await upload.read(MAX_FILE_BYTES + 1)
+            await run_in_threadpool(store_asset, db, settings.products_root,
+                                    product_id, str(form.get("kind")), raw)
+        except (ValueError, LookupError) as exc:
+            raise _bad_request(exc) from None
+        finally:
+            await form.close()
     return RedirectResponse(f"/studio/products/{product_id}/brand-kit", status_code=303)
 
 

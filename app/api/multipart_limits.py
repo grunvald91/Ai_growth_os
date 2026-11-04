@@ -1,8 +1,13 @@
 """Stream-counted multipart parser; limits apply without Content-Length."""
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import HTTPException, Request
 from starlette.datastructures import FormData
+
+# Bound in-process image decoding and multipart spooling; each worker enforces this.
+IMAGE_UPLOAD_SLOTS = asyncio.Semaphore(2)
 
 
 async def limited_multipart_form(request: Request, *,
