@@ -18,6 +18,7 @@ from app.company_profile import load_company_profile
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.integrations.yandex_organizations import YandexOrganizationsError, search
+from app.integrations.yandex_evidence import sign_organization, verify_organization
 from app.models.domain import Product
 from app.services.artifacts import ArtifactService
 from app.workflows.research_contracts import ResearchSource, ResearchSourceBundle
@@ -61,6 +62,8 @@ async def before_company_search(
     """For the admin-only 'new company' form, before a company ID exists."""
     _require_operator(request)
     value = await _lookup(query, city, limit=10)
+    for item in value["organizations"]:
+        item["selection_token"] = sign_organization(item, scope="new", query=query, city=city)
     return JSONResponse(value, headers={"Cache-Control": "no-store"})
 
 
@@ -75,13 +78,16 @@ async def company_search(
     """Product URL scope is also enforced by the Studio auth dependency."""
     _company(db, product_id)
     value = await _lookup(query, city, skip=skip)
+    for item in value["organizations"]:
+        item["selection_token"] = sign_organization(
+            item, scope=str(product_id), query=query, city=city)
     return JSONResponse(value, headers={"Cache-Control": "no-store"})
 
 
 class SourceSelection(BaseModel):
     query: str = Field(min_length=2, max_length=100)
     city: str = Field(min_length=2, max_length=80)
-    ids: list[str] = Field(min_length=1, max_length=25)
+    tokens: list[str] = Field(min_length=1, max_length=25)
 
 
 def _source_rows(organizations: list[dict], selected: set[str]) -> list[ResearchSource]:
@@ -113,12 +119,17 @@ def _source_rows(organizations: list[dict], selected: set[str]) -> list[Research
 
 @router.post("/studio/products/{product_id}/market-research/sources", status_code=201)
 async def save_market_sources(product_id: UUID, body: SourceSelection, db=Depends(get_db)):
-    """Re-query on save so no untrusted client-supplied claims enter evidence."""
+    """Verify signed Yandex results without re-querying or trusting browser data."""
     product = _company(db, product_id)
-    if len(set(body.ids)) != len(body.ids):
+    if len(set(body.tokens)) != len(body.tokens):
         raise HTTPException(422, "Повторяющиеся организации")
-    found = await _lookup(body.query, body.city, limit=50)
-    sources = _source_rows(found["organizations"], set(body.ids))
+    try:
+        selected = [verify_organization(
+            token, scope=str(product_id), query=body.query, city=body.city)
+            for token in body.tokens]
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    sources = _source_rows(selected, {item["id"] for item in selected})
     if not sources:
         raise HTTPException(422, "Отобранные организации не найдены в выдаче Яндекса")
     bundle = ResearchSourceBundle(
@@ -168,7 +179,7 @@ $('ym-research-form').onsubmit=async ev=>{{
     $('ym-stats').textContent='Найдено: '+rows.length+' · категории: '+Object.entries(groups).sort((a,b)=>b[1]-a[1]).slice(0,6).map(x=>x[0]+' ('+x[1]+')').join(', ');
     rows.forEach(o=>{{
       const p=elt('div',undefined,root);p.style='padding:12px 0;border-bottom:1px solid var(--sg-line,#ddd)';
-      const l=elt('label',undefined,p),check=elt('input',undefined,l);check.type='checkbox';check.value=o.id;check.checked=true;
+      const l=elt('label',undefined,p),check=elt('input',undefined,l);check.type='checkbox';check.value=o.selection_token;check.checked=true;
       elt('strong',' '+o.name,l);
       elt('p',[o.address,(o.categories||[]).join(', ')].filter(Boolean).join(' · '),p);
       const link=elt('a','Открыть в Картах',p);link.href=o.maps_url||o.website||'#';link.target='_blank';link.rel='noopener noreferrer';
@@ -177,11 +188,11 @@ $('ym-research-form').onsubmit=async ev=>{{
   }}catch(e){{$('ym-status').textContent=String(e.message||e);}}
 }};
 $('ym-save').onclick=async()=>{{
- const ids=[...$('ym-results').querySelectorAll('input:checked')].map(x=>x.value);
- if(!ids.length){{$('ym-status').textContent='Выберите хотя бы одну компанию';return;}}
+ const tokens=[...$('ym-results').querySelectorAll('input:checked')].map(x=>x.value);
+ if(!tokens.length){{$('ym-status').textContent='Выберите хотя бы одну компанию';return;}}
  const query=$('ym-niche').value.trim(),city=$('ym-city').value.trim();
  try{{
-  const r=await fetch('/studio/products/'+id+'/market-research/sources',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{query,city,ids}})}});
+  const r=await fetch('/studio/products/'+id+'/market-research/sources',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{query,city,tokens}})}});
   const data=await r.json();if(!r.ok)throw Error(data.detail||'Ошибка сохранения');
   $('ym-status').textContent='Сохранено источников: '+data.saved+'. Они доступны в бизнес-разведке.';
  }}catch(e){{$('ym-status').textContent=String(e.message||e);}}
