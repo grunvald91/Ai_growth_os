@@ -9,14 +9,15 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 
 from app.brand_kit.contracts import BrandStyle
 from app.brand_kit.design_models import BrandBackground, BrandComposition, BrandRender
-from app.brand_kit.models import BrandAsset, BrandVersion
+from app.brand_kit.models import BrandActive, BrandAsset, BrandVersion
 from app.brand_kit.renderer import HEIGHT, WIDTH, StoryFrame, render_story
 from app.brand_kit.service import verified_asset
+from app.brand_kit.quotas import enforce_quota
 from app.models.domain import Product
 
 MAX_BACKGROUND_UPLOAD = 12_000_000
@@ -108,7 +109,7 @@ def store_background(db, root: Path, product_id: UUID, raw: bytes) -> BrandBackg
                 raise ValueError("Фон слишком большой по разрешению")
             if getattr(original, "n_frames", 1) != 1:
                 raise ValueError("Анимированный фон запрещён")
-            image = ImageOps.exif_transpose(original).convert("RGB")
+            image = ImageOps.exif_transpose(original).convert("RGBA")
             image.load()
     except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
         raise ValueError("Файл фона повреждён") from exc
@@ -118,11 +119,17 @@ def store_background(db, root: Path, product_id: UUID, raw: bytes) -> BrandBackg
     if not 0 < len(data) <= MAX_BACKGROUND_STORED:
         raise ValueError("Сохранённый фон слишком большой")
     digest = hashlib.sha256(data).hexdigest()
+    # Serialize quota accounting with all other writes for this tenant.
+    product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
+    if product is None:
+        raise LookupError("Компания не найдена")
     existing = db.scalar(select(BrandBackground).where(
         BrandBackground.product_id == product_id, BrandBackground.sha256 == digest))
     if existing is not None:
         verified_background(db, root, product_id, existing.id)
         return existing
+    enforce_quota(db, product_id, BrandBackground, additional_bytes=len(data),
+                  max_files=80, max_bytes=128_000_000)
     row = BrandBackground(
         id=uuid4(), product_id=product_id, filename="", sha256=digest,
         byte_size=len(data), width=image.width, height=image.height,
@@ -235,6 +242,9 @@ def create_composition(db, root: Path, product_id: UUID, version_id: UUID,
         except LookupError:
             _restore_previous_render(db, root, product_id, prior, prior_render)
         return prior_render
+    current = db.get(BrandActive, product_id)
+    if current is None or current.version_id != version_id:
+        raise ValueError("Для нового кадра требуется действующая версия фирменного стиля")
     style = BrandStyle.model_validate(version.config)
     variant_id = getattr(style.logos, frame.logo_variant) or style.logos.original
     if variant_id is None:
@@ -250,6 +260,8 @@ def create_composition(db, root: Path, product_id: UUID, version_id: UUID,
                           background=background)
     if not 0 < len(output.png) <= MAX_RENDER_STORED:
         raise ValueError("Итоговое изображение превысило лимит")
+    enforce_quota(db, product_id, BrandRender, additional_bytes=len(output.png),
+                  max_files=200, max_bytes=256_000_000)
     composition = BrandComposition(
         id=uuid4(), product_id=product_id, version_id=version_id,
         background_id=background_id, frame_key=frame_key,
@@ -271,3 +283,44 @@ def create_composition(db, root: Path, product_id: UUID, version_id: UUID,
         path.unlink(missing_ok=True)
         raise
     return result
+
+
+def delete_unused_background(db, root: Path, product_id: UUID, background_id: UUID) -> None:
+    """Explicit tenant deletion; existing compositions keep their referenced backgrounds."""
+    product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
+    if product is None:
+        raise LookupError("Компания не найдена")
+    row = db.scalar(select(BrandBackground).where(
+        BrandBackground.id == background_id, BrandBackground.product_id == product_id))
+    if row is None:
+        raise LookupError("Фон не найден")
+    if db.scalar(select(BrandComposition.id).where(
+            BrandComposition.product_id == product_id,
+            BrandComposition.background_id == background_id).limit(1)):
+        raise ValueError("Фон используется в готовых материалах")
+    _, path = verified_background(db, root, product_id, background_id)
+    db.delete(row)
+    db.commit()
+    path.unlink(missing_ok=True)
+
+
+def delete_story_render(db, root: Path, product_id: UUID, render_id: UUID) -> None:
+    """Explicit removal of one composed image and its private idempotency key."""
+    product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
+    if product is None:
+        raise LookupError("Компания не найдена")
+    row = db.scalar(select(BrandRender).where(
+        BrandRender.id == render_id, BrandRender.product_id == product_id))
+    if row is None:
+        raise LookupError("Кадр не найден")
+    _, path = verified_render(db, root, product_id, render_id)
+    composition = db.scalar(select(BrandComposition).where(
+        BrandComposition.id == row.composition_id,
+        BrandComposition.product_id == product_id))
+    if composition is None:
+        raise LookupError("Композиция недоступна")
+    db.delete(row)
+    db.flush()
+    db.delete(composition)
+    db.commit()
+    path.unlink(missing_ok=True)
