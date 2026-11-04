@@ -472,3 +472,20 @@ def test_library_refuses_deleting_background_in_use(company):
     assert client.post(
         f"/studio/products/{a.id}/brand-kit/library/backgrounds/{background.id}/delete",
         follow_redirects=False).status_code == 303
+
+
+def test_corrupted_or_missing_stored_material_can_be_explicitly_removed(company):
+    client, db, a, _, va, _, root, _ = company
+    background = store_background(db, root, a.id, picture())
+    _, background_path = verified_background(db, root, a.id, background.id)
+    background_path.write_bytes(b"broken")
+    assert client.delete(
+        f"/studio/products/{a.id}/brand-kit/backgrounds/{background.id}").status_code == 200
+    assert db.get(BrandBackground, background.id) is None
+    render = create_composition(db, root, a.id, va.id, frame(),
+                                frame_key="cleanup:corrupted")
+    _, render_path = verified_render(db, root, a.id, render.id)
+    render_path.unlink()
+    assert client.delete(
+        f"/studio/products/{a.id}/brand-kit/renders/{render.id}").status_code == 200
+    assert db.get(BrandRender, render.id) is None
