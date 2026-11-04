@@ -153,3 +153,55 @@ async def test_light_mode_still_requires_answer_and_questions(db, product, tmp_p
     workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
     result = await workflow.run(request_for(product).model_copy(update={"light": True}))
     assert result.status == "failed"
+
+
+@pytest.mark.parametrize("wrapped", [
+    "plain",
+    "fence",
+    "prose",
+    "trailing_comma",
+    "literal_newline",
+])
+def test_seo_plan_parser_recovers_only_unambiguous_model_json(wrapped):
+    import json
+    from app.workflows.article_production import _parse_stage_payload
+    from app.workflows.article_contracts import SEOPlan
+    payload = {
+        "primary_query": "программа онлайн записи клиентов",
+        "related_queries": [],
+        "title": "Как выбрать программу",
+        "hook": "Проверить календарь и CRM",
+        "outline": ["Ручная запись", "Самозапись"],
+        "adaptation_notes": "Не обещать неизвестные функции",
+    }
+    raw = json.dumps(payload, ensure_ascii=False)
+    if wrapped == "fence":
+        raw = "```json\n" + raw + "\n```"
+    elif wrapped == "prose":
+        raw = "План SEO:\n" + raw + "\nПроверьте исходные факты."
+    elif wrapped == "trailing_comma":
+        raw = raw[:-1] + ",}"
+    elif wrapped == "literal_newline":
+        raw = raw.replace("Проверить календарь и CRM", "Проверить календарь\nи CRM")
+    parsed = _parse_stage_payload(SEOPlan, raw)
+    assert parsed.primary_query == payload["primary_query"]
+    assert len(parsed.outline) == 2
+
+
+def test_seo_plan_parser_rejects_unclosed_or_multiple_json_objects():
+    import json
+    from app.workflows.article_production import _parse_stage_payload
+    from app.workflows.article_contracts import SEOPlan
+    good = {
+        "primary_query": "запись клиентов",
+        "title": "Система записи клиентов",
+        "hook": "Сравнение вариантов",
+        "outline": ["Функции"], "adaptation_notes": "Только проверенные факты",
+    }
+    raw = json.dumps(good, ensure_ascii=False)
+    with pytest.raises(ValueError):
+        _parse_stage_payload(SEOPlan, raw[:-1])
+    with pytest.raises(ValueError):
+        _parse_stage_payload(SEOPlan, raw + raw)
+    with pytest.raises(ValueError):
+        _parse_stage_payload(SEOPlan, '{"primary_query":"запись клиентов"}')
