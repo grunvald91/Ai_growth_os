@@ -8,6 +8,7 @@ Paid/commercial usage and data-storage permissions must be confirmed separately.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -89,8 +90,10 @@ def normalize(payload: dict) -> dict:
             continue
         categories = meta.get("Categories") or []
         phones = meta.get("Phones") or []
+        org_id = str(meta["id"])[:80]
         result.append({
-            "id": str(meta["id"])[:80],
+            "id": org_id,
+            "maps_url": "https://yandex.ru/maps/org/" + org_id if re.fullmatch(r"\\d{1,25}", org_id) else "",
             "name": str(meta["name"])[:200],
             "address": str(meta.get("address") or "")[:300],
             "website": _website(meta.get("url")),
