@@ -60,7 +60,7 @@ def _b64(data: bytes) -> str:
 
 def make_ticket(*, user_id: int, business_id: int, role: str, name: str, now: Optional[float] = None) -> str:
     payload = _b64(json.dumps({
-        "v": 1, "aud": AUDIENCE, "uid": user_id, "biz": business_id, "role": role, "name": name[:120],
+        "v": 1, "aud": AUDIENCE, "origin": CANONICAL_STUDIO_URL, "uid": user_id, "biz": business_id, "role": role, "name": name[:120],
         "jti": secrets.token_urlsafe(16), "exp": int((now if now is not None else time.time()) + TICKET_TTL_SECONDS),
     }, separators=(",", ":"), ensure_ascii=False).encode())
     signature = _b64(hmac.new(_secret("STUDIO_SSO_SECRET"), payload.encode(), hashlib.sha256).digest())
