@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.api.content_studio import _owner_product, studio_page_shell
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
@@ -262,13 +263,10 @@ def edit_story(product_id: UUID, task_id: UUID, artifact_id: UUID,
                               int(metadata["frame_number"])))
 
 
-@router.post("/studio/products/{product_id}/tasks/{task_id}/stories/{artifact_id}/edit")
-async def save_story_edit(product_id: UUID, task_id: UUID, artifact_id: UUID,
-                          request: Request, db: Session = Depends(get_db),
-                          settings=Depends(get_settings)):
+def _save_story_edit_sync(product_id: UUID, task_id: UUID, artifact_id: UUID,
+                          fields: dict[str, str], db: Session, settings):
     product, source, metadata, composition = _source(
         db, settings.products_root, product_id, task_id, artifact_id)
-    fields = await _fields(request)
     try:
         token = UUID(fields["token"])
         old_style = BrandStyle.model_validate(composition.brand_snapshot)
@@ -304,6 +302,18 @@ async def save_story_edit(product_id: UUID, task_id: UUID, artifact_id: UUID,
         status_code=303)
 
 
+
+@router.post("/studio/products/{product_id}/tasks/{task_id}/stories/{artifact_id}/edit")
+async def save_story_edit(product_id: UUID, task_id: UUID, artifact_id: UUID,
+                          request: Request, db: Session = Depends(get_db),
+                          settings=Depends(get_settings)):
+    fields = await _fields(request)
+    # Image composition/PIL and synchronous SQLAlchemy must not block the
+    # shared ASGI event loop (all DB access stays sequential).
+    return await run_in_threadpool(_save_story_edit_sync, product_id, task_id,
+                                   artifact_id, fields, db, settings)
+
+
 @router.get("/studio/products/{product_id}/tasks/{task_id}/stories/{artifact_id}/regenerate-background")
 def confirm_background(product_id: UUID, task_id: UUID, artifact_id: UUID,
                        db: Session = Depends(get_db), settings=Depends(get_settings)):
@@ -331,22 +341,11 @@ def confirm_background(product_id: UUID, task_id: UUID, artifact_id: UUID,
         headers={"Cache-Control": "private, no-store"})
 
 
-@router.post("/studio/products/{product_id}/tasks/{task_id}/stories/{artifact_id}/regenerate-background")
-async def regenerate_background(product_id: UUID, task_id: UUID, artifact_id: UUID,
-                                request: Request, db: Session = Depends(get_db),
-                                settings=Depends(get_settings)):
+def _reserve_regeneration(db: Session, root, product_id: UUID, task_id: UUID,
+                          artifact_id: UUID, token: UUID, model: str):
+    _, source, metadata, composition = _source(db, root, product_id, task_id, artifact_id)
     from app.content.creative import CreativeDraft
-    from app.content.creative_images import image_prompt, png_output, request_image, resolve_model
-    product, source, metadata, composition = _source(
-        db, settings.products_root, product_id, task_id, artifact_id)
-    fields = await _fields(request)
-    if fields.get("confirm") != "yes" or fields.get("model") not in {"gemini", "openai"}:
-        raise HTTPException(422, "Необходимо подтвердить платную генерацию")
-    try:
-        token = UUID(fields["token"])
-    except (ValueError, KeyError):
-        raise HTTPException(422, "Некорректный идентификатор подтверждения") from None
-    model = resolve_model(settings, fields["model"])
+
     brief = db.scalar(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.task_id == task_id,
         Artifact.kind == "creative_brief").order_by(
@@ -355,7 +354,7 @@ async def regenerate_background(product_id: UUID, task_id: UUID, artifact_id: UU
         raise HTTPException(409, "Исходная раскадровка недоступна")
     try:
         draft = CreativeDraft.model_validate({
-            k:v for k,v in json.loads(brief.content).items()
+            k: v for k, v in json.loads(brief.content).items()
             if k in CreativeDraft.model_fields})
         number = int(metadata["frame_number"])
         scene = draft.frames[number-1]
@@ -364,53 +363,87 @@ async def regenerate_background(product_id: UUID, task_id: UUID, artifact_id: UU
     except (ValueError, TypeError, KeyError, IndexError):
         raise HTTPException(409, "Исходная раскадровка повреждена") from None
 
+    # Lock the company for both lookup and durable nonce reservation.
     db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
-    # Search the entire history for this nonce; slicing at 200 permitted
-    # already charged requests to be repeated as the history grew.
-    prior = list(db.scalars(select(Artifact).where(
+    prior = db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.task_id == task_id,
         Artifact.kind == "creative_background_regen",
-        Artifact.content.contains('"token": "' + str(token) + '"'))))
-    for row in prior:
-        try:
-            if json.loads(row.content).get("token") == str(token):
-                raise HTTPException(409, "Этот платный запрос уже был отправлен. Повторное списание заблокировано.")
-        except (ValueError, TypeError):
-            continue
+        Artifact.content.contains('"token": "' + str(token) + '"')))
+    if any(json.loads(row.content).get("token") == str(token) for row in prior):
+        raise HTTPException(409, "Этот платный запрос уже отправлен; повторное списание запрещено")
     intent = ArtifactService(db).create(
         product_id=product_id, task_id=task_id, kind="creative_background_regen",
         title=f"Подтверждение платного фона · кадр {number}",
-        content=json.dumps({"token":str(token), "state":"pending",
-                            "frame_number":number, "model":model,
-                            "source_artifact_id":str(source.id)}))
+        content=json.dumps({"token": str(token), "state": "pending",
+                            "frame_number": number, "model": model,
+                            "source_artifact_id": str(source.id)}))
     db.commit()
+    return source, metadata, composition, intent.id, draft, scene, number
+
+
+def _finish_regeneration(db: Session, settings, product_id: UUID, task_id: UUID,
+                         source, metadata, composition, intent_id: UUID,
+                         token: UUID, model_choice: str, raw: bytes):
+    from app.content.creative_images import png_output
+
+    png = png_output(raw, ratio="9:16", branded=True)
+    background = store_background(db, settings.products_root, product_id, png)
+    frame = StoryFrame.model_validate(composition.spec)
+    style = BrandStyle.model_validate(composition.brand_snapshot)
+    final = _new_revision(db, settings.products_root, product_id, task_id,
+                          source, metadata, composition, frame, style, token,
+                          background_id=background.id, paid_model=model_choice)
+    intent = db.get(Artifact, intent_id)
+    if intent is None:
+        raise RuntimeError("Подтверждение платного запроса исчезло")
+    intent.content = json.dumps({
+        "token": str(token), "state": "completed",
+        "frame_number": int(metadata["frame_number"]),
+        "model": model_choice, "render_artifact_id": str(final.id)})
+    db.commit()
+    return final.id
+
+
+def _failed_regeneration(db: Session, intent_id: UUID, token: UUID,
+                         number: int, model: str, exc_name: str):
+    db.rollback()
+    state = db.get(Artifact, intent_id)
+    if state is not None:
+        state.content = json.dumps({
+            "token": str(token), "state": "unknown",
+            "frame_number": number, "model": model, "error_type": exc_name})
+        db.commit()
+
+
+@router.post("/studio/products/{product_id}/tasks/{task_id}/stories/{artifact_id}/regenerate-background")
+async def regenerate_background(product_id: UUID, task_id: UUID, artifact_id: UUID,
+                                request: Request, db: Session = Depends(get_db),
+                                settings=Depends(get_settings)):
+    from app.content.creative_images import image_prompt, request_image, resolve_model
+
+    fields = await _fields(request)
+    if fields.get("confirm") != "yes" or fields.get("model") not in {"gemini", "openai"}:
+        raise HTTPException(422, "Необходимо подтвердить платную генерацию")
     try:
-        # Paid call exactly once for this confirmed nonce. No implicit retry.
+        token = UUID(fields["token"])
+    except (ValueError, KeyError):
+        raise HTTPException(422, "Некорректный идентификатор подтверждения") from None
+    model = resolve_model(settings, fields["model"])
+    source, metadata, composition, intent_id, draft, scene, number = await run_in_threadpool(
+        _reserve_regeneration, db, settings.products_root, product_id, task_id,
+        artifact_id, token, model)
+    try:
         prompt = image_prompt(draft, scene, number, len(draft.frames), "9:16", branded=True)
         raw = await request_image(settings, model, prompt, "9:16")
-        png = png_output(raw, ratio="9:16", branded=True)
-        background = store_background(db, settings.products_root, product_id, png)
-        frame = StoryFrame.model_validate(composition.spec)
-        style = BrandStyle.model_validate(composition.brand_snapshot)
-        final = _new_revision(
-            db, settings.products_root, product_id, task_id, source, metadata,
-            composition, frame, style, token, background_id=background.id,
-            paid_model=fields["model"])
-        intent.content = json.dumps({
-            "token":str(token), "state":"completed",
-            "frame_number":number, "model":model, "render_artifact_id":str(final.id)})
-        db.commit()
+        final_id = await run_in_threadpool(
+            _finish_regeneration, db, settings, product_id, task_id,
+            source, metadata, composition, intent_id, token, fields["model"], raw)
     except Exception as exc:
-        db.rollback()
-        state = db.get(Artifact, intent.id)
-        if state is not None:
-            state.content = json.dumps({
-                "token":str(token), "state":"unknown",
-                "frame_number":number, "model":model,
-                "error_type":type(exc).__name__})
-            db.commit()
+        await run_in_threadpool(
+            _failed_regeneration, db, intent_id, token, number, model,
+            type(exc).__name__)
         raise HTTPException(502,
             "Не удалось подтвердить результат модели. Автоматический повтор не выполняется.") from None
     return RedirectResponse(
-        f"/studio/products/{product_id}/tasks/{task_id}/stories/{final.id}/edit",
+        f"/studio/products/{product_id}/tasks/{task_id}/stories/{final_id}/edit",
         status_code=303)
