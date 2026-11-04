@@ -25,6 +25,7 @@ from starlette.background import BackgroundTask
 from tempfile import SpooledTemporaryFile
 
 from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
+from app.api.studio_servgo_org_js import JS as STUDIO_SERVGO_ORG_JS
 from app.api.content_studio_brand import SERVGO_FAVICON_SVG, servgo_brand_html
 from app.api.content_studio_article import render_article
 from app.content.render import asset_path
@@ -1795,9 +1796,14 @@ def analytics_page(db: Session, product: Product) -> str:
         body=body,
     )
 
-def product_selector(products: list[Product], *, can_add: bool = False, can_link: bool = False) -> str:
+def product_selector(products: list[Product], *, can_add: bool = False,
+                     can_link: bool = False, unified_user_id: int | None = None,
+                     linked_business_ids: tuple[int, ...] = (),
+                     platform_product: Product | None = None) -> str:
     from app.api.studio_company_picker import selector_html
-    return selector_html(products, can_add=can_add, can_link=can_link)
+    return selector_html(products, can_add=can_add, can_link=can_link,
+                         unified_user_id=unified_user_id, linked_business_ids=linked_business_ids,
+                         platform_product=platform_product)
 
 @router.get("/studio/assets/servgo.svg")
 def studio_official_logo():
@@ -1821,20 +1827,61 @@ def studio_js():
     return response
 
 
+@router.get("/studio/assets/servgo-organisations.js")
+def studio_servgo_organisations_js():
+    response = Response(STUDIO_SERVGO_ORG_JS, media_type="application/javascript")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+def _canonical_servgo_user(request: Request, settings) -> int | None:
+    """Only the CURRENT verified ServGo browser identity can expand the chooser."""
+    import hmac
+
+    from app.api.studio_sso import _canonical_pwa
+    from app.sso.browser_identity import COOKIE as IDENTITY_COOKIE, read_identity
+    from app.sso.tickets import COOKIE as SSO_COOKIE, read_session
+
+    if not _canonical_pwa(request, settings):
+        return None
+    session = read_session(settings, request.cookies.get(SSO_COOKIE))
+    identity = read_identity(settings, request.cookies.get(IDENTITY_COOKIE))
+    if (session is None or identity is None or session.user_id != identity[0] or
+            not session.identity_hash or not hmac.compare_digest(session.identity_hash, identity[1])):
+        return None
+    return session.user_id
+
+
 @router.get("/studio")
-def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)):
+def studio(request: Request, choose: bool = False, db: Session = Depends(get_db),
+           settings=Depends(get_settings)):
     query = select(Product)
     allowed = getattr(request.state, "studio_product_ids", None)
     if allowed is not None:
         query = query.where(Product.id.in_([UUID(value) for value in allowed]))
     products = list(db.scalars(query.order_by(Product.name).limit(100)))
     preferred = next((p for p in products if p.slug == "servgo"), None)
-    if not choose and (len(products) == 1 or (preferred is not None and allowed is None)):
+    canonical_user = _canonical_servgo_user(request, settings)
+    # On canonical ServGo, even a linked Growth operator sees the common
+    # chooser. The old automatic operator redirect remains on the legacy host.
+    if canonical_user is None and not choose and (len(products) == 1 or (preferred is not None and allowed is None)):
         selected = products[0] if len(products) == 1 else preferred
         return RedirectResponse(f"/studio/products/{selected.id}", status_code=302)
     from app.sso.tickets import COOKIE as SSO_COOKIE
-    response = HTMLResponse(product_selector(products, can_add=allowed is None,
-                                            can_link=bool(request.cookies.get(SSO_COOKIE))))
+    from app.sso.models import StudioBusinessLink
+    linked_ids = ()
+    if canonical_user is not None:
+        links = list(db.scalars(select(StudioBusinessLink).where(
+            StudioBusinessLink.product_id.in_([product.id for product in products]))))
+        linked_ids = tuple(link.servgo_business_id for link in links)
+    response = HTMLResponse(product_selector(
+        products, can_add=allowed is None and canonical_user is None,
+        can_link=bool(request.cookies.get(SSO_COOKIE)) and canonical_user is None,
+        unified_user_id=canonical_user, linked_business_ids=linked_ids,
+        # Only an explicitly linked, validated Growth platform operator has
+        # unrestricted scope (allowed=None). No ID/name-based elevation.
+        platform_product=preferred if canonical_user is not None and allowed is None else None))
     response.headers["Cache-Control"] = "no-store"
     return response
 
