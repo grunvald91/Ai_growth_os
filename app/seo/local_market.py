@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections import Counter
 from datetime import datetime, timezone
@@ -16,6 +17,17 @@ from app.models.domain import Artifact, Product
 from app.services.artifacts import ArtifactService
 
 KIND = "seo_local_market"
+STATUS_KIND = "seo_local_market_status"
+_logger = logging.getLogger(__name__)
+
+
+def _status(db, product_id, task_id, status: str, reason: str = "") -> None:
+    ArtifactService(db).create(product_id=product_id, task_id=task_id,
+        kind=STATUS_KIND, title="Статус локального SEO-исследования",
+        content=json.dumps({"provider": "yandex_organizations", "status": status,
+                            "reason": reason}, ensure_ascii=False))
+    db.commit()
+
 
 
 async def collect_local_market(db, product_id: UUID, task_id: UUID, products_root: Path) -> dict | None:
@@ -37,11 +49,16 @@ async def collect_local_market(db, product_id: UUID, task_id: UUID, products_roo
             else identity.geography or "").strip()
     niche = (identity.category or identity.industry or "").strip()
     if not 2 <= len(city) <= 80 or not 2 <= len(niche) <= 100:
+        _status(db, product_id, task_id, "skipped", "Не хватает отрасли или города в профиле компании")
         return None
     try:
         result = await search(niche, city, results=10, quota_path=Path(products_root) /
                               "_integrations" / "yandex_ppo_usage.sqlite")
-    except YandexOrganizationsError:
+    except YandexOrganizationsError as exc:
+        # Never log provider request URLs: httpx URLs can contain the secret key.
+        _logger.warning("seo_yandex_local_market_unavailable product_id=%s error_type=%s",
+                        product_id, type(exc).__name__)
+        _status(db, product_id, task_id, "unavailable", str(exc)[:180])
         return None
     organizations = result.get("organizations", [])[:10]
     category_counts = Counter(c for item in organizations for c in item.get("categories", []))
@@ -61,7 +78,7 @@ async def collect_local_market(db, product_id: UUID, task_id: UUID, products_roo
     ArtifactService(db).create(
         product_id=product.id, task_id=task_id, kind=KIND,
         title="Локальные конкуренты · Яндекс Карты", content=json.dumps(snapshot, ensure_ascii=False))
-    db.commit()
+    _status(db, product_id, task_id, "collected", f"Карточек организаций: {len(organizations)}")
     return snapshot
 
 
