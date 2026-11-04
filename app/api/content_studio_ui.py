@@ -126,27 +126,6 @@ def create_content_html(product_id, *, created=False, fields=None, error=None,
             <button class="btn primary sg-primary-action" type="submit">Создать материал <span aria-hidden="true">→</span></button>
           </div>
         </form>
-        <script>
-        (() => {{
-          const form = document.getElementById('sg-create-form');
-          const panel = form && form.querySelector('[data-story-brand-control]');
-          if (!panel) return;
-          function sync() {{
-            const checked = form.querySelector('input[name="format"]:checked');
-            panel.style.display = checked && checked.value === 'story' ? '' : 'none';
-            panel.querySelectorAll('select').forEach(select => {{
-              select.disabled = !(checked && checked.value === 'story');
-            }});
-            const model = panel.querySelector('select[name="image_model"]');
-            const confirmation = panel.querySelector('[data-story-paid-confirm]');
-            const paid = checked && checked.value === 'story' && model && model.value !== 'none';
-            confirmation.style.display = paid ? '' : 'none';
-            confirmation.querySelector('input').required = !!paid;
-          }}
-          form.addEventListener('change', sync);
-          sync();
-        }})();
-        </script>
       </section>
       <aside class="sg-aside-stack">
         <section class="sg-surface sg-guide"><h3>Простое видео с озвучкой</h3>
