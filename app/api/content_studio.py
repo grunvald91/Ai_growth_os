@@ -1798,10 +1798,12 @@ def analytics_page(db: Session, product: Product) -> str:
 
 def product_selector(products: list[Product], *, can_add: bool = False,
                      can_link: bool = False, unified_user_id: int | None = None,
-                     linked_business_ids: tuple[int, ...] = ()) -> str:
+                     linked_business_ids: tuple[int, ...] = (),
+                     platform_product: Product | None = None) -> str:
     from app.api.studio_company_picker import selector_html
     return selector_html(products, can_add=can_add, can_link=can_link,
-                         unified_user_id=unified_user_id, linked_business_ids=linked_business_ids)
+                         unified_user_id=unified_user_id, linked_business_ids=linked_business_ids,
+                         platform_product=platform_product)
 
 @router.get("/studio/assets/servgo.svg")
 def studio_official_logo():
@@ -1860,12 +1862,14 @@ def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)
         query = query.where(Product.id.in_([UUID(value) for value in allowed]))
     products = list(db.scalars(query.order_by(Product.name).limit(100)))
     preferred = next((p for p in products if p.slug == "servgo"), None)
-    if not choose and (len(products) == 1 or (preferred is not None and allowed is None)):
+    canonical_user = _canonical_servgo_user(request, settings)
+    # On canonical ServGo, even a linked Growth operator sees the common
+    # chooser. The old automatic operator redirect remains on the legacy host.
+    if canonical_user is None and not choose and (len(products) == 1 or (preferred is not None and allowed is None)):
         selected = products[0] if len(products) == 1 else preferred
         return RedirectResponse(f"/studio/products/{selected.id}", status_code=302)
     from app.sso.tickets import COOKIE as SSO_COOKIE
     from app.sso.models import StudioBusinessLink
-    canonical_user = _canonical_servgo_user(request, settings)
     linked_ids = ()
     if canonical_user is not None:
         links = list(db.scalars(select(StudioBusinessLink).where(
@@ -1874,7 +1878,10 @@ def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)
     response = HTMLResponse(product_selector(
         products, can_add=allowed is None and canonical_user is None,
         can_link=bool(request.cookies.get(SSO_COOKIE)) and canonical_user is None,
-        unified_user_id=canonical_user, linked_business_ids=linked_ids))
+        unified_user_id=canonical_user, linked_business_ids=linked_ids,
+        # Only an explicitly linked, validated Growth platform operator has
+        # unrestricted scope (allowed=None). No ID/name-based elevation.
+        platform_product=preferred if canonical_user is not None and allowed is None else None))
     response.headers["Cache-Control"] = "no-store"
     return response
 
