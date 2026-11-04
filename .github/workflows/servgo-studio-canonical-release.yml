@@ -5,7 +5,7 @@ name: Deploy ServGo canonical Studio SSO link
 # Runs only after a main merge and touches only the SSO origin selector.
 on:
   push:
-    branches: [main, 'fix/studio-canonical-servgo-entry-20261104']
+    branches: [main, 'fix/studio-canonical-readiness-20261104']
     paths:
       - 'web/api/routes/studio_sso.py'
       - 'scripts/deploy_studio_canonical_sso.py'

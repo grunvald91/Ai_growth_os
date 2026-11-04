@@ -3,6 +3,7 @@ import ast
 
 import pytest
 
+from scripts import deploy_studio_canonical_sso as deploy
 from scripts.deploy_studio_canonical_sso import patch, _canonical_constant
 from pathlib import Path
 
@@ -67,3 +68,28 @@ def test_refuse_missing_or_multiple_origin_functions():
         patch(BASE.replace('def studio_public_url()', 'def another_name()'), TARGET)
     with pytest.raises(ValueError):
         patch(BASE + '\ndef studio_public_url():\n    return STUDIO_URL\n', TARGET)
+
+def test_api_readiness_retries_until_http_200(monkeypatch):
+    values = iter([RuntimeError("connection refused"), "503", "200"])
+    calls = []
+    def fake_run(_client, _cmd, timeout=60):
+        value = next(values)
+        calls.append(value)
+        if isinstance(value, Exception):
+            raise value
+        return value
+    sleeps = []
+    monkeypatch.setattr(deploy, "run", fake_run)
+    monkeypatch.setattr(deploy.time, "sleep", lambda delay: sleeps.append(delay))
+    deploy.wait_for_api_health(object(), attempts=3, delay_seconds=0.25)
+    assert len(calls) == 3
+    assert sleeps == [0.25, 0.25]
+
+
+def test_api_readiness_fails_closed_after_bounded_attempts(monkeypatch):
+    monkeypatch.setattr(deploy, "run", lambda *_args, **_kwargs: "503")
+    sleeps = []
+    monkeypatch.setattr(deploy.time, "sleep", lambda delay: sleeps.append(delay))
+    with pytest.raises(RuntimeError, match="did not become healthy"):
+        deploy.wait_for_api_health(object(), attempts=3, delay_seconds=0.25)
+    assert sleeps == [0.25, 0.25]

@@ -98,6 +98,21 @@ def run(client, command: str, timeout: int = 60) -> str:
     return output
 
 
+def wait_for_api_health(client, *, attempts: int = 20, delay_seconds: float = 2) -> None:
+    """Wait for a successful API response; rollback caller handles exhaustion."""
+    for attempt in range(attempts):
+        try:
+            health = run(client, "curl -s -o /dev/null -w '%{http_code}' "
+                         "--max-time 3 http://127.0.0.1:8000/health", timeout=8)
+        except RuntimeError:
+            health = ""
+        if health == "200":
+            return
+        if attempt + 1 < attempts:
+            time.sleep(delay_seconds)
+    raise RuntimeError("ServGo API did not become healthy after restart")
+
+
 def release() -> None:
     password = os.environ.get("SERVGO_PASSWORD", "")
     if not password:
@@ -139,11 +154,8 @@ def release() -> None:
         run(client, "systemctl restart " + service_q, timeout=70)
         if run(client, "systemctl is-active " + service_q) != "active":
             raise RuntimeError("ServGo API is not active")
-        # Check a local API route, not the nginx SPA fallback.
-        health = run(client, "curl -s -o /dev/null -w '%{http_code}' "
-                     "--max-time 8 http://127.0.0.1:8000/health", timeout=15)
-        if health != "200":
-            raise RuntimeError("ServGo API health failed")
+        # systemctl "active" can precede uvicorn readiness after a cold start.
+        wait_for_api_health(client)
         # Verify the actual server file still returns only the approved origin.
         with sftp.open(REMOTE, "rb") as handle:
             active = handle.read().decode("utf-8")
