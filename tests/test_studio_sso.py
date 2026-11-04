@@ -983,3 +983,33 @@ def test_canonical_sso_ticket_requires_current_servgo_identity(env):
         client.cookies.set("sg_identity", _browser_identity(7))
         ok = client.get(url, params={"t": make_ticket(jti="different-user-3")})
         assert ok.status_code == 303
+
+
+def test_canonical_servgo_sso_without_any_legacy_password_configuration(env):
+    """Current ServGo login must never depend on old Growth operator passwords."""
+    _, settings, salon, _, _ = env
+    settings.studio_servgo_gateway_enabled = True
+    settings.studio_admin_username = None
+    settings.studio_admin_password = None
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
+        without_login = client.get(f"/studio/products/{salon.id}/dispatch/state")
+        assert without_login.status_code == 401
+        client.cookies.set("sg_identity", _browser_identity(7))
+        redirect = client.get("/studio/sso", params={"t": make_ticket(jti="no-legacy-accounts1")})
+        assert redirect.status_code == 303
+        page = client.get(f"/studio/products/{salon.id}/dispatch/state")
+        assert page.status_code == 200
+
+        # A different verified account must still be rejected.
+        client.cookies.set("sg_identity", _browser_identity(8))
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+
+
+def test_legacy_origin_without_password_configuration_stays_closed(env):
+    """Removing legacy credentials must not open password-free Growth access."""
+    _, settings, salon, _, _ = env
+    settings.studio_admin_username = None
+    settings.studio_admin_password = None
+    with TestClient(app, base_url=ORIGIN, follow_redirects=False) as client:
+        page = client.get(f"/studio/products/{salon.id}/dispatch/state")
+        assert page.status_code == 503
