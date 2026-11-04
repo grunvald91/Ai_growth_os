@@ -4,7 +4,7 @@ from __future__ import annotations
 import html
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 from pydantic import Field
@@ -154,7 +154,8 @@ def _storage_total(db: Session, product_id: UUID, model) -> tuple[int, int]:
 
 @router.get("/studio/products/{product_id}/brand-kit/library",
             response_class=HTMLResponse)
-def brand_asset_library(product_id: UUID, db: Session = Depends(get_db)):
+def brand_asset_library(product_id: UUID, page: int = Query(0, ge=0, le=4),
+                        db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
     root = f"/studio/products/{product_id}/brand-kit"
     quotas = (
@@ -169,14 +170,15 @@ def brand_asset_library(product_id: UUID, db: Session = Depends(get_db)):
             f'<div class="sg-surface"><b>{html.escape(name)}</b>'
             f'<p>{used_count} из {count_limit} файлов · '
             f'{used_bytes / 1_000_000:.1f} из {bytes_limit / 1_000_000:.0f} МБ</p></div>')
+    page_size = 50
     backgrounds = list(db.scalars(select(BrandBackground).where(
         BrandBackground.product_id == product_id).order_by(
-        BrandBackground.created_at.desc(), BrandBackground.id.desc()).limit(50)))
+        BrandBackground.created_at.desc(), BrandBackground.id.desc()).offset(page * page_size).limit(page_size)))
     renders = list(db.execute(select(BrandRender, BrandComposition).join(
         BrandComposition, BrandComposition.id == BrandRender.composition_id).where(
         BrandRender.product_id == product_id,
         BrandComposition.product_id == product_id).order_by(
-        BrandRender.created_at.desc(), BrandRender.id.desc()).limit(50)))
+        BrandRender.created_at.desc(), BrandRender.id.desc()).offset(page * page_size).limit(page_size)))
 
     bg_items = []
     for item in backgrounds:
@@ -202,6 +204,17 @@ def brand_asset_library(product_id: UUID, db: Session = Depends(get_db)):
             f'<form method="post" action="{root}/library/renders/{item.id}/delete" '
             'onsubmit="return confirm(\'Удалить кадр и его историю повторной сборки?\')">'
             '<button class="btn danger" type="submit">Удалить кадр</button></form></div>')
+    background_count = _storage_total(db, product_id, BrandBackground)[0]
+    render_count = _storage_total(db, product_id, BrandRender)[0]
+    total_pages = max(1, (max(background_count, render_count) + page_size - 1) // page_size)
+    pagination = (
+        '<nav aria-label="Страницы материалов">'
+        + (f'<a class="btn secondary" href="{root}/library?page={page-1}">← Предыдущие</a>'
+           if page > 0 else '')
+        + f'<span> Страница {page + 1} из {total_pages} </span>'
+        + (f'<a class="btn secondary" href="{root}/library?page={page+1}">Следующие →</a>'
+           if page + 1 < total_pages else '') + '</nav>'
+    )
     body = (
         f'<p><a class="btn secondary" href="{root}">← Настройки стиля</a></p>'
         '<p class="sg-muted">Место ограничено отдельно по логотипам, фонам и кадрам. '
@@ -211,7 +224,8 @@ def brand_asset_library(product_id: UUID, db: Session = Depends(get_db)):
         '<h2>Фоны</h2><div style="display:flex;flex-wrap:wrap;gap:10px">'
         + ("".join(bg_items) or '<p>Фоны не загружены.</p>') + '</div>'
         '<h2>Готовые кадры</h2><div style="display:flex;flex-wrap:wrap;gap:10px">'
-        + ("".join(render_items) or '<p>Готовых кадров нет.</p>') + '</div>'
+        + ("".join(render_items) or '<p>На этой странице готовых кадров нет.</p>') + '</div>'
+        + pagination
     )
     return HTMLResponse(studio_page_shell(
         product, active="profile", title="Хранилище фирменного стиля",
