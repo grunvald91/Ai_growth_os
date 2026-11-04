@@ -289,9 +289,8 @@ def require_studio_auth(
     db=Depends(get_db),
 ):
     users = _load_users(settings)
-    if not _auth_configured(settings, users):
-        request.state.studio_product_ids = None
-        return None  # Developer loopback only; never a production exemption.
+    # The canonical PWA uses only ServGo SSO. Legacy passwords may be
+    # unconfigured here, but a missing SSO configuration must never bypass auth.
     # The canonical PWA is authenticated only by the active ServGo account.
     # Never fall back to an unrelated Growth password/Basic cookie on this host.
     from app.api.studio_sso import _canonical_pwa
@@ -300,6 +299,10 @@ def require_studio_auth(
         if sso is None:
             _login_required(request)
         return _apply_scope(request, *sso, users=users)
+
+    if not _auth_configured(settings, users):
+        request.state.studio_product_ids = None
+        return None  # Developer loopback only; never a production exemption.
 
     # A signed login session wins over credentials the browser remembers for Basic auth,
     # so signing in with another account through the form really switches the user.
