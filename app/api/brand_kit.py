@@ -209,7 +209,8 @@ background:var(--bk-background);color:var(--bk-text);font-family:var(--bk-font)}
         f'<p role="status"><strong>{esc(active_label)}</strong>. '
         f'Черновик: {latest.version if latest else "нет"}.</p>'
         '<div class="bk-wrap"><div>'
-        '<section class="sg-surface"><h2>1. Исходные ресурсы</h2>' + upload_form + '</section>'
+        '<section class="sg-surface"><h2>1. Исходные ресурсы</h2>' + upload_form +
+        f'<a class="btn secondary" href="{base}/library">Хранилище · материалы и лимиты</a></section>'
         '<section class="sg-surface"><h2>2. Настройки фирменного стиля</h2>' + settings_form +
         '</section></div><div>'
         '<section class="sg-surface"><h2>Предварительный просмотр 9:16</h2>' +
