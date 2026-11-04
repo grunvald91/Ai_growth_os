@@ -603,3 +603,40 @@ async def test_owner_cannot_publish_a_stale_reader_version(env, tmp_path):
     db.commit()
     assert publish_owner_approved(db) == 0
     assert not list(db.scalars(select(Publication)))
+
+
+@pytest.mark.asyncio
+async def test_servgo_consumer_query_blocked_with_clean_critic_and_owner_approval(env, tmp_path):
+    from app.content.review import approve_material
+    db, company = env
+    article_id = await make_article(db, company, tmp_path)
+    row = db.get(Artifact, article_id)
+    article = ArticleArtifact.model_validate_json(row.content)
+    article.seo.primary_query = "запись к психологу"
+    article.seo_brief.primary_query = "запись к психологу"
+    row.content = article.model_dump_json()
+    db.commit()
+    outcome = publish_if_clear(db, article_id)
+    assert not outcome.published and "buyer-intent mismatch" in outcome.reason
+    approve_material(db, tmp_path, company.id, article_id)
+    assert publish_owner_approved(db) == 0
+    assert db.scalar(select(Publication).where(Publication.artifact_id == article_id)) is None
+
+
+@pytest.mark.asyncio
+async def test_consumer_service_company_may_publish_its_own_booking_query(env, tmp_path):
+    db, _ = env
+    practice = Product(name="Psychology practice", slug="psychology-practice")
+    db.add(practice)
+    db.commit()
+    set_enabled(db, practice.id, enabled=True, actor="fixture-owner")
+    db.add(StudioBusinessLink(servgo_business_id=94213, product_id=practice.id))
+    db.commit()
+    article_id = await make_article(db, practice, tmp_path)
+    row = db.get(Artifact, article_id)
+    article = ArticleArtifact.model_validate_json(row.content)
+    article.seo.primary_query = "запись к психологу"
+    article.seo_brief.primary_query = "запись к психологу"
+    row.content = article.model_dump_json()
+    db.commit()
+    assert publish_if_clear(db, article_id).published
