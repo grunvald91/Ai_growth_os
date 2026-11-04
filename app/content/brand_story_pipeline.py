@@ -31,8 +31,23 @@ def brand_digest(config: dict) -> str:
         separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
-def pin_brand_request(db, request):
-    """Choose approved style and provider *once*, while enqueue holds the company lock."""
+def brand_story_canary_allowed(settings, product_id: UUID) -> bool:
+    """Strict company UUID allowlist. Empty/malformed configuration fails closed."""
+    if not settings.brand_stories_enabled:
+        return False
+    entries = [part.strip() for part in settings.brand_story_canary_product_ids.split(",")]
+    try:
+        return str(product_id) in {str(UUID(part)) for part in entries if part}
+    except ValueError:
+        return False
+
+
+def pin_brand_request(db, request, *, settings):
+    """Choose approved style once; never enable an unapproved company."""
+    if not brand_story_canary_allowed(settings, request.product_id):
+        if request.brand_mode == "brand":
+            raise ValueError("Фирменные Stories пока не включены для этой компании")
+        return request.model_copy(update={"brand_mode": "classic"})
     pointer = db.get(BrandActive, request.product_id)
     version = (db.scalar(select(BrandVersion).where(
         BrandVersion.product_id == request.product_id,

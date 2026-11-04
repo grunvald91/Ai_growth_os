@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     intelligence_campaign_enabled: bool = True
     # Disabled until explicitly enabled for a measured rollout; review adds LLM calls.
     agent_critic_enabled: bool = False
+    # Strict default-off per-company canary; no implicit '*' activation.
+    brand_stories_enabled: bool = False
+    brand_story_canary_product_ids: str = ""
     # Owner's decision: at most this many blog articles of the SEO plan are started per day (Moscow time).
     seo_articles_per_day: int = Field(default=3, ge=1)
     seo_publications_per_day: int = Field(default=3, ge=1)

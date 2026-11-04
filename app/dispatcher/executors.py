@@ -494,7 +494,7 @@ async def confirm_create_creative(ctx: Context, stored: dict, via: str) -> Outco
                                                ("auto" if params.format in {"story", "static_image"} else "none")),
                                   aspect_ratio=params.aspect_ratio,
                                   brand_mode="auto" if params.format == "story" else "classic")
-        task = queue_creative(ctx.db, command)
+        task = queue_creative(ctx.db, command, settings=ctx.settings)
     except (ValueError, ValidationError, LookupError):
         ctx.db.rollback()
         return Outcome("Не удалось создать задание. Проверьте тему, формат и площадку.", ok=False)

@@ -221,7 +221,7 @@ def _preview(draft: CreativeDraft, *, images_requested: bool = False) -> str:
     return "\n\n".join(lines)
 
 
-def queue_creative(db, request: CreativeRequest, *, commit=True) -> Task:
+def queue_creative(db, request: CreativeRequest, *, commit=True, settings=None) -> Task:
     company = db.scalar(select(Product).where(
         Product.id == request.product_id).with_for_update())
     if company is None:
@@ -232,7 +232,8 @@ def queue_creative(db, request: CreativeRequest, *, commit=True) -> Task:
         raise ValueError("Brand snapshot is only assigned by the trusted queue")
     if request.format == "story" and request.brand_mode in ("auto", "brand"):
         from app.content.brand_story_pipeline import pin_brand_request
-        request = pin_brand_request(db, request)
+        from app.core.config import get_settings
+        request = pin_brand_request(db, request, settings=settings or get_settings())
     title = f"CREATIVE: {request.format}:{request.platform}:{request.topic}"
     title = title[:275] + ':' + hashlib.sha256(request.model_dump_json(exclude={"task_id"}).encode()).hexdigest()[:16]
     duplicate = TaskService(db).find_active_duplicate(
