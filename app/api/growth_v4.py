@@ -464,7 +464,18 @@ def render_v4(page, request, pid, switch):
         template = template.replace('</head>', '<style>'+notice_css+'</style></head>')
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
-    template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-daily.css?v=1"></head>', 1)
+    # ServGo is one same-origin installed PWA (manifest scope="/"), not a
+    # second Growth-specific worker or a cache for private Studio pages.
+    template = template.replace('</head>', (
+        '<meta name="theme-color" content="#ffffff">'
+        '<meta name="apple-mobile-web-app-capable" content="yes">'
+        '<meta name="apple-mobile-web-app-status-bar-style" content="default">'
+        '<meta name="apple-mobile-web-app-title" content="ServGo">'
+        '<link rel="manifest" href="/manifest.webmanifest">'
+        '<link rel="apple-touch-icon" href="/apple-touch-icon.png">'
+        '<link rel="stylesheet" href="/studio/assets/growth-daily.css?v=2">'
+        '</head>'
+    ), 1)
     if home:
         drawer = (
             '<button id="sgDailyHandle" class="sg-daily-handle" type="button" '
@@ -487,7 +498,7 @@ def render_v4(page, request, pid, switch):
     template = template.replace('</head>', (
         '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=18">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
-        '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=6">'
+        '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=7">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
         '</head>'
     ))
