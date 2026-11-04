@@ -163,6 +163,12 @@ def main():
                     bubbles:true,pointerType:'touch',pointerId:33}));
                 }""")
                 expect(classic_more).not_to_have_attribute('open', '')
+                classic_more.locator('summary').click()
+                expect(classic_more).to_have_attribute('open', '')
+                # Native backdrop of this <details> resolves to the menu element.
+                classic_more.evaluate("""menu => menu.dispatchEvent(
+                  new PointerEvent('pointerdown',{bubbles:true,pointerType:'touch'}))""")
+                expect(classic_more).not_to_have_attribute('open', '')
                 page.locator('[name="topic"]').fill('Тест реальной очереди')
                 page.locator('form button[type="submit"]').click()
                 page.wait_for_url('**/tasks/*')
