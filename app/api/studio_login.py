@@ -68,7 +68,7 @@ def _page(*, next_url: str, login: str = "", error: str | None = None, notice: s
     body = f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#F4F6FA"><title>Вход · Growth Studio</title>
+<meta name="theme-color" content="#F4F6FA"><link rel="manifest" href="/manifest.webmanifest"><meta name="apple-mobile-web-app-capable" content="yes"><title>Вход · Growth Studio</title>
 <link rel="icon" href="{LOGO}"><style>{STYLE}</style></head>
 <body><main>
 <section>
