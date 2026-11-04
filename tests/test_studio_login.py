@@ -179,3 +179,42 @@ def test_account_form_ticks_the_current_company_and_shows_errors_at_the_form(stu
     ok = c.post(url, auth=OWNER, data={"username": "manager", "role": "company", f"company_{studio.mine.id}": "on"})
     area = ok.text.split('id="account-result"', 1)[1]
     assert "Аккаунт создан" in area and "studio/login" in area
+
+
+def test_canonical_servgo_studio_login_uses_main_account(studio):
+    # The configured same-origin gateway never shows a second password prompt.
+    studio.settings.studio_servgo_gateway_enabled = True
+    with TestClient(app, base_url="https://servgo.ru") as client:
+        page = client.get("/studio/login", follow_redirects=False)
+        assert page.status_code == 303
+        assert page.headers["location"] == "/login?next=%2Fworkspace%2Fstudio-entry"
+        assert page.headers["cache-control"] == "no-store"
+
+        # The old operator credential remains available for emergency migration,
+        # without appearing in normal ServGo navigation.
+        legacy = client.get("/studio/login?legacy=1")
+        assert legacy.status_code == 200
+        assert "Вход в Growth Studio" in legacy.text
+
+        # Signing out from Growth must finish the logout in the shared PWA.
+        out = client.get("/studio/logout", follow_redirects=False)
+        assert out.status_code == 303
+        assert out.headers["location"] == "/logout"
+        cookies = out.headers.get_list("set-cookie")
+        assert any(row.startswith("sg_session=") and "max-age=0" in row for row in cookies)
+        assert any(row.startswith("sg_sso=") and "max-age=0" in row for row in cookies)
+
+
+def test_canonical_servgo_logout_clears_studio_cookies_same_origin_only(studio):
+    studio.settings.studio_servgo_gateway_enabled = True
+    with TestClient(app, base_url="https://servgo.ru") as client:
+        denied = client.post("/studio/session/logout",
+                             headers={"Origin": "https://evil.example"})
+        assert denied.status_code == 403
+        response = client.post("/studio/session/logout",
+                               headers={"Origin": "https://servgo.ru"})
+        assert response.status_code == 204
+        assert response.headers["cache-control"] == "no-store"
+        cookies = response.headers.get_list("set-cookie")
+        assert any(row.startswith("sg_session=") and "max-age=0" in row for row in cookies)
+        assert any(row.startswith("sg_sso=") and "max-age=0" in row for row in cookies)
