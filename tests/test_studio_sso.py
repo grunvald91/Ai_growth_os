@@ -927,3 +927,22 @@ def test_link_attempt_without_servgo_cookie_is_denied(env):
     response = client.post("/studio/identity", data={"username": "owner", "password": "correct-secret"},
                            headers={"origin": ORIGIN}, auth=("owner", "correct-secret"))
     assert response.status_code == 403
+
+
+def test_canonical_servgo_sso_overrides_legacy_operator_cookie(env):
+    """On the unified origin the account chosen in ServGo is authoritative."""
+    db, settings, salon, other, _ = env
+    settings.studio_servgo_gateway_enabled = True
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
+        login = client.post("/studio/login",
+                            data={"username": "owner", "password": "correct-secret"},
+                            headers={"origin": "https://servgo.ru"})
+        assert login.status_code == 303
+        assert client.cookies.get("sg_session")
+        response = client.get("/studio/sso", params={"t": make_ticket(jti="canonical-issuer1")})
+        assert response.status_code == 303
+        cookies = [row.lower() for row in response.headers.get_list("set-cookie")]
+        assert any(row.startswith("sg_session=") and "max-age=0" in row for row in cookies)
+        assert any(row.startswith("sg_sso=") and "max-age=0" not in row for row in cookies)
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+        assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 404
