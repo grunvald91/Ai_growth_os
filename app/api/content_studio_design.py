@@ -658,3 +658,35 @@ STUDIO_CSS += """
 STUDIO_CSS += """
 .sg-image-tile>a.is-square{aspect-ratio:1/1}
 """
+
+
+# Brand Stories controls use the existing first-party Studio JS bundle.
+# No inline scripts: compatible with a restrictive script-src CSP.
+STUDIO_JS += r"""
+(function(){
+  'use strict';
+  function syncBrandStoryForm(){
+    const form = document.getElementById('sg-create-form');
+    const panel = form && form.querySelector('[data-story-brand-control]');
+    if(!panel) return;
+    const radio = form.querySelector('input[name="format"]:checked');
+    const story = !!radio && radio.value === 'story';
+    panel.style.display = story ? '' : 'none';
+    panel.querySelectorAll('select').forEach(select => { select.disabled = !story; });
+    const model = panel.querySelector('select[name="image_model"]');
+    const consent = panel.querySelector('[data-story-paid-confirm]');
+    const paid = story && model && model.value !== 'none';
+    if(consent){
+      consent.style.display = paid ? '' : 'none';
+      const input = consent.querySelector('input');
+      if(input){ input.disabled = !paid; input.required = !!paid; }
+    }
+  }
+  document.addEventListener('change', event=>{
+    if(event.target.closest('#sg-create-form')) syncBrandStoryForm();
+  });
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', syncBrandStoryForm);
+  } else { syncBrandStoryForm(); }
+})();
+""";

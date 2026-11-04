@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import io
 from uuid import uuid4
 
@@ -489,3 +490,20 @@ def test_corrupted_or_missing_stored_material_can_be_explicitly_removed(company)
     assert client.delete(
         f"/studio/products/{a.id}/brand-kit/renders/{render.id}").status_code == 200
     assert db.get(BrandRender, render.id) is None
+
+
+def test_default_crop_preserves_pre_editor_story_request_hash(company):
+    client, db, a, _, va, _, root, style = company
+    screen = frame()
+    result = create_composition(db, root, a.id, va.id, screen,
+                                frame_key="old-center-format")
+    record = db.get(BrandComposition, result.composition_id)
+    pre_editor = screen.model_dump(mode="json")
+    pre_editor.pop("crop_x", None)
+    pre_editor.pop("crop_y", None)
+    signature = json.dumps({
+        "version_id": str(va.id), "background_id": None, "frame": pre_editor
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    assert record.request_sha256 == hashlib.sha256(signature).hexdigest()
+    assert create_composition(db, root, a.id, va.id, screen,
+                              frame_key="old-center-format").id == result.id

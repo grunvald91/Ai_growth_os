@@ -102,6 +102,10 @@ class CreativeRequest(Strict):
     frame_count: int | None = Field(default=None, ge=3, le=10)
     # 'none' preserves classic text-only callers; dispatcher explicitly opts in.
     image_model: Literal["none", "auto", "gemini", "openai"] = "none"
+    # Classic remains the default for old queued tasks. New jobs opt in via auto.
+    brand_mode: Literal["classic", "auto", "brand"] = "classic"
+    brand_version_id: UUID | None = None
+    brand_snapshot_sha256: str | None = None
     aspect_ratio: Literal["9:16", "4:5", "1:1", "16:9"] | None = None
 
     @model_validator(mode="after")
@@ -112,6 +116,8 @@ class CreativeRequest(Strict):
             raise ValueError("Frame count applies only to Stories")
         if self.image_model != "none" and self.format not in {"story", "static_image"}:
             raise ValueError("Image generation requires Stories or static image")
+        if self.brand_mode != "classic" and self.format != "story":
+            raise ValueError("Brand Kit mode is for Stories only")
         if self.aspect_ratio is not None:
             if self.format == "story" and self.aspect_ratio != "9:16":
                 raise ValueError("Stories must be vertical 9:16")
@@ -215,11 +221,19 @@ def _preview(draft: CreativeDraft, *, images_requested: bool = False) -> str:
     return "\n\n".join(lines)
 
 
-def queue_creative(db, request: CreativeRequest, *, commit=True) -> Task:
+def queue_creative(db, request: CreativeRequest, *, commit=True, settings=None) -> Task:
     company = db.scalar(select(Product).where(
         Product.id == request.product_id).with_for_update())
     if company is None:
         raise LookupError("Компания не найдена")
+    # Freeze the chosen brand at enqueue, never at worker retry. Old request JSON
+    # has brand_mode=classic and continues through the original renderer.
+    if request.brand_version_id is not None or request.brand_snapshot_sha256 is not None:
+        raise ValueError("Brand snapshot is only assigned by the trusted queue")
+    if request.format == "story" and request.brand_mode in ("auto", "brand"):
+        from app.content.brand_story_pipeline import pin_brand_request
+        from app.core.config import get_settings
+        request = pin_brand_request(db, request, settings=settings or get_settings())
     title = f"CREATIVE: {request.format}:{request.platform}:{request.topic}"
     title = title[:275] + ':' + hashlib.sha256(request.model_dump_json(exclude={"task_id"}).encode()).hexdigest()[:16]
     duplicate = TaskService(db).find_active_duplicate(
@@ -232,6 +246,8 @@ def queue_creative(db, request: CreativeRequest, *, commit=True) -> Task:
         title=title, description=(
             "Creative images and brief; human review before publication"
             if request.image_model != "none" else
+            "Local Brand Kit composition; human review before publication"
+            if request.brand_mode == "brand" else
             "Text creative brief only; human review, no rendering"
         ),
         status=TaskStatus.QUEUED, priority=100,
@@ -368,6 +384,15 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
         if request.image_model != "none":
             from app.content.creative_images import resolve_model
             resolve_model(settings, request.image_model)
+        if request.brand_mode == "brand":
+            from app.content.brand_story_pipeline import (
+                validate_pinned_request, brand_story_canary_allowed,
+            )
+            # A rollout kill switch must also stop already queued jobs before
+            # their first new paid background generation.
+            if not brand_story_canary_allowed(settings, request.product_id):
+                raise ValueError("Фирменные Stories отключены для компании")
+            validate_pinned_request(db, request, task_id)
         db.commit()
         context = load_context(db, product, settings.products_root)
         verified = product_facts(privacy.sanitize_text(context["stable_context"]))
@@ -392,6 +417,9 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
         if saved_brief is not None:
             # Image-only continuation: do not regenerate text or change storyboard.
             draft = CreativeDraft.model_validate(relax(CreativeDraft, json.loads(saved_brief.content)))
+            if request.brand_mode == "brand":
+                from app.content.brand_story_pipeline import validate_brand_story_copy
+                validate_brand_story_copy(draft)
             if (draft.format != request.format or draft.platform != request.platform
                     or (request.frame_count is not None and len(draft.frames) != request.frame_count)):
                 raise ValueError("Saved creative brief does not match approved request")
@@ -437,8 +465,18 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     stage_payload["strategy"] = strategy.model_dump(mode="json")
                 rules = prompt_text("creative.common") + prompt_text(
                     "creative.strategist" if agent == "creative_strategist" else "creative.director")
+                if request.brand_mode == "brand" and agent == "creative_director":
+                    rules += (
+                        " BRANDED STORIES: each on_screen_text MUST be short, "
+                        "no more than 110 characters and at most two short lines; "
+                        "draft.cta MUST be at most 65 characters. All actual visible "
+                        "text is composed by the deterministic renderer, not the image model."
+                    )
                 def validate_candidate(data):
                     parsed = schema.model_validate(relax(schema, data))
+                    if request.brand_mode == "brand" and agent == "creative_director":
+                        from app.content.brand_story_pipeline import validate_brand_story_copy
+                        validate_brand_story_copy(parsed)
                     if any(source_id not in verified for source_id in parsed.evidence_ids):
                         raise ValueError("Unknown product evidence in creative brief")
                     if agent == "creative_director" and (
@@ -540,6 +578,12 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                 status="awaiting_approval",
             )
             db.commit()
+        if request.brand_mode == "brand":
+            active_stage = "brand_layout_preflight"
+            from app.content.brand_story_pipeline import preflight_brand_story_layout
+            await asyncio.to_thread(
+                preflight_brand_story_layout,
+                db, settings.products_root, request, draft, task_id)
         if request.image_model != "none":
             from app.content.creative_images import generate_images, resolve_model
             model_name = resolve_model(settings, request.image_model)
@@ -556,11 +600,26 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             run_ids.append(image_run.id)
             db.commit()
             success = await generate_images(db, settings, request, draft, task_id=task_id)
+            if request.brand_mode == "brand":
+                # Render successful backgrounds even when another paid frame
+                # failed, so the user can inspect existing completed screens.
+                active_stage = "brand_story_composition"
+                from app.content.brand_story_pipeline import compose_saved_stories
+                composed = compose_saved_stories(
+                    db, settings.products_root, request, draft, task_id)
+                success = success and composed
             image_run = db.get(AgentRun, image_run.id)
             image_run.status = "completed" if success else "failed"
             image_run.finished_at = datetime.now(timezone.utc)
             if not success:
                 image_run.error = "One or more image frames could not be generated"
+                db.get(Task, task.id).status = TaskStatus.FAILED
+                db.commit()
+                return False
+        if request.brand_mode == "brand" and request.image_model == "none":
+            active_stage = "brand_story_composition"
+            from app.content.brand_story_pipeline import compose_saved_stories
+            if not compose_saved_stories(db, settings.products_root, request, draft, task_id):
                 db.get(Task, task.id).status = TaskStatus.FAILED
                 db.commit()
                 return False

@@ -18,7 +18,7 @@ from app.brand_kit.models import BrandActive, BrandAsset, BrandVersion
 from app.brand_kit.renderer import HEIGHT, WIDTH, StoryFrame, render_story
 from app.brand_kit.service import verified_asset
 from app.brand_kit.quotas import enforce_quota
-from app.models.domain import Product
+from app.models.domain import Product, Artifact
 
 MAX_BACKGROUND_UPLOAD = 12_000_000
 MAX_BACKGROUND_STORED = 16_000_000
@@ -201,7 +201,9 @@ def _restore_previous_render(db, root: Path, product_id: UUID,
 
 def create_composition(db, root: Path, product_id: UUID, version_id: UUID,
                        frame: StoryFrame, *, frame_key: str,
-                       background_id: UUID | None = None) -> BrandRender:
+                       background_id: UUID | None = None,
+                       pinned_task_id: UUID | None = None,
+                       style_override: BrandStyle | None = None) -> BrandRender:
     """Pure paid-call-free composition; stable ID guards retries and mismatched payloads.
 
     A composition is pinned to the exact approved brand JSON. Switching active
@@ -220,7 +222,22 @@ def create_composition(db, root: Path, product_id: UUID, version_id: UUID,
     if version is None:
         raise LookupError("Утверждённая версия фирменного стиля не найдена")
     spec = frame.model_dump(mode="json")
+    # Pre-editor compositions (stages A-C) have no crop fields. Their
+    # idempotency digest must remain byte-identical on default-center retries.
+    if spec.get("crop_x") == 0.5:
+        spec.pop("crop_x")
+    if spec.get("crop_y") == 0.5:
+        spec.pop("crop_y")
+    if pinned_task_id is not None:
+        # The public /compose route has no pinned_task_id input. Only jobs
+        # whose immutable creative_request recorded this exact version/JSON
+        # can render after a newer brand version was approved.
+        from app.content.brand_story_pipeline import assert_task_brand
+        assert_task_brand(db, product_id, pinned_task_id, version)
+    if style_override is not None and pinned_task_id is None:
+        raise ValueError("Редактирование стиля доступно только заданию")
     signature = json.dumps({
+        **({"style_override": style_override.model_dump(mode="json")} if style_override else {}),
         "version_id": str(version_id),
         "background_id": str(background_id) if background_id else None,
         "frame": spec,
@@ -243,9 +260,9 @@ def create_composition(db, root: Path, product_id: UUID, version_id: UUID,
             _restore_previous_render(db, root, product_id, prior, prior_render)
         return prior_render
     current = db.get(BrandActive, product_id)
-    if current is None or current.version_id != version_id:
+    if (current is None or current.version_id != version_id) and pinned_task_id is None:
         raise ValueError("Для нового кадра требуется действующая версия фирменного стиля")
-    style = BrandStyle.model_validate(version.config)
+    style = style_override if style_override is not None else BrandStyle.model_validate(version.config)
     variant_id = getattr(style.logos, frame.logo_variant) or style.logos.original
     if variant_id is None:
         raise ValueError("Фирменный логотип не выбран")
@@ -308,6 +325,26 @@ def delete_unused_background(db, root: Path, product_id: UUID, background_id: UU
     path.unlink(missing_ok=True)
 
 
+def restore_story_render(db, root: Path, product_id: UUID,
+                         render_id: UUID) -> Path:
+    """Restore an immutable PNG from snapshot/logo/background without any AI call."""
+    db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
+    render = db.scalar(select(BrandRender).where(
+        BrandRender.product_id == product_id, BrandRender.id == render_id))
+    if render is None:
+        raise LookupError("Готовая версия Stories не найдена")
+    try:
+        return verified_render(db, root, product_id, render_id)[1]
+    except LookupError:
+        composition = db.scalar(select(BrandComposition).where(
+            BrandComposition.product_id == product_id,
+            BrandComposition.id == render.composition_id))
+        if composition is None:
+            raise LookupError("Исходная композиция не найдена")
+        _restore_previous_render(db, root, product_id, composition, render)
+        return verified_render(db, root, product_id, render_id)[1]
+
+
 def delete_story_render(db, root: Path, product_id: UUID, render_id: UUID) -> None:
     """Explicit removal of one composed image and its private idempotency key."""
     product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
@@ -319,6 +356,19 @@ def delete_story_render(db, root: Path, product_id: UUID, render_id: UUID) -> No
         raise LookupError("Кадр не найден")
     if row.filename != str(row.id) + ".png":
         raise LookupError("Недопустимое имя файла")
+    # Growth keeps immutable revision pointers in JSON artifacts, not a FK.
+    # A deletion here otherwise destroys a finished task and its history.
+    references = db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id,
+        Artifact.kind == "creative_story_render",
+        Artifact.content.contains(str(render_id))))
+    for item in references:
+        try:
+            if json.loads(item.content).get("render_id") == str(render_id):
+                raise ValueError("Готовый кадр используется в задании Growth")
+        except (TypeError, json.JSONDecodeError):
+            # Reject corrupt metadata rather than deleting a possibly used PNG.
+            raise ValueError("Невозможно проверить ссылки на готовый кадр") from None
     path = _folder(root, "_brand_renders", product_id) / row.filename
     if path.exists() and not path.is_file() and not path.is_symlink():
         raise LookupError("Недопустимый тип файла")

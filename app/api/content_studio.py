@@ -42,6 +42,7 @@ from app.content.revisions import source_fingerprint
 from app.content.manual_edits import editable_fields, save_manual_edit
 from app.content.creative import CreativeRequest, queue_creative
 from app.content.creative_images import generated_images, verified_file
+from app.content.brand_story_pipeline import visible_images, verified_visible_images, verified_gallery_image
 from app.api.creative_image_gallery import gallery_html
 from app.content.telegram_publishing import (verify_channel, save_verified_channel,
     connected_channels, schedule_post, cancel_scheduled_post, validate_telegram_text,
@@ -1505,7 +1506,7 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
     )
 
 
-def material_detail_page(db: Session, product: Product, record: Artifact) -> str:
+def material_detail_page(db: Session, product: Product, record: Artifact, *, root=None) -> str:
     value = parse_json(record)
     kind_label = artifact_kind_label(record, value)
     generic_warnings = value.get("quality_warnings") or []
@@ -1558,11 +1559,14 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
         </section>
         """
     elif record.kind == "creative_brief":
-        image_rows = generated_images(db, product.id, record.task_id)
+        image_rows, invalid_frames = verified_visible_images(
+            db, root or get_settings().products_root, product.id, record.task_id)
         image_errors = list(db.scalars(select(Artifact).where(
             Artifact.product_id == product.id, Artifact.task_id == record.task_id,
             Artifact.kind == "creative_image_error")))
-        prepared_gallery = gallery_html(product.id, record.task_id, image_rows, errors=image_errors)
+        prepared_gallery = gallery_html(
+            product.id, record.task_id, image_rows, errors=image_errors,
+            invalid_frames=invalid_frames)
         frames = value.get("frames") or []
         scenes = "".join(
             '<article class="sg-storyboard-card">'
@@ -1902,7 +1906,8 @@ def studio_materials(product_id: UUID, kind: str = "all", q: str = "", page: int
 
 
 @router.get("/studio/products/{product_id}/materials/{artifact_id}", response_class=HTMLResponse)
-def studio_material_detail(product_id: UUID, artifact_id: UUID, db: Session = Depends(get_db)):
+def studio_material_detail(product_id: UUID, artifact_id: UUID, db: Session = Depends(get_db),
+                           settings=Depends(get_settings)):
     product = db.get(Product, product_id)
     if product is None:
         raise HTTPException(404, "Product not found")
@@ -1915,7 +1920,8 @@ def studio_material_detail(product_id: UUID, artifact_id: UUID, db: Session = De
         return RedirectResponse(
             f"/studio/products/{product_id}/whiteboard/{record.task_id}", status_code=303,
         )
-    response = HTMLResponse(material_detail_page(db, product, record))
+    response = HTMLResponse(material_detail_page(
+        db, product, record, root=settings.products_root))
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -2094,7 +2100,10 @@ async def studio_manual_edit(product_id: UUID, artifact_id: UUID, request: Reque
 def studio_create_page(product_id: UUID, created: bool = False, db: Session = Depends(get_db),
                        settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
-    html_body = create_content_html(product.id, created=created, durations=task_durations(db))
+    from app.content.brand_story_pipeline import brand_story_canary_allowed
+    html_body = create_content_html(
+        product.id, created=created, durations=task_durations(db),
+        brand_canary=brand_story_canary_allowed(settings, product.id))
     # Preserve the same project vocabulary and recording limit as the home voice composer.
     html_body += (f'<span class="sg-create-voice-config" hidden '
                   f'data-voice-project="{esc(product.slug)}" '
@@ -2113,13 +2122,15 @@ def studio_create_page(product_id: UUID, created: bool = False, db: Session = De
 
 
 @router.post("/studio/products/{product_id}/create")
-async def studio_create_submit(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+async def studio_create_submit(product_id: UUID, request: Request, db: Session = Depends(get_db),
+                               settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     fields = await _studio_form(request)
     chosen = fields.get("format", "post")
     topic = fields.get("topic", "")
     audience = fields.get("audience") or None
     brief = fields.get("editorial_brief") or None
+    from app.content.brand_story_pipeline import brand_story_canary_allowed
     try:
         if chosen == "package":
             task = queue_content(db, product.id, topic, audience=audience, editorial_brief=brief)
@@ -2131,15 +2142,23 @@ async def studio_create_submit(product_id: UUID, request: Request, db: Session =
             count = int(count_text) if count_text else None
             command = CreativeRequest(mode="creative", product_id=product.id, topic=topic,
                                       format=chosen, platform=fields.get("channel") or "",
-                                      frame_count=count, audience=audience, editorial_brief=brief)
-            task = queue_creative(db, command)
+                                      frame_count=count, audience=audience, editorial_brief=brief,
+                                      brand_mode=fields.get("brand_mode", "auto") if chosen == "story" else "classic",
+                                      image_model=fields.get("image_model", "none")
+                                      if chosen == "story" else "none")
+            if chosen == "story" and command.image_model != "none" and fields.get("paid_confirm") != "yes":
+                raise ValueError("Подтвердите платную генерацию фонов перед отправкой задания")
+            task = queue_creative(db, command, settings=settings)
         else:
             raise ValueError("Неизвестный формат")
     except (ValueError, LookupError) as exc:
         db.rollback()
         return HTMLResponse(studio_page_shell(
             product, active="create", title="Создать материал", subtitle="Проверьте поля задания.",
-            body=create_content_html(product.id, fields=fields, durations=task_durations(db), error="Проверьте формат, площадку и длину полей: тема 3–300, аудитория до 300, требования до 3500 символов."),
+            body=create_content_html(
+                product.id, fields=fields, durations=task_durations(db),
+                brand_canary=brand_story_canary_allowed(settings, product.id),
+                error=str(exc)[:300]),
         ), status_code=422, headers={"Cache-Control": "no-store"})
     return RedirectResponse(f"/studio/products/{product.id}/tasks/{task.id}", status_code=303)
 
@@ -2202,7 +2221,8 @@ async def studio_notifications_read_all(product_id: UUID, request: Request, db: 
 
 
 @router.get("/studio/products/{product_id}/tasks/{task_id}", response_class=HTMLResponse)
-def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
+def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_db),
+                     settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     task = db.scalar(select(Task).where(Task.id == task_id, Task.product_id == product_id))
     if task is None:
@@ -2252,11 +2272,13 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
                     'Готовые этапы сохраняются; используйте продолжение задания.</p>'
                     '</section>'
                 )
-        images = generated_images(db, product.id, task.id)
+        images, invalid_frames = verified_visible_images(
+            db, settings.products_root, product.id, task.id)
         errors = list(db.scalars(select(Artifact).where(
             Artifact.product_id == product.id, Artifact.task_id == task.id,
             Artifact.kind == "creative_image_error")))
-        body += gallery_html(product.id, task.id, images, errors=errors)
+        body += gallery_html(product.id, task.id, images, errors=errors,
+                             invalid_frames=invalid_frames)
     response = HTMLResponse(studio_page_shell(
         product, active="work", title="Создание материала",
         subtitle="Настоящий статус задания, этапы ИИ-команды и готовые результаты.",
@@ -2284,11 +2306,12 @@ def studio_creative_image(product_id: UUID, task_id: UUID, artifact_id: UUID,
     _creative_owner_task(db, product_id, task_id)
     record = db.scalar(select(Artifact).where(
         Artifact.id == artifact_id, Artifact.task_id == task_id,
-        Artifact.product_id == product_id, Artifact.kind == "generated_image"))
+        Artifact.product_id == product_id,
+        Artifact.kind.in_(["generated_image", "creative_story_render"])))
     if record is None:
         raise HTTPException(404, "Изображение не найдено")
     try:
-        image = verified_file(settings.products_root, product_id, task_id, record)
+        image = verified_gallery_image(db, settings.products_root, product_id, task_id, record)
     except (LookupError, ValueError, OSError):
         raise HTTPException(404, "Файл изображения недоступен") from None
     return FileResponse(
@@ -2300,15 +2323,17 @@ def studio_creative_image(product_id: UUID, task_id: UUID, artifact_id: UUID,
 def studio_creative_images_zip(product_id: UUID, task_id: UUID,
                                db: Session = Depends(get_db), settings=Depends(get_settings)):
     _creative_owner_task(db, product_id, task_id)
-    images = generated_images(db, product_id, task_id)
+    images = visible_images(db, product_id, task_id)
     if not images:
         raise HTTPException(404, "Нет готовых изображений")
     files = []
     for record in images:
         try:
-            path = verified_file(settings.products_root, product_id, task_id, record)
-        except (LookupError, ValueError, OSError):
-            continue
+            path = verified_gallery_image(db, settings.products_root, product_id, task_id, record)
+        except (LookupError, ValueError, OSError) as exc:
+            raise HTTPException(
+                409, "Не удалось собрать полный ZIP: один из кадров недоступен или повреждён"
+            ) from None
         files.append((path, json.loads(record.content)))
     if not files:
         raise HTTPException(404, "Файлы изображений недоступны")
@@ -2317,7 +2342,7 @@ def studio_creative_images_zip(product_id: UUID, task_id: UUID,
     try:
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for path, meta in files:
-                archive.write(path, arcname=path.name)
+                archive.write(path, arcname=f"frame-{int(meta['frame_number']):02d}.png")
             archive.writestr("metadata.json", json.dumps(
                 [{"frame_number": m["frame_number"], "model": m["model"],
                   "prompt": m["prompt"], "filename": m["filename"]}

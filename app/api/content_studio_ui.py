@@ -17,7 +17,7 @@ def esc(value) -> str:
 FORMAT_CHOICES = [
     ("post", "Пост", "Готовый текст для одной площадки"),
     ("short_video", "Короткое видео · сценарий", "Сценарий, кадры и озвучка — не MP4"),
-    ("story", "Stories", "Последовательность экранов — не готовые изображения"),
+    ("story", "Stories", "Вертикальные PNG в фирменном стиле · при наличии Brand Kit"),
     ("static_image", "Изображение · бриф", "Визуальный бриф — не готовая картинка"),
     ("package", "Полный пакет", "Статья, адаптации и видеосценарии"),
 ]
@@ -33,7 +33,8 @@ CHANNELS = {
                      ("dzen", "Дзен"), ("instagram_reels", "Instagram")],
 }
 
-def create_content_html(product_id, *, created=False, fields=None, error=None, durations=None) -> str:
+def create_content_html(product_id, *, created=False, fields=None, error=None,
+                        durations=None, brand_canary=False) -> str:
     fields = fields or {}
     timing = "".join(f"<li>{esc(duration_estimate(durations or {}, kind))}</li>"
                      for kind in ("post", "package", "creative"))
@@ -57,6 +58,28 @@ def create_content_html(product_id, *, created=False, fields=None, error=None, d
                 if created else "")
     if error:
         feedback = f'<div class="sg-warning" role="alert">{esc(error)}</div>'
+    brand_controls = """
+            <fieldset class="sg-field sg-wide" data-story-brand-control>
+              <legend>Stories · фирменное оформление</legend>
+              <label class="sg-field"><span>Стиль</span>
+                <select name="brand_mode">
+                  <option value="auto" selected>Использовать утверждённый Brand Kit, если настроен</option>
+                  <option value="brand">Только с утверждённым Brand Kit</option>
+                  <option value="classic">Старый способ без фирменной композиции</option>
+                </select>
+              </label>
+              <label class="sg-field"><span>Генерация фона</span>
+                <select name="image_model">
+                  <option value="none">Без платного изображения · фирменный фон</option>
+                  <option value="auto" selected>Модель из Brand Kit · платный запрос</option>
+                  <option value="gemini">Gemini · платный запрос</option>
+                  <option value="openai">ChatGPT Image · платный запрос</option>
+                </select>
+              </label>
+              <label class="sg-field" data-story-paid-confirm><input type="checkbox" name="paid_confirm" value="yes"> Подтверждаю платную генерацию фонов для выбранного количества кадров</label>
+              <small>Текст и логотип накладываются отдельно. Платная генерация только после явного подтверждения.</small>
+            </fieldset>
+    """ if brand_canary else ""
     return f"""
     <section class="sg-surface sg-animator-entry sg-animator-top">
       <div><span class="sg-overline">НОВЫЙ ФОРМАТ · ВИДЕО С ОЗВУЧКОЙ</span>
@@ -87,6 +110,7 @@ def create_content_html(product_id, *, created=False, fields=None, error=None, d
             <label class="sg-field sg-wide"><span>Для кого пишем <em>· необязательно</em></span>
               <input name="audience" maxlength="300" value="{esc(fields.get('audience', ''))}" placeholder="Например: занятые родители с детьми">
             </label>
+            {brand_controls}
             <label class="sg-field sg-wide"><span>Дополнительные требования <em>· необязательно</em></span>
               <textarea name="editorial_brief" maxlength="3500" rows="3"
                 placeholder="Тон, особенности услуги, что нельзя обещать, нужный призыв">{esc(fields.get('editorial_brief', ''))}</textarea>

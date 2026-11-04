@@ -12,14 +12,14 @@ import json
 import logging
 import re
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
 
 from app.content.whiteboard.adapters import ClaudeHubGeminiImageProvider
-from app.models.domain import AgentRun, Artifact
+from app.models.domain import AgentRun, Artifact, Product
 from app.services.artifacts import ArtifactService
 
 LOG = logging.getLogger(__name__)
@@ -73,7 +73,20 @@ def image_folder(root: Path, product_id: UUID, task_id: UUID) -> Path:
     return Path(root) / "_creative_images" / str(UUID(str(product_id))) / str(UUID(str(task_id)))
 
 
-def image_prompt(draft, frame, number: int, total: int, ratio: str) -> str:
+def image_prompt(draft, frame, number: int, total: int, ratio: str, *,
+                 branded: bool = False) -> str:
+    if branded:
+        return (
+            "Create ONLY a photographic or illustrated 9:16 background scene, "
+            "not a finished Stories layout. Absolutely NO words, lettering, "
+            "numbers, watermarks, logos, fake logos, UI or typography. "
+            "Keep the center and safe areas uncluttered for subsequent "
+            "programmatic text and the company's real logo. "
+            f"Frame {number} of {total}, maintain consistent colors across scenes. "
+            f"Art direction: {draft.visual_style[:1600]}. "
+            f"Subject: {frame.purpose}. Scene: {frame.visual_prompt}. "
+            f"Additional visual context: {frame.action_or_animation}."
+        )[:16000]
     return (
         (f"Create ONE finished vertical 9:16 Stories screen for {draft.platform}. "
          "Do not create a horizontal banner. "
@@ -94,8 +107,12 @@ def image_prompt(draft, frame, number: int, total: int, ratio: str) -> str:
     )[:16000]
 
 
-def png_output(raw: bytes, *, ratio: str) -> bytes:
-    """Bounded decode, fit into intended ratio without stretching or cropping."""
+def png_output(raw: bytes, *, ratio: str, branded: bool = False,
+               preserve_source: bool = False) -> bytes:
+    """For paid backgrounds preserve native pixels; crop only in Story renderer.
+
+    Legacy image deliverables keep the original sizing and padding behavior.
+    """
     if not isinstance(raw, bytes) or not 0 < len(raw) <= 16_000_000:
         raise ValueError("Unexpected generated image size")
     try:
@@ -103,14 +120,18 @@ def png_output(raw: bytes, *, ratio: str) -> bytes:
             if source.width < 256 or source.height < 256 or source.width * source.height > 12_000_000:
                 raise ValueError("Generated image dimensions are outside limits")
             source.load()
-            image = source.convert("RGB")
+            image = ImageOps.exif_transpose(source).convert("RGB")
     except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
         raise ValueError("Image model did not return a usable image") from exc
     try:
         size = OUTPUT_SIZES[ratio]
     except KeyError as exc:
         raise ValueError("Unsupported image aspect ratio") from exc
-    target = ImageOps.pad(image, size, method=Image.Resampling.LANCZOS, color="white", centering=(.5, .5))
+    target = (image if preserve_source else
+              ImageOps.fit(image, size, method=Image.Resampling.LANCZOS)
+              if branded else
+              ImageOps.pad(image, size, method=Image.Resampling.LANCZOS,
+                           color="white", centering=(.5, .5)))
     buffer = io.BytesIO()
     target.save(buffer, format="PNG", optimize=True)
     output = buffer.getvalue()
@@ -119,7 +140,8 @@ def png_output(raw: bytes, *, ratio: str) -> bytes:
     return output
 
 
-async def request_image(settings, model: str, prompt: str, ratio: str, *, client=None) -> bytes:
+async def request_image(settings, model: str, prompt: str, ratio: str, *,
+                        client=None, preserve_source: bool = False) -> bytes:
     """Call the chosen model exactly once; reject remote image URLs and malformed responses."""
     if model == GEMINI_MODEL:
         provider = ClaudeHubGeminiImageProvider(
@@ -169,7 +191,7 @@ async def request_image(settings, model: str, prompt: str, ratio: str, *, client
         raw = base64.b64decode(encoded, validate=True)
     except (KeyError, IndexError, TypeError, base64.binascii.Error) as exc:
         raise ValueError("Image API returned invalid data") from exc
-    return png_output(raw, ratio=ratio)
+    return png_output(raw, ratio=ratio, preserve_source=preserve_source)
 
 
 def generated_images(db, product_id: UUID, task_id: UUID) -> list[Artifact]:
@@ -195,6 +217,33 @@ def verified_file(root: Path, product_id: UUID, task_id: UUID, record: Artifact)
     return path
 
 
+class PaidImageOutcomeUnknown(ValueError):
+    """Provider may have charged a background frame; human resolution required."""
+
+
+def _frame_intents(db, product_id: UUID, task_id: UUID,
+                   number: int) -> list[Artifact]:
+    """Read all durable paid attempts including after worker restarts."""
+    rows = db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id, Artifact.task_id == task_id,
+        Artifact.kind == "creative_image_intent"))
+    result = []
+    for row in rows:
+        try:
+            if int(json.loads(row.content)["frame_number"]) == number:
+                result.append(row)
+        except (KeyError, ValueError, TypeError):
+            raise ValueError("Не удалось проверить журнал платной генерации") from None
+    return result
+
+
+def _mark_image_intent_complete(intent: Artifact, *, digest: str) -> None:
+    meta = json.loads(intent.content)
+    meta["state"] = "completed"
+    meta["sha256"] = digest
+    intent.content = json.dumps(meta, ensure_ascii=False)
+
+
 async def generate_images(db, settings, request, draft, *, task_id: UUID, provider=None) -> bool:
     """Persist each successful image; return false on partial or total failure.
 
@@ -209,6 +258,21 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
     directory = image_folder(settings.products_root, request.product_id, task_id)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     existing = {}
+    branded = getattr(request, "brand_mode", "classic") == "brand"
+    palette_hint = ""
+    if branded:
+        from app.content.brand_story_pipeline import validate_pinned_request
+        from app.brand_kit.contracts import BrandStyle
+        version = validate_pinned_request(db, request, task_id)
+        style = BrandStyle.model_validate(version.config)
+        palette = style.palette
+        palette_hint = (
+            "Company visual identity MUST inform the background color treatment. "
+            f"Primary {palette.primary}; secondary {palette.secondary}; "
+            f"accent {palette.accent}; base background {palette.background}; "
+            f"visual character {style.visual_character}. "
+            "Background-only: never draw text, logos, letters or glyphs."
+        )
     for record in generated_images(db, request.product_id, task_id):
         metadata = json.loads(record.content)
         number = int(metadata["frame_number"])
@@ -227,7 +291,11 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
             completed += 1
             continue
         filename = f"frame-{frame.number:02d}.png"
-        prompt = image_prompt(draft, frame, frame.number, len(draft.frames), ratio)
+        intent = None
+        prompt = image_prompt(draft, frame, frame.number, len(draft.frames), ratio,
+                              branded=branded)
+        if branded:
+            prompt = (prompt + " " + palette_hint)[:16000]
         try:
             # A process may crash after the atomic file rename but before the DB
             # commit. Reconcile that file without requesting/billing the model again.
@@ -239,12 +307,52 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
                 with Image.open(io.BytesIO(picture)) as cached_image:
                     cached_image.load()
                     if (cached_image.format != "PNG" or
-                            cached_image.size != OUTPUT_SIZES[ratio]):
+                            (not branded and cached_image.size != OUTPUT_SIZES[ratio]) or
+                            (branded and (
+                                cached_image.width < 256 or cached_image.height < 256
+                                or cached_image.width * cached_image.height > 12_000_000))):
                         raise ValueError("Unrecorded creative image file failed validation")
+                if branded:
+                    attempts = _frame_intents(
+                        db, request.product_id, task_id, frame.number)
+                    if not attempts:
+                        raise ValueError("Branded orphan file has no matching paid intent")
+                    digest = hashlib.sha256(picture).hexdigest()
+                    for attempt in attempts:
+                        checkpoint = json.loads(attempt.content)
+                        if checkpoint.get("sha256") and checkpoint["sha256"] != digest:
+                            raise ValueError("Recovered paid frame does not match original SHA256")
             else:
-                picture = await (provider.generate(prompt, model=model, ratio=ratio)
-                                 if provider is not None else request_image(settings, model, prompt, ratio))
-                picture = png_output(picture, ratio=ratio)
+                if branded:
+                    # Persist before contacting the provider. On timeout, a
+                    # charge may have happened even though no PNG arrived.
+                    db.scalar(select(Product.id).where(
+                        Product.id == request.product_id).with_for_update())
+                    if _frame_intents(db, request.product_id, task_id, frame.number):
+                        raise PaidImageOutcomeUnknown(
+                            "Исход платной генерации неизвестен; "
+                            "автоматический повтор запрещён")
+                    intent = ArtifactService(db).create(
+                        product_id=request.product_id, task_id=task_id,
+                        kind="creative_image_intent",
+                        title=f"Платная генерация фона · кадр {frame.number}",
+                        content=json.dumps({
+                            "token": str(uuid4()), "frame_number": frame.number,
+                            "model": model, "ratio": ratio,
+                            "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+                            "state": "pending",
+                        }, ensure_ascii=False))
+                    db.commit()
+                if provider is not None:
+                    picture = await provider.generate(prompt, model=model, ratio=ratio)
+                elif branded:
+                    picture = await request_image(
+                        settings, model, prompt, ratio, preserve_source=True)
+                else:
+                    # Keep the legacy call signature for existing classic
+                    # image-model adapters and their test doubles.
+                    picture = await request_image(settings, model, prompt, ratio)
+                picture = png_output(picture, ratio=ratio, preserve_source=branded)
                 temporary = directory / (filename + ".partial")
                 temporary.write_bytes(picture)
                 temporary.replace(path)
@@ -257,6 +365,16 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
                     "prompt": prompt,
                 }, ensure_ascii=False),
             )
+            if branded:
+                # A file recovered after rename-before-DB crash also finalizes
+                # its original intent without a second paid API call.
+                if intent is None:
+                    pending = _frame_intents(
+                        db, request.product_id, task_id, frame.number)
+                    intent = pending[-1] if pending else None
+                if intent is not None:
+                    _mark_image_intent_complete(
+                        intent, digest=hashlib.sha256(picture).hexdigest())
             db.commit()
             completed += 1
         except Exception as exc:
