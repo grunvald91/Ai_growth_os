@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.datastructures import UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -146,7 +146,7 @@ def _brand_body(product_id, db: Session, error: str = "") -> str:
             for number, title, subtitle in (
                 (1, "Что мешает клиентам записаться?", "Первый кадр привлекает внимание"),
                 (2, "Покажите простое решение", "Понятная мысль крупным текстом"),
-                (3, "Готовы попробовать?", "Завершите серию призывом к действию")))
+                (3, "Готовы попробовать?", "Завершите серию призывом к действию"))
         ) + '</div>'
     )
     history = "".join(
@@ -235,7 +235,7 @@ def brand_kit_page(product_id: UUID, db: Session = Depends(get_db)):
 def brand_kit_state(product_id: UUID, db: Session = Depends(get_db)):
     _owner_product(db, product_id)
     active, versions, latest = read_state(db, product_id)
-    return {
+    payload = {
         "active_version_id": str(active.id) if active else None,
         "latest_draft_id": str(latest.id) if latest and latest.status == "draft" else None,
         "versions": [
@@ -244,12 +244,21 @@ def brand_kit_state(product_id: UUID, db: Session = Depends(get_db)):
             for v in versions
         ],
     }
+    return JSONResponse(payload, headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/studio/products/{product_id}/brand-kit/assets")
 async def upload_brand_asset(product_id: UUID, request: Request,
                              db: Session = Depends(get_db)):
     _owner_product(db, product_id)
+    length = request.headers.get("content-length")
+    if length:
+        try:
+            declared = int(length)
+        except ValueError:
+            raise HTTPException(400, "Неверный Content-Length") from None
+        if declared > MAX_FILE_BYTES + 12_000:
+            raise HTTPException(413, "Слишком большой файл")
     form = await request.form(max_files=1, max_fields=3)
     upload = form.get("file")
     if not isinstance(upload, UploadFile):

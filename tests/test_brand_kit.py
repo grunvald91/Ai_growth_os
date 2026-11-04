@@ -130,6 +130,19 @@ def test_approval_requires_logo_and_readable_text(studio):
     assert db.get(BrandActive, a.id) is None
 
 
+def test_repeated_upload_and_form_save_reuse_existing_checkpoints(studio):
+    client, db, a, _, _ = studio
+    assert upload(client, a).status_code == 303
+    assert upload(client, a).status_code == 303
+    assets = list(db.scalars(select(BrandAsset).where(BrandAsset.product_id == a.id)))
+    assert len(assets) == 1
+    for _ in range(2):
+        assert client.post(f"/studio/products/{a.id}/brand-kit/versions",
+                           data=fields(assets[0].id), follow_redirects=False).status_code == 303
+    versions = list(db.scalars(select(BrandVersion).where(BrandVersion.product_id == a.id)))
+    assert len(versions) == 1 and versions[0].version == 1
+
+
 def test_upload_rejects_fake_images_and_alien_logo(studio):
     client, db, a, b, _ = studio
     assert upload(client, a, data=b"not an image").status_code == 422
@@ -150,6 +163,16 @@ def test_corrupted_logo_is_not_served_or_approved(studio):
     assert client.get(f"/studio/products/{a.id}/brand-kit/assets/{asset.id}").status_code == 404
     assert client.post(f"/studio/products/{a.id}/brand-kit/versions",
                        data=fields(asset.id)).status_code == 404
+
+
+def test_company_deletion_removes_brand_files_without_touching_other_tenant(studio):
+    from app.intake.company_admin import delete_company
+    client, db, a, b, root = studio
+    assert upload(client, a).status_code == 303
+    assert upload(client, b).status_code == 303
+    assert delete_company(db, root, a.id) == a.name
+    assert not (root / "_brand_assets" / str(a.id)).exists()
+    assert (root / "_brand_assets" / str(b.id)).exists()
 
 
 def test_company_account_cannot_open_another_brand(studio):

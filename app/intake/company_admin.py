@@ -27,8 +27,10 @@ def rename_company(db: Session, product: Product, *, name: str, description: str
 
 
 def _safe_rmtree(root: Path, target: Path) -> None:
+    if target.is_symlink() or target.parent.is_symlink():
+        return
     root, target = root.resolve(), target.resolve()
-    if target != root and target.is_relative_to(root) and target.is_dir() and not target.is_symlink():
+    if target != root and target.is_relative_to(root) and target.is_dir():
         shutil.rmtree(target, ignore_errors=True)
 
 
@@ -55,6 +57,7 @@ def delete_company(db: Session, products_root: Path, product_id: UUID) -> str:
     db.commit()
     root = Path(products_root)
     _safe_rmtree(root, root / "_content" / str(product_id))
+    _safe_rmtree(root, root / "_brand_assets" / str(product_id))
     if slug.startswith(STUDIO_SLUG_PREFIX) and "/" not in slug and ".." not in slug:
         _safe_rmtree(root, root / slug)
     return name
