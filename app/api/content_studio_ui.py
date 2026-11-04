@@ -122,20 +122,20 @@ def create_content_html(product_id, *, created=False, fields=None, error=None, d
           </div>
         </form>
         <script>
-        (() => {
+        (() => {{
           const form = document.getElementById('sg-create-form');
           const panel = form && form.querySelector('[data-story-brand-control]');
           if (!panel) return;
-          function sync() {
+          function sync() {{
             const checked = form.querySelector('input[name="format"]:checked');
             panel.style.display = checked && checked.value === 'story' ? '' : 'none';
-            panel.querySelectorAll('select').forEach(select => {
+            panel.querySelectorAll('select').forEach(select => {{
               select.disabled = !(checked && checked.value === 'story');
-            });
-          }
+            }});
+          }}
           form.addEventListener('change', sync);
           sync();
-        })();
+        }})();
         </script>
       </section>
       <aside class="sg-aside-stack">
