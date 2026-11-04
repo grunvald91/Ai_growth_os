@@ -208,8 +208,19 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
                                requested=getattr(request, "aspect_ratio", None))
     directory = image_folder(settings.products_root, request.product_id, task_id)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    existing = {int(json.loads(a.content)["frame_number"])
-                for a in generated_images(db, request.product_id, task_id)}
+    existing = {}
+    for record in generated_images(db, request.product_id, task_id):
+        metadata = json.loads(record.content)
+        number = int(metadata["frame_number"])
+        if number in existing or number not in {frame.number for frame in draft.frames}:
+            raise ValueError("Duplicate or unexpected creative image checkpoint")
+        # A DB record is NOT proof that a paid image file survived the crash.
+        saved = verified_file(settings.products_root, request.product_id, task_id, record)
+        if hashlib.sha256(saved.read_bytes()).hexdigest() != metadata["sha256"]:
+            raise ValueError("Creative image checkpoint checksum mismatch")
+        if metadata.get("model") != model or metadata.get("ratio") != ratio:
+            raise ValueError("Creative image checkpoint model or aspect changed")
+        existing[number] = record
     completed = 0
     for frame in draft.frames:
         if frame.number in existing:
@@ -218,13 +229,25 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
         filename = f"frame-{frame.number:02d}.png"
         prompt = image_prompt(draft, frame, frame.number, len(draft.frames), ratio)
         try:
-            picture = await (provider.generate(prompt, model=model, ratio=ratio)
-                             if provider is not None else request_image(settings, model, prompt, ratio))
-            picture = png_output(picture, ratio=ratio)
+            # A process may crash after the atomic file rename but before the DB
+            # commit. Reconcile that file without requesting/billing the model again.
             path = directory / filename
-            temporary = directory / (filename + ".partial")
-            temporary.write_bytes(picture)
-            temporary.replace(path)
+            if path.exists() or path.is_symlink():
+                if path.is_symlink() or not path.is_file() or path.stat().st_size > LIMIT:
+                    raise ValueError("Unsafe unrecorded creative image file")
+                picture = path.read_bytes()
+                with Image.open(io.BytesIO(picture)) as cached_image:
+                    cached_image.load()
+                    if (cached_image.format != "PNG" or
+                            cached_image.size != OUTPUT_SIZES[ratio]):
+                        raise ValueError("Unrecorded creative image file failed validation")
+            else:
+                picture = await (provider.generate(prompt, model=model, ratio=ratio)
+                                 if provider is not None else request_image(settings, model, prompt, ratio))
+                picture = png_output(picture, ratio=ratio)
+                temporary = directory / (filename + ".partial")
+                temporary.write_bytes(picture)
+                temporary.replace(path)
             ArtifactService(db).create(
                 product_id=request.product_id, task_id=task_id,
                 kind="generated_image", title=f"Кадр {frame.number}: {draft.title[:120]}",
