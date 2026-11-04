@@ -1147,3 +1147,44 @@ html[data-theme='dark'] .bf-chat-input button:disabled {
   background: var(--s-surface-3);
   color: var(--s-muted);
 }
+
+/* ClientShell login, account and Studio entry must use the same dark Air
+   surfaces as the rest of the PWA. The legacy light-only declarations above
+   (.bf-shell-page .ds-card and .bf-account-*) otherwise win over ds tokens. */
+html[data-theme='dark'] .bf-shell-page .ds-card,
+html[data-theme='dark'] .bf-account-card,
+html[data-theme='dark'] .bf-account-row {
+  background: var(--s-surface-2);
+  color: var(--s-text);
+}
+html[data-theme='dark'] .bf-account-card strong,
+html[data-theme='dark'] .bf-account-row,
+html[data-theme='dark'] .bf-shell-page .ds-h3,
+html[data-theme='dark'] .bf-shell-page .ds-h2 {
+  color: var(--s-text);
+}
+html[data-theme='dark'] .bf-account-card p,
+html[data-theme='dark'] .bf-shell-page .ds-hint,
+html[data-theme='dark'] .bf-shell-page .ds-sub {
+  color: var(--s-muted);
+}
+html[data-theme='dark'] .bf-shell-page .ds-input,
+html[data-theme='dark'] .bf-shell-page .ds-card .ds-input {
+  background: var(--s-surface);
+  color: var(--s-text);
+  border-color: var(--s-line);
+  box-shadow: inset 0 0 0 1px var(--s-line);
+  color-scheme: dark;
+}
+html[data-theme='dark'] .bf-shell-page .ds-input:focus,
+html[data-theme='dark'] .bf-shell-page .ds-card .ds-input:focus {
+  background: var(--s-surface-3);
+  box-shadow: 0 0 0 2px var(--s-accent);
+}
+html[data-theme='dark'] .bf-shell-page .ds-btn--ghost {
+  background: var(--s-surface-3);
+  color: var(--s-text-2);
+}
+html[data-theme='dark'] .bf-account-card a {
+  color: var(--s-accent);
+}
