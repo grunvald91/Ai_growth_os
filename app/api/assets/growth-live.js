@@ -39,8 +39,9 @@
  document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.mobile-nav details[open]').forEach(d=>d.open=false);closeSearch()}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();search()}});
  const product=location.pathname.match(/\/studio\/products\/([0-9a-f-]{36})/i);
  const base=product?'/studio/products/'+product[1]:null;
- document.getElementById('bizBtn').onclick=()=>location.assign('/studio?choose=1');
- document.getElementById('notifyBtn')?.addEventListener('click',()=>location.assign('/studio?choose=1'));
+ // In Growth V4, the company switch is a scoped dropdown (growth-daily.js).
+ if(!base)document.getElementById('bizBtn')?.addEventListener('click',()=>location.assign('/studio?choose=1'));
+ // The notification control owns its own dropdown; never redirect it to company selection.
  document.querySelector('[data-focusvoice]').onclick=()=>{const input=document.getElementById('dp-input');if(input)input.focus();else location.assign(base||'/studio')};
  let searchBox,returnFocus;
  function closeSearch(){if(searchBox){searchBox.remove();searchBox=null;document.querySelector('.shell').inert=false;returnFocus?.focus()}}
