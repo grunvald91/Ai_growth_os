@@ -1,0 +1,97 @@
+name: One-time read-only Instagram Stories production diagnosis 2026-11-04
+on:
+  push:
+    branches: [diag/creative-stories-prod-20261104]
+    paths: ['.github/workflows/creative-stories-prod-readonly-20261104.yml']
+permissions:
+  contents: read
+concurrency:
+  group: creative-stories-incident-20261104
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    if: github.repository == 'grunvald91/Ai_growth_os' && github.ref == 'refs/heads/diag/creative-stories-prod-20261104'
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Inspect sanitized creative task metadata, no writes and no generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > /tmp/creative-stories-diagnose.py <<'PY'
+          import json, re, logging
+          from collections import Counter
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from sqlalchemy import select
+          from app.core.config import Settings
+          from app.db.session import SessionLocal
+          from app.models.domain import Task, AgentRun, Artifact
+          from app.content.creative_images import image_folder
+          logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+          cfg=Settings()
+          print("utc_now", datetime.now(timezone.utc).isoformat())
+          print("release_sha", cfg.release_sha)
+          print("image_provider_keys_present", json.dumps({"claudehub":bool(cfg.xai_api_key),"openai":bool(cfg.openai_api_key)}))
+          with SessionLocal() as db:
+              tasks=list(db.scalars(select(Task).where(Task.assigned_agent.in_(("content_creative","content_factory","content_editor"))).order_by(Task.created_at.desc(),Task.id.desc()).limit(35)))
+              print("tasks_inspected", len(tasks))
+              for t in tasks:
+                  artifacts=list(db.scalars(select(Artifact).where(Artifact.task_id==t.id).order_by(Artifact.created_at)))
+                  runs=list(db.scalars(select(AgentRun).where(AgentRun.task_id==t.id).order_by(AgentRun.started_at)))
+                  req=next((a for a in artifacts if a.kind=="creative_request"),None)
+                  info={}
+                  if req:
+                      try:
+                          raw=json.loads(req.content)
+                          info={k:raw.get(k) for k in ("format","platform","image_model","frame_count","aspect_ratio")}
+                      except Exception: info={"parse_error":"invalid_request_json"}
+                  errors=[]
+                  for a in artifacts:
+                      if a.kind=="creative_image_error":
+                          try:
+                              data=json.loads(a.content)
+                              errors.append({"frame":data.get("frame_number"),"code":str(data.get("code"))[:80]})
+                          except Exception: errors.append({"error":"invalid_image_error_json"})
+                  images=[]
+                  for a in artifacts:
+                      if a.kind=="generated_image":
+                          try:
+                              meta=json.loads(a.content)
+                              p=image_folder(cfg.products_root,t.product_id,t.id)/str(meta.get("filename",""))
+                              images.append({"frame":meta.get("frame_number"),"exists":p.is_file(),"bytes":p.stat().st_size if p.is_file() else 0})
+                          except Exception: images.append({"error":"unreadable_image_record"})
+                  safe_runs=[]
+                  for run in runs[-9:]:
+                      err=str(run.error or "")
+                      m=re.search(r"(?:creative_failed:)?([A-Za-z_][A-Za-z0-9_]{2,60})(?::|$)",err)
+                      safe_runs.append({"agent":run.agent_name,"status":run.status,"error_code":m.group(1) if m and err else None})
+                  draft=next((a for a in artifacts if a.kind=="creative_brief"),None)
+                  frames=None
+                  if draft:
+                      try: frames=len(json.loads(draft.content).get("frames") or [])
+                      except Exception: frames="unparseable"
+                  print("task",json.dumps({
+                     "id_suffix":str(t.id)[-8:],"agent":t.assigned_agent,
+                     "created_at":str(t.created_at),"status":getattr(t.status,"value",str(t.status)),
+                     "request":info,"brief_frames":frames,"artifact_counts":dict(Counter(a.kind for a in artifacts)),
+                     "image_errors":errors,"saved_images":images,"runs":safe_runs,
+                  },ensure_ascii=False,sort_keys=True))
+          PY
+          if [ -z "$SSHPASS" ]; then echo "SSH secret unavailable"; exit 1; fi
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned || true
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            if ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/scanned
+          if [ ! -s ~/.ssh/known_hosts ]; then echo "SSH fingerprint mismatch"; exit 1; fi
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST"             "bash -lc 'echo ====container_status====; docker ps --filter label=com.docker.compose.project=ai-growth-os --format \"{{.Names}}|{{.Status}}\"; echo ====database_readonly====; docker exec -i ai-growth-os-api-1 python -; echo ====recent_image_failures_count====; docker logs --since 12h --tail 3000 ai-growth-os-worker-1 2>&1 | grep -c \"Image generation failed at task=\" || true'"             < /tmp/creative-stories-diagnose.py
