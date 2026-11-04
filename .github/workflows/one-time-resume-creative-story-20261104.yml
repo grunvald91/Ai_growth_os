@@ -1,0 +1,162 @@
+name: One-time owner-authorized resume Instagram Stories 2026-11-04
+on:
+  push:
+    branches: [ops/resume-creative-story-20261104]
+    paths: ['.github/workflows/one-time-resume-creative-story-20261104.yml']
+permissions:
+  contents: read
+concurrency:
+  group: one-time-owner-stories-20261104
+  cancel-in-progress: false
+jobs:
+  resume:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    if: github.repository == 'grunvald91/Ai_growth_os' && github.ref == 'refs/heads/ops/resume-creative-story-20261104'
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Verify release and exact owner task, queue at most once, observe completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > /tmp/resume-creative.py <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from sqlalchemy import select
+          from app.core.config import Settings
+          from app.db.session import SessionLocal
+          from app.models.domain import Task, TaskStatus, Artifact
+          from app.content.creative import CreativeRequest
+          
+          EXPECTED = "304548b81528b555529d442eceafa46b124cb57d"
+          SUFFIX = "8dab2a1d"
+          cfg = Settings()
+          if cfg.release_sha != EXPECTED:
+              raise SystemExit("STOP: production release SHA differs from reviewed release")
+          with SessionLocal() as db:
+              candidates = list(db.scalars(select(Task).where(
+                  Task.assigned_agent == "content_creative",
+                  Task.created_at >= datetime(2026, 11, 4, 5, 0, tzinfo=timezone.utc),
+              ).order_by(Task.created_at.desc()).limit(100)))
+              matches = [t for t in candidates if str(t.id).endswith(SUFFIX)
+                         and str(t.created_at).startswith("2026-11-04 05:53:45")]
+              if len(matches) != 1:
+                  raise SystemExit("STOP: target task not uniquely verified")
+              task = db.scalar(select(Task).where(Task.id == matches[0].id).with_for_update())
+              original = db.scalar(select(Artifact).where(
+                  Artifact.product_id == task.product_id, Artifact.task_id == task.id,
+                  Artifact.kind == "creative_request"))
+              if original is None:
+                  raise SystemExit("STOP: original owner request missing")
+              request = CreativeRequest.model_validate_json(original.content)
+              if (request.product_id != task.product_id or request.format != "story"
+                  or request.platform != "instagram_reels" or request.frame_count != 3
+                  or request.image_model != "auto" or request.aspect_ratio != "9:16"):
+                  raise SystemExit("STOP: request differs from diagnosed three-frame Instagram Stories")
+              prior = list(db.scalars(select(Artifact).where(
+                  Artifact.product_id == task.product_id, Artifact.task_id == task.id,
+                  Artifact.kind == "creative_manual_resume_20261104")))
+              if prior:
+                  print("already_queued_once", SUFFIX)
+                  raise SystemExit(0)
+              if task.status == TaskStatus.COMPLETED:
+                  print("already_completed", SUFFIX)
+                  raise SystemExit(0)
+              if task.status in (TaskStatus.QUEUED, TaskStatus.RUNNING):
+                  print("already_active", SUFFIX)
+                  raise SystemExit(0)
+              if task.status != TaskStatus.FAILED:
+                  raise SystemExit("STOP: target is not a failed task")
+              duplicate = db.scalar(select(Task.id).where(
+                  Task.product_id == task.product_id, Task.title == task.title,
+                  Task.id != task.id,
+                  Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING])))
+              if duplicate:
+                  raise SystemExit("STOP: an equivalent active task exists")
+              db.add(Artifact(
+                  product_id=task.product_id, task_id=task.id,
+                  kind="creative_manual_resume_20261104",
+                  title="Owner-authorized original Stories task recovery",
+                  content=json.dumps({"reason":"owner_requested_recovery",
+                                      "release_sha":EXPECTED, "attempt":1}),
+              ))
+              task.status = TaskStatus.QUEUED
+              task.due_at = None
+              db.commit()
+              print("OWNER_TASK_RESUME_QUEUED", SUFFIX, "same_task=True", "new_task=False")
+          PY
+          cat > /tmp/inspect-creative.py <<'PY'
+          import json, time
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Task, Artifact, AgentRun, TaskStatus
+          SUFFIX = "8dab2a1d"
+          with SessionLocal() as db:
+              marker = db.scalar(select(Artifact).where(
+                  Artifact.kind == "creative_manual_resume_20261104",
+              ).order_by(Artifact.created_at.desc()).limit(1))
+              if marker is None or not str(marker.task_id).endswith(SUFFIX):
+                  raise SystemExit("STOP: resume audit marker missing")
+              task_id = marker.task_id
+          deadline = time.monotonic() + 720
+          previous = None
+          while True:
+              with SessionLocal() as db:
+                  task = db.get(Task, task_id)
+                  if task is None:
+                      raise SystemExit("STOP: task missing")
+                  stats = {
+                      "status": task.status.value if hasattr(task.status, "value") else str(task.status),
+                      "brief_count": len(list(db.scalars(select(Artifact.id).where(
+                          Artifact.task_id == task_id, Artifact.kind == "creative_brief")))),
+                      "image_count": len(list(db.scalars(select(Artifact.id).where(
+                          Artifact.task_id == task_id, Artifact.kind == "generated_image")))),
+                      "stage_count": len(list(db.scalars(select(Artifact.id).where(
+                          Artifact.task_id == task_id, Artifact.kind == "content_stage_output")))),
+                  }
+                  if stats != previous:
+                      print("task_progress", SUFFIX, json.dumps(stats), flush=True)
+                      previous = stats
+                  if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+                      runs = list(db.scalars(select(AgentRun).where(
+                          AgentRun.task_id == task_id,
+                      ).order_by(AgentRun.started_at.desc()).limit(5)))
+                      print("latest_runs", json.dumps([{"agent":r.agent_name,"status":r.status,
+                          "error_code":str(r.error or "").split(":")[1][:80] if ":" in str(r.error or "") else
+                          str(r.error or "")[:80]} for r in runs]), flush=True)
+                      errors = list(db.scalars(select(Artifact).where(
+                          Artifact.task_id == task_id, Artifact.kind.in_((
+                              "creative_stage_error", "creative_image_error")),
+                      ).order_by(Artifact.created_at.desc()).limit(7)))
+                      print("latest_errors", json.dumps([{
+                          "kind":e.kind,
+                          "code":json.loads(e.content).get("exception_type") or json.loads(e.content).get("code"),
+                          "stage":json.loads(e.content).get("stage"),
+                          "frame":json.loads(e.content).get("frame_number"),
+                      } for e in errors]), flush=True)
+                      if task.status == TaskStatus.COMPLETED and stats["image_count"] == 3:
+                          print("STORIES_RECOVERY_COMPLETED", SUFFIX, "images=3", flush=True)
+                          raise SystemExit(0)
+                      raise SystemExit("STORIES_RECOVERY_NOT_COMPLETED")
+              if time.monotonic() >= deadline:
+                  print("STORIES_RECOVERY_STILL_RUNNING", SUFFIX, flush=True)
+                  raise SystemExit(0)
+              time.sleep(15)
+          PY
+          test -n "$SSHPASS" || { echo "SSH credential absent"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned || true
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            if ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/scanned
+          test -s ~/.ssh/known_hosts || { echo "SSH fingerprint mismatch"; exit 1; }
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST"             "docker exec -i ai-growth-os-api-1 python -" < /tmp/resume-creative.py
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST"             "docker exec -i ai-growth-os-api-1 python -u -" < /tmp/inspect-creative.py
