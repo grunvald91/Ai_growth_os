@@ -111,6 +111,9 @@ def _new_revision(db, root, company_id, task_id, source, metadata, composition,
         db, root, company_id, composition.version_id, frame, frame_key=key,
         background_id=background_id if background_id is not None else composition.background_id,
         pinned_task_id=task_id, style_override=style)
+    # create_composition commits. Re-lock before the artifact idempotency check
+    # so simultaneous submits with the same token cannot append two revisions.
+    db.scalar(select(Product.id).where(Product.id == company_id).with_for_update())
     for item in composed_images(db, company_id, task_id):
         try:
             if json.loads(item.content).get("render_id") == str(render.id):

@@ -86,6 +86,17 @@ def validate_pinned_request(db, request, task_id: UUID) -> BrandVersion:
     return version
 
 
+def validate_brand_story_copy(draft) -> None:
+    """Reject unrenderable LLM copy before any image provider is charged."""
+    if len(draft.cta) > 65:
+        raise ValueError("Фирменные Stories: призыв длиннее 65 символов")
+    for frame in draft.frames:
+        if len(frame.on_screen_text) > 110 or frame.on_screen_text.count("\\n") > 2:
+            raise ValueError("Фирменные Stories: текст кадра превышает лимит")
+        if not frame.on_screen_text.strip():
+            raise ValueError("Фирменные Stories: пустой текст кадра")
+
+
 def story_frame(draft, source, *, count: int) -> StoryFrame:
     template = "hook" if source.number == 1 else (
         "cta" if source.number == count else "explanation")

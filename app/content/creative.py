@@ -410,6 +410,9 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
         if saved_brief is not None:
             # Image-only continuation: do not regenerate text or change storyboard.
             draft = CreativeDraft.model_validate(relax(CreativeDraft, json.loads(saved_brief.content)))
+            if request.brand_mode == "brand":
+                from app.content.brand_story_pipeline import validate_brand_story_copy
+                validate_brand_story_copy(draft)
             if (draft.format != request.format or draft.platform != request.platform
                     or (request.frame_count is not None and len(draft.frames) != request.frame_count)):
                 raise ValueError("Saved creative brief does not match approved request")
@@ -464,6 +467,9 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     )
                 def validate_candidate(data):
                     parsed = schema.model_validate(relax(schema, data))
+                    if request.brand_mode == "brand" and agent == "creative_director":
+                        from app.content.brand_story_pipeline import validate_brand_story_copy
+                        validate_brand_story_copy(parsed)
                     if any(source_id not in verified for source_id in parsed.evidence_ids):
                         raise ValueError("Unknown product evidence in creative brief")
                     if agent == "creative_director" and (
