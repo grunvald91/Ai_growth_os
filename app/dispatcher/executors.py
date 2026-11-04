@@ -492,7 +492,8 @@ async def confirm_create_creative(ctx: Context, stored: dict, via: str) -> Outco
                                   editorial_brief=params.editorial_brief,
                                   image_model=(params.image_model or
                                                ("auto" if params.format in {"story", "static_image"} else "none")),
-                                  aspect_ratio=params.aspect_ratio)
+                                  aspect_ratio=params.aspect_ratio,
+                                  brand_mode="auto" if params.format == "story" else "classic")
         task = queue_creative(ctx.db, command)
     except (ValueError, ValidationError, LookupError):
         ctx.db.rollback()

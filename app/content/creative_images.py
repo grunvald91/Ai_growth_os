@@ -73,7 +73,20 @@ def image_folder(root: Path, product_id: UUID, task_id: UUID) -> Path:
     return Path(root) / "_creative_images" / str(UUID(str(product_id))) / str(UUID(str(task_id)))
 
 
-def image_prompt(draft, frame, number: int, total: int, ratio: str) -> str:
+def image_prompt(draft, frame, number: int, total: int, ratio: str, *,
+                 branded: bool = False) -> str:
+    if branded:
+        return (
+            "Create ONLY a photographic or illustrated 9:16 background scene, "
+            "not a finished Stories layout. Absolutely NO words, lettering, "
+            "numbers, watermarks, logos, fake logos, UI or typography. "
+            "Keep the center and safe areas uncluttered for subsequent "
+            "programmatic text and the company's real logo. "
+            f"Frame {number} of {total}, maintain consistent colors across scenes. "
+            f"Art direction: {draft.visual_style[:1600]}. "
+            f"Subject: {frame.purpose}. Scene: {frame.visual_prompt}. "
+            f"Additional visual context: {frame.action_or_animation}."
+        )[:16000]
     return (
         (f"Create ONE finished vertical 9:16 Stories screen for {draft.platform}. "
          "Do not create a horizontal banner. "
@@ -227,7 +240,8 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
             completed += 1
             continue
         filename = f"frame-{frame.number:02d}.png"
-        prompt = image_prompt(draft, frame, frame.number, len(draft.frames), ratio)
+        prompt = image_prompt(draft, frame, frame.number, len(draft.frames), ratio,
+                              branded=getattr(request, "brand_mode", "classic") == "brand")
         try:
             # A process may crash after the atomic file rename but before the DB
             # commit. Reconcile that file without requesting/billing the model again.

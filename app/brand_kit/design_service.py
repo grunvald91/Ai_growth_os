@@ -201,7 +201,9 @@ def _restore_previous_render(db, root: Path, product_id: UUID,
 
 def create_composition(db, root: Path, product_id: UUID, version_id: UUID,
                        frame: StoryFrame, *, frame_key: str,
-                       background_id: UUID | None = None) -> BrandRender:
+                       background_id: UUID | None = None,
+                       pinned_task_id: UUID | None = None,
+                       style_override: BrandStyle | None = None) -> BrandRender:
     """Pure paid-call-free composition; stable ID guards retries and mismatched payloads.
 
     A composition is pinned to the exact approved brand JSON. Switching active
@@ -220,7 +222,16 @@ def create_composition(db, root: Path, product_id: UUID, version_id: UUID,
     if version is None:
         raise LookupError("Утверждённая версия фирменного стиля не найдена")
     spec = frame.model_dump(mode="json")
+    if pinned_task_id is not None:
+        # The public /compose route has no pinned_task_id input. Only jobs
+        # whose immutable creative_request recorded this exact version/JSON
+        # can render after a newer brand version was approved.
+        from app.content.brand_story_pipeline import assert_task_brand
+        assert_task_brand(db, product_id, pinned_task_id, version)
+    if style_override is not None and pinned_task_id is None:
+        raise ValueError("Редактирование стиля доступно только заданию")
     signature = json.dumps({
+        "style_override": style_override.model_dump(mode="json") if style_override else None,
         "version_id": str(version_id),
         "background_id": str(background_id) if background_id else None,
         "frame": spec,
@@ -243,9 +254,9 @@ def create_composition(db, root: Path, product_id: UUID, version_id: UUID,
             _restore_previous_render(db, root, product_id, prior, prior_render)
         return prior_render
     current = db.get(BrandActive, product_id)
-    if current is None or current.version_id != version_id:
+    if (current is None or current.version_id != version_id) and pinned_task_id is None:
         raise ValueError("Для нового кадра требуется действующая версия фирменного стиля")
-    style = BrandStyle.model_validate(version.config)
+    style = style_override if style_override is not None else BrandStyle.model_validate(version.config)
     variant_id = getattr(style.logos, frame.logo_variant) or style.logos.original
     if variant_id is None:
         raise ValueError("Фирменный логотип не выбран")

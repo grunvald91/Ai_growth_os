@@ -102,6 +102,10 @@ class CreativeRequest(Strict):
     frame_count: int | None = Field(default=None, ge=3, le=10)
     # 'none' preserves classic text-only callers; dispatcher explicitly opts in.
     image_model: Literal["none", "auto", "gemini", "openai"] = "none"
+    # Classic remains the default for old queued tasks. New jobs opt in via auto.
+    brand_mode: Literal["classic", "auto", "brand"] = "classic"
+    brand_version_id: UUID | None = None
+    brand_snapshot_sha256: str | None = None
     aspect_ratio: Literal["9:16", "4:5", "1:1", "16:9"] | None = None
 
     @model_validator(mode="after")
@@ -112,6 +116,8 @@ class CreativeRequest(Strict):
             raise ValueError("Frame count applies only to Stories")
         if self.image_model != "none" and self.format not in {"story", "static_image"}:
             raise ValueError("Image generation requires Stories or static image")
+        if self.brand_mode != "classic" and self.format != "story":
+            raise ValueError("Brand Kit mode is for Stories only")
         if self.aspect_ratio is not None:
             if self.format == "story" and self.aspect_ratio != "9:16":
                 raise ValueError("Stories must be vertical 9:16")
@@ -220,6 +226,13 @@ def queue_creative(db, request: CreativeRequest, *, commit=True) -> Task:
         Product.id == request.product_id).with_for_update())
     if company is None:
         raise LookupError("Компания не найдена")
+    # Freeze the chosen brand at enqueue, never at worker retry. Old request JSON
+    # has brand_mode=classic and continues through the original renderer.
+    if request.brand_version_id is not None or request.brand_snapshot_sha256 is not None:
+        raise ValueError("Brand snapshot is only assigned by the trusted queue")
+    if request.format == "story" and request.brand_mode in ("auto", "brand"):
+        from app.content.brand_story_pipeline import pin_brand_request
+        request = pin_brand_request(db, request)
     title = f"CREATIVE: {request.format}:{request.platform}:{request.topic}"
     title = title[:275] + ':' + hashlib.sha256(request.model_dump_json(exclude={"task_id"}).encode()).hexdigest()[:16]
     duplicate = TaskService(db).find_active_duplicate(
@@ -232,6 +245,8 @@ def queue_creative(db, request: CreativeRequest, *, commit=True) -> Task:
         title=title, description=(
             "Creative images and brief; human review before publication"
             if request.image_model != "none" else
+            "Local Brand Kit composition; human review before publication"
+            if request.brand_mode == "brand" else
             "Text creative brief only; human review, no rendering"
         ),
         status=TaskStatus.QUEUED, priority=100,
@@ -368,6 +383,9 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
         if request.image_model != "none":
             from app.content.creative_images import resolve_model
             resolve_model(settings, request.image_model)
+        if request.brand_mode == "brand":
+            from app.content.brand_story_pipeline import validate_pinned_request
+            validate_pinned_request(db, request, task_id)
         db.commit()
         context = load_context(db, product, settings.products_root)
         verified = product_facts(privacy.sanitize_text(context["stable_context"]))
@@ -564,6 +582,12 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                 db.get(Task, task.id).status = TaskStatus.FAILED
                 db.commit()
                 return False
+        if request.brand_mode == "brand":
+            active_stage = "brand_story_composition"
+            from app.content.brand_story_pipeline import compose_saved_stories
+            # Images are background-only in branded mode; never expose them
+            # as completed Stories without validated deterministic overlays.
+            compose_saved_stories(db, settings.products_root, request, draft, task_id)
         db.get(Task, task.id).status = TaskStatus.COMPLETED
         db.commit()
         return True
