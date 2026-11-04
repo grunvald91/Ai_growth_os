@@ -1161,3 +1161,48 @@ def test_malformed_live_roles_fall_back_only_to_checked_ticket_company(env):
     assert access.servgo_business_roles(settings, 7) is None
     assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
     assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 404
+
+
+def test_malformed_legacy_operator_record_cannot_block_or_elevate_canonical_sso(env, tmp_path):
+    """Structurally invalid but parseable legacy JSON is not a tenant SSO dependency."""
+    from app.api.content_studio_auth import credential_fingerprint
+    from app.core.studio_operator_links import bind_operator, linked_operator
+    _, settings, salon, _, _ = env
+    account_file = tmp_path / "accounts.json"
+    account_file.write_text("{}", encoding="utf-8")
+    settings.studio_users_file = account_file
+    fingerprint = credential_fingerprint(settings, {}, "owner")
+    assert fingerprint is not None
+    bind_operator(settings, 7, "owner", fingerprint[0])
+    assert linked_operator(settings, 7, {}) == "owner"
+    # This is a syntactically valid dict, but the owner entry lacks password_hash.
+    account_file.write_text('{"owner":{"role":"admin"}}', encoding="utf-8")
+    settings.studio_servgo_gateway_enabled = True
+
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
+        client.cookies.set("sg_identity", _browser_identity(7))
+        response = client.get("/studio/sso", params={
+            "t": make_ticket(origin="https://servgo.ru", jti="malformed-operator-01")
+        })
+        assert response.status_code == 303
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+        assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 403
+
+    with TestClient(app, base_url=ORIGIN, follow_redirects=False) as legacy:
+        # Old operator credentials must not silently work with malformed entries.
+        assert legacy.get(f"/studio/products/{salon.id}/dispatch/state",
+                          auth=("owner", "correct-secret")).status_code == 503
+
+
+def test_malformed_live_role_type_is_rejected_without_server_exception(env):
+    _, settings, _, _, servgo = env
+    # Validate the malformed payload shape itself; no unhashable role may bubble
+    # up into a 500 from the membership check.
+    original = servgo.__call__
+    class MalformedRoles:
+        def __call__(self, request):
+            if request.url.path.endswith("/internal/studio/businesses"):
+                return httpx.Response(200, json=[{"id": 12, "role": ["owner"]}])
+            return original(request)
+    access._transport = httpx.MockTransport(MalformedRoles())
+    assert access.servgo_business_roles(settings, 7) is None
