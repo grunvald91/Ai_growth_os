@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -21,6 +21,7 @@ from email_utils import normalize_optional_email
 from .. import deps
 from ..database import get_db
 from ..schemas import TokenOut, UserOut
+from ..studio_identity import set_identity
 
 router = APIRouter()
 
@@ -155,7 +156,7 @@ async def begin(body: Begin, request: Request, user=Depends(deps.get_current_use
 
 
 @router.post("/email/verify", response_model=TokenOut)
-async def verify(body: Verify, user=Depends(deps.get_current_user_optional), db=Depends(get_db)):
+async def verify(body: Verify, response: Response, user=Depends(deps.get_current_user_optional), db=Depends(get_db)):
     require_config()
     # Serialize by email before locking individual codes, including reset races.
     email = await db.scalar(select(EmailChallenge.email).where(EmailChallenge.id == body.challenge_id))
@@ -210,11 +211,13 @@ async def verify(body: Verify, user=Depends(deps.get_current_user_optional), db=
     except IntegrityError:
         await db.rollback()
         raise HTTPException(409, "Адрес или аккаунт уже привязан") from None
-    return await token_for(db, identity)
+    out = await token_for(db, identity)
+    set_identity(response, out.user.id)
+    return out
 
 
 @router.post("/email/login", response_model=TokenOut)
-async def login(body: Credentials, request: Request, db=Depends(get_db)):
+async def login(body: Credentials, request: Request, response: Response, db=Depends(get_db)):
     require_config()
     await rate_limit(db, "login-ip:" + request.client.host, 60, 15)
     await rate_limit(db, "login:" + body.email, 10, 15)
@@ -225,4 +228,6 @@ async def login(body: Credentials, request: Request, db=Depends(get_db)):
     valid = await asyncio.to_thread(verify_password, body.password, encoded)
     if not identity or not valid:
         raise HTTPException(401, "Неверный email или пароль")
-    return await token_for(db, identity)
+    out = await token_for(db, identity)
+    set_identity(response, out.user.id)
+    return out
