@@ -81,9 +81,8 @@ def verified_render(db, root: Path, product_id: UUID,
 def _write_once(path: Path, data: bytes) -> None:
     if path.exists() or path.is_symlink():
         raise LookupError("Файл с таким идентификатором уже существует")
-    temporary = path.with_suffix(".partial")
-    if temporary.exists() or temporary.is_symlink():
-        raise LookupError("Обнаружена незавершённая запись")
+    # A stale partial upload from a crashed process must never prevent a retry.
+    temporary = path.with_name(path.name + "." + uuid4().hex + ".partial")
     try:
         with temporary.open("xb") as stream:
             os.chmod(temporary, 0o600)
@@ -150,6 +149,49 @@ def store_background(db, root: Path, product_id: UUID, raw: bytes) -> BrandBackg
     return row
 
 
+def _restore_previous_render(db, root: Path, product_id: UUID,
+                             composition: BrandComposition,
+                             render: BrandRender) -> None:
+    """Restore only the original checksum; never silently change a published image.
+
+    A bad/missing background or a changed renderer is reported, not hidden.
+    There are no paid model calls anywhere in this recovery path.
+    """
+    brand = BrandStyle.model_validate(composition.brand_snapshot)
+    frame = StoryFrame.model_validate(composition.spec)
+    asset_id = getattr(brand.logos, frame.logo_variant) or brand.logos.original
+    if asset_id is None:
+        raise LookupError("Оригинальный логотип недоступен для восстановления")
+    logo, logo_file = verified_asset(db, root, product_id, asset_id)
+    if logo.kind not in ("original", frame.logo_variant):
+        raise LookupError("Логотип не принадлежит нужному варианту")
+    background_bytes = None
+    if composition.background_id is not None:
+        _, file = verified_background(db, root, product_id, composition.background_id)
+        background_bytes = file.read_bytes()
+    candidate = render_story(brand, frame, logo=logo_file.read_bytes(),
+                             background=background_bytes).png
+    if (hashlib.sha256(candidate).hexdigest() != render.sha256
+            or len(candidate) != render.byte_size):
+        raise LookupError("Восстановленный PNG отличается от сохранённой версии")
+    if render.filename != str(render.id) + ".png":
+        raise LookupError("Неверный идентификатор PNG")
+    destination = _folder(root, "_brand_renders", product_id, create=True) / render.filename
+    # os.replace replaces a symlink itself (never opens its target).
+    temporary = destination.with_name(
+        destination.name + "." + uuid4().hex + ".partial")
+    try:
+        with temporary.open("xb") as stream:
+            os.chmod(temporary, 0o600)
+            stream.write(candidate)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+    verified_render(db, root, product_id, render.id)
+
+
 def create_composition(db, root: Path, product_id: UUID, version_id: UUID,
                        frame: StoryFrame, *, frame_key: str,
                        background_id: UUID | None = None) -> BrandRender:
@@ -188,7 +230,10 @@ def create_composition(db, root: Path, product_id: UUID, version_id: UUID,
             BrandRender.composition_id == prior.id))
         if prior_render is None:
             raise LookupError("Композиция не завершена — требуется восстановление")
-        verified_render(db, root, product_id, prior_render.id)
+        try:
+            verified_render(db, root, product_id, prior_render.id)
+        except LookupError:
+            _restore_previous_render(db, root, product_id, prior, prior_render)
         return prior_render
     style = BrandStyle.model_validate(version.config)
     variant_id = getattr(style.logos, frame.logo_variant) or style.logos.original

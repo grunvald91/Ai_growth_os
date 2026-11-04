@@ -4,13 +4,15 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import Field
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
 
 from app.api.content_studio import _owner_product
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
+from app.api.multipart_limits import limited_multipart_form
 from app.brand_kit.contracts import Strict
 from app.brand_kit.design_service import (
     MAX_BACKGROUND_UPLOAD, create_composition, store_background,
@@ -42,20 +44,16 @@ def _error(exc: Exception) -> HTTPException:
 async def upload_story_background(product_id: UUID, request: Request,
                                   db: Session = Depends(get_db)):
     _owner_product(db, product_id)
-    declared = request.headers.get("content-length")
-    if declared:
-        try:
-            if int(declared) > MAX_BACKGROUND_UPLOAD + 16_000:
-                raise HTTPException(413, "Файл слишком большой")
-        except ValueError:
-            raise HTTPException(400, "Некорректная длина запроса") from None
-    form = await request.form(max_files=1, max_fields=2)
+    form = await limited_multipart_form(
+        request, max_body=MAX_BACKGROUND_UPLOAD + 16_000,
+        max_files=1, max_fields=2)
     source = form.get("file")
     if not isinstance(source, UploadFile):
         raise HTTPException(422, "Выберите файл PNG, JPEG или WebP")
     try:
         data = await source.read(MAX_BACKGROUND_UPLOAD + 1)
-        record = store_background(db, get_settings().products_root, product_id, data)
+        record = await run_in_threadpool(
+            store_background, db, get_settings().products_root, product_id, data)
     except (LookupError, ValueError) as exc:
         raise _error(exc) from None
     finally:

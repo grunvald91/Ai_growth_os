@@ -141,7 +141,7 @@ def _font_codepoints(family: str, bold: bool) -> frozenset[int]:
 
 def _verify_copy_glyphs(family: str, bold: bool, text: str) -> None:
     available = _font_codepoints(family, bold)
-    missing = sorted({ord(ch) for ch in text if ch != "\\n" and ord(ch) not in available})
+    missing = sorted({ord(ch) for ch in text if ch != "\n" and ord(ch) not in available})
     if missing:
         raise ValueError(
             "В шрифте нет символов: " +
