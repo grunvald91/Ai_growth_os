@@ -91,6 +91,26 @@ with SessionLocal() as db:
         key = f"{task.assigned_agent}:{str(task.status)}"
         kinds[key] = kinds.get(key, 0) + 1
     safe_print("seo_jobs_by_status_last_150", kinds)
+    # Only the SEO request topic, never contact details or client bookings.
+    from app.workflows.article_contracts import ArticleProductionInput
+    pending = []
+    for task in jobs:
+        if task.assigned_agent != "content_factory" or not task.title.startswith("SEO-ARTICLE:"):
+            continue
+        if str(task.status).split(".")[-1] != "QUEUED":
+            continue
+        request = db.scalar(select(Artifact).where(Artifact.task_id == task.id,
+            Artifact.kind == "content_request").limit(1))
+        if not request:
+            continue
+        try:
+            data = ArticleProductionInput.model_validate_json(request.content)
+            pending.append({"query": data.seo_brief.primary_query if data.seo_brief else None,
+                "due_at": task.due_at, "status": str(task.status)})
+        except Exception:
+            pending.append({"parse_error": True})
+    safe_print("queued_seo_request_queries", pending)
+
 
 # Real Yandex/Google suggestion checks, without DB writes or language-model calls.
 import asyncio
@@ -98,7 +118,8 @@ from app.seo.suggest import collect
 
 _BUYER_PROBES = {
     "booking_software": "программа онлайн записи клиентов",
-    "empty_slots": "как заполнить свободные окна мастеров",
+    "empty_slots": "как привлечь клиентов в салон красоты",
+    "empty_slots_precise": "как заполнить пустые окна в салоне красоты",
     "ai_marketing": "ии для продвижения бизнеса",
 }
 
@@ -106,9 +127,10 @@ def _buyer_relevant(topic, query):
     q = " " + query.casefold().replace("ё", "е") + " "
     if topic == "booking_software":
         return "запис" in q and any(v in q for v in ("программ", "сервис", "онлайн", "систем", "crm", "црм"))
-    if topic == "empty_slots":
-        return any(v in q for v in ("окн", "загруз", "клиент")) and any(
-            v in q for v in ("мастер", "салон", "запис", "клиент", "расписан"))
+    if topic.startswith("empty_slots"):
+        return (any(v in q for v in ("привлеч", "заполн", "свободн", "пусты", "нехватк"))
+            and any(v in q for v in ("клиент", "салон", "мастер", "расписан"))
+            and not any(v in q for v in ("пластиков", "стеклопакет", "окна пвх", "город мастеров")))
     if topic == "ai_marketing":
         return any(v in q for v in (" ии ", "нейросет", "искусствен", " ai ")) and any(
             v in q for v in ("продвиж", "маркетинг", "реклам", "бизнес", "контент"))
