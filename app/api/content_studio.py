@@ -2095,7 +2095,10 @@ async def studio_manual_edit(product_id: UUID, artifact_id: UUID, request: Reque
 def studio_create_page(product_id: UUID, created: bool = False, db: Session = Depends(get_db),
                        settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
-    html_body = create_content_html(product.id, created=created, durations=task_durations(db))
+    from app.content.brand_story_pipeline import brand_story_canary_allowed
+    html_body = create_content_html(
+        product.id, created=created, durations=task_durations(db),
+        brand_canary=brand_story_canary_allowed(settings, product.id))
     # Preserve the same project vocabulary and recording limit as the home voice composer.
     html_body += (f'<span class="sg-create-voice-config" hidden '
                   f'data-voice-project="{esc(product.slug)}" '
@@ -2114,13 +2117,15 @@ def studio_create_page(product_id: UUID, created: bool = False, db: Session = De
 
 
 @router.post("/studio/products/{product_id}/create")
-async def studio_create_submit(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+async def studio_create_submit(product_id: UUID, request: Request, db: Session = Depends(get_db),
+                               settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     fields = await _studio_form(request)
     chosen = fields.get("format", "post")
     topic = fields.get("topic", "")
     audience = fields.get("audience") or None
     brief = fields.get("editorial_brief") or None
+    from app.content.brand_story_pipeline import brand_story_canary_allowed
     try:
         if chosen == "package":
             task = queue_content(db, product.id, topic, audience=audience, editorial_brief=brief)
@@ -2136,14 +2141,19 @@ async def studio_create_submit(product_id: UUID, request: Request, db: Session =
                                       brand_mode=fields.get("brand_mode", "auto") if chosen == "story" else "classic",
                                       image_model=fields.get("image_model", "none")
                                       if chosen == "story" else "none")
-            task = queue_creative(db, command)
+            if chosen == "story" and command.image_model != "none" and fields.get("paid_confirm") != "yes":
+                raise ValueError("Подтвердите платную генерацию фонов перед отправкой задания")
+            task = queue_creative(db, command, settings=settings)
         else:
             raise ValueError("Неизвестный формат")
     except (ValueError, LookupError) as exc:
         db.rollback()
         return HTMLResponse(studio_page_shell(
             product, active="create", title="Создать материал", subtitle="Проверьте поля задания.",
-            body=create_content_html(product.id, fields=fields, durations=task_durations(db), error="Проверьте формат, площадку и длину полей: тема 3–300, аудитория до 300, требования до 3500 символов."),
+            body=create_content_html(
+                product.id, fields=fields, durations=task_durations(db),
+                brand_canary=brand_story_canary_allowed(settings, product.id),
+                error=str(exc)[:300]),
         ), status_code=422, headers={"Cache-Control": "no-store"})
     return RedirectResponse(f"/studio/products/{product.id}/tasks/{task.id}", status_code=303)
 

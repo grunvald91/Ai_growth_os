@@ -33,7 +33,8 @@ CHANNELS = {
                      ("dzen", "Дзен"), ("instagram_reels", "Instagram")],
 }
 
-def create_content_html(product_id, *, created=False, fields=None, error=None, durations=None) -> str:
+def create_content_html(product_id, *, created=False, fields=None, error=None,
+                        durations=None, brand_canary=False) -> str:
     fields = fields or {}
     timing = "".join(f"<li>{esc(duration_estimate(durations or {}, kind))}</li>"
                      for kind in ("post", "package", "creative"))
@@ -57,6 +58,9 @@ def create_content_html(product_id, *, created=False, fields=None, error=None, d
                 if created else "")
     if error:
         feedback = f'<div class="sg-warning" role="alert">{esc(error)}</div>'
+    brand_controls = """
+            {brand_controls}
+    """ if brand_canary else ""
     return f"""
     <section class="sg-surface sg-animator-entry sg-animator-top">
       <div><span class="sg-overline">НОВЫЙ ФОРМАТ · ВИДЕО С ОЗВУЧКОЙ</span>
@@ -132,6 +136,11 @@ def create_content_html(product_id, *, created=False, fields=None, error=None, d
             panel.querySelectorAll('select').forEach(select => {{
               select.disabled = !(checked && checked.value === 'story');
             }});
+            const model = panel.querySelector('select[name="image_model"]');
+            const confirmation = panel.querySelector('[data-story-paid-confirm]');
+            const paid = checked && checked.value === 'story' && model && model.value !== 'none';
+            confirmation.style.display = paid ? '' : 'none';
+            confirmation.querySelector('input').required = !!paid;
           }}
           form.addEventListener('change', sync);
           sync();
