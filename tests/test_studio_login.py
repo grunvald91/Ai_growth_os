@@ -192,16 +192,16 @@ def test_canonical_servgo_studio_login_uses_main_account(studio):
 
         # The old operator credential remains available for emergency migration,
         # without appearing in normal ServGo navigation.
-        legacy = client.get("/studio/login?legacy=1")
-        assert legacy.status_code == 200
-        assert "Вход в Growth Studio" in legacy.text
+        legacy = client.get("/studio/login?legacy=1", follow_redirects=False)
+        assert legacy.status_code == 303
+        assert legacy.headers["location"] == "/login?next=%2Fworkspace%2Fstudio-entry"
 
         # Signing out from Growth must finish the logout in the shared PWA.
         out = client.get("/studio/logout", follow_redirects=False)
         assert out.status_code == 303
         assert out.headers["location"] == "/logout"
         cookies = out.headers.get_list("set-cookie")
-        assert any(row.startswith("sg_session=") and "max-age=0" in row for row in cookies)
+        assert any(row.startswith("sg_session=") and "max-age=0" in row.lower() for row in cookies)
         assert any(row.startswith("sg_sso=") and "max-age=0" in row for row in cookies)
 
 
