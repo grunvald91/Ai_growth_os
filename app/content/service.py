@@ -27,12 +27,16 @@ def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC, *, commit=Tr
                                          editorial_brief=editorial_brief,
                                          request_publication=True, produce_ready_assets=True)
         title = "CONTENT: " + request.topic
-        description = ("SEO article, channel adaptations, two video scripts. "
-                       "No automatic publication or video rendering.")
+        description = ("Подготовка статьи, адаптаций для каналов и двух видеосценариев. "
+                       "Публикация и создание видеофайлов выполняются отдельно.")
     else:
         raise ValueError("Unknown content format")
     if dedupe_key:
         title = dedupe_key
+        if format == "package" and title.startswith("SEO-ARTICLE:"):
+            # The SEO planner queues an article-only job; channel/video packages
+            # are disabled in the saved content_request by queue_plan_item().
+            description = "Создание SEO-статьи по контент-плану."
     else:
         fingerprint = hashlib.sha256(request.model_dump_json().encode()).hexdigest()[:16]
         title = title[:275] + ':' + fingerprint
