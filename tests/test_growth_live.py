@@ -172,7 +172,9 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert '/studio/assets/growth-live.css?v=17' in page.text
     assert '/studio/assets/dispatcher.js?v=voice-glow-audio-20261102' in page.text
     assert '/studio/assets/growth-live.js?v=9' in page.text
-    assert 'Простое видео' in page.text
+    # A video is a creation format, not a standalone main-menu section.
+    nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
+    assert 'Простое видео' not in nav
     assert 'hero-intro' in page.text
     assert 'Добрый день, Марина' not in page.text
     assert 'initialTasks' not in page.text
