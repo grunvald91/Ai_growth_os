@@ -27,6 +27,9 @@ class StoryFrame(Strict):
     body: str = Field(default="", max_length=360)
     cta: str = Field(default="", max_length=90)
     logo_variant: Literal["original", "light", "dark"] = "original"
+    # Focus for deterministic crop (0 = left/top, 1 = right/bottom).
+    crop_x: float = Field(default=0.5, ge=0.0, le=1.0)
+    crop_y: float = Field(default=0.5, ge=0.0, le=1.0)
 
     @field_validator("heading", "body", "cta")
     @classmethod
@@ -198,7 +201,8 @@ def _rgba(color: str, alpha: int = 255) -> tuple[int, int, int, int]:
 
 
 def _background(brand: BrandStyle, source: bytes | None,
-                image_position: str) -> Image.Image:
+                image_position: str, *, crop_x: float = 0.5,
+                crop_y: float = 0.5) -> Image.Image:
     canvas = Image.new("RGBA", (WIDTH, HEIGHT), _rgba(brand.palette.background))
     if source is None:
         return canvas
@@ -217,13 +221,15 @@ def _background(brand: BrandStyle, source: bytes | None,
     except (OSError, Image.DecompressionBombError) as exc:
         raise ValueError("Некорректное изображение фона") from exc
     if image_position == "full":
-        fitted = ImageOps.fit(rgb, (WIDTH, HEIGHT), method=Image.Resampling.LANCZOS)
+        fitted = ImageOps.fit(rgb, (WIDTH, HEIGHT), method=Image.Resampling.LANCZOS,
+                              centering=(crop_x, crop_y))
         canvas.alpha_composite(fitted, (0, 0))
         return canvas
     # Section backgrounds cover a single half without introducing white padding.
     box = (0, 0, WIDTH, HEIGHT // 2) if image_position == "top" else (
         0, HEIGHT // 2, WIDTH, HEIGHT)
-    fitted = ImageOps.fit(rgb, (WIDTH, HEIGHT // 2), method=Image.Resampling.LANCZOS)
+    fitted = ImageOps.fit(rgb, (WIDTH, HEIGHT // 2), method=Image.Resampling.LANCZOS,
+                          centering=(crop_x, crop_y))
     canvas.alpha_composite(fitted, box[:2])
     return canvas
 
@@ -299,7 +305,8 @@ def render_story(brand: BrandStyle, frame: StoryFrame, *,
     _verify_copy_glyphs(brand.typography.heading, True, frame.heading + frame.cta)
     _verify_copy_glyphs(brand.typography.body, False, frame.body)
     layout = getattr(brand, frame.template)
-    image = _background(brand, background, layout.image_position)
+    image = _background(brand, background, layout.image_position,
+                        crop_x=frame.crop_x, crop_y=frame.crop_y)
     emblem = _logo(logo)
     x1, y1, x2, y2 = _logo_box(emblem, layout.logo_position)
     emblem = emblem.resize((x2 - x1, y2 - y1), Image.Resampling.LANCZOS)
