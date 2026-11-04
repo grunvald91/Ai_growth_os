@@ -221,6 +221,9 @@ def test_zip_rejects_incomplete_or_corrupted_final_frame(setup):
     res = client.get(f"/studio/products/{company.id}/tasks/{task.id}/images.zip")
     assert res.status_code == 409
     assert "полный ZIP" in res.text
+    gallery = client.get(f"/studio/products/{company.id}/tasks/{task.id}")
+    assert gallery.status_code == 200
+    assert "не созданы или повреждены" in gallery.text
 
 
 def test_form_requires_consent_for_paid_backgrounds(setup):
@@ -305,3 +308,20 @@ def test_free_editor_composition_runs_off_event_loop(setup, monkeypatch):
     assert res.status_code == 303
     assert event_threads and render_threads
     assert event_threads[0] != render_threads[0]
+
+
+
+def test_kill_switch_denies_paid_regeneration_even_for_previous_render(setup):
+    db, client, company, _, task, root, _ = setup
+    source = visible_images(db, company.id, task.id)[0]
+    uri = (f"/studio/products/{company.id}/tasks/{task.id}"
+           f"/stories/{source.id}/regenerate-background")
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        _env_file=None, products_root=root, brand_stories_enabled=False,
+        xai_api_key="unit-test")
+    blocked = client.post(
+        uri, data={"token":str(uuid4()),"model":"gemini","confirm":"yes"},
+        follow_redirects=False)
+    assert blocked.status_code == 403
+    assert not list(db.scalars(select(Artifact).where(
+        Artifact.kind == "creative_background_regen", Artifact.task_id == task.id)))
