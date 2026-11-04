@@ -156,6 +156,7 @@ def main():
                 page.set_viewport_size({'width': 390, 'height': 844})
                 page.locator('#bizBtn').click()
                 assert page.locator('#sgOrgMenu').is_visible()
+                page.locator('#sgOrgMenu .sg-org-option').first.wait_for(state='visible', timeout=10000)
                 assert page.locator('#sgOrgMenu').get_by_text(product.name, exact=True).count() >= 1
                 assert page.locator('#bizBtn').get_attribute('aria-expanded') == 'true'
                 page.mouse.click(52, 250)  # outside the dropdown
