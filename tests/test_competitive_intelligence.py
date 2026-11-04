@@ -309,3 +309,36 @@ async def test_worker_recovers_interrupted_run_and_unconfigured_models(api_db, t
     db.expire_all()
     assert service.get(queued_id)["error"] == "research_model_unconfigured"
     assert db.get(Task, queued_id).status == TaskStatus.FAILED
+
+
+
+@pytest.mark.asyncio
+async def test_run_automatically_collects_yandex_evidence(monkeypatch, db, product, tmp_path):
+    """An intelligence run searches its own market without the owner pressing Search."""
+    from app.competitive_intelligence import yandex_sources
+
+    calls = []
+    async def discovery(found_product, request, root, *, max_sources=10):
+        calls.append((found_product.id, request.region, max_sources))
+        return ResearchSourceBundle.model_validate({
+            "label": "Яндекс Карты: автоматический поиск организаций и сайтов",
+            "sources": [{
+                "url": "https://yandex.ru/maps/org/123",
+                "title": "Автосервис Сочи", "competitor": "Автосервис Сочи",
+                "platform": "Яндекс Карты",
+                "excerpt": "Справочник Яндекс Карты: Автосервис Сочи; адрес: Сочи",
+                "source_type": "website",
+            }]
+        }), "collected"
+    monkeypatch.setattr(yandex_sources, "collect_sources", discovery)
+    strong, jeff = ResearchProvider(), ResearchProvider()
+    service = build_intelligence(db, Settings(products_root=tmp_path), strong, jeff)
+    run_id = UUID(service.start(RunInput(
+        product_id=product.id, brief="Изучи локальных конкурентов",
+        region="Сочи", mode="weaknesses"))["id"])
+    await service.execute(run_id)
+    state = service.get(run_id)
+    assert calls == [(product.id, "Сочи", 10)]
+    assert state["source_discovery"]["status"] == "collected"
+    assert state["counts"]["found"] >= 1
+    assert service.evidence(run_id)[0]["platform"] == "Яндекс Карты"
