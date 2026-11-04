@@ -107,8 +107,12 @@ def image_prompt(draft, frame, number: int, total: int, ratio: str, *,
     )[:16000]
 
 
-def png_output(raw: bytes, *, ratio: str, branded: bool = False) -> bytes:
-    """Bounded decode, fit into intended ratio without stretching or cropping."""
+def png_output(raw: bytes, *, ratio: str, branded: bool = False,
+               preserve_source: bool = False) -> bytes:
+    """For paid backgrounds preserve native pixels; crop only in Story renderer.
+
+    Legacy image deliverables keep the original sizing and padding behavior.
+    """
     if not isinstance(raw, bytes) or not 0 < len(raw) <= 16_000_000:
         raise ValueError("Unexpected generated image size")
     try:
@@ -116,14 +120,15 @@ def png_output(raw: bytes, *, ratio: str, branded: bool = False) -> bytes:
             if source.width < 256 or source.height < 256 or source.width * source.height > 12_000_000:
                 raise ValueError("Generated image dimensions are outside limits")
             source.load()
-            image = source.convert("RGB")
+            image = ImageOps.exif_transpose(source).convert("RGB")
     except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
         raise ValueError("Image model did not return a usable image") from exc
     try:
         size = OUTPUT_SIZES[ratio]
     except KeyError as exc:
         raise ValueError("Unsupported image aspect ratio") from exc
-    target = (ImageOps.fit(image, size, method=Image.Resampling.LANCZOS)
+    target = (image if preserve_source else
+              ImageOps.fit(image, size, method=Image.Resampling.LANCZOS)
               if branded else
               ImageOps.pad(image, size, method=Image.Resampling.LANCZOS,
                            color="white", centering=(.5, .5)))
@@ -135,7 +140,8 @@ def png_output(raw: bytes, *, ratio: str, branded: bool = False) -> bytes:
     return output
 
 
-async def request_image(settings, model: str, prompt: str, ratio: str, *, client=None) -> bytes:
+async def request_image(settings, model: str, prompt: str, ratio: str, *,
+                        client=None, preserve_source: bool = False) -> bytes:
     """Call the chosen model exactly once; reject remote image URLs and malformed responses."""
     if model == GEMINI_MODEL:
         provider = ClaudeHubGeminiImageProvider(
@@ -185,7 +191,7 @@ async def request_image(settings, model: str, prompt: str, ratio: str, *, client
         raw = base64.b64decode(encoded, validate=True)
     except (KeyError, IndexError, TypeError, base64.binascii.Error) as exc:
         raise ValueError("Image API returned invalid data") from exc
-    return png_output(raw, ratio=ratio)
+    return png_output(raw, ratio=ratio, preserve_source=preserve_source)
 
 
 def generated_images(db, product_id: UUID, task_id: UUID) -> list[Artifact]:
@@ -277,9 +283,11 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
                         raise ValueError("Unrecorded creative image file failed validation")
             else:
                 picture = await (provider.generate(prompt, model=model, ratio=ratio)
-                                 if provider is not None else request_image(settings, model, prompt, ratio))
+                                 if provider is not None else request_image(
+                                     settings, model, prompt, ratio,
+                                     preserve_source=branded))
                 picture = png_output(picture, ratio=ratio,
-                                     branded=getattr(request, "brand_mode", "classic") == "brand")
+                                     preserve_source=branded)
                 temporary = directory / (filename + ".partial")
                 temporary.write_bytes(picture)
                 temporary.replace(path)

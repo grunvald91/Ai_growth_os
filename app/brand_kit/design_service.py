@@ -18,7 +18,7 @@ from app.brand_kit.models import BrandActive, BrandAsset, BrandVersion
 from app.brand_kit.renderer import HEIGHT, WIDTH, StoryFrame, render_story
 from app.brand_kit.service import verified_asset
 from app.brand_kit.quotas import enforce_quota
-from app.models.domain import Product
+from app.models.domain import Product, Artifact
 
 MAX_BACKGROUND_UPLOAD = 12_000_000
 MAX_BACKGROUND_STORED = 16_000_000
@@ -325,6 +325,26 @@ def delete_unused_background(db, root: Path, product_id: UUID, background_id: UU
     path.unlink(missing_ok=True)
 
 
+def restore_story_render(db, root: Path, product_id: UUID,
+                         render_id: UUID) -> Path:
+    """Restore an immutable PNG from snapshot/logo/background without any AI call."""
+    db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
+    render = db.scalar(select(BrandRender).where(
+        BrandRender.product_id == product_id, BrandRender.id == render_id))
+    if render is None:
+        raise LookupError("Готовая версия Stories не найдена")
+    try:
+        return verified_render(db, root, product_id, render_id)[1]
+    except LookupError:
+        composition = db.scalar(select(BrandComposition).where(
+            BrandComposition.product_id == product_id,
+            BrandComposition.id == render.composition_id))
+        if composition is None:
+            raise LookupError("Исходная композиция не найдена")
+        _restore_previous_render(db, root, product_id, composition, render)
+        return verified_render(db, root, product_id, render_id)[1]
+
+
 def delete_story_render(db, root: Path, product_id: UUID, render_id: UUID) -> None:
     """Explicit removal of one composed image and its private idempotency key."""
     product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
@@ -336,6 +356,19 @@ def delete_story_render(db, root: Path, product_id: UUID, render_id: UUID) -> No
         raise LookupError("Кадр не найден")
     if row.filename != str(row.id) + ".png":
         raise LookupError("Недопустимое имя файла")
+    # Growth keeps immutable revision pointers in JSON artifacts, not a FK.
+    # A deletion here otherwise destroys a finished task and its history.
+    references = db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id,
+        Artifact.kind == "creative_story_render",
+        Artifact.content.contains(str(render_id))))
+    for item in references:
+        try:
+            if json.loads(item.content).get("render_id") == str(render_id):
+                raise ValueError("Готовый кадр используется в задании Growth")
+        except (TypeError, json.JSONDecodeError):
+            # Reject corrupt metadata rather than deleting a possibly used PNG.
+            raise ValueError("Невозможно проверить ссылки на готовый кадр") from None
     path = _folder(root, "_brand_renders", product_id) / row.filename
     if path.exists() and not path.is_file() and not path.is_symlink():
         raise LookupError("Недопустимый тип файла")

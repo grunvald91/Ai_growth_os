@@ -393,7 +393,7 @@ def _finish_regeneration(db: Session, settings, product_id: UUID, task_id: UUID,
                          token: UUID, model_choice: str, raw: bytes):
     from app.content.creative_images import png_output
 
-    png = png_output(raw, ratio="9:16", branded=True)
+    png = png_output(raw, ratio="9:16", preserve_source=True)
     background = store_background(db, settings.products_root, product_id, png)
     frame = StoryFrame.model_validate(composition.spec)
     style = BrandStyle.model_validate(composition.brand_snapshot)
@@ -440,7 +440,8 @@ async def regenerate_background(product_id: UUID, task_id: UUID, artifact_id: UU
         artifact_id, token, fields["model"])
     try:
         prompt = image_prompt(draft, scene, number, len(draft.frames), "9:16", branded=True)
-        raw = await request_image(settings, model, prompt, "9:16")
+        raw = await request_image(settings, model, prompt, "9:16",
+                                  preserve_source=True)
         final_id = await run_in_threadpool(
             _finish_regeneration, db, settings, product_id, task_id,
             source, metadata, composition, intent_id, token, fields["model"], raw)
