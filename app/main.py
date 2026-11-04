@@ -41,6 +41,8 @@ from app.api.brand_kit import router as brand_kit_router
 app.include_router(brand_kit_router)
 from app.api.brand_kit_design import router as brand_kit_design_router
 app.include_router(brand_kit_design_router)
+from app.api.brand_story_editor import router as brand_story_editor_router
+app.include_router(brand_story_editor_router)
 from app.api.tune import router as tune_router
 app.include_router(tune_router)
 
