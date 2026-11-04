@@ -16,7 +16,7 @@ from app.api.content_studio import _owner_product, studio_page_shell
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.multipart_limits import IMAGE_UPLOAD_SLOTS, limited_multipart_form
 from app.brand_kit.contracts import ACCENTS, FONTS, GENERATORS, BrandStyle
-from app.brand_kit.models import BrandAsset
+from app.brand_kit.models import BrandAsset, BrandVersion
 from app.brand_kit.service import (
     ASSET_KINDS, MAX_FILE_BYTES, approve_version, delete_unused_logo, read_state,
     save_draft, store_asset, verified_asset,
@@ -90,8 +90,9 @@ def _brand_body(product_id, db: Session, error: str = "", *, can_approve: bool =
     ).order_by(BrandAsset.created_at.desc(), BrandAsset.id.desc()).limit(100)))
     referenced = {
         str(value)
-        for version in versions
-        for value in (version.config.get("logos") or {}).values() if value
+        for configuration in db.scalars(select(BrandVersion.config).where(
+            BrandVersion.product_id == product_id))
+        for value in (configuration.get("logos") or {}).values() if value
     }
     upload_form = (
         f'<form method="post" enctype="multipart/form-data" action="{base}/assets">'
