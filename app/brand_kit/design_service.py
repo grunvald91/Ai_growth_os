@@ -231,7 +231,7 @@ def create_composition(db, root: Path, product_id: UUID, version_id: UUID,
     if style_override is not None and pinned_task_id is None:
         raise ValueError("Редактирование стиля доступно только заданию")
     signature = json.dumps({
-        "style_override": style_override.model_dump(mode="json") if style_override else None,
+        **({"style_override": style_override.model_dump(mode="json")} if style_override else {}),
         "version_id": str(version_id),
         "background_id": str(background_id) if background_id else None,
         "frame": spec,

@@ -455,6 +455,13 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                     stage_payload["strategy"] = strategy.model_dump(mode="json")
                 rules = prompt_text("creative.common") + prompt_text(
                     "creative.strategist" if agent == "creative_strategist" else "creative.director")
+                if request.brand_mode == "brand" and agent == "creative_director":
+                    rules += (
+                        " BRANDED STORIES: each on_screen_text MUST be short, "
+                        "no more than 110 characters and at most two short lines; "
+                        "draft.cta MUST be at most 65 characters. All actual visible "
+                        "text is composed by the deterministic renderer, not the image model."
+                    )
                 def validate_candidate(data):
                     parsed = schema.model_validate(relax(schema, data))
                     if any(source_id not in verified for source_id in parsed.evidence_ids):
@@ -574,6 +581,14 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             run_ids.append(image_run.id)
             db.commit()
             success = await generate_images(db, settings, request, draft, task_id=task_id)
+            if request.brand_mode == "brand":
+                # Render successful backgrounds even when another paid frame
+                # failed, so the user can inspect existing completed screens.
+                active_stage = "brand_story_composition"
+                from app.content.brand_story_pipeline import compose_saved_stories
+                composed = compose_saved_stories(
+                    db, settings.products_root, request, draft, task_id)
+                success = success and composed
             image_run = db.get(AgentRun, image_run.id)
             image_run.status = "completed" if success else "failed"
             image_run.finished_at = datetime.now(timezone.utc)
@@ -582,12 +597,13 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                 db.get(Task, task.id).status = TaskStatus.FAILED
                 db.commit()
                 return False
-        if request.brand_mode == "brand":
+        if request.brand_mode == "brand" and request.image_model == "none":
             active_stage = "brand_story_composition"
             from app.content.brand_story_pipeline import compose_saved_stories
-            # Images are background-only in branded mode; never expose them
-            # as completed Stories without validated deterministic overlays.
-            compose_saved_stories(db, settings.products_root, request, draft, task_id)
+            if not compose_saved_stories(db, settings.products_root, request, draft, task_id):
+                db.get(Task, task.id).status = TaskStatus.FAILED
+                db.commit()
+                return False
         db.get(Task, task.id).status = TaskStatus.COMPLETED
         db.commit()
         return True

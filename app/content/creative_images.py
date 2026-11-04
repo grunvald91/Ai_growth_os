@@ -107,7 +107,7 @@ def image_prompt(draft, frame, number: int, total: int, ratio: str, *,
     )[:16000]
 
 
-def png_output(raw: bytes, *, ratio: str) -> bytes:
+def png_output(raw: bytes, *, ratio: str, branded: bool = False) -> bytes:
     """Bounded decode, fit into intended ratio without stretching or cropping."""
     if not isinstance(raw, bytes) or not 0 < len(raw) <= 16_000_000:
         raise ValueError("Unexpected generated image size")
@@ -123,7 +123,10 @@ def png_output(raw: bytes, *, ratio: str) -> bytes:
         size = OUTPUT_SIZES[ratio]
     except KeyError as exc:
         raise ValueError("Unsupported image aspect ratio") from exc
-    target = ImageOps.pad(image, size, method=Image.Resampling.LANCZOS, color="white", centering=(.5, .5))
+    target = (ImageOps.fit(image, size, method=Image.Resampling.LANCZOS)
+              if branded else
+              ImageOps.pad(image, size, method=Image.Resampling.LANCZOS,
+                           color="white", centering=(.5, .5)))
     buffer = io.BytesIO()
     target.save(buffer, format="PNG", optimize=True)
     output = buffer.getvalue()
@@ -258,7 +261,8 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
             else:
                 picture = await (provider.generate(prompt, model=model, ratio=ratio)
                                  if provider is not None else request_image(settings, model, prompt, ratio))
-                picture = png_output(picture, ratio=ratio)
+                picture = png_output(picture, ratio=ratio,
+                                     branded=getattr(request, "brand_mode", "classic") == "brand")
                 temporary = directory / (filename + ".partial")
                 temporary.write_bytes(picture)
                 temporary.replace(path)
