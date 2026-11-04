@@ -41,7 +41,7 @@ jobs:
             'docker exec -i ai-growth-os-api-1 python -' < scripts/seo_acceptance_readonly_20261104.py
           # Only machine-readable exception class is emitted; no prompts, UUIDs or content.
           sshpass -e ssh -o BatchMode=no -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
-            'docker logs --since 50m ai-growth-os-api-1 2>&1' \
+            'docker logs --since 50m ai-growth-os-worker-1 2>&1' \
             | python3 -c 'import re,sys; lines=[s for s in sys.stdin if "Article production failed for task" in s]; print("SEO_WORKER_FAILURE_CLASSES", [m.group(1) for s in lines[-12:] if (m := re.search(r"\(([A-Za-z]+(?:Error|Exception))\)\s*$", s.strip()))])'
           sshpass -e ssh -o BatchMode=no -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
             "docker ps --filter label=com.docker.compose.project=ai-growth-os --format '{{.Names}} {{.Status}}'" \
