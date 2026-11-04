@@ -45,8 +45,8 @@ jobs:
           from app.core.config import get_settings
           from app.db.session import SessionLocal
           from app.models.domain import Product, Task, Artifact, AgentRun, Publication
-          from app.seo.activation import is_enabled
-          from app.seo.queue import SEO_TASK_PREFIX
+          from app.seo.activation import is_enabled, editorial_preferences
+          from app.seo.queue import SEO_TASK_PREFIX, articles_started_today
 
           settings = get_settings()
           print("app_release_sha=", str(settings.release_sha)[:12])
@@ -59,6 +59,9 @@ jobs:
               if product is None:
                   raise SystemExit(2)
               print("servgo_seo_enabled=", bool(is_enabled(db, product.id)))
+              prefs = editorial_preferences(db, product.id, default_articles_per_day=settings.seo_articles_per_day)
+              print("seo_generation_quota=", prefs.articles_per_day, "timezone=", prefs.timezone_name)
+              print("seo_generation_attempts_today=", articles_started_today(db, product_id=product.id))
               jobs = list(db.scalars(select(Task).where(
                   Task.product_id == product.id, Task.assigned_agent == "content_factory",
                   Task.title.like(f"{SEO_TASK_PREFIX}%")
@@ -94,6 +97,8 @@ jobs:
                   }, ensure_ascii=False))
               print("DONE_READ_ONLY")
           PY
+          echo '=== Worker containers (read only)'
+          docker ps --filter label=com.docker.compose.project=ai-growth-os --format '{{.Names}} {{.Status}}'
           echo '=== Public HTTPS status (no requests with user data)'
           for path in /blog /blog/sitemap.xml /robots.txt; do
             curl --max-time 15 -sS --resolve servgo.ru:443:127.0.0.1 -o /dev/null \
