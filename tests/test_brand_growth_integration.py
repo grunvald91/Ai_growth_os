@@ -138,7 +138,7 @@ async def test_pin_checkpoint_and_reuse_paid_backgrounds_after_new_approval(bran
     assert compose_saved_stories(db, root, pinned, draft, task.id)
     assert len(fake.calls) == 3
     assert len(visible_images(db, company.id, task.id)) == 3
-    assert client.get(f"/studio/products/{other.id}/tasks/{task.id}/images.zip").status_code == 401
+    assert client.get(f"/studio/products/{other.id}/tasks/{task.id}/images.zip").status_code == 404
 
 
 @pytest.mark.asyncio

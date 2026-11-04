@@ -136,7 +136,15 @@ def visible_images(db, product_id: UUID, task_id: UUID) -> list[Artifact]:
         try:
             number = int(json.loads(item.content)["frame_number"])
             if 1 <= number <= 10:
-                result[number] = item
+                previous = result.get(number)
+                current_revision = int(json.loads(item.content).get("revision", 0))
+                previous_revision = (int(json.loads(previous.content).get("revision", 0))
+                                     if previous is not None else -1)
+                if current_revision > previous_revision or (
+                        current_revision == previous_revision and
+                        (previous is None or (item.created_at, str(item.id)) >
+                         (previous.created_at, str(previous.id)))):
+                    result[number] = item
         except (ValueError, KeyError, TypeError):
             continue
     return [result[n] for n in sorted(result)]
