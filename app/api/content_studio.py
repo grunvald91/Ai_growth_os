@@ -1906,7 +1906,8 @@ def studio_materials(product_id: UUID, kind: str = "all", q: str = "", page: int
 
 
 @router.get("/studio/products/{product_id}/materials/{artifact_id}", response_class=HTMLResponse)
-def studio_material_detail(product_id: UUID, artifact_id: UUID, db: Session = Depends(get_db)):
+def studio_material_detail(product_id: UUID, artifact_id: UUID, db: Session = Depends(get_db),
+                           settings=Depends(get_settings)):
     product = db.get(Product, product_id)
     if product is None:
         raise HTTPException(404, "Product not found")
@@ -1920,7 +1921,7 @@ def studio_material_detail(product_id: UUID, artifact_id: UUID, db: Session = De
             f"/studio/products/{product_id}/whiteboard/{record.task_id}", status_code=303,
         )
     response = HTMLResponse(material_detail_page(
-        db, product, record, root=get_settings().products_root))
+        db, product, record, root=settings.products_root))
     response.headers["Cache-Control"] = "no-store"
     return response
 
