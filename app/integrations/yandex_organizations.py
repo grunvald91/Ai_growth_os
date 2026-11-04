@@ -3,7 +3,7 @@
 No response data is persisted here. The key stays in the Growth service. This is
 not Yandex Cloud Search API or a source of business email addresses.
 
-Paid/commercial usage and data-storage permissions must be confirmed separately.
+The owner's server-side API key enables lookup; no unrelated authorization flags.
 """
 from __future__ import annotations
 
@@ -17,34 +17,23 @@ from urllib.parse import urlsplit
 import httpx
 
 ENDPOINT = "https://search-maps.yandex.ru/v1/"
-_TRUE = {"1", "true", "yes", "on"}
-
 
 class YandexOrganizationsError(Exception):
     """Sanitized provider failure. Never attach request URLs containing apikey."""
 
 
-def _enabled(name: str) -> bool:
-    return os.getenv(name, "").strip().lower() in _TRUE
-
-
 def capability() -> dict:
-    """Do not imply an API key proves commercial or storage entitlement."""
-    return {
-        "key_configured": bool(os.getenv("API_YANDEX", "").strip()),
-        "license_confirmed": _enabled("SERVGO_YANDEX_PPO_LICENSE_CONFIRMED"),
-        "storage_allowed": _enabled("SERVGO_YANDEX_PPO_STORAGE_ALLOWED"),
-        "enabled": bool(os.getenv("API_YANDEX", "").strip())
-                   and _enabled("SERVGO_YANDEX_PPO_LICENSE_CONFIRMED"),
-        "daily_budget": budget(),
-    }
+    """Operational availability, not contract or commercial entitlement inference."""
+    active = bool(os.getenv("API_YANDEX", "").strip())
+    return {"key_configured": active, "enabled": active, "daily_budget": budget()}
 
 
 def budget() -> int:
+    """Operator-configured allowance; default 1000 requests per UTC day."""
     try:
-        return max(1, min(1000, int(os.getenv("SERVGO_YANDEX_PPO_DAILY_BUDGET", "50"))))
+        return max(1, int(os.getenv("SERVGO_YANDEX_PPO_DAILY_BUDGET", "1000")))
     except ValueError:
-        return 50
+        return 1000
 
 
 def _reserve_request(quota_path: Path) -> None:
@@ -104,15 +93,14 @@ def normalize(payload: dict) -> dict:
             "email": None,
             "source": "Яндекс Карты",
         })
-    return {"organizations": result, "source": "Яндекс Карты",
-            "storage_allowed": capability()["storage_allowed"]}
+    return {"organizations": result, "source": "Яндекс Карты"}
 
 
 async def search(query: str, city: str, *, quota_path: Path, results: int = 25,
                  skip: int = 0, transport: httpx.AsyncBaseTransport | None = None) -> dict:
     config = capability()
     if not config["enabled"]:
-        raise YandexOrganizationsError("Поиск Яндекса не активирован: проверьте ключ и лицензию")
+        raise YandexOrganizationsError("API_YANDEX не передан в окружение сервиса Growth")
     if not 2 <= len(query.strip()) <= 100 or not 2 <= len(city.strip()) <= 80:
         raise YandexOrganizationsError("Укажите нишу и город")
     if not 1 <= results <= 50 or not 0 <= skip <= 1000 or skip % results != 0:
