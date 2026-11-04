@@ -4,6 +4,7 @@ on:
     branches: [qa/seo-e2e-readonly-20261104]
     paths:
       - .github/workflows/seo-acceptance-inventory-20261104.yml
+      - scripts/seo_acceptance_readonly_20261104.py
 permissions:
   contents: read
 concurrency:
