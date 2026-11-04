@@ -320,8 +320,11 @@ def test_creative_json_parser_accepts_safe_wrappers_but_not_truncated_prose():
     assert parse_creative_json(json.dumps(plain, ensure_ascii=False)) == value
     with pytest.raises(json.JSONDecodeError):
         parse_creative_json(plain[:-5])
+    # One complete JSON object enclosed in prose is recoverable locally.
+    assert parse_creative_json("Пояснение\n" + plain) == value
+    # Multiple complete objects are ambiguous and must not be guessed.
     with pytest.raises(json.JSONDecodeError):
-        parse_creative_json("Пояснение\n" + plain)
+        parse_creative_json("Вариант 1: " + plain + "\nВариант 2: " + plain)
     with pytest.raises(ValueError, match="JSON object"):
         parse_creative_json("[1, 2]")
     with pytest.raises(ValueError, match="too large"):
