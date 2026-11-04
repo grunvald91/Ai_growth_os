@@ -147,8 +147,34 @@ def _new_revision(db, root, company_id, task_id, source, metadata, composition,
     return artifact
 
 
+def _history(db, root, company_id: UUID, task_id: UUID, frame_no: int) -> str:
+    """Every immutable revision is linked to its owner-verified preview and PNG."""
+    history = []
+    for artifact in composed_images(db, company_id, task_id):
+        try:
+            meta = json.loads(artifact.content)
+            if int(meta.get("frame_number", -1)) != frame_no:
+                continue
+            verified_gallery_image(db, root, company_id, task_id, artifact)
+            revision = int(meta.get("revision", 0))
+        except (ValueError, KeyError, TypeError, LookupError, OSError):
+            continue
+        history.append((revision, artifact.created_at, str(artifact.id), artifact.id))
+    history.sort(reverse=True)
+    if not history:
+        return '<p class="sg-muted">Сохранённых версий пока нет.</p>'
+    base = f"/studio/products/{company_id}/tasks/{task_id}"
+    items = "".join(
+        '<li><span>Версия ' + str(number+1) + '</span> '
+        f'<a href="{base}/stories/{artifact_id}/edit">Открыть</a> · '
+        f'<a href="{base}/images/{artifact_id}?download=true">PNG</a></li>'
+        for number, _, _, artifact_id in history)
+    return ('<details class="sg-surface" open><summary>История версий · '
+            + str(len(history)) + '</summary><ol>' + items + '</ol></details>')
+
+
 def _page(product, task_id, artifact_id, *, style, frame, metadata,
-          error: str = ""):
+          history_html: str = "", error: str = ""):
     base = f"/studio/products/{product.id}/tasks/{task_id}"
     here = f"{base}/stories/{artifact_id}/edit"
     layout = getattr(style, frame.template)
@@ -216,7 +242,8 @@ def _page(product, task_id, artifact_id, *, style, frame, metadata,
        <p><a class="btn secondary" href="{base}/stories/{artifact_id}/regenerate-background">
         Перегенерировать только фон · платный вызов</a></p>
       </section>
-    </div>'''
+    </div>
+    {history_html}'''
     return HTMLResponse(studio_page_shell(
         product, active="work", title="Редактор Stories",
         subtitle="Результат в фирменном стиле компании. Сохранение бесплатно.", body=body),
@@ -230,7 +257,9 @@ def edit_story(product_id: UUID, task_id: UUID, artifact_id: UUID,
         db, settings.products_root, product_id, task_id, artifact_id)
     return _page(product, task_id, artifact_id, style=BrandStyle.model_validate(
         composition.brand_snapshot), frame=StoryFrame.model_validate(
-        composition.spec), metadata=metadata)
+        composition.spec), metadata=metadata,
+        history_html=_history(db, settings.products_root, product_id, task_id,
+                              int(metadata["frame_number"])))
 
 
 @router.post("/studio/products/{product_id}/tasks/{task_id}/stories/{artifact_id}/edit")
@@ -266,7 +295,10 @@ async def save_story_edit(product_id: UUID, task_id: UUID, artifact_id: UUID,
         db.rollback()
         return _page(product, task_id, artifact_id, style=BrandStyle.model_validate(
             composition.brand_snapshot), frame=StoryFrame.model_validate(
-            composition.spec), metadata=metadata, error=f"Не удалось сохранить: {str(exc)[:220]}")
+            composition.spec), metadata=metadata,
+            history_html=_history(db, settings.products_root, product_id, task_id,
+                                  int(metadata["frame_number"])),
+            error=f"Не удалось сохранить: {str(exc)[:220]}")
     return RedirectResponse(
         f"/studio/products/{product_id}/tasks/{task_id}/stories/{result.id}/edit",
         status_code=303)
