@@ -40,10 +40,11 @@ def _fetch(settings, user_id: int, business_id: int) -> str | None:
     return None
 
 
-def servgo_role(settings, user_id: int, business_id: int, *, now: float | None = None) -> str | None:
+def servgo_role(settings, user_id: int, business_id: int, *, now: float | None = None,
+                fresh: bool = False) -> str | None:
     current = now if now is not None else time.monotonic()
     cached = _CACHE.get((user_id, business_id))
-    if cached and cached[0] > current:
+    if not fresh and cached and cached[0] > current:
         return cached[1]
     try:
         role = _fetch(settings, user_id, business_id)
@@ -75,7 +76,8 @@ def forget(user_id: int | None = None, business_id: int | None = None) -> None:
                 _BUSINESS_IDS_CACHE.pop(key, None)
 
 
-def servgo_business_ids(settings, user_id: int, *, now: float | None = None) -> frozenset[int] | None:
+def servgo_business_ids(settings, user_id: int, *, now: float | None = None,
+                        fresh: bool = False) -> frozenset[int] | None:
     """Authorized business IDs, never derived from the Growth database alone.
 
     None means the authenticated internal list is unavailable (old ServGo
@@ -88,7 +90,7 @@ def servgo_business_ids(settings, user_id: int, *, now: float | None = None) -> 
     cache_key = (settings.servgo_api_url.rstrip("/"), user_id)
     current = now if now is not None else time.monotonic()
     cached = _BUSINESS_IDS_CACHE.get(cache_key)
-    if cached and cached[0] > current:
+    if not fresh and cached and cached[0] > current:
         return cached[1]
     try:
         with httpx.Client(timeout=TIMEOUT_SECONDS, transport=_transport) as client:
