@@ -929,16 +929,26 @@ def test_link_attempt_without_servgo_cookie_is_denied(env):
     assert response.status_code == 403
 
 
+def _browser_identity(uid: int, *, nonce: str = "n" * 32, secret: str = SSO) -> str:
+    body = b64(json.dumps({"v": 1, "u": uid, "n": nonce,
+                           "e": int(time.time()) + 3600}, separators=(",", ":")).encode())
+    sig = b64(hmac.new(secret.encode(), b"servgo-browser-identity-v1:" + body.encode(),
+                       hashlib.sha256).digest())
+    return body + "." + sig
+
+
 def test_canonical_servgo_sso_overrides_legacy_operator_cookie(env):
-    """On the unified origin the account chosen in ServGo is authoritative."""
-    db, settings, salon, other, _ = env
+    """The canonical origin uses only the currently signed-in ServGo identity."""
+    _, settings, salon, other, _ = env
     settings.studio_servgo_gateway_enabled = True
+    from app.core.studio_sessions import issue, fingerprint
     with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
-        login = client.post("/studio/login",
-                            data={"username": "owner", "password": "correct-secret"},
-                            headers={"origin": "https://servgo.ru"})
-        assert login.status_code == 303
-        assert client.cookies.get("sg_session")
+        # Old operator cookies cannot bypass the common account on this host.
+        old_owner = issue(settings, "owner", fingerprint("owner\\0correct-secret"))
+        client.cookies.set("sg_session", old_owner)
+        assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 401
+
+        client.cookies.set("sg_identity", _browser_identity(7))
         response = client.get("/studio/sso", params={"t": make_ticket(jti="canonical-issuer1")})
         assert response.status_code == 303
         cookies = [row.lower() for row in response.headers.get_list("set-cookie")]
@@ -946,3 +956,28 @@ def test_canonical_servgo_sso_overrides_legacy_operator_cookie(env):
         assert any(row.startswith("sg_sso=") and "max-age=0" not in row for row in cookies)
         assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
         assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 404
+
+        # Switching to another ServGo account does not preserve the old Studio login.
+        client.cookies.set("sg_identity", _browser_identity(8))
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+
+        # Even another login by the SAME user must exchange a fresh one-use ticket.
+        client.cookies.set("sg_identity", _browser_identity(7, nonce="z" * 32))
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+        client.cookies.delete("sg_identity")
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+
+
+def test_canonical_sso_ticket_requires_current_servgo_identity(env):
+    _, settings, salon, _, _ = env
+    settings.studio_servgo_gateway_enabled = True
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
+        url = "/studio/sso"
+        denied = client.get(url, params={"t": make_ticket(jti="different-user-1")})
+        assert denied.status_code == 403
+        client.cookies.set("sg_identity", _browser_identity(9))
+        denied = client.get(url, params={"t": make_ticket(jti="different-user-2")})
+        assert denied.status_code == 403
+        client.cookies.set("sg_identity", _browser_identity(7))
+        ok = client.get(url, params={"t": make_ticket(jti="different-user-3")})
+        assert ok.status_code == 303
