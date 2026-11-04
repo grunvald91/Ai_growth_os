@@ -164,7 +164,7 @@ async def test_paid_regeneration_requires_explicit_consent_and_deduplicates_toke
     no=c.post(url,data={"token":str(uuid4()),"model":"gemini"})
     assert no.status_code==422
     calls=[]
-    async def fake_request(settings,model,prompt,ratio):
+    async def fake_request(settings,model,prompt,ratio,*,preserve_source=False):
         calls.append((model,prompt,ratio))
         stream=io.BytesIO()
         Image.new("RGB",(600,1000),(17,111,211)).save(stream,"PNG")
@@ -270,7 +270,7 @@ def test_paid_nonce_checked_after_more_than_200_prior_confirmations(setup, monke
     db.commit()
     from app.content import creative_images
     calls = []
-    async def fake_image(settings, model, prompt, ratio):
+    async def fake_image(settings, model, prompt, ratio, *, preserve_source=False):
         calls.append(prompt)
         stream = io.BytesIO()
         Image.new("RGB", (600, 1000), (40, 80, 120)).save(stream, "PNG")
@@ -325,3 +325,27 @@ def test_kill_switch_denies_paid_regeneration_even_for_previous_render(setup):
     assert blocked.status_code == 403
     assert not list(db.scalars(select(Artifact).where(
         Artifact.kind == "creative_background_regen", Artifact.task_id == task.id)))
+
+
+def test_gallery_recovers_older_healthy_revision_when_latest_is_damaged(setup):
+    from app.content.brand_story_pipeline import verified_visible_images
+    db, client, company, _, task, root, style = setup
+    original = visible_images(db, company.id, task.id)[0]
+    base = f"/studio/products/{company.id}/tasks/{task.id}"
+    route = f"{base}/stories/{original.id}/edit"
+    assert client.post(route, data=edit_payload(style),
+                       follow_redirects=False).status_code == 303
+    latest = visible_images(db, company.id, task.id)[0]
+    assert latest.id != original.id
+    newer_path = verified_gallery_image(db, root, company.id, task.id, latest)
+    newer_path.unlink()
+    fallback, damaged = verified_visible_images(db, root, company.id, task.id)
+    assert damaged == [1]
+    assert fallback[0].id == original.id
+    assert verified_gallery_image(db, root, company.id, task.id, original).exists()
+    page = client.get(base)
+    assert page.status_code == 200
+    assert "показана предыдущая исправная версия" in page.text
+    assert f"/images/{original.id}" in page.text
+    assert f"/images/{latest.id}" not in page.text
+    assert client.get(base + "/images.zip").status_code == 409

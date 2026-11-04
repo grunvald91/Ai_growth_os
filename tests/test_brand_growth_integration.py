@@ -161,12 +161,18 @@ async def test_partial_paid_failure_renders_good_frames_without_rebilling(brand_
                                      task_id=task.id, provider=fake)
     assert not compose_saved_stories(db, root, request, draft, task.id)
     assert len(visible_images(db, company.id, task.id)) == 2
+    # The model may have charged frame 2 before losing its response.
+    # Unlike confirmed file checkpoints, an ambiguous paid frame MUST NOT
+    # be retried automatically (even when frames 1 and 3 succeeded).
     another = FakeProvider()
-    assert await generate_images(db, settings, request, draft,
-                                 task_id=task.id, provider=another)
-    assert len(another.calls) == 1
-    assert compose_saved_stories(db, root, request, draft, task.id)
-    assert len(visible_images(db, company.id, task.id)) == 3
+    assert not await generate_images(db, settings, request, draft,
+                                     task_id=task.id, provider=another)
+    assert len(another.calls) == 0
+    assert len(visible_images(db, company.id, task.id)) == 2
+    intents = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_image_intent")))
+    assert len(intents) == 3
+    assert [json.loads(a.content)["state"] for a in intents].count("pending") == 1
 
 
 def test_own_images_render_locally_and_legacy_requests_unchanged(brand_growth):
@@ -271,3 +277,113 @@ async def test_kill_switch_stops_queued_paid_job_before_model_call(brand_growth)
     assert not await run_creative_once(db, disabled, command, task_id=task.id,
                                        provider=PaidMustNotRun())
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_paid_timeout_never_rebills_unknown_frame(brand_growth):
+    from httpx import ReadTimeout
+    db, _, company, _, _, root, _ = brand_growth
+    task = queue_creative(db, _request(company), settings=_canary(company))
+    request = CreativeRequest.model_validate_json(db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_request")).content)
+    draft = _draft()
+    settings = Settings(_env_file=None, products_root=root, xai_api_key="unit-test")
+    class TimeoutProvider:
+        calls = 0
+        async def generate(self, *args, **kwargs):
+            self.calls += 1
+            raise ReadTimeout("provider accepted charge, reply lost")
+    first = TimeoutProvider()
+    assert not await generate_images(db, settings, request, draft, task_id=task.id, provider=first)
+    assert first.calls == 3
+    second = FakeProvider()
+    assert not await generate_images(db, settings, request, draft, task_id=task.id, provider=second)
+    assert second.calls == []
+    intents = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_image_intent")))
+    assert len(intents) == 3
+    assert all(json.loads(r.content)["state"] == "pending" for r in intents)
+
+
+@pytest.mark.asyncio
+async def test_orphaned_native_background_reconciles_original_paid_intent(brand_growth):
+    from app.content.creative_images import image_folder
+    db, _, company, _, _, root, _ = brand_growth
+    task = queue_creative(db, _request(company), settings=_canary(company))
+    request = CreativeRequest.model_validate_json(db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_request")).content)
+    settings = Settings(_env_file=None, products_root=root, xai_api_key="unit-test")
+    draft = _draft()
+    provider = FakeProvider()
+    assert await generate_images(db, settings, request, draft, task_id=task.id, provider=provider)
+    saved = list(generated_images(db, company.id, task.id))
+    # Simulate a process that saved the atomic PNG but not its artifact.
+    db.delete(saved[0])
+    db.commit()
+    intent = next(row for row in db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_image_intent"))
+                  if json.loads(row.content)["frame_number"] == 1)
+    meta = json.loads(intent.content)
+    meta["state"] = "pending"
+    intent.content = json.dumps(meta)
+    db.commit()
+    second = FakeProvider()
+    assert await generate_images(db, settings, request, draft, task_id=task.id,
+                                 provider=second)
+    assert second.calls == []
+    assert json.loads(intent.content)["state"] == "completed"
+    assert (image_folder(root, company.id, task.id) / "frame-01.png").exists()
+
+
+def test_missing_composed_png_restores_from_original_snapshot_without_paid_api(brand_growth):
+    from app.brand_kit.design_service import verified_render
+    db, _, company, _, _, root, _ = brand_growth
+    task = queue_creative(db, _request(company).model_copy(update={
+        "image_model": "none"}), settings=_canary(company))
+    request = CreativeRequest.model_validate_json(db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_request")).content)
+    spec = _draft()
+    assert compose_saved_stories(db, root, request, spec, task.id)
+    frame = visible_images(db, company.id, task.id)[0]
+    rid = UUID(json.loads(frame.content)["render_id"])
+    _, path = verified_render(db, root, company.id, rid)
+    original = path.read_bytes()
+    path.unlink()
+    assert compose_saved_stories(db, root, request, spec, task.id)
+    assert verified_gallery_image(db, root, company.id, task.id, frame).read_bytes() == original
+    assert len(visible_images(db, company.id, task.id)) == 3
+
+
+def test_growth_referenced_render_cannot_be_deleted_from_brand_library(brand_growth):
+    from app.brand_kit.design_service import delete_story_render
+    db, _, company, _, _, root, _ = brand_growth
+    task = queue_creative(db, _request(company).model_copy(update={
+        "image_model": "none"}), settings=_canary(company))
+    request = CreativeRequest.model_validate_json(db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_request")).content)
+    assert compose_saved_stories(db, root, request, _draft(), task.id)
+    frame = visible_images(db, company.id, task.id)[0]
+    rid = UUID(json.loads(frame.content)["render_id"])
+    with pytest.raises(ValueError, match="используется"):
+        delete_story_render(db, root, company.id, rid)
+    assert verified_gallery_image(db, root, company.id, task.id, frame).exists()
+
+
+def test_native_background_keeps_both_edges_until_final_focal_crop(brand_growth):
+    from app.content.creative_images import png_output
+    from app.brand_kit.renderer import _background
+    db, _, company, _, _, root, style = brand_growth
+    source = Image.new("RGB", (1200, 800), (255, 0, 0))
+    for x in range(600, 1200):
+        for y in range(800):
+            source.putpixel((x, y), (0, 0, 255))
+    data = __import__("io").BytesIO()
+    source.save(data, "PNG")
+    native = png_output(data.getvalue(), ratio="9:16", preserve_source=True)
+    with Image.open(__import__("io").BytesIO(native)) as unchanged:
+        assert unchanged.size == (1200, 800)
+    left = _background(style, native, "full", crop_x=0.0)
+    right = _background(style, native, "full", crop_x=1.0)
+    assert left.getpixel((450, 500)) != right.getpixel((450, 500))
+    assert left.getpixel((10, 500))[:3] != (255, 255, 255)
+    assert right.getpixel((10, 500))[:3] != (255, 255, 255)
