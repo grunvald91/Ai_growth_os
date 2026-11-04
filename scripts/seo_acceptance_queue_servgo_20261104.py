@@ -106,10 +106,13 @@ async def main():
         profile = load_company_profile(settings.products_root, company.slug).profile
         if profile is None:
             raise RuntimeError("Verified ServGo marketing profile unavailable")
-        buyer = "Владельцы и управляющие небольших сервисных бизнесов с записью по времени"
-        buyers = tuple(profile.customers.primary_segments)
-        if buyer not in buyers:
-            raise RuntimeError("Intended buyer is not declared in current company profile")
+        buyers = tuple(s for s in profile.customers.primary_segments if s.strip())
+        category = (profile.identity.category or "").casefold()
+        if "b2b" not in category or not buyers:
+            raise RuntimeError("Live ServGo profile has no verified B2B buyer segment")
+        buyer = next((s for s in buyers if any(word in s.casefold()
+            for word in ("владельц", "управляющ", "предпринимател", "бизнес"))), buyers[0])
+        emit("selected_declared_buyer", {"buyer_segment": buyer, "segment_count": len(buyers)})
         if any(t["query"] in planned_queries(db, company.id) for t in TOPICS):
             raise RuntimeError("One acceptance query is already queued/published; no duplicates allowed")
         core_clusters = []
