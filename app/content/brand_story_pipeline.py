@@ -125,6 +125,25 @@ def story_frame(draft, source, *, count: int) -> StoryFrame:
     })
 
 
+def preflight_brand_story_layout(db, root: Path, request, draft, task_id: UUID) -> None:
+    """Use real approved fonts/logo/layout, not only character counts, pre-billing."""
+    from app.brand_kit.renderer import render_story
+    from app.brand_kit.service import verified_asset
+
+    validate_brand_story_copy(draft)
+    version = validate_pinned_request(db, request, task_id)
+    style = BrandStyle.model_validate(version.config)
+    for source in draft.frames:
+        frame = story_frame(draft, source, count=len(draft.frames))
+        variant = getattr(style.logos, frame.logo_variant) or style.logos.original
+        if variant is None:
+            raise ValueError("Фирменный стиль не содержит логотип")
+        _, logo_path = verified_asset(db, root, request.product_id, variant)
+        # Rendering with a solid brand background validates exact text size,
+        # glyph support, contrast and safe bounds without calling the image AI.
+        render_story(style, frame, logo=logo_path.read_bytes())
+
+
 def composed_images(db, product_id: UUID, task_id: UUID) -> list[Artifact]:
     return list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.task_id == task_id,

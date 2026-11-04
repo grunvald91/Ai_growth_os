@@ -572,6 +572,12 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                 status="awaiting_approval",
             )
             db.commit()
+        if request.brand_mode == "brand":
+            active_stage = "brand_layout_preflight"
+            from app.content.brand_story_pipeline import preflight_brand_story_layout
+            await asyncio.to_thread(
+                preflight_brand_story_layout,
+                db, settings.products_root, request, draft, task_id)
         if request.image_model != "none":
             from app.content.creative_images import generate_images, resolve_model
             model_name = resolve_model(settings, request.image_model)
