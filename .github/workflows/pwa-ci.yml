@@ -151,8 +151,8 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python tests/test_studio_sso.py
-          python tests/test_studio_identity.py
-          python tests/test_studio_auth_login.py
+          python -m unittest discover -s tests -p test_studio_identity.py -v
+          python -m unittest discover -s tests -p test_studio_auth_login.py -v
 
       - name: Install nginx for an isolated staging syntax check
         run: sudo apt-get update -qq && sudo apt-get install -y -qq nginx >/dev/null
