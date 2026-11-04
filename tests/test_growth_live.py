@@ -150,7 +150,7 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
     assert '/studio/assets/growth-live.css?v=18' in page.text
     assert '/studio/assets/dispatcher.js?v=voice-glow-audio-20261102' in page.text
-    assert '/studio/assets/growth-live.js?v=9' in page.text
+    assert '/studio/assets/growth-live.js?v=10' in page.text
     assert 'Простое видео' in page.text
     assert 'hero-intro' in page.text
     assert 'Добрый день, Марина' not in page.text
