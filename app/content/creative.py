@@ -298,22 +298,14 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
         db.rollback()
         return False
     run_ids = []
+    active_stage = "creative"
+    response = None
     try:
         # Fail before spending strategy/director tokens if no image credential
         # is configured for the requested real-image deliverable.
         if request.image_model != "none":
             from app.content.creative_images import resolve_model
             resolve_model(settings, request.image_model)
-        for agent in ("creative_strategist", "creative_director"):
-            run = AgentRun(
-                task_id=task_id, agent_name=agent,
-                provider=settings.llm_provider, model=settings.llm_model,
-                status="queued",
-                input_references=[{"kind": "product", "id": str(product.id)}],
-            )
-            db.add(run)
-            db.flush()
-            run_ids.append(run.id)
         db.commit()
         context = load_context(db, product, settings.products_root)
         verified = product_facts(privacy.sanitize_text(context["stable_context"]))
@@ -331,75 +323,85 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             "deliverable": ("director_ready_brief_and_real_images" if request.image_model != "none"
                             else "text_only_director_ready_brief"),
         }
-        strategy = None
-        for idx, (agent, schema) in enumerate((
-            ("creative_strategist", CreativeStrategy),
-            ("creative_director", CreativeDraft),
-        )):
-            run = db.get(AgentRun, run_ids[idx])
-            run.status = "running"
-            run.started_at = datetime.now(timezone.utc)
-            db.commit()
-            stage_payload = dict(payload)
-            if strategy:
-                stage_payload["strategy"] = strategy.model_dump(mode="json")
-            rules = prompt_text("creative.common") + prompt_text(
-                "creative.strategist" if agent == "creative_strategist" else "creative.director")
-            def validate_candidate(data):
-                parsed = schema.model_validate(relax(schema, data))
-                if any(source_id not in verified for source_id in parsed.evidence_ids):
-                    raise ValueError("Unknown product evidence in creative brief")
-                if agent == "creative_director" and (
-                    parsed.format != request.format or parsed.platform != request.platform
-                ):
-                    raise ValueError("LLM changed the selected format or platform")
-                if agent == "creative_director" and request.frame_count is not None and len(parsed.frames) != request.frame_count:
-                    raise ValueError("LLM changed the requested Stories screen count")
-                return parsed
-
-            def record_model_call(stage, observed):
-                persist_observed_llm_call(
-                    db, product_id=product.id, task_id=task.id, run_id=run.id,
-                    response=observed, stage=stage, task_type="creative_brief",
-                    provider=settings.llm_provider,
+        saved_brief = db.scalar(select(Artifact).where(
+            Artifact.product_id == product.id, Artifact.task_id == task.id,
+            Artifact.kind == "creative_brief",
+        ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+        if saved_brief is not None:
+            # Image-only continuation: do not regenerate text or change storyboard.
+            draft = CreativeDraft.model_validate(relax(CreativeDraft, json.loads(saved_brief.content)))
+            if (draft.format != request.format or draft.platform != request.platform
+                    or (request.frame_count is not None and len(draft.frames) != request.frame_count)):
+                raise ValueError("Saved creative brief does not match approved request")
+        else:
+            strategy = None
+            for idx, (agent, schema) in enumerate((
+                ("creative_strategist", CreativeStrategy),
+                ("creative_director", CreativeDraft),
+            )):
+                active_stage = agent
+                response = None
+                stored_stage = db.scalar(select(Artifact).where(
+                    Artifact.product_id == product.id,
+                    Artifact.task_id == task.id,
+                    Artifact.kind == "content_stage_output",
+                    Artifact.title == agent + ": draft",
+                ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+                if stored_stage is not None:
+                    # Previous completed model stage: validate and reuse, without a paid call.
+                    result = schema.model_validate(relax(schema, json.loads(stored_stage.content)))
+                    if any(source_id not in verified for source_id in result.evidence_ids):
+                        raise ValueError("Saved creative stage contains unknown product evidence")
+                    if agent == "creative_director" and (
+                        result.format != request.format or result.platform != request.platform
+                        or (request.frame_count is not None and len(result.frames) != request.frame_count)
+                    ):
+                        raise ValueError("Saved creative director stage does not match request")
+                    if idx == 0:
+                        strategy = result
+                    continue
+                run = AgentRun(
+                    task_id=task_id, agent_name=agent,
+                    provider=settings.llm_provider, model=settings.llm_model,
+                    status="running", started_at=datetime.now(timezone.utc),
+                    input_references=[{"kind": "product", "id": str(product.id)}],
                 )
-            def record_review_progress(snapshot):
-                persist_critic_audit(
-                    db, product_id=product.id, task_id=task.id,
-                    run_id=run.id, response=snapshot,
-                )
+                db.add(run)
+                db.flush()
+                run_ids.append(run.id)
                 db.commit()
+                stage_payload = dict(payload)
+                if strategy:
+                    stage_payload["strategy"] = strategy.model_dump(mode="json")
+                rules = prompt_text("creative.common") + prompt_text(
+                    "creative.strategist" if agent == "creative_strategist" else "creative.director")
+                def validate_candidate(data):
+                    parsed = schema.model_validate(relax(schema, data))
+                    if any(source_id not in verified for source_id in parsed.evidence_ids):
+                        raise ValueError("Unknown product evidence in creative brief")
+                    if agent == "creative_director" and (
+                        parsed.format != request.format or parsed.platform != request.platform
+                    ):
+                        raise ValueError("LLM changed the selected format or platform")
+                    if agent == "creative_director" and request.frame_count is not None and len(parsed.frames) != request.frame_count:
+                        raise ValueError("LLM changed the requested Stories screen count")
+                    return parsed
 
-            response = await asyncio.wait_for(llm.generate(LLMRequest(
-                system_prompt=rules,
-                messages=[LLMMessage(role="user", content=json.dumps(stage_payload, ensure_ascii=False))],
-                response_schema=schema.model_json_schema(),
-                model=settings.llm_model,
-                max_tokens=3000 if idx == 0 else 8500,
-                metadata={
-                    "team_role": agent, "task_type": "creative_brief",
-                    "reasoning_effort": "low", "provider_timeout_seconds": PROVIDER_TIMEOUT_SECONDS,
-                },
-            ), validate_revision=validate_candidate,
-                on_observed=record_model_call,
-                on_review_progress=record_review_progress), timeout=CALL_WAIT_SECONDS + llm.extra_timeout_seconds)
-            persist_critic_audit(
-                db, product_id=product.id, task_id=task.id, run_id=run.id,
-                response=response,
-            )
-            db.commit()
-            try:
-                if response.stop_reason not in (None, "end_turn", "stop_sequence"):
-                    raise ValueError("Incomplete creative output")
-                if len(response.content) > 65000:
-                    raise ValueError("Creative output exceeds bound")
-                result = validate_candidate(json.loads(response.content))
-            except (ValueError, TypeError) as exc:
-                # One repair attempt with the exact problem; no second critic round.
-                retry = LLMService(privacy_gateway=privacy, provider=llm._provider, critic_enabled=False)
-                response = await asyncio.wait_for(retry.generate(LLMRequest(
-                    system_prompt=rules + " Your previous answer was rejected by validation: "
-                    + _validation_summary(exc) + ". Fix exactly this and return the complete JSON again.",
+                def record_model_call(stage, observed):
+                    persist_observed_llm_call(
+                        db, product_id=product.id, task_id=task.id, run_id=run.id,
+                        response=observed, stage=stage, task_type="creative_brief",
+                        provider=settings.llm_provider,
+                    )
+                def record_review_progress(snapshot):
+                    persist_critic_audit(
+                        db, product_id=product.id, task_id=task.id,
+                        run_id=run.id, response=snapshot,
+                    )
+                    db.commit()
+
+                response = await asyncio.wait_for(llm.generate(LLMRequest(
+                    system_prompt=rules,
                     messages=[LLMMessage(role="user", content=json.dumps(stage_payload, ensure_ascii=False))],
                     response_schema=schema.model_json_schema(),
                     model=settings.llm_model,
@@ -408,45 +410,74 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                         "team_role": agent, "task_type": "creative_brief",
                         "reasoning_effort": "low", "provider_timeout_seconds": PROVIDER_TIMEOUT_SECONDS,
                     },
-                ), on_observed=record_model_call), timeout=CALL_WAIT_SECONDS)
-                if response.stop_reason not in (None, "end_turn", "stop_sequence"):
-                    raise ValueError("Incomplete creative output") from exc
-                if len(response.content) > 65000:
-                    raise ValueError("Creative output exceeds bound") from exc
-                result = validate_candidate(json.loads(response.content))
-            check = ArtifactService(db).create(
-                product_id=product.id, task_id=task.id, agent_run_id=run.id,
-                kind="content_stage_output", title=agent + ": draft",
-                content=json.dumps(result.model_dump(mode="json"), ensure_ascii=False),
+                ), validate_revision=validate_candidate,
+                    prepare_original=parse_creative_json,
+                    on_observed=record_model_call,
+                    on_review_progress=record_review_progress), timeout=CALL_WAIT_SECONDS + llm.extra_timeout_seconds)
+                persist_critic_audit(
+                    db, product_id=product.id, task_id=task.id, run_id=run.id,
+                    response=response,
+                )
+                db.commit()
+                try:
+                    if response.stop_reason not in (None, "end_turn", "stop_sequence"):
+                        raise ValueError("Incomplete creative output")
+                    if len(response.content) > 65000:
+                        raise ValueError("Creative output exceeds bound")
+                    result = validate_candidate(parse_creative_json(response.content))
+                except (ValueError, TypeError) as exc:
+                    # One repair attempt with the exact problem; no second critic round.
+                    retry = LLMService(privacy_gateway=privacy, provider=llm._provider, critic_enabled=False)
+                    response = await asyncio.wait_for(retry.generate(LLMRequest(
+                        system_prompt=rules + " Your previous answer was rejected by validation: "
+                        + _validation_summary(exc) + ". Fix exactly this and return the complete JSON again.",
+                        messages=[LLMMessage(role="user", content=json.dumps(stage_payload, ensure_ascii=False))],
+                        response_schema=schema.model_json_schema(),
+                        model=settings.llm_model,
+                        max_tokens=3000 if idx == 0 else 8500,
+                        metadata={
+                            "team_role": agent, "task_type": "creative_brief",
+                            "reasoning_effort": "low", "provider_timeout_seconds": PROVIDER_TIMEOUT_SECONDS,
+                        },
+                    ), on_observed=record_model_call), timeout=CALL_WAIT_SECONDS)
+                    if response.stop_reason not in (None, "end_turn", "stop_sequence"):
+                        raise ValueError("Incomplete creative output") from exc
+                    if len(response.content) > 65000:
+                        raise ValueError("Creative output exceeds bound") from exc
+                    result = validate_candidate(json.loads(response.content))
+                check = ArtifactService(db).create(
+                    product_id=product.id, task_id=task.id, agent_run_id=run.id,
+                    kind="content_stage_output", title=agent + ": draft",
+                    content=json.dumps(result.model_dump(mode="json"), ensure_ascii=False),
+                )
+                references = [
+                    *(run.output_references or []),
+                    {"kind": "artifact", "id": str(check.id)},
+                ]
+                run.status = "completed"
+                run.finished_at = datetime.now(timezone.utc)
+                run.output_references = references
+                db.commit()
+                if idx == 0:
+                    strategy = result
+            draft = result
+            facts_warnings = factual_claim_warnings(_preview(draft, images_requested=request.image_model != "none"), verified)
+            ArtifactService(db).create(
+                product_id=product.id, task_id=task.id,
+                kind="creative_brief", title=draft.title,
+                content=json.dumps({
+                    **draft.model_dump(mode="json"),
+                    "origin": "quick_creative",
+                    "preview_text": _preview(draft, images_requested=request.image_model != "none"),
+                    "review_notes": (["Раскадровка; изображения создаются отдельным шагом"]
+                                     if request.image_model != "none"
+                                     else ["Черновой бриф; видео или изображение не созданы"]),
+                    "quality_warnings": facts_warnings,
+                    "fact_check_required": bool(facts_warnings),
+                }, ensure_ascii=False),
+                status="awaiting_approval",
             )
-            references = [
-                *(run.output_references or []),
-                {"kind": "artifact", "id": str(check.id)},
-            ]
-            run.status = "completed"
-            run.finished_at = datetime.now(timezone.utc)
-            run.output_references = references
             db.commit()
-            if idx == 0:
-                strategy = result
-        draft = result
-        facts_warnings = factual_claim_warnings(_preview(draft, images_requested=request.image_model != "none"), verified)
-        ArtifactService(db).create(
-            product_id=product.id, task_id=task.id,
-            kind="creative_brief", title=draft.title,
-            content=json.dumps({
-                **draft.model_dump(mode="json"),
-                "origin": "quick_creative",
-                "preview_text": _preview(draft, images_requested=request.image_model != "none"),
-                "review_notes": (["Раскадровка; изображения создаются отдельным шагом"]
-                                 if request.image_model != "none"
-                                 else ["Черновой бриф; видео или изображение не созданы"]),
-                "quality_warnings": facts_warnings,
-                "fact_check_required": bool(facts_warnings),
-            }, ensure_ascii=False),
-            status="awaiting_approval",
-        )
-        db.commit()
         if request.image_model != "none":
             from app.content.creative_images import generate_images, resolve_model
             model_name = resolve_model(settings, request.image_model)
@@ -478,8 +509,13 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             run = db.get(AgentRun, run_id)
             if run is not None and run.status != "completed":
                 run.status = "failed"
-                run.error = ("creative_failed:" + type(exc).__name__ + ":" + _validation_summary(exc))[:1000]
+                run.error = "creative_failed:" + type(exc).__name__
                 run.finished_at = datetime.now(timezone.utc)
+        ArtifactService(db).create(
+            product_id=product.id, task_id=task.id,
+            kind="creative_stage_error", title="Creative stage diagnosis",
+            content=json.dumps(creative_error_metadata(active_stage, exc, response), ensure_ascii=False),
+        )
         failed = db.get(Task, task.id)
         if failed:
             failed.status = TaskStatus.FAILED
