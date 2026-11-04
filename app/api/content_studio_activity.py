@@ -485,7 +485,8 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
     fail = (
         f'<form action="{base}/tasks/{task.id}/retry" method="post">'
         '<button class="btn secondary" type="submit">'
-        + ("Продолжить с сохранённых этапов" if creative_resume else "Повторить задание")
+        + ("Продолжить с сохранённых этапов" if creative_resume and results
+           else "Повторить задание")
         + '</button></form>'
         if key in {"failed", "cancelled"} and task.assigned_agent
         in {"content_factory", "content_creative", "content_editor"}
