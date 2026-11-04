@@ -1,0 +1,52 @@
+name: One-time SEO acceptance read-only inventory
+on:
+  push:
+    branches: [qa/seo-e2e-readonly-20261104]
+    paths:
+      - .github/workflows/seo-acceptance-inventory-20261104.yml
+permissions:
+  contents: read
+concurrency:
+  group: seo-acceptance-readonly-20261104
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read-only database inventory over pinned SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$SSHPASS" ]; then
+            echo "::error::Read-only SSH requires SERVER_SSH_PASSWORD; no server changes made"
+            exit 1
+          fi
+          sudo apt-get -qq update >/dev/null
+          sudo apt-get -qq install -y sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/seo-seen
+          while IFS= read -r line; do
+            printf '%s\\n' "$line" > /tmp/seo-one
+            ssh-keygen -lf /tmp/seo-one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/seo-seen
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Production host fingerprint mismatch"; exit 1; }
+          sshpass -e ssh -o BatchMode=no -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'docker exec -i ai-growth-os-api-1 python -' < scripts/seo_acceptance_readonly_20261104.py
+      - name: Read public endpoints without writing requests
+        shell: bash
+        run: |
+          set -uo pipefail
+          for url in \
+            https://servgo.ru/blog \
+            https://servgo.ru/blog/sitemap.xml \
+            https://servgo.ru/robots.txt \
+            https://growth.servgo.ru/public/blog/servgo/articles; do
+            code="$(curl -L -sS -o /dev/null -w '%{http_code}' --max-time 16 "$url")" || code=network_error
+            echo "SEO_PUBLIC_URL $url -> $code"
+          done
