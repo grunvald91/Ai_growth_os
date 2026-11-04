@@ -489,8 +489,7 @@ def render_v4(page, request, pid, switch):
             '<button id="sgDailyClose" class="sg-daily-close" type="button" '
             'aria-label="Свернуть сводку" title="Свернуть">×</button></div>'
             '<div id="sgDailyContent" class="sg-daily-content"></div>'
-            '<p class="sg-daily-hint">Нажмите вне панели, чтобы свернуть её. '
-            'Открыть снова можно по кнопке слева.</p></aside>'
+            '<p class="sg-daily-hint">Нажмите вне панели, чтобы свернуть.</p></aside>'
         )
         template = template.replace('</body>', drawer+'</body>', 1)
     if pid:
