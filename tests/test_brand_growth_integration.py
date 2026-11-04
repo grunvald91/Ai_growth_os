@@ -125,6 +125,7 @@ async def test_pin_checkpoint_and_reuse_paid_backgrounds_after_new_approval(bran
     assert await generate_images(db, settings, pinned, draft,
                                  task_id=task.id, provider=fake)
     assert len(fake.calls) == 3
+    assert all("#3366CC" in call[0] for call in fake.calls)
     assert all("NO words" in call[0] or "NO words".lower() in call[0].lower()
                for call in fake.calls)
     assert compose_saved_stories(db, root, pinned, draft, task.id)

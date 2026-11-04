@@ -225,6 +225,21 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
     directory = image_folder(settings.products_root, request.product_id, task_id)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     existing = {}
+    branded = getattr(request, "brand_mode", "classic") == "brand"
+    palette_hint = ""
+    if branded:
+        from app.content.brand_story_pipeline import validate_pinned_request
+        from app.brand_kit.contracts import BrandStyle
+        version = validate_pinned_request(db, request, task_id)
+        style = BrandStyle.model_validate(version.config)
+        palette = style.palette
+        palette_hint = (
+            "Company visual identity MUST inform the background color treatment. "
+            f"Primary {palette.primary}; secondary {palette.secondary}; "
+            f"accent {palette.accent}; base background {palette.background}; "
+            f"visual character {style.visual_character}. "
+            "Background-only: never draw text, logos, letters or glyphs."
+        )
     for record in generated_images(db, request.product_id, task_id):
         metadata = json.loads(record.content)
         number = int(metadata["frame_number"])
@@ -244,7 +259,9 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
             continue
         filename = f"frame-{frame.number:02d}.png"
         prompt = image_prompt(draft, frame, frame.number, len(draft.frames), ratio,
-                              branded=getattr(request, "brand_mode", "classic") == "brand")
+                              branded=branded)
+        if branded:
+            prompt = (prompt + " " + palette_hint)[:16000]
         try:
             # A process may crash after the atomic file rename but before the DB
             # commit. Reconcile that file without requesting/billing the model again.

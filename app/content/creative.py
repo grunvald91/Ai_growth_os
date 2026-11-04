@@ -385,7 +385,13 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
             from app.content.creative_images import resolve_model
             resolve_model(settings, request.image_model)
         if request.brand_mode == "brand":
-            from app.content.brand_story_pipeline import validate_pinned_request
+            from app.content.brand_story_pipeline import (
+                validate_pinned_request, brand_story_canary_allowed,
+            )
+            # A rollout kill switch must also stop already queued jobs before
+            # their first new paid background generation.
+            if not brand_story_canary_allowed(settings, request.product_id):
+                raise ValueError("Фирменные Stories отключены для компании")
             validate_pinned_request(db, request, task_id)
         db.commit()
         context = load_context(db, product, settings.products_root)

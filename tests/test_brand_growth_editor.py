@@ -241,3 +241,42 @@ def test_form_requires_consent_for_paid_backgrounds(setup):
     fields["paid_confirm"] = "yes"
     yes = client.post(uri, data=fields, follow_redirects=False)
     assert yes.status_code == 303
+
+
+
+def test_noncanary_creation_omits_hidden_brand_controls():
+    from app.api.content_studio_ui import create_content_html
+    from uuid import uuid4
+    no = create_content_html(uuid4(), brand_canary=False)
+    yes = create_content_html(uuid4(), brand_canary=True)
+    assert 'name="brand_mode"' not in no
+    assert 'name="image_model"' not in no
+    assert 'name="paid_confirm"' not in no
+    assert 'name="brand_mode"' in yes
+    assert 'name="paid_confirm"' in yes
+
+
+def test_paid_nonce_checked_after_more_than_200_prior_confirmations(setup, monkeypatch):
+    from app.services.artifacts import ArtifactService
+    db, client, company, _, task, _, _ = setup
+    for index in range(220):
+        ArtifactService(db).create(
+            product_id=company.id, task_id=task.id,
+            kind="creative_background_regen", title=f"Older paid event {index}",
+            content=json.dumps({"token": str(uuid4()), "state": "completed"}))
+    db.commit()
+    from app.content import creative_images
+    calls = []
+    async def fake_image(settings, model, prompt, ratio):
+        calls.append(prompt)
+        stream = io.BytesIO()
+        Image.new("RGB", (600, 1000), (40, 80, 120)).save(stream, "PNG")
+        return stream.getvalue()
+    monkeypatch.setattr(creative_images, "request_image", fake_image)
+    source = visible_images(db, company.id, task.id)[0]
+    url = (f"/studio/products/{company.id}/tasks/{task.id}"
+           f"/stories/{source.id}/regenerate-background")
+    confirmation = {"token": str(uuid4()), "model": "gemini", "confirm": "yes"}
+    assert client.post(url, data=confirmation, follow_redirects=False).status_code == 303
+    assert client.post(url, data=confirmation, follow_redirects=False).status_code == 409
+    assert len(calls) == 1
