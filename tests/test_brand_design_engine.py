@@ -113,7 +113,7 @@ def test_renderer_outputs_three_true_stories_with_original_logo_and_safe_boxes(c
 
 def test_long_text_fails_rather_than_clipping(company):
     _, _, _, _, _, _, _, style = company
-    with pytest.raises(ValueError, match="помещается|Слишком длинная"): 
+    with pytest.raises(ValueError, match="помещается|Слишком длинная"):
         render_story(style, frame(body="Очень " * 55), logo=png_logo())
     with pytest.raises(ValueError, match="требует призыва"):
         render_story(style, frame("cta", cta=""), logo=png_logo())
