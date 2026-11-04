@@ -266,7 +266,12 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
             ArtifactService(db).create(
                 product_id=request.product_id, task_id=task_id,
                 kind="creative_image_error", title=f"Кадр {frame.number}: ошибка",
-                content=json.dumps({"frame_number": frame.number, "code": type(exc).__name__}),
+                content=json.dumps({
+                    "frame_number": frame.number, "code": type(exc).__name__,
+                    "stage": "creative_image", "model": model,
+                    "http_status": (exc.response.status_code
+                                    if isinstance(exc, httpx.HTTPStatusError) else None),
+                }),
             )
             db.commit()
     return completed == len(draft.frames)
