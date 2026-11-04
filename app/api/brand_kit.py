@@ -211,7 +211,7 @@ background:var(--bk-background);color:var(--bk-text);font-family:var(--bk-font)}
         '<section class="sg-surface"><h2>1. Исходные ресурсы</h2>' + upload_form + '</section>'
         '<section class="sg-surface"><h2>2. Настройки фирменного стиля</h2>' + settings_form +
         '</section></div><div>'
-        '<section class="sg-surface"><h2>Предварительный просмотр 9:16</h2>'
+        '<section class="sg-surface"><h2>Предварительный просмотр 9:16</h2>' +
         ('<p class="sg-warning">Предпросмотр черновика · ещё не действует в Stories.</p>'
          if previewing_draft else
          '<p class="sg-muted">Предпросмотр действующего фирменного стиля.</p>') +
@@ -295,7 +295,8 @@ def _require_brand_owner(request: Request) -> None:
 
 @router.post("/studio/products/{product_id}/brand-kit/assets")
 async def upload_brand_asset(product_id: UUID, request: Request,
-                             db: Session = Depends(get_db)):
+                             db: Session = Depends(get_db),
+                             settings = Depends(get_settings)):
     _owner_product(db, product_id)
     form = await limited_multipart_form(
         request, max_body=MAX_FILE_BYTES + 12_000, max_files=1, max_fields=3)
@@ -304,7 +305,7 @@ async def upload_brand_asset(product_id: UUID, request: Request,
         raise HTTPException(422, "Выберите изображение")
     try:
         raw = await upload.read(MAX_FILE_BYTES + 1)
-        await run_in_threadpool(store_asset, db, get_settings().products_root, product_id, str(form.get("kind")), raw)
+        await run_in_threadpool(store_asset, db, settings.products_root, product_id, str(form.get("kind")), raw)
     except (ValueError, LookupError) as exc:
         raise _bad_request(exc) from None
     finally:
@@ -314,10 +315,11 @@ async def upload_brand_asset(product_id: UUID, request: Request,
 
 @router.get("/studio/products/{product_id}/brand-kit/assets/{asset_id}")
 def read_brand_asset(product_id: UUID, asset_id: UUID,
-                     db: Session = Depends(get_db)):
+                     db: Session = Depends(get_db),
+                     settings = Depends(get_settings)):
     _owner_product(db, product_id)
     try:
-        record, path = verified_asset(db, get_settings().products_root, product_id, asset_id)
+        record, path = verified_asset(db, settings.products_root, product_id, asset_id)
     except (LookupError, ValueError):
         raise HTTPException(404, "Файл не найден") from None
     return FileResponse(path, media_type=record.media_type,
@@ -328,12 +330,13 @@ def read_brand_asset(product_id: UUID, asset_id: UUID,
 
 @router.post("/studio/products/{product_id}/brand-kit/versions")
 async def new_brand_version(product_id: UUID, request: Request,
-                            db: Session = Depends(get_db)):
+                            db: Session = Depends(get_db),
+                            settings = Depends(get_settings)):
     _owner_product(db, product_id)
     form = await request.form(max_fields=35, max_files=0)
     try:
         style = _style_from_form(form)
-        save_draft(db, get_settings().products_root, product_id,
+        save_draft(db, settings.products_root, product_id,
                    style.model_dump(mode="json"))
     except (ValueError, LookupError, ValidationError) as exc:
         raise _bad_request(exc) from None
@@ -342,11 +345,12 @@ async def new_brand_version(product_id: UUID, request: Request,
 
 @router.post("/studio/products/{product_id}/brand-kit/versions/{version_id}/approve")
 def approve_brand(product_id: UUID, version_id: UUID, request: Request,
-                  db: Session = Depends(get_db)):
+                  db: Session = Depends(get_db),
+                  settings = Depends(get_settings)):
     _owner_product(db, product_id)
     _require_brand_owner(request)
     try:
-        approve_version(db, get_settings().products_root, product_id, version_id)
+        approve_version(db, settings.products_root, product_id, version_id)
     except (ValueError, LookupError, ValidationError) as exc:
         raise _bad_request(exc) from None
     return RedirectResponse(f"/studio/products/{product_id}/brand-kit", status_code=303)
