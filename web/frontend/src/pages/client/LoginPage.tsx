@@ -196,6 +196,11 @@ export function LoginPage() {
   return (
     <ClientShell backTo="/" title="Вход">
       <div className="ds-form-narrow" style={{ paddingTop: 4 }}>
+        {studioNext === STUDIO_ENTRY && (
+          <p role="status" className="ds-hint" style={{ marginBottom: 16 }}>
+            Войдите в ваш аккаунт ServGo. После входа откроется Studio для доступной компании.
+          </p>
+        )}
         {yandexProblem && <p role="alert" style={{ color: 'var(--s-danger)', marginBottom: 12 }}>{yandexProblem}</p>}
         <div style={{ marginBottom: 16 }}><YandexLoginButton /></div>
         <EmailAuthForm />
