@@ -108,10 +108,13 @@ async def main():
             raise RuntimeError("Verified ServGo marketing profile unavailable")
         buyers = tuple(s for s in profile.customers.primary_segments if s.strip())
         category = (profile.identity.category or "").casefold()
-        if "b2b" not in category or not buyers:
-            raise RuntimeError("Live ServGo profile has no verified B2B buyer segment")
-        buyer = next((s for s in buyers if any(word in s.casefold()
-            for word in ("владельц", "управляющ", "предпринимател", "бизнес"))), buyers[0])
+        if not any(word in category for word in ("платформ", "saas", "программ", "систем", "b2b")):
+            raise RuntimeError("Live ServGo profile is not a software/platform offer")
+        owner_buyers = [s for s in buyers if any(word in s.casefold()
+            for word in ("владельц", "управляющ", "предпринимател", "администратор"))]
+        if not owner_buyers:
+            raise RuntimeError("Live ServGo profile lacks an actual owner/manager buyer segment")
+        buyer = owner_buyers[0]
         emit("selected_declared_buyer", {"buyer_segment": buyer, "segment_count": len(buyers)})
         if any(t["query"] in planned_queries(db, company.id) for t in TOPICS):
             raise RuntimeError("One acceptance query is already queued/published; no duplicates allowed")
