@@ -164,11 +164,15 @@ with SessionLocal() as db:
                                "reader_hash": bool(data.get("reader_hash"))}
                 except ValueError:
                     verdict = {"parse_error": True}
-            stages = db.execute(select(AgentRun.agent_name, AgentRun.status).where(
-                AgentRun.task_id == task.id).order_by(AgentRun.created_at.desc()).limit(12)).all()
+            stages = list(db.scalars(select(AgentRun).where(
+                AgentRun.task_id == task.id).order_by(AgentRun.created_at.desc()).limit(12)))
+            def error_class(run):
+                raw = (run.error or "").strip()
+                return ":".join(raw.split(":")[:2])[:100] if raw else None
             row = {"query": item.primary_query, "task_status": str(task.status),
                 "article_status": str(article.status) if article else None,
-                "critic": verdict, "stages": [{"agent": a, "status": status} for a,status in stages],
+                "critic": verdict, "stages": [{"agent": run.agent_name, "status": run.status,
+                    "error_category": error_class(run)} for run in stages],
                 "publication": publication.status if publication else None,
                 "public_path": publication.external_reference if publication else None}
             rows.append(row)
