@@ -298,7 +298,11 @@ def delete_unused_background(db, root: Path, product_id: UUID, background_id: UU
             BrandComposition.product_id == product_id,
             BrandComposition.background_id == background_id).limit(1)):
         raise ValueError("Фон используется в готовых материалах")
-    _, path = verified_background(db, root, product_id, background_id)
+    if row.filename != str(row.id) + ".png":
+        raise LookupError("Недопустимое имя файла")
+    path = _folder(root, "_brand_backgrounds", product_id) / row.filename
+    if path.exists() and not path.is_file() and not path.is_symlink():
+        raise LookupError("Недопустимый тип файла")
     db.delete(row)
     db.commit()
     path.unlink(missing_ok=True)
@@ -313,7 +317,11 @@ def delete_story_render(db, root: Path, product_id: UUID, render_id: UUID) -> No
         BrandRender.id == render_id, BrandRender.product_id == product_id))
     if row is None:
         raise LookupError("Кадр не найден")
-    _, path = verified_render(db, root, product_id, render_id)
+    if row.filename != str(row.id) + ".png":
+        raise LookupError("Недопустимое имя файла")
+    path = _folder(root, "_brand_renders", product_id) / row.filename
+    if path.exists() and not path.is_file() and not path.is_symlink():
+        raise LookupError("Недопустимый тип файла")
     composition = db.scalar(select(BrandComposition).where(
         BrandComposition.id == row.composition_id,
         BrandComposition.product_id == product_id))
