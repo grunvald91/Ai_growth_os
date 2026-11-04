@@ -114,7 +114,8 @@ def home_summary(db: Session, product: Product) -> dict:
     } for slot in editorial_slots]
     seo_slots = _seo_schedule(db, product_id, now)
     upcoming.extend(seo_slots)
-    upcoming.sort(key=lambda row: row["when"])
+    # Compare absolute timestamps: a +03:00 editorial slot may precede a UTC SEO slot.
+    upcoming.sort(key=lambda row: datetime.fromisoformat(row["when"]).astimezone(timezone.utc))
     cutoff = now + timedelta(days=7)
     planned_week = sum(
         1 for row in upcoming if datetime.fromisoformat(row["when"]) < cutoff
@@ -128,6 +129,7 @@ def home_summary(db: Session, product: Product) -> dict:
         Task.product_id == product_id,
         Task.assigned_agent == "seo_factory",
         Task.status == TaskStatus.FAILED,
+        Task.updated_at >= now - timedelta(days=21),
     ).order_by(Task.updated_at.desc(), Task.id.desc()).limit(2)))
     attention = [
         {"title": "SEO-завод: задание завершилось с ошибкой",
