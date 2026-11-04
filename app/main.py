@@ -28,6 +28,9 @@ app.include_router(company_profiles_router, dependencies=[Depends(require_studio
 from app.api.company_intake import router as company_intake_router
 app.include_router(company_intake_router, dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 
+from app.api.yandex_discovery import router as yandex_discovery_router
+app.include_router(yandex_discovery_router, dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
+
 # Public sign-in page; registered before the protected Studio routes.
 from app.api.studio_login import router as studio_login_router
 app.include_router(studio_login_router)
