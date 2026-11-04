@@ -697,6 +697,7 @@ def canonical_first_visit(env, **ticket):
     servgo.allowed[(7, 31)] = ticket.pop("role", "owner")
     servgo.businesses[31] = {**servgo.businesses[12], "name": "Баня Парная"}
     client = TestClient(app, base_url="https://servgo.ru", follow_redirects=False)
+    client.cookies.set("sg_identity", _browser_identity(7))
     page = client.get("/studio/sso", params={
         "t": make_ticket(biz=31, jti=ticket.pop("jti", "w" * 16), **ticket)
     })
@@ -802,6 +803,7 @@ def test_native_setup_recognises_proxy_https_without_allowing_cross_host(env, tm
     browser = TestClient(app, base_url="http://servgo.ru",
                          headers={"x-forwarded-proto":"https"},
                          follow_redirects=False)
+    browser.cookies.set("sg_identity", _browser_identity(7))
     response = browser.get("/studio/sso", params={
         "t": make_ticket(biz=31, jti="n" * 16),
     })
