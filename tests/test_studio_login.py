@@ -202,7 +202,7 @@ def test_canonical_servgo_studio_login_uses_main_account(studio):
         assert out.headers["location"] == "/logout"
         cookies = out.headers.get_list("set-cookie")
         assert any(row.startswith("sg_session=") and "max-age=0" in row.lower() for row in cookies)
-        assert any(row.startswith("sg_sso=") and "max-age=0" in row for row in cookies)
+        assert any(row.startswith("sg_sso=") and "max-age=0" in row.lower() for row in cookies)
 
 
 def test_canonical_servgo_logout_clears_studio_cookies_same_origin_only(studio):
@@ -216,5 +216,5 @@ def test_canonical_servgo_logout_clears_studio_cookies_same_origin_only(studio):
         assert response.status_code == 204
         assert response.headers["cache-control"] == "no-store"
         cookies = response.headers.get_list("set-cookie")
-        assert any(row.startswith("sg_session=") and "max-age=0" in row for row in cookies)
-        assert any(row.startswith("sg_sso=") and "max-age=0" in row for row in cookies)
+        assert any(row.startswith("sg_session=") and "max-age=0" in row.lower() for row in cookies)
+        assert any(row.startswith("sg_sso=") and "max-age=0" in row.lower() for row in cookies)
