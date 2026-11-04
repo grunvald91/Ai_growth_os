@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from pydantic import BaseModel, Field
 
 from app.api.content_studio import studio_page_shell
@@ -23,6 +23,14 @@ from app.services.artifacts import ArtifactService
 from app.workflows.research_contracts import ResearchSource, ResearchSourceBundle
 
 router = APIRouter()
+
+
+@router.get("/studio/assets/yandex-company.js")
+def yandex_company_script():
+    return FileResponse(Path(__file__).with_name("assets") / "yandex-company.js",
+                        media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
+
 
 
 async def _lookup(query: str, city: str, *, limit: int = 25, skip: int = 0):
