@@ -56,6 +56,7 @@ def gallery_html(product_id: UUID, task_id: UUID, images: list[Artifact], *,
             continue
     # Do not report a recovered frame as missing after a successful retry.
     failed = [number for number in failed if number not in succeeded]
+    broken_latest = [n for n in (invalid_frames or []) if n in succeeded]
     failed.extend(n for n in (invalid_frames or []) if n not in succeeded)
     if not tiles and not failed:
         return ""
@@ -64,10 +65,16 @@ def gallery_html(product_id: UUID, task_id: UUID, images: list[Artifact], *,
         'не созданы или повреждены. Остальные изображения доступны; проверьте задание.</p>'
         if failed else ""
     )
+    if broken_latest:
+        status += (
+            f'<p class="sg-image-partial" role="status">Кадры {", ".join(str(x) for x in sorted(set(broken_latest)))}: '
+            'последняя редакция недоступна — показана предыдущая исправная версия. '
+            'Скачайте PNG отдельно, архив всего задания пока недоступен.</p>'
+        )
     download = (
         f'<a class="btn primary" href="{base}/images.zip" download="images.zip">'
         f'Скачать все · {len(tiles)} PNG (ZIP)</a>'
-        if tiles else "")
+        if tiles and not broken_latest and not failed else "")
     return (
         '<section class="sg-creative-images" aria-label="Сгенерированные изображения">'
         '<div class="sg-image-gallery-head"><div><h3>Готовые изображения</h3>'

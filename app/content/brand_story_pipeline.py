@@ -204,20 +204,47 @@ def verified_gallery_image(db, root: Path, product_id: UUID, task_id: UUID,
 
 def verified_visible_images(db, root: Path, product_id: UUID,
                             task_id: UUID) -> tuple[list[Artifact], list[int]]:
-    """Only advertise genuinely available, checksum-verified PNG files."""
-    valid, missing = [], []
-    for item in visible_images(db, product_id, task_id):
-        try:
-            verified_gallery_image(db, root, product_id, task_id, item)
-            valid.append(item)
-        except (ValueError, LookupError, OSError, KeyError, TypeError):
+    """Show the latest *valid* version; offer a healthy older version if needed.
+
+    The second result flags missing/damaged latest revisions even when a
+    previous immutable frame is available as a non-silent fallback.
+    """
+    visible = visible_images(db, product_id, task_id)
+    if not visible or visible[0].kind != "creative_story_render":
+        valid, damaged = [], []
+        for item in visible:
             try:
-                number = int(json.loads(item.content).get("frame_number", 0))
-                if 1 <= number <= 10:
-                    missing.append(number)
-            except (ValueError, TypeError):
-                pass
-    return valid, sorted(set(missing))
+                verified_gallery_image(db, root, product_id, task_id, item)
+                valid.append(item)
+            except (ValueError, LookupError, OSError, KeyError, TypeError):
+                try:
+                    damaged.append(int(json.loads(item.content)["frame_number"]))
+                except (ValueError, KeyError, TypeError):
+                    pass
+        return valid, sorted(set(damaged))
+    by_frame: dict[int, list[tuple[int, Artifact]]] = {}
+    for item in composed_images(db, product_id, task_id):
+        try:
+            meta = json.loads(item.content)
+            number, revision = int(meta["frame_number"]), int(meta.get("revision", 0))
+            if 1 <= number <= 10:
+                by_frame.setdefault(number, []).append((revision, item))
+        except (ValueError, KeyError, TypeError):
+            continue
+    valid, damaged = [], []
+    for number in sorted(by_frame):
+        candidates = sorted(by_frame[number], key=lambda pair: (
+            pair[0], pair[1].created_at, str(pair[1].id)), reverse=True)
+        for idx, (_, item) in enumerate(candidates):
+            try:
+                verified_gallery_image(db, root, product_id, task_id, item)
+            except (ValueError, LookupError, OSError, KeyError, TypeError):
+                if idx == 0:
+                    damaged.append(number)
+                continue
+            valid.append(item)
+            break
+    return valid, sorted(set(damaged))
 
 
 def compose_saved_stories(db, root: Path, request, draft, task_id: UUID) -> bool:
@@ -241,8 +268,22 @@ def compose_saved_stories(db, root: Path, request, draft, task_id: UUID) -> bool
     okay = True
     for frame in draft.frames:
         if frame.number in finished:
-            # A saved row with missing/corrupted output is NOT a successful checkpoint.
-            verified_gallery_image(db, root, request.product_id, task_id, finished[frame.number])
+            # Rebuild from the immutable composition snapshot without calling
+            # a paid model or creating a new revision.
+            previous = finished[frame.number]
+            try:
+                verified_gallery_image(db, root, request.product_id, task_id, previous)
+            except (LookupError, ValueError, OSError, KeyError, TypeError):
+                try:
+                    from app.brand_kit.design_service import restore_story_render
+                    render_id = UUID(json.loads(previous.content)["render_id"])
+                    restore_story_render(db, root, request.product_id, render_id)
+                    verified_gallery_image(db, root, request.product_id, task_id, previous)
+                except (LookupError, ValueError, OSError, KeyError, TypeError) as exc:
+                    db.rollback()
+                    LOG.warning("Immutable Story repair failed task=%s frame=%s type=%s",
+                                task_id, frame.number, type(exc).__name__)
+                    okay = False
             continue
         try:
             background_id = None
