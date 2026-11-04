@@ -222,7 +222,16 @@ def read_state(db, product_id: UUID) -> tuple[BrandVersion | None, list[BrandVer
 def delete_unused_logo(db, root: Path, product_id: UUID, asset_id: UUID) -> None:
     """Remove an original asset only when no version refers to its UUID."""
     db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
-    record, path = verified_asset(db, root, product_id, asset_id)
+    record = db.scalar(select(BrandAsset).where(
+        BrandAsset.product_id == product_id, BrandAsset.id == asset_id))
+    if record is None:
+        raise LookupError("Логотип компании не найден")
+    if record.filename != str(record.id) + IMAGE_FORMATS_REVERSE.get(record.media_type, ""):
+        raise LookupError("Недопустимое имя файла")
+    path = _asset_dir(root, product_id) / record.filename
+    # Unlink removes a symlink itself and never follows its target.
+    if path.exists() and not path.is_file() and not path.is_symlink():
+        raise LookupError("Недопустимый тип файла")
     versions = db.scalars(select(BrandVersion.config).where(
         BrandVersion.product_id == product_id))
     for configuration in versions:
