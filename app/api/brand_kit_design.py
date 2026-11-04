@@ -15,7 +15,7 @@ from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.multipart_limits import limited_multipart_form
 from app.brand_kit.contracts import Strict
 from app.brand_kit.design_service import (
-    MAX_BACKGROUND_UPLOAD, create_composition, store_background,
+    MAX_BACKGROUND_UPLOAD, create_composition, delete_story_render, delete_unused_background, store_background,
     verified_background, verified_render,
 )
 from app.brand_kit.renderer import StoryFrame
@@ -35,7 +35,7 @@ class ComposeRequest(Strict):
 def _error(exc: Exception) -> HTTPException:
     if isinstance(exc, LookupError):
         return HTTPException(404, str(exc))
-    if "Повторный ключ" in str(exc):
+    if "Повторный ключ" in str(exc) or "действующая версия" in str(exc) or "используется в готовых" in str(exc):
         return HTTPException(409, str(exc))
     return HTTPException(422, str(exc)[:350])
 
@@ -111,3 +111,25 @@ def download_composed_story(product_id: UUID, render_id: UUID,
         headers={"Cache-Control": "private, no-store",
                  "X-Content-Type-Options": "nosniff",
                  "Content-Security-Policy": "default-src 'none'; sandbox"})
+
+
+@router.delete("/studio/products/{product_id}/brand-kit/backgrounds/{background_id}")
+def remove_story_background(product_id: UUID, background_id: UUID,
+                            db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    try:
+        delete_unused_background(db, get_settings().products_root, product_id, background_id)
+    except (ValueError, LookupError) as exc:
+        raise _error(exc) from None
+    return JSONResponse({"deleted": True}, headers={"Cache-Control": "no-store"})
+
+
+@router.delete("/studio/products/{product_id}/brand-kit/renders/{render_id}")
+def remove_story_render(product_id: UUID, render_id: UUID,
+                        db: Session = Depends(get_db)):
+    _owner_product(db, product_id)
+    try:
+        delete_story_render(db, get_settings().products_root, product_id, render_id)
+    except (ValueError, LookupError) as exc:
+        raise _error(exc) from None
+    return JSONResponse({"deleted": True}, headers={"Cache-Control": "no-store"})
