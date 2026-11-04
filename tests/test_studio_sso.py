@@ -1095,15 +1095,18 @@ def test_fresh_servgo_role_bypasses_stale_positive_cache(env):
 def test_canonical_sso_survives_corrupt_legacy_accounts_without_operator_elevation(env, tmp_path):
     """Legacy JSON problems cannot block a tenant or silently grant platform scope."""
     from app.api.content_studio_auth import credential_fingerprint
-    from app.core.studio_operator_links import bind_operator
-    db, settings, salon, _, _ = env
-    # Establish an otherwise valid platform-operator link before corrupting the file.
+    from app.core.studio_operator_links import bind_operator, linked_operator
+    _, settings, salon, _, _ = env
+    corrupt = tmp_path / "corrupt-accounts.json"
+    corrupt.write_text("{}", encoding="utf-8")
+    settings.studio_users_file = corrupt
+    # Establish a real operator link using the SAME account directory, then
+    # corrupt that file: this must revoke elevation but not tenant SSO.
     fingerprint = credential_fingerprint(settings, {}, "owner")
     assert fingerprint is not None
     bind_operator(settings, 7, "owner", fingerprint[0])
-    corrupt = tmp_path / "corrupt-accounts.json"
+    assert linked_operator(settings, 7, {}) == "owner"
     corrupt.write_text("{invalid json", encoding="utf-8")
-    settings.studio_users_file = corrupt
     settings.studio_servgo_gateway_enabled = True
 
     with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
