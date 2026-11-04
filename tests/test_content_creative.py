@@ -440,3 +440,52 @@ async def test_fenced_creative_stages_do_not_trigger_extra_repair_calls(db, tmp_
                                    request, task_id=task.id, provider=provider)
     assert len(provider.calls) == 2
     assert db.get(Task, task.id).status == TaskStatus.COMPLETED
+
+
+def test_creative_json_parser_accepts_one_complete_envelope_after_prose():
+    from app.content.creative import parse_creative_json
+    valid = json.dumps(strategy_payload(), ensure_ascii=False)
+    assert parse_creative_json("Готово. Ниже структура:\n" + valid + "\nПроверьте.") == strategy_payload()
+    assert parse_creative_json("<think>План построен.</think>\n" + valid) == strategy_payload()
+    assert parse_creative_json("Ответ модели:\n" + valid + "\n") == strategy_payload()
+    with pytest.raises(json.JSONDecodeError):
+        parse_creative_json("Вариант A:\n" + valid + "\nВариант B:\n" + valid)
+    with pytest.raises(json.JSONDecodeError):
+        parse_creative_json("JSON: " + valid[:-7])
+    with pytest.raises(json.JSONDecodeError):
+        parse_creative_json("К сожалению, JSON подготовить не удалось.")
+    with pytest.raises(json.JSONDecodeError):
+        parse_creative_json("План: {только пример} и ответ: {ещё пример}")
+
+
+@pytest.mark.asyncio
+async def test_story_uses_wrapped_but_valid_grok_response_without_repeat(db, tmp_path):
+    from app.content.creative import parse_creative_json
+    product = Product(name="Цветочная мастерская", slug="creative-grok-envelope")
+    db.add(product)
+    db.commit()
+    task_request = CreativeRequest(mode="creative", product_id=product.id,
+                                   topic="Три совета", format="story",
+                                   platform="instagram_reels", frame_count=3)
+    task = queue_creative(db, task_request)
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+        async def generate(self, request):
+            self.calls.append(request)
+            output = strategy_payload() if len(self.calls) == 1 else creative_payload("story", "instagram_reels")
+            raw = "Ответ JSON:\n" + json.dumps(output, ensure_ascii=False) + "\nГотово."
+            return LLMResponse(content=raw, model="grok-4.7",
+                               usage=LLMUsage(input_tokens=10, output_tokens=40),
+                               stop_reason="end_turn")
+
+    provider = Provider()
+    assert await run_creative_once(
+        db, Settings(_env_file=None, products_root=tmp_path, agent_critic_enabled=False),
+        task_request, task_id=task.id, provider=provider)
+    assert len(provider.calls) == 2
+    assert db.get(Task, task.id).status == TaskStatus.COMPLETED
+    saved = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_stage_error")))
+    assert saved == []
