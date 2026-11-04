@@ -239,8 +239,18 @@ def _sso_login(request: Request, settings, db=None, *, users: dict | None = None
     from app.core.studio_operator_links import linked_operator
     # When the legacy account store is broken, tenant SSO remains available
     # but no linked platform-operator privilege can be evaluated or granted.
-    linked_login = (linked_operator(settings, session.user_id, users if users is not None else _load_users(settings))
-                    if operator_accounts_healthy else None)
+    linked_login = None
+    if operator_accounts_healthy:
+        try:
+            linked_login = linked_operator(settings, session.user_id,
+                                           users if users is not None else _load_users(settings))
+        except HTTPException:
+            # A syntactically valid JSON file may still contain malformed
+            # legacy operator entries. Keep the tenant-scoped login, but never
+            # grant platform-wide privileges from an invalid credential.
+            if not _canonical_pwa(request, settings):
+                raise
+            _logger.warning("studio_legacy_operator_invalid_for_canonical_sso")
     if linked_login is not None:
         # Preserve the proven operator login so permission gates such as
         # STUDIO_TUNE_USERNAMES continue to recognize this exact identity.
