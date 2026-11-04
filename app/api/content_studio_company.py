@@ -386,7 +386,7 @@ def _company_settings_html(product: Product, *, can_delete: bool) -> str:
 <form method="post" action="{base}/profile/rename" class="sg-intake-form" data-once>
   <label class="sg-field"><span>Название</span><input name="name" required minlength="2" maxlength="200" value="{esc(product.name)}"></label>
   <label class="sg-field"><span>Краткое описание</span><textarea name="description" rows="3" maxlength="10000">{esc(product.description or '')}</textarea></label>
-  <div class="sg-intake-actions"><button class="btn">Сохранить название</button>{delete_link}</div></form><script src="/studio/assets/yandex-company.js" defer></script></section>"""
+  <div class="sg-intake-actions"><button class="btn">Сохранить название</button>{delete_link}</div></form></section>"""
 
 
 def _collect_company_form(product: Product, registry_hint: str, review: dict | None = None) -> str:
@@ -425,7 +425,7 @@ def _collect_company_form(product: Product, registry_hint: str, review: dict | N
   {_file_field("Файлы")}
   {questions_block}
   <div class="sg-intake-actions"><button class="btn primary" type="submit">Собрать профиль</button></div>
-</form></section>"""
+</form><script src="/studio/assets/yandex-company.js" defer></script></section>"""
 
 
 def _edit_page_body(product: Product, profile: CompanyProfile | None, error: str | None) -> str:
