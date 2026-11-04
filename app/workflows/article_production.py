@@ -493,7 +493,7 @@ def _decode_stage_json(content: str):
         source = content.strip()
         if len(source) > 150_000:
             raise original
-        fenced = re.fullmatch(r"```(?:json)?\\s*([\\s\\S]*?)\\s*```", source, re.IGNORECASE)
+        fenced = re.fullmatch(r"```(?:json)?\s*([\s\S]*?)\s*```", source, re.IGNORECASE)
         if fenced is not None:
             source = fenced.group(1).strip()
         else:
@@ -512,12 +512,12 @@ def _decode_stage_json(content: str):
         escaped = False
         for index, ch in enumerate(source):
             if quoted:
-                if ch in "\\n\\r\\t":
-                    output.append({"\\n": "\\\\n", "\\r": "\\\\r", "\\t": "\\\\t"}[ch])
+                if ch in "\n\r\t":
+                    output.append({"\n": "\\n", "\r": "\\r", "\t": "\\t"}[ch])
                     continue
                 if escaped:
                     escaped = False
-                elif ch == "\\\\":
+                elif ch == "\\":
                     escaped = True
                 elif ch == '"':
                     quoted = False
