@@ -462,7 +462,9 @@ def _profile_body(product: Product, state: dict | None, error: str | None, notic
                   registry_hint: str, job: dict | None = None, profile: CompanyProfile | None = None,
                   can_delete: bool = False) -> str:
     base = f"/studio/products/{product.id}"
-    parts = []
+    parts = [f'<section class="sg-surface sg-intake-section"><h2>Фирменный стиль</h2>'
+             f'<p>Логотипы, цвета, шрифты и шаблоны Stories для вашей компании.</p>'
+             f'<a class="btn secondary" href="{base}/brand-kit">Открыть фирменный стиль</a></section>']
     running = bool(job and job.get("running"))
     if error:
         parts.append(f'<div class="sg-warning" role="alert">{esc(error)}</div>')
