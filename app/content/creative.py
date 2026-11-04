@@ -246,8 +246,56 @@ def queue_creative(db, request: CreativeRequest, *, commit=True) -> Task:
     return task
 
 
+def _extract_single_json_object(text: str) -> dict | None:
+    """Extract a unique, syntactically complete JSON object, never an arbitrary fragment.
+
+    Only bracket-matched objects outside quoted strings are considered. Reject
+    ambiguous multiple answers, malformed objects and incomplete replies.
+    """
+    found = []
+    depth = 0
+    start = None
+    quoted = False
+    escaped = False
+    for index, character in enumerate(text):
+        if not depth:
+            if character == "{":
+                depth = 1
+                start = index
+                quoted = escaped = False
+            continue
+        if quoted:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                quoted = False
+        elif character == '"':
+            quoted = True
+        elif character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    candidate = json.loads(text[start:index + 1])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(candidate, dict):
+                    found.append(candidate)
+                    if len(found) > 1:
+                        return None
+    return found[0] if len(found) == 1 else None
+
+
 def parse_creative_json(content: str) -> dict:
-    """Accept an exact JSON object, optionally fenced or encoded as a JSON string."""
+    """Parse strict JSON or one uniquely identifiable JSON object in model prose.
+
+    A gateway may ignore its requested json_schema and prepend an explanation
+    or a reasoning wrapper. Only a complete, unambiguous JSON object is used,
+    and the caller still applies the full Pydantic/tenant validation.
+    """
     import re
     if not isinstance(content, str) or len(content) > 65000:
         raise ValueError("Creative output too large or not text")
@@ -256,12 +304,18 @@ def parse_creative_json(content: str) -> dict:
                          flags=re.IGNORECASE | re.DOTALL)
     if fence:
         value = fence.group(1).strip()
-    decoded = json.loads(value)
-    if isinstance(decoded, str):
-        decoded = json.loads(decoded)
+    try:
+        decoded = json.loads(value)
+        if isinstance(decoded, str):
+            decoded = json.loads(decoded)
+    except json.JSONDecodeError:
+        decoded = _extract_single_json_object(value)
+        if decoded is None:
+            raise
     if not isinstance(decoded, dict):
         raise ValueError("Creative output must be a JSON object")
     return decoded
+
 
 
 def creative_error_metadata(stage: str, error: BaseException, response=None) -> dict:
@@ -271,9 +325,17 @@ def creative_error_metadata(stage: str, error: BaseException, response=None) -> 
         data.update(json_error_code=error.msg[:80], json_line=error.lineno,
                     json_column=error.colno, json_position=error.pos)
     if response is not None:
+        text = (response.content or "").strip()
         data.update(output_length=len(response.content or ""),
                     stop_reason=str(response.stop_reason or "unknown")[:40],
-                    model=str(response.model or "")[:120])
+                    model=str(response.model or "")[:120],
+                    output_prefix_class=(
+                        "json_start" if text.startswith(("{", "[", '"')) else
+                        "markdown_fence" if text.startswith(chr(96) * 3) else
+                        "markup" if text.startswith("<") else
+                        "prose" if text[:1].isalpha() else "other"
+                    ),
+                    balanced_json_object_present=_extract_single_json_object(text) is not None)
     return data
 
 
