@@ -2222,6 +2222,27 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
     ).order_by(Artifact.created_at.desc()).limit(1))
     body = task_detail_html(product.id, task, runs, results, request=request)
     if task.assigned_agent == "content_creative":
+        if task.status == TaskStatus.FAILED:
+            diagnostic = db.scalar(select(Artifact).where(
+                Artifact.product_id == product.id, Artifact.task_id == task.id,
+                Artifact.kind == "creative_stage_error",
+            ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+            if diagnostic:
+                data = parse_json(diagnostic)
+                stage_label = {
+                    "creative_strategist": "Стратегия",
+                    "creative_director": "Раскадровка",
+                    "creative_image": "Изображения",
+                }.get(data.get("stage"), "Подготовка материала")
+                error_code = str(data.get("exception_type") or "unknown")[:80]
+                detail = " · ошибка структуры JSON" if error_code == "JSONDecodeError" else ""
+                body += (
+                    '<section class="sg-surface" role="status">'
+                    '<h3>Причина остановки</h3>'
+                    f'<p>Этап: {esc(stage_label)} · {esc(error_code)}{detail}. '
+                    'Готовые этапы сохраняются; используйте продолжение задания.</p>'
+                    '</section>'
+                )
         images = generated_images(db, product.id, task.id)
         errors = list(db.scalars(select(Artifact).where(
             Artifact.product_id == product.id, Artifact.task_id == task.id,
