@@ -192,3 +192,17 @@ def test_task_pin_is_required_and_wrong_brand_cannot_be_rendered(brand_growth):
             _draft(), _draft().frames[0], count=3), frame_key="x-company",
             pinned_task_id=task.id)
     assert db.scalar(select(BrandVersion).where(BrandVersion.id == old.id)) is not None
+
+
+def test_brand_copy_is_checked_before_paid_background_call():
+    from app.content.brand_story_pipeline import validate_brand_story_copy
+    draft = _draft()
+    validate_brand_story_copy(draft)
+    malformed = draft.model_copy(deep=True)
+    malformed.frames[0].on_screen_text = "Очень длинный текст " * 12
+    with pytest.raises(ValueError, match="текст кадра"):
+        validate_brand_story_copy(malformed)
+    malformed = draft.model_copy(deep=True)
+    malformed.cta = "Невероятно длинная рекламная фраза для призыва " * 5
+    with pytest.raises(ValueError, match="призыв"):
+        validate_brand_story_copy(malformed)
