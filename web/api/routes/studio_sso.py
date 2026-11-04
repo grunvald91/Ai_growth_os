@@ -19,13 +19,14 @@ import secrets
 import time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import Business, BusinessOwner, Employee, Service, User, get_db
 from ..deps import get_current_user
+from ..studio_identity import ensure_identity
 
 router = APIRouter()
 
@@ -146,13 +147,15 @@ class TicketOut(BaseModel):
 
 
 @router.post("/studio/ticket", response_model=TicketOut)
-async def studio_ticket(data: TicketIn, user: User = Depends(get_current_user),
-                        db: AsyncSession = Depends(get_db)):
+async def studio_ticket(data: TicketIn, request: Request, response: Response,
+                        user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """One-time link into the studio for a business the person is allowed to manage."""
     role = await studio_role(db, user.id, data.business_id)
     if role is None:
         raise HTTPException(status_code=403, detail="No access to the marketing studio for this business")
     business = await db.get(Business, data.business_id)
+    # Refresh a pre-upgrade JWT login without rotating an already-valid browser identity.
+    ensure_identity(response, user.id, request.cookies.get("sg_identity"))
     ticket = make_ticket(user_id=user.id, business_id=business.id, role=role, name=business.name or "")
     return TicketOut(url=f"{studio_public_url()}/studio/sso?t={ticket}")
 
