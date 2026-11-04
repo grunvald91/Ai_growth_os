@@ -128,25 +128,30 @@
     }
     function attachGrip(button,open,swipeDirection){
       let startY=null;
-      let swiped=false;
+      let activePointer=null;
+      let suppressClickUntil=0;
       button.addEventListener('pointerdown',event=>{
         if(event.pointerType==='touch' || event.pointerType==='pen'){
           startY=event.clientY;
-          swiped=false;
+          activePointer=event.pointerId;
+          // Keep receiving pointerup even when the finger ends outside the handle.
+          try{button.setPointerCapture(event.pointerId);}catch(_){/* synthetic event */}
         }
       });
       button.addEventListener('pointerup',event=>{
-        if(startY===null)return;
+        if(startY===null || event.pointerId!==activePointer)return;
         const movement=event.clientY-startY;
         startY=null;
+        activePointer=null;
         if(swipeDirection*movement>24){
-          swiped=true;
+          suppressClickUntil=performance.now()+350;
           showHistory(open);
         }
       });
-      button.addEventListener('pointercancel',()=>{startY=null;swiped=false;});
+      button.addEventListener('pointercancel',()=>{startY=null;activePointer=null;});
       button.addEventListener('click',()=>{
-        if(swiped){swiped=false;return;}
+        // Touch devices can synthesize a click immediately after the swipe.
+        if(performance.now()<suppressClickUntil)return;
         showHistory(open);
       });
     }
