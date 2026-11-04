@@ -126,38 +126,63 @@ with SessionLocal() as db:
     safe_print("queued_seo_request_queries", pending)
 
 
-# Real Yandex/Google suggestion checks, without DB writes or language-model calls.
-import asyncio
-from app.seo.suggest import collect
 
-_BUYER_PROBES = {
-    "booking_software": "программа онлайн записи клиентов",
-    "empty_slots": "как привлечь клиентов в салон красоты",
-    "empty_slots_precise": "как заполнить пустые окна в салоне красоты",
-    "ai_marketing": "ии для продвижения бизнеса",
-}
-
-def _buyer_relevant(topic, query):
-    q = " " + query.casefold().replace("ё", "е") + " "
-    if topic == "booking_software":
-        return "запис" in q and any(v in q for v in ("программ", "сервис", "онлайн", "систем", "crm", "црм"))
-    if topic.startswith("empty_slots"):
-        return (any(v in q for v in ("привлеч", "заполн", "свободн", "пусты", "нехватк"))
-            and any(v in q for v in ("клиент", "салон", "мастер", "расписан"))
-            and not any(v in q for v in ("пластиков", "стеклопакет", "окна пвх", "город мастеров")))
-    if topic == "ai_marketing":
-        return any(v in q for v in (" ии ", "нейросет", "искусствен", " ai ")) and any(
-            v in q for v in ("продвиж", "маркетинг", "реклам", "бизнес", "контент"))
-    return False
-
-async def probe_buyer_sources():
-    for topic, seed in _BUYER_PROBES.items():
-        results = await collect([seed], max_requests=24, concurrency=4, total_timeout=48)
-        evidence = {}
-        for engine, data in results.items():
-            candidates = sorted(q for q in data.queries if _buyer_relevant(topic, q))
-            evidence[engine] = {"requests": data.requests, "failed": data.failed,
-                "returned": len(data.queries), "buyer_queries": candidates[:14]}
-        safe_print("buyer_source_" + topic, {"seed": seed, "sources": evidence})
-
-asyncio.run(probe_buyer_sources())
+# Read-only acceptance progress and actual public HTTPS pages.
+from app.models.domain import AgentRun
+import httpx
+BATCH_TITLE = "SEO acceptance: three B2B buyer journeys"
+with SessionLocal() as db:
+    company = db.scalar(select(Product).where(Product.slug == "servgo").limit(1))
+    batch = db.scalar(select(Artifact).where(Artifact.product_id == company.id,
+        Artifact.kind == "seo_acceptance_batch",
+        Artifact.title == "seo-acceptance-three-b2b-20261104").limit(1))
+    plan = db.scalar(select(Artifact).where(Artifact.product_id == company.id,
+        Artifact.kind == "seo_content_plan", Artifact.title == BATCH_TITLE)
+        .order_by(Artifact.created_at.desc()).limit(1))
+    safe_print("acceptance_batch_recorded", bool(batch))
+    safe_print("acceptance_plan_recorded", bool(plan))
+    if plan:
+        rows = []
+        for item in SeoContentPlan.model_validate_json(plan.content).items:
+            task = db.scalar(select(Task).where(Task.product_id == company.id,
+                Task.title == f"SEO-ARTICLE:{plan.id}:{item.id}").limit(1))
+            if task is None:
+                rows.append({"query": item.primary_query, "task": "missing"})
+                continue
+            article = db.scalar(select(Artifact).where(
+                Artifact.task_id == task.id, Artifact.kind == "article").limit(1))
+            review = db.scalar(select(Artifact).where(
+                Artifact.task_id == task.id, Artifact.kind == "seo_final_review")
+                .order_by(Artifact.created_at.desc()).limit(1))
+            publication = db.scalar(select(Publication).where(
+                Publication.artifact_id == article.id).limit(1)) if article else None
+            verdict = None
+            if review:
+                try:
+                    data = json.loads(review.content)
+                    verdict = {"status": data.get("status"), "findings": len(data.get("findings") or []),
+                               "reader_hash": bool(data.get("reader_hash"))}
+                except ValueError:
+                    verdict = {"parse_error": True}
+            stages = db.execute(select(AgentRun.agent_name, AgentRun.status).where(
+                AgentRun.task_id == task.id).order_by(AgentRun.created_at.desc()).limit(12)).all()
+            row = {"query": item.primary_query, "task_status": str(task.status),
+                "article_status": str(article.status) if article else None,
+                "critic": verdict, "stages": [{"agent": a, "status": status} for a,status in stages],
+                "publication": publication.status if publication else None,
+                "public_path": publication.external_reference if publication else None}
+            rows.append(row)
+        safe_print("acceptance_batch_progress", rows)
+        for row in rows:
+            if row.get("publication") != "published":
+                continue
+            url = "https://servgo.ru" + row["public_path"]
+            try:
+                response = httpx.get(url, follow_redirects=True, timeout=18)
+                safe_print("acceptance_public_page", {
+                    "url": url, "status": response.status_code,
+                    "canonical": 'rel="canonical"' in response.text and url in response.text,
+                    "cta": "/blog/cta/" in response.text,
+                    "h1": "<h1" in response.text})
+            except Exception as exc:
+                safe_print("acceptance_http_error", {"url": url, "type": type(exc).__name__})
