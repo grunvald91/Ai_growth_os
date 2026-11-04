@@ -75,6 +75,23 @@ JS = r"""
     items.className = 'sg-company-items';
     const unique = new Set();
     let connectedCount = 0;
+    // Existing platform-wide Growth project is a separate, protected record,
+    // not a newly created BookingBot business. The server emits its product
+    // UUID only when this SSO user has a VERIFIED linked operator account.
+    const platformId = mount.dataset.platformProduct || '';
+    const platformName = mount.dataset.platformName || '';
+    if (platformId && platformName) {
+      const platformButton = text('a', 'sg-company-choice', '');
+      platformButton.href = '/studio/products/' + encodeURIComponent(platformId);
+      platformButton.appendChild(text('span', 'sg-company-avatar', 'S'));
+      const platformCopy = text('span', 'sg-company-choice-copy', '');
+      platformCopy.appendChild(text('strong', '', platformName));
+      platformCopy.appendChild(text('small', '', 'Платформа · существующий проект администратора'));
+      platformButton.appendChild(platformCopy);
+      platformButton.appendChild(text('span', 'sg-company-arrow', '›'));
+      items.appendChild(platformButton);
+      connectedCount += 1;
+    }
     for (const company of companies) {
       if (!company || !Number.isSafeInteger(company.id) || company.id <= 0 ||
           typeof company.name !== 'string' || !company.name.trim() ||
@@ -116,10 +133,11 @@ JS = r"""
     }
     mount.replaceChildren(
       text('p', 'sg-company-caption',
-           'Организаций ServGo: ' + companies.length + ' · Подключено к маркетингу: ' + connectedCount),
+           'Доступных организаций и проектов: ' + (companies.length + (platformId ? 1 : 0)) +
+           ' · Подключено к маркетингу: ' + connectedCount),
       items
     );
-    if (!companies.length) {
+    if (!companies.length && !platformId) {
       mount.appendChild(text('p', 'sg-company-empty', 'У этого аккаунта пока нет доступных организаций.'));
     }
     if (legacy) legacy.hidden = true;
