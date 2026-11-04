@@ -1,0 +1,176 @@
+"""Tenant-scoped storage, review and activation of immutable visual identities."""
+from __future__ import annotations
+
+import hashlib
+import io
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+from uuid import UUID, uuid4
+
+from PIL import Image, UnidentifiedImageError
+from sqlalchemy import func, select
+
+from app.brand_kit.contracts import BrandStyle, contrast_ratio
+from app.brand_kit.models import BrandActive, BrandAsset, BrandVersion
+from app.models.domain import Product
+
+MAX_FILE_BYTES = 6_000_000
+MAX_PIXELS = 12_000_000
+IMAGE_FORMATS = {
+    "PNG": ("image/png", ".png"),
+    "JPEG": ("image/jpeg", ".jpg"),
+    "WEBP": ("image/webp", ".webp"),
+}
+ASSET_KINDS = ("original", "light", "dark")
+
+
+def _asset_dir(root: Path, product_id: UUID, *, create: bool = False) -> Path:
+    root = Path(root).resolve()
+    library = root / "_brand_assets"
+    folder = library / str(UUID(str(product_id)))
+    # Never follow a swapped symlink into another tenant's filesystem.
+    if library.is_symlink() or folder.is_symlink():
+        raise ValueError("Unsafe asset library")
+    if create:
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not folder.resolve().is_relative_to(root) or folder.is_symlink():
+        raise ValueError("Invalid asset location")
+    return folder
+
+
+def verified_asset(db, root: Path, product_id: UUID, asset_id: UUID) -> tuple[BrandAsset, Path]:
+    asset = db.scalar(select(BrandAsset).where(
+        BrandAsset.id == asset_id, BrandAsset.product_id == product_id))
+    if asset is None:
+        raise LookupError("Логотип не найден для этой компании")
+    folder = _asset_dir(root, product_id)
+    valid_name = str(asset.id) + IMAGE_FORMATS_REVERSE.get(asset.media_type, "")
+    if asset.filename != valid_name:
+        raise LookupError("Недопустимое имя файла")
+    path = folder / asset.filename
+    if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(folder.resolve()):
+        raise LookupError("Логотип недоступен")
+    if path.stat().st_size != asset.byte_size or asset.byte_size > MAX_FILE_BYTES:
+        raise LookupError("Нарушена целостность логотипа")
+    if hashlib.sha256(path.read_bytes()).hexdigest() != asset.sha256:
+        raise LookupError("Нарушена контрольная сумма логотипа")
+    return asset, path
+
+
+IMAGE_FORMATS_REVERSE = {media: extension for media, extension in IMAGE_FORMATS.values()}
+
+
+def store_asset(db, root: Path, product_id: UUID, kind: str, raw: bytes) -> BrandAsset:
+    if kind not in ASSET_KINDS:
+        raise ValueError("Неизвестный вариант логотипа")
+    if not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_FILE_BYTES:
+        raise ValueError("Логотип: от 1 байта до 6 МБ")
+    # Validate the actual decoded image, never trust the supplied filename or MIME.
+    try:
+        with Image.open(io.BytesIO(raw)) as image:
+            fmt = image.format
+            if fmt not in IMAGE_FORMATS or image.width < 1 or image.height < 1:
+                raise ValueError("Разрешены PNG, JPEG и WebP")
+            width, height = image.size
+            if width * height > MAX_PIXELS:
+                raise ValueError("Слишком высокое разрешение")
+            if getattr(image, "n_frames", 1) != 1:
+                raise ValueError("Анимированные логотипы не поддерживаются")
+            image.load()
+    except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
+        raise ValueError("Файл не является корректным изображением") from exc
+    media_type, extension = IMAGE_FORMATS[fmt]
+    asset_id = uuid4()
+    filename = str(asset_id) + extension
+    folder = _asset_dir(root, product_id, create=True)
+    path = folder / filename
+    try:
+        with path.open("xb") as stream:
+            os.chmod(path, 0o600)
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        record = BrandAsset(
+            id=asset_id, product_id=product_id, kind=kind, filename=filename,
+            media_type=media_type, sha256=hashlib.sha256(raw).hexdigest(),
+            byte_size=len(raw), width=width, height=height,
+        )
+        db.add(record)
+        db.commit()
+    except Exception:
+        db.rollback()
+        path.unlink(missing_ok=True)
+        raise
+    return record
+
+
+def _assert_assets(db, root: Path, product_id: UUID, style: BrandStyle) -> None:
+    for field in ASSET_KINDS:
+        asset_id = getattr(style.logos, field)
+        if asset_id is None:
+            continue
+        asset, _ = verified_asset(db, root, product_id, asset_id)
+        if asset.kind != field:
+            raise ValueError("Вариант логотипа не совпадает с загруженным файлом")
+
+
+def save_draft(db, root: Path, product_id: UUID, payload: dict) -> BrandVersion:
+    style = BrandStyle.model_validate(payload)
+    # Serializes concurrent version allocation on PostgreSQL.
+    product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
+    if product is None:
+        raise LookupError("Компания не найдена")
+    _assert_assets(db, root, product_id, style)
+    latest = db.scalar(select(func.max(BrandVersion.version)).where(
+        BrandVersion.product_id == product_id)) or 0
+    row = BrandVersion(
+        product_id=product_id, version=latest + 1,
+        status="draft", config=style.model_dump(mode="json"))
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def approve_version(db, root: Path, product_id: UUID, version_id: UUID) -> BrandVersion:
+    product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
+    if product is None:
+        raise LookupError("Компания не найдена")
+    version = db.scalar(select(BrandVersion).where(
+        BrandVersion.id == version_id,
+        BrandVersion.product_id == product_id).with_for_update())
+    if version is None:
+        raise LookupError("Версия фирменного стиля не найдена")
+    if version.status not in ("draft", "approved"):
+        raise ValueError("Эту версию нельзя утвердить")
+    style = BrandStyle.model_validate(version.config)
+    _assert_assets(db, root, product_id, style)
+    if style.logos.original is None:
+        raise ValueError("Сначала загрузите оригинальный логотип")
+    if contrast_ratio(style.palette.text, style.palette.background) < 4.5:
+        raise ValueError("Низкий контраст: измените цвет текста или фона")
+    version.status = "approved"
+    if version.approved_at is None:
+        version.approved_at = datetime.now(timezone.utc)
+    current = db.get(BrandActive, product_id)
+    if current is None:
+        db.add(BrandActive(product_id=product_id, version_id=version.id))
+    else:
+        current.version_id = version.id
+    db.commit()
+    return version
+
+
+def read_state(db, product_id: UUID) -> tuple[BrandVersion | None, list[BrandVersion], BrandVersion | None]:
+    versions = list(db.scalars(select(BrandVersion).where(
+        BrandVersion.product_id == product_id).order_by(
+            BrandVersion.version.desc()).limit(50)))
+    pointer = db.get(BrandActive, product_id)
+    active = next((v for v in versions if pointer is not None and v.id == pointer.version_id), None)
+    if active is None and pointer is not None:
+        active = db.scalar(select(BrandVersion).where(
+            BrandVersion.id == pointer.version_id, BrandVersion.product_id == product_id,
+            BrandVersion.status == "approved"))
+    latest = versions[0] if versions else None
+    return active, versions, latest
