@@ -12,7 +12,10 @@ from app.db.base import Base, TimestampMixin, UUIDMixin
 
 class BrandAsset(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "brand_assets"
-    __table_args__ = (UniqueConstraint("product_id", "id", name="uq_brand_asset_owner_id"),)
+    __table_args__ = (
+        UniqueConstraint("product_id", "id", name="uq_brand_asset_owner_id"),
+        UniqueConstraint("product_id", "kind", "sha256", name="uq_brand_asset_dedupe"),
+    )
 
     product_id: Mapped[UUID] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
