@@ -316,9 +316,10 @@ async def test_orphaned_native_background_reconciles_original_paid_intent(brand_
     draft = _draft()
     provider = FakeProvider()
     assert await generate_images(db, settings, request, draft, task_id=task.id, provider=provider)
-    saved = list(generated_images(db, company.id, task.id))
-    # Simulate a process that saved the atomic PNG but not its artifact.
-    db.delete(saved[0])
+    saved = next(row for row in generated_images(db, company.id, task.id)
+                 if json.loads(row.content)["frame_number"] == 1)
+    # Select by frame number; SQLite rows with equal timestamps order by UUID.
+    db.delete(saved)
     db.commit()
     intent = next(row for row in db.scalars(select(Artifact).where(
         Artifact.task_id == task.id, Artifact.kind == "creative_image_intent"))

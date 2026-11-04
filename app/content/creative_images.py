@@ -312,9 +312,16 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
                                 cached_image.width < 256 or cached_image.height < 256
                                 or cached_image.width * cached_image.height > 12_000_000))):
                         raise ValueError("Unrecorded creative image file failed validation")
-                if branded and not _frame_intents(
-                        db, request.product_id, task_id, frame.number):
-                    raise ValueError("Branded orphan file has no matching paid intent")
+                if branded:
+                    attempts = _frame_intents(
+                        db, request.product_id, task_id, frame.number)
+                    if not attempts:
+                        raise ValueError("Branded orphan file has no matching paid intent")
+                    digest = hashlib.sha256(picture).hexdigest()
+                    for attempt in attempts:
+                        checkpoint = json.loads(attempt.content)
+                        if checkpoint.get("sha256") and checkpoint["sha256"] != digest:
+                            raise ValueError("Recovered paid frame does not match original SHA256")
             else:
                 if branded:
                     # Persist before contacting the provider. On timeout, a
