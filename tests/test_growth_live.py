@@ -60,6 +60,27 @@ def test_switch_both_ways_preserves_query_and_real_forms(live):
 
 
 
+def test_daily_drawer_and_compact_navigation_use_v4_real_routes(live):
+    client, _, product = live
+    base = f"/studio/products/{product.id}"
+    page = client.get(base + "?design=v4")
+    assert page.status_code == 200
+    assert 'id="sgDailyDrawer"' in page.text
+    assert 'id="sgDailyHandle"' in page.text
+    assert 'id="sgDailyBackdrop"' in page.text
+    assert '/studio/assets/growth-daily.js?v=1' in page.text
+    assert '/studio/assets/growth-daily.css?v=1' in page.text
+    assert 'id="sgOrgMenu" hidden' in page.text
+    nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
+    assert nav.index(">Календарь</span>") < nav.index(">Ещё</span>")
+    assert nav.index("SEO-завод") < nav.index("Контент-план")
+    assert nav.index("Контент-план") < nav.index("Библиотека")
+    assert "Простое видео" not in nav
+    assert "Другая компания" not in nav
+    assert client.get("/studio/assets/growth-daily.js").status_code == 200
+    assert client.get("/studio/assets/growth-daily.css").status_code == 200
+
+
 def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     client, _, product = live
     page = client.get(f'/studio/products/{product.id}/create?design=v4')
@@ -151,7 +172,9 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert '/studio/assets/growth-live.css?v=18' in page.text
     assert '/studio/assets/dispatcher.js?v=voice-glow-audio-20261102' in page.text
     assert '/studio/assets/growth-live.js?v=10' in page.text
-    assert 'Простое видео' in page.text
+    # A video is a creation format, not a standalone main-menu section.
+    nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
+    assert 'Простое видео' not in nav
     assert 'hero-intro' in page.text
     assert 'Добрый день, Марина' not in page.text
     assert 'initialTasks' not in page.text
