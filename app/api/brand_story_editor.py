@@ -341,9 +341,16 @@ def confirm_background(product_id: UUID, task_id: UUID, artifact_id: UUID,
         headers={"Cache-Control": "private, no-store"})
 
 
-def _reserve_regeneration(db: Session, root, product_id: UUID, task_id: UUID,
-                          artifact_id: UUID, token: UUID, model: str):
-    _, source, metadata, composition = _source(db, root, product_id, task_id, artifact_id)
+def _reserve_regeneration(db: Session, settings, product_id: UUID, task_id: UUID,
+                          artifact_id: UUID, token: UUID, model_choice: str):
+    # Always verify ownership before revealing canary/provider state.
+    _, source, metadata, composition = _source(
+        db, settings.products_root, product_id, task_id, artifact_id)
+    from app.content.brand_story_pipeline import brand_story_canary_allowed
+    if not brand_story_canary_allowed(settings, product_id):
+        raise HTTPException(403, "Платная перегенерация отключена для этой компании")
+    from app.content.creative_images import resolve_model
+    model = resolve_model(settings, model_choice)
     from app.content.creative import CreativeDraft
 
     brief = db.scalar(select(Artifact).where(
@@ -378,7 +385,7 @@ def _reserve_regeneration(db: Session, root, product_id: UUID, task_id: UUID,
                             "frame_number": number, "model": model,
                             "source_artifact_id": str(source.id)}))
     db.commit()
-    return source, metadata, composition, intent.id, draft, scene, number
+    return source, metadata, composition, intent.id, draft, scene, number, model
 
 
 def _finish_regeneration(db: Session, settings, product_id: UUID, task_id: UUID,
@@ -419,7 +426,7 @@ def _failed_regeneration(db: Session, intent_id: UUID, token: UUID,
 async def regenerate_background(product_id: UUID, task_id: UUID, artifact_id: UUID,
                                 request: Request, db: Session = Depends(get_db),
                                 settings=Depends(get_settings)):
-    from app.content.creative_images import image_prompt, request_image, resolve_model
+    from app.content.creative_images import image_prompt, request_image
 
     fields = await _fields(request)
     if fields.get("confirm") != "yes" or fields.get("model") not in {"gemini", "openai"}:
@@ -428,13 +435,9 @@ async def regenerate_background(product_id: UUID, task_id: UUID, artifact_id: UU
         token = UUID(fields["token"])
     except (ValueError, KeyError):
         raise HTTPException(422, "Некорректный идентификатор подтверждения") from None
-    from app.content.brand_story_pipeline import brand_story_canary_allowed
-    if not brand_story_canary_allowed(settings, product_id):
-        raise HTTPException(403, "Платная перегенерация отключена для этой компании")
-    model = resolve_model(settings, fields["model"])
-    source, metadata, composition, intent_id, draft, scene, number = await run_in_threadpool(
-        _reserve_regeneration, db, settings.products_root, product_id, task_id,
-        artifact_id, token, model)
+    source, metadata, composition, intent_id, draft, scene, number, model = await run_in_threadpool(
+        _reserve_regeneration, db, settings, product_id, task_id,
+        artifact_id, token, fields["model"])
     try:
         prompt = image_prompt(draft, scene, number, len(draft.frames), "9:16", branded=True)
         raw = await request_image(settings, model, prompt, "9:16")
