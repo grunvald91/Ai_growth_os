@@ -5,6 +5,7 @@ import html
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import ValidationError
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.api.content_studio import _owner_product, studio_page_shell
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
+from app.api.multipart_limits import limited_multipart_form
 from app.brand_kit.contracts import ACCENTS, FONTS, GENERATORS, BrandStyle
 from app.brand_kit.models import BrandAsset
 from app.brand_kit.service import (
@@ -60,9 +62,11 @@ def _style_from_form(fields) -> BrandStyle:
         "logos": {
             name: fields.get("logo_" + name) or None for name in ASSET_KINDS
         },
-        "hook": {"logo_position": fields.get("hook_logo_position", "top-left")},
-        "explanation": {"logo_position": fields.get("explanation_logo_position", "top-left")},
-        "cta": {"logo_position": fields.get("cta_logo_position", "top-left")},
+        **{name: {
+            "logo_position": fields.get(name + "_logo_position", "top-left"),
+            "image_position": fields.get(name + "_image_position", "full"),
+            "text_align": fields.get(name + "_text_align", "left"),
+        } for name in ("hook", "explanation", "cta")},
     })
 
 
@@ -110,9 +114,18 @@ def _brand_body(product_id, db: Session, error: str = "") -> str:
         ("top-left", "Сверху слева"), ("top-right", "Сверху справа"),
         ("bottom-left", "Снизу слева"), ("bottom-right", "Снизу справа"))
     positions = "".join(
-        '<label>' + esc(label) +
-        _select(name + "_logo_position", [v for v, _ in position_names],
-                getattr(style, name).logo_position, labels=dict(position_names)) + '</label>'
+        '<fieldset class="bk-frame-layout"><legend>' + esc(label) + '</legend>' +
+        '<label>Логотип' + _select(name + "_logo_position",
+            [v for v, _ in position_names], getattr(style, name).logo_position,
+            labels=dict(position_names)) + '</label>' +
+        '<label>Фотография' + _select(name + "_image_position",
+            ("full", "top", "bottom"), getattr(style, name).image_position,
+            labels={"full": "На весь кадр", "top": "Верхняя половина",
+                    "bottom": "Нижняя половина"}) + '</label>' +
+        '<label>Выравнивание текста' + _select(name + "_text_align",
+            ("left", "center", "right"), getattr(style, name).text_align,
+            labels={"left": "Слева", "center": "По центру", "right": "Справа"}) +
+        '</label></fieldset>'
         for name, label in (("hook", "Кадр 1 · внимание"),
                             ("explanation", "Кадр 2 · раскрытие"),
                             ("cta", "Кадр 3 · призыв")))
@@ -127,7 +140,7 @@ def _brand_body(product_id, db: Session, error: str = "") -> str:
         _select("visual_character", ACCENTS, style.visual_character, labels=LABELS) +
         '</label><label>Фоны' +
         _select("preferred_generator", GENERATORS, style.preferred_generator, labels=LABELS) +
-        '</label></div><h3>Положение логотипа</h3><div class="bk-grid">' + positions + '</div>'
+        '</label></div><h3>Композиции кадров</h3><div class="bk-grid">' + positions + '</div>'
         '<button class="btn primary" type="submit">Сохранить новую версию</button>'
         '<p class="sg-muted">Сохранение — черновик. В генерации используется только утверждённая версия.</p>'
         '</form>'
@@ -163,6 +176,8 @@ def _brand_body(product_id, db: Session, error: str = "") -> str:
 .bk-wrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(270px,.75fr);gap:14px}
 .bk-wrap section{min-width:0}.bk-wrap h3{font-size:15px;margin:15px 0 10px}
 .bk-wrap form label{display:grid;gap:6px;font-size:12px;font-weight:650;margin:0 0 12px}
+.bk-frame-layout{min-width:0;border:1px solid var(--sg-line,#dde0e5);border-radius:10px;padding:10px}
+.bk-frame-layout legend{font-size:12px;font-weight:700;padding:0 5px}
 .bk-wrap select,.bk-wrap input[type=color],.bk-wrap input[type=file]{width:100%;min-height:42px;border:1px solid var(--sg-line,#d7dce5);border-radius:9px;background:var(--sg-card,#fff);color:var(--sg-text,#17212f);padding:8px}
 .bk-wrap input[type=color]{padding:3px}.bk-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}
 .bk-colors{display:grid;grid-template-columns:repeat(auto-fit,minmax(85px,1fr));gap:8px}
@@ -212,6 +227,9 @@ background:var(--bk-background);color:var(--bk-text);font-family:var(--bk-font)}
       const frame=preview.querySelector('[data-role="'+role+'"]');
       const position=form.elements.namedItem(role+'_logo_position');
       if(frame&&position) frame.dataset.position=position.value;
+      const align=form.elements.namedItem(role+'_text_align');
+      const content=frame&&frame.querySelector('.bk-preview-content');
+      if(content&&align) content.style.textAlign=align.value;
     }
     const font=form.elements.namedItem('heading');
     if(font)preview.style.setProperty('--bk-font',JSON.stringify(font.value)+',Arial,sans-serif');
@@ -255,25 +273,26 @@ def brand_kit_state(product_id: UUID, db: Session = Depends(get_db)):
     return JSONResponse(payload, headers={"Cache-Control": "private, no-store"})
 
 
+def _require_brand_owner(request: Request) -> None:
+    """Only a platform operator or the actual SSO business owner may approve."""
+    if getattr(request.state, "studio_product_ids", None) is None:
+        return
+    if getattr(request.state, "studio_sso_role", None) != "owner":
+        raise HTTPException(403, "Только владелец компании может утвердить стиль")
+
+
 @router.post("/studio/products/{product_id}/brand-kit/assets")
 async def upload_brand_asset(product_id: UUID, request: Request,
                              db: Session = Depends(get_db)):
     _owner_product(db, product_id)
-    length = request.headers.get("content-length")
-    if length:
-        try:
-            declared = int(length)
-        except ValueError:
-            raise HTTPException(400, "Неверный Content-Length") from None
-        if declared > MAX_FILE_BYTES + 12_000:
-            raise HTTPException(413, "Слишком большой файл")
-    form = await request.form(max_files=1, max_fields=3)
+    form = await limited_multipart_form(
+        request, max_body=MAX_FILE_BYTES + 12_000, max_files=1, max_fields=3)
     upload = form.get("file")
     if not isinstance(upload, UploadFile):
         raise HTTPException(422, "Выберите изображение")
     try:
         raw = await upload.read(MAX_FILE_BYTES + 1)
-        store_asset(db, get_settings().products_root, product_id, str(form.get("kind")), raw)
+        await run_in_threadpool(store_asset, db, get_settings().products_root, product_id, str(form.get("kind")), raw)
     except (ValueError, LookupError) as exc:
         raise _bad_request(exc) from None
     finally:
@@ -310,8 +329,10 @@ async def new_brand_version(product_id: UUID, request: Request,
 
 
 @router.post("/studio/products/{product_id}/brand-kit/versions/{version_id}/approve")
-def approve_brand(product_id: UUID, version_id: UUID, db: Session = Depends(get_db)):
+def approve_brand(product_id: UUID, version_id: UUID, request: Request,
+                  db: Session = Depends(get_db)):
     _owner_product(db, product_id)
+    _require_brand_owner(request)
     try:
         approve_version(db, get_settings().products_root, product_id, version_id)
     except (ValueError, LookupError, ValidationError) as exc:

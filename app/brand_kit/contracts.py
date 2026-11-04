@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-FONTS = ("Manrope", "Arial", "Roboto", "Montserrat", "Noto Sans", "PT Sans", "DejaVu Sans")
+FONTS = ("Manrope", "DejaVu Sans")  # Guaranteed: bundled Manrope and Docker DejaVu.
 FONT_CSS = {name: "'" + name + "',Arial,sans-serif" for name in FONTS}
 ACCENTS = ("minimal", "photo", "illustration", "decorative")
 GENERATORS = ("gemini", "openai", "own")
@@ -35,8 +35,8 @@ class Palette(Strict):
 
 
 class Typography(Strict):
-    heading: Literal["Manrope", "Arial", "Roboto", "Montserrat", "Noto Sans", "PT Sans", "DejaVu Sans"] = "Manrope"
-    body: Literal["Manrope", "Arial", "Roboto", "Montserrat", "Noto Sans", "PT Sans", "DejaVu Sans"] = "Manrope"
+    heading: Literal["Manrope", "DejaVu Sans"] = "Manrope"
+    body: Literal["Manrope", "DejaVu Sans"] = "Manrope"
 
 
 class Logos(Strict):

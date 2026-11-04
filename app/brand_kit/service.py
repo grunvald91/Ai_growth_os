@@ -79,6 +79,19 @@ def store_asset(db, root: Path, product_id: UUID, kind: str, raw: bytes) -> Bran
             if getattr(image, "n_frames", 1) != 1:
                 raise ValueError("Анимированные логотипы не поддерживаются")
             image.load()
+            # Reject images whose visible content would be illegible in the final
+            # 238x104 pixel logo placement (including transparent padding).
+            scale = min(1.0, 238 / width, 104 / height)
+            if image.mode in ("RGBA", "LA") or "transparency" in image.info:
+                alpha = image.convert("RGBA").getchannel("A")
+                visible = alpha.point(lambda a: 255 if a >= 32 else 0).getbbox()
+            else:
+                visible = (0, 0, width, height)
+            if visible is None or (
+                (visible[2] - visible[0]) * scale < 24
+                or (visible[3] - visible[1]) * scale < 12
+            ):
+                raise ValueError("Логотип слишком мал или невидим в Stories")
     except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
         raise ValueError("Файл не является корректным изображением") from exc
     media_type, extension = IMAGE_FORMATS[fmt]
