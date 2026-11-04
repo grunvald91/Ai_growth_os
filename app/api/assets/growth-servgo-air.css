@@ -1239,3 +1239,30 @@ body[data-growth-design="v4"] .route-content .sg-storyboard-screen {
 body[data-growth-design="v4"] .route-content .sg-storyboard-card details {
   border-color:var(--s-line-2);
 }
+
+/* The legacy script/detail card itself still has a hard-coded white background.
+ * Without this bridge white dark-theme text becomes invisible on #fbfdff.
+ * Align script shots and prompts with the same semantic surfaces. */
+body[data-growth-design="v4"] .route-content .material-detail-body .article-text {
+  background:var(--s-surface-2) !important;
+  border-color:var(--s-line-2) !important;
+}
+body[data-growth-design="v4"] .route-content .story-shot {
+  background:var(--s-surface-2);
+  border-color:var(--s-line-2);
+  color:var(--s-text);
+}
+body[data-growth-design="v4"] .route-content .story-shot :is(b,.story-shot-head b) {
+  color:var(--s-text);
+}
+body[data-growth-design="v4"] .route-content .story-shot p {
+  color:var(--s-muted);
+}
+body[data-growth-design="v4"] .route-content .story-shot time {
+  color:var(--s-accent);
+}
+body[data-growth-design="v4"] .route-content .story-prompt {
+  background:var(--s-surface-3);
+  color:var(--s-text);
+}
+
