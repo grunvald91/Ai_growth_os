@@ -104,6 +104,17 @@ class StudioSsoTest(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(claims['exp'] - time.time(), 60)
         self.assertGreater(claims['exp'] - time.time(), 50)
 
+    async def test_studio_ticket_binds_to_the_current_servgo_browser_identity(self):
+        from web.api.studio_identity import read
+        response = self.ticket("owner")
+        self.assertEqual(response.status_code, 200)
+        cookie = response.headers.get("set-cookie", "")
+        self.assertIn("sg_identity=", cookie)
+        self.assertIn("httponly", cookie.lower())
+        self.assertIn("secure", cookie.lower())
+        identity = cookie.split("sg_identity=", 1)[1].split(";", 1)[0]
+        self.assertEqual(read(identity), self.u["owner"])
+
     async def test_ticket_always_uses_servgo_pwa_regardless_of_legacy_flag(self):
         with mock.patch.dict(os.environ, {'SERVGO_GROWTH_GATEWAY_ENABLED': 'true'}):
             response = self.ticket('owner')
