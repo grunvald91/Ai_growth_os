@@ -445,12 +445,15 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
     if not runs:
         steps.append("<li>Ожидаем запуска обработки</li>" if key == "queued" else
                      "<li>Обработка запущена. Подробные этапы ещё не поступили.</li>")
+    latest_completed = {run.agent_name for run in runs if run.status == "completed"}
     for run in runs[-16:]:
         stage = STAGE_NAMES.get(run.agent_name, "Подготовка материала")
         state = {
             "queued": "Ожидает", "running": "Выполняется",
             "completed": "Готово", "failed": "Ошибка",
         }.get(run.status, "Проверяется")
+        if run.status == "failed" and run.agent_name in latest_completed:
+            state = "Исправлено при продолжении"
         steps.append(f'<li><span>{safe(stage)}</span><b>{safe(state)}</b></li>')
     rendered = []
     for result in results:
@@ -478,11 +481,15 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
     refresh = ('<p class="sg-work-refresh" role="status">Состояние обновляется каждые 15 секунд. '
                'Эту страницу можно закрыть и вернуться позже.</p>'
                if key in {"queued", "running"} else "")
+    creative_resume = task.assigned_agent == "content_creative"
     fail = (
         f'<form action="{base}/tasks/{task.id}/retry" method="post">'
-        '<button class="btn secondary" type="submit">Повторить задание</button></form>'
+        '<button class="btn secondary" type="submit">'
+        + ("Продолжить с сохранённых этапов" if creative_resume else "Повторить задание")
+        + '</button></form>'
         if key in {"failed", "cancelled"} and task.assigned_agent
-        in {"content_factory", "content_creative", "content_editor"} and not results else ""
+        in {"content_factory", "content_creative", "content_editor"}
+        and (creative_resume or not results) else ""
     )
     stage_sig = "|".join(str(run.id) + ":" + run.status for run in runs[-20:])
     return (
