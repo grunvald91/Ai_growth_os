@@ -430,3 +430,45 @@ def test_primary_and_secondary_palette_both_affect_story(company):
     modified.palette.secondary = "#556677"
     updated = render_story(modified, frame(), logo=png_logo()).png
     assert hashlib.sha256(updated).digest() != hashlib.sha256(baseline).digest()
+
+
+def test_storage_library_shows_limits_and_handles_form_cleanup(company):
+    client, db, a, b, va, _, root, _ = company
+    background = store_background(db, root, a.id, picture())
+    view = client.get(f"/studio/products/{a.id}/brand-kit/library")
+    assert view.status_code == 200, view.text
+    assert "Хранилище фирменного стиля" in view.text
+    assert "Фоны" in view.text and "Готовые кадры" in view.text
+    assert "128 МБ" in view.text
+    assert str(background.id) in view.text
+    page = client.get(f"/studio/products/{a.id}/brand-kit")
+    assert "/brand-kit/library" in page.text
+
+    # Company B cannot touch company A's stored files through the form route.
+    assert client.post(
+        f"/studio/products/{b.id}/brand-kit/library/backgrounds/{background.id}/delete",
+        follow_redirects=False).status_code == 404
+    action = client.post(
+        f"/studio/products/{a.id}/brand-kit/library/backgrounds/{background.id}/delete",
+        follow_redirects=False)
+    assert action.status_code == 303
+    assert db.scalar(select(BrandBackground).where(BrandBackground.id == background.id)) is None
+
+
+def test_library_refuses_deleting_background_in_use(company):
+    client, db, a, _, va, _, root, _ = company
+    background = store_background(db, root, a.id, picture())
+    render = create_composition(db, root, a.id, va.id, frame(),
+                                frame_key="library:locked", background_id=background.id)
+    response = client.post(
+        f"/studio/products/{a.id}/brand-kit/library/backgrounds/{background.id}/delete",
+        follow_redirects=False)
+    assert response.status_code == 409
+    library = client.get(f"/studio/products/{a.id}/brand-kit/library")
+    assert "Используется в готовом кадре" in library.text
+    assert client.post(
+        f"/studio/products/{a.id}/brand-kit/library/renders/{render.id}/delete",
+        follow_redirects=False).status_code == 303
+    assert client.post(
+        f"/studio/products/{a.id}/brand-kit/library/backgrounds/{background.id}/delete",
+        follow_redirects=False).status_code == 303
