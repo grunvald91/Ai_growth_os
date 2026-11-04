@@ -730,10 +730,10 @@ body[data-growth-design="v4"] .sg-create-history-open{
   touch-action:none;-webkit-tap-highlight-color:transparent;
 }
 body[data-growth-design="v4"] .sg-create-history-close{
-  width:100%;min-height:27px;flex:0 0 27px;border-bottom:1px solid var(--line);
+  width:100%;min-height:38px;flex:0 0 38px;border-bottom:1px solid var(--line);
 }
 body[data-growth-design="v4"] .sg-create-history-open{
-  display:none;width:64px;height:25px;margin:0 auto 2px;border-radius:999px;
+  display:none;width:76px;height:38px;margin:0 auto 1px;border-radius:999px;
   background:var(--card);box-shadow:0 1px 6px #00000012;
 }
 body[data-growth-design="v4"] .sg-create-dispatch.has-feed.sg-history-collapsed .sg-create-history-open{display:flex}
