@@ -77,7 +77,8 @@ async def studio_role(db: AsyncSession, user_id: int, business_id: int) -> Optio
     link = await db.scalar(select(BusinessOwner).where(
         BusinessOwner.business_id == business_id, BusinessOwner.user_id == user_id))
     if link is not None:
-        return link.role if link.role in ("owner", "co_owner") else "co_owner"
+        # Unknown/invalid values must never silently grant co-owner rights.
+        return link.role if link.role in ("owner", "co_owner") else None
     if not business.studio_admin_access:
         return None
     user = await db.get(User, user_id)
