@@ -246,6 +246,37 @@ def queue_creative(db, request: CreativeRequest, *, commit=True) -> Task:
     return task
 
 
+def parse_creative_json(content: str) -> dict:
+    """Accept an exact JSON object, optionally fenced or encoded as a JSON string."""
+    import re
+    if not isinstance(content, str) or len(content) > 65000:
+        raise ValueError("Creative output too large or not text")
+    value = content.strip().lstrip("\ufeff")
+    fence = re.fullmatch(r"\x60{3}(?:json)?\s*\n(.*?)\n\s*\x60{3}", value,
+                         flags=re.IGNORECASE | re.DOTALL)
+    if fence:
+        value = fence.group(1).strip()
+    decoded = json.loads(value)
+    if isinstance(decoded, str):
+        decoded = json.loads(decoded)
+    if not isinstance(decoded, dict):
+        raise ValueError("Creative output must be a JSON object")
+    return decoded
+
+
+def creative_error_metadata(stage: str, error: BaseException, response=None) -> dict:
+    """Bounded, non-sensitive stage diagnosis. Never store prompts or model output."""
+    data = {"stage": stage, "exception_type": type(error).__name__[:80]}
+    if isinstance(error, json.JSONDecodeError):
+        data.update(json_error_code=error.msg[:80], json_line=error.lineno,
+                    json_column=error.colno, json_position=error.pos)
+    if response is not None:
+        data.update(output_length=len(response.content or ""),
+                    stop_reason=str(response.stop_reason or "unknown")[:40],
+                    model=str(response.model or "")[:120])
+    return data
+
+
 async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: UUID, provider=None):
     from app.core.composition import SAFE_LLM_METADATA_FIELDS, build_llm_provider
     from app.llm.service import LLMService
