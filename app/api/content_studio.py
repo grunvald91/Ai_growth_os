@@ -2347,19 +2347,13 @@ def studio_retry_task(product_id: UUID, task_id: UUID, db: Session = Depends(get
         Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING])))
     if duplicate:
         raise HTTPException(409, "Такое задание уже выполняется")
-    if task.assigned_agent == "content_creative":
-        # A saved storyboard and images are checkpoints, not a reason to prevent
-        # continuation. The worker only generates missing stages and frames.
-        original = db.scalar(select(Artifact.id).where(
-            Artifact.task_id == task.id, Artifact.product_id == product_id,
-            Artifact.kind == "creative_request"))
-        if original is None:
-            raise HTTPException(409, "Нельзя продолжить без исходного запроса")
-    else:
+    if task.assigned_agent != "content_creative":
         partial = db.scalar(select(Artifact.id).where(
             Artifact.task_id == task_id, Artifact.kind.in_(MATERIAL_KINDS)))
         if partial:
             raise HTTPException(409, "У задания уже есть материалы. Проверьте их перед новым запуском.")
+    # Creative stages and frames are idempotent checkpoints. The worker itself
+    # validates the stored request before invoking any paid provider calls.
     task.status = TaskStatus.QUEUED
     db.commit()
     return RedirectResponse(f"/studio/products/{product_id}/tasks/{task_id}", status_code=303)
