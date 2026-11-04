@@ -217,3 +217,17 @@ def read_state(db, product_id: UUID) -> tuple[BrandVersion | None, list[BrandVer
             BrandVersion.status == "approved"))
     latest = versions[0] if versions else None
     return active, versions, latest
+
+
+def delete_unused_logo(db, root: Path, product_id: UUID, asset_id: UUID) -> None:
+    """Remove an original asset only when no version refers to its UUID."""
+    db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
+    record, path = verified_asset(db, root, product_id, asset_id)
+    versions = db.scalars(select(BrandVersion.config).where(
+        BrandVersion.product_id == product_id))
+    for configuration in versions:
+        if str(asset_id) in (configuration.get("logos") or {}).values():
+            raise ValueError("Логотип используется в сохранённом фирменном стиле")
+    db.delete(record)
+    db.commit()
+    path.unlink(missing_ok=True)

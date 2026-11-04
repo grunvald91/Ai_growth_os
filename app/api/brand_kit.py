@@ -16,9 +16,9 @@ from app.api.content_studio import _owner_product, studio_page_shell
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.multipart_limits import IMAGE_UPLOAD_SLOTS, limited_multipart_form
 from app.brand_kit.contracts import ACCENTS, FONTS, GENERATORS, BrandStyle
-from app.brand_kit.models import BrandAsset
+from app.brand_kit.models import BrandAsset, BrandVersion
 from app.brand_kit.service import (
-    ASSET_KINDS, MAX_FILE_BYTES, approve_version, read_state,
+    ASSET_KINDS, MAX_FILE_BYTES, approve_version, delete_unused_logo, read_state,
     save_draft, store_asset, verified_asset,
 )
 from app.core.config import get_settings
@@ -88,6 +88,12 @@ def _brand_body(product_id, db: Session, error: str = "", *, can_approve: bool =
     assets = list(db.scalars(select(BrandAsset).where(
         BrandAsset.product_id == product_id
     ).order_by(BrandAsset.created_at.desc(), BrandAsset.id.desc()).limit(100)))
+    referenced = {
+        str(value)
+        for configuration in db.scalars(select(BrandVersion.config).where(
+            BrandVersion.product_id == product_id))
+        for value in (configuration.get("logos") or {}).values() if value
+    }
     upload_form = (
         f'<form method="post" enctype="multipart/form-data" action="{base}/assets">'
         '<label>Тип ресурса' + _select("kind", ASSET_KINDS, "original", labels=LABELS) + '</label>'
@@ -95,6 +101,14 @@ def _brand_body(product_id, db: Session, error: str = "", *, can_approve: bool =
         'accept="image/png,image/jpeg,image/webp" required></label>'
         '<button class="btn secondary" type="submit">Загрузить оригинальный файл</button>'
         '</form>'
+    )
+    cleanup = "".join(
+        f'<form method="post" action="{base}/assets/{asset.id}/delete" '
+        'onsubmit="return confirm(\'Удалить неиспользуемый логотип?\')">'
+        f'<small>{esc(asset.kind)} · {asset.width}×{asset.height} · '
+        f'{asset.byte_size / 1_000_000:.2f} МБ</small>'
+        '<button type="submit" class="btn danger">Удалить</button></form>'
+        for asset in assets if str(asset.id) not in referenced
     )
     colors = "".join(
         f'<label>{esc(label)}<input type="color" name="{name}" '
@@ -210,6 +224,8 @@ background:var(--bk-background);color:var(--bk-text);font-family:var(--bk-font)}
         f'Черновик: {latest.version if latest else "нет"}.</p>'
         '<div class="bk-wrap"><div>'
         '<section class="sg-surface"><h2>1. Исходные ресурсы</h2>' + upload_form +
+        ('<details><summary>Неиспользуемые файлы · освободить место</summary>'
+         + cleanup + '</details>' if cleanup else '') +
         f'<a class="btn secondary" href="{base}/library">Хранилище · материалы и лимиты</a></section>'
         '<section class="sg-surface"><h2>2. Настройки фирменного стиля</h2>' + settings_form +
         '</section></div><div>'
@@ -382,3 +398,17 @@ def brand_preview_dejavu_bold():
     if not path.is_file():
         raise HTTPException(503, "DejaVu недоступен")
     return FileResponse(path, media_type="font/ttf", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.post("/studio/products/{product_id}/brand-kit/assets/{asset_id}/delete")
+def remove_unused_brand_logo(product_id: UUID, asset_id: UUID,
+                             db: Session = Depends(get_db),
+                             settings = Depends(get_settings)):
+    _owner_product(db, product_id)
+    try:
+        delete_unused_logo(db, settings.products_root, product_id, asset_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f"/studio/products/{product_id}/brand-kit", status_code=303)

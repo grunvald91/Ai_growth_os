@@ -265,3 +265,27 @@ def test_brand_multipart_stream_limit_without_length(studio):
                  "transfer-encoding": "chunked"})
     assert result.status_code == 413
     assert db.scalar(select(BrandAsset)) is None
+
+
+def test_unused_original_logo_can_be_deleted_but_saved_version_logo_cannot(studio):
+    client, db, a, b, root = studio
+    assert upload(client, a).status_code == 303
+    first = db.scalar(select(BrandAsset).where(BrandAsset.product_id == a.id))
+    # Initially the file is not pinned to any version and may be released.
+    assert client.post(
+        f"/studio/products/{b.id}/brand-kit/assets/{first.id}/delete",
+        follow_redirects=False).status_code == 404
+    assert client.post(
+        f"/studio/products/{a.id}/brand-kit/assets/{first.id}/delete",
+        follow_redirects=False).status_code == 303
+    assert db.get(BrandAsset, first.id) is None
+    assert upload(client, a).status_code == 303
+    second = db.scalar(select(BrandAsset).where(BrandAsset.product_id == a.id))
+    assert client.post(f"/studio/products/{a.id}/brand-kit/versions",
+                       data=fields(second.id), follow_redirects=False).status_code == 303
+    assert client.post(
+        f"/studio/products/{a.id}/brand-kit/assets/{second.id}/delete",
+        follow_redirects=False).status_code == 409
+    assert db.get(BrandAsset, second.id) is not None
+    assert "Неиспользуемые файлы" not in client.get(
+        f"/studio/products/{a.id}/brand-kit").text

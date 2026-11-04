@@ -202,3 +202,34 @@ def test_brand_preview_loads_real_browser_fonts_and_distinguishes_draft(studio):
                BrandStyle().model_dump(mode="json"))
     second = c.get(page_url, auth=OWNER)
     assert "Предпросмотр черновика" in second.text
+
+
+def test_company_brand_signoff_works_with_signed_cookie_and_revokes_live(studio):
+    from app.core.studio_accounts import create_account, set_brand_approver, load_accounts
+    from app.api.content_studio_auth import credential_fingerprint
+    from app.core.studio_sessions import COOKIE, issue
+    from app.brand_kit.service import save_draft, store_asset
+    from app.brand_kit.contracts import BrandStyle
+    from PIL import Image
+    import io
+    c, db, company, settings = studio.client, studio.db, studio.mine, studio.settings
+    create_account(settings, username="brand.signer", password="brand-signer-secret",
+                   role="company", product_ids=[str(company.id)], created_by="owner",
+                   brand_approver=True)
+    users = load_accounts(settings)
+    encoded, _ = credential_fingerprint(settings, users, "brand.signer")
+    ticket = issue(settings, "brand.signer", encoded)
+    buf = io.BytesIO()
+    Image.new("RGB", (260, 140), (20, 100, 160)).save(buf, "PNG")
+    asset = store_asset(db, settings.products_root, company.id, "original", buf.getvalue())
+    version = save_draft(db, settings.products_root, company.id,
+                         BrandStyle.model_validate(
+                             {"logos": {"original": str(asset.id)}}).model_dump(mode="json"))
+    url = f"/studio/products/{company.id}/brand-kit/versions/{version.id}/approve"
+    c.cookies.set(COOKIE, ticket)
+    try:
+        assert c.post(url, follow_redirects=False).status_code == 303
+        set_brand_approver(settings, "brand.signer", False)
+        assert c.post(url, follow_redirects=False).status_code == 403
+    finally:
+        c.cookies.delete(COOKIE)
