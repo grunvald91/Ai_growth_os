@@ -140,21 +140,32 @@ def main():
                 response=page.goto(
                     f'{origin}/studio/products/{product.id}?design=v4',wait_until='load')
                 assert response and response.status==200
-                # Computed visibility catches a hidden parent even when the
-                # company label and mobile overrides are present in the HTML.
+                # The morning briefing appears once and must not pollute the chat.
+                page.locator('#sgDailyDrawer').wait_for(state='visible')
+                page.locator('#sgDailyContent .sg-daily-stats').wait_for(state='visible')
+                assert page.locator('body').evaluate("e => e.classList.contains('sg-daily-open')")
+                page.locator('#sgDailyClose').click()
+                assert page.locator('#sgDailyHandle').is_visible()
+                # Computed visibility catches hidden/oversized header controls.
                 for width in (360, 390, 780, 1280):
                     page.set_viewport_size({'width': width, 'height': 844})
                     switcher = page.locator('#bizBtn')
                     assert switcher.is_visible(), f'Company switcher hidden at {width}px'
                     assert switcher.locator('strong').is_visible()
-                    assert switcher.get_attribute('href') == '/studio?choose=1'
+                    assert switcher.get_attribute('href') is None
                 page.set_viewport_size({'width': 390, 'height': 844})
                 page.locator('#bizBtn').click()
-                page.wait_for_url('**/studio?choose=1')
-                assert page.get_by_text(product.name, exact=True).count() >= 1
+                assert page.locator('#sgOrgMenu').is_visible()
+                assert page.locator('#sgOrgMenu').get_by_text(product.name, exact=True).count() >= 1
+                assert page.locator('#bizBtn').get_attribute('aria-expanded') == 'true'
+                page.mouse.click(52, 250)  # outside the dropdown
+                assert page.locator('#sgOrgMenu').is_hidden()
+                assert page.locator('#bizBtn').get_attribute('aria-expanded') == 'false'
                 page.goto(f'{origin}/studio/products/{product.id}?design=v4', wait_until='load')
-                result['checks'].append({'page': 'company-switcher',
-                    'widths': [360, 390, 780, 1280], 'visible': True, 'chooser_opens': True})
+                assert page.locator('#sgDailyDrawer').is_hidden(), 'Daily briefing re-opened on the same day'
+                result['checks'].append({'page': 'company-switcher-and-daily-briefing',
+                    'widths': [360, 390, 780, 1280], 'visible': True, 'dropdown_opens': True,
+                    'opens_once_per_day': True, 'close_on_outside_click': True})
                 # Navigation must work by clicking inside the mobile drawer;
                 # testing page.goto() alone would miss WebView link handling.
                 page.locator('#mobileNav details>summary').click()
