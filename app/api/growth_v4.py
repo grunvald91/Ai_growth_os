@@ -246,15 +246,20 @@ def render_v4(page, request, pid, switch):
     current = request.url.path
     home = bool(pid and current == base and original.find(cls='dp-home'))
     links = [('home','Главная',base,'home'),('create','Создать',base+'/create','plus'),
-             ('work','Задания',base+'/work','clock'),('review','Согласование',base+'/review','check'),
-             ('materials','Материалы',base+'/materials','folder'),('calendar','Календарь',base+'/calendar','calendar'),
-             ('campaigns','Кампании',base+'/campaigns','layers'),('seo','SEO-завод',base+'/seo','globe')]
+             ('work','Задания',base+'/work','clock'),('calendar','Календарь',base+'/calendar','calendar'),
+             ('seo','SEO-завод',base+'/seo','globe'),
+             ('plan','Контент-план',base+'/plan','layers'),
+             ('materials','Библиотека',base+'/materials','folder'),
+             ('channels','Каналы и публикации',base+'/channels','layers'),
+             ('campaigns','Кампании',base+'/campaigns','layers'),
+             ('review','Согласование',base+'/review','check')]
     from app.api.content_studio import more_links
     if pid:
         seen = {link[2] for link in links}
         glyphs = {'whiteboard':'video','mail':'mail','team':'user','intelligence':'search','analytics':'chart','profile':'settings'}
-        links += [(key, 'Простое видео' if key=='whiteboard' else label, href, glyphs.get(key,'layers'))
-                  for key,href,_,label in more_links(pid) if href not in seen]
+        links += [(key, label, href, glyphs.get(key,'layers'))
+                  for key,href,_,label in more_links(pid)
+                  if href not in seen and key not in {'whiteboard', 'switch'}]
     else:
         links = [('companies','Компании','/studio?choose=1','layers'),('team','ИИ-команда','/studio/team','user')]
 
@@ -382,13 +387,23 @@ def render_v4(page, request, pid, switch):
     template = re.sub(r'<title>.*?</title>', lambda _:title_tag, pristine,count=1,flags=re.S)
     template = template.replace('<style>', styles+'<style>',1)
     nav = ''.join(link(r,True) for r in links[:3])
-    # The platform-owner Mail is not a tenant feature. Use business Campaigns
-    # as the fourth mobile tab; platform Mail remains available in ServGo admin.
     if pid:
-        campaigns = next((r for r in links if r[0] == 'campaigns'), None)
-        if campaigns:
-            nav += link(campaigns, True)
-    nav += f'<details><summary>{icon("layers")}<span>Ещё</span></summary><div class="v4-more">'+''.join(link(r) for r in links)+'</div></details>'
+        calendar = next((r for r in links if r[0] == 'calendar'), None)
+        if calendar:
+            nav += link(calendar, True)
+    by_key = {r[0]: r for r in links}
+    more_groups = [
+        ('Контент и продвижение', ('seo','plan','materials','channels','campaigns','comments')),
+        ('Аналитика и исследования', ('analytics','intelligence')),
+        ('ИИ-команда', ('team','tune','speed')),
+        ('Компания и управление', ('profile','accounts','servgo','logout')),
+    ]
+    more_html = ''.join(
+        '<section class="sg-v4-more-group"><strong>'+html.escape(title)+'</strong>'
+        + ''.join(link(by_key[key]) for key in keys if key in by_key)+'</section>'
+        for title,keys in more_groups
+    ) if pid else ''.join(link(r) for r in links)
+    nav += f'<details><summary>{icon("layers")}<span>Ещё</span></summary><div class="v4-more">'+more_html+'</div></details>'
     template = template.replace('<nav class="mobile-nav" id="mobileNav"></nav>', '<nav class="mobile-nav" id="mobileNav" aria-label="Быстрая навигация">'+nav+'</nav>')
     template = template.replace('Единый интерфейс 4.0 · демоданные','Growth OS · интерфейс 4.0')
     template = template.replace('Демо · API не подключены', f'<a href="{switch}">Старый дизайн</a>')
@@ -397,14 +412,16 @@ def render_v4(page, request, pid, switch):
                if company_link else ('Выберите компанию' if pid is None and current == '/studio' else 'Моя компания'))
     template = template.replace('Студия «Мята»',html.escape(company)).replace('<span class="avatar">М</span>',
                      '<span class="avatar">'+html.escape(company[:1])+'</span>')
-    # The prototype switch button had no click handler in the production page:
-    # its demo script is intentionally stripped above. Open the real, scoped
-    # server-rendered company chooser instead of presenting a dead control.
-    template = template.replace('<button class="biz-switch" id="bizBtn">',
-                                '<a class="biz-switch" id="bizBtn" href="/studio?choose=1" '
-                                'aria-label="Сменить компанию" title="Сменить компанию">', 1)
-    template = template.replace('<svg class="icon sm"><use href="#i-down"/></svg></button>',
-                                '<svg class="icon sm"><use href="#i-down"/></svg></a>', 1)
+    # Keep the header switch in place; populate a scoped dropdown on click.
+    if pid:
+        template = template.replace('<button class="biz-switch" id="bizBtn">',
+            '<div class="sg-org-wrapper" id="sgOrgWrapper">'
+            '<button class="biz-switch" id="bizBtn" type="button" '
+            'aria-label="Сменить компанию" aria-haspopup="true" aria-expanded="false" '
+            'aria-controls="sgOrgMenu">', 1)
+        template = template.replace('<svg class="icon sm"><use href="#i-down"/></svg></button>',
+            '<svg class="icon sm"><use href="#i-down"/></svg></button>'
+            '<div class="sg-org-menu" id="sgOrgMenu" hidden></div></div>', 1)
     # Always display the active company name on mobile, not only an initial.
     template = template.replace('</head>',
         '<style>@media(max-width:780px){'
@@ -436,6 +453,26 @@ def render_v4(page, request, pid, switch):
         template = template.replace('</head>', '<style>'+notice_css+'</style></head>')
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
+    template = template.replace('</head>', '<link rel="stylesheet" href="/studio/assets/growth-daily.css?v=1"></head>', 1)
+    if home:
+        drawer = (
+            '<button id="sgDailyHandle" class="sg-daily-handle" type="button" '
+            'aria-label="Сводка на сегодня" aria-controls="sgDailyDrawer" aria-expanded="false">'
+            + icon('calendar') + '<span>Сегодня</span></button>'
+            '<div id="sgDailyBackdrop" class="sg-daily-backdrop" aria-hidden="true"></div>'
+            '<aside id="sgDailyDrawer" class="sg-daily-drawer" role="dialog" '
+            'aria-modal="true" aria-label="Ежедневная сводка" aria-hidden="true" tabindex="-1">'
+            '<div class="sg-daily-heading"><div><h2>Сводка на сегодня</h2>'
+            '<small id="sgDailyCompany"></small></div>'
+            '<button id="sgDailyClose" class="sg-daily-close" type="button" '
+            'aria-label="Свернуть сводку" title="Свернуть">×</button></div>'
+            '<div id="sgDailyContent" class="sg-daily-content"></div>'
+            '<p class="sg-daily-hint">Нажмите вне панели, чтобы свернуть её. '
+            'Открыть снова можно по кнопке слева.</p></aside>'
+        )
+        template = template.replace('</body>', drawer+'</body>', 1)
+    if pid:
+        extras += '<script src="/studio/assets/growth-daily.js?v=1"></script>'
     template = template.replace('</head>', (
         '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=17">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
