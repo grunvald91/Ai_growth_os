@@ -333,9 +333,12 @@ async def regenerate_background(product_id: UUID, task_id: UUID, artifact_id: UU
         raise HTTPException(409, "Исходная раскадровка повреждена") from None
 
     db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
+    # Search the entire history for this nonce; slicing at 200 permitted
+    # already charged requests to be repeated as the history grew.
     prior = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.task_id == task_id,
-        Artifact.kind == "creative_background_regen").limit(200)))
+        Artifact.kind == "creative_background_regen",
+        Artifact.content.contains('"token": "' + str(token) + '"'))))
     for row in prior:
         try:
             if json.loads(row.content).get("token") == str(token):

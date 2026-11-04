@@ -2322,8 +2322,10 @@ def studio_creative_images_zip(product_id: UUID, task_id: UUID,
     for record in images:
         try:
             path = verified_gallery_image(db, settings.products_root, product_id, task_id, record)
-        except (LookupError, ValueError, OSError):
-            continue
+        except (LookupError, ValueError, OSError) as exc:
+            raise HTTPException(
+                409, "Не удалось собрать полный ZIP: один из кадров недоступен или повреждён"
+            ) from None
         files.append((path, json.loads(record.content)))
     if not files:
         raise HTTPException(404, "Файлы изображений недоступны")
