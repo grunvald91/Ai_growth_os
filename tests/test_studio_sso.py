@@ -146,6 +146,22 @@ class StudioSsoTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(read_ticket(self.ticket('co').json()['url'])['role'], 'co_owner')
         self.assertEqual(self.ticket('stranger').status_code, 403)
 
+    async def test_unknown_owner_role_fails_closed_for_all_studio_endpoints(self):
+        # The DB column allows arbitrary strings; never promote such rows.
+        async with self.sessions() as db:
+            link = await db.scalar(select(BusinessOwner).where(
+                BusinessOwner.business_id == self.business_id,
+                BusinessOwner.user_id == self.u['co']))
+            link.role = 'viewer'
+            await db.commit()
+        self.assertEqual(self.ticket('co').status_code, 403)
+        listing = self.client.get('/studio/businesses')
+        self.assertEqual(listing.status_code, 200)
+        self.assertNotIn(self.business_id, [item['id'] for item in listing.json()])
+        denied = self.access('co')
+        self.assertEqual(denied.status_code, 200)
+        self.assertEqual(denied.json(), {'allowed': False, 'role': None})
+
     async def test_administrator_needs_the_owner_switch(self):
         self.assertEqual(self.ticket('admin').status_code, 403)
         await self.set_flag(True)
