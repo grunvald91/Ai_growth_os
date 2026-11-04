@@ -18,6 +18,7 @@ from app.seo.activation import is_enabled
 from app.seo.clustering import classify_intent, normalize
 from app.seo.contracts import QueryCluster, SemanticCore, SeoContentPlan, SourceStatus, PlanItem
 from app.seo.planner import planned_queries, validate_plan
+from app.seo.publishing import servgo_buyer_intent_problems  # required deployed release guard
 from app.seo.queue import queue_plan
 from app.seo.suggest import collect
 from app.services.artifacts import ArtifactService
