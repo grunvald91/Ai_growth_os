@@ -1,6 +1,7 @@
 """Durable Task/Artifact orchestration; model calls always cross LLMService."""
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -24,6 +25,7 @@ from app.workflows.research_sources import load_source_bundles
 
 AGENT = "competitive_intelligence"
 RUN_KIND = "competitive_intelligence_run"
+_logger = logging.getLogger(__name__)
 
 
 class IntelligenceService:
@@ -161,8 +163,15 @@ class IntelligenceService:
             b.label.startswith("Яндекс Карты: автоматический поиск") for b in bundles)
         remaining = max(0, 50 - sum(len(b.sources) for b in bundles))
         if not already_discovered and remaining:
-            discovered, status = await collect_sources(
-                product, request, self.products_root, max_sources=min(10, remaining))
+            try:
+                discovered, status = await collect_sources(
+                    product, request, self.products_root, max_sources=min(10, remaining))
+            except Exception as exc:
+                # Optional directory lookup can never stop the owner's main
+                # intelligence run. Do not expose credentials in its error text.
+                _logger.warning("intelligence_yandex_discovery_failed error_type=%s",
+                                type(exc).__name__)
+                discovered, status = None, "provider_unavailable"
             state["source_discovery"] = {"provider": "yandex_organizations", "status": status}
             if discovered is not None:
                 bundles.append(discovered)
