@@ -25,15 +25,23 @@ def gallery_html(product_id: UUID, task_id: UUID, images: list[Artifact], *, err
             continue
         succeeded.add(number)
         uri = f"{base}/images/{record.id}"
+        edit = (
+            f'<a class="btn secondary" href="{base}/stories/{record.id}/edit">Изменить бесплатно</a>'
+            if record.kind == "creative_story_render" else ""
+        )
+        label = ("Фирменный стиль · " + ("ChatGPT Image" if "openai" in model
+                 else "Gemini" if "gemini" in model else "без платной модели"))
+                 if model.startswith("brand:") else
+                 ("ChatGPT Image" if model.startswith("gpt-") else "Gemini"))
         tiles.append(
             '<article class="sg-image-tile">'
             f'<a class="{"is-square" if meta.get("ratio") == "1:1" else "is-portrait"}" href="{uri}" target="_blank" rel="noopener" aria-label="Открыть кадр {number}">'
             f'<img src="{uri}" loading="lazy" decoding="async" alt="Готовый кадр {number}" /></a>'
             '<div class="sg-image-tile-foot"><div>'
-            f'<b>Кадр {number}</b><small>{html.escape("ChatGPT Image" if model.startswith("gpt-") else "Gemini")}</small>'
+            f'<b>Кадр {number}</b><small>{html.escape(label)}</small>'
             '</div>'
             f'<a class="btn secondary" href="{uri}?download=true" download="story-{number:02d}.png">Скачать PNG</a>'
-            '</div></article>'
+            + edit + '</div></article>'
         )
     failed = []
     for record in errors or []:

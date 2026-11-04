@@ -42,6 +42,7 @@ from app.content.revisions import source_fingerprint
 from app.content.manual_edits import editable_fields, save_manual_edit
 from app.content.creative import CreativeRequest, queue_creative
 from app.content.creative_images import generated_images, verified_file
+from app.content.brand_story_pipeline import visible_images, verified_gallery_image
 from app.api.creative_image_gallery import gallery_html
 from app.content.telegram_publishing import (verify_channel, save_verified_channel,
     connected_channels, schedule_post, cancel_scheduled_post, validate_telegram_text,
@@ -1558,7 +1559,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
         </section>
         """
     elif record.kind == "creative_brief":
-        image_rows = generated_images(db, product.id, record.task_id)
+        image_rows = visible_images(db, product.id, record.task_id)
         image_errors = list(db.scalars(select(Artifact).where(
             Artifact.product_id == product.id, Artifact.task_id == record.task_id,
             Artifact.kind == "creative_image_error")))
@@ -2131,7 +2132,10 @@ async def studio_create_submit(product_id: UUID, request: Request, db: Session =
             count = int(count_text) if count_text else None
             command = CreativeRequest(mode="creative", product_id=product.id, topic=topic,
                                       format=chosen, platform=fields.get("channel") or "",
-                                      frame_count=count, audience=audience, editorial_brief=brief)
+                                      frame_count=count, audience=audience, editorial_brief=brief,
+                                      brand_mode=fields.get("brand_mode", "auto") if chosen == "story" else "classic",
+                                      image_model=fields.get("image_model", "none")
+                                      if chosen == "story" else "none")
             task = queue_creative(db, command)
         else:
             raise ValueError("Неизвестный формат")
@@ -2252,7 +2256,7 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
                     'Готовые этапы сохраняются; используйте продолжение задания.</p>'
                     '</section>'
                 )
-        images = generated_images(db, product.id, task.id)
+        images = visible_images(db, product.id, task.id)
         errors = list(db.scalars(select(Artifact).where(
             Artifact.product_id == product.id, Artifact.task_id == task.id,
             Artifact.kind == "creative_image_error")))
@@ -2284,11 +2288,12 @@ def studio_creative_image(product_id: UUID, task_id: UUID, artifact_id: UUID,
     _creative_owner_task(db, product_id, task_id)
     record = db.scalar(select(Artifact).where(
         Artifact.id == artifact_id, Artifact.task_id == task_id,
-        Artifact.product_id == product_id, Artifact.kind == "generated_image"))
+        Artifact.product_id == product_id,
+        Artifact.kind.in_(["generated_image", "creative_story_render"])))
     if record is None:
         raise HTTPException(404, "Изображение не найдено")
     try:
-        image = verified_file(settings.products_root, product_id, task_id, record)
+        image = verified_gallery_image(db, settings.products_root, product_id, task_id, record)
     except (LookupError, ValueError, OSError):
         raise HTTPException(404, "Файл изображения недоступен") from None
     return FileResponse(
@@ -2300,13 +2305,13 @@ def studio_creative_image(product_id: UUID, task_id: UUID, artifact_id: UUID,
 def studio_creative_images_zip(product_id: UUID, task_id: UUID,
                                db: Session = Depends(get_db), settings=Depends(get_settings)):
     _creative_owner_task(db, product_id, task_id)
-    images = generated_images(db, product_id, task_id)
+    images = visible_images(db, product_id, task_id)
     if not images:
         raise HTTPException(404, "Нет готовых изображений")
     files = []
     for record in images:
         try:
-            path = verified_file(settings.products_root, product_id, task_id, record)
+            path = verified_gallery_image(db, settings.products_root, product_id, task_id, record)
         except (LookupError, ValueError, OSError):
             continue
         files.append((path, json.loads(record.content)))
@@ -2317,7 +2322,7 @@ def studio_creative_images_zip(product_id: UUID, task_id: UUID,
     try:
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for path, meta in files:
-                archive.write(path, arcname=path.name)
+                archive.write(path, arcname=f"frame-{int(meta['frame_number']):02d}.png")
             archive.writestr("metadata.json", json.dumps(
                 [{"frame_number": m["frame_number"], "model": m["model"],
                   "prompt": m["prompt"], "filename": m["filename"]}
