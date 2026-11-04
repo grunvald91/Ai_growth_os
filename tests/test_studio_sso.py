@@ -1090,3 +1090,71 @@ def test_fresh_servgo_role_bypasses_stale_positive_cache(env):
     servgo.allowed.clear()
     assert access.servgo_role(settings, 7, 12, now=1001) == "owner"
     assert access.servgo_role(settings, 7, 12, now=1001, fresh=True) is None
+
+
+def test_canonical_sso_survives_corrupt_legacy_accounts_without_operator_elevation(env, tmp_path):
+    """Legacy JSON problems cannot block a tenant or silently grant platform scope."""
+    from app.api.content_studio_auth import credential_fingerprint
+    from app.core.studio_operator_links import bind_operator
+    db, settings, salon, _, _ = env
+    # Establish an otherwise valid platform-operator link before corrupting the file.
+    fingerprint = credential_fingerprint(settings, {}, "owner")
+    assert fingerprint is not None
+    bind_operator(settings, 7, "owner", fingerprint[0])
+    corrupt = tmp_path / "corrupt-accounts.json"
+    corrupt.write_text("{invalid json", encoding="utf-8")
+    settings.studio_users_file = corrupt
+    settings.studio_servgo_gateway_enabled = True
+
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
+        client.cookies.set("sg_identity", _browser_identity(7))
+        login = client.get("/studio/sso", params={
+            "t": make_ticket(origin="https://servgo.ru", jti="corrupt-accounts-1")
+        })
+        assert login.status_code == 303
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+        # The link remains present, but legacy account corruption must NOT
+        # turn a tenant into a platform administrator.
+        assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 403
+        assert client.get("/studio/tune").status_code == 403
+
+    # Legacy credential-based sessions still fail closed on a damaged account file.
+    with TestClient(app, base_url=ORIGIN, follow_redirects=False) as legacy:
+        assert legacy.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 503
+
+
+def test_one_live_business_list_call_authorizes_product_scope_and_role(env):
+    """The list already includes trusted current roles; no redundant access request."""
+    _, _, salon, _, servgo = env
+    client = signed_in(env)
+    servgo.calls.clear()
+    response = client.get(f"/studio/products/{salon.id}/dispatch/state")
+    assert response.status_code == 200
+    checks = [request.url.path for request in servgo.calls]
+    assert sum(path.endswith("/internal/studio/businesses") for path in checks) == 1
+    assert not any(path.endswith("/internal/studio/access") for path in checks)
+
+    # Immediate revocation without waiting for a cache TTL or manual invalidation.
+    servgo.allowed.clear()
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+
+
+def test_one_live_business_list_reflects_role_changes_without_cache(env):
+    _, settings, salon, _, servgo = env
+    client = signed_in(env)
+    assert access.servgo_business_roles(settings, 7) == {12: "owner"}
+    servgo.allowed[(7, 12)] = "administrator"
+    assert access.servgo_business_roles(settings, 7) == {12: "administrator"}
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+
+
+def test_malformed_live_roles_fall_back_only_to_checked_ticket_company(env):
+    db, settings, salon, other, servgo = env
+    db.add(StudioBusinessLink(servgo_business_id=14, product_id=other.id))
+    db.commit()
+    servgo.allowed[(7, 14)] = "co_owner"
+    client = signed_in(env)
+    servgo.mode = "invalid_list"
+    assert access.servgo_business_roles(settings, 7) is None
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+    assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 404
