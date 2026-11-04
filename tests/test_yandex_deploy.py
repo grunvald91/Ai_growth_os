@@ -23,7 +23,6 @@ def test_sync_preserves_existing_env_and_uses_reference_only(tmp_path, monkeypat
     monkeypatch.setattr(sync, "CONFIG", config)
     monkeypatch.setattr(sys, "stdin", io.StringIO("yandex-test-api-key"))
     sync.main()
-    sync.main.__call__  # no second write needed to inspect artifact
     saved = env.read_text()
     assert saved.count("API_YANDEX=") == 1
     assert "API_YANDEX=yandex-test-api-key" in saved
