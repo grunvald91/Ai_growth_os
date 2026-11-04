@@ -1,0 +1,36 @@
+name: One-time ServGo SEO old-plan safety stop
+on:
+  push:
+    branches: [qa/seo-e2e-readonly-20261104]
+    paths:
+      - .github/workflows/seo-stop-legacy-20261104.yml
+permissions:
+  contents: read
+concurrency:
+  group: seo-servgo-legacy-safety-20261104
+  cancel-in-progress: false
+jobs:
+  stop-legacy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Strictly scoped ServGo SEO safety stop on server
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::Server SSH credential missing"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/safety-host-keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/safety-one
+            ssh-keygen -lf /tmp/safety-one 2>/dev/null | grep -q "SHA256:$HOST_FP " &&
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/safety-host-keys
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Pinned host identity mismatch"; exit 1; }
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'docker exec -i ai-growth-os-api-1 python -' < scripts/seo_stop_legacy_20261104.py
