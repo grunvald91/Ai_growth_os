@@ -32,20 +32,17 @@ router = APIRouter()
 TICKET_TTL_SECONDS = 60
 AUDIENCE = "growth-studio"
 MIN_SECRET_LENGTH = 32
-STUDIO_URL = "https://growth.servgo.ru"
 CANONICAL_STUDIO_URL = "https://servgo.ru"
 
 
 def studio_public_url() -> str:
-    """Feature-gated same-origin sign-in endpoint for the installed ServGo PWA.
+    """All ServGo UI entry tickets use the one installed same-origin PWA.
 
-    Never accept a caller-provided URL, Host header, or unvalidated environment
-    origin here: the one-time ticket must land at a fixed trusted destination.
-    Leave disabled until nginx /studio routing, Growth Origin validation,
-    SSO and PWA cache upgrade have passed staging smoke tests.
+    The legacy Growth hostname stays directly accessible, but its address is
+    never issued by the ServGo application. Never derive ticket origins from
+    untrusted Host headers, environment flags or request parameters.
     """
-    enabled = os.getenv("SERVGO_GROWTH_GATEWAY_ENABLED", "").casefold() in {"1", "true", "yes"}
-    return CANONICAL_STUDIO_URL if enabled else STUDIO_URL
+    return CANONICAL_STUDIO_URL
 
 
 

@@ -97,14 +97,14 @@ class StudioSsoTest(unittest.IsolatedAsyncioTestCase):
         response = self.ticket('owner')
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertTrue(body['url'].startswith('https://growth.servgo.ru/studio/sso?t='))
+        self.assertTrue(body['url'].startswith('https://servgo.ru/studio/sso?t='))
         claims = read_ticket(body['url'])
         self.assertEqual((claims['uid'], claims['biz'], claims['role'], claims['aud']),
                          (self.u['owner'], self.business_id, 'owner', 'growth-studio'))
         self.assertLessEqual(claims['exp'] - time.time(), 60)
         self.assertGreater(claims['exp'] - time.time(), 50)
 
-    async def test_growth_same_origin_gateway_is_feature_gated_and_ticket_still_signed(self):
+    async def test_ticket_always_uses_servgo_pwa_regardless_of_legacy_flag(self):
         with mock.patch.dict(os.environ, {'SERVGO_GROWTH_GATEWAY_ENABLED': 'true'}):
             response = self.ticket('owner')
         self.assertEqual(response.status_code, 200)
@@ -114,11 +114,11 @@ class StudioSsoTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((claims['uid'], claims['biz'], claims['aud']),
                          (self.u['owner'], self.business_id, 'growth-studio'))
 
-    async def test_unrecognized_gateway_flag_does_not_change_the_destination(self):
+    async def test_unrecognized_gateway_flag_cannot_reenable_old_destination(self):
         with mock.patch.dict(os.environ, {'SERVGO_GROWTH_GATEWAY_ENABLED': 'not-configured'}):
             response = self.ticket('owner')
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()['url'].startswith('https://growth.servgo.ru/studio/sso?t='))
+        self.assertTrue(response.json()['url'].startswith('https://servgo.ru/studio/sso?t='))
 
     async def test_every_link_is_unique(self):
         first = read_ticket(self.ticket('owner').json()['url'])['jti']
