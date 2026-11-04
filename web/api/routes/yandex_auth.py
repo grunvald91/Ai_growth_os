@@ -32,6 +32,7 @@ from .. import deps
 from ..database import get_db
 from ..photo_transport import create_photo_client
 from ..schemas import TokenOut, UserOut
+from ..studio_identity import set_identity
 from .auth import _normalize_phone, _role_for_user, _user_by_phone
 
 logger = logging.getLogger(__name__)
@@ -354,8 +355,15 @@ async def _phone_join(db: AsyncSession, body: "ExchangeIn", ticket: YandexTicket
     return {"status": "code_required", "account": account}
 
 
+def _login_response(response: Response, result: dict) -> dict:
+    if result.get("status") == "ok":
+        set_identity(response, int(result["user"]["id"]))
+    return result
+
+
 @router.post("/yandex/exchange")
-async def exchange(body: ExchangeIn, request: Request, user: Optional[User] = Depends(deps.get_current_user_optional),
+async def exchange(body: ExchangeIn, request: Request, response: Response,
+                   user: Optional[User] = Depends(deps.get_current_user_optional),
                    db: AsyncSession = Depends(get_db)):
     browser = request.cookies.get(TICKET_COOKIE) or ""
     if not hmac.compare_digest(browser, _mac("browser:" + _ticket_hash(body.ticket))):
@@ -385,7 +393,7 @@ async def exchange(body: ExchangeIn, request: Request, user: Optional[User] = De
             if not same_email and not phones_match(user.phone, profile.get("phone")):
                 raise HTTPException(409, "Этот Яндекс уже используется для входа в другой аккаунт ServGo. Объединяем "
                                          "только при совпадении телефона или почты, а здесь они разные")
-            return await _join(db, ticket, profile, user, owner)
+            return _login_response(response, await _join(db, ticket, profile, user, owner))
         if await _has_yandex(db, user.id):
             raise HTTPException(409, "К вашему аккаунту уже привязан другой Яндекс")
         db.add(_new_identity(profile, user.id))
@@ -400,25 +408,25 @@ async def exchange(body: ExchangeIn, request: Request, user: Optional[User] = De
         if owner is None:
             raise HTTPException(400, "Аккаунт не найден")
         if body.separate or not await yandex_only(db, owner):
-            return await _finish(db, ticket, owner, profile)
+            return _login_response(response, await _finish(db, ticket, owner, profile))
         # A Yandex-only account meets an account with the same confirmed email or Telegram phone: join them.
         target = await _email_match(db, profile)
         if target is not None:
-            return await _join(db, ticket, profile, target, owner)
+            return _login_response(response, await _join(db, ticket, profile, target, owner))
         match = await _telegram_phone_match(db, profile)
         if match is None:
-            return await _finish(db, ticket, owner, profile)
-        return await _phone_join(db, body, ticket, profile, user, match, owner, now)
+            return _login_response(response, await _finish(db, ticket, owner, profile))
+        return _login_response(response, await _phone_join(db, body, ticket, profile, user, match, owner, now))
 
     # --- a new Yandex: the same confirmed email as an email login -> that account
     target = await _email_match(db, profile)
     if target is not None:
-        return await _join(db, ticket, profile, target, None)
+        return _login_response(response, await _join(db, ticket, profile, target, None))
     # --- the same phone as a Telegram account -> that account, after a code from its Telegram
     if not body.separate:
         match = await _telegram_phone_match(db, profile)
         if match is not None:
-            return await _phone_join(db, body, ticket, profile, user, match, None, now)
+            return _login_response(response, await _phone_join(db, body, ticket, profile, user, match, None, now))
 
     # --- a new person (or one who chose a separate account)
     phone_taken = bool(profile.get("phone")) and await _user_by_phone(db, profile["phone"]) is not None
@@ -434,4 +442,4 @@ async def exchange(body: ExchangeIn, request: Request, user: Optional[User] = De
     except IntegrityError:
         await db.rollback()
         raise HTTPException(409, "Вход уже выполняется. Нажмите «Войти через Яндекс» ещё раз") from None
-    return await _issue(db, new_user)
+    return _login_response(response, await _issue(db, new_user))
