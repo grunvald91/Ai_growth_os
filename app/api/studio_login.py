@@ -106,6 +106,10 @@ def _clear_studio_cookies(response: Response, settings: Settings) -> Response:
     for name in (COOKIE, SSO_COOKIE):
         response.delete_cookie(name, path="/", httponly=True, samesite="lax",
                                secure=_secure_cookie(settings))
+    # Revoke unfinished first-visit confirmation as well as established sessions.
+    from app.api.studio_sso import SETUP_COOKIE, SETUP_PATH
+    response.delete_cookie(SETUP_COOKIE, path=SETUP_PATH, httponly=True,
+                           samesite="lax", secure=True)
     return response
 
 
