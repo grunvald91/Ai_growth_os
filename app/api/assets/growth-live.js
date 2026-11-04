@@ -39,12 +39,7 @@
  // Floating mobile navigation menus dismiss when the owner taps elsewhere.
  // Keep in-flow <details> sections (SEO help, settings, etc.) independent.
  const floatingMenus='.mobile-nav>details';
- function closeFloatingMenus(except){
-   document.querySelectorAll(floatingMenus+'[open]').forEach(menu=>{
-     if(menu!==except)menu.open=false;
-   });
- }
- document.addEventListener('pointerdown',e=>{
+document.addEventListener('pointerdown',e=>{
    if(!(e.target instanceof Node))return;
    document.querySelectorAll(floatingMenus+'[open]').forEach(menu=>{
      if(!menu.contains(e.target))menu.open=false;
