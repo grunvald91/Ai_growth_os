@@ -152,6 +152,17 @@ def main():
                 # is exercised via its own real classic form rather than a selector
                 # that does not exist in the v4 document.
                 page.goto(base+'/create?design=classic')
+                # The classic mobile navigation must also dismiss by outside tap.
+                classic_more = page.locator('[data-m-more]')
+                classic_more.locator('summary').click()
+                expect(classic_more).to_have_attribute('open', '')
+                page.evaluate("""() => {
+                  const outside=document.querySelector('.sg-mobile-shell-head') ||
+                    document.querySelector('main');
+                  outside.dispatchEvent(new PointerEvent('pointerdown',{
+                    bubbles:true,pointerType:'touch',pointerId:33}));
+                }""")
+                expect(classic_more).not_to_have_attribute('open', '')
                 page.locator('[name="topic"]').fill('Тест реальной очереди')
                 page.locator('form button[type="submit"]').click()
                 page.wait_for_url('**/tasks/*')
