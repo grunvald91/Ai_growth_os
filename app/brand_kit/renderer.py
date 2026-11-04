@@ -247,7 +247,9 @@ def _logo_backing(logo: Image.Image, brand: BrandStyle) -> str:
     """Use an opaque background that contrasts with visible original pixels."""
     samples = logo.copy()
     samples.thumbnail((56, 56), Image.Resampling.LANCZOS)
-    visible = [pixel for pixel in samples.getdata() if pixel[3] >= 80]
+    pixels = (samples.get_flattened_data() if hasattr(samples, "get_flattened_data")
+              else samples.getdata())
+    visible = [pixel for pixel in pixels if pixel[3] >= 80]
     if not visible:
         raise ValueError("Логотип прозрачный или нечитаемый")
     colors = list(dict.fromkeys((
