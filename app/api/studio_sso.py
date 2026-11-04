@@ -104,8 +104,10 @@ def _cookie_redirect(settings: Settings, claims: tickets.Claims, role: str, prod
                      request: Request | None = None) -> RedirectResponse:
     session = tickets.Claims(claims.user_id, claims.business_id, role, claims.name, claims.jti, claims.expires)
     response = RedirectResponse(target, status_code=303, headers=HEADERS)
-    if request is not None and _password_session_covers(request, settings, product_id) is False:
-        # A password sign-in for other companies would hide this one; the person chose ServGo now.
+    if request is not None and (_canonical_pwa(request, settings)
+                                or _password_session_covers(request, settings, product_id) is False):
+        # The canonical ServGo sign-in is authoritative even if a legacy operator
+        # cookie is present. Legacy-host operator sessions retain old semantics.
         from app.core.studio_sessions import COOKIE as PASSWORD_COOKIE
         response.delete_cookie(PASSWORD_COOKIE, path="/", httponly=True, samesite="lax", secure=_secure(settings))
     response.set_cookie(tickets.COOKIE, tickets.issue_session(settings, session, str(product_id)),
