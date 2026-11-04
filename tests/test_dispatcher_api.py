@@ -62,6 +62,34 @@ def test_home_replaces_the_overview_only_for_enabled_companies(env):
     assert "dp-form" not in client.get(f"/studio/products/{servgo.id}/classic").text
 
 
+def test_daily_summary_uses_company_data_and_separates_pending_approval(env):
+    from app.models.domain import Artifact, ArtifactStatus, TaskStatus
+
+    db, _, servgo, other, _ = env
+    db.add_all([
+        Task(product_id=servgo.id, title="Очередь", status=TaskStatus.QUEUED,
+             assigned_agent="content_factory"),
+        Task(product_id=servgo.id, title="Подтверждение видео", status=TaskStatus.WAITING_APPROVAL,
+             assigned_agent="whiteboard_renderer"),
+        Task(product_id=other.id, title="Чужое задание", status=TaskStatus.RUNNING,
+             assigned_agent="content_factory"),
+        Artifact(product_id=servgo.id, title="Пост", kind="channel_text",
+                 content="{}", status=ArtifactStatus.AWAITING_APPROVAL),
+    ])
+    db.commit()
+    client = TestClient(app)
+    response = client.get(f"/studio/products/{servgo.id}/home-summary.json")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    values = response.json()
+    assert values["in_work"] == 1   # Waiting for approval must not count as work.
+    assert values["review"] == 2    # One draft material and one video confirmation.
+    assert values["planned_week"] == 0
+    assert all("/studio/products/" + str(other.id) not in n["url"] for n in values["attention"])
+    chooser = client.get(f"/studio/products/{servgo.id}/organizations.json").json()
+    assert {c["id"] for c in chooser["items"]} == {str(servgo.id), str(other.id)}
+
+
 def test_home_embeds_state_safely_and_shows_hints(env):
     db, settings, servgo, _, _ = env
     page = TestClient(app).get(f"/studio/products/{servgo.id}").text
