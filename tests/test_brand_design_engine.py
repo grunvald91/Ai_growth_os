@@ -318,3 +318,115 @@ def test_background_sections_and_text_alignment(company):
     with Image.open(io.BytesIO(result.png)) as image:
         assert image.getpixel((30, 30)) == (13, 27, 42)
         assert image.getpixel((30, 1400)) == (12, 71, 85)
+
+
+def test_new_frames_require_active_brand_but_old_frames_remain_immutable(company):
+    client, db, a, _, va, _, root, style = company
+    initial = create_composition(
+        db, root, a.id, va.id, frame(), frame_key="active:original")
+    baseline = verified_render(db, root, a.id, initial.id)[1].read_bytes()
+    changed = style.model_copy(deep=True)
+    changed.palette.primary = "#BB0022"
+    changed.palette.secondary = "#00BB22"
+    newer = save_draft(db, root, a.id, changed.model_dump(mode="json"))
+    approve_version(db, root, a.id, newer.id)
+    old_new = client.post(f"/studio/products/{a.id}/brand-kit/compose", json={
+        "version_id": str(va.id), "frame_key": "active:forbidden",
+        "frame": frame().model_dump(mode="json")})
+    assert old_new.status_code == 409
+    old_retry = client.post(f"/studio/products/{a.id}/brand-kit/compose", json={
+        "version_id": str(va.id), "frame_key": "active:original",
+        "frame": frame().model_dump(mode="json")})
+    assert old_retry.status_code == 201
+    assert old_retry.json()["id"] == str(initial.id)
+    assert verified_render(db, root, a.id, initial.id)[1].read_bytes() == baseline
+    current = client.post(f"/studio/products/{a.id}/brand-kit/compose", json={
+        "version_id": str(newer.id), "frame_key": "active:current",
+        "frame": frame().model_dump(mode="json")})
+    assert current.status_code == 201, current.text
+
+
+def test_explicit_background_cleanup_respects_render_references_and_tenant(company):
+    client, db, a, b, va, _, root, _ = company
+    unused = store_background(db, root, a.id, picture())
+    _, unused_path = verified_background(db, root, a.id, unused.id)
+    assert client.delete(
+        f"/studio/products/{b.id}/brand-kit/backgrounds/{unused.id}").status_code == 404
+    assert client.delete(
+        f"/studio/products/{a.id}/brand-kit/backgrounds/{unused.id}").status_code == 200
+    assert not unused_path.exists()
+
+    used = store_background(db, root, a.id, picture("PNG"))
+    render = create_composition(db, root, a.id, va.id, frame(),
+                                frame_key="clean:used", background_id=used.id)
+    assert client.delete(
+        f"/studio/products/{a.id}/brand-kit/backgrounds/{used.id}").status_code == 409
+    _, render_path = verified_render(db, root, a.id, render.id)
+    assert client.delete(
+        f"/studio/products/{b.id}/brand-kit/renders/{render.id}").status_code == 404
+    assert client.delete(
+        f"/studio/products/{a.id}/brand-kit/renders/{render.id}").status_code == 200
+    assert not render_path.exists()
+    assert client.delete(
+        f"/studio/products/{a.id}/brand-kit/backgrounds/{used.id}").status_code == 200
+
+
+def test_brand_storage_quota_limits_counts_and_bytes(company):
+    from app.brand_kit.quotas import enforce_quota
+    from app.brand_kit.models import BrandAsset
+    client, db, a, _, va, _, root, style = company
+    with pytest.raises(ValueError, match="лимит файлов"):
+        enforce_quota(db, a.id, BrandAsset, additional_bytes=48_000_001,
+                      max_files=32, max_bytes=48_000_000)
+    enforce_quota(db, a.id, BrandBackground, additional_bytes=5,
+                  max_files=80, max_bytes=128_000_000)
+    store_background(db, root, a.id, picture())
+    with pytest.raises(ValueError, match="лимит файлов"):
+        enforce_quota(db, a.id, BrandBackground, additional_bytes=1,
+                      max_files=1, max_bytes=128_000_000)
+
+
+def test_transparent_background_uses_company_background_color(company):
+    _, _, _, _, _, _, _, style = company
+    picture_rgba = Image.new("RGBA", (600, 1000), (245, 0, 0, 0))
+    stream = io.BytesIO()
+    picture_rgba.save(stream, "PNG")
+    result = render_story(style, frame(), logo=png_logo(), background=stream.getvalue())
+    with Image.open(io.BytesIO(result.png)) as img:
+        assert img.convert("RGB").getpixel((25, 25)) == (13, 27, 42)
+
+
+def test_white_logo_is_visible_on_white_brand_backdrop(company):
+    from app.brand_kit.contracts import contrast_ratio
+    _, _, _, _, _, _, _, style = company
+    white_brand = style.model_copy(deep=True)
+    white_brand.palette.background = "#FFFFFF"
+    white_brand.palette.text = "#000000"
+    white_logo = io.BytesIO()
+    Image.new("RGB", (320, 140), (255, 255, 255)).save(white_logo, "PNG")
+    result = render_story(white_brand, frame(), logo=white_logo.getvalue())
+    with Image.open(io.BytesIO(result.png)) as img:
+        lx1, ly1, _, _ = result.logo_box
+        backdrop = img.convert("RGB").getpixel((lx1 - 7, ly1 - 5))
+        backing_hex = "#" + "".join(f"{c:02X}" for c in backdrop)
+        assert contrast_ratio("#FFFFFF", backing_hex) >= 3
+
+
+def test_original_jpeg_logo_obeys_exif_orientation(company):
+    from app.brand_kit.renderer import _logo
+    logo = Image.new("RGB", (300, 120), (255, 255, 255))
+    exif = Image.Exif()
+    exif[274] = 6
+    stream = io.BytesIO()
+    logo.save(stream, "JPEG", exif=exif)
+    assert _logo(stream.getvalue()).size == (120, 300)
+
+
+def test_primary_and_secondary_palette_both_affect_story(company):
+    _, _, _, _, _, _, _, style = company
+    baseline = render_story(style, frame(), logo=png_logo()).png
+    modified = style.model_copy(deep=True)
+    modified.palette.primary = "#663399"
+    modified.palette.secondary = "#556677"
+    updated = render_story(modified, frame(), logo=png_logo()).png
+    assert hashlib.sha256(updated).digest() != hashlib.sha256(baseline).digest()
