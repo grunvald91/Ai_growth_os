@@ -202,10 +202,10 @@ def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str] | No
             return None
     if db is None or not _sso_link_current(db, session):
         return None  # The studio owner disconnected or re-linked this business: the old session ends.
-    business_ids = access.servgo_business_ids(settings, session.user_id)
+    business_ids = access.servgo_business_ids(settings, session.user_id, fresh=True)
     if business_ids is None:
         # An old/unavailable API may authorize only the original ticket scope.
-        role = access.servgo_role(settings, session.user_id, session.business_id)
+        role = access.servgo_role(settings, session.user_id, session.business_id, fresh=True)
         if role is None:
             return None
         request.state.studio_sso_role = role
@@ -221,7 +221,7 @@ def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str] | No
         current = request.path_params.get("product_id")
         if current is not None:
             # Resolve the role for the requested company, not the entry ticket.
-            roles = [access.servgo_role(settings, session.user_id, link.servgo_business_id)
+            roles = [access.servgo_role(settings, session.user_id, link.servgo_business_id, fresh=True)
                      for link in linked if str(link.product_id) == str(current)]
             role = next((value for value in ("owner", "co_owner", "administrator") if value in roles), None)
             if role is None:
