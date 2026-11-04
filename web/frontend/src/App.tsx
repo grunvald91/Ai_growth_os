@@ -15,6 +15,7 @@ import { LoginPage } from './pages/client/LoginPage'
 import { YandexLoginPage } from './pages/client/YandexLoginPage'
 import { OwnerMailPage } from './pages/client/OwnerMailPage'
 import { GrowthWorkspacePage } from './pages/client/GrowthWorkspacePage'
+import { StudioSignInPage } from './pages/client/StudioSignInPage'
 import { AccountPage } from './pages/client/AccountPage'
 import { PrepaymentsPage } from './pages/admin/PrepaymentsPage'
 import { AdminPaymentAttention } from './components/AdminPaymentAttention'
@@ -50,6 +51,19 @@ function BookRedirect() {
 /** Redirect /schedule, /analytics, /calendar → admin routes */
 function LegacyAdminRedirect({ to }: { to: string }) {
   return <Navigate to={to} replace />
+}
+
+/** Finish Growth -> ServGo sign-out on the canonical same-origin PWA. */
+function UnifiedLogoutPage() {
+  const navigate = useNavigate()
+  useEffect(() => {
+    let active = true
+    void clearLogin()
+      .catch(error => console.warn('Logout cleanup failed:', error))
+      .finally(() => { if (active) navigate('/login', { replace: true }) })
+    return () => { active = false }
+  }, [navigate])
+  return <div role="status" style={{ padding: 24 }}>Выходим из аккаунта…</div>
 }
 
 function ProtectedRoute({ children, restorationPending }: { children: React.ReactNode; restorationPending: boolean }) {
@@ -188,6 +202,10 @@ function App() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/legal/:docType/:businessId" element={<LegalPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/logout" element={<UnifiedLogoutPage />} />
+        <Route path="/workspace/studio-entry" element={
+          <ProtectedRoute restorationPending={authRestoring}><StudioSignInPage /></ProtectedRoute>
+        } />
         <Route path="/login/yandex" element={<YandexLoginPage />} />
         <Route path="/mail" element={<OwnerMailPage />} />
         <Route path="/workspace/mail" element={<AdminRoute restorationPending={authRestoring}><OwnerMailPage /></AdminRoute>} />
