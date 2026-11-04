@@ -29,10 +29,12 @@ def gallery_html(product_id: UUID, task_id: UUID, images: list[Artifact], *, err
             f'<a class="btn secondary" href="{base}/stories/{record.id}/edit">Изменить бесплатно</a>'
             if record.kind == "creative_story_render" else ""
         )
-        label = ("Фирменный стиль · " + ("ChatGPT Image" if "openai" in model
-                 else "Gemini" if "gemini" in model else "без платной модели"))
-                 if model.startswith("brand:") else
-                 ("ChatGPT Image" if model.startswith("gpt-") else "Gemini"))
+        if model.startswith("brand:"):
+            generator = ("ChatGPT Image" if "openai" in model else
+                         "Gemini" if "gemini" in model else "без платной модели")
+            label = "Фирменный стиль · " + generator
+        else:
+            label = "ChatGPT Image" if model.startswith("gpt-") else "Gemini"
         tiles.append(
             '<article class="sg-image-tile">'
             f'<a class="{"is-square" if meta.get("ratio") == "1:1" else "is-portrait"}" href="{uri}" target="_blank" rel="noopener" aria-label="Открыть кадр {number}">'
