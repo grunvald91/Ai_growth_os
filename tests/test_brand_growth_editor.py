@@ -66,7 +66,9 @@ def setup(tmp_path):
         approve_version(db,tmp_path,a.id,version.id)
         task=queue_creative(db,CreativeRequest(
             mode="creative",product_id=a.id,topic="Как записаться онлайн",
-            platform="telegram",format="story",brand_mode="brand",image_model="none"))
+            platform="telegram",format="story",brand_mode="brand",image_model="none"),
+            settings=Settings(_env_file=None, brand_stories_enabled=True,
+                              brand_story_canary_product_ids=str(a.id)))
         saved=db.scalar(select(Artifact).where(
             Artifact.task_id==task.id,Artifact.kind=="creative_request"))
         command=CreativeRequest.model_validate_json(saved.content)
@@ -84,7 +86,8 @@ def setup(tmp_path):
         app.dependency_overrides[get_db]=session
         app.dependency_overrides[get_settings]=lambda:Settings(
             _env_file=None,products_root=tmp_path,xai_api_key="test-key",
-            studio_public_origin="https://growth.servgo.ru")
+            studio_public_origin="https://growth.servgo.ru",
+            brand_stories_enabled=True, brand_story_canary_product_ids=str(a.id))
         with TestClient(app,headers={"Origin":"https://growth.servgo.ru"}) as client:
             yield db,client,a,b,task,tmp_path,style
         app.dependency_overrides.clear()
@@ -192,3 +195,49 @@ def test_invalid_color_does_not_mutate_existing_image(setup):
     assert response.status_code in {200,422}
     assert len(list(db.scalars(select(Artifact).where(
         Artifact.kind=="creative_story_render",Artifact.task_id==task.id))))==3
+
+
+
+def test_history_lists_previous_verified_versions(setup):
+    db, client, company, _, task, root, style = setup
+    initial = visible_images(db, company.id, task.id)[0]
+    route = f"/studio/products/{company.id}/tasks/{task.id}/stories/{initial.id}/edit"
+    assert client.post(route, data=edit_payload(style),
+                       follow_redirects=False).status_code == 303
+    current = visible_images(db, company.id, task.id)[0]
+    page = client.get(
+        f"/studio/products/{company.id}/tasks/{task.id}/stories/{current.id}/edit")
+    assert page.status_code == 200
+    assert "История версий" in page.text and "Версия 1" in page.text
+    assert f"/stories/{initial.id}/edit" in page.text
+    assert f"/images/{initial.id}?download=true" in page.text
+
+
+def test_zip_rejects_incomplete_or_corrupted_final_frame(setup):
+    db, client, company, _, task, root, _ = setup
+    record = visible_images(db, company.id, task.id)[0]
+    path = verified_gallery_image(db, root, company.id, task.id, record)
+    path.unlink()
+    res = client.get(f"/studio/products/{company.id}/tasks/{task.id}/images.zip")
+    assert res.status_code == 409
+    assert "полный ZIP" in res.text
+
+
+def test_form_requires_consent_for_paid_backgrounds(setup):
+    db, client, company, _, task, root, style = setup
+    uri = f"/studio/products/{company.id}/create"
+    html = client.get(uri)
+    assert html.status_code == 200
+    assert 'name="paid_confirm"' in html.text
+    assert '<option value="auto" selected>' in html.text
+    fields = {
+        "format": "story", "channel": "telegram",
+        "topic": "Создай три новых Stories", "brand_mode": "auto",
+        "image_model": "auto",
+    }
+    no = client.post(uri, data=fields, follow_redirects=False)
+    assert no.status_code == 422
+    assert "Подтвердите платную генерацию" in no.text
+    fields["paid_confirm"] = "yes"
+    yes = client.post(uri, data=fields, follow_redirects=False)
+    assert yes.status_code == 303

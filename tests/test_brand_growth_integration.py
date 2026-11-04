@@ -90,11 +90,17 @@ def brand_growth(tmp_path):
         def override_db(): yield db
         app.dependency_overrides[get_db] = override_db
         app.dependency_overrides[get_settings] = lambda: Settings(
-            _env_file=None, products_root=tmp_path, xai_api_key="unit-test")
+            _env_file=None, products_root=tmp_path, xai_api_key="unit-test",
+            brand_stories_enabled=True, brand_story_canary_product_ids=str(a.id))
         with TestClient(app) as client:
             yield db, client, a, b, old, tmp_path, style
         app.dependency_overrides.clear()
     engine.dispose()
+
+
+def _canary(company):
+    return Settings(_env_file=None, brand_stories_enabled=True,
+                    brand_story_canary_product_ids=str(company.id))
 
 
 def _request(company, **kw):
@@ -106,7 +112,7 @@ def _request(company, **kw):
 @pytest.mark.asyncio
 async def test_pin_checkpoint_and_reuse_paid_backgrounds_after_new_approval(brand_growth):
     db, client, company, other, old, root, style = brand_growth
-    task = queue_creative(db, _request(company))
+    task = queue_creative(db, _request(company), settings=_canary(company))
     stored = db.scalar(select(Artifact).where(
         Artifact.task_id == task.id, Artifact.kind == "creative_request"))
     pinned = CreativeRequest.model_validate_json(stored.content)
@@ -144,7 +150,7 @@ async def test_pin_checkpoint_and_reuse_paid_backgrounds_after_new_approval(bran
 @pytest.mark.asyncio
 async def test_partial_paid_failure_renders_good_frames_without_rebilling(brand_growth):
     db, _, company, _, _, root, _ = brand_growth
-    task = queue_creative(db, _request(company))
+    task = queue_creative(db, _request(company), settings=_canary(company))
     request = CreativeRequest.model_validate_json(db.scalar(select(Artifact).where(
         Artifact.task_id == task.id, Artifact.kind == "creative_request")).content)
     fake = FakeProvider(fail=2)
@@ -166,7 +172,7 @@ def test_own_images_render_locally_and_legacy_requests_unchanged(brand_growth):
     db, _, a, b, old, root, style = brand_growth
     request = _request(a)
     request = request.model_copy(update={"image_model": "none"})
-    task = queue_creative(db, request)
+    task = queue_creative(db, request, settings=_canary(a))
     pinned = CreativeRequest.model_validate_json(db.scalar(select(Artifact).where(
         Artifact.task_id == task.id, Artifact.kind == "creative_request")).content)
     assert pinned.brand_mode == "brand" and pinned.image_model == "none"
@@ -184,7 +190,7 @@ def test_task_pin_is_required_and_wrong_brand_cannot_be_rendered(brand_growth):
     from app.brand_kit.design_service import create_composition
     from app.content.brand_story_pipeline import story_frame
     db, _, a, b, old, root, _ = brand_growth
-    task = queue_creative(db, _request(a))
+    task = queue_creative(db, _request(a), settings=_canary(a))
     assert db.get(BrandActive, a.id).version_id == old.id
     # No cross-tenant access even if a valid pinned task UUID is supplied.
     with pytest.raises((LookupError, ValueError)):
@@ -206,3 +212,39 @@ def test_brand_copy_is_checked_before_paid_background_call():
     malformed.cta = "Невероятно длинная рекламная фраза для призыва " * 5
     with pytest.raises(ValueError, match="призыв"):
         validate_brand_story_copy(malformed)
+
+
+
+def test_strict_canary_default_off_and_company_allowlist(brand_growth):
+    from app.content.brand_story_pipeline import brand_story_canary_allowed
+    db, _, company, other, _, _, _ = brand_growth
+    assert not brand_story_canary_allowed(Settings(_env_file=None), company.id)
+    assert not brand_story_canary_allowed(
+        Settings(_env_file=None, brand_stories_enabled=True), company.id)
+    assert brand_story_canary_allowed(_canary(company), company.id)
+    assert not brand_story_canary_allowed(_canary(company), other.id)
+    assert not brand_story_canary_allowed(
+        Settings(_env_file=None, brand_stories_enabled=True,
+                 brand_story_canary_product_ids="garbage"), company.id)
+    job = queue_creative(db, _request(company), settings=Settings(_env_file=None))
+    stored = db.scalar(select(Artifact).where(
+        Artifact.task_id == job.id, Artifact.kind == "creative_request"))
+    assert json.loads(stored.content)["brand_mode"] == "classic"
+    with pytest.raises(ValueError, match="пока не включены"):
+        queue_creative(db, _request(company).model_copy(update={"brand_mode": "brand"}),
+                       settings=Settings(_env_file=None))
+    db.rollback()
+
+
+def test_real_text_layout_preflight_rejects_long_word_before_billing(brand_growth):
+    from app.content.brand_story_pipeline import preflight_brand_story_layout
+    db, _, company, _, _, root, _ = brand_growth
+    task = queue_creative(db, _request(company), settings=_canary(company))
+    request = CreativeRequest.model_validate_json(db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_request")).content)
+    spec = _draft()
+    preflight_brand_story_layout(db, root, request, spec, task.id)
+    long_word = spec.model_copy(deep=True)
+    long_word.frames[1].on_screen_text = "Щ" * 95
+    with pytest.raises(ValueError, match="помещ"):
+        preflight_brand_story_layout(db, root, request, long_word, task.id)
