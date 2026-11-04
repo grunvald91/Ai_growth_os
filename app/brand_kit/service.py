@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.brand_kit.contracts import BrandStyle, contrast_ratio
 from app.brand_kit.models import BrandActive, BrandAsset, BrandVersion
@@ -81,6 +82,13 @@ def store_asset(db, root: Path, product_id: UUID, kind: str, raw: bytes) -> Bran
     except (OSError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
         raise ValueError("Файл не является корректным изображением") from exc
     media_type, extension = IMAGE_FORMATS[fmt]
+    digest = hashlib.sha256(raw).hexdigest()
+    previous = db.scalar(select(BrandAsset).where(
+        BrandAsset.product_id == product_id, BrandAsset.kind == kind,
+        BrandAsset.sha256 == digest))
+    if previous is not None:
+        verified_asset(db, root, product_id, previous.id)
+        return previous
     asset_id = uuid4()
     filename = str(asset_id) + extension
     folder = _asset_dir(root, product_id, create=True)
@@ -93,11 +101,22 @@ def store_asset(db, root: Path, product_id: UUID, kind: str, raw: bytes) -> Bran
             os.fsync(stream.fileno())
         record = BrandAsset(
             id=asset_id, product_id=product_id, kind=kind, filename=filename,
-            media_type=media_type, sha256=hashlib.sha256(raw).hexdigest(),
+            media_type=media_type, sha256=digest,
             byte_size=len(raw), width=width, height=height,
         )
         db.add(record)
         db.commit()
+    except IntegrityError:
+        # A concurrent upload won the unique (company, variant, sha256) race.
+        db.rollback()
+        path.unlink(missing_ok=True)
+        winner = db.scalar(select(BrandAsset).where(
+            BrandAsset.product_id == product_id, BrandAsset.kind == kind,
+            BrandAsset.sha256 == digest))
+        if winner is None:
+            raise
+        verified_asset(db, root, product_id, winner.id)
+        return winner
     except Exception:
         db.rollback()
         path.unlink(missing_ok=True)
@@ -122,11 +141,15 @@ def save_draft(db, root: Path, product_id: UUID, payload: dict) -> BrandVersion:
     if product is None:
         raise LookupError("Компания не найдена")
     _assert_assets(db, root, product_id, style)
-    latest = db.scalar(select(func.max(BrandVersion.version)).where(
-        BrandVersion.product_id == product_id)) or 0
+    previous = db.scalar(select(BrandVersion).where(
+        BrandVersion.product_id == product_id).order_by(
+            BrandVersion.version.desc()).limit(1))
+    snapshot = style.model_dump(mode="json")
+    if previous is not None and previous.status == "draft" and previous.config == snapshot:
+        return previous
     row = BrandVersion(
-        product_id=product_id, version=latest + 1,
-        status="draft", config=style.model_dump(mode="json"))
+        product_id=product_id, version=(previous.version if previous else 0) + 1,
+        status="draft", config=snapshot)
     db.add(row)
     db.commit()
     db.refresh(row)
