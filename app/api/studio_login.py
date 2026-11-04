@@ -9,7 +9,7 @@ import base64
 import html
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.api.content_studio import _studio_form
 from app.api.content_studio_auth import (
@@ -94,8 +94,30 @@ def _secure_cookie(settings: Settings) -> bool:
     return settings.app_env.casefold() in {"production", "prod"}
 
 
+def _canonical_servgo(request: Request, settings: Settings) -> bool:
+    """Only the trusted same-origin HTTPS gateway may forward to ServGo login."""
+    secure_request = (request.url.scheme.casefold() == "https"
+                      or request.headers.get("x-forwarded-proto", "").strip().casefold() == "https")
+    return bool(settings.studio_servgo_gateway_enabled and secure_request
+                and request.url.netloc.casefold() == "servgo.ru")
+
+
+def _clear_studio_cookies(response: Response, settings: Settings) -> Response:
+    for name in (COOKIE, SSO_COOKIE):
+        response.delete_cookie(name, path="/", httponly=True, samesite="lax",
+                               secure=_secure_cookie(settings))
+    return response
+
+
 @router.get("/studio/login", response_class=HTMLResponse)
-def login_form(next: str | None = None, logged_out: bool = False):
+def login_form(request: Request, next: str | None = None, logged_out: bool = False,
+               legacy: bool = False, settings: Settings = Depends(get_settings)):
+    # On servgo.ru all regular users authenticate with the same Telegram,
+    # Yandex or email account they use in the admin. The legacy password form
+    # remains available only by an explicit emergency/operator request.
+    if _canonical_servgo(request, settings) and not legacy:
+        return RedirectResponse("/login?next=%2Fworkspace%2Fstudio-entry", status_code=303,
+                                headers={"Cache-Control": "no-store"})
     notice = "Вы вышли. Можно войти под другим логином." if logged_out else None
     return _page(next_url=_safe_next(next), notice=notice)
 
@@ -131,8 +153,15 @@ async def login_submit(request: Request, settings: Settings = Depends(get_settin
 
 
 @router.get("/studio/logout")
-def logout(settings: Settings = Depends(get_settings)):
-    response = RedirectResponse("/studio/login?logged_out=1", status_code=303)
-    response.delete_cookie(COOKIE, path="/", httponly=True, samesite="lax", secure=_secure_cookie(settings))
-    response.delete_cookie(SSO_COOKIE, path="/", httponly=True, samesite="lax", secure=_secure_cookie(settings))
-    return response
+def logout(request: Request, settings: Settings = Depends(get_settings)):
+    # The canonical PWA finishes logout by clearing its JWT, shared session,
+    # offline snapshots and other tabs, rather than leaving ServGo signed in.
+    target = "/logout" if _canonical_servgo(request, settings) else "/studio/login?logged_out=1"
+    response = RedirectResponse(target, status_code=303, headers={"Cache-Control": "no-store"})
+    return _clear_studio_cookies(response, settings)
+
+
+@router.post("/studio/session/logout")
+def logout_session(settings: Settings = Depends(get_settings)):
+    """Same-origin ServGo logout also revokes both Growth browser cookies."""
+    return _clear_studio_cookies(Response(status_code=204, headers={"Cache-Control": "no-store"}), settings)
