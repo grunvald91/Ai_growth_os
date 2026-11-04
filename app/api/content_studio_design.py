@@ -588,10 +588,20 @@ STUDIO_CSS += """
 """
 STUDIO_JS += r"""
 (function(){
-  // Tapping the dimmed area (the details element itself) closes "Ещё".
-  document.addEventListener('click', function(event){
+  // Classic mobile navigation: outside taps close the floating "Ещё" sheet.
+  // The dimmed backdrop targets the details element itself; any other outside
+  // target should also dismiss it without blocking the original action.
+  document.addEventListener('pointerdown', function(event){
     document.querySelectorAll('[data-m-more][open]').forEach(function(menu){
-      if (event.target === menu) menu.removeAttribute('open');
+      if (event.target instanceof Node && (event.target===menu || !menu.contains(event.target))) menu.open=false;
+    });
+  });
+  document.addEventListener('keydown', function(event){
+    if(event.key!=='Escape')return;
+    document.querySelectorAll('[data-m-more][open]').forEach(function(menu){
+      const wasInside=menu.contains(document.activeElement);
+      menu.open=false;
+      if(wasInside)menu.querySelector('summary')?.focus();
     });
   });
 })();

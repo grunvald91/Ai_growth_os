@@ -111,6 +111,72 @@
       status.textContent='Не удалось получить предложения. Вы можете задать тему самостоятельно.';
     }
   });
+
+  // Inline assistance panels are dismissible as well. Ignore their own
+  // launcher buttons so a tap on an info icon can switch descriptions.
+  document.addEventListener('pointerdown',event=>{
+    if(!(event.target instanceof Element))return;
+    if(!panel.hidden && !panel.contains(event.target) &&
+       !event.target.closest('[data-sg-info],[data-sg-about]'))panel.hidden=true;
+    if(!topics.hidden && !topics.contains(event.target) &&
+       !event.target.closest('[data-sg-suggest]'))topics.hidden=true;
+  });
+
+  // The Create overlay can be collapsed without hiding the input or losing messages.
+  // Pointer gestures are scoped to the handles, so they do not compete with
+  // feed scrolling or the hold-to-record voice gesture in the composer.
+  const history=document.getElementById('sg-create-history');
+  const historyClose=document.getElementById('sg-create-history-close');
+  const historyOpen=document.getElementById('sg-create-history-open');
+  if(history && historyClose && historyOpen){
+    function showHistory(open,focusHandle=true){
+      root.classList.toggle('sg-history-collapsed',!open);
+      history.setAttribute('aria-hidden',String(!open));
+      historyClose.setAttribute('aria-expanded',String(open));
+      historyOpen.setAttribute('aria-expanded',String(open));
+      if(focusHandle)(open ? historyClose : historyOpen).focus({preventScroll:true});
+    }
+    // Outside taps dismiss the floating conversation without stealing focus
+    // from the format chooser, textarea, voice recorder or other target.
+    document.addEventListener('pointerdown',event=>{
+      if(root.classList.contains('has-feed') &&
+         !root.classList.contains('sg-history-collapsed') &&
+         event.target instanceof Node && !history.contains(event.target)){
+        showHistory(false,false);
+      }
+    });
+    function attachGrip(button,open,swipeDirection){
+      let startY=null;
+      let activePointer=null;
+      let suppressClickUntil=0;
+      button.addEventListener('pointerdown',event=>{
+        if(event.pointerType==='touch' || event.pointerType==='pen'){
+          startY=event.clientY;
+          activePointer=event.pointerId;
+          // Keep receiving pointerup even when the finger ends outside the handle.
+          try{button.setPointerCapture(event.pointerId);}catch(_){/* synthetic event */}
+        }
+      });
+      button.addEventListener('pointerup',event=>{
+        if(startY===null || event.pointerId!==activePointer)return;
+        const movement=event.clientY-startY;
+        startY=null;
+        activePointer=null;
+        if(swipeDirection*movement>24){
+          suppressClickUntil=performance.now()+350;
+          showHistory(open);
+        }
+      });
+      button.addEventListener('pointercancel',()=>{startY=null;activePointer=null;});
+      button.addEventListener('click',()=>{
+        // Touch devices can synthesize a click immediately after the swipe.
+        if(performance.now()<suppressClickUntil)return;
+        showHistory(open);
+      });
+    }
+    attachGrip(historyClose,false,1); // pull down
+    attachGrip(historyOpen,true,-1);  // pull up
+  }
   // Only the lower dispatcher composer can submit a request.
   // Settings are read at send time, including immediately after voice transcription.
 })();

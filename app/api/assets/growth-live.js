@@ -36,7 +36,27 @@
   e.preventDefault();
   location.assign(destination.pathname+destination.search+destination.hash);
  },true);
- document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.mobile-nav details[open]').forEach(d=>d.open=false);closeSearch()}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();search()}});
+ // Floating mobile navigation menus dismiss when the owner taps elsewhere.
+ // Keep in-flow <details> sections (SEO help, settings, etc.) independent.
+ const floatingMenus='.mobile-nav>details';
+document.addEventListener('pointerdown',e=>{
+   if(!(e.target instanceof Node))return;
+   document.querySelectorAll(floatingMenus+'[open]').forEach(menu=>{
+     if(!menu.contains(e.target))menu.open=false;
+   });
+ });
+ document.addEventListener('keydown',e=>{
+   if(e.key==='Escape'){
+     const menus=[...document.querySelectorAll(floatingMenus+'[open]')];
+     menus.forEach(menu=>menu.open=false);
+     if(menus.length){
+       const previous=menus.at(-1).querySelector('summary');
+       if(previous && menus.at(-1).contains(document.activeElement))previous.focus();
+     }
+     closeSearch();
+   }
+   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();search();}
+ });
  const product=location.pathname.match(/\/studio\/products\/([0-9a-f-]{36})/i);
  const base=product?'/studio/products/'+product[1]:null;
  document.getElementById('bizBtn').onclick=()=>location.assign('/studio?choose=1');
@@ -50,6 +70,8 @@
   searchBox=document.createElement('div');searchBox.className='v4-search';searchBox.setAttribute('role','dialog');searchBox.setAttribute('aria-modal','true');searchBox.setAttribute('aria-label','Поиск раздела');
   searchBox.innerHTML='<section><button class="btn ghost" type="button">Закрыть</button><input aria-label="Поиск раздела" placeholder="Найти раздел…"><nav></nav></section>';
   searchBox.querySelector('button').onclick=closeSearch;
+  // Backdrop taps dismiss search, but taps inside the dialog do not.
+  searchBox.addEventListener('pointerdown',e=>{if(e.target===searchBox)closeSearch();});
   const input=searchBox.querySelector('input');
   function update(){const nav=searchBox.querySelector('nav');nav.replaceChildren();document.querySelectorAll('#leftNav a').forEach(a=>{if(a.textContent.toLowerCase().includes(input.value.toLowerCase()))nav.append(a.cloneNode(true))})}
   input.oninput=update;document.body.append(searchBox);document.querySelector('.shell').inert=true;update();input.focus();

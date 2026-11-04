@@ -90,9 +90,22 @@ def main():
                 expect(page.get_by_role('link',name='Промпты агентов',exact=True)).to_be_visible()
                 page.set_viewport_size({'width':390,'height':844})
                 page.goto(base+'?design=v4')
-                page.locator('[data-sg-notifications] summary').click()
+                # Floating menus close on outside taps, but not inside.
+                more = page.locator('#mobileNav details')
+                more.locator('summary').click()
+                expect(page.locator('.v4-more')).to_be_visible()
+                page.locator('.topbar').click(position={'x':8,'y':8})
+                expect(more).not_to_have_attribute('open', '')
+                notice = page.locator('[data-sg-notifications]')
+                notice.locator('summary').click()
                 expect(page.locator('.sg-notify-popover')).to_be_visible()
-                page.locator('[data-sg-notifications] summary').click()
+                page.locator('.sg-notify-head strong').click()
+                expect(notice).to_have_attribute('open', '')
+                page.locator('.topbar').click(position={'x':8,'y':8})
+                expect(notice).not_to_have_attribute('open', '')
+                notice.locator('summary').click()
+                page.keyboard.press('Escape')
+                expect(notice).not_to_have_attribute('open', '')
                 page.screenshot(path='/tmp/growth-v4-mobile.png',full_page=True)
                 page.set_viewport_size({'width':1440,'height':900})
                 page.screenshot(path='/tmp/growth-v4-desktop.png',full_page=True)
@@ -100,11 +113,62 @@ def main():
                 assert page.locator('.animate-in').first.evaluate("e=>getComputedStyle(e).animationName") == 'none'
                 page.emulate_media(reduced_motion='no-preference')
                 page.goto(base+'/create')
+                page.set_viewport_size({'width':390,'height':844})
+                # Use an isolated DOM message; no AI task or real publication.
+                page.evaluate("""() => {
+                  const feed=document.querySelector('#dp-feed');
+                  const message=document.createElement('div');
+                  message.className='dp-msg bot';
+                  message.textContent='Проверка сворачивания истории';
+                  feed.appendChild(message);
+                  document.querySelector('.sg-create-dispatch').classList.add('has-feed');
+                }""")
+                expect(page.locator('#sg-create-history')).to_be_visible()
+                page.locator('#sg-create-history-close').click()
+                expect(page.locator('#sg-create-history')).to_be_hidden()
+                expect(page.locator('#sg-create-history-open')).to_be_visible()
+                page.locator('#sg-create-history-open').click()
+                expect(page.locator('#sg-create-history')).to_be_visible()
+                # Pointer-swipe tests the same logic used by real touch devices.
+                page.evaluate("""() => {
+                  const handle=document.querySelector('#sg-create-history-close');
+                  handle.dispatchEvent(new PointerEvent('pointerdown',{
+                    bubbles:true,pointerType:'touch',pointerId:91,clientY:100}));
+                  handle.dispatchEvent(new PointerEvent('pointerup',{
+                    bubbles:true,pointerType:'touch',pointerId:91,clientY:138}));
+                }""")
+                expect(page.locator('#sg-create-history')).to_be_hidden()
+                page.evaluate("""() => {
+                  const handle=document.querySelector('#sg-create-history-open');
+                  handle.dispatchEvent(new PointerEvent('pointerdown',{
+                    bubbles:true,pointerType:'touch',pointerId:92,clientY:138}));
+                  handle.dispatchEvent(new PointerEvent('pointerup',{
+                    bubbles:true,pointerType:'touch',pointerId:92,clientY:100}));
+                }""")
+                expect(page.locator('#sg-create-history')).to_be_visible()
+                assert 'Проверка сворачивания истории' in page.locator('#dp-feed').inner_text()
                 page.screenshot(path='/tmp/growth-v4-create.png',full_page=True)
                 # The v4 page uses the dispatcher composer; the legacy POST path
                 # is exercised via its own real classic form rather than a selector
                 # that does not exist in the v4 document.
                 page.goto(base+'/create?design=classic')
+                # The classic mobile navigation must also dismiss by outside tap.
+                classic_more = page.locator('[data-m-more]')
+                classic_more.locator('summary').click()
+                expect(classic_more).to_have_attribute('open', '')
+                page.evaluate("""() => {
+                  const outside=document.querySelector('.sg-mobile-shell-head') ||
+                    document.querySelector('main');
+                  outside.dispatchEvent(new PointerEvent('pointerdown',{
+                    bubbles:true,pointerType:'touch',pointerId:33}));
+                }""")
+                expect(classic_more).not_to_have_attribute('open', '')
+                classic_more.locator('summary').click()
+                expect(classic_more).to_have_attribute('open', '')
+                # Native backdrop of this <details> resolves to the menu element.
+                classic_more.evaluate("""menu => menu.dispatchEvent(
+                  new PointerEvent('pointerdown',{bubbles:true,pointerType:'touch'}))""")
+                expect(classic_more).not_to_have_attribute('open', '')
                 page.locator('[name="topic"]').fill('Тест реальной очереди')
                 page.locator('form button[type="submit"]').click()
                 page.wait_for_url('**/tasks/*')

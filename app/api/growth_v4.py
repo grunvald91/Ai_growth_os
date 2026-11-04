@@ -182,7 +182,14 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
           data-voice-preview-url="/studio/voice/preview" data-voice-max="{int(voice_max)}"
           data-voice-project="{html.escape(voice_project,quote=True)}"
           aria-label="Создание через диспетчера">
-          <div class="dp-feed" id="dp-feed" role="log" aria-live="polite" aria-label="Ответы диспетчера"></div>
+          <div class="sg-create-history" id="sg-create-history" aria-label="История сообщений">
+            <button type="button" class="sg-create-history-close" id="sg-create-history-close"
+              aria-label="Свернуть историю сообщений" aria-controls="dp-feed" aria-expanded="true">
+              <span class="sg-create-history-grip" aria-hidden="true"></span>
+            </button>
+            <div class="dp-feed" id="dp-feed" role="log" aria-live="polite"
+              aria-label="Ответы диспетчера"></div>
+          </div>
           <div class="command-dock">
             <div class="voice-hold-overlay vg" id="dp-voice-overlay" aria-hidden="true">
               <div class="vg__glow"></div>
@@ -197,6 +204,10 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             <div class="command-topicbar">
               <button class="dp-new" id="dp-new" type="button">＋ Новая тема</button>
             </div>
+            <button type="button" class="sg-create-history-open" id="sg-create-history-open"
+              aria-label="Развернуть историю сообщений" aria-controls="dp-feed" aria-expanded="false">
+              <span class="sg-create-history-grip" aria-hidden="true"></span>
+            </button>
             <form class="dp-form command-bar" id="dp-form" autocomplete="off">
               <label class="dp-sr" for="dp-input">Напишите или скажите, что создать</label>
               <textarea id="dp-input" class="dp-input" rows="1"
@@ -425,7 +436,7 @@ def render_v4(page, request, pid, switch):
     if home:
         extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>voice-glow-audio-20261102', extras)
     if pid and current == base+'/create':
-        extras += '<script src="/studio/assets/create-studio.js?v=images-20261102"></script>'
+        extras += '<script src="/studio/assets/create-studio.js?v=history-20261104"></script>'
         extras += '<script src="/studio/assets/dispatcher.js?v=voice-glow-audio-20261102"></script>'
     if pid and (home or current == base+'/create'):
         # The glow measures the existing recorder stream; load before dispatcher.js.
@@ -437,11 +448,11 @@ def render_v4(page, request, pid, switch):
         if '/studio/assets/studio.js' not in extras:
             extras += '<script>'+notice_js+'</script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=17">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=18">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=6">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
         '</head>'
     ))
-    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=9"></script></body>')
+    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=10"></script></body>')
     return template
