@@ -88,7 +88,7 @@ def accounts_html(product_id, accounts, products, operators, *, actor=None, noti
     # The error sits next to the form and the page scrolls there: on a phone the top is off screen.
     alert = f'<p class="sg-warning sg-form-error" role="alert">{esc(error)}</p>' if error else ""
     # The result (new password) and the form share one anchor, so the page lands on them after a POST.
-    body += (f'<div id="account-result">{result}<section class="sg-surface"><h2>Переходный аккаунт Growth</h2>{alert}'
+    body += (f'<div id="account-result">{result}<section class="sg-surface"><h2>Новый аккаунт Growth (переходный)</h2>{alert}'
              f'<form method="post" action="{base}#account-result" class="sg-form">'
              '<label class="sg-field"><span>Логин</span><input name="username" required minlength="3" maxlength="40" '
              f'pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{{2,39}}" autocomplete="off" value="{esc(fields.get("username", ""))}" '
