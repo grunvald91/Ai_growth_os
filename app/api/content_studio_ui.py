@@ -17,7 +17,7 @@ def esc(value) -> str:
 FORMAT_CHOICES = [
     ("post", "Пост", "Готовый текст для одной площадки"),
     ("short_video", "Короткое видео · сценарий", "Сценарий, кадры и озвучка — не MP4"),
-    ("story", "Stories", "Последовательность экранов — не готовые изображения"),
+    ("story", "Stories", "Вертикальные PNG в фирменном стиле · при наличии Brand Kit"),
     ("static_image", "Изображение · бриф", "Визуальный бриф — не готовая картинка"),
     ("package", "Полный пакет", "Статья, адаптации и видеосценарии"),
 ]
@@ -121,6 +121,22 @@ def create_content_html(product_id, *, created=False, fields=None, error=None, d
             <button class="btn primary sg-primary-action" type="submit">Создать материал <span aria-hidden="true">→</span></button>
           </div>
         </form>
+        <script>
+        (() => {
+          const form = document.getElementById('sg-create-form');
+          const panel = form && form.querySelector('[data-story-brand-control]');
+          if (!panel) return;
+          function sync() {
+            const checked = form.querySelector('input[name="format"]:checked');
+            panel.style.display = checked && checked.value === 'story' ? '' : 'none';
+            panel.querySelectorAll('select').forEach(select => {
+              select.disabled = !(checked && checked.value === 'story');
+            });
+          }
+          form.addEventListener('change', sync);
+          sync();
+        })();
+        </script>
       </section>
       <aside class="sg-aside-stack">
         <section class="sg-surface sg-guide"><h3>Простое видео с озвучкой</h3>
