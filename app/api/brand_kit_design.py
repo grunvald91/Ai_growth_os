@@ -42,7 +42,8 @@ def _error(exc: Exception) -> HTTPException:
 
 @router.post("/studio/products/{product_id}/brand-kit/backgrounds")
 async def upload_story_background(product_id: UUID, request: Request,
-                                  db: Session = Depends(get_db)):
+                                  db: Session = Depends(get_db),
+                                  settings = Depends(get_settings)):
     _owner_product(db, product_id)
     form = await limited_multipart_form(
         request, max_body=MAX_BACKGROUND_UPLOAD + 16_000,
@@ -53,7 +54,7 @@ async def upload_story_background(product_id: UUID, request: Request,
     try:
         data = await source.read(MAX_BACKGROUND_UPLOAD + 1)
         record = await run_in_threadpool(
-            store_background, db, get_settings().products_root, product_id, data)
+            store_background, db, settings.products_root, product_id, data)
     except (LookupError, ValueError) as exc:
         raise _error(exc) from None
     finally:
@@ -67,10 +68,11 @@ async def upload_story_background(product_id: UUID, request: Request,
 
 @router.get("/studio/products/{product_id}/brand-kit/backgrounds/{background_id}")
 def story_background(product_id: UUID, background_id: UUID,
-                     db: Session = Depends(get_db)):
+                     db: Session = Depends(get_db),
+                     settings = Depends(get_settings)):
     _owner_product(db, product_id)
     try:
-        _, path = verified_background(db, get_settings().products_root, product_id, background_id)
+        _, path = verified_background(db, settings.products_root, product_id, background_id)
     except (ValueError, LookupError):
         raise HTTPException(404, "Фон не найден") from None
     return FileResponse(path, media_type="image/png",
@@ -81,11 +83,12 @@ def story_background(product_id: UUID, background_id: UUID,
 
 @router.post("/studio/products/{product_id}/brand-kit/compose")
 def compose_story(product_id: UUID, payload: ComposeRequest,
-                  db: Session = Depends(get_db)):
+                  db: Session = Depends(get_db),
+                  settings = Depends(get_settings)):
     _owner_product(db, product_id)
     try:
         render = create_composition(
-            db, get_settings().products_root, product_id, payload.version_id,
+            db, settings.products_root, product_id, payload.version_id,
             payload.frame, frame_key=payload.frame_key,
             background_id=payload.background_id)
     except (ValueError, LookupError) as exc:
@@ -100,10 +103,11 @@ def compose_story(product_id: UUID, payload: ComposeRequest,
 
 @router.get("/studio/products/{product_id}/brand-kit/renders/{render_id}")
 def download_composed_story(product_id: UUID, render_id: UUID,
-                            download: bool = False, db: Session = Depends(get_db)):
+                            download: bool = False, db: Session = Depends(get_db),
+                            settings = Depends(get_settings)):
     _owner_product(db, product_id)
     try:
-        _, path = verified_render(db, get_settings().products_root, product_id, render_id)
+        _, path = verified_render(db, settings.products_root, product_id, render_id)
     except (ValueError, LookupError):
         raise HTTPException(404, "Изображение не найдено") from None
     return FileResponse(path, media_type="image/png",
@@ -115,10 +119,11 @@ def download_composed_story(product_id: UUID, render_id: UUID,
 
 @router.delete("/studio/products/{product_id}/brand-kit/backgrounds/{background_id}")
 def remove_story_background(product_id: UUID, background_id: UUID,
-                            db: Session = Depends(get_db)):
+                            db: Session = Depends(get_db),
+                            settings = Depends(get_settings)):
     _owner_product(db, product_id)
     try:
-        delete_unused_background(db, get_settings().products_root, product_id, background_id)
+        delete_unused_background(db, settings.products_root, product_id, background_id)
     except (ValueError, LookupError) as exc:
         raise _error(exc) from None
     return JSONResponse({"deleted": True}, headers={"Cache-Control": "no-store"})
@@ -126,10 +131,11 @@ def remove_story_background(product_id: UUID, background_id: UUID,
 
 @router.delete("/studio/products/{product_id}/brand-kit/renders/{render_id}")
 def remove_story_render(product_id: UUID, render_id: UUID,
-                        db: Session = Depends(get_db)):
+                        db: Session = Depends(get_db),
+                        settings = Depends(get_settings)):
     _owner_product(db, product_id)
     try:
-        delete_story_render(db, get_settings().products_root, product_id, render_id)
+        delete_story_render(db, settings.products_root, product_id, render_id)
     except (ValueError, LookupError) as exc:
         raise _error(exc) from None
     return JSONResponse({"deleted": True}, headers={"Cache-Control": "no-store"})
