@@ -228,31 +228,30 @@ def new_company_form(request: Request, db: Session = Depends(get_db)):
 
 
 def _ingest_yandex_selection(service: CompanyIntakeService, product_id: UUID,
-                             session_id: UUID, raw: str) -> None:
-    """Selected external directory data is input evidence, not owner verification."""
-    if not raw or len(raw) > 4000:
+                             session_id: UUID, raw: str, *, scope: str | None = None) -> None:
+    """Accept only a signed, tenant-scoped Yandex result as third-party evidence."""
+    if not raw:
         return
+    from app.integrations.yandex_evidence import verify_organization
+    from app.intake.sources import make_source
+
     try:
-        record = json.loads(raw)
-        if not isinstance(record, dict):
-            return
-        org_id = str(record.get("id") or "")
-        if not re.fullmatch(r"\d{1,25}", org_id):
-            return
-        from app.intake.sources import make_source
-        label = str(record.get("name") or "")[:200]
-        address = str(record.get("address") or "")[:300]
-        categories = [str(x)[:100] for x in (record.get("categories") or [])
-                      if isinstance(x, str)][:10]
-        website = str(record.get("website") or "")[:500]
-        lines = ["Яндекс Карты: карточка выбранной организации.", "Название: " + label,
-                 "Адрес: " + address, "Категории: " + ", ".join(categories),
-                 "Сайт: " + website]
-        source = make_source("public_third_party", "https://yandex.ru/maps/org/" + org_id,
-                             "\n".join(v for v in lines if v.split(": ", 1)[-1].strip()))
-        service.add_source(product_id, session_id, source, actor=ACTOR)
-    except (ValueError, TypeError, IntakeError):
-        return
+        record = verify_organization(raw, scope=scope or str(product_id))
+    except ValueError as exc:
+        raise IntakeError(str(exc)) from None
+    org_id = record["id"]
+    label = str(record.get("name") or "")[:200]
+    address = str(record.get("address") or "")[:300]
+    categories = [str(x)[:100] for x in (record.get("categories") or [])
+                  if isinstance(x, str)][:10]
+    website = str(record.get("website") or "")[:500]
+    lines = ["Яндекс Карты: карточка выбранной организации.", "Название: " + label,
+             "Адрес: " + address, "Категории: " + ", ".join(categories),
+             "Сайт: " + website]
+    source = make_source(
+        "public_third_party", "https://yandex.ru/maps/org/" + org_id,
+        "\n".join(v for v in lines if v.split(": ", 1)[-1].strip()))
+    service.add_source(product_id, session_id, source, actor=ACTOR)
 
 
 async def _add_materials(service: CompanyIntakeService, product_id: UUID, session_id: UUID,
@@ -319,7 +318,7 @@ async def new_company_submit(request: Request, background: BackgroundTasks, db: 
         session = service.start(product.id, actor=ACTOR)
         session_id = UUID(session["session_id"])
         service.add_text(product.id, session_id, about, actor=ACTOR, reference="growth studio: описание владельца")
-        _ingest_yandex_selection(service, product.id, session_id, fields.get("yandex_org", ""))
+        _ingest_yandex_selection(service, product.id, session_id, fields.get("yandex_org", ""), scope="new")
         # Parse uploaded files in the background as well: multi-page OCR must
         # never hold the POST connection open for its entire worker timeout.
         _start_job(background, product.id, session_id, website=website, identifier=identifier,
