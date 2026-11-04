@@ -176,13 +176,13 @@ def test_seo_plan_parser_recovers_only_unambiguous_model_json(wrapped):
     }
     raw = json.dumps(payload, ensure_ascii=False)
     if wrapped == "fence":
-        raw = "```json\\n" + raw + "\\n```"
+        raw = "```json\n" + raw + "\n```"
     elif wrapped == "prose":
-        raw = "План SEO:\\n" + raw + "\\nПроверьте исходные факты."
+        raw = "План SEO:\n" + raw + "\nПроверьте исходные факты."
     elif wrapped == "trailing_comma":
         raw = raw[:-1] + ",}"
     elif wrapped == "literal_newline":
-        raw = raw.replace("Проверить календарь и CRM", "Проверить календарь\\nи CRM")
+        raw = raw.replace("Проверить календарь и CRM", "Проверить календарь\nи CRM")
     parsed = _parse_stage_payload(SEOPlan, raw)
     assert parsed.primary_query == payload["primary_query"]
     assert len(parsed.outline) == 2
