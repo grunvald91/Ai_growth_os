@@ -34,8 +34,13 @@ export async function clearLogin() {
   for (const entry of completed) {
     if (entry.status === 'rejected') console.warn('Remote logout unavailable; local logout remains active', entry.reason)
   }
-  // Callers handling explicit logout must await deletion before navigation.
+  // Finish clearing local/offline data even if remote logout failed.
   await clearOfflineSnapshots()
+  // The ServGo identity cookie must be deleted. A failed platform logout may
+  // leave both the central session and its bound Studio session alive.
+  if (completed[0].status === 'rejected') {
+    throw new Error('ServGo server logout did not complete')
+  }
 }
 
 export function saveLogin(res: AuthResponse) {
@@ -44,6 +49,7 @@ export function saveLogin(res: AuthResponse) {
   if (previousToken !== res.token) window.dispatchEvent(new Event('servgo-account-changed'))
   localStorage.setItem('userRole', res.role)
   localStorage.setItem('userName', res.user.full_name)
+  window.dispatchEvent(new Event('servgo-login-saved'))
   sessionStorage.removeItem('servgoExplicitLogout')
   localStorage.removeItem('servgoExplicitLogout')
 }
