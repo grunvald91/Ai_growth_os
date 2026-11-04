@@ -83,6 +83,7 @@ class Session:
     business_id: int
     product_id: str
     role: str
+    identity_hash: str | None = None
 
 
 def _sign(settings, payload: str) -> str:
@@ -91,8 +92,12 @@ def _sign(settings, payload: str) -> str:
     return _b64(hmac.new(signing_key(settings), b"sso:" + payload.encode(), hashlib.sha256).digest())
 
 
-def issue_session(settings, claims: Claims, product_id: str, *, now: float | None = None) -> str:
+def issue_session(settings, claims: Claims, product_id: str, *, now: float | None = None,
+                  identity_hash: str | None = None) -> str:
+    if identity_hash is not None and (len(identity_hash) != 64 or any(c not in "0123456789abcdef" for c in identity_hash)):
+        raise ValueError("Invalid browser identity fingerprint")
     payload = _b64(json.dumps({"u": claims.user_id, "b": claims.business_id, "p": product_id, "r": claims.role,
+                               "i": identity_hash,
                                "e": int((now if now is not None else time.time()) + MAX_AGE)},
                               separators=(",", ":")).encode())
     return f"{payload}.{_sign(settings, payload)}"
@@ -106,7 +111,12 @@ def read_session(settings, token: str | None, *, now: float | None = None) -> Se
         return None
     try:
         data = json.loads(_unb64(payload))
-        session = Session(int(data["u"]), int(data["b"]), str(data["p"]), str(data["r"]))
+        identity_hash = data.get("i")
+        if identity_hash is not None and (not isinstance(identity_hash, str) or
+                                          len(identity_hash) != 64 or
+                                          any(c not in "0123456789abcdef" for c in identity_hash)):
+            return None
+        session = Session(int(data["u"]), int(data["b"]), str(data["p"]), str(data["r"]), identity_hash)
         expires = int(data["e"])
     except (ValueError, KeyError, TypeError):
         return None
