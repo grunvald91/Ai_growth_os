@@ -249,3 +249,25 @@ def test_real_text_layout_preflight_rejects_long_word_before_billing(brand_growt
     long_word.frames[1].on_screen_text = "Щ" * 95
     with pytest.raises(ValueError, match="помещ"):
         preflight_brand_story_layout(db, root, request, long_word, task.id)
+
+
+
+@pytest.mark.asyncio
+async def test_kill_switch_stops_queued_paid_job_before_model_call(brand_growth):
+    from app.content.creative import run_creative_once
+    db, _, company, _, _, root, _ = brand_growth
+    task = queue_creative(db, _request(company), settings=_canary(company))
+    command = CreativeRequest.model_validate_json(db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_request")).content)
+    calls = []
+    class PaidMustNotRun:
+        async def generate(self, *args, **kwargs):
+            calls.append(args)
+            raise AssertionError("Paid LLM must not execute when canary is disabled")
+    disabled = Settings(
+        _env_file=None, products_root=root, xai_api_key="unit-test",
+        brand_stories_enabled=False,
+        brand_story_canary_product_ids=str(company.id))
+    assert not await run_creative_once(db, disabled, command, task_id=task.id,
+                                       provider=PaidMustNotRun())
+    assert calls == []

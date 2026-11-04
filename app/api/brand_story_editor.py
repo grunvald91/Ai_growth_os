@@ -428,6 +428,9 @@ async def regenerate_background(product_id: UUID, task_id: UUID, artifact_id: UU
         token = UUID(fields["token"])
     except (ValueError, KeyError):
         raise HTTPException(422, "Некорректный идентификатор подтверждения") from None
+    from app.content.brand_story_pipeline import brand_story_canary_allowed
+    if not brand_story_canary_allowed(settings, product_id):
+        raise HTTPException(403, "Платная перегенерация отключена для этой компании")
     model = resolve_model(settings, fields["model"])
     source, metadata, composition, intent_id, draft, scene, number = await run_in_threadpool(
         _reserve_regeneration, db, settings.products_root, product_id, task_id,

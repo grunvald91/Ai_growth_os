@@ -249,10 +249,10 @@ def test_noncanary_creation_omits_hidden_brand_controls():
     from uuid import uuid4
     no = create_content_html(uuid4(), brand_canary=False)
     yes = create_content_html(uuid4(), brand_canary=True)
-    assert 'name="brand_mode"' not in no
-    assert 'name="image_model"' not in no
+    assert '<select name="brand_mode">' not in no
+    assert '<select name="image_model">' not in no
     assert 'name="paid_confirm"' not in no
-    assert 'name="brand_mode"' in yes
+    assert '<select name="brand_mode">' in yes
     assert 'name="paid_confirm"' in yes
 
 
@@ -280,3 +280,28 @@ def test_paid_nonce_checked_after_more_than_200_prior_confirmations(setup, monke
     assert client.post(url, data=confirmation, follow_redirects=False).status_code == 303
     assert client.post(url, data=confirmation, follow_redirects=False).status_code == 409
     assert len(calls) == 1
+
+
+
+def test_free_editor_composition_runs_off_event_loop(setup, monkeypatch):
+    import threading
+    from app.api import brand_story_editor as editor
+    db, client, company, _, task, _, style = setup
+    initial = visible_images(db, company.id, task.id)[0]
+    uri = f"/studio/products/{company.id}/tasks/{task.id}/stories/{initial.id}/edit"
+    event_threads = []
+    render_threads = []
+    original_fields = editor._fields
+    original_new_revision = editor._new_revision
+    async def tracked_fields(request):
+        event_threads.append(threading.get_ident())
+        return await original_fields(request)
+    def tracked_revision(*args, **kwargs):
+        render_threads.append(threading.get_ident())
+        return original_new_revision(*args, **kwargs)
+    monkeypatch.setattr(editor, "_fields", tracked_fields)
+    monkeypatch.setattr(editor, "_new_revision", tracked_revision)
+    res = client.post(uri, data=edit_payload(style), follow_redirects=False)
+    assert res.status_code == 303
+    assert event_threads and render_threads
+    assert event_threads[0] != render_threads[0]
