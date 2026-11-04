@@ -222,6 +222,12 @@ def create_composition(db, root: Path, product_id: UUID, version_id: UUID,
     if version is None:
         raise LookupError("Утверждённая версия фирменного стиля не найдена")
     spec = frame.model_dump(mode="json")
+    # Pre-editor compositions (stages A-C) have no crop fields. Their
+    # idempotency digest must remain byte-identical on default-center retries.
+    if spec.get("crop_x") == 0.5:
+        spec.pop("crop_x")
+    if spec.get("crop_y") == 0.5:
+        spec.pop("crop_y")
     if pinned_task_id is not None:
         # The public /compose route has no pinned_task_id input. Only jobs
         # whose immutable creative_request recorded this exact version/JSON
