@@ -102,6 +102,10 @@ def task_title(task: Task, request: Artifact | None = None) -> str:
         except (ValueError, TypeError):
             pass
     topic = str(data.get("topic") or "").strip()
+    # SEO-ARTICLE:<plan UUID>:<item id> is an idempotency key used by workers.
+    # It is never a business-facing title; show the original plan topic instead.
+    if (task.title or "").startswith("SEO-ARTICLE:"):
+        return f"SEO-статья: {topic}" if topic else "SEO-статья по контент-плану"
     if task.assigned_agent == "whiteboard_renderer":
         return re.sub(r'^Рисованное видео:', 'Простое видео:', task.description or 'Простое видео', flags=re.I)
     if task.assigned_agent == "editorial_planner":
@@ -129,6 +133,18 @@ def task_title(task: Task, request: Artifact | None = None) -> str:
     if len(title) >= 32 and all(c in "0123456789abcdef-" for c in title.lower()):
         return "Подготовка материала"
     return title[:125] or "Подготовка материала"
+
+
+def task_public_description(task: Task) -> str:
+    """Show truthful Russian owner copy without rewriting historical task keys."""
+    if (task.title or "").startswith("SEO-ARTICLE:"):
+        return "Создание SEO-статьи по контент-плану."
+    detail = str(task.description or "").strip()
+    if detail == ("SEO article, channel adaptations, two video scripts. "
+                  "No automatic publication or video rendering."):
+        return ("Подготовка статьи, адаптаций для каналов и двух видеосценариев. "
+                "Публикация и создание видеофайлов выполняются отдельно.")
+    return detail
 
 
 def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:

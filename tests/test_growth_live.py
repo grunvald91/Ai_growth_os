@@ -1,4 +1,5 @@
 from uuid import uuid4
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +11,7 @@ from app.main import app
 from app.core.config import Settings, get_settings
 from app.db.models import Base
 from app.db.session import get_db
-from app.models.domain import Artifact, Product
+from app.models.domain import Artifact, Product, Task, TaskStatus
 
 
 @pytest.fixture
@@ -1202,3 +1203,62 @@ def test_voice_glow_uses_existing_audio_stream(live):
     assert "function arm()" in res.text
     assert "attempt !== resumeAttempt" in res.text
     assert "Math.sqrt(sum / samples.length) - .003" in res.text
+
+
+def test_v4_work_board_shows_seo_article_topic_in_russian_for_existing_jobs(live):
+    """Old task IDs remain worker deduplication keys; owner never sees them."""
+    client, db, product = live
+    plan_id = uuid4()
+    raw_title = f"SEO-ARTICLE:{plan_id}:a002"
+    legacy_description = ("SEO article, channel adaptations, two video scripts. "
+                          "No automatic publication or video rendering.")
+    task = Task(product_id=product.id, assigned_agent="content_factory",
+                title=raw_title, description=legacy_description,
+                status=TaskStatus.QUEUED)
+    no_request = Task(product_id=product.id, assigned_agent="content_factory",
+                      title=f"SEO-ARTICLE:{plan_id}:a003",
+                      description=legacy_description, status=TaskStatus.QUEUED)
+    unrelated = Product(name="Another tenant", slug=f"another-{uuid4().hex[:8]}")
+    db.add_all([task, no_request, unrelated])
+    db.flush()
+    foreign = Task(product_id=unrelated.id, assigned_agent="content_factory",
+                   title=f"SEO-ARTICLE:{plan_id}:a004", status=TaskStatus.QUEUED)
+    request = Artifact(product_id=product.id, task_id=task.id, kind="content_request",
+                       title="Пакет контента", content=json.dumps({
+                           "topic": "Как увеличить запись клиентов в сервис",
+                           "seo_brief": {"primary_query": "онлайн запись для сервиса"},
+                       }, ensure_ascii=False))
+    db.add_all([request, foreign])
+    db.commit()
+
+    base = f"/studio/products/{product.id}"
+    response = client.get(base + "/v4/data?design=v4")
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "private, no-store"
+    tasks = {row["id"]: row for row in response.json()["tasks"]}
+    assert str(foreign.id) not in tasks
+    assert tasks[str(task.id)]["title"] == "SEO-статья: Как увеличить запись клиентов в сервис"
+    assert tasks[str(task.id)]["detail"] == "Создание SEO-статьи по контент-плану."
+    assert tasks[str(no_request.id)]["title"] == "SEO-статья по контент-плану"
+    assert tasks[str(no_request.id)]["detail"] == "Создание SEO-статьи по контент-плану."
+    assert all("SEO-ARTICLE:" not in row["title"] for row in tasks.values())
+    assert all("No automatic publication" not in row["detail"] for row in tasks.values())
+    # Changing UI labels must never break deduplication or task links.
+    assert db.get(Task, task.id).title == raw_title
+    detail = client.get(f"{base}/tasks/{task.id}?design=classic")
+    assert detail.status_code == 200
+    assert "SEO-статья: Как увеличить запись клиентов в сервис" in detail.text
+    assert raw_title not in detail.text
+
+
+def test_new_content_task_descriptions_are_russian_and_seo_specific(live):
+    from app.content.service import queue_content
+    _, db, product = live
+    package = queue_content(db, product.id, "Как клиент записывается онлайн")
+    seo_title = f"SEO-ARTICLE:{uuid4()}:a001"
+    seo = queue_content(db, product.id, "Как привлечь клиентов через поиск",
+                        dedupe_key=seo_title)
+    assert "Подготовка статьи, адаптаций" in package.description
+    assert "SEO article" not in package.description
+    assert seo.description == "Создание SEO-статьи по контент-плану."
+    assert seo.title == seo_title

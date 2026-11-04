@@ -834,11 +834,24 @@ def v4_data(product_id: UUID, db: Session = Depends(get_db)):
     _owner_product(db, product_id)
     tasks = list(db.scalars(select(Task).where(Task.product_id == product_id)
                            .order_by(Task.created_at.desc()).limit(200)))
+    # Keep stored task titles as immutable worker/deduplication keys. Build a
+    # company-scoped map of the original requests for owner-facing article topics.
+    from app.api.content_studio_activity import task_title, task_public_description
+    requests_by_task = {}
+    if tasks:
+        requests = db.scalars(select(Artifact).where(
+            Artifact.product_id == product_id,
+            Artifact.task_id.in_([task.id for task in tasks]),
+            Artifact.kind.in_(("content_request", "creative_request", "edit_request")),
+        ).order_by(Artifact.created_at.desc(), Artifact.id.desc()))
+        for request in requests:
+            requests_by_task.setdefault(request.task_id, request)
     materials = list(db.scalars(select(Artifact).where(Artifact.product_id == product_id, Artifact.kind.in_(MATERIAL_KINDS))
                                .order_by(Artifact.created_at.desc()).limit(200)))
     from fastapi.responses import JSONResponse
-    return JSONResponse({'tasks': [dict(id=str(t.id),title=t.title,status=t.status.value,
-            group=t.assigned_agent or 'ИИ-команда',detail=t.description or '') for t in tasks],
+    return JSONResponse({'tasks': [dict(
+            id=str(t.id),title=task_title(t, requests_by_task.get(t.id)),status=t.status.value,
+            group=t.assigned_agent or 'ИИ-команда',detail=task_public_description(t)) for t in tasks],
         'materials': [dict(id=str(a.id),title=a.title,kind=a.kind,status=a.status.value,
                           description='') for a in materials]},
         headers={'Cache-Control':'private, no-store'})
