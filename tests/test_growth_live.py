@@ -1137,7 +1137,7 @@ def test_mobile_seo_dashboard_prioritizes_status_and_hides_process_details(live)
     assert 'Запусков пока нет.' in page.text
     assert 'Подключить SEO-завод' in page.text
     assert 'после отдельного серверного выпуска' not in page.text
-    assert '/studio/assets/growth-servgo-air.css?v=7' in page.text
+    assert '/studio/assets/growth-servgo-air.css?v=8' in page.text
 
 
 def test_notification_bell_is_real_svg_centered_on_every_v4_screen(live):
