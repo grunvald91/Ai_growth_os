@@ -111,6 +111,48 @@
       status.textContent='Не удалось получить предложения. Вы можете задать тему самостоятельно.';
     }
   });
+
+  // The Create overlay can be collapsed without hiding the input or losing messages.
+  // Pointer gestures are scoped to the handles, so they do not compete with
+  // feed scrolling or the hold-to-record voice gesture in the composer.
+  const history=document.getElementById('sg-create-history');
+  const historyClose=document.getElementById('sg-create-history-close');
+  const historyOpen=document.getElementById('sg-create-history-open');
+  if(history && historyClose && historyOpen){
+    function showHistory(open){
+      root.classList.toggle('sg-history-collapsed',!open);
+      history.setAttribute('aria-hidden',String(!open));
+      historyClose.setAttribute('aria-expanded',String(open));
+      historyOpen.setAttribute('aria-expanded',String(open));
+      (open ? historyClose : historyOpen).focus({preventScroll:true});
+    }
+    function attachGrip(button,open,swipeDirection){
+      let startY=null;
+      let swiped=false;
+      button.addEventListener('pointerdown',event=>{
+        if(event.pointerType==='touch' || event.pointerType==='pen'){
+          startY=event.clientY;
+          swiped=false;
+        }
+      });
+      button.addEventListener('pointerup',event=>{
+        if(startY===null)return;
+        const movement=event.clientY-startY;
+        startY=null;
+        if(swipeDirection*movement>24){
+          swiped=true;
+          showHistory(open);
+        }
+      });
+      button.addEventListener('pointercancel',()=>{startY=null;swiped=false;});
+      button.addEventListener('click',()=>{
+        if(swiped){swiped=false;return;}
+        showHistory(open);
+      });
+    }
+    attachGrip(historyClose,false,1); // pull down
+    attachGrip(historyOpen,true,-1);  // pull up
+  }
   // Only the lower dispatcher composer can submit a request.
   // Settings are read at send time, including immediately after voice transcription.
 })();
