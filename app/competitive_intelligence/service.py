@@ -153,6 +153,24 @@ class IntelligenceService:
         if plan.mode != request.mode:
             raise ValueError("Planner changed requested mode")
         state["plan"] = plan.model_dump(mode="json")
+        # Agent-run automatic organization discovery, not a separate owner step.
+        # Keep submitted evidence unchanged; add only authenticated directory data.
+        bundles = [ResearchSourceBundle.model_validate(b) for b in state["source_bundles"]]
+        from app.competitive_intelligence.yandex_sources import collect_sources
+        already_discovered = any(
+            b.label.startswith("Яндекс Карты: автоматический поиск") for b in bundles)
+        remaining = max(0, 50 - sum(len(b.sources) for b in bundles))
+        if not already_discovered and remaining:
+            discovered, status = await collect_sources(
+                product, request, self.products_root, max_sources=min(10, remaining))
+            state["source_discovery"] = {"provider": "yandex_organizations", "status": status}
+            if discovered is not None:
+                bundles.append(discovered)
+                state["source_bundles"] = [bundle.model_dump(mode="json") for bundle in bundles]
+        elif already_discovered:
+            state["source_discovery"] = {"provider": "yandex_organizations", "status": "reused"}
+        else:
+            state["source_discovery"] = {"provider": "yandex_organizations", "status": "evidence_full"}
         self._save(artifact, state, "sources")
         evidence = normalize([ResearchSourceBundle.model_validate(bundle) for bundle in state["source_bundles"]],
                              request, datetime.now(timezone.utc))
