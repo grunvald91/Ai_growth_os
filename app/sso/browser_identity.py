@@ -5,6 +5,7 @@ binds a Studio SSO session to the current browser login; it does not confer
 company access. The latter is checked against ServGo on each Studio request.
 """
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -35,5 +36,5 @@ def read_identity(settings, token: str | None, *, now: int | None = None) -> tup
             not isinstance(data.get("n"), str) or len(data["n"]) < 24):
             return None
         return data["u"], hashlib.sha256(token.encode()).hexdigest()
-    except (ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError, UnicodeError, binascii.Error, AttributeError):
         return None
