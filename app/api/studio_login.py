@@ -115,7 +115,7 @@ def login_form(request: Request, next: str | None = None, logged_out: bool = Fal
     # On servgo.ru all regular users authenticate with the same Telegram,
     # Yandex or email account they use in the admin. The legacy password form
     # remains available only by an explicit emergency/operator request.
-    if _canonical_servgo(request, settings) and not legacy:
+    if _canonical_servgo(request, settings):
         return RedirectResponse("/login?next=%2Fworkspace%2Fstudio-entry", status_code=303,
                                 headers={"Cache-Control": "no-store"})
     notice = "Вы вышли. Можно войти под другим логином." if logged_out else None
@@ -124,6 +124,9 @@ def login_form(request: Request, next: str | None = None, logged_out: bool = Fal
 
 @router.post("/studio/login", response_class=HTMLResponse)
 async def login_submit(request: Request, settings: Settings = Depends(get_settings)):
+    if _canonical_servgo(request, settings):
+        from fastapi import HTTPException
+        raise HTTPException(403, "Use the ServGo account on this host")
     fields = await _studio_form(request)
     login, password = fields.get("username", ""), fields.get("password", "")
     next_url = _safe_next(fields.get("next"))
