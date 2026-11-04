@@ -53,7 +53,7 @@ body[data-growth-design="v4"] .sg-company-arrow{color:var(--s-accent)}
 body[data-growth-design="v4"] .sg-company-foot a{color:var(--s-muted)}
 .sg-company-action{width:100%;font:inherit;cursor:pointer;text-align:left}
 .sg-company-action:disabled{cursor:wait;opacity:.65}
-.sg-growth-connected[hidden]{display:none}
+#sg-growth-connected[hidden]{display:none}
 html[data-theme="dark"] .sg-company-picker{
   --picker-text:#f0f5fc;--picker-muted:#b6c4d5;--picker-card:#1e2b40;
   --picker-border:#2a3b55;--picker-accent:#7aabff}
@@ -75,7 +75,8 @@ html[data-theme="dark"] .sg-company-picker{
 
 def selector_html(products, *, can_add: bool = False, can_link: bool = False,
                   unified_user_id: int | None = None,
-                  linked_business_ids: tuple[int, ...] = ()) -> str:
+                  linked_business_ids: tuple[int, ...] = (),
+                  platform_product=None) -> str:
     entries = "".join(
         '<a class="sg-company-choice" href="/studio/products/' + _esc(product.id) + '">'
         '<span class="sg-company-avatar" aria-hidden="true">' + _esc((product.name or "?").strip()[:1].upper()) + '</span>'
@@ -93,15 +94,19 @@ def selector_html(products, *, can_add: bool = False, can_link: bool = False,
     if not entries:
         entries = '<div class="sg-company-empty">Пока нет организаций, к которым у вас есть доступ.</div>'
     unified = unified_user_id is not None
-    connect = ('<a href="/workspace/studio-entry">Все организации ServGo</a>' if unified
+    connect = (('<a href="/studio/identity">Подключить существующие права администратора Growth</a>'
+                if platform_product is None else '') if unified
                else '<a href="/studio/identity">Объединить профиль с ServGo</a>' if can_link else '')
     # The initial Growth list remains a no-JS fallback. On canonical SSO
     # the browser fetches the CURRENT ServGo business list with its JWT;
     # merely having an old Growth link does not grant any new access.
     if unified:
         safe_ids = ','.join(str(int(value)) for value in linked_business_ids)
+        platform_attr = (' data-platform-product="' + _esc(platform_product.id)
+                         + '" data-platform-name="' + _esc(platform_product.name) + '"'
+                         if platform_product is not None else '')
         chooser = ('<section id="sg-servgo-organisations" data-user-id="' + _esc(unified_user_id)
-                   + '" data-linked-businesses="' + _esc(safe_ids) + '">'
+                   + '" data-linked-businesses="' + _esc(safe_ids) + '"' + platform_attr + '>'
                    '<p role="status" class="sg-company-caption">Загружаем все организации ServGo…</p>'
                    '</section>'
                    '<section id="sg-growth-connected"><p class="sg-company-caption">'
