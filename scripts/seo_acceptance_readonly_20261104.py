@@ -28,6 +28,20 @@ with SessionLocal() as db:
     if company is None:
         raise SystemExit(2)
     safe_print("company_opted_in", is_enabled(db, company.id))
+    from app.company_profile import load_company_profile
+    loaded = load_company_profile(settings.products_root, company.slug)
+    profile = loaded.profile
+    safe_print("runtime_company_profile", {
+        "products_root": str(settings.products_root),
+        "profile_source": loaded.source,
+        "validation_errors": list(loaded.validation_errors),
+        "category": profile.identity.category if profile else None,
+        "primary_segments": list(profile.customers.primary_segments) if profile else [],
+        "ideal_customer": profile.customers.ideal_customer if profile else None,
+        "offer_count": len(profile.offer.products_services) if profile else 0,
+        "approved_facts_count": len(profile.proof.approved_facts) if profile else 0,
+    })
+
     safe_print("company_article_limit", settings.seo_articles_per_day)
     safe_print("company_publication_limit", settings.seo_publications_per_day)
     counts = {}
