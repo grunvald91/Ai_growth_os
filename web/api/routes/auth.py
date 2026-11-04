@@ -179,7 +179,6 @@ async def _token_for_telegram_user(
     user = await _join_yandex_account(db, signed_in, user)
     role = await _role_for_user(db, user)
     token = create_token(user.id, role=role)
-    set_identity(response, user.id)
     return TokenOut(
         token=token,
         user=UserOut.model_validate(user),
@@ -284,6 +283,7 @@ async def verify_code(
 
     role = await _role_for_user(db, user)
     token = create_token(user.id, role=role)
+    set_identity(response, user.id)
     return TokenOut(
         token=token,
         user=UserOut.model_validate(user),
