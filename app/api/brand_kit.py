@@ -82,6 +82,7 @@ def _select(name: str, values, value, *, labels=None) -> str:
 def _brand_body(product_id, db: Session, error: str = "", *, can_approve: bool = True) -> str:
     active, versions, latest = read_state(db, product_id)
     style = BrandStyle.model_validate(latest.config) if latest else BrandStyle()
+    previewing_draft = bool(latest and latest.status == "draft")
     base = f"/studio/products/{product_id}/brand-kit"
     assets = list(db.scalars(select(BrandAsset).where(
         BrandAsset.product_id == product_id
@@ -173,6 +174,9 @@ def _brand_body(product_id, db: Session, error: str = "", *, can_approve: bool =
         for v in versions[:20]
     )
     css = """<style>
+@font-face{font-family:"Manrope Brand";src:url("/studio/assets/brand-manrope.woff2") format("woff2");font-weight:100 900;font-style:normal;font-display:swap}
+@font-face{font-family:"DejaVu Brand";src:url("/studio/assets/brand-dejavu.ttf") format("truetype");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"DejaVu Brand";src:url("/studio/assets/brand-dejavu-bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:swap}
 .bk-wrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(270px,.75fr);gap:14px}
 .bk-wrap section{min-width:0}.bk-wrap h3{font-size:15px;margin:15px 0 10px}
 .bk-wrap form label{display:grid;gap:6px;font-size:12px;font-weight:650;margin:0 0 12px}
@@ -208,6 +212,9 @@ background:var(--bk-background);color:var(--bk-text);font-family:var(--bk-font)}
         '<section class="sg-surface"><h2>2. Настройки фирменного стиля</h2>' + settings_form +
         '</section></div><div>'
         '<section class="sg-surface"><h2>Предварительный просмотр 9:16</h2>'
+        ('<p class="sg-warning">Предпросмотр черновика · ещё не действует в Stories.</p>'
+         if previewing_draft else
+         '<p class="sg-muted">Предпросмотр действующего фирменного стиля.</p>') +
         '<p class="sg-muted">Три согласованных типа кадров. Это макет, а не результат ИИ.</p>' +
         preview + '</section><section class="sg-surface"><h2>История версий</h2>' +
         (history or '<p class="sg-muted">Версий пока нет.</p>') +
@@ -232,7 +239,7 @@ background:var(--bk-background);color:var(--bk-text);font-family:var(--bk-font)}
       if(content&&align) content.style.textAlign=align.value;
     }
     const font=form.elements.namedItem('heading');
-    if(font)preview.style.setProperty('--bk-font',JSON.stringify(font.value)+',Arial,sans-serif');
+    if(font)preview.style.setProperty('--bk-font',font.value==='Manrope' ? '"Manrope Brand",sans-serif' : '"DejaVu Brand",sans-serif');
     const logo=form.elements.namedItem('logo_original');
     const src=logo&&logo.value ? '""" + base + """/assets/'+logo.value : '';
     preview.querySelectorAll('.bk-preview-logo-wrap').forEach(el=>{
@@ -252,7 +259,8 @@ def brand_kit_page(product_id: UUID, request: Request, db: Session = Depends(get
     product = _owner_product(db, product_id)
     can_approve = (
         getattr(request.state, "studio_product_ids", None) is None
-        or getattr(request.state, "studio_sso_role", None) == "owner")
+        or getattr(request.state, "studio_sso_role", None) == "owner"
+        or getattr(request.state, "studio_brand_approver", False))
     body = _brand_body(product_id, db, can_approve=can_approve)
     return HTMLResponse(studio_page_shell(
         product, active="profile", title="Фирменный стиль",
@@ -280,8 +288,9 @@ def _require_brand_owner(request: Request) -> None:
     """Only a platform operator or the actual SSO business owner may approve."""
     if getattr(request.state, "studio_product_ids", None) is None:
         return
-    if getattr(request.state, "studio_sso_role", None) != "owner":
-        raise HTTPException(403, "Только владелец компании может утвердить стиль")
+    if (getattr(request.state, "studio_sso_role", None) != "owner"
+            and not getattr(request.state, "studio_brand_approver", False)):
+        raise HTTPException(403, "Утвердить стиль может владелец или уполномоченный сотрудник")
 
 
 @router.post("/studio/products/{product_id}/brand-kit/assets")
@@ -341,3 +350,26 @@ def approve_brand(product_id: UUID, version_id: UUID, request: Request,
     except (ValueError, LookupError, ValidationError) as exc:
         raise _bad_request(exc) from None
     return RedirectResponse(f"/studio/products/{product_id}/brand-kit", status_code=303)
+
+
+@router.get("/studio/assets/brand-manrope.woff2")
+def brand_preview_manrope():
+    from pathlib import Path
+    return FileResponse(Path(__file__).resolve().parent / "assets" / "manrope.woff2",
+                        media_type="font/woff2", headers={"Cache-Control": "private, max-age=86400"})
+
+@router.get("/studio/assets/brand-dejavu.ttf")
+def brand_preview_dejavu():
+    from pathlib import Path
+    path = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    if not path.is_file():
+        raise HTTPException(503, "DejaVu недоступен")
+    return FileResponse(path, media_type="font/ttf", headers={"Cache-Control": "private, max-age=86400"})
+
+@router.get("/studio/assets/brand-dejavu-bold.ttf")
+def brand_preview_dejavu_bold():
+    from pathlib import Path
+    path = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
+    if not path.is_file():
+        raise HTTPException(503, "DejaVu недоступен")
+    return FileResponse(path, media_type="font/ttf", headers={"Cache-Control": "private, max-age=86400"})
