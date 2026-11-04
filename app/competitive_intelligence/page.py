@@ -56,8 +56,14 @@ details{{margin:12px 0}}summary{{cursor:pointer}}
 <label>Публикации по <input id="intel-to" type="date"></label>
 </div>
 <label>Конкуренты, по одному на строку <textarea id="intel-competitors" maxlength="2010" placeholder="Оставьте пустым, чтобы использовать всех конкурентов из добавленных источников"></textarea></label>
+<div class="intel-card" style="padding:12px">
+  <h3>Найти конкурентов через Яндекс Карты</h3>
+  <label>Ниша / вид деятельности<input id="intel-yandex-niche" maxlength="100" placeholder="Салоны красоты"></label>
+  <button type="button" id="intel-yandex-search">Найти организации</button>
+  <p id="intel-yandex-results" role="status" aria-live="polite"></p>
+</div>
 <details><summary>Добавить источники к этому исследованию</summary>
-<p>Укажите URL и выдержку из первоисточника. Если ничего не добавлять, используются ранее сохранённые источники компании. Поиск по интернету появится на следующем этапе.</p>
+<p>Укажите URL и выдержку из первоисточника. Если ничего не добавлять, используются ранее сохранённые источники компании. Можно также найти организации через Яндекс Карты выше.</p>
 <div id="intel-sources"></div><button type="button" id="intel-add-source">Добавить источник</button>
 </details>
 <div class="intel-actions"><button id="intel-submit" type="submit">Начать исследование</button></div>
@@ -204,6 +210,40 @@ SCRIPT = r"""
     stream.addEventListener('done',()=>refresh().catch(e=>error(e.message)));
     stream.onerror=()=>{ stream.close(); async function poll(){ try{if(await refresh()) return;}catch(e){error(e.message);} if(current===generation) pollTimer=setTimeout(poll,3000); } pollTimer=setTimeout(poll,1000); };
   }
+  $('intel-yandex-search').onclick=async()=>{
+    const niche=$('intel-yandex-niche').value.trim(),city=$('intel-region').value.trim();
+    if(niche.length<2||city.length<2){error('Укажите нишу и регион для поиска в Яндексе');return;}
+    const status=$('intel-yandex-results'),button=$('intel-yandex-search');button.disabled=true;
+    status.textContent='Ищу организации…';
+    try{
+      const endpoint='/studio/products/'+$('intel-product').value+'/organizations/search?'+new URLSearchParams({query:niche,city});
+      const response=await fetch(endpoint);
+      const data=await response.json();
+      if(!response.ok)throw Error(data.detail||'Яндекс API недоступен');
+      let added=0;
+      const already=new Set([...$('intel-sources').querySelectorAll('input[data-field="url"]')].map(x=>x.value));
+      for(const item of (data.organizations||[]).slice(0,20)){
+        const url=item.maps_url||item.website;
+        if(!url||already.has(url)||$('intel-sources').children.length>=50)continue;
+        addSource();
+        const row=$('intel-sources').lastElementChild;
+        row.querySelector('[data-field="competitor"]').value=item.name;
+        row.querySelector('[data-field="url"]').value=url;
+        row.querySelector('[data-field="source_type"]').value='website';
+        row.querySelector('[data-field="excerpt"]').value=[
+          'Яндекс Карты: '+item.name,
+          item.address?'Адрес: '+item.address:'',
+          item.categories?.length?'Категории: '+item.categories.join(', '):''
+        ].filter(Boolean).join('; ');
+        already.add(url);added++;
+      }
+      const existing=$('intel-competitors').value.split('\n').map(x=>x.trim()).filter(Boolean);
+      const names=[...$('intel-sources').querySelectorAll('[data-field="competitor"]')].map(x=>x.value.trim()).filter(Boolean);
+      $('intel-competitors').value=[...new Set([...existing,...names])].slice(0,10).join('\n');
+      status.textContent='Найдено '+(data.organizations||[]).length+', добавлено '+added+' источников из Яндекс Карт. Это справочная информация, не отзывы или цены.';
+    }catch(e){status.textContent=e.message||'Ошибка поиска';}
+    finally{button.disabled=false;}
+  };
   $('intel-add-source').onclick=addSource;
   $('intel-quick').onclick=e=>{ const mode=e.target.dataset.mode; if(mode){$('intel-mode').value=mode; if(!$('intel-brief').value) $('intel-brief').value={weaknesses:'Найти повторяющиеся слабости конкурентов и предложить проверку оффера',pricing:'Сравнить цены и состав предложений конкурентов',reviews:'Проанализировать темы, жалобы и положительные отзывы конкурентов'}[mode];} };
   $('intel-tabs').onclick=e=>{ if(e.target.dataset.view&&report) render(e.target.dataset.view); };
