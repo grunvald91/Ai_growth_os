@@ -176,6 +176,16 @@ with SessionLocal() as db:
                 "publication": publication.status if publication else None,
                 "public_path": publication.external_reference if publication else None}
             rows.append(row)
+            if str(task.status).endswith("FAILED"):
+                from app.models.domain import CostRecord
+                cost_rows = list(db.execute(select(
+                    AgentRun.agent_name, CostRecord.input_tokens, CostRecord.output_tokens,
+                    CostRecord.details).join(AgentRun, CostRecord.agent_run_id == AgentRun.id).where(
+                    AgentRun.task_id == task.id).order_by(CostRecord.incurred_at.desc()).limit(12)))
+                safe_print("acceptance_failed_observed_calls", [
+                    {"stage": stage, "input_tokens": inp, "output_tokens": out,
+                     "model": (details or {}).get("response_model")}
+                    for stage, inp, out, details in cost_rows])
         safe_print("acceptance_batch_progress", rows)
         for row in rows:
             if row.get("publication") != "published":
