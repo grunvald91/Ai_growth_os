@@ -289,3 +289,17 @@ def test_unused_original_logo_can_be_deleted_but_saved_version_logo_cannot(studi
     assert db.get(BrandAsset, second.id) is not None
     assert "Неиспользуемые файлы" not in client.get(
         f"/studio/products/{a.id}/brand-kit").text
+
+
+def test_corrupted_unused_logo_can_be_purged_to_release_company_quota(studio):
+    client, db, a, _, root = studio
+    assert upload(client, a).status_code == 303
+    asset = db.scalar(select(BrandAsset).where(BrandAsset.product_id == a.id))
+    _, location = verified_asset(db, root, a.id, asset.id)
+    location.write_bytes(b"corrupted")
+    result = client.post(
+        f"/studio/products/{a.id}/brand-kit/assets/{asset.id}/delete",
+        follow_redirects=False)
+    assert result.status_code == 303
+    assert db.get(BrandAsset, asset.id) is None
+    assert not location.exists()
