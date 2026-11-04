@@ -189,3 +189,79 @@ def test_company_account_cannot_open_another_brand(studio):
                            data=fields()).status_code == 404
     finally:
         app.dependency_overrides.pop(require_studio_auth, None)
+
+
+def test_brand_approval_requires_owner_role(studio):
+    client, db, a, _, root = studio
+    assert upload(client, a).status_code == 303
+    asset = db.scalar(select(BrandAsset).where(BrandAsset.product_id == a.id))
+    assert client.post(f"/studio/products/{a.id}/brand-kit/versions",
+                       data=fields(asset.id), follow_redirects=False).status_code == 303
+    version = db.scalar(select(BrandVersion).where(BrandVersion.product_id == a.id))
+
+    def company_login(role):
+        def login(request: Request):
+            identity = _apply_scope(request, "company", [str(a.id)])
+            if role:
+                request.state.studio_sso_role = role
+            return identity
+        return login
+
+    for role in (None, "administrator", "co_owner"):
+        app.dependency_overrides[require_studio_auth] = company_login(role)
+        assert client.post(
+            f"/studio/products/{a.id}/brand-kit/versions/{version.id}/approve",
+            follow_redirects=False).status_code == 403
+        assert db.get(BrandActive, a.id) is None
+    app.dependency_overrides[require_studio_auth] = company_login("owner")
+    try:
+        assert client.post(
+            f"/studio/products/{a.id}/brand-kit/versions/{version.id}/approve",
+            follow_redirects=False).status_code == 303
+        assert db.get(BrandActive, a.id).version_id == version.id
+    finally:
+        app.dependency_overrides.pop(require_studio_auth, None)
+
+
+def test_brand_rejects_tiny_and_invisible_originals(studio):
+    client, db, a, _, _ = studio
+    for size, alpha in (((1, 1), 255), ((280, 180), 0)):
+        data = io.BytesIO()
+        Image.new("RGBA", size, (255, 255, 255, alpha)).save(data, "PNG")
+        assert upload(client, a, data=data.getvalue()).status_code == 422
+    assert db.scalar(select(BrandAsset).where(BrandAsset.product_id == a.id)) is None
+
+
+def test_brand_layout_fields_are_saved(studio):
+    client, db, a, _, _ = studio
+    data = fields()
+    data.update(hook_image_position="bottom", hook_text_align="right",
+                explanation_image_position="top", explanation_text_align="center")
+    r = client.post(f"/studio/products/{a.id}/brand-kit/versions",
+                    data=data, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    version = db.scalar(select(BrandVersion).where(BrandVersion.product_id == a.id))
+    assert version.config["hook"]["image_position"] == "bottom"
+    assert version.config["hook"]["text_align"] == "right"
+    assert version.config["explanation"]["image_position"] == "top"
+    assert version.config["explanation"]["text_align"] == "center"
+    page = client.get(f"/studio/products/{a.id}/brand-kit")
+    assert 'name="hook_image_position"' in page.text
+    assert 'name="hook_text_align"' in page.text
+
+
+def test_brand_multipart_stream_limit_without_length(studio):
+    client, db, a, _, _ = studio
+    boundary = "brand-limit"
+    def stream():
+        yield (f'--{boundary}\\r\\nContent-Disposition: form-data; '
+               'name="file"; filename="big.png"\\r\\n'
+               'Content-Type: image/png\\r\\n\\r\\n').encode().replace(b"\\\\r",b"\\r").replace(b"\\\\n",b"\\n")
+        yield b"x" * (6_000_000 + 20_000)
+        yield f'\\r\\n--{boundary}--\\r\\n'.encode().replace(b"\\\\r",b"\\r").replace(b"\\\\n",b"\\n")
+    result = client.post(f"/studio/products/{a.id}/brand-kit/assets",
+        content=stream(),
+        headers={"content-type": f"multipart/form-data; boundary={boundary}",
+                 "transfer-encoding": "chunked"})
+    assert result.status_code == 413
+    assert db.scalar(select(BrandAsset)) is None
