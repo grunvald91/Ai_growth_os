@@ -28,12 +28,16 @@ def capability() -> dict:
     return {"key_configured": active, "enabled": active, "daily_budget": budget()}
 
 
-def budget() -> int:
-    """Operator-configured allowance; default 1000 requests per UTC day."""
+def budget() -> int | None:
+    """An optional owner-specified local ceiling; None leaves quota control to Yandex."""
+    value = os.getenv("SERVGO_YANDEX_PPO_DAILY_BUDGET", "").strip()
+    if not value:
+        return None
     try:
-        return max(1, int(os.getenv("SERVGO_YANDEX_PPO_DAILY_BUDGET", "1000")))
+        parsed = int(value)
+        return parsed if parsed > 0 else None
     except ValueError:
-        return 1000
+        return None
 
 
 def _reserve_request(quota_path: Path) -> None:
@@ -45,10 +49,14 @@ def _reserve_request(quota_path: Path) -> None:
             db.execute("CREATE TABLE IF NOT EXISTS yandex_ppo_usage (day TEXT PRIMARY KEY, used INTEGER NOT NULL)")
             db.execute("BEGIN IMMEDIATE")
             db.execute("INSERT OR IGNORE INTO yandex_ppo_usage (day,used) VALUES (?,0)", (day,))
-            changed = db.execute(
-                "UPDATE yandex_ppo_usage SET used=used+1 WHERE day=? AND used<?",
-                (day, budget()),
-            ).rowcount
+            ceiling = budget()
+            if ceiling is None:
+                changed = db.execute(
+                    "UPDATE yandex_ppo_usage SET used=used+1 WHERE day=?", (day,)).rowcount
+            else:
+                changed = db.execute(
+                    "UPDATE yandex_ppo_usage SET used=used+1 WHERE day=? AND used<?",
+                    (day, ceiling)).rowcount
             if not changed:
                 raise YandexOrganizationsError("Суточный бюджет запросов Яндекса исчерпан")
             db.execute("DELETE FROM yandex_ppo_usage WHERE day<?", (day,))
