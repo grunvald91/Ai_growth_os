@@ -763,7 +763,7 @@ def test_canonical_first_visit_requires_actual_signed_cookie_and_live_owner(env)
     empty = TestClient(app, base_url="https://servgo.ru", follow_redirects=False)
     without_cookie = empty.post("/studio/sso/create", data={"business_id":31},
                                 headers={"origin":"https://servgo.ru"})
-    assert without_cookie.status_code == 400
+    assert without_cookie.status_code == 401  # Missing current ServGo identity is unauthorized.
     servgo.allowed.clear()
     revoked = client.post("/studio/sso/create", data={"business_id":31},
                           headers={"origin":"https://servgo.ru"})
