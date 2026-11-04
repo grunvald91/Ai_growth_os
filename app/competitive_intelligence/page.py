@@ -137,6 +137,16 @@ SCRIPT = r"""
     $('intel-stages').querySelectorAll('li').forEach(el=>el.classList.toggle('current',el.dataset.stage===state.stage));
     const c=state.counts;
     $('intel-counts').textContent=`Найдено: ${c.found} · Отобрано: ${c.retained} · Исключено: ${c.excluded} · Передано на углублённый анализ: ${c.escalated}`;
+    const discovery=state.source_discovery;
+    if(discovery){
+      const labels={collected:'Яндекс: источники организаций и сайтов собраны автоматически',
+        reused:'Яндекс: использованы источники предыдущего исследования',
+        no_key:'Яндекс: API не подключён к рабочему окружению',
+        insufficient_company_context:'Яндекс: в профиле не хватает отрасли или города',
+        provider_unavailable:'Яндекс: поиск временно недоступен',
+        no_matches:'Яндекс: совпадений нет',evidence_full:'Источники: лимит материалов исследования заполнен'};
+      $('intel-counts').textContent+=' · '+(labels[discovery.status]||'Статус Яндекса неизвестен');
+    }
     $('intel-plan').replaceChildren();
     if (state.plan) { node('h3','Вопросы исследования',$('intel-plan')); const list=node('ul',undefined,$('intel-plan')); state.plan.questions.forEach(q=>node('li',q,list)); }
     if (state.error) error(state.error==='research_model_unconfigured' ? 'Исследование не запущено: сервис анализа ещё не настроен.' : 'Исследование не завершено. Данные сохранены; можно запустить уточнение или новое исследование.');
