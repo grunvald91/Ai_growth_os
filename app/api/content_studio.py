@@ -42,7 +42,7 @@ from app.content.revisions import source_fingerprint
 from app.content.manual_edits import editable_fields, save_manual_edit
 from app.content.creative import CreativeRequest, queue_creative
 from app.content.creative_images import generated_images, verified_file
-from app.content.brand_story_pipeline import visible_images, verified_gallery_image
+from app.content.brand_story_pipeline import visible_images, verified_visible_images, verified_gallery_image
 from app.api.creative_image_gallery import gallery_html
 from app.content.telegram_publishing import (verify_channel, save_verified_channel,
     connected_channels, schedule_post, cancel_scheduled_post, validate_telegram_text,
@@ -1506,7 +1506,7 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
     )
 
 
-def material_detail_page(db: Session, product: Product, record: Artifact) -> str:
+def material_detail_page(db: Session, product: Product, record: Artifact, *, root=None) -> str:
     value = parse_json(record)
     kind_label = artifact_kind_label(record, value)
     generic_warnings = value.get("quality_warnings") or []
@@ -1559,11 +1559,14 @@ def material_detail_page(db: Session, product: Product, record: Artifact) -> str
         </section>
         """
     elif record.kind == "creative_brief":
-        image_rows = visible_images(db, product.id, record.task_id)
+        image_rows, invalid_frames = verified_visible_images(
+            db, root or get_settings().products_root, product.id, record.task_id)
         image_errors = list(db.scalars(select(Artifact).where(
             Artifact.product_id == product.id, Artifact.task_id == record.task_id,
             Artifact.kind == "creative_image_error")))
-        prepared_gallery = gallery_html(product.id, record.task_id, image_rows, errors=image_errors)
+        prepared_gallery = gallery_html(
+            product.id, record.task_id, image_rows, errors=image_errors,
+            invalid_frames=invalid_frames)
         frames = value.get("frames") or []
         scenes = "".join(
             '<article class="sg-storyboard-card">'
@@ -1916,7 +1919,8 @@ def studio_material_detail(product_id: UUID, artifact_id: UUID, db: Session = De
         return RedirectResponse(
             f"/studio/products/{product_id}/whiteboard/{record.task_id}", status_code=303,
         )
-    response = HTMLResponse(material_detail_page(db, product, record))
+    response = HTMLResponse(material_detail_page(
+        db, product, record, root=get_settings().products_root))
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -2216,7 +2220,8 @@ async def studio_notifications_read_all(product_id: UUID, request: Request, db: 
 
 
 @router.get("/studio/products/{product_id}/tasks/{task_id}", response_class=HTMLResponse)
-def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
+def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_db),
+                     settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     task = db.scalar(select(Task).where(Task.id == task_id, Task.product_id == product_id))
     if task is None:
@@ -2266,11 +2271,13 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
                     'Готовые этапы сохраняются; используйте продолжение задания.</p>'
                     '</section>'
                 )
-        images = visible_images(db, product.id, task.id)
+        images, invalid_frames = verified_visible_images(
+            db, settings.products_root, product.id, task.id)
         errors = list(db.scalars(select(Artifact).where(
             Artifact.product_id == product.id, Artifact.task_id == task.id,
             Artifact.kind == "creative_image_error")))
-        body += gallery_html(product.id, task.id, images, errors=errors)
+        body += gallery_html(product.id, task.id, images, errors=errors,
+                             invalid_frames=invalid_frames)
     response = HTMLResponse(studio_page_shell(
         product, active="work", title="Создание материала",
         subtitle="Настоящий статус задания, этапы ИИ-команды и готовые результаты.",

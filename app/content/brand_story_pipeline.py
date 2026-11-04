@@ -202,6 +202,24 @@ def verified_gallery_image(db, root: Path, product_id: UUID, task_id: UUID,
     return path
 
 
+def verified_visible_images(db, root: Path, product_id: UUID,
+                            task_id: UUID) -> tuple[list[Artifact], list[int]]:
+    """Only advertise genuinely available, checksum-verified PNG files."""
+    valid, missing = [], []
+    for item in visible_images(db, product_id, task_id):
+        try:
+            verified_gallery_image(db, root, product_id, task_id, item)
+            valid.append(item)
+        except (ValueError, LookupError, OSError, KeyError, TypeError):
+            try:
+                number = int(json.loads(item.content).get("frame_number", 0))
+                if 1 <= number <= 10:
+                    missing.append(number)
+            except (ValueError, TypeError):
+                pass
+    return valid, sorted(set(missing))
+
+
 def compose_saved_stories(db, root: Path, request, draft, task_id: UUID) -> bool:
     """Render only missing frames; preserve partial successes and paid backgrounds."""
     version = validate_pinned_request(db, request, task_id)

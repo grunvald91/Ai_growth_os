@@ -8,8 +8,10 @@ from uuid import UUID
 from app.models.domain import Artifact
 
 
-def gallery_html(product_id: UUID, task_id: UUID, images: list[Artifact], *, errors: list[Artifact] | None = None) -> str:
-    if not images and not errors:
+def gallery_html(product_id: UUID, task_id: UUID, images: list[Artifact], *,
+                 errors: list[Artifact] | None = None,
+                 invalid_frames: list[int] | None = None) -> str:
+    if not images and not errors and not invalid_frames:
         return ""
     base = f"/studio/products/{product_id}/tasks/{task_id}"
     tiles = []
@@ -54,11 +56,12 @@ def gallery_html(product_id: UUID, task_id: UUID, images: list[Artifact], *, err
             continue
     # Do not report a recovered frame as missing after a successful retry.
     failed = [number for number in failed if number not in succeeded]
+    failed.extend(n for n in (invalid_frames or []) if n not in succeeded)
     if not tiles and not failed:
         return ""
     status = (
         f'<p class="sg-image-partial" role="status">Кадры {", ".join(str(x) for x in sorted(set(failed)))} '
-        'не созданы. Остальные изображения доступны; ошибка зафиксирована в задании.</p>'
+        'не созданы или повреждены. Остальные изображения доступны; проверьте задание.</p>'
         if failed else ""
     )
     download = (
