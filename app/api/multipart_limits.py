@@ -18,19 +18,28 @@ async def limited_multipart_form(request: Request, *,
             raise HTTPException(400, "Некорректная длина запроса")
         if length > max_body:
             raise HTTPException(413, "Загружаемый файл слишком большой")
-    chunks: list[bytes] = []
+    source = request.stream().__aiter__()
     size = 0
-    async for chunk in request.stream():
+    finished = False
+
+    async def receive():
+        nonlocal size, finished
+        if finished:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        try:
+            chunk = await anext(source)
+        except StopAsyncIteration:
+            finished = True
+            if declared is not None and size != length:
+                raise HTTPException(400, "Размер запроса не совпадает с Content-Length")
+            return {"type": "http.request", "body": b"", "more_body": False}
         size += len(chunk)
         if size > max_body:
             raise HTTPException(413, "Загружаемый файл слишком большой")
-        chunks.append(chunk)
-    data = b"".join(chunks)
-    if declared is not None and len(data) != length:
-        raise HTTPException(400, "Размер запроса не совпадает с Content-Length")
-
-    async def receive():
-        return {"type": "http.request", "body": data, "more_body": False}
+        # Starlette's multipart parser writes uploaded files into bounded SpooledTemporaryFile.
+        # No in-memory collection or concatenation of the whole request.
+        return {"type": "http.request", "body": chunk, "more_body": True}
 
     bounded = Request(request.scope, receive=receive)
-    return await bounded.form(max_files=max_files, max_fields=max_fields)
+    return await bounded.form(max_files=max_files, max_fields=max_fields,
+                              max_part_size=max_body)

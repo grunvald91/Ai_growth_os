@@ -148,3 +148,57 @@ def test_every_desktop_section_is_reachable_on_mobile(studio):
     mobile_links = set(re.findall(r'href="([^"]+)"', mobile))
     assert desktop_links - mobile_links == set()
     assert "/accounts" in " ".join(mobile_links) and "Ещё" in mobile
+
+
+def test_brand_approval_is_explicitly_delegated_to_company_account(studio):
+    from app.brand_kit.contracts import BrandStyle
+    from app.brand_kit.models import BrandActive, BrandVersion
+    from app.brand_kit.service import save_draft, store_asset
+    from app.core.studio_accounts import load_accounts
+    from PIL import Image
+    import io
+    from sqlalchemy import select
+
+    c, company, other, settings, db = (
+        studio.client, studio.mine, studio.other, studio.settings, studio.db)
+    buf = io.BytesIO()
+    Image.new("RGB", (300, 120), (60, 80, 150)).save(buf, "PNG")
+    logo = store_asset(db, settings.products_root, company.id, "original", buf.getvalue())
+    style = BrandStyle.model_validate({"logos": {"original": str(logo.id)}})
+    version = save_draft(db, settings.products_root, company.id, style.model_dump(mode="json"))
+    approval = f"/studio/products/{company.id}/brand-kit/versions/{version.id}/approve"
+    accounts_url = f"/studio/products/{company.id}/accounts"
+    created = c.post(accounts_url, auth=OWNER,
+                     data={"username": "local.brand", "role": "company",
+                           f"company_{company.id}": "on"})
+    assert created.status_code == 200
+    local = ("local.brand", _password(created.text))
+    assert c.post(approval, auth=local).status_code == 403
+    assert db.get(BrandActive, company.id) is None
+    grant = c.post(accounts_url + "/local.brand/brand-approval",
+                   auth=OWNER, data={"enabled": "1"}, follow_redirects=False)
+    assert grant.status_code == 303
+    assert load_accounts(settings)["local.brand"]["brand_approver"] is True
+    assert c.post(approval, auth=local, follow_redirects=False).status_code == 303
+    assert db.get(BrandActive, company.id).version_id == version.id
+    assert c.get(f"/studio/products/{other.id}/brand-kit", auth=local).status_code == 404
+    revoke = c.post(accounts_url + "/local.brand/brand-approval",
+                    auth=OWNER, data={"enabled": "0"}, follow_redirects=False)
+    assert revoke.status_code == 303
+    assert c.post(approval, auth=local).status_code == 403
+
+
+def test_brand_preview_loads_real_browser_fonts_and_distinguishes_draft(studio):
+    from app.brand_kit.contracts import BrandStyle
+    from app.brand_kit.service import save_draft
+    c, company, settings, db = studio.client, studio.mine, studio.settings, studio.db
+    page_url = f"/studio/products/{company.id}/brand-kit"
+    first = c.get(page_url, auth=OWNER)
+    assert first.status_code == 200
+    assert "brand-manrope.woff2" in first.text
+    assert c.get("/studio/assets/brand-manrope.woff2", auth=OWNER).status_code == 200
+    assert c.get("/studio/assets/brand-manrope.woff2").status_code == 401
+    save_draft(db, settings.products_root, company.id,
+               BrandStyle().model_dump(mode="json"))
+    second = c.get(page_url, auth=OWNER)
+    assert "Предпросмотр черновика" in second.text
