@@ -58,8 +58,8 @@ def test_growth_v4_preview_uses_real_studio_auth(monkeypatch):
         assert authorized.headers["cache-control"] == "private, no-store"
 
 
-def test_v4_company_switcher_opens_authorized_company_chooser():
-    """The production v4 HTML must not ship the prototype's inert switch button."""
+def test_v4_company_switcher_is_inline_dropdown():
+    """The button opens a scoped dropdown, not a full company chooser page."""
     from types import SimpleNamespace
     from uuid import uuid4
 
@@ -74,10 +74,11 @@ def test_v4_company_switcher_opens_authorized_company_chooser():
     )
     request = SimpleNamespace(url=SimpleNamespace(path=f"/studio/products/{pid}/materials", query=""))
     result = render_v4(page, request, pid, "/studio?design=classic")
-    assert '<a class="biz-switch" id="bizBtn" href="/studio?choose=1"' in result
+    assert '<button class="biz-switch" id="bizBtn" type="button"' in result
+    assert 'id="sgOrgMenu" hidden' in result
     assert 'aria-label="Сменить компанию"' in result
     assert '<strong>Две фирмы</strong>' in result
-    assert '<button class="biz-switch" id="bizBtn">' not in result
+    assert 'href="/studio?choose=1" aria-label="Сменить компанию"' not in result
 
 
 def test_v4_company_chooser_does_not_bind_to_first_business():
