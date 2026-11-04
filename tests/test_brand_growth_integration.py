@@ -388,3 +388,27 @@ def test_native_background_keeps_both_edges_until_final_focal_crop(brand_growth)
     assert left.getpixel((450, 500)) != right.getpixel((450, 500))
     assert left.getpixel((10, 500))[:3] != (255, 255, 255)
     assert right.getpixel((10, 500))[:3] != (255, 255, 255)
+
+
+@pytest.mark.asyncio
+async def test_orphaned_paid_image_rejects_altered_png_even_if_valid_format(brand_growth):
+    from app.content.creative_images import image_folder
+    db, _, company, _, _, root, _ = brand_growth
+    task = queue_creative(db, _request(company), settings=_canary(company))
+    request = CreativeRequest.model_validate_json(db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "creative_request")).content)
+    settings = Settings(_env_file=None, products_root=root, xai_api_key="unit-test")
+    draft = _draft()
+    assert await generate_images(db, settings, request, draft, task_id=task.id,
+                                 provider=FakeProvider())
+    saved = next(row for row in generated_images(db, company.id, task.id)
+                 if json.loads(row.content)["frame_number"] == 1)
+    db.delete(saved)
+    db.commit()
+    file = image_folder(root, company.id, task.id) / "frame-01.png"
+    file.write_bytes(_image((11, 28, 47)))  # valid PNG and dimensions, wrong original SHA
+    provider = FakeProvider()
+    assert not await generate_images(db, settings, request, draft,
+                                     task_id=task.id, provider=provider)
+    assert provider.calls == []
+    assert len(generated_images(db, company.id, task.id)) == 2
