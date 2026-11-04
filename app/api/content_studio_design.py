@@ -589,10 +589,11 @@ STUDIO_CSS += """
 STUDIO_JS += r"""
 (function(){
   // Classic mobile navigation: outside taps close the floating "Ещё" sheet.
-  // Let the original pointer action continue (navigation, input, etc.).
+  // The dimmed backdrop targets the details element itself; any other outside
+  // target should also dismiss it without blocking the original action.
   document.addEventListener('pointerdown', function(event){
     document.querySelectorAll('[data-m-more][open]').forEach(function(menu){
-      if (event.target instanceof Node && !menu.contains(event.target)) menu.open=false;
+      if (event.target instanceof Node && (event.target===menu || !menu.contains(event.target))) menu.open=false;
     });
   });
   document.addEventListener('keydown', function(event){
