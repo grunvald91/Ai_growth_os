@@ -24,6 +24,7 @@ from app.db.session import get_db
 from app.intake.contracts import IntakeError
 from app.models.domain import Product
 from app.sso import access, tickets
+from app.sso.browser_identity import COOKIE as IDENTITY_COOKIE, read_identity
 from app.sso.company import MIN_ABOUT, about_text
 from app.sso.models import StudioBusinessLink, StudioSsoTicket
 
@@ -104,11 +105,20 @@ def _cookie_redirect(settings: Settings, claims: tickets.Claims, role: str, prod
                      request: Request | None = None) -> RedirectResponse:
     session = tickets.Claims(claims.user_id, claims.business_id, role, claims.name, claims.jti, claims.expires)
     response = RedirectResponse(target, status_code=303, headers=HEADERS)
-    if request is not None and _password_session_covers(request, settings, product_id) is False:
-        # A password sign-in for other companies would hide this one; the person chose ServGo now.
+    browser_hash = None
+    if request is not None and _canonical_pwa(request, settings):
+        identity = read_identity(settings, request.cookies.get(IDENTITY_COOKIE))
+        if identity is None or identity[0] != claims.user_id:
+            from fastapi import HTTPException
+            raise HTTPException(403, "Current ServGo browser identity is missing or changed")
+        browser_hash = identity[1]
+    if request is not None and (_canonical_pwa(request, settings)
+                                or _password_session_covers(request, settings, product_id) is False):
+        # The canonical ServGo sign-in is authoritative even if a legacy operator
+        # cookie is present. Legacy-host operator sessions retain old semantics.
         from app.core.studio_sessions import COOKIE as PASSWORD_COOKIE
         response.delete_cookie(PASSWORD_COOKIE, path="/", httponly=True, samesite="lax", secure=_secure(settings))
-    response.set_cookie(tickets.COOKIE, tickets.issue_session(settings, session, str(product_id)),
+    response.set_cookie(tickets.COOKIE, tickets.issue_session(settings, session, str(product_id), identity_hash=browser_hash),
                         max_age=tickets.MAX_AGE, path="/", httponly=True, samesite="lax", secure=_secure(settings))
     return response
 
@@ -149,11 +159,15 @@ def _first_visit(request: Request, background: BackgroundTasks, db: Session, set
     # On the unified HTTPS origin, keep the confirmation inside the native
     # ServGo React workspace. The signed intent never enters URL, HTML or JS.
     if _canonical_pwa(request, settings):
+        identity = read_identity(settings, request.cookies.get(IDENTITY_COOKIE))
+        if identity is None or identity[0] != claims.user_id:
+            return _native_error(request, settings, "identity", "Другой аккаунт",
+                                 "Войдите в ServGo ещё раз.", 403)
         response = RedirectResponse(
             f"/workspace/growth?setup=1&business_id={claims.business_id}",
             status_code=303, headers=HEADERS,
         )
-        response.set_cookie(SETUP_COOKIE, tickets.issue_intent(settings, claims),
+        response.set_cookie(SETUP_COOKIE, tickets.issue_intent(settings, claims, identity_hash=identity[1]),
                             max_age=tickets.INTENT_TTL, path=SETUP_PATH,
                             secure=True, httponly=True, samesite="lax")
         return response
@@ -209,10 +223,16 @@ def sso_create(request: Request, background: BackgroundTasks, c: str = Form(""),
         intent = request.cookies.get(SETUP_COOKIE, "")
     else:
         intent = c
+    identity = read_identity(settings, request.cookies.get(IDENTITY_COOKIE)) if canonical else None
+    if canonical and identity is None:
+        return _native_error(request, settings, "identity", "Вход ServGo устарел", "Войдите в аккаунт ServGo повторно.", 401)
     try:
-        claims = tickets.read_intent(settings, intent)
+        claims = tickets.read_intent(settings, intent, identity_hash=identity[1] if identity else None,
+                                     require_identity=canonical)
     except tickets.SsoError:
         return _native_error(request, settings, "expired", *EXPIRED, action=("Вернуться в ServGo", ADMIN_URL))
+    if canonical and identity[0] != claims.user_id:
+        return _native_error(request, settings, "identity", "Другой аккаунт", "Войдите в нужный аккаунт ServGo.", 403)
     if canonical and claims.business_id != business_id:
         return _native_error(request, settings, "business", "Выбран другой бизнес", "Вернитесь в ServGo и выберите бизнес ещё раз.", 409)
     access.forget(claims.user_id, claims.business_id)
@@ -283,6 +303,17 @@ def sso_landing(request: Request, background: BackgroundTasks, t: str | None = N
         claims = tickets.verify_ticket(settings, t)
     except tickets.SsoError:
         return _native_error(request, settings, "expired", *EXPIRED, action=("Войти по логину", "/studio/login"))
+    # New tickets are signed for the canonical origin. A ticket issued for
+    # servgo.ru must never be redeemable on the legacy standalone Growth host.
+    if claims.origin == tickets.CANONICAL_ORIGIN and not _canonical_pwa(request, settings):
+        return _native_error(request, settings, "origin", "Неверный адрес входа",
+                             "Откройте маркетинг из ServGo ещё раз.", 403)
+    # The one-time ticket must be redeemed by the same current browser login.
+    if _canonical_pwa(request, settings):
+        identity = read_identity(settings, request.cookies.get(IDENTITY_COOKIE))
+        if identity is None or identity[0] != claims.user_id:
+            return _native_error(request, settings, "identity", "Другой аккаунт",
+                                 "Войдите в ServGo под пользователем, которому принадлежит компания.", 403)
     # ServGo confirms access right now: the link alone is not enough.
     access.forget(claims.user_id, claims.business_id)
     role = access.servgo_role(settings, claims.user_id, claims.business_id)

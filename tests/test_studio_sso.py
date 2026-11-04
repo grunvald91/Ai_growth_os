@@ -29,9 +29,12 @@ def b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode().rstrip("=")
 
 
-def make_ticket(*, uid=7, biz=12, role="owner", exp=None, aud="growth-studio", secret=SSO, jti="j" * 16, v=1, name="Салон"):
-    payload = b64(json.dumps({"v": v, "aud": aud, "uid": uid, "biz": biz, "role": role, "name": name, "jti": jti,
-                              "exp": int(time.time() + 60) if exp is None else exp}).encode())
+def make_ticket(*, uid=7, biz=12, role="owner", exp=None, aud="growth-studio", secret=SSO, jti="j" * 16, v=1, name="Салон", origin=None):
+    data = {"v": v, "aud": aud, "uid": uid, "biz": biz, "role": role, "name": name, "jti": jti,
+            "exp": int(time.time() + 60) if exp is None else exp}
+    if origin is not None:
+        data["origin"] = origin
+    payload = b64(json.dumps(data).encode())
     return payload + "." + b64(hmac.new(secret.encode(), payload.encode(), hashlib.sha256).digest())
 
 
@@ -697,6 +700,7 @@ def canonical_first_visit(env, **ticket):
     servgo.allowed[(7, 31)] = ticket.pop("role", "owner")
     servgo.businesses[31] = {**servgo.businesses[12], "name": "Баня Парная"}
     client = TestClient(app, base_url="https://servgo.ru", follow_redirects=False)
+    client.cookies.set("sg_identity", _browser_identity(7))
     page = client.get("/studio/sso", params={
         "t": make_ticket(biz=31, jti=ticket.pop("jti", "w" * 16), **ticket)
     })
@@ -759,7 +763,7 @@ def test_canonical_first_visit_requires_actual_signed_cookie_and_live_owner(env)
     empty = TestClient(app, base_url="https://servgo.ru", follow_redirects=False)
     without_cookie = empty.post("/studio/sso/create", data={"business_id":31},
                                 headers={"origin":"https://servgo.ru"})
-    assert without_cookie.status_code == 400
+    assert without_cookie.status_code == 401  # Missing current ServGo identity is unauthorized.
     servgo.allowed.clear()
     revoked = client.post("/studio/sso/create", data={"business_id":31},
                           headers={"origin":"https://servgo.ru"})
@@ -802,6 +806,7 @@ def test_native_setup_recognises_proxy_https_without_allowing_cross_host(env, tm
     browser = TestClient(app, base_url="http://servgo.ru",
                          headers={"x-forwarded-proto":"https"},
                          follow_redirects=False)
+    browser.cookies.set("sg_identity", _browser_identity(7))
     response = browser.get("/studio/sso", params={
         "t": make_ticket(biz=31, jti="n" * 16),
     })
@@ -927,3 +932,277 @@ def test_link_attempt_without_servgo_cookie_is_denied(env):
     response = client.post("/studio/identity", data={"username": "owner", "password": "correct-secret"},
                            headers={"origin": ORIGIN}, auth=("owner", "correct-secret"))
     assert response.status_code == 403
+
+
+def _browser_identity(uid: int, *, nonce: str = "n" * 32, secret: str = SSO) -> str:
+    body = b64(json.dumps({"v": 1, "u": uid, "n": nonce,
+                           "e": int(time.time()) + 3600}, separators=(",", ":")).encode())
+    sig = b64(hmac.new(secret.encode(), b"servgo-browser-identity-v1:" + body.encode(),
+                       hashlib.sha256).digest())
+    return body + "." + sig
+
+
+def test_canonical_servgo_sso_overrides_legacy_operator_cookie(env):
+    """The canonical origin uses only the currently signed-in ServGo identity."""
+    _, settings, salon, other, _ = env
+    settings.studio_servgo_gateway_enabled = True
+    from app.core.studio_sessions import issue, fingerprint
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
+        # Old operator cookies cannot bypass the common account on this host.
+        old_owner = issue(settings, "owner", fingerprint("owner\\0correct-secret"))
+        client.cookies.set("sg_session", old_owner)
+        assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 401
+
+        client.cookies.set("sg_identity", _browser_identity(7))
+        response = client.get("/studio/sso", params={"t": make_ticket(jti="canonical-issuer1")})
+        assert response.status_code == 303
+        cookies = [row.lower() for row in response.headers.get_list("set-cookie")]
+        assert any(row.startswith("sg_session=") and "max-age=0" in row for row in cookies)
+        assert any(row.startswith("sg_sso=") and "max-age=0" not in row for row in cookies)
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+        assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 404
+
+        # Switching to another ServGo account does not preserve the old Studio login.
+        client.cookies.set("sg_identity", _browser_identity(8))
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+
+        # Even another login by the SAME user must exchange a fresh one-use ticket.
+        client.cookies.set("sg_identity", _browser_identity(7, nonce="z" * 32))
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+        client.cookies.delete("sg_identity")
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+
+
+def test_canonical_sso_ticket_requires_current_servgo_identity(env):
+    _, settings, salon, _, _ = env
+    settings.studio_servgo_gateway_enabled = True
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
+        url = "/studio/sso"
+        denied = client.get(url, params={"t": make_ticket(jti="different-user-1")})
+        assert denied.status_code == 403
+        client.cookies.set("sg_identity", _browser_identity(9))
+        denied = client.get(url, params={"t": make_ticket(jti="different-user-2")})
+        assert denied.status_code == 403
+        client.cookies.set("sg_identity", _browser_identity(7))
+        ok = client.get(url, params={"t": make_ticket(jti="different-user-3")})
+        assert ok.status_code == 303
+
+
+def test_canonical_servgo_sso_without_any_legacy_password_configuration(env):
+    """Current ServGo login must never depend on old Growth operator passwords."""
+    _, settings, salon, _, _ = env
+    settings.studio_servgo_gateway_enabled = True
+    settings.studio_admin_username = None
+    settings.studio_admin_password = None
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
+        without_login = client.get(f"/studio/products/{salon.id}/dispatch/state")
+        assert without_login.status_code == 401
+        client.cookies.set("sg_identity", _browser_identity(7))
+        redirect = client.get("/studio/sso", params={"t": make_ticket(jti="no-legacy-accounts1")})
+        assert redirect.status_code == 303
+        page = client.get(f"/studio/products/{salon.id}/dispatch/state")
+        assert page.status_code == 200
+
+        # A different verified account must still be rejected.
+        client.cookies.set("sg_identity", _browser_identity(8))
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+
+
+def test_legacy_origin_without_password_configuration_stays_closed(env):
+    """Removing legacy credentials must not open password-free Growth access."""
+    _, settings, salon, _, _ = env
+    settings.studio_admin_username = None
+    settings.studio_admin_password = None
+    with TestClient(app, base_url=ORIGIN, follow_redirects=False) as client:
+        page = client.get(f"/studio/products/{salon.id}/dispatch/state")
+        assert page.status_code == 503
+
+
+def test_canonical_ticket_cannot_be_redeemed_on_legacy_growth_host(env):
+    """A stolen new canonical ticket must not become a Growth cookie via the legacy URL."""
+    from app.core.config import get_settings
+    _, settings, salon, _, _ = env
+    settings.studio_servgo_gateway_enabled = True
+    ticket = make_ticket(origin="https://servgo.ru", jti="canonical-only-001")
+    with TestClient(app, base_url="https://growth.servgo.ru", follow_redirects=False) as legacy:
+        refused = legacy.get("/studio/sso", params={"t": ticket})
+        assert refused.status_code == 403
+        assert "sg_sso=" not in refused.headers.get("set-cookie", "")
+        assert legacy.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as canonical:
+        canonical.cookies.set("sg_identity", _browser_identity(7))
+        accepted = canonical.get("/studio/sso", params={"t": ticket})
+        assert accepted.status_code == 303
+        assert canonical.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+
+
+def test_canonical_ticket_rejects_invalid_signed_destination(env):
+    _, settings, _, _, _ = env
+    settings.studio_servgo_gateway_enabled = True
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
+        client.cookies.set("sg_identity", _browser_identity(7))
+        bad = client.get("/studio/sso", params={"t": make_ticket(origin="https://evil.example",
+                                                       jti="invalid-origin-01")})
+        assert bad.status_code == 400
+
+
+def test_canonical_setup_intent_is_invalid_after_same_user_login_rotation(env):
+    db, _, _, _, _ = env
+    client, started = canonical_first_visit(env)
+    assert started.status_code == 303
+    client.cookies.set("sg_identity", _browser_identity(7, nonce="new-login-" + "x" * 32))
+    denied = client.post("/studio/sso/create", data={"business_id": 31},
+                         headers={"origin": "https://servgo.ru"})
+    assert denied.status_code == 400
+    assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
+
+
+def test_canonical_logout_clears_pending_company_setup_cookie(env):
+    client, page = canonical_first_visit(env)
+    assert page.status_code == 303
+    assert "sg_growth_setup" in client.cookies
+    logged_out = client.post("/studio/session/logout",
+                             headers={"origin": "https://servgo.ru"})
+    assert logged_out.status_code == 204
+    assert "sg_growth_setup=" in logged_out.headers.get("set-cookie", "") or any(
+        h.startswith("sg_growth_setup=") and "max-age=0" in h.lower()
+        for h in logged_out.headers.get_list("set-cookie")
+    )
+    assert "sg_growth_setup" not in client.cookies
+    client.cookies.set("sg_identity", _browser_identity(7, nonce="another-login-" + "x" * 32))
+    denied = client.post("/studio/sso/create", data={"business_id": 31},
+                         headers={"origin": "https://servgo.ru"})
+    assert denied.status_code == 400
+
+
+def test_server_revokes_existing_studio_access_on_next_request_without_cache_flush(env):
+    _, _, salon, _, servgo = env
+    client = signed_in(env)
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+    servgo.allowed.clear()  # No access.forget(): this models actual owner revocation.
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+
+
+def test_fresh_servgo_role_bypasses_stale_positive_cache(env):
+    _, settings, _, _, servgo = env
+    access.forget()
+    assert access.servgo_role(settings, 7, 12, now=1000) == "owner"
+    servgo.allowed.clear()
+    assert access.servgo_role(settings, 7, 12, now=1001) == "owner"
+    assert access.servgo_role(settings, 7, 12, now=1001, fresh=True) is None
+
+
+def test_canonical_sso_survives_corrupt_legacy_accounts_without_operator_elevation(env, tmp_path):
+    """Legacy JSON problems cannot block a tenant or silently grant platform scope."""
+    from app.api.content_studio_auth import credential_fingerprint
+    from app.core.studio_operator_links import bind_operator, linked_operator
+    _, settings, salon, _, _ = env
+    corrupt = tmp_path / "corrupt-accounts.json"
+    corrupt.write_text("{}", encoding="utf-8")
+    settings.studio_users_file = corrupt
+    # Establish a real operator link using the SAME account directory, then
+    # corrupt that file: this must revoke elevation but not tenant SSO.
+    fingerprint = credential_fingerprint(settings, {}, "owner")
+    assert fingerprint is not None
+    bind_operator(settings, 7, "owner", fingerprint[0])
+    assert linked_operator(settings, 7, {}) == "owner"
+    corrupt.write_text("{invalid json", encoding="utf-8")
+    settings.studio_servgo_gateway_enabled = True
+
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
+        client.cookies.set("sg_identity", _browser_identity(7))
+        login = client.get("/studio/sso", params={
+            "t": make_ticket(origin="https://servgo.ru", jti="corrupt-accounts-1")
+        })
+        assert login.status_code == 303
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+        # The link remains present, but legacy account corruption must NOT
+        # turn a tenant into a platform administrator.
+        assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 403
+        assert client.get("/studio/tune").status_code == 403
+
+    # Legacy credential-based sessions still fail closed on a damaged account file.
+    with TestClient(app, base_url=ORIGIN, follow_redirects=False) as legacy:
+        assert legacy.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 503
+
+
+def test_one_live_business_list_call_authorizes_product_scope_and_role(env):
+    """The list already includes trusted current roles; no redundant access request."""
+    _, _, salon, _, servgo = env
+    client = signed_in(env)
+    servgo.calls.clear()
+    response = client.get(f"/studio/products/{salon.id}/dispatch/state")
+    assert response.status_code == 200
+    checks = [request.url.path for request in servgo.calls]
+    assert sum(path.endswith("/internal/studio/businesses") for path in checks) == 1
+    assert not any(path.endswith("/internal/studio/access") for path in checks)
+
+    # Immediate revocation without waiting for a cache TTL or manual invalidation.
+    servgo.allowed.clear()
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+
+
+def test_one_live_business_list_reflects_role_changes_without_cache(env):
+    _, settings, salon, _, servgo = env
+    client = signed_in(env)
+    assert access.servgo_business_roles(settings, 7) == {12: "owner"}
+    servgo.allowed[(7, 12)] = "administrator"
+    assert access.servgo_business_roles(settings, 7) == {12: "administrator"}
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+
+
+def test_malformed_live_roles_fall_back_only_to_checked_ticket_company(env):
+    db, settings, salon, other, servgo = env
+    db.add(StudioBusinessLink(servgo_business_id=14, product_id=other.id))
+    db.commit()
+    servgo.allowed[(7, 14)] = "co_owner"
+    client = signed_in(env)
+    servgo.mode = "invalid_list"
+    assert access.servgo_business_roles(settings, 7) is None
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+    assert client.get(f"/studio/products/{other.id}/dispatch/state").status_code == 404
+
+
+def test_malformed_legacy_operator_record_cannot_block_or_elevate_canonical_sso(env, tmp_path):
+    """Structurally invalid but parseable legacy JSON is not a tenant SSO dependency."""
+    from app.api.content_studio_auth import credential_fingerprint
+    from app.core.studio_operator_links import bind_operator, linked_operator
+    _, settings, salon, _, _ = env
+    account_file = tmp_path / "accounts.json"
+    account_file.write_text("{}", encoding="utf-8")
+    settings.studio_users_file = account_file
+    fingerprint = credential_fingerprint(settings, {}, "owner")
+    assert fingerprint is not None
+    bind_operator(settings, 7, "owner", fingerprint[0])
+    assert linked_operator(settings, 7, {}) == "owner"
+    # This is a syntactically valid dict, but the owner entry lacks password_hash.
+    account_file.write_text('{"owner":{"role":"admin"}}', encoding="utf-8")
+    settings.studio_servgo_gateway_enabled = True
+
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
+        client.cookies.set("sg_identity", _browser_identity(7))
+        response = client.get("/studio/sso", params={
+            "t": make_ticket(origin="https://servgo.ru", jti="malformed-operator-01")
+        })
+        assert response.status_code == 303
+        assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+        assert client.get(f"/studio/products/{salon.id}/accounts").status_code == 403
+
+    with TestClient(app, base_url=ORIGIN, follow_redirects=False) as legacy:
+        # Old operator credentials must not silently work with malformed entries.
+        assert legacy.get(f"/studio/products/{salon.id}/dispatch/state",
+                          auth=("owner", "correct-secret")).status_code == 503
+
+
+def test_malformed_live_role_type_is_rejected_without_server_exception(env):
+    _, settings, _, _, servgo = env
+    # Validate the malformed payload shape itself; no unhashable role may bubble
+    # up into a 500 from the membership check.
+    original = servgo.__call__
+    class MalformedRoles:
+        def __call__(self, request):
+            if request.url.path.endswith("/internal/studio/businesses"):
+                return httpx.Response(200, json=[{"id": 12, "role": ["owner"]}])
+            return original(request)
+    access._transport = httpx.MockTransport(MalformedRoles())
+    assert access.servgo_business_roles(settings, 7) is None

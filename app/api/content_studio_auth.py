@@ -187,18 +187,28 @@ def _session_login(request: Request, settings, users: dict) -> tuple[str, list[s
     return login, current[1]
 
 
-def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str] | None] | None:
+def _sso_login(request: Request, settings, db=None, *, users: dict | None = None,
+               operator_accounts_healthy: bool = True) -> tuple[str, list[str] | None] | None:
     """Validate the signed identity and derive company access from live ServGo permissions."""
     from app.sso import access, tickets
     session = tickets.read_session(settings, request.cookies.get(tickets.COOKIE))
     if session is None or not tickets.configured(settings):
         return None
+    from app.api.studio_sso import _canonical_pwa
+    if _canonical_pwa(request, settings):
+        from app.sso.browser_identity import COOKIE as ID_COOKIE, read_identity
+        current = read_identity(settings, request.cookies.get(ID_COOKIE))
+        if (current is None or current[0] != session.user_id or
+                not session.identity_hash or not secrets.compare_digest(current[1], session.identity_hash)):
+            return None
     if db is None or not _sso_link_current(db, session):
         return None  # The studio owner disconnected or re-linked this business: the old session ends.
-    business_ids = access.servgo_business_ids(settings, session.user_id)
-    if business_ids is None:
+    # The protected internal list already contains verified, current roles.
+    # One fresh network round-trip covers both membership and role revocation.
+    business_roles = access.servgo_business_roles(settings, session.user_id)
+    if business_roles is None:
         # An old/unavailable API may authorize only the original ticket scope.
-        role = access.servgo_role(settings, session.user_id, session.business_id)
+        role = access.servgo_role(settings, session.user_id, session.business_id, fresh=True)
         if role is None:
             return None
         request.state.studio_sso_role = role
@@ -209,12 +219,12 @@ def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str] | No
         from sqlalchemy import select
         from app.sso.models import StudioBusinessLink
         linked = list(db.scalars(select(StudioBusinessLink).where(
-            StudioBusinessLink.servgo_business_id.in_(business_ids))))
+            StudioBusinessLink.servgo_business_id.in_(business_roles))))
         allowed = {str(link.product_id) for link in linked}
         current = request.path_params.get("product_id")
         if current is not None:
             # Resolve the role for the requested company, not the entry ticket.
-            roles = [access.servgo_role(settings, session.user_id, link.servgo_business_id)
+            roles = [business_roles[link.servgo_business_id]
                      for link in linked if str(link.product_id) == str(current)]
             role = next((value for value in ("owner", "co_owner", "administrator") if value in roles), None)
             if role is None:
@@ -227,7 +237,20 @@ def _sso_login(request: Request, settings, db=None) -> tuple[str, list[str] | No
     # It is unlocked only after the person has explicitly proved control of an
     # existing Growth operator credential in a live ServGo SSO session.
     from app.core.studio_operator_links import linked_operator
-    linked_login = linked_operator(settings, session.user_id, _load_users(settings))
+    # When the legacy account store is broken, tenant SSO remains available
+    # but no linked platform-operator privilege can be evaluated or granted.
+    linked_login = None
+    if operator_accounts_healthy:
+        try:
+            linked_login = linked_operator(settings, session.user_id,
+                                           users if users is not None else _load_users(settings))
+        except HTTPException:
+            # A syntactically valid JSON file may still contain malformed
+            # legacy operator entries. Keep the tenant-scoped login, but never
+            # grant platform-wide privileges from an invalid credential.
+            if not _canonical_pwa(request, settings):
+                raise
+            _logger.warning("studio_legacy_operator_invalid_for_canonical_sso")
     if linked_login is not None:
         # Preserve the proven operator login so permission gates such as
         # STUDIO_TUNE_USERNAMES continue to recognize this exact identity.
@@ -281,10 +304,33 @@ def require_studio_auth(
     settings: Settings = Depends(get_settings),
     db=Depends(get_db),
 ):
+    # The canonical PWA uses only ServGo SSO. Legacy passwords may be
+    # unconfigured here, but a missing SSO configuration must never bypass auth.
+    # The canonical PWA is authenticated only by the active ServGo account.
+    # Never fall back to an unrelated Growth password/Basic cookie on this host.
+    from app.api.studio_sso import _canonical_pwa
+    if _canonical_pwa(request, settings):
+        operator_accounts_healthy = True
+        try:
+            users = _load_users(settings)
+        except HTTPException:
+            # The old password database is not an identity prerequisite.
+            # Fail closed for *operator elevation*, not for normal ServGo SSO.
+            _logger.warning("studio_legacy_accounts_unavailable_for_canonical_sso")
+            users = {}
+            operator_accounts_healthy = False
+        sso = _sso_login(request, settings, db, users=users,
+                         operator_accounts_healthy=operator_accounts_healthy)
+        if sso is None:
+            _login_required(request)
+        return _apply_scope(request, *sso, users=users)
+
+    # Legacy host keeps strict account-file and password validation.
     users = _load_users(settings)
     if not _auth_configured(settings, users):
         request.state.studio_product_ids = None
         return None  # Developer loopback only; never a production exemption.
+
     # A signed login session wins over credentials the browser remembers for Basic auth,
     # so signing in with another account through the form really switches the user.
     # It also wins over a ServGo sign-in: a link someone else sent can never push the
@@ -292,7 +338,7 @@ def require_studio_auth(
     session = _session_login(request, settings, users)
     if session is not None:
         return _apply_scope(request, *session, users=users)
-    sso = _sso_login(request, settings, db)
+    sso = _sso_login(request, settings, db, users=users)
     if sso is not None:
         return _apply_scope(request, *sso, users=users)
     if not credentials:

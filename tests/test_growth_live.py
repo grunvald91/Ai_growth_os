@@ -1097,6 +1097,19 @@ def test_canonical_growth_defaults_to_v4_without_changing_legacy_preference(live
     config = Settings(app_env="development", studio_public_origin="https://growth.servgo.ru",
                       studio_servgo_gateway_enabled=True, _env_file=None)
     monkeypatch.setitem(app.dependency_overrides, get_settings, lambda: config)
+    # This test checks theme routing, not authentication. The canonical host
+    # now strictly requires ServGo SSO, even in development; provide an
+    # explicit test-only authenticated request rather than weakening production.
+    from fastapi import Request
+    from app.api.content_studio_auth import require_studio_auth
+
+    def layout_test_account(request: Request):
+        request.state.studio_login = "layout-test-account"
+        request.state.studio_account_role = "admin"
+        request.state.studio_product_ids = None
+        return "layout-test-account"
+
+    monkeypatch.setitem(app.dependency_overrides, require_studio_auth, layout_test_account)
     base = f"/studio/products/{product.id}"
     with TestClient(app, base_url="https://servgo.ru") as canonical:
         page = canonical.get(base)
