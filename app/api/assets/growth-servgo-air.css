@@ -1221,7 +1221,8 @@ body[data-growth-design="v4"] .route-content :is(
   .sg-storyboard-card p,.sg-storyboard-card details p,.sg-storyboard-counter,
   .sg-native-post-label,.material-detail-card .detail-meta
 ) {
-  color:var(--s-muted) !important;
+  /* --s-muted on --s-surface-2 is only 4.39:1 in the light theme. */
+  color:var(--s-text-2) !important;
   -webkit-text-fill-color:currentColor !important;
   opacity:1;
 }
@@ -1238,4 +1239,30 @@ body[data-growth-design="v4"] .route-content .sg-storyboard-screen {
 }
 body[data-growth-design="v4"] .route-content .sg-storyboard-card details {
   border-color:var(--s-line-2);
+}
+
+/* The legacy script/detail card itself still has a hard-coded white background.
+ * Without this bridge white dark-theme text becomes invisible on #fbfdff.
+ * Align script shots and prompts with the same semantic surfaces. */
+body[data-growth-design="v4"] .route-content .material-detail-body .article-text {
+  background:var(--s-surface-2) !important;
+  border-color:var(--s-line-2) !important;
+}
+body[data-growth-design="v4"] .route-content .story-shot {
+  background:var(--s-surface-2);
+  border-color:var(--s-line-2);
+  color:var(--s-text);
+}
+body[data-growth-design="v4"] .route-content .story-shot :is(b,.story-shot-head b) {
+  color:var(--s-text);
+}
+body[data-growth-design="v4"] .route-content .story-shot p {
+  color:var(--s-text-2);
+}
+body[data-growth-design="v4"] .route-content .story-shot time {
+  color:var(--s-accent-press);
+}
+body[data-growth-design="v4"] .route-content .story-prompt {
+  background:var(--s-surface-3);
+  color:var(--s-text);
 }

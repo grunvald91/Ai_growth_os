@@ -66,6 +66,8 @@ def test_material_text_never_reverts_to_classic_dark_ink():
                      ".sg-storyboard-card p", ".sg-storyboard-screen"):
         assert selector in bridge
     assert "color:var(--s-text) !important" in bridge
-    assert "color:var(--s-muted) !important" in bridge
+    assert "color:var(--s-text-2) !important" in bridge
+    assert "background:var(--s-surface-2) !important" in bridge
+    assert "color:var(--s-accent-press)" in bridge
     assert "-webkit-text-fill-color:currentColor !important" in bridge
     assert "background:var(--s-surface-2) !important" in bridge

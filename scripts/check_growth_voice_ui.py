@@ -22,7 +22,7 @@ from app.main import app
 from app.core.config import Settings, get_settings
 from app.db.models import Base
 from app.db.session import get_db
-from app.models.domain import Product
+from app.models.domain import Product, Artifact
 
 OUT = Path("/tmp/servgo-growth-voice-ui")
 OUT.mkdir(exist_ok=True)
@@ -39,6 +39,28 @@ def main():
     with Session(engine, expire_on_commit=False) as session:
         product = Product(name="ServGo isolated fixture", slug="servgo-ci-check")
         session.add(product)
+        session.commit()
+        # Real server-rendered preview fixtures: the original CSS used a
+        # light background while the v4 override switched its ink to white.
+        script_material = Artifact(
+            product_id=product.id, kind="video_script", title="Contrast test video",
+            content=json.dumps({"production_brief": {
+                "objective": "Readable script", "target_platform": "instagram_reels",
+                "voiceover_or_dialogue_script": "Readable voiceover",
+                "editing_rhythm": "Readable editing",
+                "shots": [{"start_second": 0, "end_second": 5,
+                           "purpose": "Shot title", "visual_description": "Shot description",
+                           "generation_prompt": "Shot prompt"}]}}))
+        post_material = Artifact(
+            product_id=product.id, kind="channel_text", title="Contrast test post",
+            content=json.dumps({"body": "Readable publication", "channel": "telegram"}))
+        creative_material = Artifact(
+            product_id=product.id, kind="creative_brief", title="Contrast test frames",
+            content=json.dumps({"platform": "instagram_reels", "frames": [{
+                "number": 1, "on_screen_text": "Screen text",
+                "purpose": "Frame title", "action_or_animation": "Frame description",
+                "visual_prompt": "Frame prompt", "spoken_text": "Frame speech"}]}))
+        session.add_all([script_material, post_material, creative_material])
         session.commit()
         app.dependency_overrides[get_db] = lambda: session
         app.dependency_overrides[get_settings] = lambda: Settings(app_env="development", _env_file=None)
@@ -584,6 +606,46 @@ def main():
                 result['checks'].append({'page':'seo-v4-dark',
                     'widths':[360,390,780,1280],'bell_centered':True,
                     'heading_contrast_at_least_4_5':True,'stages_collapsed':True})
+                # Validate computed colours on REAL material routes, not only CSS
+                # selector presence. Both light and dark must be readable.
+                for theme in ("dark", "light"):
+                    for material, checks in (
+                        (script_material, [
+                            (".material-detail-body .article-text", ".material-detail-body .article-text"),
+                            (".story-shot b", ".story-shot"),
+                            (".story-shot p", ".story-shot"),
+                            (".story-prompt", ".story-prompt")]),
+                        (post_material, [
+                            (".material-detail-body .article-text", ".material-detail-body .article-text"),
+                            (".sg-native-post-label", ".sg-post-preview")]),
+                        (creative_material, [
+                            (".sg-storyboard-card p", ".sg-storyboard-card"),
+                            (".sg-storyboard-screen span", ".sg-storyboard-screen")]),
+                    ):
+                        page.goto(
+                            f"{origin}/studio/products/{product.id}/materials/{material.id}?design=v4",
+                            wait_until="load")
+                        page.evaluate("(mode) => window.ServGoTheme.setPreference(mode)", theme)
+                        for selector, background_selector in checks:
+                            contrast = page.evaluate("""(input) => {
+                              const fgEl=document.querySelector(input.selector);
+                              const bgEl=document.querySelector(input.background);
+                              if(!fgEl||!bgEl)throw Error('Fixture selector missing: '+input.selector);
+                              const fg=getComputedStyle(fgEl).color;
+                              const bg=getComputedStyle(bgEl).backgroundColor;
+                              const luma=value=>{
+                                const parts=(value.match(/[\\d.]+/g)||[]).slice(0,3).map(n=>Number(n)/255);
+                                return parts.map(n=>n<=0.04045?n/12.92:Math.pow((n+0.055)/1.055,2.4))
+                                  .reduce((sum,n,i)=>sum+n*[0.2126,0.7152,0.0722][i],0);
+                              };
+                              const a=luma(fg), b=luma(bg);
+                              return {ratio:(Math.max(a,b)+0.05)/(Math.min(a,b)+0.05),
+                                foreground:fg, background:bg};
+                            }""", {"selector": selector, "background": background_selector})
+                            assert contrast["ratio"] >= 4.5, (
+                                f"{theme}: {selector} contrast {contrast}")
+                result["checks"].append({"page":"material-detail-v4",
+                    "themes":["dark","light"],"script_post_frames_contrast_at_least_4_5":True})
                 browser.close()
         finally:
             server.should_exit=True
