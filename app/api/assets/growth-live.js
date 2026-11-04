@@ -59,8 +59,8 @@ document.addEventListener('pointerdown',e=>{
  });
  const product=location.pathname.match(/\/studio\/products\/([0-9a-f-]{36})/i);
  const base=product?'/studio/products/'+product[1]:null;
- document.getElementById('bizBtn').onclick=()=>location.assign('/studio?choose=1');
- document.getElementById('notifyBtn')?.addEventListener('click',()=>location.assign('/studio?choose=1'));
+ // Company selection is handled by growth-daily.js; notifications own their dropdown.
+ if(!base)document.getElementById('bizBtn')?.addEventListener('click',()=>location.assign('/studio?choose=1'));
  document.querySelector('[data-focusvoice]').onclick=()=>{const input=document.getElementById('dp-input');if(input)input.focus();else location.assign(base||'/studio')};
  let searchBox,returnFocus;
  function closeSearch(){if(searchBox){searchBox.remove();searchBox=null;document.querySelector('.shell').inert=false;returnFocus?.focus()}}

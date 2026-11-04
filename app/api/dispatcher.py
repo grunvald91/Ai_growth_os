@@ -166,6 +166,39 @@ def home_html(db: Session, product: Product, settings: Settings, request: Reques
 </body></html>"""
 
 
+@router.get("/studio/products/{product_id}/home-summary.json")
+def daily_home_summary(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+    """No LLM invocation, no paid activity; one authorised tenant at a time."""
+    permitted = getattr(request.state, "studio_product_ids", None)
+    if permitted is not None and str(product_id) not in {str(p) for p in permitted}:
+        raise HTTPException(403, "Нет доступа к компании")
+    product = _owner_product(db, product_id)
+    from app.dispatcher.home_summary import home_summary
+    return JSONResponse(home_summary(db, product), headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/studio/products/{product_id}/organizations.json")
+def home_organizations(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+    """Company dropdown uses the same scope as Studio's company selector."""
+    permitted = getattr(request.state, "studio_product_ids", None)
+    if permitted is not None and str(product_id) not in {str(p) for p in permitted}:
+        raise HTTPException(403, "Нет доступа к компании")
+    _owner_product(db, product_id)
+    from sqlalchemy import select
+    q = select(Product)
+    if permitted is not None:
+        q = q.where(Product.id.in_([UUID(str(p)) for p in permitted]))
+    products = list(db.scalars(q.order_by(Product.name, Product.id).limit(100)))
+    if not any(item.id == product_id for item in products):
+        current = db.get(Product, product_id)
+        if current is not None:
+            products.append(current)
+    return JSONResponse({
+        "items": [{"id": str(item.id), "name": item.name} for item in products],
+        "can_add": permitted is None,
+    }, headers={"Cache-Control": "private, no-store"})
+
+
 @router.get("/studio/assets/dispatcher.css")
 def dispatcher_css():
     return Response((ASSETS / "dispatcher.css").read_text(encoding="utf-8"), media_type="text/css",

@@ -83,6 +83,13 @@ def test_new_company_account_signs_in_with_capitalized_login_and_sees_only_its_c
     assert c.get(f"/studio/products/{studio.mine.id}/accounts").status_code == 403
     chooser = c.get("/studio?choose=1").text
     assert "Кофейня" in chooser and "Барбершоп" not in chooser and "/studio/new" not in chooser
+    orgs = c.get(f"/studio/products/{studio.mine.id}/organizations.json")
+    assert orgs.status_code == 200
+    assert [row["name"] for row in orgs.json()["items"]] == ["Кофейня"]
+    assert orgs.json()["can_add"] is False
+    # The auth layer intentionally hides foreign companies as 404, not 403.
+    assert c.get(f"/studio/products/{studio.other.id}/organizations.json").status_code == 404
+    assert c.get(f"/studio/products/{studio.other.id}/home-summary.json").status_code == 404
     # Basic auth from a phone also ignores the capital letter.
     c.cookies.clear()
     assert c.get(f"/studio/products/{studio.mine.id}", headers=_basic("Manager", password)).status_code == 200

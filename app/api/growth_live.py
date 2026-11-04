@@ -111,6 +111,18 @@ def stylesheet():
     return Response((ASSETS/'growth-live.css').read_text(), media_type='text/css')
 
 
+@router.get('/studio/assets/growth-daily.css')
+def daily_stylesheet():
+    return Response((ASSETS/'growth-daily.css').read_text(), media_type='text/css',
+                    headers={'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'})
+
+
+@router.get('/studio/assets/growth-daily.js')
+def daily_javascript():
+    return Response((ASSETS/'growth-daily.js').read_text(), media_type='application/javascript',
+                    headers={'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'})
+
+
 @router.get('/studio/assets/growth-live.js')
 def javascript():
     return Response((ASSETS/'growth-live.js').read_text(), media_type='application/javascript')
