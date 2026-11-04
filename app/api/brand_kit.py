@@ -225,7 +225,8 @@ background:var(--bk-background);color:var(--bk-text);font-family:var(--bk-font)}
         '<div class="bk-wrap"><div>'
         '<section class="sg-surface"><h2>1. Исходные ресурсы</h2>' + upload_form +
         ('<details><summary>Неиспользуемые файлы · освободить место</summary>'
-         + cleanup + '</details>' if cleanup else '') + '</section>'
+         + cleanup + '</details>' if cleanup else '') +
+        f'<a class="btn secondary" href="{base}/library">Хранилище · материалы и лимиты</a></section>'
         '<section class="sg-surface"><h2>2. Настройки фирменного стиля</h2>' + settings_form +
         '</section></div><div>'
         '<section class="sg-surface"><h2>Предварительный просмотр 9:16</h2>' +

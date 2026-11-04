@@ -191,6 +191,8 @@ def approve_version(db, root: Path, product_id: UUID, version_id: UUID) -> Brand
         raise ValueError("Сначала загрузите оригинальный логотип")
     if contrast_ratio(style.palette.text, style.palette.background) < 4.5:
         raise ValueError("Низкий контраст: измените цвет текста или фона")
+    from app.brand_kit.renderer import validate_brand_fonts
+    validate_brand_fonts(style)
     version.status = "approved"
     if version.approved_at is None:
         version.approved_at = datetime.now(timezone.utc)

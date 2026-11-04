@@ -58,6 +58,8 @@ def delete_company(db: Session, products_root: Path, product_id: UUID) -> str:
     root = Path(products_root)
     _safe_rmtree(root, root / "_content" / str(product_id))
     _safe_rmtree(root, root / "_brand_assets" / str(product_id))
+    _safe_rmtree(root, root / "_brand_backgrounds" / str(product_id))
+    _safe_rmtree(root, root / "_brand_renders" / str(product_id))
     if slug.startswith(STUDIO_SLUG_PREFIX) and "/" not in slug and ".." not in slug:
         _safe_rmtree(root, root / slug)
     return name
