@@ -1,4 +1,4 @@
-name: One-time ServGo SEO E2E acceptance batch — verified buyer resume
+name: One-time ServGo SEO E2E acceptance batch — production owner profile
 on:
   push:
     branches: [qa/seo-e2e-readonly-20261104]
