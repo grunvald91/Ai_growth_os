@@ -1,0 +1,108 @@
+name: "SEO #241 guarded one-time editor retry"
+on:
+  push:
+    branches: [seo-canary-readonly-20261104]
+    paths: [.github/workflows/seo-canary-guarded-retry-once.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: seo-241-one-time-guarded-retry
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    if: github.repository == 'grunvald91/Ai_growth_os'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Requeue exactly one previously failed SEO canary without bypassing quotas
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD unavailable"; exit 1; }
+          sudo apt-get install -qq -y sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/seo-host-keys
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/seo-host-key
+            ssh-keygen -lf /tmp/seo-host-key 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/seo-host-keys
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Pinned server host key mismatch"; exit 1; }
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          import json
+          from sqlalchemy import select, func, update
+          from app.core.config import get_settings
+          from app.db.session import SessionLocal
+          from app.models.domain import Product, Task, TaskStatus, Artifact, AgentRun, Publication
+          from app.seo.activation import require_enabled
+          from app.seo.queue import SEO_TASK_PREFIX
+
+          expected_sha = "08b62d0414da8985009ee004b45b7f01dc0f622e"
+          target_query = "программа онлайн записи клиентов"
+          required_queue = {"ии для продвижения бизнеса", "как привлечь клиентов в салон красоты"}
+          settings = get_settings()
+          if settings.release_sha != expected_sha:
+              raise SystemExit("ABORT: production release changed since the read-only verification")
+          if settings.seo_autorun_enabled or settings.seo_servgo_autorun_enabled:
+              raise SystemExit("ABORT: unexpected autonomous SEO scheduling state")
+          with SessionLocal() as db:
+              product = db.scalar(select(Product).where(Product.slug == "servgo").with_for_update())
+              if product is None:
+                  raise SystemExit("ABORT: ServGo company not found")
+              require_enabled(db, product.id)
+              tasks = list(db.scalars(select(Task).where(
+                  Task.product_id == product.id, Task.assigned_agent == "content_factory",
+                  Task.title.like(f"{SEO_TASK_PREFIX}%")
+              ).with_for_update()))
+              matches = {}
+              for task in tasks:
+                  raw = db.scalar(select(Artifact.content).where(
+                      Artifact.product_id == product.id, Artifact.task_id == task.id,
+                      Artifact.kind == "content_request").limit(1))
+                  if raw is None:
+                      continue
+                  brief = (json.loads(raw).get("seo_brief") or {})
+                  query = brief.get("primary_query")
+                  if query in {target_query, *required_queue}:
+                      matches.setdefault(query, []).append(task)
+              if any(len(matches.get(q, [])) != 1 for q in {target_query, *required_queue}):
+                  raise SystemExit("ABORT: canary tasks not uniquely identifiable")
+              candidate = matches[target_query][0]
+              if candidate.status != TaskStatus.FAILED:
+                  raise SystemExit("ABORT: previous canary is not in FAILED state")
+              if any(matches[q][0].status != TaskStatus.QUEUED for q in required_queue):
+                  raise SystemExit("ABORT: other canary tasks changed state")
+              attempts = db.scalar(select(func.count()).select_from(Artifact).where(
+                  Artifact.task_id == candidate.id, Artifact.kind == "seo_article_started"))
+              articles = db.scalar(select(func.count()).select_from(Artifact).where(
+                  Artifact.task_id == candidate.id, Artifact.kind == "article"))
+              publications = db.scalar(select(func.count()).select_from(Publication).join(
+                  Artifact, Publication.artifact_id == Artifact.id).where(
+                  Artifact.task_id == candidate.id))
+              editor_failure = db.scalar(select(AgentRun.id).where(
+                  AgentRun.task_id == candidate.id, AgentRun.agent_name == "seo_editor",
+                  AgentRun.status == "failed").limit(1))
+              if attempts != 1 or articles != 0 or publications != 0 or editor_failure is None:
+                  raise SystemExit(
+                      f"ABORT: retry not safe (attempts={attempts}, articles={articles}, publications={publications}, editor_failure={editor_failure is not None})"
+                  )
+              result = db.execute(update(Task).where(
+                  Task.id == candidate.id, Task.product_id == product.id,
+                  Task.status == TaskStatus.FAILED
+              ).values(status=TaskStatus.QUEUED))
+              if result.rowcount != 1:
+                  db.rollback()
+                  raise SystemExit("ABORT: another process changed task state")
+              db.commit()
+              print("SEO_CANARY_REQUEUED", str(candidate.id)[:8],
+                    "no content generated, daily limit unchanged, global autorun OFF")
+          PY
+          REMOTE
