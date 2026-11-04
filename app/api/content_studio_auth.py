@@ -255,10 +255,14 @@ def _login_required(request: Request):
     raise HTTPException(401, "Authentication required", headers={"WWW-Authenticate": "Basic"})
 
 
-def _apply_scope(request: Request, login: str, allowed: list[str] | None) -> str:
+def _apply_scope(request: Request, login: str, allowed: list[str] | None, users: dict | None = None) -> str:
     request.state.studio_product_ids = allowed
     request.state.studio_account_role = "admin" if allowed is None else "company"
     request.state.studio_login = login
+    account = (users or {}).get(login, {})
+    request.state.studio_brand_approver = (
+        allowed is not None and account.get("role") == "company"
+        and account.get("brand_approver") is True)
     if allowed is None:
         return login
     product_id = request.path_params.get("product_id")
@@ -287,16 +291,16 @@ def require_studio_auth(
     # studio owner out of their own account (the landing page drops a narrower session instead).
     session = _session_login(request, settings, users)
     if session is not None:
-        return _apply_scope(request, *session)
+        return _apply_scope(request, *session, users=users)
     sso = _sso_login(request, settings, db)
     if sso is not None:
-        return _apply_scope(request, *sso)
+        return _apply_scope(request, *sso, users=users)
     if not credentials:
         _login_required(request)
     result = check_credentials(settings, users, credentials.username, credentials.password)
     if result is None:
         raise HTTPException(401, "Incorrect credentials", headers={"WWW-Authenticate": "Basic"})
-    return _apply_scope(request, *result)
+    return _apply_scope(request, *result, users=users)
 
 
 def require_studio_csrf(

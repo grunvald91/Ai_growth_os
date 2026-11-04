@@ -22,11 +22,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import time
+import tomllib
 from pathlib import Path
 
 HOME = Path("/opt/ai_growth_os/deploy")
@@ -34,6 +37,11 @@ CONFIG = HOME / "deploy.json"
 INSTALLED = HOME / "deploy_growth.py"
 API = "ai-growth-os-api-1"
 TAG_PREFIX = "servgo-growth-release:"
+POSTGRES = "ai-growth-os-postgres-1"
+BACKUPS = HOME.parent / "backups"
+# Only the dependency for Brand Kit's bundled WOFF2 font is approved for
+# an in-place extension of the otherwise immutable production base image.
+ALLOWED_INSTALL = frozenset({"fonttools[woff]>=4.60,<5"})
 
 
 def run(args, **kw):
@@ -66,6 +74,40 @@ def plan(base_migrations: list[str], new_migrations: list[str], current: str | N
     if current != expected:
         problems.append(f"the database is at {current}, the current base image expects {expected}")
     return problems
+
+
+def installable_requirements(release: Path, unmet: list[str]) -> list[str]:
+    """Fail closed on arbitrary missing packages; allow the reviewed font extra only."""
+    project = tomllib.loads((release / "pyproject.toml").read_text())
+    declared = project["project"]["dependencies"]
+    candidates = [item for item in declared if item in ALLOWED_INSTALL]
+    return [item for item in candidates if any(error.startswith(item + " (") for error in unmet)]
+
+
+def backup_database(current: str | None, newest: str) -> Path:
+    """A verified PostgreSQL custom-format dump before Alembic touches the database."""
+    BACKUPS.mkdir(parents=True, exist_ok=True, mode=0o700)
+    name = f"before-brand-kit-{current or 'unknown'}-to-{newest}-{int(time.time())}.dump"
+    path = BACKUPS / name
+    descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            subprocess.run(
+                ["docker", "exec", POSTGRES, "pg_dump", "-U", "ai_growth",
+                 "-d", "ai_growth", "-Fc"],
+                stdout=stream, stderr=subprocess.PIPE, check=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        with path.open("rb") as saved:
+            if saved.read(5) != b"PGDMP":
+                raise RuntimeError("PostgreSQL backup is not a custom-format dump")
+        if path.stat().st_size < 100:
+            raise RuntimeError("PostgreSQL backup appears empty")
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+    log(f"PG_BACKUP_OK {path.name} bytes={path.stat().st_size}")
+    return path
 
 
 def release_tag(migrations: list[str]) -> str:
@@ -102,28 +144,53 @@ def main(release: Path) -> None:
     facts = module.base_facts(base, release)
     new_migrations = sorted(p.name for p in (release / "alembic/versions").glob("*.py"))
     current = revision_of(alembic(base, "current"))
-    problems = plan(facts["migrations"], new_migrations, current, facts["unmet"])
+    allowed = installable_requirements(release, facts["unmet"])
+    unsupported = [item for item in facts["unmet"]
+                   if not any(item.startswith(req + " (") for req in allowed)]
+    problems = plan(facts["migrations"], new_migrations, current, unsupported)
     log(f"base_image={base} database_revision={current} new_migrations="
         f"{sorted(set(new_migrations) - set(facts['migrations']))}")
     if problems:
         raise SystemExit("not preparing: " + "; ".join(problems))
-    if (set(new_migrations) == set(facts["migrations"])):
-        log("base image already carries every migration; nothing to build")
+    changed = set(new_migrations) != set(facts["migrations"])
+    if not changed and not allowed:
+        log("base image already carries every migration and dependency")
         image = base
     else:
         name = "growth-prepare-build"
+        image = release_tag(new_migrations) + ("-fonttools" if allowed else "")
         subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-        run(["docker", "create", "--name", name, base, "true"], stdout=subprocess.DEVNULL)
+        if allowed:
+            command = "python -m pip install --no-cache-dir " + " ".join(
+                shlex.quote(req) for req in allowed)
+            run(["docker", "create", "--name", name, base, "sh", "-lc", command],
+                stdout=subprocess.DEVNULL)
+        else:
+            run(["docker", "create", "--name", name, base, "true"],
+                stdout=subprocess.DEVNULL)
         try:
-            run(["docker", "cp", str(release / "alembic/versions") + "/.", name + ":/app/alembic/versions"])
+            if allowed:
+                run(["docker", "start", name], stdout=subprocess.DEVNULL)
+                exit_code = cap(["docker", "wait", name]).strip()
+                if exit_code != "0":
+                    raise RuntimeError("Installing reviewed fontTools dependency failed")
+                log("FONTTOOLS_INSTALL_OK")
+            run(["docker", "cp", str(release / "alembic/versions") + "/.",
+                 name + ":/app/alembic/versions"])
+            # Check package versions against the release's manifest in the final
+            # container, not just pip's exit code.
             run(["docker", "commit", "--change", 'CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]',
-                 name, release_tag(new_migrations)], stdout=subprocess.DEVNULL)
+                 name, image], stdout=subprocess.DEVNULL)
         finally:
             subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-        image = release_tag(new_migrations)
-        log(f"built {image}")
+        final = module.base_facts(image, release)
+        if final["unmet"] or sorted(final["migrations"]) != new_migrations:
+            raise RuntimeError("Prepared base does not match required dependencies/migrations")
+        log(f"PREPARED_IMAGE_OK {image}")
     heads = alembic(image, "heads").split()
     log(f"image_head={heads[0] if heads else None}")
+    if changed:
+        backup_database(current, max(name.split("_")[0] for name in new_migrations))
     alembic(image, "upgrade", "head")
     after = revision_of(alembic(image, "current"))
     log(f"database_revision_after={after}")

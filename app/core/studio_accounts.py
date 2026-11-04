@@ -120,7 +120,7 @@ def _check_password(password: str) -> str:
 
 
 def create_account(settings, *, username: str, password: str | None, role: str, product_ids: list[str],
-                   created_by: str | None, reserved: set[str] = frozenset()) -> str:
+                   created_by: str | None, reserved: set[str] = frozenset(), brand_approver: bool = False) -> str:
     """Create an account; returns the password (generated when not given)."""
     username = username.strip().lower()
     if not USERNAME.fullmatch(username):
@@ -139,6 +139,7 @@ def create_account(settings, *, username: str, password: str | None, role: str, 
         accounts[username] = {
             "password_hash": hash_password(password), "role": role,
             "product_ids": companies if role == "company" else [],
+            "brand_approver": bool(brand_approver) if role == "company" else False,
             "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "created_by": created_by or "operator",
         }
@@ -169,3 +170,14 @@ def delete_account(settings, username: str, *, actor: str | None) -> None:
             raise AccountError("Аккаунт не найден")
         _write(path, accounts)
     _verified.clear()
+
+
+def set_brand_approver(settings, username: str, enabled: bool) -> None:
+    """Operator grants sign-off on all companies assigned to this account."""
+    path, _ = accounts_path(settings)
+    with _Locked(path):
+        accounts = load_accounts(settings)
+        if username not in accounts or accounts[username].get("role") != "company":
+            raise AccountError("Аккаунт компании не найден")
+        accounts[username]["brand_approver"] = bool(enabled)
+        _write(path, accounts)

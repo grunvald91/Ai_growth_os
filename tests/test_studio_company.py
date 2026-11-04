@@ -231,6 +231,11 @@ def test_deletion_respects_foreign_keys_and_spares_other_companies(tmp_path):
             if column.unique and not column.foreign_keys and not column.primary_key:
                 # A unique column must differ between the two companies' rows.
                 row[column.name] = next(counter) if column.type.python_type is int else uuid.uuid4().hex
+            elif column.name == "product_id" and table.name == "brand_kit_active":
+                # Composite FK: product_id points to both Product and BrandVersion.
+                row[column.name] = product_id
+            elif column.name == "version_id" and table.name == "brand_kit_active":
+                row[column.name] = ids["brand_kit_versions"]
             elif column.foreign_keys:
                 target = next(iter(column.foreign_keys)).column.table.name
                 row[column.name] = product_id if target == "products" else ids.get(target)

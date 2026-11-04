@@ -12,7 +12,7 @@ from app.api.content_studio import _owner_product, _studio_form, esc, studio_pag
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.core.config import get_settings
 from app.core.studio_accounts import (AccountError, create_account, delete_account, load_accounts,
-                                      reset_password)
+                                      reset_password, set_brand_approver)
 from app.db.session import get_db
 from app.models.domain import Product
 from app.sso import links as sso_links
@@ -46,7 +46,7 @@ def accounts_html(product_id, accounts, products, operators, *, actor=None, noti
         result = (f'<section class="sg-surface sg-notice" role="status"><h2>{esc(notice[0])}</h2>'
                  f'<p>Логин: <b>{esc(notice[1])}</b><br>Пароль: <code class="sg-secret">{esc(notice[2])}</code></p>'
                  '<p>Скопируйте пароль сейчас: он показывается один раз и нигде не хранится в открытом виде. '
-                 'Вход — на странице <b>growth.servgo.ru/studio/login</b>. Логин можно вводить с любой буквы.</p></section>')
+                 'Вход — на странице <b>servgo.ru/studio/login</b>. Логин можно вводить с любой буквы.</p></section>')
     rows = ""
     for name in sorted(operators):
         rows += (f'<tr><td><b>{esc(name)}</b></td><td>Владелец (основной вход)</td><td>Все компании</td>'
@@ -55,10 +55,18 @@ def accounts_html(product_id, accounts, products, operators, *, actor=None, noti
         if account.get("role") == "admin":
             role, scope = "Администратор", "Все компании"
         else:
-            role = "Компания"
+            role = "Компания · утверждает стиль" if account.get("brand_approver") is True else "Компания"
             scope = ", ".join(names.get(pid, "удалённая компания") for pid in account.get("product_ids", []))
         actions = (f'<form method="post" action="{base}/{esc(name)}/password#account-result" class="sg-inline-actions">'
                    '<button class="btn secondary">Новый пароль</button></form>')
+        if account.get("role") == "company":
+            enabled = account.get("brand_approver") is True
+            actions += (
+                f'<form method="post" action="{base}/{esc(name)}/brand-approval" '
+                'class="sg-inline-actions"><input type="hidden" name="enabled" '
+                f'value="{0 if enabled else 1}"><button class="btn secondary">'
+                + ("Отозвать право утверждения" if enabled else "Разрешить утверждать стиль")
+                + '</button></form>')
         if name != actor:
             actions += (f'<form method="post" action="{base}/{esc(name)}/delete" class="sg-inline-actions" '
                         f'onsubmit="return confirm(\'Удалить аккаунт {esc(name)}? Вход по нему сразу перестанет работать.\')">'
@@ -93,6 +101,8 @@ def accounts_html(product_id, accounts, products, operators, *, actor=None, noti
              f'<option value="admin"{" selected" if role == "admin" else ""}>Администратор — все компании и аккаунты</option>'
              '</select></label>'
              f'<fieldset class="sg-field"><legend>Компании (для роли «Компания»)</legend>{checks}</fieldset>'
+             '<label class="sg-check"><input type="checkbox" name="brand_approver" value="on"> '
+             'Разрешить утверждать фирменный стиль для всех выбранных компаний</label>'
              '<button class="btn primary">Создать аккаунт</button></form></section></div>')
     return body
 
@@ -162,7 +172,8 @@ async def accounts_create(product_id: UUID, request: Request, db: Session = Depe
             raise AccountError("Выбрана несуществующая компания")
         password = create_account(settings, username=fields.get("username", ""), password=fields.get("password") or None,
                                   role=fields.get("role", ""), product_ids=chosen, created_by=actor,
-                                  reserved=_operator_logins(settings))
+                                  reserved=_operator_logins(settings),
+                                  brand_approver=fields.get("brand_approver") == "on")
     except AccountError as exc:
         return _render(request, db, product, settings, status=422, error=str(exc),
                        fields={k: v for k, v in fields.items() if k != "password"})
@@ -354,3 +365,23 @@ def studio_identity_disconnect(request: Request, db: Session = Depends(get_db),
     from app.core.studio_operator_links import unbind_operator
     unbind_operator(settings, uid)
     return RedirectResponse("/studio/identity", status_code=303)
+
+
+@router.post("/studio/products/{product_id}/accounts/{username}/brand-approval",
+             response_class=HTMLResponse)
+async def accounts_brand_approval(product_id: UUID, username: str, request: Request,
+                                  db: Session = Depends(get_db),
+                                  settings=Depends(get_settings),
+                                  actor=Depends(require_studio_auth)):
+    _require_admin(request)
+    request.state.studio_actor = actor
+    product = _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    enabled = fields.get("enabled")
+    if enabled not in {"0", "1"}:
+        raise HTTPException(422, "Некорректные полномочия")
+    try:
+        set_brand_approver(settings, username, enabled == "1")
+    except AccountError as exc:
+        return _render(request, db, product, settings, status=422, error=str(exc))
+    return RedirectResponse(f"/studio/products/{product.id}/accounts", status_code=303)

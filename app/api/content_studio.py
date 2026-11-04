@@ -396,6 +396,7 @@ def more_links(product_id: UUID) -> list[tuple[str, str, str, str]]:
         ("comments", base + "/comments", "☰", "Комментарии"),
         ("intelligence", f"/intelligence?product_id={product_id}", "◎", "Бизнес-разведка"),
         ("profile", base + "/profile", "▣", "Профиль компании"),
+        ("brand", base + "/brand-kit", "◈", "Фирменный стиль"),
         ("speed", base + "/speed", "⏱", "Скорость ИИ-моделей"),
         ("team", "/studio/team", "♧", "ИИ-команда"),
         ("tune", "/studio/tune", "⚙", "Настройка агентов"),
