@@ -1,0 +1,94 @@
+name: One-time read-only Stories JSON response shape diagnosis
+on:
+  push:
+    branches: [diag/creative-stories-prod-20261104]
+    paths: ['.github/workflows/creative-response-shape-readonly-20261104.yml']
+permissions:
+  contents: read
+concurrency:
+  group: creative-response-shape-20261104
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    if: github.repository == 'grunvald91/Ai_growth_os' && github.ref == 'refs/heads/diag/creative-stories-prod-20261104'
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Read sanitized parse metadata, no provider calls and no DB writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > /tmp/shapes.py <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from sqlalchemy import select
+          from app.core.config import Settings
+          from app.db.session import SessionLocal
+          from app.models.domain import Task, Artifact, AgentRun, CostRecord
+          SUFFIX="8dab2a1d"
+          cfg=Settings()
+          print("release_sha",cfg.release_sha)
+          print("configured_llm_provider",cfg.llm_provider,"default_model",cfg.llm_model)
+          print("critic_enabled",cfg.agent_critic_enabled)
+          with SessionLocal() as db:
+              rows=list(db.scalars(select(Task).where(
+                  Task.assigned_agent=="content_creative",
+                  Task.created_at >= datetime(2026,11,4,5,0,tzinfo=timezone.utc),
+              ).order_by(Task.created_at.desc()).limit(100)))
+              matches=[r for r in rows if str(r.id).endswith(SUFFIX)]
+              if len(matches)!=1:
+                  raise SystemExit("Task not uniquely found")
+              t=matches[0]
+              print("task",SUFFIX,"status",str(t.status.value))
+              stages=list(db.scalars(select(Artifact).where(
+                  Artifact.task_id==t.id,
+                  Artifact.kind.in_(("creative_stage_error","creative_image_error")),
+              ).order_by(Artifact.created_at)))
+              for s in stages[-12:]:
+                  data=json.loads(s.content)
+                  safe={key:data.get(key) for key in (
+                      "stage","exception_type","json_error_code","json_line","json_column",
+                      "json_position","output_length","stop_reason","model","code","frame_number",
+                      "http_status",
+                  ) if key in data}
+                  print("safe_stage_error",json.dumps(safe,ensure_ascii=False))
+              runs=list(db.scalars(select(AgentRun).where(
+                  AgentRun.task_id==t.id).order_by(AgentRun.started_at)))
+              for run in runs[-12:]:
+                  print("agent_run",json.dumps({
+                      "agent_name":run.agent_name,"status":run.status,
+                      "model":run.model,"provider":run.provider,
+                      "error_type":str(run.error or "").split(":")[1][:80] if ":" in str(run.error or "") else str(run.error or "")[:80],
+                  }))
+                  calls=list(db.scalars(select(CostRecord).where(
+                      CostRecord.agent_run_id==run.id,CostRecord.category=="llm",
+                  ).order_by(CostRecord.incurred_at)))
+                  for c in calls[-8:]:
+                      details=c.details if isinstance(c.details,dict) else {}
+                      print("llm_call",json.dumps({
+                          "stage":details.get("llm_stage"),
+                          "model":str(details.get("model") or "")[:120],
+                          "input_tokens":c.input_tokens,
+                          "output_tokens":c.output_tokens,
+                          "usage_incomplete":details.get("usage_incomplete"),
+                          "finish_reason":details.get("finish_reason"),
+                      }))
+          PY
+          test -n "$SSHPASS"
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned || true
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            if ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/scanned
+          test -s ~/.ssh/known_hosts
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            "docker exec -i ai-growth-os-api-1 python -" < /tmp/shapes.py
