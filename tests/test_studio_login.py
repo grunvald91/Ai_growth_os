@@ -178,7 +178,8 @@ def test_account_form_ticks_the_current_company_and_shows_errors_at_the_form(stu
     assert f'name="company_{studio.mine.id}" value="on" checked' not in bad.text
     ok = c.post(url, auth=OWNER, data={"username": "manager", "role": "company", f"company_{studio.mine.id}": "on"})
     area = ok.text.split('id="account-result"', 1)[1]
-    assert "Аккаунт создан" in area and "studio/login" in area
+    assert "Аккаунт создан" in area and "прежнем отдельном адресе Studio" in area
+    assert "servgo.ru/studio/login?legacy=1" not in area
 
 
 def test_canonical_servgo_studio_login_uses_main_account(studio):
