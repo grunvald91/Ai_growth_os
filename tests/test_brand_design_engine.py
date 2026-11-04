@@ -104,7 +104,7 @@ def test_renderer_outputs_three_true_stories_with_original_logo_and_safe_boxes(c
             assert rendered.format == "PNG"
             lx1, ly1, lx2, ly2 = result.logo_box
             assert rendered.getpixel(((lx1 + lx2) // 2, (ly1 + ly2) // 2)) == (235, 30, 160)
-        for box in (result.logo_box, result.heading_box, result.body_box, result.cta_box):
+        for box in (result.logo_box, result.logo_backdrop_box, result.panel_box, result.heading_box, result.body_box, result.cta_box):
             if box is not None:
                 assert SAFE_LEFT <= box[0] < box[2] <= SAFE_RIGHT
                 assert SAFE_TOP <= box[1] < box[3] <= SAFE_BOTTOM
@@ -223,10 +223,13 @@ def test_corrupted_background_and_render_are_rejected(company):
     _, file = verified_render(db, root, a.id, render.id)
     file.write_bytes(b"tampered")
     assert client.get(f"/studio/products/{a.id}/brand-kit/renders/{render.id}").status_code == 404
-    assert client.post(f"/studio/products/{a.id}/brand-kit/compose", json={
+    repaired = client.post(f"/studio/products/{a.id}/brand-kit/compose", json={
         "version_id": str(va.id), "frame_key": "good:no-background",
         "frame": frame().model_dump(mode="json"),
-    }).status_code == 404
+    })
+    assert repaired.status_code == 201, repaired.text
+    assert repaired.json()["id"] == str(render.id)
+    assert hashlib.sha256(file.read_bytes()).hexdigest() == render.sha256
 
 
 def test_company_scoped_session_denies_other_company(company):
@@ -241,3 +244,77 @@ def test_company_scoped_session_denies_other_company(company):
         assert client.get(f"/studio/products/{b.id}/brand-kit/renders/{uuid4()}").status_code == 404
     finally:
         app.dependency_overrides.pop(require_studio_auth, None)
+
+
+def test_missing_png_restored_with_same_id_and_sha(company):
+    client, db, a, _, va, _, root, _ = company
+    record = create_composition(db, root, a.id, va.id, frame(), frame_key="recover:file")
+    _, path = verified_render(db, root, a.id, record.id)
+    original = path.read_bytes()
+    path.unlink()
+    assert client.get(f"/studio/products/{a.id}/brand-kit/renders/{record.id}").status_code == 404
+    answer = client.post(f"/studio/products/{a.id}/brand-kit/compose", json={
+        "version_id": str(va.id), "frame_key": "recover:file",
+        "frame": frame().model_dump(mode="json"),
+    })
+    assert answer.status_code == 201, answer.text
+    assert answer.json()["id"] == str(record.id)
+    assert path.read_bytes() == original
+    assert db.scalar(select(func.count()).select_from(BrandRender)) == 1
+
+
+def test_png_recovery_refuses_mismatch_after_renderer_upgrade(company, monkeypatch):
+    client, db, a, _, va, _, root, _ = company
+    record = create_composition(db, root, a.id, va.id, frame(), frame_key="recover:mismatch")
+    _, path = verified_render(db, root, a.id, record.id)
+    path.unlink()
+    from app.brand_kit import design_service
+    previous = design_service.render_story
+
+    def modified(*args, **kwargs):
+        result = previous(*args, **kwargs)
+        return result.__class__(**{**vars(result), "png": result.png + b"extra"})
+    monkeypatch.setattr(design_service, "render_story", modified)
+    answer = client.post(f"/studio/products/{a.id}/brand-kit/compose", json={
+        "version_id": str(va.id), "frame_key": "recover:mismatch",
+        "frame": frame().model_dump(mode="json"),
+    })
+    assert answer.status_code == 404
+    assert not path.exists()
+
+
+def test_cmap_detects_unsupported_character_and_uses_real_weights(company):
+    _, _, _, _, _, _, _, style = company
+    assert load_font("Manrope", 60, True)
+    assert load_font("Manrope", 60, False)
+    with pytest.raises(ValueError, match="U\\+"):
+        render_story(style, frame(heading="Креатив 🦄"), logo=png_logo())
+
+
+def test_background_chunked_body_limit(company):
+    client, db, a, _, _, _, _, _ = company
+    boundary = "photo-limit"
+    def chunks():
+        yield (f'--{boundary}\\r\\nContent-Disposition: form-data; '
+               'name="file"; filename="big.png"\\r\\n'
+               'Content-Type: image/png\\r\\n\\r\\n').encode()
+        yield b"x" * (12_000_000 + 20_000)
+        yield f'\\r\\n--{boundary}--\\r\\n'.encode()
+    r = client.post(f"/studio/products/{a.id}/brand-kit/backgrounds",
+        content=chunks(),
+        headers={"content-type": f"multipart/form-data; boundary={boundary}",
+                 "transfer-encoding": "chunked"})
+    assert r.status_code == 413
+    assert db.scalar(select(func.count()).select_from(BrandBackground)) == 0
+
+
+def test_background_sections_and_text_alignment(company):
+    _, _, _, _, _, _, _, brand = company
+    configured = brand.model_copy(deep=True)
+    configured.hook.image_position = "bottom"
+    configured.hook.text_align = "right"
+    result = render_story(configured, frame(), logo=png_logo(), background=picture())
+    assert result.background_mode == "bottom"
+    with Image.open(io.BytesIO(result.png)) as image:
+        assert image.getpixel((30, 30)) == (13, 27, 42)
+        assert image.getpixel((30, 1400)) == (12, 71, 85)
