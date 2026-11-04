@@ -55,10 +55,8 @@
               (org.categories || []).length ? 'Категории: ' + org.categories.join(', ') : ''
             ].filter(Boolean).join('\n');
             if (description && !description.value.trim()) description.value = summary;
-            evidence.value = JSON.stringify({
-              id: org.id, name: org.name, address: org.address,
-              website: org.website, categories: org.categories, maps_url: org.maps_url
-            });
+            // The server verifies the short-lived, company-bound signed result.
+            evidence.value = org.selection_token || '';
             result.textContent = 'Данные «' + org.name + '» подставлены. Проверьте и подтвердите при создании профиля.';
           });
           const link = make('a', ' Открыть в Картах', row);
