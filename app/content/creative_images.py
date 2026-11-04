@@ -307,8 +307,14 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
                 with Image.open(io.BytesIO(picture)) as cached_image:
                     cached_image.load()
                     if (cached_image.format != "PNG" or
-                            cached_image.size != OUTPUT_SIZES[ratio]):
+                            (not branded and cached_image.size != OUTPUT_SIZES[ratio]) or
+                            (branded and (
+                                cached_image.width < 256 or cached_image.height < 256
+                                or cached_image.width * cached_image.height > 12_000_000))):
                         raise ValueError("Unrecorded creative image file failed validation")
+                if branded and not _frame_intents(
+                        db, request.product_id, task_id, frame.number):
+                    raise ValueError("Branded orphan file has no matching paid intent")
             else:
                 if branded:
                     # Persist before contacting the provider. On timeout, a
@@ -330,10 +336,15 @@ async def generate_images(db, settings, request, draft, *, task_id: UUID, provid
                             "state": "pending",
                         }, ensure_ascii=False))
                     db.commit()
-                picture = await (provider.generate(prompt, model=model, ratio=ratio)
-                                 if provider is not None else request_image(
-                                     settings, model, prompt, ratio,
-                                     preserve_source=branded))
+                if provider is not None:
+                    picture = await provider.generate(prompt, model=model, ratio=ratio)
+                elif branded:
+                    picture = await request_image(
+                        settings, model, prompt, ratio, preserve_source=True)
+                else:
+                    # Keep the legacy call signature for existing classic
+                    # image-model adapters and their test doubles.
+                    picture = await request_image(settings, model, prompt, ratio)
                 picture = png_output(picture, ratio=ratio, preserve_source=branded)
                 temporary = directory / (filename + ".partial")
                 temporary.write_bytes(picture)
