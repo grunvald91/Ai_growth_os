@@ -18,11 +18,22 @@ export async function clearLogin() {
   localStorage.removeItem('userRole')
   localStorage.removeItem('userName')
   localStorage.removeItem('adminBusinessId')
+  sessionStorage.removeItem('servgoLoginNext')
   window.dispatchEvent(new Event('servgo-logout'))
   // The server endpoint deletes the HttpOnly shared-session cookie; local
   // logout still works offline, while the tombstone blocks silent re-login.
-  try { await api.logout() }
-  catch (error) { console.warn('Could not clear the shared session cookie; automatic restoration is blocked locally', error) }
+  // The canonical PWA also owns the Growth cookies under /studio.
+  // Clear both server sessions before navigation; a failure never resurrects
+  // the locally logged-out account.
+  const completed = await Promise.allSettled([
+    api.logout(),
+    fetch('/studio/session/logout', { method: 'POST', credentials: 'same-origin' }).then(response => {
+      if (!response.ok) throw new Error('Studio logout HTTP ' + response.status)
+    }),
+  ])
+  for (const entry of completed) {
+    if (entry.status === 'rejected') console.warn('Remote logout unavailable; local logout remains active', entry.reason)
+  }
   // Callers handling explicit logout must await deletion before navigation.
   await clearOfflineSnapshots()
 }
