@@ -138,15 +138,15 @@ def _brand_body(product_id, db: Session, error: str = "") -> str:
     preview = (
         '<div class="bk-preview-row" id="bk-preview">'
         + "".join(
-            '<div class="bk-phone"><div class="bk-safe"><div class="bk-preview-logo-wrap">' +
+            f'<div class="bk-phone" data-role="{role}" data-position="{getattr(style, role).logo_position}"><div class="bk-safe"><div class="bk-preview-logo-wrap">' +
             logo_html + '</div><div class="bk-preview-content"><small>Пример оформления</small>'
             f'<strong>{esc(title)}</strong><span>{esc(subtitle)}</span>'
-            + ('<b class="bk-preview-cta">Записаться</b>' if number == 3 else '') +
+            + ('<b class="bk-preview-cta">Записаться</b>' if role == "cta" else '') +
             '</div></div></div>'
-            for number, title, subtitle in (
-                (1, "Что мешает клиентам записаться?", "Первый кадр привлекает внимание"),
-                (2, "Покажите простое решение", "Понятная мысль крупным текстом"),
-                (3, "Готовы попробовать?", "Завершите серию призывом к действию"))
+            for role, title, subtitle in (
+                ("hook", "Что мешает клиентам записаться?", "Первый кадр привлекает внимание"),
+                ("explanation", "Покажите простое решение", "Понятная мысль крупным текстом"),
+                ("cta", "Готовы попробовать?", "Завершите серию призывом к действию"))
         ) + '</div>'
     )
     history = "".join(
@@ -171,7 +171,10 @@ def _brand_body(product_id, db: Session, error: str = "") -> str:
 background:var(--bk-background);color:var(--bk-text);font-family:var(--bk-font)}
 .bk-safe{height:100%;padding:16% 8% 20%;display:flex;flex-direction:column;justify-content:space-between;gap:12px}
 .bk-preview-logo{max-width:64%;max-height:30px;object-fit:contain;object-position:left center}
-.bk-no-logo{font-size:9px;opacity:.7}.bk-preview-content{display:grid;gap:8px;min-width:0}
+.bk-no-logo{font-size:9px;opacity:.7}
+.bk-phone[data-position^="bottom"] .bk-preview-logo-wrap{order:2}
+.bk-phone[data-position$="right"] .bk-preview-logo-wrap{text-align:right}
+.bk-phone[data-position$="right"] .bk-preview-logo{object-position:right center}.bk-preview-content{display:grid;gap:8px;min-width:0}
 .bk-preview-content small{font-size:9px;opacity:.75}.bk-preview-content strong{font-size:clamp(10px,1.6vw,21px);line-height:1.2;overflow-wrap:anywhere}
 .bk-preview-content span{font-size:clamp(9px,1.2vw,15px);line-height:1.3;overflow-wrap:anywhere}
 .bk-preview-cta{padding:7px;background:var(--bk-accent);color:#fff;border-radius:6px;font-size:10px;text-align:center}
@@ -204,6 +207,11 @@ background:var(--bk-background);color:var(--bk-text);font-family:var(--bk-font)}
     for(const key of ['background','text','accent']){
       const field=form.elements.namedItem(key);
       if(field) preview.style.setProperty('--bk-'+key,field.value);
+    }
+    for (const role of ['hook','explanation','cta']) {
+      const frame=preview.querySelector('[data-role="'+role+'"]');
+      const position=form.elements.namedItem(role+'_logo_position');
+      if(frame&&position) frame.dataset.position=position.value;
     }
     const font=form.elements.namedItem('heading');
     if(font)preview.style.setProperty('--bk-font',JSON.stringify(font.value)+',Arial,sans-serif');
