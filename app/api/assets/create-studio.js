@@ -112,6 +112,16 @@
     }
   });
 
+  // Inline assistance panels are dismissible as well. Ignore their own
+  // launcher buttons so a tap on an info icon can switch descriptions.
+  document.addEventListener('pointerdown',event=>{
+    if(!(event.target instanceof Element))return;
+    if(!panel.hidden && !panel.contains(event.target) &&
+       !event.target.closest('[data-sg-info],[data-sg-about]'))panel.hidden=true;
+    if(!topics.hidden && !topics.contains(event.target) &&
+       !event.target.closest('[data-sg-suggest]'))topics.hidden=true;
+  });
+
   // The Create overlay can be collapsed without hiding the input or losing messages.
   // Pointer gestures are scoped to the handles, so they do not compete with
   // feed scrolling or the hold-to-record voice gesture in the composer.
