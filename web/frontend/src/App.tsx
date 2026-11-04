@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect } from 'react'
+import { lazy, Suspense, useState, useEffect, useCallback } from 'react'
 import { Routes, Route, Navigate, useSearchParams, useLocation, useNavigate } from 'react-router-dom'
 import { api, ApiError } from './api/client'
 import { clearLogin, saveLogin } from './authUtils'
@@ -56,23 +56,29 @@ function LegacyAdminRedirect({ to }: { to: string }) {
 /** Finish Growth -> ServGo sign-out on the canonical same-origin PWA. */
 function UnifiedLogoutPage() {
   const navigate = useNavigate()
+  const [error, setError] = useState('')
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let active = true
     void clearLogin()
-      .catch(error => console.warn('Logout cleanup failed:', error))
-      .finally(() => { if (active) navigate('/login', { replace: true }) })
+      .then(() => { if (active) navigate('/login?logged_out=1', { replace: true }) })
+      .catch(() => { if (active) setError('Не удалось завершить выход на сервере. Проверьте интернет и повторите.') })
     return () => { active = false }
-  }, [navigate])
-  return <div role="status" style={{ padding: 24 }}>Выходим из аккаунта…</div>
+  }, [navigate, attempt])
+  if (error) return <main role="alert" style={{ padding: 24 }}>
+    <p>{error}</p>
+    <button type="button" onClick={() => { setError(''); setAttempt(n => n + 1) }}>Повторить выход</button>
+  </main>
+  return <div role="status" style={{ padding: 24 }}>Завершаем выход из аккаунта…</div>
 }
 
-function ProtectedRoute({ children, restorationPending }: { children: React.ReactNode; restorationPending: boolean }) {
+function ProtectedRoute({ children, restorationPending, loginPath = '/login' }: { children: React.ReactNode; restorationPending: boolean; loginPath?: string }) {
   const access = routeAccess(
     localStorage.getItem('token'), localStorage.getItem('userRole'), false, restorationPending,
     localStorage.getItem('servgoExplicitLogout') === '1' || sessionStorage.getItem('servgoExplicitLogout') === '1',
   )
   if (access === 'wait') return <div role="status" style={{ padding: 24 }}>Восстанавливаем вход…</div>
-  if (access === 'login') return <Navigate to="/login" replace />
+  if (access === 'login') return <Navigate to={loginPath} replace />
   return <>{children}</>
 }
 
@@ -122,6 +128,8 @@ function App() {
     let active = true
     async function restoreAuth() {
       try {
+        // Logout must run before any automatic Telegram/cookie restoration.
+        if (window.location.pathname === '/logout') return
         if (sessionStorage.getItem('servgoExplicitLogout') === '1' ||
             localStorage.getItem('servgoExplicitLogout') === '1') return
         const initData = window.Telegram?.WebApp?.initData
@@ -204,7 +212,8 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/logout" element={<UnifiedLogoutPage />} />
         <Route path="/workspace/studio-entry" element={
-          <ProtectedRoute restorationPending={authRestoring}><StudioSignInPage /></ProtectedRoute>
+          <ProtectedRoute restorationPending={authRestoring}
+            loginPath="/login?next=%2Fworkspace%2Fstudio-entry"><StudioSignInPage /></ProtectedRoute>
         } />
         <Route path="/login/yandex" element={<YandexLoginPage />} />
         <Route path="/mail" element={<OwnerMailPage />} />
