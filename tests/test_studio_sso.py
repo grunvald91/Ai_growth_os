@@ -101,6 +101,7 @@ class StudioSsoTest(unittest.IsolatedAsyncioTestCase):
         claims = read_ticket(body['url'])
         self.assertEqual((claims['uid'], claims['biz'], claims['role'], claims['aud']),
                          (self.u['owner'], self.business_id, 'owner', 'growth-studio'))
+        self.assertEqual(claims['origin'], 'https://servgo.ru')
         self.assertLessEqual(claims['exp'] - time.time(), 60)
         self.assertGreater(claims['exp'] - time.time(), 50)
 
