@@ -444,7 +444,7 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
                         raise ValueError("Incomplete creative output") from exc
                     if len(response.content) > 65000:
                         raise ValueError("Creative output exceeds bound") from exc
-                    result = validate_candidate(json.loads(response.content))
+                    result = validate_candidate(parse_creative_json(response.content))
                 check = ArtifactService(db).create(
                     product_id=product.id, task_id=task.id, agent_run_id=run.id,
                     kind="content_stage_output", title=agent + ": draft",
@@ -481,6 +481,8 @@ async def run_creative_once(db, settings, request: CreativeRequest, *, task_id: 
         if request.image_model != "none":
             from app.content.creative_images import generate_images, resolve_model
             model_name = resolve_model(settings, request.image_model)
+            active_stage = "creative_image"
+            response = None
             image_run = AgentRun(
                 task_id=task_id, agent_name="creative_image",
                 provider="openai" if model_name.startswith("gpt-") else "claudehub",
