@@ -39,6 +39,8 @@ from app.api.content_studio_company import router as content_studio_company_rout
 app.include_router(content_studio_company_router)
 from app.api.brand_kit import router as brand_kit_router
 app.include_router(brand_kit_router)
+from app.api.brand_kit_design import router as brand_kit_design_router
+app.include_router(brand_kit_design_router)
 from app.api.tune import router as tune_router
 app.include_router(tune_router)
 
