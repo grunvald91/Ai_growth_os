@@ -100,11 +100,15 @@ def servgo_business_roles(settings, user_id: int) -> dict[int, str] | None:
         return None
     roles: dict[int, str] = {}
     for item in data:
-        if (not isinstance(item, dict) or type(item.get("id")) is not int
-                or item["id"] <= 0 or item.get("role") not in {"owner", "co_owner", "administrator"}
-                or item["id"] in roles):
+        if not isinstance(item, dict):
             return None
-        roles[item["id"]] = item["role"]
+        business_id, role = item.get("id"), item.get("role")
+        if (type(business_id) is not int or business_id <= 0
+                or type(role) is not str
+                or role not in {"owner", "co_owner", "administrator"}
+                or business_id in roles):
+            return None
+        roles[business_id] = role
     return roles
 
 
