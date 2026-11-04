@@ -79,7 +79,7 @@ def _select(name: str, values, value, *, labels=None) -> str:
     return '<select name="' + esc(name) + '" id="bk-' + esc(name) + '">' + options + '</select>'
 
 
-def _brand_body(product_id, db: Session, error: str = "") -> str:
+def _brand_body(product_id, db: Session, error: str = "", *, can_approve: bool = True) -> str:
     active, versions, latest = read_state(db, product_id)
     style = BrandStyle.model_validate(latest.config) if latest else BrandStyle()
     base = f"/studio/products/{product_id}/brand-kit"
@@ -169,7 +169,7 @@ def _brand_body(product_id, db: Session, error: str = "") -> str:
         (f'<form method="post" action="{base}/versions/{v.id}/approve">'
          '<button class="btn secondary" type="submit">' +
          ("Вернуть версию" if v.status == "approved" else "Утвердить") +
-         '</button></form>' if not active or v.id != active.id else '') + '</div>'
+         '</button></form>' if can_approve and (not active or v.id != active.id) else '') + '</div>'
         for v in versions[:20]
     )
     css = """<style>
@@ -248,9 +248,12 @@ background:var(--bk-background);color:var(--bk-text);font-family:var(--bk-font)}
 
 
 @router.get("/studio/products/{product_id}/brand-kit", response_class=HTMLResponse)
-def brand_kit_page(product_id: UUID, db: Session = Depends(get_db)):
+def brand_kit_page(product_id: UUID, request: Request, db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
-    body = _brand_body(product_id, db)
+    can_approve = (
+        getattr(request.state, "studio_product_ids", None) is None
+        or getattr(request.state, "studio_sso_role", None) == "owner")
+    body = _brand_body(product_id, db, can_approve=can_approve)
     return HTMLResponse(studio_page_shell(
         product, active="profile", title="Фирменный стиль",
         subtitle="Логотип, цвета, шрифты и три шаблона для Stories.", body=body),
