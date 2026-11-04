@@ -56,7 +56,7 @@ def _message(title: str, text: str, status: int, *, action: tuple[str, str] | No
     body = f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="referrer" content="no-referrer"><meta name="theme-color" content="#F4F6FA">
+<meta name="referrer" content="no-referrer"><meta name="theme-color" content="#F4F6FA"><link rel="manifest" href="/manifest.webmanifest"><meta name="apple-mobile-web-app-capable" content="yes">
 <title>{html.escape(title)} · Growth Studio</title><link rel="icon" href="{LOGO}"><style>{STYLE}</style></head>
 <body><main><section>
   <div class="brand"><img src="{LOGO}" width="40" height="40" alt=""><b>Serv<span>Go</span></b></div>
@@ -170,7 +170,7 @@ def _ask_to_create(settings: Settings, claims: tickets.Claims) -> HTMLResponse:
     body = f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="referrer" content="no-referrer"><meta name="theme-color" content="#F4F6FA">
+<meta name="referrer" content="no-referrer"><meta name="theme-color" content="#F4F6FA"><link rel="manifest" href="/manifest.webmanifest"><meta name="apple-mobile-web-app-capable" content="yes">
 <title>Создать компанию · Growth Studio</title><link rel="icon" href="{LOGO}"><style>{STYLE}
 .ask-actions form{{margin-top:0}}.ask-actions{{display:grid;gap:10px;margin-top:20px}}
 .ask-later{{background:transparent;color:var(--blue);box-shadow:inset 0 0 0 1px currentColor}}

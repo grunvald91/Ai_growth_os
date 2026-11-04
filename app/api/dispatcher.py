@@ -123,6 +123,8 @@ def home_html(db: Session, product: Product, settings: Settings, request: Reques
   <meta name="theme-color" content="#ffffff">
   <title>{esc(product.name)} · Главная · Growth Studio</title>
   <link rel="icon" type="image/svg+xml" href="/studio/assets/servgo.svg">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="/studio/assets/studio.css?v=14">
   <link rel="stylesheet" href="/studio/assets/dispatcher.css?v={ASSET_VERSION}">
 </head>

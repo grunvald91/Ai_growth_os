@@ -1205,3 +1205,37 @@ html[data-theme="dark"] body[data-growth-design="v4"] .route-content .wb-downloa
   body[data-growth-design="v4"] #wb-topic-options label strong { font-size: 12px; line-height: 1.35; }
   body[data-growth-design="v4"] #wb-topic-options label small { font-size: 11px; line-height: 1.3; }
 }
+
+/* Material-detail contrast bridge: older typography and storyboard components
+ * use fixed light-mode inks (#243950, #42526e) underneath the v4 dark shell.
+ * Keep all material text on BookingBot semantic palette in both themes. */
+body[data-growth-design="v4"] .route-content :is(
+  .article-text,.preview-copy,.sg-post-preview,.material-detail-body .article-text,
+  .material-detail-card .panel-sub,.sg-storyboard-card h3,.sg-storyboard-screen span
+) {
+  color:var(--s-text) !important;
+  -webkit-text-fill-color:currentColor !important;
+  opacity:1;
+}
+body[data-growth-design="v4"] .route-content :is(
+  .sg-storyboard-card p,.sg-storyboard-card details p,.sg-storyboard-counter,
+  .sg-native-post-label,.material-detail-card .detail-meta
+) {
+  color:var(--s-muted) !important;
+  -webkit-text-fill-color:currentColor !important;
+  opacity:1;
+}
+body[data-growth-design="v4"] .route-content .material-detail-card details > summary {
+  color:var(--s-text) !important;
+}
+body[data-growth-design="v4"] .route-content :is(.sg-storyboard-card,.sg-post-preview) {
+  background:var(--s-surface-2) !important;
+  border-color:var(--s-line-2) !important;
+}
+body[data-growth-design="v4"] .route-content .sg-storyboard-screen {
+  background:var(--s-surface-3);
+  border-color:var(--s-line-2);
+}
+body[data-growth-design="v4"] .route-content .sg-storyboard-card details {
+  border-color:var(--s-line-2);
+}

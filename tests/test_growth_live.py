@@ -69,7 +69,7 @@ def test_daily_drawer_and_compact_navigation_use_v4_real_routes(live):
     assert 'id="sgDailyHandle"' in page.text
     assert 'id="sgDailyBackdrop"' in page.text
     assert '/studio/assets/growth-daily.js?v=1' in page.text
-    assert '/studio/assets/growth-daily.css?v=1' in page.text
+    assert '/studio/assets/growth-daily.css?v=2' in page.text
     assert 'id="sgOrgMenu" hidden' in page.text
     nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
     assert nav.index(">Календарь</span>") < nav.index(">Ещё</span>")
@@ -1137,7 +1137,7 @@ def test_mobile_seo_dashboard_prioritizes_status_and_hides_process_details(live)
     assert 'Запусков пока нет.' in page.text
     assert 'Подключить SEO-завод' in page.text
     assert 'после отдельного серверного выпуска' not in page.text
-    assert '/studio/assets/growth-servgo-air.css?v=6' in page.text
+    assert '/studio/assets/growth-servgo-air.css?v=7' in page.text
 
 
 def test_notification_bell_is_real_svg_centered_on_every_v4_screen(live):
