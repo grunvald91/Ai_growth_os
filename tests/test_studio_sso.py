@@ -29,9 +29,12 @@ def b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode().rstrip("=")
 
 
-def make_ticket(*, uid=7, biz=12, role="owner", exp=None, aud="growth-studio", secret=SSO, jti="j" * 16, v=1, name="Салон"):
-    payload = b64(json.dumps({"v": v, "aud": aud, "uid": uid, "biz": biz, "role": role, "name": name, "jti": jti,
-                              "exp": int(time.time() + 60) if exp is None else exp}).encode())
+def make_ticket(*, uid=7, biz=12, role="owner", exp=None, aud="growth-studio", secret=SSO, jti="j" * 16, v=1, name="Салон", origin=None):
+    data = {"v": v, "aud": aud, "uid": uid, "biz": biz, "role": role, "name": name, "jti": jti,
+            "exp": int(time.time() + 60) if exp is None else exp}
+    if origin is not None:
+        data["origin"] = origin
+    payload = b64(json.dumps(data).encode())
     return payload + "." + b64(hmac.new(secret.encode(), payload.encode(), hashlib.sha256).digest())
 
 
@@ -1013,3 +1016,77 @@ def test_legacy_origin_without_password_configuration_stays_closed(env):
     with TestClient(app, base_url=ORIGIN, follow_redirects=False) as client:
         page = client.get(f"/studio/products/{salon.id}/dispatch/state")
         assert page.status_code == 503
+
+
+def test_canonical_ticket_cannot_be_redeemed_on_legacy_growth_host(env):
+    """A stolen new canonical ticket must not become a Growth cookie via the legacy URL."""
+    from app.core.config import get_settings
+    _, settings, salon, _, _ = env
+    settings.studio_servgo_gateway_enabled = True
+    ticket = make_ticket(origin="https://servgo.ru", jti="canonical-only-001")
+    with TestClient(app, base_url="https://growth.servgo.ru", follow_redirects=False) as legacy:
+        refused = legacy.get("/studio/sso", params={"t": ticket})
+        assert refused.status_code == 403
+        assert "sg_sso=" not in refused.headers.get("set-cookie", "")
+        assert legacy.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as canonical:
+        canonical.cookies.set("sg_identity", _browser_identity(7))
+        accepted = canonical.get("/studio/sso", params={"t": ticket})
+        assert accepted.status_code == 303
+        assert canonical.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+
+
+def test_canonical_ticket_rejects_invalid_signed_destination(env):
+    _, settings, _, _, _ = env
+    settings.studio_servgo_gateway_enabled = True
+    with TestClient(app, base_url="https://servgo.ru", follow_redirects=False) as client:
+        client.cookies.set("sg_identity", _browser_identity(7))
+        bad = client.get("/studio/sso", params={"t": make_ticket(origin="https://evil.example",
+                                                       jti="invalid-origin-01")})
+        assert bad.status_code == 400
+
+
+def test_canonical_setup_intent_is_invalid_after_same_user_login_rotation(env):
+    db, _, _, _, _ = env
+    client, started = canonical_first_visit(env)
+    assert started.status_code == 303
+    client.cookies.set("sg_identity", _browser_identity(7, nonce="new-login-" + "x" * 32))
+    denied = client.post("/studio/sso/create", data={"business_id": 31},
+                         headers={"origin": "https://servgo.ru"})
+    assert denied.status_code == 400
+    assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.servgo_business_id == 31)) is None
+
+
+def test_canonical_logout_clears_pending_company_setup_cookie(env):
+    client, page = canonical_first_visit(env)
+    assert page.status_code == 303
+    assert "sg_growth_setup" in client.cookies
+    logged_out = client.post("/studio/session/logout",
+                             headers={"origin": "https://servgo.ru"})
+    assert logged_out.status_code == 204
+    assert "sg_growth_setup=" in logged_out.headers.get("set-cookie", "") or any(
+        h.startswith("sg_growth_setup=") and "max-age=0" in h.lower()
+        for h in logged_out.headers.get_list("set-cookie")
+    )
+    assert "sg_growth_setup" not in client.cookies
+    client.cookies.set("sg_identity", _browser_identity(7, nonce="another-login-" + "x" * 32))
+    denied = client.post("/studio/sso/create", data={"business_id": 31},
+                         headers={"origin": "https://servgo.ru"})
+    assert denied.status_code == 400
+
+
+def test_server_revokes_existing_studio_access_on_next_request_without_cache_flush(env):
+    _, _, salon, _, servgo = env
+    client = signed_in(env)
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 200
+    servgo.allowed.clear()  # No access.forget(): this models actual owner revocation.
+    assert client.get(f"/studio/products/{salon.id}/dispatch/state").status_code == 401
+
+
+def test_fresh_servgo_role_bypasses_stale_positive_cache(env):
+    _, settings, _, _, servgo = env
+    access.forget()
+    assert access.servgo_role(settings, 7, 12, now=1000) == "owner"
+    servgo.allowed.clear()
+    assert access.servgo_role(settings, 7, 12, now=1001) == "owner"
+    assert access.servgo_role(settings, 7, 12, now=1001, fresh=True) is None
