@@ -28,6 +28,8 @@ def test_create_history_gestures_preserve_feed_and_voice_input():
     assert "attachGrip(historyClose,false,1)" in script
     assert "attachGrip(historyOpen,true,-1)" in script
     assert "swipeDirection*movement>24" in script
+    assert "setPointerCapture(event.pointerId)" in script
+    assert "suppressClickUntil=performance.now()+350" in script
     assert "root.classList.toggle('sg-history-collapsed',!open)" in script
     assert "history.setAttribute('aria-hidden',String(!open))" in script
     assert "aria-expanded" in script
