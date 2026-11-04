@@ -94,6 +94,11 @@ _CONSUMER_APPOINTMENT = re.compile(
 )
 
 
+def consumer_appointment_query(query: str) -> bool:
+    """A direct appointment request targets a consumer, not a B2B software buyer."""
+    return bool(_CONSUMER_APPOINTMENT.search(normalize(query)))
+
+
 def planned_queries(db: Session, product_id: UUID) -> set[str]:
     """Primary queries of earlier plans of this company whose article is written or still in work.
     A query whose article failed or was cancelled is free again."""
@@ -161,7 +166,7 @@ def validate_plan(plan: SeoContentPlan, core: SemanticCore, taken: frozenset[str
         if key in seen_queries:
             raise PlanError(f"Primary query repeated or already written: {item.primary_query}")
         seen_queries.add(key)
-        if b2b_provider and _CONSUMER_APPOINTMENT.search(key):
+        if b2b_provider and consumer_appointment_query(key):
             raise PlanError(f"Consumer appointment query is not a B2B buyer query: {item.primary_query}")
         if buyer_segments and item.target_segment not in buyer_segments:
             raise PlanError(f"Plan item {item.id} does not target a declared buyer segment")

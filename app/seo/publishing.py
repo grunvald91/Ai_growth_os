@@ -163,6 +163,17 @@ def unsupported_servgo_pricing(db: Session, row: Artifact, article: ArticleArtif
             if _SERVGO_PRICE.search(visible) else [])
 
 
+def servgo_buyer_intent_problems(db: Session, row: Artifact, article: ArticleArtifact) -> list[str]:
+    """Protect the B2B ServGo blog from consumer-intent legacy article plans."""
+    product = db.get(Product, row.product_id)
+    if product is None or product.slug != "servgo":
+        return []
+    from app.seo.planner import consumer_appointment_query
+    if consumer_appointment_query(article.seo.primary_query):
+        return ["ServGo buyer-intent mismatch: consumer appointment query"]
+    return []
+
+
 def duplicate_page_problems(db: Session, row: Artifact, article: ArticleArtifact) -> list[str]:
     """Fail on actual repeats; avoid fuzzy heuristics that punish legitimately similar guides."""
     def core_text(value: ArticleArtifact) -> str:
@@ -256,6 +267,7 @@ def publish_if_clear(db: Session, article_id, *, now: datetime | None = None,
         return Outcome(False, "daily_publication_limit")
     article = ArticleArtifact.model_validate_json(row.content)
     problems = (static_problems(article) + unsupported_servgo_pricing(db, row, article)
+                + servgo_buyer_intent_problems(db, row, article)
                 + duplicate_page_problems(db, row, article))
     verdict = critic_verdict(db, row.task_id, article.reader_article)
     if verdict not in CLEAN_CRITIC_STATUSES:
@@ -364,6 +376,7 @@ def publish_owner_approved(db: Session, *, now: datetime | None = None,
         # Owner confirmation can override the critic's editorial verdict, not
         # basic page completeness: public_blog dereferences reader_article.
         problems = (static_problems(article) + unsupported_servgo_pricing(db, row, article)
+                + servgo_buyer_intent_problems(db, row, article)
                 + duplicate_page_problems(db, row, article))
         # Explicit owner approval cannot bypass a missing, stale or critical review.
         # The critic must have reviewed the exact reader-facing version.
