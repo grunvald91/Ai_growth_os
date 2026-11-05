@@ -1,0 +1,25 @@
+name: SEO 241 targeted regression
+
+on:
+  push:
+    branches: [qa/seo-241-single-e2e-20261105]
+    paths:
+      - .github/workflows/seo-241-targeted-test.yml
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: SEO regression tests
+        run: |
+          python -m py_compile deploy/ops/20261105/seo_241_e2e_once.py
+          python -m pip install -e '.[test]'
+          python -m pytest -q tests/test_seo_activation.py tests/test_seo_budgets.py tests/test_seo_factory.py tests/test_seo_publishing.py tests/test_seo_release_canary.py tests/test_seo_schedule.py tests/test_seo_article.py tests/test_seo_planner.py tests/test_seo_connected_company_journey.py tests/test_seo_critic_rules.py
