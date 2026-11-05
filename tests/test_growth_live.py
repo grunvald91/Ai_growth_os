@@ -1374,3 +1374,25 @@ def test_new_content_task_descriptions_are_russian_and_seo_specific(live):
     assert "SEO article" not in package.description
     assert seo.description == "Создание SEO-статьи по контент-плану."
     assert seo.title == seo_title
+
+
+def test_owner_home_chat_canvas_overrides_later_air_surface_styles():
+    """Later ServGo Air CSS must not recolor the approved Growth chat surface."""
+    from app.api.growth_v4 import ASSETS
+    css = (ASSETS / "growth-servgo-air.css").read_text(encoding="utf-8")
+    marker = "/* Growth home canvas: conversation is the page"
+    assert css.count(marker) == 1
+    guard = css.split(marker, 1)[1]
+    # The regression was caused by preceding soft/gray composer rules;
+    # the final scoped rules must win without changing Create or other pages.
+    assert css.index('background:color-mix(in srgb,var(--s-surface-2) 92%,transparent);') < css.index(marker)
+    assert 'body.home-page[data-growth-design="v4"] .dp-home .command-bar {' in guard
+    assert 'background:var(--s-bg)!important;' in guard
+    assert 'body.home-page[data-growth-design="v4"] .dp-home .dp-feed,' in guard
+    assert 'body.home-page[data-growth-design="v4"] .dp-home .dp-msg.bot {' in guard
+    assert 'background:transparent!important;' in guard
+    assert '-webkit-backdrop-filter:none!important;' in guard
+    assert 'border-color:var(--s-accent)!important;' in guard
+    assert (ASSETS.parent / "growth_v4.py").read_text(encoding="utf-8").count(
+        "growth-servgo-air.css?v=12"
+    ) == 1
