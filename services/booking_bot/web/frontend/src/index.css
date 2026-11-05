@@ -1,0 +1,281 @@
+@import "tailwindcss";
+@import "./styles/design-system.css";
+
+@theme {
+  /* ServGo brand palette (aliased onto existing apple-* tokens so all
+     pre-existing class names switch styles without code changes). */
+  --color-apple-blue: #2F5BEB;          /* ServGo blue */
+  --color-apple-blue-hover: #244BD6;    /* ServGo blue darker */
+  --color-apple-bg: #F2F4F7;            /* ServGo background */
+  --color-apple-text: #0D1B2A;          /* ServGo navy */
+  --color-apple-gray: #6B7280;          /* ServGo body grey */
+  --color-apple-border: #E6E9EF;        /* ServGo light line */
+  --color-apple-success: #1B9E54;       /* ServGo success */
+  --color-apple-warning: #C56A12;       /* ServGo warm */
+  --color-apple-danger: #D6463E;        /* ServGo danger */
+  --color-apple-card: #FFFFFF;
+
+  /* New ServGo-specific tokens, available as bg-servgo-navy, text-servgo-purple, etc. */
+  --color-servgo-navy: #0D1B2A;
+  --color-servgo-blue: #2F5BEB;
+  --color-servgo-blue-dk: #244BD6;
+  --color-servgo-purple: #7C3AED;
+  --color-servgo-gray-lt: #9AA3B2;
+  --color-servgo-line-dk: #D7DCE6;
+
+  --font-sans: 'Montserrat Variable', 'Montserrat', system-ui, sans-serif;
+}
+
+/* ServGo brand gradient — use as `background: var(--servgo-grad)` */
+:root {
+  --servgo-grad: linear-gradient(135deg, #2F5BEB 0%, #7C3AED 100%);
+  --servgo-grad-soft: linear-gradient(135deg, rgba(47,91,235,.10), rgba(124,58,237,.10));
+  --servgo-shadow: 0 1px 2px rgba(13,27,42,.04), 0 6px 20px rgba(13,27,42,.06);
+  --servgo-shadow-lg: 0 20px 60px rgba(13,27,42,.14);
+}
+
+.bg-servgo-grad { background-image: var(--servgo-grad); }
+.bg-servgo-grad-soft { background-image: var(--servgo-grad-soft); }
+.shadow-servgo { box-shadow: var(--servgo-shadow); }
+.shadow-servgo-lg { box-shadow: var(--servgo-shadow-lg); }
+
+/* ── ServGo reusable patterns ─────────────────────────────────────────────
+   Adopt by applying class names; pages don't need a refactor. */
+
+/* Primary gradient CTA */
+.btn-grad {
+  background-image: var(--servgo-grad);
+  color: #ffffff;
+  box-shadow: 0 10px 22px rgba(47, 91, 235, 0.28);
+  font-weight: 700;
+  border-radius: 13px;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+.btn-grad:hover:not(:disabled) { box-shadow: 0 12px 26px rgba(47, 91, 235, 0.34); }
+.btn-grad:active { transform: scale(0.985); }
+.btn-grad:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+
+/* Period / view pill toggle — navy-active variant per ServGo design */
+.tabs-pill {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid var(--color-apple-border);
+}
+.tabs-pill > * {
+  padding: 7px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-apple-gray);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: transparent;
+  border: none;
+}
+.tabs-pill > .tab-active {
+  background: var(--color-servgo-navy);
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(13, 27, 42, 0.15);
+}
+
+/* Icon-in-gradient-soft tile used in section card headers */
+.section-icon-tile {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background-image: var(--servgo-grad-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+*,
+*::before,
+*::after {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-apple-text);
+  background: var(--color-apple-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
+  font-size: 16px;
+  overscroll-behavior-y: none;
+}
+
+/* Telegram WebApp: add gap so app header doesn't touch TG header controls */
+html.tg-webapp body {
+  padding-top: var(--tg-safe-top, 0px);
+}
+
+/* Skeleton loading animation */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #e8e8ed 25%, #d8d8dd 50%, #e8e8ed 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 12px;
+}
+
+/* Page entrance animation */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeInUp 0.4s ease-out both;
+}
+
+.animate-fade-in-delay-1 {
+  animation: fadeInUp 0.4s ease-out 0.05s both;
+}
+
+.animate-fade-in-delay-2 {
+  animation: fadeInUp 0.4s ease-out 0.1s both;
+}
+
+.animate-fade-in-delay-3 {
+  animation: fadeInUp 0.4s ease-out 0.15s both;
+}
+
+/* Staggered list animation */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out both;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-fade-in-delay-1,
+  .animate-fade-in-delay-2,
+  .animate-fade-in-delay-3,
+  .animate-slide-in {
+    animation: none !important;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #c7c7cc;
+  border-radius: 3px;
+}
+
+/* Active press state for mobile */
+.press-scale {
+  transition: transform 0.15s ease;
+}
+.press-scale:active {
+  transform: scale(0.97);
+}
+
+/* Hide scrollbar for horizontal scroll containers */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Touch action optimization */
+button, a, [role="button"] {
+  touch-action: manipulation;
+}
+
+/* ServGo Air theme: shared by client journey, admin shell and installed PWA.
+ * Existing React utility classes remain source-compatible during the migration.
+ */
+:root[data-theme='dark'] {
+  --color-apple-bg: var(--s-bg);
+  --color-apple-card: var(--s-surface);
+  --color-apple-text: var(--s-text);
+  --color-apple-gray: var(--s-muted);
+  --color-apple-border: var(--s-line);
+  --color-apple-blue: var(--s-accent);
+  --color-apple-blue-hover: var(--s-accent-press);
+  --color-apple-success: var(--s-success);
+  --color-apple-warning: var(--s-warning);
+  --color-apple-danger: var(--s-danger);
+}
+html[data-theme='dark'], html[data-theme='dark'] body {
+  background: var(--s-bg);
+  color: var(--s-text);
+}
+html[data-theme='dark'] .bg-white { background-color: var(--s-surface); }
+.servgo-shell-header, .servgo-shell-bottom {
+  color: var(--s-text);
+  background: color-mix(in srgb, var(--s-surface) 94%, transparent);
+  border-color: var(--s-line);
+}
+.servgo-shell-popover {
+  color: var(--s-text);
+  background: var(--s-surface);
+  border-color: var(--s-line);
+}
+.servgo-theme-control { position: relative; display: inline-flex; align-items: center; }
+.servgo-theme-trigger {
+  display: grid; place-items: center; width: 38px; height: 38px;
+  border: 0; border-radius: 13px; cursor: pointer; color: var(--s-muted);
+  background: var(--s-surface-2);
+}
+.servgo-theme-trigger:hover, .servgo-theme-trigger[aria-expanded='true'] {
+  color: var(--s-accent);
+  background: var(--s-surface-3);
+}
+.servgo-theme-trigger:focus-visible, .servgo-theme-option:focus-visible {
+  outline: 2px solid var(--s-accent); outline-offset: 2px;
+}
+.servgo-theme-menu {
+  position: absolute; z-index: 200; top: calc(100% + 9px); right: 0;
+  min-width: 210px; padding: 10px; border: 1px solid var(--s-line);
+  border-radius: 18px; background: var(--s-surface); color: var(--s-text);
+  box-shadow: var(--sh-pop);
+}
+.servgo-theme-menu-title { margin: 3px 8px 8px; font: 600 12px/1.4 var(--ds-font); color: var(--s-muted); }
+.servgo-theme-option {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 43px;
+  padding: 10px; border: 0; border-radius: 11px; background: none;
+  color: var(--s-text); text-align: left; cursor: pointer;
+}
+.servgo-theme-option span { flex: 1; }
+.servgo-theme-option:hover, .servgo-theme-option[aria-pressed='true'] {
+  background: var(--s-surface-2); color: var(--s-accent);
+}

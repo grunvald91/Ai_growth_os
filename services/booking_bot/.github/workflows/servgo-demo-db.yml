@@ -1,0 +1,75 @@
+name: Configure existing ServGo demo business in DB
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Write demo data to business 11 (false = read-only preflight)'
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: ${{ inputs.apply }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Execute data-only read or update over pinned Paramiko SSH
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, pathlib, shlex, time
+          import paramiko
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self, client, hostname, key):
+                  fingerprint=base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if fingerprint!='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU':
+                      raise paramiko.SSHException('Host key mismatch')
+                  client.get_host_keys().add(hostname,key.get_name(),key)
+          if not os.environ.get('SERVER_PASSWORD'):raise RuntimeError('SSH secret unavailable')
+          source=pathlib.Path('scripts/configure_100boats_demo_db.py').read_bytes()
+          payload=base64.b64encode(source).decode('ascii')
+          ssh=None
+          for attempt in range(3):
+              conn=paramiko.SSHClient();conn.set_missing_host_key_policy(Pinned())
+              try:
+                  conn.connect('155.212.162.47',username='root',port=22,
+                               password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False,
+                               timeout=12,banner_timeout=25,auth_timeout=15)
+                  ssh=conn;break
+              except (paramiko.SSHException,OSError,EOFError):
+                  conn.close()
+                  if attempt==2:raise
+                  time.sleep(3)
+          def execute(source_code,apply=False):
+              command="cd /opt/booking_bot && ./venv/bin/python -c "+shlex.quote(source_code)
+              if apply:command+=' --apply'
+              _,out,err=ssh.exec_command(command,timeout=75)
+              stdout=out.read().decode('utf-8','replace')
+              status=out.channel.recv_exit_status()
+              if status:
+                  errors=err.read().decode('utf-8','replace').splitlines()
+                  print('Remote operation failed, exit='+str(status)+'; error_type='+
+                        (errors[-1].split(':')[0] if errors else 'unknown'))
+                  raise RuntimeError('Remote DB operation failed')
+              print(stdout)
+              return stdout
+          try:
+              code="import base64;exec(compile(base64.b64decode('"+payload+"'),'demo-db.py','exec'))"
+              before=execute(code)
+              assert 'owner_verified=yes' in before and 'existing_bookings=0' in before
+              if os.environ['APPLY']=='true':
+                  execute(code,apply=True)
+                  after=execute(code)
+                  assert 'active=True' in after and 'main_service_minutes=300' in after and 'existing_price_rules=9' in after
+                  print('database_configuration_verified=yes')
+              else:print('read_only_preflight=yes; production_untouched=yes')
+          finally:
+              ssh.close()
+          PY

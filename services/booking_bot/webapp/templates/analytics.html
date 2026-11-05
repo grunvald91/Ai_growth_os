@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Аналитика бизнеса · ServGo</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=2">
+    <link rel="apple-touch-icon" href="/static/favicon.svg?v=2">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/css/analytics.css?v=2">
+</head>
+<body>
+    <div id="app">
+        <!-- Loading -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Загрузка аналитики...</p>
+        </div>
+
+        <!-- Main Content -->
+        <div class="content" id="mainContent" style="display: none;">
+            <!-- Header -->
+            <header class="header">
+                <h1>📊 Аналитика</h1>
+                <select class="business-select" id="businessSelect">
+                    <option value="">Выберите бизнес</option>
+                </select>
+            </header>
+
+            <!-- Schedule Button -->
+            <div class="schedule-button-section">
+                <button class="schedule-btn" onclick="openSchedule()">
+                    <span class="schedule-btn-icon">📅</span>
+                    <span class="schedule-btn-text">Открыть расписание</span>
+                    <span class="schedule-btn-arrow">→</span>
+                </button>
+            </div>
+
+            <!-- Detailed Bookings List -->
+            <div class="section" id="detailedBookingsSection">
+                <h2>📋 Записи за период</h2>
+                <div class="bookings-list" id="detailedBookingsList">
+                    <!-- Bookings will be rendered here -->
+                </div>
+            </div>
+
+            <!-- Period Selector -->
+            <div class="period-selector">
+                <button class="period-btn active" data-period="today">Сегодня</button>
+                <button class="period-btn" data-period="week">Неделя</button>
+                <button class="period-btn" data-period="month">Месяц</button>
+                <button class="period-btn" data-period="year">Год</button>
+            </div>
+
+            <!-- Summary Cards -->
+            <div class="summary-cards">
+                <div class="card">
+                    <div class="card-icon">💰</div>
+                    <div class="card-content">
+                        <div class="card-value" id="totalRevenue">0 ₽</div>
+                        <div class="card-label">Выручка</div>
+                        <div class="card-change positive" id="revenueChange">+0%</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">📅</div>
+                    <div class="card-content">
+                        <div class="card-value" id="totalBookings">0</div>
+                        <div class="card-label">Записей</div>
+                        <div class="card-change" id="bookingsChange">+0%</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">👥</div>
+                    <div class="card-content">
+                        <div class="card-value" id="uniqueClients">0</div>
+                        <div class="card-label">Клиентов</div>
+                        <div class="card-change" id="clientsChange">+0%</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">✅</div>
+                    <div class="card-content">
+                        <div class="card-value" id="completionRate">0%</div>
+                        <div class="card-label">Завершено</div>
+                        <div class="card-sublabel" id="cancelRate">Отмен: 0%</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Revenue Chart -->
+            <div class="chart-section">
+                <h2>📈 Динамика выручки</h2>
+                <div class="chart-container">
+                    <canvas id="revenueChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Bookings by Status -->
+            <div class="chart-section">
+                <h2>📊 Статусы записей</h2>
+                <div class="chart-container chart-small">
+                    <canvas id="statusChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Top Services -->
+            <div class="section">
+                <h2>🏆 Топ услуг</h2>
+                <div class="list" id="topServicesList">
+                    <!-- Services will be rendered here -->
+                </div>
+            </div>
+
+            <!-- Masters Stats -->
+            <div class="section">
+                <h2>👨‍🔧 Статистика мастеров</h2>
+                <div class="list" id="mastersStatsList">
+                    <!-- Masters stats will be rendered here -->
+                </div>
+            </div>
+
+            <!-- Peak Hours -->
+            <div class="chart-section">
+                <h2>⏰ Загруженность по часам</h2>
+                <div class="chart-container">
+                    <canvas id="hoursChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Peak Days -->
+            <div class="chart-section">
+                <h2>📆 Загруженность по дням</h2>
+                <div class="chart-container chart-small">
+                    <canvas id="daysChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Clients Analysis -->
+            <div class="section">
+                <h2>👥 Анализ клиентов</h2>
+                <div class="client-stats">
+                    <div class="stat-row">
+                        <span class="stat-label">Новых клиентов:</span>
+                        <span class="stat-value" id="newClients">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Повторных клиентов:</span>
+                        <span class="stat-value" id="returningClients">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Средний чек:</span>
+                        <span class="stat-value" id="avgCheck">0 ₽</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Записей на клиента:</span>
+                        <span class="stat-value" id="bookingsPerClient">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Subscriptions Stats -->
+            <div class="section">
+                <h2>🎫 Абонементы</h2>
+                <div class="subscription-stats">
+                    <div class="stat-row">
+                        <span class="stat-label">Активных абонементов:</span>
+                        <span class="stat-value" id="activeSubscriptions">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Продано за период:</span>
+                        <span class="stat-value" id="soldSubscriptions">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Выручка с абонементов:</span>
+                        <span class="stat-value" id="subscriptionsRevenue">0 ₽</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Prepayment Stats -->
+            <div class="section">
+                <h2>💳 Предоплаты</h2>
+                <div class="prepayment-stats">
+                    <div class="stat-row">
+                        <span class="stat-label">Записей с предоплатой:</span>
+                        <span class="stat-value" id="prepaymentBookings">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Сумма предоплат:</span>
+                        <span class="stat-value" id="prepaymentTotal">0 ₽</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Подтверждено:</span>
+                        <span class="stat-value" id="prepaymentConfirmed">0 ₽</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/analytics.js?v=3"></script>
+</body>
+</html>

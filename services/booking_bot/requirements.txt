@@ -1,0 +1,24 @@
+# Telegram Bot
+aiogram>=3.25.0
+aiohttp>=3.9.0
+aiohttp-socks~=0.10.1
+
+# Database
+SQLAlchemy[asyncio]>=2.0.25
+asyncpg>=0.29.0
+alembic>=1.13.1
+
+# Utilities
+python-dotenv>=1.0.1
+pywebpush>=2.5.0
+pytz>=2024.1
+qrcode[pil]>=7.4.2
+
+# HTTP client (rental owner notifications)
+httpx>=0.28.0
+
+# Async tools
+APScheduler>=3.10.4
+
+# Shared web authentication
+psycopg2-binary>=2.9.9

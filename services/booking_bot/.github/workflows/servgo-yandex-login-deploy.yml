@@ -1,0 +1,21 @@
+name: Deploy ServGo sign-in with Yandex ID (web API only)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: servgo-yandex-login-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      YANDEX_CLIENT_ID: ba4e643ee7c54d97a0c00cfde9a63028
+      YANDEX_CLIENT_SECRET: ${{ secrets.YANDEX_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Migrate, patch, restart web API, verify, roll back on failure
+        run: python scripts/deploy_yandex_login.py

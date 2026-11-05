@@ -1,0 +1,552 @@
+/* ═════════════════════════════════════════════════════════════════════════
+   ServGo · DESIGN SYSTEM (единый источник дизайна)
+   ─────────────────────────────────────────────────────────────────────────
+   Эталон — экран «Расписание». Этот файл задаёт ОДНУ палитру, тему
+   (свет/тёмная + Telegram) и набор базовых компонентов, на которых строятся
+   ВСЕ остальные страницы админки.
+
+   Подключение (один раз, глобально): import './styles/design-system.css'
+   Тема: повесь data-theme="light|dark" на корень страницы (или на <html>).
+         Значение берётся из useTheme() — он следит за Telegram colorScheme,
+         системной темой и сохраняет выбор в localStorage.
+
+   Использование на новой странице:
+     <div className="ds-screen" data-theme={theme}> … </div>
+   и дальше классы ds-* / переменные var(--s-*) ниже.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+/* ─────────────────────────── 1. ТОКЕНЫ ─────────────────────────── */
+/* Светлая — дефолт (если data-theme не задан) */
+/* Палитра «ServGo Air» (макеты servgo_admin_schedule_focus_v16 / booking_client_flow_v9):
+   белые поверхности без рамок, мягкие голубые подложки, градиентный акцент. */
+:root,
+[data-theme='light'] {
+  /* Поверхности / текст */
+  --s-bg: #ffffff;
+  --s-surface: #ffffff;
+  --s-surface-2: #f6f9fd;             /* soft — подложка карточек и полей */
+  --s-surface-3: #eef5fc;             /* light — выбранное / hover */
+  --s-text: #1b2d42;
+  --s-text-2: #3d536b;
+  --s-muted: #62778b;                 /* mid — описания */
+  --s-muted-2: #8996a4;               /* muted — подсказки */
+  --s-line: #edf2f8;
+  --s-line-2: #dfe8f2;
+  --s-grid: rgba(120, 155, 195, 0.14);
+
+  /* Акцент */
+  --s-accent: #3478d6;
+  --s-accent-press: #2a66be;
+  --s-accent-ink: #FFFFFF;            /* текст на акценте */
+  --s-accent-soft: #eef5fc;
+  --s-accent-grad: linear-gradient(110deg, #3174d4, #578fef);
+  --s-flow-grad: linear-gradient(104deg, #307be8, #8ad8f3, #686fe4, #336be2, #67baf4, #307be8);
+
+  /* Семантика */
+  --s-success: #26886b;
+  --s-warning: #bf8450;
+  --s-danger: #c36262;
+  --s-now: #e0626a;
+
+  /* Статусы записи (бейджи / карточки) */
+  --st-pending: #a8794d;   --st-pending-bg: #fcf1e6;
+  --st-confirmed: #3478d6; --st-confirmed-bg: #eef5fc;
+  --st-completed: #25826d; --st-completed-bg: #e7f5ee;
+  --st-cancelled: #8996a4; --st-cancelled-bg: #f2f5f9;
+  --st-prepay: #8470c5;    --st-prepay-bg: #f0ecfc;
+
+  /* Радиусы */
+  --r-xs: 8px;
+  --r-sm: 10px;
+  --r-md: 12px;
+  --r-lg: 14px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+
+  /* Тени */
+  --sh-1: none;
+  --sh-2: 0 5px 22px rgba(41, 77, 122, 0.052);
+  --sh-pop: 0 12px 40px rgba(24, 62, 108, 0.17);
+
+  /* Типографика */
+  --ds-font: 'Onest Variable', 'Onest', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* Тёмная (для Telegram / тёмной системы — дефолт мини-аппа) */
+[data-theme='dark'] {
+  --s-bg: #111a29;
+  --s-surface: #172237;
+  --s-surface-2: #1e2b40;
+  --s-surface-3: #273a53;
+  --s-text: #f0f5fc;
+  --s-text-2: #d3deea;
+  --s-muted: #b6c4d5;
+  --s-muted-2: #9aaabe;
+  --s-line: #1f2d43;
+  --s-line-2: #2a3b55;
+  --s-grid: rgba(150, 180, 215, 0.10);
+
+  --s-accent: #7aabff;
+  --s-accent-press: #70a7f2;
+  --s-accent-ink: #0f1b2c;
+  --s-accent-soft: #273a53;
+  --s-accent-grad: linear-gradient(110deg, #4f8ae6, #7aabff);
+
+  --s-success: #72caaa;
+  --s-warning: #ecc08e;
+  --s-danger: #f09c9c;
+  --s-now: #f09c9c;
+
+  --st-pending: #ecc08e;   --st-pending-bg: rgba(236, 192, 142, 0.14);
+  --st-confirmed: #7aabff; --st-confirmed-bg: rgba(122, 171, 255, 0.15);
+  --st-completed: #72caaa; --st-completed-bg: rgba(114, 202, 170, 0.15);
+  --st-cancelled: #9aaabe; --st-cancelled-bg: rgba(154, 170, 190, 0.14);
+  --st-prepay: #b9aaff;    --st-prepay-bg: rgba(185, 170, 255, 0.15);
+
+  --sh-1: none;
+  --sh-2: 0 5px 22px rgba(0, 0, 0, 0.09);
+  --sh-pop: 0 12px 34px rgba(0, 0, 0, 0.42);
+}
+
+/* ─────────────────────────── 2. БАЗА ─────────────────────────── */
+.ds-scope, .ds-screen { font-family: var(--ds-font); letter-spacing: -0.015em; color: var(--s-text); -webkit-font-smoothing: antialiased; font-feature-settings: 'tnum'; }
+.ds-scope *, .ds-scope *::before, .ds-scope *::after,
+.ds-screen *, .ds-screen *::before, .ds-screen *::after { box-sizing: border-box; }
+
+.ds-scope ::-webkit-scrollbar, .ds-screen ::-webkit-scrollbar { width: 6px; height: 6px; }
+.ds-scope ::-webkit-scrollbar-thumb, .ds-screen ::-webkit-scrollbar-thumb { background: var(--s-line-2); border-radius: 6px; }
+.ds-scope ::-webkit-scrollbar-track, .ds-screen ::-webkit-scrollbar-track { background: transparent; }
+
+/* Полноэкранный «mini-app» каркас (как у Расписания) */
+.ds-screen {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--s-bg);
+}
+
+/* Telegram WebApp: рендерится порталом прямо в body, поэтому padding-top на body
+   (см. index.css) сюда не доходит — сдвигаем сам fixed-экран под нативную шапку TG. */
+html.tg-webapp .ds-screen { top: var(--tg-safe-top, 0px); }
+
+/* ─────────────────────────── 3. ТИПОГРАФИКА ─────────────────────────── */
+.ds-h1 { font-size: 21px; font-weight: 550; line-height: 1.12; letter-spacing: -0.038em; color: var(--s-text); margin: 0; }
+.ds-h2 { font-size: 17px; font-weight: 550; line-height: 1.18; letter-spacing: -0.038em; color: var(--s-text); margin: 0; }
+.ds-h3 { font-size: 14px; font-weight: 550; letter-spacing: -0.03em; color: var(--s-text); margin: 0; }
+.ds-text { font-size: 13.5px; color: var(--s-text); }
+.ds-sub { font-size: 12px; color: var(--s-muted); font-weight: 350; line-height: 1.45; }
+.ds-caption { font-size: 11px; color: var(--s-muted-2); font-weight: 350; }
+.ds-accent { color: var(--s-accent); }
+.ds-eyebrow { font-size: 10px; letter-spacing: 0.09em; font-weight: 500; text-transform: uppercase; color: var(--s-muted-2); margin: 0 0 8px; }
+
+/* Индикатор выбора: отсутствует, пока элемент не активен. Тонкая
+   сужающаяся к краям анимированная линия в фирменном градиенте. */
+.choice-accent { position: relative; }
+.choice-accent::after {
+  content: ""; display: none; position: absolute; left: 17%; right: 17%; bottom: 1px; height: 2.4px;
+  pointer-events: none; background: var(--s-flow-grad, linear-gradient(104deg, #307be8, #8ad8f3, #686fe4, #336be2, #67baf4, #307be8));
+  background-size: 310% 100%;
+  clip-path: polygon(0% 50%, 10% 45%, 24% 36%, 36% 23%, 45% 10%, 55% 10%, 64% 23%, 76% 36%, 90% 45%, 100% 50%, 90% 55%, 76% 64%, 64% 77%, 55% 90%, 45% 90%, 36% 77%, 24% 64%, 10% 55%);
+  animation: dsFlowLine 3.7s linear infinite;
+}
+.choice-accent.active::after, .choice-accent.selected::after, .choice-accent[aria-pressed='true']::after { display: block; }
+@keyframes dsFlowLine { 0% { background-position: 0 50%; } 100% { background-position: 100% 50%; } }
+
+/* ─────────────────────────── 4. КНОПКИ ─────────────────────────── */
+.ds-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 38px; padding: 9px 14px; border: 0; border-radius: 13px;
+  font-family: inherit; font-size: 13px; font-weight: 500; letter-spacing: -0.015em; cursor: pointer;
+  text-decoration: none; background: var(--s-surface-2); color: var(--s-muted);
+  transition: transform 0.1s ease, background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.ds-btn:active { transform: scale(0.985); }
+.ds-btn:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
+.ds-btn--primary { background: var(--s-accent-grad); color: #fff; box-shadow: 0 4px 16px rgba(57, 118, 212, 0.15); }
+.ds-btn--primary:hover:not(:disabled) { box-shadow: 0 6px 18px rgba(57, 118, 212, 0.24); }
+[data-theme='dark'] .ds-btn--primary { color: #0f1b2c; }
+.ds-btn--ghost { background: var(--s-surface-2); color: var(--s-muted); }
+.ds-btn--ghost:hover { color: var(--s-accent); background: var(--s-surface-3); }
+.ds-btn--danger { background: #f8eded; color: #ba6363; }
+[data-theme='dark'] .ds-btn--danger { background: rgba(240, 156, 156, 0.14); color: var(--s-danger); }
+.ds-btn--on { background: var(--s-surface-3); color: var(--s-accent); }
+.ds-btn--block { width: 100%; }
+.ds-btn--sm { min-height: 33px; padding: 7px 11px; font-size: 12px; border-radius: 12px; }
+
+/* Иконочная кнопка — без рамки */
+.ds-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; flex-shrink: 0; padding: 0;
+  border: 0; border-radius: 12px;
+  background: transparent; color: var(--s-muted); cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.ds-icon-btn.bordered { border: 0; }
+.ds-icon-btn:hover { color: var(--s-accent); background: var(--s-surface-2); }
+.ds-icon-btn.is-on { color: var(--s-accent); background: var(--s-surface-3); }
+
+/* Плавающая кнопка */
+.ds-fab {
+  position: absolute; right: 16px; bottom: 86px; z-index: 30;
+  width: 48px; height: 48px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: none; cursor: pointer; color: #fff;
+  background: linear-gradient(130deg, #3478df, #6298ec);
+  box-shadow: 0 8px 20px rgba(54, 122, 217, 0.26);
+  transition: transform 0.12s ease;
+}
+.ds-fab:active { transform: scale(0.94); }
+
+/* Переключатель */
+.ds-toggle { width: 39px; height: 22px; flex-shrink: 0; border: 0; padding: 0; border-radius: 99px; background: #d8e1ed; position: relative; cursor: pointer; transition: background 0.2s; }
+.ds-toggle::before { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.13); transition: transform 0.2s; }
+.ds-toggle.on { background: linear-gradient(105deg, #367cdd, #718ee5); }
+.ds-toggle.on::before { transform: translateX(17px); }
+[data-theme='dark'] .ds-toggle:not(.on) { background: var(--s-line-2); }
+.ds-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; }
+.ds-toggle-row .t1 { font-size: 12.5px; font-weight: 500; color: var(--s-text); }
+.ds-toggle-row .t2 { font-size: 10.6px; color: var(--s-muted-2); margin-top: 3px; line-height: 1.3; }
+.ds-toggle-row--compact { padding: 2px 2px 8px; gap: 10px; }
+.ds-toggle-row--compact .t1 { font-size: 11.5px; font-weight: 450; color: var(--s-muted); }
+.ds-toggle--sm { width: 32px; height: 18px; }
+.ds-toggle--sm::before { top: 2px; left: 2px; width: 14px; height: 14px; }
+.ds-toggle--sm.on::before { transform: translateX(14px); }
+.ds-toggle:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ─────────────────────────── 5. ФОРМЫ ─────────────────────────── */
+.ds-field { margin-bottom: 11px; }
+.ds-field > label, .ds-label { display: block; font-size: 11.5px; font-weight: 470; color: var(--s-muted); margin-bottom: 5px; }
+.ds-field-row { display: flex; gap: 8px; }
+.ds-field-row > * { flex: 1; min-width: 0; }
+
+.ds-input {
+  width: 100%; min-height: 40px; padding: 9px 11px; border-radius: 13px;
+  border: 0; background: var(--s-surface-2);
+  color: var(--s-text); font-size: 13px; font-weight: 350; outline: none; font-family: inherit;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+.ds-input:focus { background: var(--s-surface-3); box-shadow: 0 0 0 2px rgba(52, 120, 214, 0.45); }
+/* Внутри карточки (тот же surface-2) поле иначе сливается с фоном. */
+.ds-card .ds-input { background: var(--s-surface); box-shadow: inset 0 0 0 1px var(--s-line); }
+.ds-card .ds-input:focus { box-shadow: 0 0 0 2px rgba(52, 120, 214, 0.45); }
+/* iOS Safari зумит страницу при фокусе на поле с font-size < 16px. */
+@media (hover: none) and (pointer: coarse) { .ds-input { font-size: 16px; } }
+.ds-input::placeholder { color: var(--s-muted-2); }
+textarea.ds-input { resize: vertical; min-height: 70px; }
+
+/* Поиск */
+.ds-search {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--s-surface-2); border: 0;
+  border-radius: 13px; height: 38px; padding: 0 12px; color: var(--s-muted-2);
+}
+.ds-search svg { flex-shrink: 0; color: var(--s-muted-2); }
+.ds-search input { flex: 1; min-width: 0; border: none; background: transparent; color: var(--s-text); font-size: 12px; font-weight: 350; outline: none; font-family: inherit; }
+.ds-search input::placeholder { color: var(--s-muted-2); }
+
+/* ─────────────────────────── 6. СЕГМЕНТЫ / ЧИПЫ ─────────────────────────── */
+.ds-seg { display: inline-flex; flex-shrink: 0; background: var(--s-surface-2); border: 0; border-radius: 13px; padding: 3px; gap: 2px; }
+.ds-seg button {
+  position: relative; padding: 6px 11px; border: none; border-radius: 10px; font-family: inherit;
+  font-size: 11.5px; font-weight: 450; cursor: pointer; white-space: nowrap;
+  background: transparent; color: var(--s-muted-2);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.ds-seg button.active { background: var(--s-surface); color: var(--s-accent); box-shadow: 0 2px 7px rgba(23, 67, 118, 0.055); }
+.ds-seg--full { display: flex; gap: 5px; }
+.ds-seg--full button {
+  flex: 1; padding: 9px 4px; border-radius: 11px; cursor: pointer; font-family: inherit;
+  border: 0; background: var(--s-surface-2); color: var(--s-muted);
+  font-size: 12px; font-weight: 450;
+}
+.ds-seg--full button.on { background: var(--s-surface-3); color: var(--s-accent); }
+
+.ds-chip {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 7px 10px; border-radius: 12px; font-size: 11px; font-weight: 450;
+  cursor: pointer; white-space: nowrap; font-family: inherit;
+  background: var(--s-surface-2); color: var(--s-muted); border: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.ds-chip.active { background: var(--s-surface-3); color: var(--s-accent); }
+.ds-chip .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* ─────────────────────────── 7. БЕЙДЖИ СТАТУСОВ ─────────────────────────── */
+.ds-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 500; padding: 4px 7px; border-radius: 10px; white-space: nowrap;
+}
+.ds-badge--pending   { color: var(--st-pending);   background: var(--st-pending-bg); }
+.ds-badge--confirmed { color: var(--st-confirmed); background: var(--st-confirmed-bg); }
+.ds-badge--completed { color: var(--st-completed); background: var(--st-completed-bg); }
+.ds-badge--cancelled { color: var(--st-cancelled); background: var(--st-cancelled-bg); }
+.ds-badge--prepay    { color: var(--st-prepay);    background: var(--st-prepay-bg); }
+
+/* ─────────────────────────── 8. КАРТОЧКИ / ПЛИТКИ / СПИСКИ ─────────────────────────── */
+/* Карточки без рамок: мягкая подложка вместо обводки. */
+.ds-card { background: var(--s-surface-2); border: 0; border-radius: 18px; box-shadow: none; }
+
+.ds-tile { background: var(--s-surface-2); border: 0; border-radius: 14px; padding: 9px 10px; }
+.ds-tile .num { font-size: 21px; font-weight: 470; letter-spacing: -0.055em; color: var(--s-text); line-height: 1.06; }
+.ds-tile .lbl { font-size: 10px; color: var(--s-muted); margin-top: 3px; }
+
+/* Строка-элемент списка (клиент / запись / пункт) */
+.ds-row {
+  display: flex; align-items: stretch; gap: 11px; text-align: left; width: 100%;
+  padding: 11px 12px; border-radius: 16px; cursor: pointer; font-family: inherit; color: var(--s-text);
+  background: var(--s-surface-2); border: 0; border-left: 3px solid transparent;
+  transition: background 0.15s ease;
+}
+.ds-row:hover { background: var(--s-surface-3); }
+.ds-row .row-lead { display: flex; flex-direction: column; align-items: flex-start; min-width: 46px; }
+.ds-row .row-lead .t1 { font-size: 13px; font-weight: 550; color: var(--s-accent); line-height: 1.1; }
+.ds-row .row-lead .t2 { font-size: 10px; color: var(--s-muted-2); margin-top: 2px; }
+.ds-row .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ds-row .row-title { font-size: 13.4px; font-weight: 540; color: var(--s-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ds-row .row-sub { font-size: 11px; color: var(--s-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+
+/* Верхний контекст экрана админки («Сегодня в студии», «Каталог процедур»…) */
+.ds-context { display: flex; flex-direction: column; gap: 6px; padding: 8px 0 12px; }
+.ds-context-eyebrow { font-size: 9.5px; letter-spacing: 0.13em; color: var(--s-muted-2); font-weight: 400; text-transform: uppercase; }
+.ds-context-headline { font-size: 17px; font-weight: 480; color: var(--s-text); letter-spacing: -0.035em; line-height: 1.2; }
+.ds-context-help { font-size: 10.5px; color: var(--s-muted-2); font-weight: 350; line-height: 1.45; }
+.ds-context-strip { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px 20px; margin: 6px 0 2px; }
+.ds-context-strip > div { display: flex; flex-direction: column; min-width: 0; gap: 4px; }
+.ds-context-strip strong { font-size: 20px; color: var(--s-accent); font-weight: 460; white-space: nowrap; letter-spacing: -0.045em; }
+.ds-context-strip span { font-size: 10px; color: var(--s-muted-2); font-weight: 350; }
+.ds-context-hero { display: flex; gap: 11px; align-items: stretch; min-height: 100px; }
+.ds-context-art {
+  width: 37%; max-width: 148px; min-width: 93px; border-radius: 15px; position: relative; overflow: hidden;
+  background: linear-gradient(145deg, #d8e9f8 0%, #f3f8ff 55%, #aecbe8 100%);
+}
+[data-theme='dark'] .ds-context-art { background: linear-gradient(145deg, #23395a 0%, #1c2c46 55%, #2f4d74 100%); opacity: 0.9; }
+.ds-context-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ds-context-art .art-circle { position: absolute; width: 85px; height: 85px; border: 5px solid #f8fdffad; border-radius: 50%; top: -16px; left: 18px; }
+.ds-context-art .art-arch { position: absolute; left: 31%; top: 10px; width: 42%; height: 85px; border: 7px solid #fafcffb8; border-bottom: 0; border-radius: 80px 80px 0 0; background: #aecbe344; }
+.ds-context-art .art-chair { position: absolute; left: 25%; bottom: 15px; width: 52%; height: 21px; border-radius: 24px; background: linear-gradient(130deg, #7296b7, #3e709c); box-shadow: 0 8px 0 -5px #52769a; }
+.ds-context-hero-text { min-width: 0; flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+.ds-context-line { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--s-muted); }
+.ds-context-line strong { font-weight: 500; color: var(--s-accent); font-size: 13px; white-space: nowrap; }
+.ds-context-line > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-status-point { width: 6px; height: 6px; border-radius: 50%; background: var(--s-success); flex-shrink: 0; }
+.ds-status-point.warn { background: var(--s-warning); }
+.ds-crew { display: flex; align-items: center; margin-top: 4px; }
+.ds-crew-pic { height: 37px; width: 37px; border-radius: 50%; border: 2px solid var(--s-bg); margin-left: -7px; display: grid; place-items: center; color: #4f76a4; font-size: 11px; font-weight: 500; overflow: hidden; background: radial-gradient(circle at 45% 26%, #fff, #d5e8fa); }
+.ds-crew-pic:first-child { margin-left: 0; }
+.ds-crew-pic:nth-child(2) { background: radial-gradient(circle at 45% 26%, #fff, #e9ddfa); }
+.ds-crew-pic:nth-child(3) { background: radial-gradient(circle at 45% 26%, #fff, #d9e9e7); }
+.ds-crew-pic img { width: 100%; height: 100%; object-fit: cover; }
+.ds-crew > div { margin-left: 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ds-crew strong { font-size: 12px; font-weight: 500; color: var(--s-text); }
+.ds-crew div span { font-size: 10px; color: var(--s-muted-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (min-width: 900px) {
+  .ds-context { padding: 4px 0 16px; max-width: 750px; }
+  .ds-context-headline { font-size: 23px; font-weight: 500; }
+  .ds-context-eyebrow { font-size: 11px; }
+  .ds-context-strip strong { font-size: 23px; }
+  .ds-context-strip span, .ds-context-help { font-size: 12px; }
+  .ds-context-art { height: 130px; width: 160px; flex: none; }
+}
+
+/* ─────────────────────────── 9. БОТТОМ-ШИТ / ДИАЛОГ ─────────────────────────── */
+.ds-sheet-ov { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end; justify-content: center; background: rgba(14, 32, 52, 0.38); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); overscroll-behavior: contain; }
+.ds-center-ov { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(14, 32, 52, 0.42); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+.ds-sheet {
+  position: relative; width: 100%; max-width: 490px; color: var(--s-text);
+  background: var(--s-surface); border: 0;
+  border-radius: 27px 27px 0 0; max-height: 90vh; max-height: 90dvh; overflow-y: auto; overscroll-behavior: contain;
+  padding: 14px 18px calc(21px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -12px 42px rgba(13, 41, 75, 0.09);
+  animation: dsSheetIn 0.23s cubic-bezier(.2, .8, .2, 1);
+}
+@keyframes dsSheetIn { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+.ds-sheet-grip { width: 40px; height: 4px; border-radius: 10px; background: var(--s-muted-2); opacity: 0.4; margin: 0 auto 16px; }
+.ds-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.ds-sheet-head h3 { font-size: 19px; font-weight: 520; letter-spacing: -0.045em; color: var(--s-text); margin: 0; }
+.ds-sheet-head p { font-size: 12px; color: var(--s-muted); margin: 2px 0 0; font-weight: 350; }
+.ds-sheet-head .ds-icon-btn { width: 38px; height: 38px; border-radius: 50%; background: var(--s-surface-2); }
+.ds-sheet-actions { display: flex; gap: 8px; margin-top: 12px; }
+.ds-sheet-actions .ds-btn { flex: 1; }
+@media (min-width: 820px) { .ds-sheet-ov { align-items: center; } .ds-sheet { border-radius: 24px; } }
+
+.ds-dialog { position: relative; width: 100%; max-width: 420px; color: var(--s-text); background: var(--s-surface); border: 0; border-radius: 24px; padding: 20px; box-shadow: var(--sh-pop); }
+.ds-dialog h3 { font-size: 18px; font-weight: 520; letter-spacing: -0.04em; color: var(--s-text); margin: 0 0 4px; }
+.ds-dialog > p { font-size: 13px; color: var(--s-muted); margin: 0 0 12px; }
+.ds-dialog-actions { display: flex; gap: 8px; }
+.ds-dialog-actions .ds-btn { flex: 1; }
+
+.ds-hint { font-size: 11px; color: var(--s-muted-2); margin: 7px 1px 0; line-height: 1.45; font-weight: 350; }
+.ds-error { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--s-danger); margin-bottom: 10px; }
+
+.ds-toast {
+  position: fixed; z-index: 100; top: 64px; left: 50%; transform: translateX(-50%);
+  background: #1c416b; color: #fff; font-size: 11.5px; border-radius: 11px; padding: 10px 14px;
+  max-width: calc(100% - 32px); box-shadow: 0 9px 32px rgba(11, 40, 81, 0.2);
+}
+
+/* ─────────────────────────── 10. ШАПКА И НИЖНЯЯ НАВИГАЦИЯ ─────────────────────────── */
+.ds-shell-header { min-height: 51px; background: var(--s-bg); position: relative; z-index: 20; }
+.ds-shell-header .ds-h1 { font-size: 17.5px; font-weight: 470; white-space: nowrap; }
+/* Название раздела не сжимается; выбор бизнеса берёт остаток строки и прижат вправо. */
+.ds-shell-title { flex: 0 0 auto; }
+.ds-shell-header-extra { flex: 1 1 0; min-width: 0; display: flex; justify-content: flex-end; }
+.ds-shell-header-desktop { display: none; align-items: center; gap: 7px; flex: none; }
+.ds-bottomnav {
+  /* Все пункты в одну строку: четыре раздела + «Ещё». */
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); align-items: stretch; flex-shrink: 0;
+  border-top: 0; background: var(--s-bg); position: relative; z-index: 12;
+  box-shadow: 0 -8px 25px rgba(45, 92, 146, 0.018);
+  padding: 3px 8px calc(5px + env(safe-area-inset-bottom, 0px));
+}
+.ds-bottomnav > * { min-width: 0; }
+.ds-bn {
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  min-height: 54px; padding: 3px 1px 5px; cursor: pointer; text-decoration: none; background: none; border: 0; font-family: inherit;
+  color: var(--s-muted-2); font-size: 11px; font-weight: 400; letter-spacing: -0.035em; line-height: 1.05;
+}
+.ds-bn svg { width: 21px; height: 21px; stroke-width: 1.65; flex: none; }
+.ds-bn span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.ds-bn.active { color: var(--s-accent); font-weight: 500; }
+.ds-bn::after {
+  content: ""; display: none; position: absolute; left: 22%; right: 22%; bottom: 0; height: 2px; pointer-events: none;
+  background: var(--s-flow-grad, linear-gradient(104deg, #307be8, #8ad8f3, #686fe4, #336be2, #67baf4, #307be8));
+  background-size: 310% 100%;
+  clip-path: polygon(0% 50%, 10% 45%, 24% 36%, 36% 23%, 45% 10%, 55% 10%, 64% 23%, 76% 36%, 90% 45%, 100% 50%, 90% 55%, 76% 64%, 64% 77%, 55% 90%, 45% 90%, 36% 77%, 24% 64%, 10% 55%);
+  animation: dsFlowLine 3.7s linear infinite;
+}
+.ds-bn.active::after { display: block; }
+
+.ds-more-list { display: flex; flex-direction: column; gap: 2px; }
+.ds-more-item {
+  display: flex; align-items: center; gap: 13px; min-height: 52px; padding: 0 12px; border: 0; border-radius: 14px;
+  background: none; color: var(--s-text); font-family: inherit; font-size: 15px; font-weight: 420; text-align: left;
+  text-decoration: none; cursor: pointer; width: 100%;
+}
+.ds-more-item svg { color: var(--s-muted); flex: none; }
+.ds-more-item span { flex: 1; min-width: 0; }
+.ds-more-item:hover, .ds-more-item.active { background: var(--s-surface-2); }
+.ds-more-item.active, .ds-more-item.active svg { color: var(--s-accent); }
+.ds-more-item.danger, .ds-more-item.danger svg { color: var(--s-danger); }
+.ds-more-chev { color: var(--s-muted-2) !important; }
+
+/* Переключатель бизнеса в шапке — пилюля как в макете */
+.ds-biz-select { display: flex; align-items: center; gap: 5px; max-width: 100%; padding: 7px 9px; border: 0; border-radius: 14px; background: var(--s-surface-2); color: var(--s-muted); font-family: inherit; font-size: 11.5px; font-weight: 450; cursor: pointer; }
+.ds-biz-select span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .choice-accent::after, .ds-bn::after { animation: none; }
+  .ds-sheet { animation: none; }
+}
+
+/* ─────────────── 10b. МОБИЛЬНАЯ ЭРГОНОМИКА: информация сверху, управление снизу ───────────────
+   Короткая страница: верхний контекст растягивается и «опускает» рабочую часть к большому пальцу.
+   Длинный список прокручивается внутри, а основные действия остаются прижатыми к низу. */
+.ds-bottom-controls { position: sticky; bottom: 0; z-index: 2; background: var(--s-bg); padding: 6px 0 2px; }
+@media (max-width: 899px) {
+  .ds-shell-content { display: flex; flex-direction: column; }
+  /* Панель прилипает к самому низу, перекрывая нижний отступ контента: ничего не просвечивает. */
+  .ds-shell-content .ds-bottom-controls { bottom: -16px; padding-bottom: 18px; }
+  .ds-page { flex: 1 0 auto; display: flex; flex-direction: column; }
+  .ds-page > .ds-context { flex: 1 1 auto; justify-content: center; min-height: 96px; }
+  .ds-list-scroll { flex: 0 1 auto; max-height: min(52vh, 480px); max-height: min(52dvh, 480px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+}
+@media (max-width: 899px) and (max-height: 620px) {
+  .ds-page > .ds-context { min-height: 70px; }
+  .ds-page > .ds-context .ds-context-help { display: none; }
+  .ds-list-scroll { max-height: 44vh; max-height: 44dvh; }
+}
+
+/* ─────────────────────────── 11. ДЕСКТОП (боковая навигация) ─────────────────────────── */
+@media (min-width: 900px) {
+  .ds-screen {
+    display: grid;
+    grid-template-columns: 212px 1fr;
+    grid-template-rows: 66px minmax(0, 1fr);
+    grid-template-areas: "nav header" "nav content";
+  }
+  .ds-shell-header { grid-area: header; padding: 10px 26px !important; }
+  .ds-shell-header .ds-h1 { font-size: 21px; font-weight: 550; }
+  .ds-shell-header-desktop { display: flex; }
+  .ds-shell-content .ds-bottom-controls { bottom: -42px; padding-bottom: 44px; }
+  .ds-shell-content {
+    grid-area: content;
+    max-width: 1080px; width: 100%; margin: 0 auto;
+    padding: 13px 28px 42px !important;
+  }
+  .ds-bottomnav {
+    grid-area: nav;
+    display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 5px;
+    width: 212px; padding: 27px 14px; box-shadow: none; background: var(--s-surface-2);
+  }
+  .ds-bn {
+    flex: none; flex-direction: row; justify-content: flex-start; gap: 12px;
+    min-height: 41px; padding: 0 14px; border-radius: 14px; font-size: 13px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .ds-bn svg { width: 19px; height: 19px; }
+  .ds-bn:hover { color: var(--s-text); }
+  .ds-bn.active { background: var(--s-surface-3); }
+  .ds-bn::after { left: 13%; right: 13%; bottom: 2px; }
+  .ds-bn span { font-size: 13px; }
+  .ds-biz-select { max-width: 260px; }
+
+  /* Плитки-метрики: на десктопе в один ряд вместо растянутых 2 колонок */
+  .ds-stats-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 12px !important; }
+  /* Формы: не растягивать поля во всю ширину широкого экрана */
+  .ds-form-narrow { max-width: 640px; }
+}
+
+/* ─────────────── 12. ГЛАВНАЯ АДМИНКИ: десктоп по логике телефона ───────────────
+   Телефон: сверху информация, рабочая часть ниже. Десктоп: те же блоки, но в одну
+   видимую сетку без прокрутки — цифры сверху, ближайшие записи слева, действия справа. */
+.ds-bottomnav .ds-desk-only { display: none; }
+.dash-more-row, .dash-status-word, .dash-context-all { display: none; }
+.ds-bn-group { font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--s-muted-2); padding: 16px 14px 4px; }
+
+@media (min-width: 900px) {
+  .ds-bottomnav { overflow-y: auto; }
+  .ds-bottomnav .ds-desk-only { display: flex; }
+  .ds-bottomnav .ds-bn-group.ds-desk-only { display: block; }
+  .ds-bottomnav .ds-mobile-only { display: none; }
+
+  .dash-page {
+    display: grid; align-items: start; gap: 16px 20px;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas: "stats stats" "context ai" "context photos";
+  }
+  .dash-page .dash-stats { grid-area: stats; grid-template-columns: repeat(4, 1fr) !important; gap: 12px !important; }
+  .dash-stat { padding: 16px 18px !important; min-height: 104px !important; transition: background 0.15s ease; }
+  .dash-stat:hover { background: var(--s-surface-3); }
+  .dash-stat .ds-sub { font-size: 13px !important; }
+  .dash-stat > div:last-child { font-size: 32px !important; }
+
+  .dash-context { grid-area: context; max-width: none; padding: 22px; border-radius: 22px; background: var(--s-surface-2); gap: 12px; }
+  .dash-context .ds-context-hero { min-height: 0; gap: 22px; }
+  .dash-context .ds-context-art { width: 190px; height: auto; min-height: 220px; flex: none; }
+  .dash-context .ds-context-hero-text { justify-content: flex-start; gap: 4px; }
+  .dash-context .ds-context-headline { margin-bottom: 6px; }
+  .dash-context .ds-context-line { font-size: 14.5px; padding: 10px 12px; margin: 0 -12px; border-radius: var(--r-lg); transition: background 0.15s ease; }
+  .dash-context .ds-context-line:hover { background: var(--s-surface-3); }
+  .dash-context .ds-context-line strong { font-size: 17px; min-width: 52px; }
+  .dash-context .ds-context-help { font-size: 14px; }
+  .dash-more-row { display: flex; }
+  .dash-status-word { display: block; font-size: 12.5px; color: var(--s-muted); white-space: nowrap; }
+  .dash-context-all { display: inline-flex; align-self: flex-start; margin-top: 6px; color: var(--s-accent); font-size: 14px; font-weight: 480; text-decoration: none; }
+  .dash-context-all:hover { text-decoration: underline; }
+
+  .dash-ai { grid-area: ai; margin: 0 !important; }
+  .dash-photos { grid-area: photos; margin-top: 0 !important; }
+}
+
+/* Узкий десктоп (900–1199px): правая колонка уже, декоративная картинка скрыта — всё остаётся в одном экране. */
+@media (min-width: 900px) and (max-width: 1199px) {
+  .dash-page { grid-template-columns: minmax(0, 1fr) 250px; }
+  .dash-context .ds-context-art { display: none; }
+  .dash-stat { padding: 14px !important; }
+  .dash-stat > div:last-child { font-size: 25px !important; white-space: nowrap; }
+}
+
+/* Фокус с клавиатуры на кликабельных блоках главной — контур акцентом, как в брендбуке. */
+.dash-stat:focus-visible, .dash-context .ds-context-line:focus-visible, .dash-context-all:focus-visible, .ds-bn:focus-visible {
+  outline: 2px solid var(--s-accent); outline-offset: 2px;
+}

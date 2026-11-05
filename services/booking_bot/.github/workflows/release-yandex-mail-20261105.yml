@@ -1,0 +1,57 @@
+name: ServGo Yandex Mail one-time backend release
+
+# Release exactly once when the audited marker is merged to main.
+# Manual dispatch defaults to a read-only preflight for safe retries.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'releases/yandex-mail-20261105.trigger'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Deploy after a successful read-only preflight (default false)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: ${{ github.event_name == 'push' && 'true' || inputs.apply && 'true' || 'false' }}
+      BOT_TOKEN: test-token
+      DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the minimum test and SSH dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt -r web/api/requirements.txt pytest aiosqlite 'paramiko==3.5.1'
+      - name: Validate all Mail search providers and one-time rollout
+        run: |
+          python -m pytest -q tests/test_mail_company_search.py tests/test_yandex_mail_source.py tests/test_yandex_mail_release.py
+          python -m py_compile web/api/routes/mail_company_search.py scripts/release_yandex_mail.py
+          python - <<'PY'
+          import re,subprocess,tempfile
+          from pathlib import Path
+          raw=Path('web/api/routes/mail_campaign_dashboard.html').read_text()
+          scripts=re.findall(r'<script>(.*?)</script>',raw,re.S)
+          assert len(scripts)==1
+          with tempfile.NamedTemporaryFile(mode='w',suffix='.js') as f:
+              f.write(scripts[0]);f.flush()
+              subprocess.run(['node','--check',f.name],check=True)
+          PY
+      - name: Protected scoped release (or read-only manual preflight)
+        run: python scripts/release_yandex_mail.py

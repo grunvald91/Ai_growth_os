@@ -1,0 +1,31 @@
+name: Deploy ServGo mail company search (scoped)
+# Manual only. apply=false is a read-only preflight (nothing on the server changes).
+# apply=true: backups, replaces exactly the seven mail files (each only if the server holds the expected old
+# version), restarts the web API and the mail worker unit, checks health, rolls back on failure.
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Change production (false = read-only preflight)'
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: servgo-mail-search-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: ${{ inputs.apply }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install --disable-pip-version-check pytest 'paramiko==3.5.1'
+      - name: Verify the rollout locally
+        run: python -m pytest -q tests/test_mail_search_deploy.py
+      - name: Roll out (or preflight) and verify
+        run: python scripts/deploy_mail_search.py

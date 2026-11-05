@@ -1,0 +1,49 @@
+name: Deploy ServGo canonical Studio SSO link
+
+# All internal marketing tickets must stay on servgo.ru. Direct requests to
+# the old hostname remain supported; this workflow never changes nginx/redirects.
+# Runs only after a main merge and touches only the SSO origin selector.
+on:
+  push:
+    branches: [main, 'fix/studio-canonical-readiness-20261104']
+    paths:
+      - 'web/api/routes/studio_sso.py'
+      - 'scripts/deploy_studio_canonical_sso.py'
+      - 'tests/test_studio_canonical_sso_release.py'
+      - '.github/workflows/servgo-studio-canonical-release.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  canonical-sso:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned SSH library and tests
+        run: python -m pip install -q 'paramiko==3.5.1' 'pytest>=8,<9'
+      - name: Validate patch and commit
+        run: |
+          set -euo pipefail
+          git diff --check HEAD^ HEAD
+          python -m py_compile web/api/routes/studio_sso.py scripts/deploy_studio_canonical_sso.py
+          python -m pytest -q tests/test_studio_canonical_sso_release.py
+      - name: Read-only branch preflight or targeted production release
+        env:
+          APPLY: ${{ github.ref == 'refs/heads/main' && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVGO_PASSWORD"
+          python scripts/deploy_studio_canonical_sso.py

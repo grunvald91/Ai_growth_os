@@ -1,0 +1,27 @@
+name: Deploy ServGo booking-created notification fix
+on:
+  workflow_dispatch:
+  push:
+    branches: [ccr-40024b1b-hpdpz2]
+    paths:
+      - .github/workflows/servgo-booking-notify-fix-deploy.yml
+permissions:
+  contents: read
+concurrency:
+  group: servgo-booking-notify-fix-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python -m pip install --disable-pip-version-check pytest 'paramiko==3.5.1'
+      - name: Verify the production patch locally
+        run: python -m pytest -q tests/test_booking_notify_deploy.py
+      - name: Patch production admin.py, restart web API and verify
+        run: python scripts/deploy_booking_notify_fix.py

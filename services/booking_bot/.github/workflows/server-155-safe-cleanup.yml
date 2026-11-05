@@ -1,0 +1,52 @@
+name: Server 155 safe cleanup
+
+on:
+  push:
+    paths:
+      - '.github/workflows/server-155-safe-cleanup.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Safe cleanup and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set -e
+          echo '===== BEFORE ====='
+          df -h /
+          journalctl --disk-usage || true
+          docker system df 2>/dev/null || true
+
+          echo '===== CLEAN PIP CACHE ====='
+          rm -rf /root/.cache/pip
+
+          echo '===== VACUUM JOURNAL TO 500M ====='
+          journalctl --vacuum-size=500M
+
+          echo '===== CLEAN APT CACHE ====='
+          apt-get clean
+
+          echo '===== PRUNE DOCKER BUILD CACHE ONLY ====='
+          docker builder prune -af || true
+
+          echo '===== AFTER ====='
+          df -h /
+          journalctl --disk-usage || true
+          docker system df 2>/dev/null || true
+          echo 'Volumes, databases, running containers and application virtualenvs were not removed.'
+          REMOTE

@@ -1,0 +1,45 @@
+name: Deploy ServGo schedule changes (scoped)
+# Master personal cabinet: adds bookings.finished_at (additive), replaces twelve backend files, adds database/booking_changes.py,
+# restarts booking-web-api and booking-bot, with backups and automatic rollback.
+# The site pages go out through the regular "Deploy webapp to server" workflow on merge to main (merge AFTER this rollout).
+# Manual only. apply=false is a read-only preflight (nothing on the server changes).
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Change production (false = read-only preflight)'
+        required: true
+        type: boolean
+        default: false
+  # Read-only preflight on pushes of this branch; a commit message with the marker applies.
+  push:
+    branches: [ ops/schedule-changes-deploy ]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-schedule-changes-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: ${{ inputs.apply || contains(github.event.head_commit.message, '[apply-schedule-changes]') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check pytest aiosqlite 'paramiko==3.5.1' -r requirements.txt -r web/api/requirements.txt
+      - name: Verify the change locally
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m compileall -q bot database web scripts
+          python -m pytest -q tests/test_booking_changes.py tests/test_master_cabinet.py tests/test_schedule_changes_deploy.py
+      - name: Roll out (or preflight) and verify
+        run: python scripts/deploy_schedule_changes.py

@@ -1,0 +1,98 @@
+name: Diagnose ServGo Telegram bot (read-only)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Inspect service and filtered logs without changing server
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, shlex, time
+          import paramiko
+          EXPECTED='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,client,hostname,key):
+                  fingerprint=base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if fingerprint!=EXPECTED:raise paramiko.SSHException('SSH host key mismatch')
+                  client.get_host_keys().add(hostname,key.get_name(),key)
+          if not os.environ.get('SERVER_PASSWORD'):raise RuntimeError('Missing SSH secret')
+          source=r'''
+          import re,subprocess,socket,pathlib
+          ip='89.125.90.101'
+          try:
+              with socket.create_connection((ip,22),timeout=6) as sock:
+                  sock.settimeout(5)
+                  banner=sock.recv(128).decode('ascii','replace').splitlines()[0]
+              print('SSH_89_PORT_22', 'ssh_banner' if banner.startswith('SSH-2.0-') else 'unexpected_banner', 'server',banner[:70])
+          except (OSError,IndexError) as exc:
+              print('SSH_89_PORT_22',type(exc).__name__)
+          ssh_dir=pathlib.Path('/root/.ssh')
+          print('SSH_89_EXISTING_KNOWN_HOST', bool(ssh_dir.joinpath('known_hosts').exists() and ip in ssh_dir.joinpath('known_hosts').read_text(errors='replace')))
+          print('SSH_LOCAL_IDENTITY_PRESENT',any(ssh_dir.joinpath(name).is_file() for name in ('id_ed25519','id_rsa','id_ecdsa')))
+          def command(args):
+              p=subprocess.run(args,capture_output=True,text=True,timeout=15)
+              return p.returncode,p.stdout,p.stderr
+          for unit in ('booking-bot.service','booking-web-api.service'):
+              rc,out,err=command(['systemctl','show',unit,'-p','ActiveState','-p','SubState','-p','NRestarts','-p','ExecMainStatus','-p','ExecMainCode','-p','StateChangeTimestamp','-p','ExecMainStartTimestamp'])
+              print('SERVICE',unit,'exit',rc)
+              print(out.strip())
+          for family in ('-4','-6'):
+              for route in ('direct','environment'):
+                  args=['curl',family,'-sS','--connect-timeout','4','--max-time','8','-o','/dev/null','-w','http=%{http_code};remote_ip=%{remote_ip};time=%{time_total}']
+                  if route=='direct':args+=['--noproxy','*']
+                  rc,out,err=command(args+['https://api.telegram.org/'])
+                  print('TELEGRAM_REACHABILITY',family,route,'exit',rc,out.strip(),'error_type', ('connection_reset' if 'reset' in err.lower() else 'timeout' if 'timed out' in err.lower() else 'other' if err else 'none'))
+          for domain in ('www.google.com','api.github.com'):
+              rc,out,err=command(['curl','-4','-sS','--noproxy','*','--connect-timeout','4','--max-time','8','-o','/dev/null','-w','http=%{http_code};time=%{time_total}','https://'+domain+'/'])
+              print('CONTROL_HTTPS',domain,'exit',rc,out.strip(),'error_type', ('connection_reset' if 'reset' in err.lower() else 'timeout' if 'timed out' in err.lower() else 'other' if err else 'none'))
+          rc,out,err=command(['systemctl','cat','booking-bot.service'])
+          for line in out.splitlines():
+              if line.startswith('EnvironmentFile='):
+                  print('BOT_ENV_FILE',line.split('=',1)[1].strip())
+              if line.startswith('ExecStart='):
+                  print('BOT_EXEC_START_CONFIGURED=yes')
+          rc,out,err=command(['ss','-lntp'])
+          print('POSSIBLE_LOCAL_PROXY_LISTENERS',','.join(line.split()[3] for line in out.splitlines() if line.split() and any(':'+str(port) in line.split()[3] for port in (1080,1081,2080,3128,7890,8080))))
+          rc,out,err=command(['journalctl','-u','booking-bot.service','--since=-4h','-n','400','--no-pager','-o','short-iso'])
+          print('BOT_JOURNAL_EXIT',rc,'LINES',len(out.splitlines()))
+          pattern=re.compile(r'traceback|error|exception|failed|polling|unauthorized|conflict|restart|start request|stopp|terminated|api\.telegram|webhook|disconnect|connection|invalid|login|unhandled',re.I)
+          lines=[line for line in out.splitlines() if pattern.search(line)]
+          def safe(s):
+              s=re.sub(r'bot[0-9]{6,}:[a-zA-Z0-9_-]{25,}','bot[REDACTED]',s)
+              s=re.sub(r'(?i)(token|password|api_key|secret)\s*[=:]\s*[^\s,;]+',r'\1=[REDACTED]',s)
+              return s[:260]
+          for line in lines[-95:]:print('BOT_LOG',safe(line))
+          print('MATCHED_LINES',len(lines))
+          rc,out,err=command(['systemctl','list-units','--all','--type=service','--no-pager','--plain'])
+          print('RELATED_UNITS',','.join(line.split()[0] for line in out.splitlines() if 'booking-' in line and line.split()))
+          '''
+          encoded=base64.b64encode(source.encode()).decode()
+          remote="/opt/booking_bot/venv/bin/python -c "+shlex.quote("import base64;exec(base64.b64decode('"+encoded+"'))")
+          ssh=None
+          for attempt in range(3):
+              conn=paramiko.SSHClient();conn.set_missing_host_key_policy(Pinned())
+              try:
+                  conn.connect('155.212.162.47',username='root',password=os.environ['SERVER_PASSWORD'],port=22,
+                               look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  ssh=conn;break
+              except (paramiko.SSHException,OSError,EOFError):
+                  conn.close()
+                  if attempt==2:raise
+                  time.sleep(3)
+          try:
+              _,stdout,stderr=ssh.exec_command(remote,timeout=35)
+              result=stdout.read().decode('utf-8','replace')
+              status=stdout.channel.recv_exit_status()
+              if status:raise RuntimeError('Remote diagnostic failed (details withheld)')
+              print(result)
+          finally:ssh.close()
+          PY

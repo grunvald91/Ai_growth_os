@@ -1,0 +1,174 @@
+name: Deploy webapp to server
+
+# Экономный деплой production webapp на сервер.
+# Автодеплой запускается только при изменениях production-веба в main.
+# Сервер /opt/booking_bot НЕ git-репозиторий — изменённые файлы заливаются по SCP.
+# Ручной workflow_dispatch сохранён для точечного аварийного деплоя.
+#
+# Деплоятся ТОЛЬКО файлы, изменённые в коммите (под webapp/**), чтобы не затирать
+# серверные файлы, которые могли расходиться с git. Для ручного деплоя конкретных
+# файлов — запустить workflow вручную и передать их в поле "files".
+#
+# Требуется секрет: SERVER_SSH_PASSWORD.
+# Опционально (repository variables): SERVER_HOST, SERVER_USER, SERVER_PORT.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'webapp/server.py'
+      - 'webapp/templates/**'
+      - 'webapp/static/**'
+      - 'webapp/niches/**'
+      - 'web/frontend/**'
+  workflow_dispatch:
+    inputs:
+      files:
+        description: 'Список файлов для заливки (через пробел/перенос строки). Пусто = изменения последнего коммита.'
+        required: false
+        default: ''
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Integration PR #109 merges source before the coordinated API/Growth/nginx
+    # rollout. Only that explicitly marked merge commit defers frontend release.
+    # Ordinary subsequent main pushes and manual dispatch remain unchanged.
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[defer-servgo-frontend-release]') }}
+    runs-on: ubuntu-latest
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      REMOTE_PATH: /opt/booking_bot
+      SERVICE_NAME: booking-bot
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard — secret present
+        run: |
+          if [ -z "$SSHPASS" ]; then
+            echo "::error::Секрет SERVER_SSH_PASSWORD не задан в Settings → Secrets → Actions."
+            exit 1
+          fi
+
+      - name: Ensure sshpass
+        run: |
+          if command -v sshpass >/dev/null 2>&1; then
+            sshpass -V
+          else
+            sudo apt-get update
+            sudo apt-get install -y sshpass
+          fi
+
+      - name: Determine files to deploy
+        id: pick
+        run: |
+          set -euo pipefail
+          MANUAL='${{ github.event.inputs.files }}'
+          BEFORE='${{ github.event.before }}'
+          AFTER='${{ github.sha }}'
+
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            BEFORE=$(git rev-parse "${AFTER}~1" 2>/dev/null || echo "")
+          fi
+
+          if [ -n "${MANUAL// /}" ]; then
+            CHANGED=$(printf '%s\n' $MANUAL)
+          elif [ -n "$BEFORE" ]; then
+            CHANGED=$(git diff --name-only --diff-filter=ACMR "$BEFORE" "$AFTER" -- 'webapp/**' 'web/frontend/**' || true)
+          else
+            CHANGED=$(git ls-files 'webapp/**' 'web/frontend/**')
+          fi
+
+          WEBAPP_FILES=$(printf '%s\n' "$CHANGED" | grep '^webapp/' || true)
+          if printf '%s\n' "$CHANGED" | grep -q '^web/frontend/'; then
+            FRONTEND_CHANGED=1
+          else
+            FRONTEND_CHANGED=0
+          fi
+
+          echo "Webapp files to upload:"
+          printf '%s\n' "$WEBAPP_FILES"
+          echo "Frontend changed: $FRONTEND_CHANGED"
+          {
+            echo 'files<<__EOF__'
+            printf '%s\n' "$WEBAPP_FILES"
+            echo '__EOF__'
+            echo "frontend_changed=$FRONTEND_CHANGED"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node for frontend build
+        if: steps.pick.outputs.frontend_changed == '1'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Build frontend
+        if: steps.pick.outputs.frontend_changed == '1'
+        working-directory: web/frontend
+        run: |
+          npm ci --legacy-peer-deps
+          npm run build
+
+      - name: Upload changed files (SCP)
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ANY=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if [ ! -f "$f" ]; then echo "пропуск (нет файла): $f"; continue; fi
+            ANY=1
+            dir=$(dirname "$f")
+            sshpass -e ssh -n $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "mkdir -p '$REMOTE_PATH/$dir'"
+            sshpass -e scp $SSH_OPTS -P "$SERVER_PORT" "$f" "$SERVER_USER@$SERVER_HOST:$REMOTE_PATH/$f"
+            echo "залит: $f"
+          done <<< '${{ steps.pick.outputs.files }}'
+          if [ "$ANY" = "0" ]; then echo "Нет файлов для заливки — деплой не требуется."; fi
+          echo "ANY=$ANY" >> "$GITHUB_ENV"
+
+      - name: Upload verified frontend release with rollback
+        if: steps.pick.outputs.frontend_changed == '1'
+        env:
+          SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+          APPLY: 'true'
+        run: |
+          python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+          python scripts/deploy_servgo_frontend_atomic.py
+
+      - name: Restart service and verify
+        if: env.ANY == '1'
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh -n $SSH_OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" '
+            set -e
+            systemctl restart '"$SERVICE_NAME"'
+            echo -n "is-active: "; systemctl is-active '"$SERVICE_NAME"'
+            for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:8080/ || true)
+              if [ "$code" != "000" ] && [ "$code" -lt 500 ]; then
+                echo "webapp HTTP $code (attempt $attempt)"
+                niche_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 4 http://127.0.0.1:8080/beauty || true)
+                echo "promo niche HTTP $niche_code"
+                [ "$niche_code" = "200" ] || exit 1
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "Webapp did not become ready on 127.0.0.1:8080"
+            systemctl status '"$SERVICE_NAME"' --no-pager || true
+            journalctl -u '"$SERVICE_NAME"' -n 60 --no-pager || true
+            exit 1
+          '

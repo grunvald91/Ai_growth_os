@@ -1,0 +1,200 @@
+/* ═════════════════════════════════════════════════════════════════════════
+   ServGo · Расписание (макет servgo_admin_schedule_focus_v16)
+   График в приоритете: полосы записей окрашены цветом мастера, управление —
+   в нижнем доке у большого пальца, инструменты скрываются в «ящик».
+   ═════════════════════════════════════════════════════════════════════════ */
+
+.sched-screen { font-size: 13.5px; }
+.sched-hsub { display: flex; align-items: center; gap: 5px; margin-top: 2px; font-size: 11px; color: var(--s-muted-2); font-weight: 350; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sched-hsub .dot { width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: var(--s-success); }
+
+.sched-page {
+  flex: 1; min-height: 0; position: relative;
+  display: flex; flex-direction: column; overflow: hidden;
+  padding: 0 16px 4px;
+}
+
+/* Верхний контекст (по кнопке «Информация») */
+.sched-context { flex: none; display: flex; flex-direction: column; gap: 5px; padding: 5px 1px 8px; }
+.sched-context .ds-context-headline { font-size: 13px; line-height: 1.1; }
+.sched-context-strip { display: flex; gap: 4px; overflow: hidden; }
+.sched-context-strip > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 5px 7px; border-radius: 10px; background: var(--s-surface-2); }
+.sched-context-strip b { color: var(--s-accent); font-size: 12px; font-weight: 500; }
+.sched-context-strip span { font-size: 10px; color: var(--s-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Легенда цветов мастеров */
+.sched-legend { flex: none; display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 2px 0 4px; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+.sched-legend::-webkit-scrollbar { display: none; }
+.sched-legend-tag { display: inline-flex; align-items: center; gap: 5px; padding: 3px 2px; border: 0; background: transparent; font: inherit; font-size: 10.5px; color: var(--s-muted); white-space: nowrap; cursor: pointer; }
+.sched-legend-tag[aria-pressed='true'] { color: var(--s-accent); }
+.sched-swatch { display: inline-block; flex-shrink: 0; width: 16px; height: 6px; border-radius: 10px; background: var(--master); }
+
+/* Шапка колонок */
+.sched-colhead { flex: 0 0 34px; display: grid; align-items: center; background: var(--s-bg); }
+.sched-dayhead { min-width: 0; height: 34px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 0; background: transparent; font: inherit; font-size: 10px; color: var(--s-muted-2); position: relative; }
+.sched-dayhead strong { font-size: 10.5px; font-weight: 530; color: var(--s-text); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.025em; }
+.sched-dayhead .sched-swatch { width: 20px; height: 4px; }
+.sched-dayhead.week { cursor: pointer; }
+.sched-dayhead.week strong { font-size: 12px; }
+.sched-dayhead.week small { position: absolute; top: 1px; right: 2px; font-size: 8.5px; font-weight: 500; color: var(--s-accent); }
+.sched-dayhead.today span, .sched-dayhead.today strong { color: var(--s-accent); }
+
+/* Тело графика */
+.sched-scroll { flex: 1 1 auto; min-height: 80px; overflow: auto; position: relative; overscroll-behavior: contain; touch-action: pan-x pan-y; scrollbar-width: thin; }
+.sched-timeline {
+  position: relative; display: grid; grid-template-columns: 36px 1fr;
+}
+.sched-gutter { position: relative; }
+.sched-hour { position: absolute; left: 0; transform: translateY(-50%); font-size: 9px; color: var(--s-muted-2); font-variant-numeric: tabular-nums; }
+.sched-cols {
+  position: relative; display: grid; height: 100%;
+  background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--hour) - 1px), var(--s-grid) calc(var(--hour) - 1px), var(--s-grid) var(--hour));
+}
+.sched-col { position: relative; min-width: 0; border-left: 1px solid var(--s-grid); cursor: copy; }
+.sched-col.today { background: linear-gradient(180deg, rgba(52, 120, 214, 0.04), transparent); }
+
+/* Полоса записи: независимая дорожка, высота = реальная длительность */
+.sched-block {
+  position: absolute; pointer-events: none; overflow: hidden;
+  left: calc(var(--lane) * 100% / var(--lanes) + 1px); width: calc(100% / var(--lanes) - 2px);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 2px 1px;
+  color: #fff; border-radius: 5px;
+  background: var(--master);
+  background: linear-gradient(175deg, color-mix(in srgb, var(--master) 82%, white), var(--master));
+  box-shadow: 0 1px 4px rgba(29, 72, 114, 0.11);
+  transition: filter 0.18s ease, opacity 0.18s ease;
+}
+.sched-block::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 1px; background: #ffffff4d; }
+.sched-block .t { font-size: 9px; line-height: 1.1; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; }
+.sched-block .t span { display: block; white-space: nowrap; }
+.sched-block .n { font-size: 9px; line-height: 1.1; font-weight: 500; text-align: center; overflow-wrap: anywhere; max-width: 100%; }
+.sched-block.weekly { border-radius: 4px; padding: 0; }
+/* Ожидает подтверждения / предоплаты — штриховка поверх цвета мастера */
+.sched-block.is-awaiting { background:
+  repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0 4px, transparent 4px 8px),
+  var(--master);
+  background:
+  repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0 4px, transparent 4px 8px),
+  linear-gradient(175deg, color-mix(in srgb, var(--master) 70%, white), color-mix(in srgb, var(--master) 85%, white)); }
+.sched-block.is-done { opacity: 0.55; }
+.sched-block.is-dragging { opacity: 0.3; }
+
+.sched-hit { position: absolute; left: 0; right: 0; z-index: 3; padding: 0; border: 0; background: transparent; cursor: pointer; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.sched-hit:focus-visible { outline: 2px solid var(--s-accent); outline-offset: -2px; border-radius: 5px; }
+.sched-hit:active + .sched-block, .sched-hit:hover { background: rgba(255, 255, 255, 0.08); }
+
+.sched-drop { position: absolute; left: 1px; right: 1px; z-index: 5; pointer-events: none; border-radius: 8px; display: grid; place-items: center; font-size: 10px; color: var(--s-text); background: var(--s-surface-2); background: color-mix(in srgb, var(--master) 23%, var(--s-surface)); outline: 2px dashed var(--master); outline-offset: -2px; }
+.sched-ghost { position: fixed; z-index: 95; pointer-events: none; min-width: 130px; max-width: 180px; padding: 9px 12px; border-radius: 13px; color: #fff; font-size: 11px; line-height: 1.35; opacity: 0.94; transform: translate(12px, 12px); background: var(--master); background: linear-gradient(115deg, var(--master), color-mix(in srgb, var(--master) 78%, #192638)); box-shadow: 0 8px 25px rgba(20, 46, 72, 0.4); }
+.sched-ghost strong { display: block; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-ghost small { display: block; color: #fff; }
+
+.sched-now { position: absolute; left: 36px; right: 0; height: 0; border-top: 1.5px solid var(--s-now); z-index: 4; pointer-events: none; }
+.sched-now .knob { position: absolute; left: -4px; top: -4.5px; width: 7px; height: 7px; border-radius: 50%; background: var(--s-now); }
+.sched-now .lbl { position: absolute; left: -36px; top: -7px; font-size: 9px; font-weight: 600; color: var(--s-now); background: var(--s-bg); padding: 0 2px; }
+
+.sched-empty { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 40px 0; color: var(--s-muted); font-size: 13px; }
+.sched-pull { position: sticky; top: 6px; z-index: 10; margin: 0 auto -32px; width: max-content; display: flex; align-items: center; gap: 7px; padding: 8px 12px; border-radius: 20px; background: var(--s-surface); color: var(--s-accent); font-size: 11.5px; box-shadow: 0 6px 22px rgba(32, 83, 131, 0.12); }
+
+/* Плавающие кнопки — над нижней границей графика */
+.sched-floating { position: relative; height: 0; flex: none; z-index: 6; }
+.sched-fab { position: absolute; right: -6px; bottom: 10px; width: 42px; height: 42px; border: 0; border-radius: 50%; display: grid; place-items: center; color: #fff; cursor: pointer; background: linear-gradient(130deg, #3478df, #6298ec); box-shadow: 0 4px 15px rgba(50, 121, 213, 0.3); opacity: 0.95; }
+.sched-fab:active { transform: scale(0.94); }
+.sched-zoom-reset { position: absolute; left: -6px; bottom: 10px; width: 38px; height: 38px; border: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer; background: var(--s-surface-2); color: var(--s-accent); box-shadow: 0 3px 15px rgba(36, 107, 209, 0.18); }
+
+/* Нижний док */
+.sched-dock { flex: none; display: flex; align-items: center; gap: 5px; min-height: 43px; padding: 5px 0 1px; background: var(--s-bg); }
+.sched-dock .ds-seg button { min-height: 31px; padding: 5px 9px; font-size: 11px; }
+.sched-stepper { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 1px; }
+.sched-stepper button { min-width: 24px; min-height: 31px; display: grid; place-items: center; border: 0; background: none; padding: 3px; color: var(--s-muted); cursor: pointer; font: inherit; }
+.sched-stepper .label { min-width: 54px; font-size: 11.5px; font-weight: 500; color: var(--s-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-mini { flex: none; width: 32px; height: 33px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: transparent; color: var(--s-muted); cursor: pointer; }
+.sched-mini[aria-pressed='true'], .sched-mini[aria-expanded='true'] { color: var(--s-accent); background: var(--s-surface-3); }
+
+.sched-tools { flex: none; display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0 5px; }
+.sched-tools button { flex: 1 1 28%; min-height: 29px; padding: 5px 6px; border: 0; border-radius: 9px; background: var(--s-surface-2); color: var(--s-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.sched-tools button[aria-pressed='true'] { color: var(--s-accent); background: var(--s-surface-3); }
+.sched-search { flex: none; margin: 3px 0; height: 34px; }
+.sched-summary { flex: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px 0; }
+.sched-filters { flex: none; display: flex; gap: 5px; overflow-x: auto; padding: 3px 0 5px; scrollbar-width: none; }
+.sched-filters::-webkit-scrollbar { display: none; }
+
+/* Режим «на весь экран»: без шапки и навигации, но с выходом в доке */
+.sched-screen.is-focus .sched-page { padding: env(safe-area-inset-top, 4px) 8px env(safe-area-inset-bottom, 4px); }
+
+/* ── Шторки ── */
+.sched-sheet-grab { display: flex; align-items: center; justify-content: center; width: 100%; height: 22px; margin: -8px 0 6px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.sched-sheet-grab span { width: 40px; height: 4px; border-radius: 10px; background: var(--s-muted-2); opacity: 0.45; }
+
+.sched-detail { display: flex; flex-direction: column; gap: 12px; font-size: 13px; }
+.sched-detail-head { display: flex; gap: 10px; align-items: center; }
+.sched-detail-dot { width: 6px; height: 34px; flex: none; border-radius: 6px; background: var(--master); }
+.sched-detail-name { font-size: 16px; font-weight: 540; letter-spacing: -0.025em; }
+.sched-detail-sub { margin-top: 3px; }
+.sched-status { display: inline-flex; font-size: 10.5px; font-weight: 500; padding: 3px 8px; border-radius: 10px; color: var(--st-confirmed); background: var(--st-confirmed-bg); }
+.sched-status.st-pending { color: var(--st-pending); background: var(--st-pending-bg); }
+.sched-status.st-pending_prepayment, .sched-status.st-prepayment_sent { color: var(--st-prepay); background: var(--st-prepay-bg); }
+.sched-status.st-completed { color: var(--st-completed); background: var(--st-completed-bg); }
+.sched-status.st-cancelled { color: var(--st-cancelled); background: var(--st-cancelled-bg); }
+.sched-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+.sched-detail-grid > div { min-width: 0; padding: 3px 0; }
+.sched-detail-grid small, .sched-detail-notes small { display: block; font-size: 10px; color: var(--s-muted-2); margin-bottom: 3px; }
+.sched-detail-grid strong { font-weight: 500; font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; }
+.sched-phone { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; color: var(--s-accent); text-decoration: none; }
+.sched-detail-notes { font-size: 12px; color: var(--s-text-2); white-space: pre-line; line-height: 1.45; }
+.sched-detail-pay { display: flex; flex-direction: column; gap: 5px; padding: 11px 12px; border-radius: 12px; background: var(--s-surface-2); }
+.sched-detail-pay .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--s-muted); }
+.sched-detail-pay .row strong { color: var(--s-accent); font-weight: 550; }
+.sched-detail-pay small { font-size: 10.5px; color: var(--s-muted-2); line-height: 1.4; }
+.sched-progress { height: 5px; border-radius: 20px; background: var(--s-surface-3); overflow: hidden; margin: 3px 0 2px; }
+.sched-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #53bca9, #4f88db); }
+.sched-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.sched-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 38px; padding: 8px 5px; border: 0; border-radius: 10px; background: var(--s-surface-2); color: var(--s-muted); font: inherit; font-size: 11.5px; font-weight: 450; cursor: pointer; }
+.sched-actions button.primary { grid-column: 1 / -1; background: var(--s-surface-3); color: var(--s-accent); font-weight: 500; }
+.sched-actions button.danger { color: var(--s-danger); background: #fcebeb; }
+[data-theme='dark'] .sched-actions button.danger { background: rgba(240, 156, 156, 0.12); }
+.sched-actions button:disabled { opacity: 0.4; cursor: default; }
+
+.sched-group { display: flex; flex-direction: column; gap: 7px; }
+.sched-group-item { width: 100%; display: grid; grid-template-columns: 5px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 76px; padding: 12px 10px 12px 13px; border: 0; border-radius: 17px; background: var(--s-surface-2); color: var(--s-text); text-align: left; font: inherit; cursor: pointer; transition: background 0.15s ease, transform 0.15s ease; }
+.sched-group-item:active { transform: scale(0.992); background: var(--s-surface-3); }
+.sched-group-item .sched-detail-dot { width: 5px; height: 48px; }
+.sched-group-item .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; line-height: 1.25; }
+.sched-group-item .master { color: var(--s-accent); font-size: 10px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-group-item strong { font-size: 13.4px; font-weight: 540; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sched-group-item small { font-size: 11px; color: var(--s-muted); overflow-wrap: anywhere; }
+.sched-group-item .end { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
+.sched-group-item .time { font-size: 11.2px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sched-group-item .arrow { width: 23px; height: 23px; border-radius: 50%; display: grid; place-items: center; background: rgba(80, 139, 219, 0.08); color: var(--s-accent); }
+
+.sched-stepper-row { display: flex; align-items: center; gap: 8px; margin: -2px 0 8px; font-size: 13px; font-weight: 500; }
+
+.sched-move { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 14px; padding: 13px 14px; border-radius: 14px; background: var(--s-surface-2); font-size: 12px; }
+.sched-move strong { font-weight: 570; }
+.sched-move .old { color: var(--s-muted-2); font-size: 11px; }
+.sched-move .new { color: var(--s-accent); font-size: 13px; }
+
+@media (min-width: 900px) {
+  .sched-page { padding: 8px 28px 8px; max-width: 1100px; width: 100%; margin: 0 auto; grid-area: content; }
+  .sched-screen.is-focus { display: flex; }
+  .sched-screen.is-focus .sched-page { max-width: none; }
+  .sched-fab { right: 0; }
+}
+@media (max-height: 620px) {
+  .sched-legend { min-height: 25px; }
+  .sched-dock { min-height: 36px; }
+  .sched-colhead { flex-basis: 29px; }
+  .sched-dayhead { height: 29px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sched-block, .sched-group-item { transition: none; }
+}
+
+.sched-detail-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--s-accent);
+  text-decoration: none;
+}

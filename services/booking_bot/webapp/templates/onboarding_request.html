@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta name="referrer" content="no-referrer">
+<title>Заявка на подключение — ServGo</title>
+<style>
+:root{--blue:#3478d6;--text:#1b2d42;--muted:#62778b;--line:#e8eef6;--panel:#f6f9fd;--grad:linear-gradient(110deg,#3174d4,#578fef)}
+*{box-sizing:border-box}body{margin:0;background:#fff;color:var(--text);font:15px/1.5 'Onest',system-ui,-apple-system,sans-serif}
+main{max-width:1000px;margin:auto;padding:38px 20px 72px}header{border-bottom:1px solid var(--line);padding:14px 22px}
+header .bar{max-width:1000px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:12px}
+a{color:var(--blue);text-decoration:none}.logo{font-size:22px;font-weight:800;color:var(--text);letter-spacing:-.05em}.logo em{font-style:normal;color:var(--blue)}
+.hero{padding:32px 0 22px}.eyebrow{font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--blue)}
+h1{font-size:clamp(25px,4vw,39px);line-height:1.16;letter-spacing:-.04em;margin:8px 0 13px}p{color:var(--muted);margin:8px 0}
+.meta{display:flex;flex-wrap:wrap;gap:9px}.meta span{padding:6px 12px;border-radius:99px;background:var(--panel);font-size:12px}
+section{border:1px solid var(--line);border-radius:21px;margin:18px 0;padding:20px;box-shadow:0 5px 20px rgba(41,77,122,.035)}
+h2{margin:0 0 14px;font-size:18px;letter-spacing:-.025em}.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.item{border-radius:12px;background:var(--panel);padding:11px 13px;min-width:0}.item b{display:block;color:var(--muted);font-size:11px;font-weight:600;margin-bottom:4px}.item span{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}
+.row{padding:12px 4px;border-bottom:1px solid var(--line)}.row:last-child{border-bottom:0}.row strong{display:block;margin-bottom:4px}
+.row p{margin:3px 0;color:var(--muted);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
+button{border:0;padding:11px 17px;border-radius:12px;background:var(--grad);color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.note{font-size:12px;line-height:1.6;margin-top:24px}.error{color:#b04444;white-space:pre-wrap}
+@media(max-width:650px){main{padding:18px 13px 64px}.fields{grid-template-columns:1fr}section{padding:15px;border-radius:16px}.hero{padding:20px 4px 8px}}
+@media print{button{display:none}main{padding:8px}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<header><div class="bar"><a class="logo" href="https://servgo.ru/">Serv<em>Go</em></a><button type="button" id="print">Печать</button></div></header>
+<main>
+<div class="hero"><div class="eyebrow">ServGo · заявка на подключение</div>
+<h1 id="business">Загружаем анкету…</h1><div class="meta" id="meta"></div>
+<p id="status" role="status" aria-live="polite">Проверяем доступ и загружаем сохранённые данные.</p></div>
+<div id="sections"></div>
+<p class="note">Эта информация предназначена только для настройки онлайн-записи. Не пересылайте данные третьим лицам без согласования с владельцем бизнеса.</p>
+</main>
+<script>
+(()=>{
+'use strict';
+const sections=document.getElementById('sections'), status=document.getElementById('status');
+const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=String(text);return n;};
+const block=(heading)=>{const sec=el('section');sec.append(el('h2','',heading));sections.append(sec);return sec};
+const addPairs=(title,values)=>{const keys=Object.entries(values).filter(([,v])=>v!==null&&v!==undefined&&String(v).trim()!=='');if(!keys.length)return;
+ const sec=block(title),grid=el('div','fields');for(const [key,value] of keys){const card=el('div','item');card.append(el('b','',key),el('span','',value));grid.append(card)}sec.append(grid)};
+const addRows=(title,rows,render)=>{if(!rows?.length)return;const sec=block(title);rows.forEach((row,i)=>{const wrap=el('div','row');wrap.append(el('strong','',(i+1)+'. '+(row.name||'Без названия')));for(const item of render(row)){if(item)wrap.append(el('p','',item))}sec.append(wrap)})};
+async function show(){
+ const id=location.pathname.split('/').filter(Boolean).pop();
+ if(!/^[0-9a-f]{32}$/.test(id||''))throw Error('Некорректная ссылка');
+ const response=await fetch('/api/onboarding/requests/'+encodeURIComponent(id),{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});
+ if(response.status===403)throw Error('Нет доступа. Войдите в ServGo как администратор и откройте ссылку повторно.');
+ if(!response.ok)throw Error('Не удалось открыть заявку ('+response.status+').');
+ const data=await response.json(),f=data.form;
+ document.getElementById('business').textContent=data.business_name;
+ const meta=document.getElementById('meta');
+ [data.request_id,new Date(data.submitted_at).toLocaleString('ru-RU'),data.email_state==='sent'?'Уведомление отправлено':'Уведомление ожидает отправки'].forEach(t=>meta.append(el('span','',t)));
+ status.textContent='Сохранённая анкета · данные доступны только администратору ServGo.';
+ const fields=f.fields||{};
+ const primary=['Название бизнеса','Сфера деятельности','Телефон для клиентов','Мессенджер бизнеса','Формат услуг','Адрес','Как добраться','Описание бизнеса','Сайт и соцсети','Форма регистрации','ИНН','Юридическое наименование','ОКВЭД'];
+ addPairs('Данные бизнеса',Object.fromEntries(Object.entries(fields).filter(([k])=>primary.includes(k))));
+ addRows('Услуги',f.services||[],r=>[r.price?'Стоимость: '+r.price+' ₽':'',r.duration?'Длительность: '+r.duration+' мин':'',r.category?'Категория: '+r.category:'']);
+ addRows('Мастера и залы',f.staff||[],r=>[r.role||'',r.services?'Услуги: '+r.services:'',r.hours?'График: '+r.hours:'']);
+ addPairs('Параметры записи',{'Ресурсы':f.resource_mode,'Предоплата':f.deposit_mode,'Онлайн-оплата':f.online_mode});
+ addPairs('Недельное расписание',Object.fromEntries(Object.entries(f.hours||{}).map(([k,v])=>[k,v.off?'Выходной':v.start+'–'+v.end])));
+ addPairs('Условия оплаты, правила и контакты',Object.fromEntries(Object.entries(fields).filter(([k])=>!primary.includes(k))));
+ const done=Object.values(f.done||{}).filter(Boolean).length,total=Object.keys(f.done||{}).length;
+ addPairs('Готовность и контроль',{'Отмечено пунктов':done+' из '+total});
+}
+show().catch(e=>{document.getElementById('business').textContent='Анкету открыть не удалось';status.className='error';status.textContent=e.message});
+document.getElementById('print').addEventListener('click',()=>window.print());
+})();
+</script>
+</body>
+</html>

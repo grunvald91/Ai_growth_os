@@ -1,0 +1,110 @@
+name: Audit production source against GitHub
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Compare tracked files and encrypt differing server source
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, io, json, os, pathlib, stat, subprocess, time, zipfile
+          import paramiko
+          from cryptography.hazmat.primitives import hashes, serialization
+          from cryptography.hazmat.primitives.asymmetric import x25519
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+          from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+          public=x25519.X25519PublicKey.from_public_bytes(base64.b64decode('X8AkoDkxrSiMj7tldxpYj5ltgnHYgHWbbiagL9JC6XY='))
+          tracked=[p for p in subprocess.check_output(['git','ls-files','-z']).decode().split('\0') if p]
+          def allowed(p):
+              segments=p.lower().split('/')
+              return p!='.env.example' and not any(x in segments for x in ('.git','.github','venv','node_modules','dist','__pycache__','.env')) and not any(x in p.lower() for x in ('password','credential','private_key','.pem','.sqlite','.db','.log'))
+          tracked=[p for p in tracked if allowed(p)]
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self, client, hostname, key):
+                  actual=base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if actual!='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU':
+                      raise paramiko.SSHException('Host key mismatch')
+                  client.get_host_keys().add(hostname,key.get_name(),key)
+          ssh=None
+          for attempt in range(3):
+              conn=paramiko.SSHClient();conn.set_missing_host_key_policy(Pinned())
+              try:
+                  conn.connect('155.212.162.47',port=22,username='root',password=os.environ['SERVER_PASSWORD'],
+                               look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  ssh=conn;break
+              except (paramiko.SSHException,OSError,EOFError):
+                  conn.close()
+                  if attempt==2:raise
+                  time.sleep(3)
+          sftp=ssh.open_sftp();root='/opt/booking_bot/'
+          changed={};missing=[];same=0;too_large=[]
+          try:
+              for p in tracked:
+                  try:
+                      info=sftp.stat(root+p)
+                      if not stat.S_ISREG(info.st_mode):continue
+                      if info.st_size>2_000_000:
+                          too_large.append(p);continue
+                      with sftp.open(root+p,'rb') as f:data=f.read()
+                  except FileNotFoundError:
+                      missing.append(p);continue
+                  if hashlib.sha256(data).digest()==hashlib.sha256(pathlib.Path(p).read_bytes()).digest():same+=1
+                  else:changed[p]=data
+              extras={}
+              source_roots=('bot','database','web/api','webapp','scripts','migrations')
+              source_extensions={'.py','.js','.ts','.tsx','.html','.css','.yaml','.yml','.sql'}
+              tracked_set=set(tracked)
+              def scan(directory):
+                  try:entries=sftp.listdir_attr(root+directory)
+                  except FileNotFoundError:return
+                  for entry in entries:
+                      path=directory+'/'+entry.filename
+                      if not allowed(path) or entry.filename.startswith('.') or entry.filename.endswith(('.bak','.old','.orig')):continue
+                      if stat.S_ISDIR(entry.st_mode):scan(path)
+                      elif (stat.S_ISREG(entry.st_mode) and path not in tracked_set and
+                            pathlib.Path(path).suffix in source_extensions and entry.st_size<=2_000_000):
+                          with sftp.open(root+path,'rb') as f:extras[path]=f.read()
+              for directory in source_roots:scan(directory)
+              manifest={'tracked_checked':len(tracked),'matching':same,'missing_on_server':missing,
+                        'too_large':too_large,'extra_server_source':list(extras),
+                        'changed':{p:{'server_sha256':hashlib.sha256(data).hexdigest(),
+                                                               'repo_sha256':hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest(),
+                                                               'size':len(data)} for p,data in changed.items()}}
+              print('checked=%d matching=%d changed=%d missing=%d oversized=%d' %
+                    (len(tracked),same,len(changed),len(missing),len(too_large)))
+              print('Changed paths:',*changed,sep='\n  ')
+              print('Missing tracked paths:',*missing,sep='\n  ')
+              print('Additional server source:',*extras,sep='\n  ')
+              with zipfile.ZipFile('source-changes.zip','w',compression=zipfile.ZIP_DEFLATED) as archive:
+                  for p,data in {**changed,**extras}.items():archive.writestr(p,data)
+              raw=pathlib.Path('source-changes.zip').read_bytes()
+              ephemeral=x25519.X25519PrivateKey.generate()
+              salt=os.urandom(32);nonce=os.urandom(12)
+              key=HKDF(algorithm=hashes.SHA256(),length=32,salt=salt,info=b'servgo-source-audit-v1').derive(ephemeral.exchange(public))
+              encrypted=AESGCM(key).encrypt(nonce,raw,None)
+              header={'ephemeral':base64.b64encode(ephemeral.public_key().public_bytes(
+                       serialization.Encoding.Raw,serialization.PublicFormat.Raw)).decode(),
+                      'salt':base64.b64encode(salt).decode(),'nonce':base64.b64encode(nonce).decode()}
+              pathlib.Path('servgo-sync.enc').write_bytes(json.dumps(header).encode()+b'\n'+encrypted)
+              pathlib.Path('servgo-manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2))
+              pathlib.Path('source-changes.zip').unlink()
+          finally:
+              sftp.close();ssh.close()
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-servgo-source-audit
+          path: |
+            servgo-sync.enc
+            servgo-manifest.json
+          retention-days: 1

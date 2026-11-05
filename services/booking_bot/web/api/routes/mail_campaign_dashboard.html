@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>Кампании — ServGo Mail</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:#152544;background:#f3f8fe;--blue:#1578f5;--line:#dfebf7;--muted:#7585a0}
+*{box-sizing:border-box}body{margin:0}button,input,textarea,select{font:inherit}button{cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}
+.app{display:grid;grid-template-columns:240px minmax(0,1fr);min-height:100vh}
+aside{background:#fff;border-right:1px solid var(--line);padding:23px 15px}
+.brand{font-size:23px;font-weight:850;letter-spacing:-.5px;margin:0 0 35px;padding-left:9px}.brand small{font-size:11px;color:var(--muted);font-weight:500;display:block}
+nav a{display:block;padding:13px 15px;border-radius:13px;text-decoration:none;color:#677c9b;font-weight:700;font-size:14px;margin-bottom:5px}nav a.on{background:#eaf3ff;color:#116cdb}
+main{min-width:0;padding:29px;max-width:1550px;width:100%}
+.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:20px}.top h1{font-size:27px;margin:0;letter-spacing:-.6px}.top p{font-size:13px;color:var(--muted);margin:5px 0}
+.btn{border:0;border-radius:11px;background:var(--blue);color:#fff;font-size:13px;font-weight:750;padding:11px 16px}
+.btn.alt{background:#e9f3ff;color:#1369ce}.btn.light{background:#fff;border:1px solid var(--line);color:#486381}.btn.warn{background:#fff2e5;color:#a6601e}.btn.danger{background:#fff0f0;color:#c24d4d}
+.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.panels{display:grid;grid-template-columns:minmax(250px,35%) minmax(0,1fr);gap:15px}
+.panel{background:#fff;border:1px solid var(--line);border-radius:19px;box-shadow:0 6px 24px #112e5909;overflow:hidden}
+.panel h2{font-size:15px;margin:0;padding:17px 19px;border-bottom:1px solid var(--line)}
+.pad{padding:19px}.campaign{padding:16px 19px;border-bottom:1px solid #ecf1f8;cursor:pointer}.campaign:hover,.campaign.selected{background:#edf6ff}
+.campaign b{display:block;font-size:14px}.campaign small{color:#8495b1;font-size:12px;display:block;margin-top:7px}
+.numbers{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:17px 0}.number{border:1px solid var(--line);background:#fff;border-radius:14px;padding:14px}.number small{color:var(--muted);font-size:11px;display:block}.number strong{display:block;font-size:24px;margin-top:5px}
+.label{font-size:11px;color:#657792;border-radius:30px;padding:5px 9px;background:#edf4ff;display:inline-block;font-weight:750}.label.good{background:#e5f8ef;color:#23865c}.label.warning{background:#fff3df;color:#aa7527}
+.field{display:flex;flex-direction:column;gap:6px;margin:14px 0}.field span{font-size:12px;font-weight:740;color:#48617c}.field input,.field textarea,.field select{width:100%;border:1px solid #dce8f6;border-radius:11px;background:#fbfdff;color:#233b5d;padding:11px 12px;outline:0}.field textarea{min-height:120px;line-height:1.5;resize:vertical}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:11px;border-bottom:1px solid #edf2f9;text-align:left;overflow-wrap:anywhere;vertical-align:middle}th{color:#74859e;font-size:11px}td button{border:0;color:#1167c7;background:#edf5ff;border-radius:7px;padding:7px 9px;cursor:pointer}
+.scroll{max-height:450px;overflow:auto}.muted{color:var(--muted)}.hint{font-size:12px;line-height:1.6;color:#6a7d98}#search-dialog{max-height:calc(100dvh - 24px);overflow:auto}#search-dialog select{width:100%;min-height:44px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font:inherit;background:#fff}.idea{display:block;width:100%;text-align:left;border:1px solid var(--line);background:#f7fbff;border-radius:12px;padding:10px 12px;margin:8px 0;font:inherit;cursor:pointer}.idea b{display:block}.idea small{color:var(--muted)}.hit{padding:12px 0;border-top:1px solid var(--line)}.hit-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.hit-top .label{white-space:nowrap;flex:none}.hit-mail{overflow-wrap:anywhere;margin:4px 0}.stickybar{position:sticky;bottom:-25px;background:#fff;padding:12px 0 2px;margin-top:8px;border-top:1px solid var(--line)}
+dialog{border:1px solid var(--line);border-radius:19px;padding:25px;width:min(640px,calc(100vw - 30px));box-shadow:0 20px 70px #0c295d55}dialog::backdrop{background:#0a20497a}dialog h2{margin:0 0 8px}
+.empty{padding:28px 20px;text-align:center;color:var(--muted);font-size:13px;line-height:1.7}
+.auto{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--line);border-radius:15px;padding:11px 14px;margin-bottom:17px}
+.auto b{display:block;font-size:14px}.auto small{display:block;font-size:12px;color:var(--muted);margin-top:3px;line-height:1.45}.auto>div{flex:1;min-width:0}
+.switch{position:relative;flex:none;width:52px;height:30px;border:0;border-radius:30px;background:#cfdbea;padding:0;transition:background .15s}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 4px #0d2a5533;transition:transform .15s}
+.switch[aria-checked="true"]{background:#23a26b}.switch[aria-checked="true"]::after{transform:translateX(22px)}
+.switch:focus-visible{outline:3px solid #9cc7ff;outline-offset:2px}
+#notice{position:fixed;bottom:18px;right:18px;max-width:390px;border-radius:12px;padding:13px 18px;background:#14396b;color:#fff;box-shadow:0 12px 32px #123c6555;display:none;font-size:13px}
+.fab{display:none}
+@media(max-width:850px){.fab{display:flex;position:fixed;right:14px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:20;border-radius:16px;padding:14px 18px;background:var(--blue);color:#fff;font-weight:800;font-size:15px;text-decoration:none;box-shadow:0 10px 26px #0d78f355}#notice{bottom:calc(84px + env(safe-area-inset-bottom));left:12px;right:12px;max-width:none}main{padding-bottom:96px}}
+@media(max-width:850px){.app{grid-template-columns:1fr}aside{padding:14px 16px}nav{display:flex;gap:6px;overflow:auto}.brand{margin-bottom:12px}main{padding:17px}.panels{grid-template-columns:1fr}.numbers{grid-template-columns:repeat(2,minmax(0,1fr))}.top{align-items:flex-start}}
+</style>
+<link rel="stylesheet" href="/api/servgo-air-tokens.css?v=1">
+<link rel="stylesheet" href="/api/servgo-mail-air.css?v=3">
+<script src="/api/servgo-air-theme.js?v=1"></script>
+<script src="/api/servgo-mail-theme-picker.js?v=1" defer></script>
+</head>
+<body class="servgo-mail-v2 servgo-mail-campaigns">
+<a class="mail-skip-link" href="#mail-main-content">Перейти к кампаниям</a>
+<div class="app">
+<aside><div class="brand">ServGo <small>ИИ-маркетинг · Email-кампании</small></div>
+
+<p class="hint">Личный кабинет владельца ServGo. Адресаты, персональные предложения, очередь и результаты.</p>
+</aside>
+<main id="mail-main-content">
+<nav class="mail-workspace-links" aria-label="Навигация ServGo">
+  <a class="mail-workspace-link mail-workspace-back" href="https://servgo.ru/admin">← Панель ServGo</a>
+  <a class="mail-workspace-link mail-workspace-studio" href="https://servgo.ru/workspace/growth">✦ AI-студия</a>
+  <a class="mail-workspace-link mail-workspace-logout" href="/api/logout">Выйти из почты</a>
+</nav>
+<div class="top"><div><div class="mail-eyebrow">Рабочее пространство · Почта</div><h1>Почтовые кампании</h1><p>Адресаты, персональные предложения и результаты отправок</p></div>
+</div>
+<div id="campaigns-screen">
+<p class="hint mail-v4-automation-status" id="campaign-automation-summary" role="status">Проверяем состояние отправки…</p>
+<div class="panels">
+<section class="panel"><h2>Кампании</h2><div id="campaign-list"><div class="empty">Добавьте первую кампанию ServGo.</div></div></section>
+<section class="panel">
+<h2 id="selected-title">Управление кампанией</h2>
+<div class="pad" id="campaign-detail"><div class="empty">Выберите кампанию слева или создайте новую.</div></div>
+</section>
+</div>
+</div>
+<section id="search-dialog" class="mail-v3-search" hidden><form id="search-form"><h2>ИИ-поиск компаний</h2><p class="hint">Поиск организаций через 2ГИС, Exa и Яндекс Карты. ИИ проверяет соответствие найденных организаций выбранному бизнесу. Поиск продолжается при переключении разделов.</p>
+<label class="field"><span>Рассылка для переноса (необязательно при поиске)</span><select id="search-campaign" aria-label="Рассылка для новых адресатов"></select></label>
+<button class="btn light mail-v4-create" type="button" id="search-create-campaign">+ Новая рассылка</button>
+<label class="field"><span>Для какой компании ищем клиентов</span><select id="search-company"></select></label>
+
+<div id="search-ideas"></div>
+<label class="field"><span>Источник поиска</span><select id="search-provider"><option value="2gis">2ГИС · локальные компании</option><option value="exa">Exa · сайты компаний</option><option value="yandex">Яндекс Карты · организации</option></select></label>
+<label class="field"><span>История поисков</span><select id="search-history"><option value="">Последние поиски</option></select></label>
+<label class="field"><span>Ниша</span><input id="search-niche" minlength="2" maxlength="100" required placeholder="Например, салон красоты"></label>
+<label class="field"><span>Город</span><input id="search-city" maxlength="60" value="Сочи"></label>
+<label class="field"><span>Сколько подходящих компаний с email нужно (пусто — вся выдача)</span><input id="search-want" type="number" min="1" inputmode="numeric"></label>
+<p class="hint" id="search-status" aria-live="polite"></p>
+<p class="hint" id="search-help">Результаты поиска сохраняются отдельно от рассылки. Сначала найдите, затем проверьте и перенесите выбранных.</p>
+<div id="search-results"></div>
+<div class="row stickybar mail-v3-search-actions"><button class="btn" type="submit" id="search-go">Начать поиск</button><button type="button" class="btn alt" id="search-suggest">✦ Подобрать с ИИ</button><button type="button" class="btn alt" id="search-add" disabled>Добавить подходящих в рассылку</button><button type="button" class="btn warn" id="search-stop" style="display:none">Остановить</button><button type="button" class="btn alt" id="search-resume" style="display:none">Продолжить</button><button type="button" class="btn light" id="search-close">Закрыть</button></div></form></section>
+</main>
+</div>
+<div class="mail-v3-dock" aria-label="Управление рассылками">
+  <div class="mail-v3-actionbar" id="mail-campaign-toolbar">
+    <button class="btn" type="button" id="create">+ Рассылка</button><div id="mail-campaign-primary" class="mail-v4-primary"></div>
+    <details class="mail-v3-popover mail-v3-more"><summary>⋯ Управление</summary><div class="mail-v3-popover-content">
+      <div class="row mail-v3-toolbar-extras"><label class="servgo-mail-theme-picker">Тема <select id="servgo-mail-theme" aria-label="Тема оформления">
+<option value="system">Как в системе</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label><button id="reload" class="btn light">↻ Обновить</button><a class="btn light" style="text-decoration:none;display:inline-block" href="/api/mailbox-dashboard#compose">✉ Написать письмо</a></div>
+      <section class="auto" aria-live="polite"><div><b>Автоматическая рассылка</b><small id="auto-text">Проверяем состояние…</small></div>
+<button type="button" class="switch" id="auto-switch" role="switch" aria-checked="false" aria-label="Автоматическая рассылка" disabled></button></section>
+      <div id="campaign-action-dock"></div>
+    </div></details>
+  </div>
+  <nav class="mail-v3-nav" aria-label="Разделы почты">
+    <a href="/api/campaigns-dashboard#search" id="mail-nav-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7.5"/><path d="m20 20-4-4"/></svg><span>Поиск</span></a>
+    <a href="/api/campaigns-dashboard#campaigns" id="mail-nav-campaigns"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg><span>Рассылки</span></a>
+    <a href="/api/mailbox-dashboard#inbox"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span>Письма</span></a>
+  </nav>
+</div>
+<dialog id="new-dialog"><form id="new-form"><h2>Новая кампания</h2><p class="hint">Это отдельная серия персональных писем с собственным списком адресов и аналитикой.</p>
+<label class="field"><span>Название</span><input id="new-name" maxlength="160" minlength="3" required placeholder="Например, ServGo — салоны красоты"></label>
+<label class="field"><span>Цель кампании</span><textarea id="new-purpose" maxlength="800">Представить сервис ServGo подходящим компаниям и предложить посмотреть демонстрацию.</textarea></label>
+<label class="field"><span>Минимальный интервал между письмами, секунд</span><input id="new-gap" type="number" min="30" max="86400" value="90"></label>
+<div class="row" style="justify-content:flex-end"><button type="button" id="new-cancel" class="btn light">Отмена</button><button class="btn" type="submit">Создать</button></div>
+</form></dialog>
+<dialog id="import-dialog"><form id="import-form"><h2>Добавить адресатов</h2><p class="hint">Адреса по одному на строке либо в формате «Компания;email;HTTPS-сайт;заметка». Карточки контактов заранее не нужны. Повторы пропускаются.</p>
+<label class="field"><span>Адресаты (до 1000 за импорт)</span><textarea id="import-rows" required style="min-height:210px" placeholder="hello@example.com&#10;office@example.org&#10;Студия;info@example.net;https://example.net;Салон красоты"></textarea></label>
+<div class="row" style="justify-content:flex-end"><button class="btn light" type="button" id="import-cancel">Отмена</button><button class="btn" type="submit">Импортировать</button></div></form></dialog>
+
+<dialog id="edit-dialog"><form id="edit-form"><h2 id="edit-title">Персональное предложение</h2><p id="edit-recipient" class="hint"></p>
+<label class="field"><span>Тема</span><input id="edit-subject" minlength="3" maxlength="180" required></label>
+<label class="field"><span>Текст письма</span><textarea id="edit-body" minlength="30" maxlength="12000" required style="min-height:290px"></textarea></label>
+<p class="hint" id="edit-critique"></p>
+<div class="row" style="justify-content:flex-end"><button type="button" class="btn light" id="edit-cancel">Закрыть</button><button type="submit" class="btn">Сохранить и отправить на проверку</button></div></form></dialog>
+<a class="fab" href="/api/mailbox-dashboard#compose">✉ Написать</a>
+<div id="notice" role="status" aria-live="polite"></div>
+<script>
+const state={campaigns:[],selected:null,detail:null,checked:new Set(),editing:null};
+const el=id=>document.getElementById(id);
+const e=s=>String(s??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+function note(message){el("notice").textContent=message;el("notice").style.display="block";clearTimeout(window.__n);window.__n=setTimeout(()=>el("notice").style.display="none",4400)}
+async function api(path,method="GET",data){const init={method,credentials:"same-origin",headers:{"Accept":"application/json"}};if(data!==undefined){init.headers["Content-Type"]="application/json";init.body=JSON.stringify(data)}const r=await fetch("/api/campaigns"+path,init);let j;try{j=await r.json()}catch{throw Error("Сервер недоступен")}if(!r.ok)throw Error(typeof j.detail==="string"?j.detail:"Ошибка HTTP "+r.status);return j}
+function safe(task){return Promise.resolve().then(task).catch(ex=>note(ex.message))}
+const names={draft:"Черновик",paused:"Приостановлена",running:"В работе",finished:"Завершена",new:"Новый",research_queued:"Ждёт агента",researching:"Агент работает",review:"На проверке",approved:"Согласовано",sending:"Отправляется",accepted:"Принято SMTP",unknown:"Статус неизвестен",rejected:"Отклонено",draft_error:"Ошибка подготовки",excluded:"Исключён"};
+function badge(status){return '<span class="label '+(["accepted","approved","running"].includes(status)?"good":["unknown","draft_error","rejected"].includes(status)?"warning":"")+'">'+e(names[status]||status)+'</span>'}
+function renderAuto(a){const sw=el("auto-switch");sw.disabled=false;sw.setAttribute("aria-checked",a.enabled?"true":"false");el("campaign-automation-summary").textContent=(a.enabled?"Автоотправка включена. ":"Автоотправка выключена. ")+(a.worker_alive?"Почтовый обработчик работает.":"Почтовый обработчик сейчас не отвечает.");
+const worker=a.worker_alive?"":" Служба рассылки сейчас не отвечает — письма уйдут, когда она снова запустится.";
+el("auto-text").textContent=(a.enabled?"Включена: согласованные письма запущенных кампаний уходят по расписанию и с дневным лимитом.":"Выключена: ни одно письмо не уйдёт, пока вы её не включите. Подготовка и проверка писем продолжают работать.")+worker}
+async function loadAuto(){renderAuto(await api("/automation"))}
+el("auto-switch").onclick=()=>safe(async()=>{const on=el("auto-switch").getAttribute("aria-checked")!=="true";
+if(on&&!confirm("Включить автоматическую рассылку? Согласованные письма запущенных кампаний начнут отправляться."))return;
+el("auto-switch").disabled=true;try{renderAuto(await api("/automation","PUT",{enabled:on}));note(on?"Автоматическая рассылка включена":"Автоматическая рассылка выключена")}finally{el("auto-switch").disabled=false}});
+async function refresh(){loadAuto().catch(ex=>note(ex.message));state.campaigns=await api("");if(!state.selected){const preferred=state.campaigns.find(x=>["draft","paused"].includes(x.campaign.status))||state.campaigns[0];if(preferred)state.selected=preferred.campaign.id}if(state.selected){try{state.detail=await api("/"+state.selected)}catch{state.selected=null;state.detail=null}}render()}
+function render(){renderSearchTargets();el("campaign-list").innerHTML=state.campaigns.length?state.campaigns.map(x=>'<div class="campaign '+(state.selected===x.campaign.id?"selected":"")+'" data-id="'+e(x.campaign.id)+'"><b>'+e(x.campaign.name)+'</b><div class="row" style="margin-top:9px">'+badge(x.campaign.status)+'<span class="hint">'+x.metrics.total+' адресатов</span></div><small>Принято SMTP: '+x.metrics.smtp_accepted+' · Ответов: '+x.metrics.replies+'</small></div>').join(""):'<div class="empty">Здесь появятся ваши кампании</div>';document.querySelectorAll(".campaign").forEach(node=>node.onclick=()=>safe(()=>select(node.dataset.id)));const d=state.detail;if(!d){el("campaign-action-dock").replaceChildren();el("mail-campaign-primary").replaceChildren();el("selected-title").textContent="Управление кампанией";el("campaign-detail").innerHTML='<div class="empty">Выберите кампанию или создайте новую.</div>';return}el("selected-title").textContent=d.campaign.name;const m=d.metrics;const canEdit=["draft","paused"].includes(d.campaign.status);
+const cc=campaignCompany();el("campaign-detail").innerHTML='<div class="row">'+badge(d.campaign.status)+(cc?'<span class="label">Для «'+e(cc.name)+'»</span>':'')+'<span class="hint">'+e(d.campaign.objective)+'</span></div>'+
+'<div class="numbers">'+[['Всего адресатов',m.total],['Принято SMTP',m.smtp_accepted],['Ответили',m.replies],['Заинтересованы',m.interested]].map(x=>'<div class="number"><small>'+e(x[0])+'</small><strong>'+x[1]+'</strong></div>').join("")+'</div>'+
+'<div class="row mail-campaign-controls">'+(canEdit?'<button class="btn" id="import-btn">⇪ Адресаты</button><button class="btn alt" id="search-btn">🔎 Найти компании</button><button class="btn alt" id="prepare-btn">✦ Подготовить письма</button><button class="btn alt" id="approve-btn">✓ Согласовать выбранные</button><button class="btn" id="launch-btn">▶ Запустить</button>':'')+
+(d.campaign.status==="running"?'<button class="btn warn" id="pause-btn">Ⅱ Пауза</button>':'')+
+(d.campaign.status!=="finished"?'<button class="btn light" id="finish-btn">Завершить</button>':'')+'</div>'+
+'<p class="hint">ИИ готовит индивидуальные тексты в фоновом режиме. Отправка начинается только после проверки писем, явного запуска кампании и при включённой автоматической рассылке. Важно проверять применимые правила рекламной почты и обрабатывать отписки.</p>'+
+'<h3 style="margin-top:20px">Адресаты и письма</h3><div class="scroll"><table><thead><tr><th></th><th>Адресат</th><th>Состояние</th><th>Письмо</th></tr></thead><tbody>'+d.recipients.map(r=>'<tr><td><input class="pick" type="checkbox" data-id="'+e(r.id)+'" '+(state.checked.has(r.id)?"checked":"")+' '+(r.status!=="review"?"disabled":"")+'></td><td><b>'+e(r.company||r.email)+'</b><div class="muted">'+e(r.email)+'</div></td><td>'+badge(r.status)+'</td><td>'+(r.subject?'<button class="open-mail" data-id="'+e(r.id)+'">Просмотреть</button>':'<span class="muted">—</span>')+'</td></tr>').join("")+'</tbody></table></div>';
+const activeControls=el("campaign-detail").querySelector(".mail-campaign-controls");el("campaign-action-dock").replaceChildren(...(activeControls?[activeControls]:[]));
+const mainAction=d.campaign.status==="running"?"pause-btn":
+  canEdit?(d.recipients.length===0?"search-btn":
+  d.recipients.some(r=>["new","draft_error"].includes(r.status))?"prepare-btn":
+  d.recipients.some(r=>r.status==="review")?"approve-btn":
+  d.recipients.some(r=>r.status==="approved")?"launch-btn":"search-btn"):null;
+const mainButton=mainAction?el(mainAction):null;
+el("mail-campaign-primary").replaceChildren(...(mainButton?[mainButton]:[]));
+document.querySelectorAll(".pick").forEach(x=>x.onchange=()=>{if(x.checked)state.checked.add(x.dataset.id);else state.checked.delete(x.dataset.id)});
+document.querySelectorAll(".open-mail").forEach(x=>x.onclick=()=>edit(x.dataset.id));
+if(canEdit){el("import-btn").onclick=()=>el("import-dialog").showModal();el("search-btn").onclick=()=>safe(openSearch);el("prepare-btn").onclick=()=>safe(async()=>{const r=await api("/"+state.selected+"/prepare","POST");note("В очередь ИИ поставлено: "+r.queued);await refresh()});el("approve-btn").onclick=()=>safe(async()=>{const ids=[...state.checked];if(!ids.length){note("Выбери готовые письма");return}if(!confirm("Согласовать "+ids.length+" проверенных писем?"))return;const r=await api("/"+state.selected+"/approve","POST",{recipient_ids:ids});state.checked.clear();note("Согласовано: "+r.approved);await refresh()});el("launch-btn").onclick=()=>safe(async()=>{if(!confirm("Подтвердите, что у вас есть законное основание писать выбранным адресатам и они не исключены из рассылки. Запустить кампанию?"))return;await api("/"+state.selected+"/launch","POST",{start_at:null,legal_basis_confirmed:true});note("Кампания запущена");await refresh()})}
+if(d.campaign.status==="running")el("pause-btn").onclick=()=>safe(async()=>{await api("/"+state.selected+"/pause","POST");note("Кампания приостановлена");await refresh()});
+if(d.campaign.status!=="finished")el("finish-btn").onclick=()=>safe(async()=>{if(!confirm("Завершить кампанию?"))return;await api("/"+state.selected+"/finish","POST");await refresh()})}
+async function select(id){state.selected=id;state.checked.clear();state.detail=await api("/"+id);render()}
+function edit(id){const x=state.detail.recipients.find(r=>r.id===id);if(!x)return;state.editing=x;el("edit-title").textContent=x.company||"Письмо";el("edit-recipient").textContent=x.email;el("edit-subject").value=x.subject;el("edit-body").value=x.body;el("edit-critique").textContent=x.review_note?"Критик: "+x.review_note:"Проверьте факты и формулировки";el("edit-subject").disabled=!["review","approved"].includes(x.status)||!["draft","paused"].includes(state.detail.campaign.status);el("edit-body").disabled=el("edit-subject").disabled;el("edit-dialog").showModal()}
+el("create").onclick=()=>el("new-dialog").showModal();el("new-cancel").onclick=()=>el("new-dialog").close();
+el("reload").onclick=()=>safe(refresh);el("import-cancel").onclick=()=>el("import-dialog").close();el("edit-cancel").onclick=()=>el("edit-dialog").close();
+el("new-form").onsubmit=ev=>{ev.preventDefault();safe(async()=>{const r=await api("","POST",{name:el("new-name").value,objective:el("new-purpose").value,min_interval_seconds:Number(el("new-gap").value)});el("new-dialog").close();el("new-form").reset();state.selected=r.id;await refresh();if(location.hash==="#search")updateSearchImport({});note("Кампания создана")})};
+el("import-form").onsubmit=ev=>{ev.preventDefault();safe(async()=>{const lines=el("import-rows").value.split(/\r?\n/).flatMap(x=>x.includes(";")?[x]:x.split(/[,\s]+/)).map(x=>x.trim()).filter(Boolean);if(lines.length>1000)throw Error("За раз не более 1000 адресатов");const recipients=lines.map(line=>{const p=line.split(";").map(x=>x.trim());return p.length===1?{email:p[0]}:{company:p[0],email:p[1],website:p[2]||"",notes:p[3]||""}});const r=await api("/"+state.selected+"/recipients","POST",{recipients});el("import-dialog").close();el("import-rows").value="";note("Добавлено "+r.added+" · Дубли "+r.duplicates+" · Некорректных "+r.invalid);await refresh()})};
+el("edit-form").onsubmit=ev=>{ev.preventDefault();safe(async()=>{if(el("edit-subject").disabled)throw Error("Редактирование недоступно");await api("/"+state.selected+"/recipients/"+state.editing.id,"PATCH",{subject:el("edit-subject").value,body:el("edit-body").value});el("edit-dialog").close();note("Письмо сохранено");await refresh()})};
+const found={job:null,timer:null,picks:new Set(),selectionTouched:false};
+async function sapi(path,method="GET",data){const init={method,credentials:"same-origin",headers:{"Accept":"application/json"}};if(data!==undefined){init.headers["Content-Type"]="application/json";init.body=JSON.stringify(data)}const r=await fetch("/api/company-search"+path,init);let j;try{j=await r.json()}catch{throw Error("Сервер недоступен")}if(!r.ok)throw Error(typeof j.detail==="string"?j.detail:"Ошибка HTTP "+r.status);return j}
+const searchNames={running:"Идёт поиск",done:"Поиск завершён",blocked:"Источник ограничил доступ",cancelled:"Остановлено",interrupted:"Прервано",error:"Ошибка поиска"};
+function fitBadge(h){return h.fit===1?'<span class="label good">Подходит</span>':h.fit===0?'<span class="label">Не подходит</span>':'<span class="label warning">Не проверено</span>'}
+function renderSearch(v){
+const j=v.job,c=v.counts;const progress=v.progress||{};const hits=[...v.hits].sort((a,b)=>(b.fit===1)-(a.fit===1)||(b.email?1:0)-(a.email?1:0));
+const eligible=hits.filter(h=>h.email&&h.fit===1&&!h.imported);
+if(!found.selectionTouched)found.picks=new Set(eligible.map(h=>h.firm_id));
+else found.picks=new Set([...found.picks].filter(id=>eligible.some(h=>h.firm_id===id)));
+const units=Number(progress.elapsed_seconds||0);const elapsed=units>=60?Math.floor(units/60)+" мин "+units%60+" сек":units+" сек";
+el("search-status").textContent=(j.company_name?"Для «"+j.company_name+"». ":"")+
+  (searchNames[j.status]||j.status)+" · источник "+(j.provider==="exa"?"Exa":j.provider==="yandex"?"Яндекс Карты":"2ГИС")+
+  " · проверено "+(progress.processed??c.found)+" · с email "+c.with_email+" · подходят "+c.fit+
+  " · прошло "+elapsed+(j.message?" — "+j.message:"");
+el("search-results").innerHTML=hits.map(h=>{
+  const canPick=Boolean(h.email&&h.fit===1&&!h.imported);
+  return '<div class="hit"><div class="hit-top"><label class="mail-v4-hit-choice"><input type="checkbox" class="search-pick" data-id="'+e(h.firm_id)+'" '+(found.picks.has(h.firm_id)?"checked ":"")+(canPick?"":"disabled ")+'> <b>'+e(h.name)+'</b></label>'+fitBadge(h)+'</div>'+
+  '<div class="muted">'+e(h.rubrics)+(h.source?" · "+e(h.source):"")+'</div>'+
+  '<div class="hit-mail">'+(h.email?e(h.email)+' <span class="muted">· '+e(h.email_source)+'</span>':'<span class="muted">Почты нет'+(h.phones?" · тел. "+e(h.phones.split("; ")[0]):"")+'</span>')+'</div>'+
+  (h.source==="Яндекс Карты" && /^yandex-\d+$/.test(h.firm_id)?'<div class="muted"><a href="https://yandex.ru/maps/org/'+encodeURIComponent(h.firm_id.slice(7))+'" target="_blank" rel="noopener noreferrer">Открыть в Картах</a></div>':"")+
+  (h.fit_reason?'<div class="muted">'+e(h.fit_reason)+'</div>':"")+
+  (h.imported?'<div class="muted">Уже в рассылке</div>':"")+
+  '<div class="mail-v4-hit-review"><button type="button" class="search-review-yes" data-id="'+e(h.firm_id)+'" '+(h.fit===1?"disabled":"")+'>✓ Подходит</button><button type="button" class="search-review-no" data-id="'+e(h.firm_id)+'" '+(h.fit===0?"disabled":"")+'>× Не подходит</button></div></div>';
+}).join("")||'<p class="hint">Пока результатов нет.</p>';
+document.querySelectorAll(".search-pick").forEach(x=>x.onchange=()=>{
+  found.selectionTouched=true;
+  if(x.checked)found.picks.add(x.dataset.id);else found.picks.delete(x.dataset.id);
+  updateSearchImport(c);
+});
+for(const kind of ["yes","no"])document.querySelectorAll(".search-review-"+kind).forEach(button=>button.onclick=()=>safe(async()=>{
+  const id=button.dataset.id;await sapi("/"+found.job+"/hits/"+encodeURIComponent(id)+"/review","POST",{fit:kind==="yes"});
+  found.selectionTouched=false;await loadSearch();
+}));
+el("search-stop").style.display=j.status==="running"?"":"none";el("search-resume").style.display=["interrupted","error"].includes(j.status)?"":"none";el("search-go").disabled=j.status==="running";
+updateSearchImport(c);
+}
+function updateSearchImport(counts){
+const target=state.campaigns.find(x=>x.campaign.id===el("search-campaign").value);
+const btn=el("search-add");
+btn.disabled=!found.picks.size||!target||!["draft","paused"].includes(target.campaign.status);
+btn.textContent="Перенести выбранные ("+found.picks.size+")";
+}
+async function loadSearch(){clearTimeout(found.timer);if(!found.job)return;const v=await sapi("/"+found.job);renderSearch(v);if(v.job.status==="running"&&!el("search-dialog").hidden)found.timer=setTimeout(()=>safe(loadSearch),4000)}
+function campaignCompany(){const b=state.detail&&state.detail.campaign.company_brief;if(!b)return null;try{return{id:state.detail.campaign.company_id,name:JSON.parse(b).name||""}}catch{return null}}
+async function loadCompanies(){
+const sel=el("search-company"), previous=sel.value, own=campaignCompany();
+let list=[];try{list=await sapi("/companies")}catch{}
+sel.disabled=false;
+const ids=new Set();
+sel.innerHTML='<option value="">ServGo (платформа)</option>'+list.filter(c=>{
+if(!c.id||ids.has(c.id))return false;ids.add(c.id);return true
+}).map(c=>'<option value="'+e(c.id)+'">'+e(c.name)+'</option>').join("");
+const initial=previous||own?.id||"";
+sel.value=[...sel.options].some(o=>o.value===initial)?initial:"";
+}
+async function loadHistory(){
+const entries=await sapi("");const selector=el("search-history");
+selector.innerHTML='<option value="">Выберите прошлый поиск</option>'+entries.map(x=>
+  '<option value="'+e(x.id)+'">'+e(x.niche)+" · "+e(x.city)+" · "+e(x.provider==="exa"?"Exa":x.provider==="yandex"?"Яндекс Карты":"2ГИС")+" · "+e(x.status)+'</option>').join("");
+selector.value=found.job||"";
+selector.onchange=()=>safe(async()=>{
+  if(!selector.value)return;
+  found.job=selector.value;found.picks=new Set();found.selectionTouched=false;await loadSearch();
+});
+return entries;
+}
+async function loadSearchProviders(){
+let status={exa:false,yandex:false,jev:false};try{status=await sapi("/providers")}catch{note("Источники недоступны. Пока используйте 2ГИС.")}
+el("search-provider").querySelector('option[value="exa"]').disabled=!status.exa;
+el("search-provider").querySelector('option[value="yandex"]').disabled=!status.yandex;
+const hint=()=>{
+const viaExa=el("search-provider").value==="exa", viaYandex=el("search-provider").value==="yandex";
+el("search-help").textContent=viaYandex?
+  "Яндекс Карты: поиск организаций по городу и отрасли. Email проверяется отдельно на сайте. Используется серверный ключ API_YANDEX из Growth; почтовые адреса ищутся на официальных сайтах.":viaExa?
+  "Exa: платный API-запрос по квоте ключа, по умолчанию до 20 сайтов и до 3 проверок одновременно. Время зависит от сайтов и ИИ.":
+  "2ГИС: по умолчанию пауза 5 секунд на карточку плюс время загрузки и ИИ. Для 100 карточек — не менее 500 секунд только пауз. "+
+  (status.jev?"Первичную оценку делает Jev. ":"Оценку делает настроенный ИИ. ")+
+  (status.exa?"Exa доступен как второй источник.":"Exa пока не настроен на сервере.")+
+  (status.yandex?" Яндекс Карты подключены.":" Яндекс Карты недоступны — проверьте подключение API_YANDEX к Growth.");
+};
+el("search-provider").onchange=hint;hint();
+}
+async function openSearch(){if(location.hash!=="#search"){location.hash="search";return}pageMode();const target=state.campaigns.find(x=>x.campaign.id===state.selected);if(!target||!["draft","paused"].includes(target.campaign.status)){const first=state.campaigns.find(x=>["draft","paused"].includes(x.campaign.status));if(first)await select(first.campaign.id)}await loadCompanies();await loadSearchProviders();const recent=await loadHistory();
+if(!found.job&&recent.length)found.job=recent[0].id;
+el("search-history").value=found.job||"";
+if(found.job)await loadSearch()}
+el("search-suggest").onclick=()=>safe(async()=>{const b=el("search-suggest");b.disabled=true;el("search-ideas").innerHTML='<p class="hint">ИИ изучает компанию…</p>';try{const r=await sapi("/suggest","POST",{company_id:el("search-company").value});
+if(r.city&&!el("search-city").value.trim())el("search-city").value=r.city;
+el("search-ideas").innerHTML=r.queries.length?'<p class="hint">Кого искать для «'+e(r.company)+'» — нажмите, чтобы подставить:</p>'+r.queries.map(q=>'<button type="button" class="idea" data-q="'+e(q.query)+'"><b>'+e(q.query)+'</b><small>'+e(q.why)+'</small></button>').join(""):'<p class="hint">ИИ не предложил ниш — впишите свою.</p>';
+document.querySelectorAll(".idea").forEach(x=>x.onclick=()=>{el("search-niche").value=x.dataset.q;if(r.city)el("search-city").value=r.city;el("search-niche").focus()})}catch(ex){el("search-ideas").innerHTML="";throw ex}finally{b.disabled=false}});
+el("search-form").onsubmit=ev=>{ev.preventDefault();safe(async()=>{const want=el("search-want").value;const r=await sapi("","POST",{company_id:el("search-company").value,niche:el("search-niche").value,city:el("search-city").value,want:want?Number(want):null,provider:el("search-provider").value});found.job=r.id;found.picks=new Set();found.selectionTouched=false;await loadHistory();await loadSearch()})};
+el("search-stop").onclick=()=>safe(async()=>{await sapi("/"+found.job+"/cancel","POST");await loadSearch()});
+el("search-resume").onclick=()=>safe(async()=>{await sapi("/"+found.job+"/resume","POST");await loadSearch()});
+el("search-add").onclick=()=>safe(async()=>{
+const target=el("search-campaign").value;
+if(!target)throw Error("Создайте рассылку кнопкой рядом с выбором кампании");
+if(!found.picks.size)return;
+const r=await sapi("/"+found.job+"/to-campaign","POST",{campaign_id:target,only_fit:true,firm_ids:[...found.picks]});
+found.selectionTouched=false;found.picks.clear();await refresh();await loadSearch();
+note("Добавлено: "+r.added+" · дубли: "+r.duplicates+" · исключено: "+r.excluded);
+});
+el("search-create-campaign").onclick=()=>el("new-dialog").showModal();
+el("search-close").onclick=()=>{clearTimeout(found.timer);location.hash="campaigns"};
+function renderSearchTargets(){const sel=el("search-campaign");if(!sel)return;const possible=state.campaigns.filter(x=>["draft","paused"].includes(x.campaign.status));sel.innerHTML=possible.length?possible.map(x=>'<option value="'+e(x.campaign.id)+'">'+e(x.campaign.name)+'</option>').join(""):'<option value="">Сначала создайте рассылку</option>';sel.disabled=!possible.length;if(possible.some(x=>x.campaign.id===state.selected))sel.value=state.selected;else if(possible.length){sel.value=possible[0].campaign.id}sel.onchange=()=>safe(async()=>{if(!sel.value)return;await select(sel.value);await loadCompanies();updateSearchImport({})})}
+function pageMode(){const search=location.hash==="#search";document.body.classList.toggle("mail-search-active",search);el("search-dialog").hidden=!search;el("campaigns-screen").hidden=search;el("mail-campaign-toolbar").hidden=search;el("mail-nav-search").removeAttribute("aria-current");el("mail-nav-campaigns").removeAttribute("aria-current");(search?el("mail-nav-search"):el("mail-nav-campaigns")).setAttribute("aria-current","page")}
+window.addEventListener("hashchange",()=>{if(location.hash==="#search")safe(openSearch);else{clearTimeout(found.timer);pageMode()}});
+pageMode();refresh().then(()=>{if(location.hash==="#search")return openSearch()}).catch(ex=>note(ex.message));
+</script></body></html>

@@ -1,0 +1,102 @@
+name: ServGo owner onboarding CI
+on:
+  pull_request:
+    paths:
+      - 'webapp/onboarding_requests.py'
+      - 'webapp/server.py'
+      - 'webapp/static/onboarding.html'
+      - 'webapp/templates/onboarding_request.html'
+      - 'webapp/static/onboarding-request.html'
+      - 'tests/test_onboarding_requests.py'
+      - '.github/workflows/onboarding-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install focused test dependencies
+        run: python -m pip install --disable-pip-version-check 'aiohttp>=3.9,<4' 'SQLAlchemy[asyncio]>=2.0,<3' 'aiosqlite>=0.20'
+      - name: Python syntax and isolated onboarding regression tests
+        run: |
+          python -m py_compile webapp/server.py webapp/onboarding_requests.py tests/test_onboarding_requests.py
+          python -m unittest discover -s tests -p test_onboarding_requests.py -v
+      - name: Check HTML scripts parse in Node
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re, subprocess, tempfile
+          for path in [Path('webapp/static/onboarding.html'), Path('webapp/static/onboarding-request.html'), Path('webapp/templates/onboarding_request.html')]:
+              s = path.read_text()
+              scripts = re.findall(r'<script>(.*?)</script>', s, re.DOTALL)
+              assert len(scripts) == 1, (path, len(scripts))
+              with tempfile.NamedTemporaryFile('w',suffix='.js') as f:
+                  f.write(scripts[0])
+                  f.flush()
+                  subprocess.run(['node','--check',f.name],check=True)
+              print(path, 'inline script syntax OK')
+          PY
+
+
+  production-readonly-preflight:
+    if: github.event_name == 'workflow_dispatch'  # manual only; avoid repeated SSH preflights on each PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read-only compare production server.py to current main
+        run: |
+          set -euo pipefail
+          if [ -z "$SSHPASS" ]; then
+            echo "::error::Server SSH secret is unavailable"
+            exit 1
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass >/dev/null
+          EXPECTED=$(git show origin/main:webapp/server.py | sha256sum | awk '{print $1}')
+          OPTIONS="-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/servgo-onboarding-known-hosts"
+          ACTUAL=$(sshpass -e ssh $OPTIONS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" \
+            'sha256sum /opt/booking_bot/webapp/server.py' | awk '{print $1}')
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::Production webapp/server.py differs from GitHub main; automatic SCP would overwrite server changes"
+            exit 1
+          fi
+          echo "Production server.py matches current GitHub main"
+      - name: Read-only environment prerequisites
+        run: |
+          set -euo pipefail
+          OPTIONS="-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/servgo-onboarding-known-hosts"
+          sshpass -e ssh $OPTIONS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" '
+            set -e
+            cd /opt/booking_bot
+            if [ -f .env ]; then
+              grep -qE "^(LANDING_SMTP_HOST|SMTP_HOST)=" .env && echo "SMTP env file: present" || echo "::warning::SMTP not visible in .env (may be supplied externally)"
+              grep -qE "^ADMIN_IDS=.*[0-9]" .env && echo "Admin ID env file: present" || echo "::warning::ADMIN_IDS not visible in .env"
+            else
+              echo "::warning::No .env file (possibly environment is injected by systemd)"
+            fi
+          '
+      - name: Public checklist currently accessible (read-only)
+        run: |
+          curl --fail --silent --show-error --location --max-time 15 \
+            https://promo.servgo.ru/static/onboarding.html \
+            | grep -q 'data-field="ИНН"'

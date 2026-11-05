@@ -1,0 +1,16 @@
+name: Verify ServGo web photo upload transport
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Send then delete temporary photo through web-only SOCKS transport
+        run: python scripts/verify_web_photo_upload.py

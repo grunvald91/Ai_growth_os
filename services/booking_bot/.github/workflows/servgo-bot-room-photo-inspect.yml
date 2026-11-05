@@ -1,0 +1,16 @@
+name: Inspect ServGo bot room photo flow (read-only)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Inspect room photo callbacks, errors and redacted DB counts
+        run: python scripts/inspect_bot_room_photos.py

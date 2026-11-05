@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f1b2c" media="(prefers-color-scheme: dark)">
+  <title>Нет соединения · ServGo</title>
+  <style>
+    :root{color-scheme:light dark;--bg:#fff;--surface:#f6f9fd;--text:#1b2d42;--muted:#62778b;--accent:#3478d6}
+    @media(prefers-color-scheme:dark){:root{--bg:#0f1b2c;--surface:#1b2b3f;--text:#eaf1fa;--muted:#a6b8ce;--accent:#78b3ff}}
+    *{box-sizing:border-box}
+    body{min-height:100dvh;margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;place-items:center;padding:28px}
+    main{max-width:430px;width:100%;text-align:center}
+    .symbol{width:66px;height:66px;border-radius:20px;background:var(--surface);color:var(--accent);display:grid;place-items:center;margin:0 auto 24px;font-size:32px}
+    h1{font-size:26px;line-height:1.2;margin:0 0 12px;letter-spacing:-.5px}
+    p{color:var(--muted);margin:0 0 24px}
+    button{border:0;border-radius:14px;background:var(--accent);color:#fff;min-height:48px;padding:12px 26px;font:inherit;font-weight:650;cursor:pointer}
+    button:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="symbol" aria-hidden="true">⌁</div>
+    <h1>Нет соединения с ServGo</h1>
+    <p>Проверьте интернет и попробуйте ещё раз. На ранее открытых страницах ServGo можно просматривать сохранённые расписания и свои записи без интернета. Для изменений требуется подключение. Этот экран показывается там, где офлайн-просмотр пока недоступен.</p>
+    <button type="button" onclick="location.reload()">Повторить</button>
+  </main>
+</body>
+</html>

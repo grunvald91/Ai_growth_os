@@ -1,0 +1,17 @@
+name: Deploy only booking-bot private Bot API route
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Backup bot, verify Bot API through SOCKS, then start bot
+        run: python scripts/deploy_bot_relay89.py

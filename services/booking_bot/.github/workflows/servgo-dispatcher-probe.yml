@@ -1,0 +1,70 @@
+name: Probe the studio dispatcher with owner questions (production, read-only)
+# A push of this branch runs it once. Output goes to this private log; client cells are never printed.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ops/dispatcher-probe]
+    paths:
+      - .github/workflows/servgo-dispatcher-probe.yml
+permissions:
+  contents: read
+concurrency:
+  group: servgo-dispatcher-probe
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Run the probe inside the studio container
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, pathlib, time
+          import paramiko
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self, client, hostname, key):
+                  fp = base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if fp != 'uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU':
+                      raise paramiko.SSHException('Host key mismatch')
+                  client.get_host_keys().add(hostname, key.get_name(), key)
+          source = pathlib.Path('scripts/studio_dispatcher_probe.py').read_bytes()
+          ssh = None
+          for attempt in range(3):
+              conn = paramiko.SSHClient(); conn.set_missing_host_key_policy(Pinned())
+              try:
+                  conn.connect('155.212.162.47', username='root', port=22, password=os.environ['SERVER_PASSWORD'],
+                               look_for_keys=False, allow_agent=False, timeout=12, banner_timeout=25, auth_timeout=15)
+                  ssh = conn; break
+              except (paramiko.SSHException, OSError, EOFError):
+                  conn.close()
+                  if attempt == 2: raise
+                  time.sleep(3)
+          ssh.get_transport().set_keepalive(20)  # the probe is silent for minutes while the model thinks
+          try:
+              stdin, out, err = ssh.exec_command('docker exec -i ai-growth-os-api-1 python -', timeout=1300)
+              stdin.write(source); stdin.flush(); stdin.channel.shutdown_write()
+              text = out.read().decode('utf-8', 'replace')
+              status = out.channel.recv_exit_status()
+              print(text)
+              if status:
+                  lines = err.read().decode('utf-8', 'replace').splitlines()
+                  print('Remote failed, exit=' + str(status) + '; ' + (lines[-1][:300] if lines else ''))
+                  raise SystemExit(1)
+          finally:
+              ssh.close()
+          PY
+# env inspect 2
+# env inspect 3
+# probe 3
+# probe 4: insights and team hand-over
+# probe 5: model replies
+# probe 6: after params fix
+# probe 7: after review fixes
+# probe 8: topics
+# probe 9
+# probe 11: clean rerun, no overlapping runs

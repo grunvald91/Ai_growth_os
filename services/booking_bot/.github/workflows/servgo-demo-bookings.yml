@@ -1,0 +1,79 @@
+name: Demo bookings for business 11 (100boats ДЕМО)
+# A push of this branch runs a dry run (prints the plan, writes nothing). The commit message marker
+# [write-demo-bookings] writes the fictional bookings; [remove-demo-bookings] deletes exactly those rows.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'apply = dry run, write, remove'
+        required: true
+        default: apply
+  push:
+    branches: [ops/demo-100boats-bookings]
+    paths:
+      - .github/workflows/servgo-demo-bookings.yml
+permissions:
+  contents: read
+concurrency:
+  group: servgo-demo-bookings
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      MODE_INPUT: ${{ inputs.mode }}
+      COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install --disable-pip-version-check pytest 'paramiko==3.5.1'
+      - run: python -m pytest -q tests/test_seed_100boats_demo_bookings.py
+      - name: Run on the production host
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, pathlib, shlex, time
+          import paramiko
+          msg = os.environ.get('COMMIT_MESSAGE') or ''
+          mode = os.environ.get('MODE_INPUT') or ('write' if '[write-demo-bookings]' in msg else
+                                                  'remove' if '[remove-demo-bookings]' in msg else
+                                                  'inspect' if '[inspect-demo-bookings]' in msg else
+                                                  'confirm_tests' if '[confirm-test-bookings]' in msg else 'apply')
+          assert mode in ('apply', 'write', 'remove', 'inspect', 'confirm_tests')
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self, client, hostname, key):
+                  fp = base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if fp != 'uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU':
+                      raise paramiko.SSHException('Host key mismatch')
+                  client.get_host_keys().add(hostname, key.get_name(), key)
+          payload = base64.b64encode(pathlib.Path('scripts/seed_100boats_demo_bookings.py').read_bytes()).decode()
+          ssh = None
+          for attempt in range(3):
+              conn = paramiko.SSHClient(); conn.set_missing_host_key_policy(Pinned())
+              try:
+                  conn.connect('155.212.162.47', username='root', port=22, password=os.environ['SERVER_PASSWORD'],
+                               look_for_keys=False, allow_agent=False, timeout=12, banner_timeout=25, auth_timeout=15)
+                  ssh = conn; break
+              except (paramiko.SSHException, OSError, EOFError):
+                  conn.close()
+                  if attempt == 2: raise
+                  time.sleep(3)
+          try:
+              code = "import base64;exec(compile(base64.b64decode('" + payload + "'),'demo-bookings.py','exec'))"
+              command = "cd /opt/booking_bot && DEMO_MODE=" + mode + " ./venv/bin/python -c " + shlex.quote(code)
+              _, out, err = ssh.exec_command(command, timeout=240)
+              text = out.read().decode('utf-8', 'replace')
+              status = out.channel.recv_exit_status()
+              print(text)
+              if status:
+                  lines = err.read().decode('utf-8', 'replace').splitlines()
+                  print('Remote operation failed, exit=' + str(status) + '; error=' + (lines[-1][:300] if lines else 'unknown'))
+                  raise SystemExit(1)
+              print('mode=' + mode)
+          finally:
+              ssh.close()
+          PY
+# inspect shape
+# write
+# confirm

@@ -1,0 +1,127 @@
+name: ServGo Paramiko read-only probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Check secret is available
+        run: |
+          if [ -z "$SERVER_PASSWORD" ]; then
+            echo 'SERVER_SSH_PASSWORD is not configured'
+            exit 1
+          fi
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Check ServGo over SSH without changing server
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64
+          import hashlib
+          import logging
+          import os
+          import time
+
+          import paramiko
+
+          logging.getLogger('paramiko').setLevel(logging.CRITICAL)
+          host = '155.212.162.47'
+          expected_fingerprint = 'uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class PinnedHostKey(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self, client, hostname, key):
+                  actual = base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if actual != expected_fingerprint:
+                      raise paramiko.SSHException('Server host key fingerprint mismatch')
+                  client.get_host_keys().add(hostname, key.get_name(), key)
+          command = (
+              'printf "project="; '
+              'test -d /opt/booking_bot && echo present || echo absent; '
+              'printf "bot="; systemctl is-active booking-bot.service || true; '
+              'printf "api="; systemctl is-active booking-web-api.service || true; '
+              'printf "api_health="; '
+              'curl -sS --max-time 5 -o /dev/null -w "%{http_code}\\n" '
+              'http://127.0.0.1:8000/health || true'
+          )
+          for attempt in range(1, 4):
+              client = paramiko.SSHClient()
+              client.set_missing_host_key_policy(PinnedHostKey())
+              try:
+                  client.connect(
+                      host, port=22, username='root',
+                      password=os.environ['SERVER_PASSWORD'],
+                      look_for_keys=False, allow_agent=False,
+                      timeout=12, banner_timeout=25, auth_timeout=15,
+                  )
+                  key = client.get_transport().get_remote_server_key()
+                  fingerprint = base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  print(f'ssh_authenticated=yes host_key_sha256={fingerprint}', flush=True)
+                  _, stdout, stderr = client.exec_command(command, timeout=18)
+                  output = stdout.read().decode('utf-8', 'replace')
+                  status = stdout.channel.recv_exit_status()
+                  print(output, flush=True)
+                  inventory = '''cd /opt/booking_bot && ./venv/bin/python - <<'REMOTE_PY'
+          import asyncio
+          from sqlalchemy import text
+          from database.database import async_session_maker
+          async def run():
+              async with async_session_maker() as session:
+                  for table in ('businesses', 'employees', 'services', 'bookings', 'users'):
+                      rows = (await session.execute(text('select column_name from information_schema.columns where table_name=:table order by ordinal_position'), {'table': table})).scalars().all()
+                      print('columns_'+table+'='+','.join(rows))
+                  rows = (await session.execute(text("select id,name,business_type,owner_id from businesses where name ilike '%100boats%' order by id"))).all()
+                  print('existing_demo_businesses='+repr(rows))
+                  rows = (await session.execute(text('select id, username from users where is_admin=true order by id limit 5'))).all()
+                  print('admin_user_candidates='+repr(rows))
+                  rows = (await session.execute(text('select b.id,b.name,b.owner_id,u.username from businesses b join users u on u.id=b.owner_id order by b.id limit 25'))).all()
+                  print('business_owners='+repr(rows))
+          asyncio.run(run())
+          REMOTE_PY
+          printf 'frontend_dist='; test -d /opt/booking_bot/web/frontend/dist && echo present || echo absent
+          cd /opt/booking_bot && sha256sum database/models.py web/api/main.py web/api/routes/admin.py web/api/schemas.py scripts/seed_100boats_demo.py web/frontend/dist/index.html web/frontend/src/App.tsx web/frontend/src/api/client.ts web/frontend/src/pages/admin/SchedulePage.tsx web/frontend/package-lock.json
+          printf 'remote_git='; git rev-parse --short HEAD 2>/dev/null || true
+          printf 'remote_frontend_index='; sed -n '1,8p' web/frontend/dist/index.html
+          ./venv/bin/python - <<'SOURCE_PY'
+          from pathlib import Path
+          paths={'web/api/main.py':['app.include_router(client.router'],
+                 'web/api/schemas.py':['class AdminBookingOut'],
+                 'web/api/routes/admin.py':['def _admin_booking_out','async def update_booking_status','async def admin_reschedule_booking']}
+          for path,markers in paths.items():
+              lines=Path(path).read_text().splitlines()
+              for marker in markers:
+                  hits=[i for i,line in enumerate(lines) if marker in line]
+                  print('SNIPPET',path,marker,'matches',len(hits))
+                  for i in hits:
+                      n=20 if marker.startswith('class ') else 110 if 'reschedule' in marker else 45 if 'status' in marker else 25
+                      for j in range(max(0,i-3),min(len(lines),i+n)):
+                          line=lines[j]
+                          if any(secret in line.lower() for secret in ('token=', 'password=', 'secret=', 'api_key=')):
+                              line='[REDACTED]'
+                          print(f'{j+1}: {line}')
+          SOURCE_PY
+          '''
+                  _, inv_out, inv_err = client.exec_command(inventory, timeout=25)
+                  print(inv_out.read().decode('utf-8', 'replace'), flush=True)
+                  if inv_out.channel.recv_exit_status() != 0:
+                      print('inventory failed; stderr suffix='+inv_err.read().decode('utf-8', 'replace')[-400:], flush=True)
+                      raise SystemExit(1)
+                  if status:
+                      print(f'read-only probe failed with exit={status}', flush=True)
+                      raise SystemExit(status)
+                  break
+              except (paramiko.SSHException, OSError, EOFError) as exc:
+                  print(f'attempt={attempt} error_type={type(exc).__name__} detail={str(exc)[:120]}', flush=True)
+                  if attempt == 3:
+                      raise SystemExit('SSH unavailable after three attempts')
+                  time.sleep(3)
+              finally:
+                  client.close()
+          PY

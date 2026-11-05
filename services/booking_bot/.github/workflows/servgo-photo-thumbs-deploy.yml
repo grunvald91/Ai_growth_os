@@ -1,0 +1,19 @@
+name: Deploy ServGo photo thumbnails (web API only)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: servgo-photo-thumbs-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Deploy scoped photo cache, verify thumbnails and full photo, roll back on failure
+        run: python scripts/deploy_photo_thumbnails.py

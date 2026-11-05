@@ -1,0 +1,94 @@
+name: Proxy server read-only audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+
+    steps:
+      - name: Guard SSH credential
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || {
+            echo "::error::SERVER_SSH_PASSWORD is not configured"
+            exit 1
+          }
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Read-only proxy inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set +e
+
+          section() { printf "\n===== %s =====\n" "$1"; }
+
+          section "HOST"
+          hostnamectl 2>/dev/null | sed -n '1,20p'
+          uname -a 2>/dev/null
+          uptime 2>/dev/null
+
+          section "OS"
+          cat /etc/os-release 2>/dev/null
+
+          section "NETWORK ADDRESSES"
+          ip -brief address 2>/dev/null | sed -E 's#([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}#<MAC>#g'
+
+          section "LISTENING PORTS"
+          # Socket/process names only; no command-line arguments.
+          ss -lntup 2>/dev/null || ss -lntp 2>/dev/null
+
+          section "PROXY-RELATED PROCESS NAMES"
+          ps -eo pid=,comm= 2>/dev/null | grep -Ei 'mtproxy|telegram|tproxy|proxy|v2ray|xray|nginx|caddy|haproxy|docker' || true
+
+          section "RELEVANT SYSTEMD UNIT NAMES"
+          systemctl list-units --type=service --all --no-pager 2>/dev/null |
+            grep -Ei 'mtproxy|telegram|tproxy|proxy|v2ray|xray|nginx|caddy|docker' || true
+
+          section "ENABLED RELEVANT UNIT NAMES"
+          systemctl list-unit-files --type=service --no-pager 2>/dev/null |
+            grep -Ei 'mtproxy|telegram|tproxy|proxy|v2ray|xray|nginx|caddy|docker' || true
+
+          section "DOCKER CONTAINERS"
+          docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || true
+          docker compose ls 2>/dev/null || true
+
+          section "WEB SERVERS"
+          printf 'caddy='; caddy version 2>/dev/null || echo absent
+          printf 'nginx='; nginx -v 2>&1 || echo absent
+
+          section "FIREWALL SUMMARY"
+          ufw status 2>/dev/null || true
+          nft list tables 2>/dev/null || true
+
+          section "CANDIDATE CONFIG PATHS"
+          for root in /etc /opt /srv /usr/local /root /home; do
+            [ -d "$root" ] || continue
+            find "$root" -maxdepth 4 -type f \(               -iname '*mtproxy*' -o               -iname '*tproxy*' -o               -iname '*telegram*proxy*' -o               -iname '*v2ray*' -o               -iname '*xray*' -o               -iname 'docker-compose.yml' -o               -iname 'docker-compose.yaml' -o               -iname 'compose.yml' -o               -iname 'compose.yaml'             \) -print 2>/dev/null
+          done | head -300
+
+          section "AUTOSTART PATHS"
+          systemctl list-unit-files --state=enabled --type=service --no-pager 2>/dev/null |
+            grep -Ei 'mtproxy|telegram|tproxy|proxy|v2ray|xray|nginx|caddy|docker' || true
+
+          section "AUDIT RESULT"
+          echo "read_only=yes"
+          echo "No service was restarted, stopped, enabled, disabled, installed, deleted, or modified."
+          echo "Secret-bearing config contents and process command lines were intentionally NOT printed."
+          REMOTE
