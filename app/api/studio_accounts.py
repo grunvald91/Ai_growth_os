@@ -273,7 +273,7 @@ def _identity_html(*, connected: bool = False, linked: bool = False, error: str 
         '<button type="submit">Подтвердить и объединить</button></form>'
         if connected and not linked else (
             '<p class="sg-link-hint">Сначала войдите в ваш аккаунт ServGo через '
-            '<a href="https://servgo.ru/admin">страницу входа</a>, '
+            '<a href="/login?next=%2Fworkspace%2Fstudio-entry">страницу входа</a>, '
             'чтобы подтвердить вашу учётную запись ServGo.</p>' if not connected else ''
         )
     )
