@@ -164,4 +164,3 @@ document.addEventListener('pointerdown',e=>{
   }).catch(()=>{view.innerHTML='<p class="v4-error" role="alert">Не удалось загрузить карточки. Ниже доступен рабочий список. <button type="button" class="link" onclick="location.reload()">Повторить</button></p>'});
  }
 })();
-

@@ -73,4 +73,3 @@ def test_material_text_never_reverts_to_classic_dark_ink():
     assert "color:var(--s-accent-press)" in bridge
     assert "-webkit-text-fill-color:currentColor !important" in bridge
     assert "background:var(--s-surface-2) !important" in bridge
-

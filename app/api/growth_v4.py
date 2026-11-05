@@ -515,4 +515,3 @@ def render_v4(page, request, pid, switch):
     ))
     template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=11"></script></body>')
     return template
-

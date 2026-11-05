@@ -1152,4 +1152,3 @@
       }).catch(function () { /* No network means no restored card, not a page failure. */ });
   }
 })();
-

@@ -110,6 +110,8 @@ def main():
                         bar = page.locator('#dp-form')
                         assert bar.evaluate('(el)=>getComputedStyle(el).borderTopWidth') == '0px'
                         expect(page.locator('body')).to_have_css('background-color', 'rgb(17, 26, 41)' if mode == 'dark' else 'rgb(255, 255, 255)')
+                        if width <= 780:
+                            expect(page.locator('#mobileNav')).to_have_css('background-color', 'rgb(17, 26, 41)' if mode == 'dark' else 'rgb(255, 255, 255)')
                         expect(bar).to_have_css('background-color', bar.evaluate(
                             '(el)=>{const n=document.createElement("i");n.style.color="var(--s-surface-2)";el.append(n);const c=getComputedStyle(n).color;n.remove();return c}'))
                         assert page.locator('#dp-send').evaluate('(el)=>getComputedStyle(el).borderRadius') == '12px'

@@ -73,7 +73,7 @@ body.home-page .dp-home.has-feed{display:flex;flex-direction:column;flex:1;min-h
 .dp-home.has-feed .dp-links{display:grid;gap:8px}
 @media(max-width:780px){body.home-page:not(.home-empty) #main{padding:10px 12px}.dp-home.has-feed .dp-msg{padding:14px 16px}.dp-home.has-feed .dp-new{min-height:32px}.dp-home.has-feed .command-hints .dp-chip{min-height:36px;padding:6px 10px}}
 body.home-page:not(.home-empty) #main{padding-bottom:16px!important}
-body[data-growth-design="v4"] #mobileNav{background:var(--card)!important;border-color:var(--line)!important}
+body[data-growth-design="v4"] #mobileNav{background:var(--bg)!important;border-color:var(--line)!important}
 @media(max-width:780px){body.home-page:not(.home-empty) #main{padding-bottom:10px!important}}
 body[data-growth-design="v4"] .workspace>.topbar{margin:0}
 
@@ -840,4 +840,3 @@ body[data-growth-design="v4"] .dp-confirm .dp-btn:disabled{opacity:.5}
 /* Create: optional completion-time guidance, no invented ETA. */
 body[data-growth-design="v4"] .sg-create-timing{border:0;border-bottom:1px solid var(--line);margin-top:5px}
 body[data-growth-design="v4"] .sg-create-timing>p{font-size:12px;line-height:1.55;margin:0 0 11px;color:var(--muted)}
-

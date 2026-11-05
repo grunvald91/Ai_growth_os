@@ -1278,4 +1278,3 @@ def test_new_content_task_descriptions_are_russian_and_seo_specific(live):
     assert "SEO article" not in package.description
     assert seo.description == "Создание SEO-статьи по контент-плану."
     assert seo.title == seo_title
-

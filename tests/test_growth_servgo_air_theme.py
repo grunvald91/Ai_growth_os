@@ -232,4 +232,3 @@ def test_dispatcher_review_cards_keep_video_subjects_and_material_status_separat
         assert fragment in adapter, fragment
     assert 'growth-servgo-air.css?v=9' in v4
     assert 'history-20261104' in v4
-

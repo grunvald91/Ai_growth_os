@@ -84,4 +84,3 @@ body.sg-daily-dragging .sg-daily-handle{visibility:hidden;pointer-events:none}
 @media(prefers-reduced-motion:reduce){
  .sg-daily-drawer,.sg-daily-backdrop,.sg-daily-drawer[data-first="true"] .sg-daily-hint{transition:none;animation:none}
 }
-
