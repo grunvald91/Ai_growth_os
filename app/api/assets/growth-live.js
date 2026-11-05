@@ -102,8 +102,15 @@ document.addEventListener('pointerdown',e=>{
   window.addEventListener('orientationchange',()=>{fullHeight=window.innerHeight;fitConversation()});
   window.addEventListener('resize',fitConversation);
   fitConversation();
-  // Flex layout reserves the dock's actual height, including multiline drafts
-  // and voice states. The feed cannot paint or receive taps under the controls.
+  // The conversation extends behind the floating dock. Its measured height
+  // becomes scroll padding so the latest reply stays visible as input resizes.
+  const dock=root.querySelector('.command-dock');
+  if(dock){
+   const syncDockSpace=()=>root.style.setProperty(
+    '--sg-chat-dock-height',Math.ceil(dock.getBoundingClientRect().height)+'px');
+   new ResizeObserver(syncDockSpace).observe(dock);
+   syncDockSpace();
+  }
   const feed=document.getElementById('dp-feed');
   let previousHeight=feed.clientHeight,previousContent=feed.scrollHeight;
   new ResizeObserver(()=>{
