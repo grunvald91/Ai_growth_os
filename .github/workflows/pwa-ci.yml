@@ -139,7 +139,7 @@ jobs:
             web/api/schemas.py
 
       - name: Install API dependencies for protected Mail PWA tests
-        run: python -m pip install --disable-pip-version-check -r web/api/requirements.txt aiosqlite pytest
+        run: python -m pip install --disable-pip-version-check -r web/api/requirements.txt aiosqlite pytest 'paramiko==3.5.1'
 
       - name: Verify canonical Mail SSO, owner-only access and API URL rewrites
         env:
@@ -178,6 +178,7 @@ jobs:
           python tests/test_notification_rules.py
           python tests/test_email_utils.py
           python -m pytest -q tests/test_studio_slot_opportunities.py tests/test_studio_schedule_workdates.py tests/test_admin_insights_accuracy.py tests/test_crm_api.py
+          python -m pytest -q tests/test_mail_company_search.py tests/test_yandex_mail_source.py tests/test_yandex_mail_release.py
 
       # Reuse the frontend dist built earlier in THIS job.
       # Previously the separate browser workflow rebuilt it unnecessarily.

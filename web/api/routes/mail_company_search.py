@@ -522,6 +522,101 @@ async def run_exa_job(job_id: str, niche: str, city: str, want: int | None,
         RUNNING.pop(job_id, None)
 
 
+async def run_yandex_job(job_id: str, niche: str, city: str, want: int | None,
+                         brief: dict | None = None) -> None:
+    """Search via Growth's single keyed Yandex gateway; never copy API keys to Mail.
+
+    Each page uses one bounded request, with credentials kept on Growth.
+    """
+    brief = brief or dict(SERVGO)
+    try:
+        cap = await studio_get("/studio/internal/yandex-organizations/capabilities")
+        if not isinstance(cap, dict) or not cap.get("enabled"):
+            _finish(job_id, "error", "Яндекс API не подключён к работающему Growth")
+            return
+        with db_open() as db:
+            initialize(db)
+            known_ids = {r["firm_id"] for r in db.execute(
+                "SELECT firm_id FROM search_hit WHERE job_id=?", (job_id,))}
+            ready = db.execute(
+                "SELECT count(*) FROM search_hit WHERE job_id=? AND fit=1 AND email!=''",
+                (job_id,)).fetchone()[0]
+        pages = max(1, min(41, int(os.getenv("SERVGO_YANDEX_MAIL_MAX_PAGES", "41"))))
+        count = 0
+        seen = set(known_ids)
+        for page in range(pages):
+            if not _is_running(job_id):
+                return
+            url = "/studio/internal/yandex-organizations/search?" + urlencode(
+                {"query": niche, "city": city, "skip": page * 25})
+            data = await studio_get(url)
+            if not isinstance(data, dict) or not isinstance(data.get("organizations"), list):
+                _finish(job_id, "error", "Яндекс API недоступен; проверьте соединение и ответ сервиса")
+                return
+            cards = data["organizations"]
+            if not cards:
+                break
+            count += len(cards)
+            with db_open() as db:
+                initialize(db)
+                _touch(db, job_id, found_total=count, pages_total=page + 1)
+            for item in cards:
+                if not _is_running(job_id):
+                    return
+                if not isinstance(item, dict):
+                    continue
+                org_id = str(item.get("id") or "")
+                firm_id = "yandex-" + org_id
+                if not org_id or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", org_id) or firm_id in seen:
+                    continue
+                seen.add(firm_id)
+                website = clean_website(str(item.get("website") or ""))
+                card = {"name": str(item.get("name") or "")[:160],
+                        "address": str(item.get("address") or "")[:300],
+                        "rubrics": [str(s)[:100] for s in (item.get("categories") or []) if isinstance(s, str)],
+                        "phones": [str(s)[:80] for s in (item.get("phones") or []) if isinstance(s, str)],
+                        "rating": None, "website": website, "email": ""}
+                if not card["name"]:
+                    continue
+                if website:
+                    try:
+                        site = await asyncio.to_thread(research_public_site, website, 3_000_000, True)
+                        card["email"] = email_from_site(site or {})
+                    except Exception:
+                        pass
+                if card["email"]:
+                    fit, reason = await judge(card, brief)
+                else:
+                    fit, reason = None, "На сайте компании email не найден"
+                with db_open() as db:
+                    initialize(db)
+                    db.execute(
+                        "INSERT OR IGNORE INTO search_hit (job_id,firm_id,name,address,rubrics,rating,phones,"
+                        "email,email_source,website,telegram,whatsapp,fit,fit_reason,source)"
+                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (job_id, firm_id, card["name"], card["address"], "; ".join(card["rubrics"]),
+                         None, "; ".join(card["phones"]), card["email"],
+                         "официальный сайт" if card["email"] else "", website,
+                         "", "", fit, reason, "Яндекс Карты"))
+                    _touch(db, job_id)
+                if card["email"] and fit == 1:
+                    ready += 1
+                    if want and ready >= want:
+                        _finish(job_id, "done", "Найдено заданное число подходящих компаний")
+                        return
+            if len(cards) < 25:
+                break
+        _finish(job_id, "done", "Поиск Яндекса завершён")
+    except asyncio.CancelledError:
+        _finish(job_id, "interrupted", "Поиск прерван")
+        raise
+    except Exception as exc:
+        # Never expose URLs/headers from the internal Growth gateway in errors.
+        _finish(job_id, "error", "Ошибка поиска Яндекса: " + type(exc).__name__)
+    finally:
+        RUNNING.pop(job_id, None)
+
+
 # --------------------------------------------------------------------------- API
 
 class SearchInput(BaseModel):
@@ -529,7 +624,7 @@ class SearchInput(BaseModel):
     niche: str = Field(min_length=2, max_length=100)
     city: str = Field(default="Сочи", min_length=2, max_length=60)
     want: int | None = Field(default=None, ge=1, le=5000, description="сколько подходящих компаний с почтой нужно")
-    provider: Literal["2gis", "exa"] = "2gis"
+    provider: Literal["2gis", "exa", "yandex"] = "2gis"
 
 
 class ToCampaign(BaseModel):
@@ -580,10 +675,12 @@ async def company_brief(company_id: str) -> dict:
 
 
 @router.get("/providers")
-def providers(_=Depends(mail_owner)):
+async def providers(_=Depends(mail_owner)):
     use_jev = os.getenv("SERVGO_MAIL_USE_JEV", "false").lower() in ("1", "true", "yes")
+    cap = await studio_get("/studio/internal/yandex-organizations/capabilities")
+    yandex = bool(isinstance(cap, dict) and cap.get("enabled"))
     return {"2gis": True, "exa": bool(os.getenv("EXA_API_KEY", "").strip()),
-            "jev": use_jev and bool(os.getenv("OPENROUTER_API_KEY", "").strip())}
+            "yandex": yandex, "jev": use_jev and bool(os.getenv("OPENROUTER_API_KEY", "").strip())}
 
 
 @router.get("/companies")
@@ -624,6 +721,10 @@ async def start(data: SearchInput, _=Depends(mail_owner)):
     city = city_slug(data.city) if data.provider == "2gis" else data.city.strip()
     if data.provider == "exa" and not os.getenv("EXA_API_KEY", "").strip():
         raise HTTPException(503, "Exa не настроен на сервере; требуется EXA_API_KEY")
+    if data.provider == "yandex":
+        cap = await studio_get("/studio/internal/yandex-organizations/capabilities")
+        if not isinstance(cap, dict) or not cap.get("enabled"):
+            raise HTTPException(503, "Яндекс API не настроен в Growth")
     if any(not task.done() for task in RUNNING.values()):
         raise HTTPException(409, "Другой поиск ещё идёт: дождитесь его или остановите")
     brief = await company_brief(data.company_id)
@@ -634,7 +735,7 @@ async def start(data: SearchInput, _=Depends(mail_owner)):
                    "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                    (job_id, data.niche.strip(), city, data.want, data.company_id, brief.get("name", ""),
                     json.dumps(brief, ensure_ascii=False), data.provider, "running", utcnow(), utcnow()))
-    engine = run_exa_job if data.provider == "exa" else run_job
+    engine = {"exa": run_exa_job, "yandex": run_yandex_job}.get(data.provider, run_job)
     RUNNING[job_id] = asyncio.create_task(engine(job_id, data.niche.strip(), city, data.want, brief))
     return {"id": job_id}
 
@@ -665,9 +766,13 @@ async def resume(job_id: str, _=Depends(mail_owner)):
         if row["status"] not in ("interrupted", "error"):
             raise HTTPException(409, "Продолжить можно только прерванный поиск")
         company_brief = json.loads(row["company_brief"] or "{}")
-        engine = run_exa_job if row["provider"] == "exa" else run_job
+        engine = {"exa": run_exa_job, "yandex": run_yandex_job}.get(row["provider"], run_job)
         if row["provider"] == "exa" and not os.getenv("EXA_API_KEY", "").strip():
             raise HTTPException(503, "Exa не настроен на сервере")
+        if row["provider"] == "yandex":
+            cap = await studio_get("/studio/internal/yandex-organizations/capabilities")
+            if not isinstance(cap, dict) or not cap.get("enabled"):
+                raise HTTPException(503, "Яндекс API не настроен в Growth")
         db.execute("UPDATE search_job SET status='running',message='',updated_at=? WHERE id=?",
                    (utcnow(), job_id))
         params = (job_id, row["niche"], row["city"], row["want"], company_brief)

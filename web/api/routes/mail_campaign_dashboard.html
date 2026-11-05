@@ -68,13 +68,13 @@ dialog{border:1px solid var(--line);border-radius:19px;padding:25px;width:min(64
 </section>
 </div>
 </div>
-<section id="search-dialog" class="mail-v3-search" hidden><form id="search-form"><h2>ИИ-поиск компаний</h2><p class="hint">Массовый поиск по 2ГИС и сайтам компаний. ИИ проверяет соответствие найденных организаций выбранному бизнесу. Поиск продолжается при переключении разделов.</p>
+<section id="search-dialog" class="mail-v3-search" hidden><form id="search-form"><h2>ИИ-поиск компаний</h2><p class="hint">Поиск организаций через 2ГИС, Exa и Яндекс Карты. ИИ проверяет соответствие найденных организаций выбранному бизнесу. Поиск продолжается при переключении разделов.</p>
 <label class="field"><span>Рассылка для переноса (необязательно при поиске)</span><select id="search-campaign" aria-label="Рассылка для новых адресатов"></select></label>
 <button class="btn light mail-v4-create" type="button" id="search-create-campaign">+ Новая рассылка</button>
 <label class="field"><span>Для какой компании ищем клиентов</span><select id="search-company"></select></label>
 
 <div id="search-ideas"></div>
-<label class="field"><span>Источник поиска</span><select id="search-provider"><option value="2gis">2ГИС · локальные компании</option><option value="exa">Exa · сайты компаний</option></select></label>
+<label class="field"><span>Источник поиска</span><select id="search-provider"><option value="2gis">2ГИС · локальные компании</option><option value="exa">Exa · сайты компаний</option><option value="yandex">Яндекс Карты · организации</option></select></label>
 <label class="field"><span>История поисков</span><select id="search-history"><option value="">Последние поиски</option></select></label>
 <label class="field"><span>Ниша</span><input id="search-niche" minlength="2" maxlength="100" required placeholder="Например, салон красоты"></label>
 <label class="field"><span>Город</span><input id="search-city" maxlength="60" value="Сочи"></label>
@@ -166,7 +166,7 @@ el("import-form").onsubmit=ev=>{ev.preventDefault();safe(async()=>{const lines=e
 el("edit-form").onsubmit=ev=>{ev.preventDefault();safe(async()=>{if(el("edit-subject").disabled)throw Error("Редактирование недоступно");await api("/"+state.selected+"/recipients/"+state.editing.id,"PATCH",{subject:el("edit-subject").value,body:el("edit-body").value});el("edit-dialog").close();note("Письмо сохранено");await refresh()})};
 const found={job:null,timer:null,picks:new Set(),selectionTouched:false};
 async function sapi(path,method="GET",data){const init={method,credentials:"same-origin",headers:{"Accept":"application/json"}};if(data!==undefined){init.headers["Content-Type"]="application/json";init.body=JSON.stringify(data)}const r=await fetch("/api/company-search"+path,init);let j;try{j=await r.json()}catch{throw Error("Сервер недоступен")}if(!r.ok)throw Error(typeof j.detail==="string"?j.detail:"Ошибка HTTP "+r.status);return j}
-const searchNames={running:"Идёт поиск",done:"Поиск завершён",blocked:"2ГИС ограничил доступ",cancelled:"Остановлено",interrupted:"Прервано",error:"Ошибка поиска"};
+const searchNames={running:"Идёт поиск",done:"Поиск завершён",blocked:"Источник ограничил доступ",cancelled:"Остановлено",interrupted:"Прервано",error:"Ошибка поиска"};
 function fitBadge(h){return h.fit===1?'<span class="label good">Подходит</span>':h.fit===0?'<span class="label">Не подходит</span>':'<span class="label warning">Не проверено</span>'}
 function renderSearch(v){
 const j=v.job,c=v.counts;const progress=v.progress||{};const hits=[...v.hits].sort((a,b)=>(b.fit===1)-(a.fit===1)||(b.email?1:0)-(a.email?1:0));
@@ -175,7 +175,7 @@ if(!found.selectionTouched)found.picks=new Set(eligible.map(h=>h.firm_id));
 else found.picks=new Set([...found.picks].filter(id=>eligible.some(h=>h.firm_id===id)));
 const units=Number(progress.elapsed_seconds||0);const elapsed=units>=60?Math.floor(units/60)+" мин "+units%60+" сек":units+" сек";
 el("search-status").textContent=(j.company_name?"Для «"+j.company_name+"». ":"")+
-  (searchNames[j.status]||j.status)+" · источник "+(j.provider==="exa"?"Exa":"2ГИС")+
+  (searchNames[j.status]||j.status)+" · источник "+(j.provider==="exa"?"Exa":j.provider==="yandex"?"Яндекс Карты":"2ГИС")+
   " · проверено "+(progress.processed??c.found)+" · с email "+c.with_email+" · подходят "+c.fit+
   " · прошло "+elapsed+(j.message?" — "+j.message:"");
 el("search-results").innerHTML=hits.map(h=>{
@@ -183,6 +183,7 @@ el("search-results").innerHTML=hits.map(h=>{
   return '<div class="hit"><div class="hit-top"><label class="mail-v4-hit-choice"><input type="checkbox" class="search-pick" data-id="'+e(h.firm_id)+'" '+(found.picks.has(h.firm_id)?"checked ":"")+(canPick?"":"disabled ")+'> <b>'+e(h.name)+'</b></label>'+fitBadge(h)+'</div>'+
   '<div class="muted">'+e(h.rubrics)+(h.source?" · "+e(h.source):"")+'</div>'+
   '<div class="hit-mail">'+(h.email?e(h.email)+' <span class="muted">· '+e(h.email_source)+'</span>':'<span class="muted">Почты нет'+(h.phones?" · тел. "+e(h.phones.split("; ")[0]):"")+'</span>')+'</div>'+
+  (h.source==="Яндекс Карты" && /^yandex-\d+$/.test(h.firm_id)?'<div class="muted"><a href="https://yandex.ru/maps/org/'+encodeURIComponent(h.firm_id.slice(7))+'" target="_blank" rel="noopener noreferrer">Открыть в Картах</a></div>':"")+
   (h.fit_reason?'<div class="muted">'+e(h.fit_reason)+'</div>':"")+
   (h.imported?'<div class="muted">Уже в рассылке</div>':"")+
   '<div class="mail-v4-hit-review"><button type="button" class="search-review-yes" data-id="'+e(h.firm_id)+'" '+(h.fit===1?"disabled":"")+'>✓ Подходит</button><button type="button" class="search-review-no" data-id="'+e(h.firm_id)+'" '+(h.fit===0?"disabled":"")+'>× Не подходит</button></div></div>';
@@ -221,7 +222,7 @@ sel.value=[...sel.options].some(o=>o.value===initial)?initial:"";
 async function loadHistory(){
 const entries=await sapi("");const selector=el("search-history");
 selector.innerHTML='<option value="">Выберите прошлый поиск</option>'+entries.map(x=>
-  '<option value="'+e(x.id)+'">'+e(x.niche)+" · "+e(x.city)+" · "+e(x.provider==="exa"?"Exa":"2ГИС")+" · "+e(x.status)+'</option>').join("");
+  '<option value="'+e(x.id)+'">'+e(x.niche)+" · "+e(x.city)+" · "+e(x.provider==="exa"?"Exa":x.provider==="yandex"?"Яндекс Карты":"2ГИС")+" · "+e(x.status)+'</option>').join("");
 selector.value=found.job||"";
 selector.onchange=()=>safe(async()=>{
   if(!selector.value)return;
@@ -230,15 +231,18 @@ selector.onchange=()=>safe(async()=>{
 return entries;
 }
 async function loadSearchProviders(){
-let status={exa:false,jev:false};try{status=await sapi("/providers")}catch{note("Статус Exa недоступен. Пока используйте 2ГИС.")}
+let status={exa:false,yandex:false,jev:false};try{status=await sapi("/providers")}catch{note("Источники недоступны. Пока используйте 2ГИС.")}
 el("search-provider").querySelector('option[value="exa"]').disabled=!status.exa;
+el("search-provider").querySelector('option[value="yandex"]').disabled=!status.yandex;
 const hint=()=>{
-const viaExa=el("search-provider").value==="exa";
-el("search-help").textContent=viaExa?
+const viaExa=el("search-provider").value==="exa", viaYandex=el("search-provider").value==="yandex";
+el("search-help").textContent=viaYandex?
+  "Яндекс Карты: поиск организаций по городу и отрасли. Email проверяется отдельно на сайте. Используется серверный ключ API_YANDEX из Growth; почтовые адреса ищутся на официальных сайтах.":viaExa?
   "Exa: платный API-запрос по квоте ключа, по умолчанию до 20 сайтов и до 3 проверок одновременно. Время зависит от сайтов и ИИ.":
   "2ГИС: по умолчанию пауза 5 секунд на карточку плюс время загрузки и ИИ. Для 100 карточек — не менее 500 секунд только пауз. "+
   (status.jev?"Первичную оценку делает Jev. ":"Оценку делает настроенный ИИ. ")+
-  (status.exa?"Exa доступен как второй источник.":"Exa пока не настроен на сервере.");
+  (status.exa?"Exa доступен как второй источник.":"Exa пока не настроен на сервере.")+
+  (status.yandex?" Яндекс Карты подключены.":" Яндекс Карты недоступны — проверьте подключение API_YANDEX к Growth.");
 };
 el("search-provider").onchange=hint;hint();
 }
