@@ -1,0 +1,63 @@
+name: ServGo SEO historical query provenance (read only)
+
+on:
+  push:
+    branches: [ops/servgo-seo-3-manual-action-20261105]
+    paths: [.github/workflows/servgo-seo-core-inspection-20261105.yml]
+
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Verify identity and inspect saved semantic-core provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ]
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/seo-host-keys
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/seo-host-key
+            if ssh-keygen -lf /tmp/seo-host-key 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/seo-host-keys
+          [ -s ~/.ssh/known_hosts ]
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'docker exec -i ai-growth-os-api-1 python -' <<'PY'
+          import json
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Product, Artifact, Task, TaskStatus, Publication
+          from app.seo.contracts import SemanticCore
+          from app.seo.clustering import normalize
+          wanted = ["как организовать запись клиентов", "программа для записи клиентов в салоне красоты"]
+          with SessionLocal() as db:
+              p = db.scalar(select(Product).where(Product.slug == "servgo"))
+              assert p is not None
+              rows = list(db.scalars(select(Artifact).where(
+                  Artifact.product_id == p.id, Artifact.kind == "semantic_core")
+                  .order_by(Artifact.created_at.desc()).limit(150)))
+              print("CORE_RECORDS", len(rows))
+              found = {q: [] for q in wanted}
+              for rank, row in enumerate(rows):
+                  try:
+                      core = SemanticCore.model_validate_json(row.content)
+                  except ValueError:
+                      continue
+                  for q in wanted:
+                      matches = [c for c in core.clusters if any(
+                          normalize(s) == normalize(q) for s in c.queries)]
+                      if matches:
+                          found[q].append({"index":rank,"clusters":len(matches),
+                                          "engines":sorted(set(e for c in matches for e in c.engines))})
+              print("QUERY_PROVENANCE", json.dumps(found, ensure_ascii=False))
+          PY
