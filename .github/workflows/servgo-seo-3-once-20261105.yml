@@ -44,7 +44,7 @@ jobs:
           set -euo pipefail
           image="$(sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'docker inspect --format "{{.Config.Image}}" ai-growth-os-api-1')"
           case "$image" in
-            *servgo-growth:fbc0ae2dfafa*) echo "Production release verified: fbc0ae2" ;;
+            *servgo-growth:87f26c19e4d0*) echo "Production release verified: 87f26c1" ;;
             *) echo "::error::Growth container release changed; abort before paid calls"; exit 1 ;;
           esac
       - name: Inspect exact three article release (read-only)
