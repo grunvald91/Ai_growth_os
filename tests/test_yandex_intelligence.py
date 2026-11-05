@@ -47,3 +47,33 @@ async def test_missing_context_never_invents_organization(monkeypatch, tmp_path)
     bundle, status = await yandex_sources.collect_sources(
         SimpleNamespace(slug="empty"), SimpleNamespace(region="", competitors=[]), tmp_path)
     assert bundle is None and status == "insufficient_company_context"
+
+
+@pytest.mark.asyncio
+async def test_searches_all_named_competitors_without_duplicates(monkeypatch, tmp_path):
+    monkeypatch.setenv("API_YANDEX", "dummy")
+    identity = SimpleNamespace(category="Автосервисы", industry="",
+                               service_geography=["Сочи"], geography="")
+    monkeypatch.setattr(yandex_sources, "load_company_profile", lambda root, slug:
+                        SimpleNamespace(profile=SimpleNamespace(identity=identity)))
+    requested = []
+    async def lookup(query, city, **kwargs):
+        requested.append((query, city, kwargs["results"]))
+        if query == "Второй":
+            raise yandex_sources.YandexOrganizationsError("503")
+        org = {"id": "123" if query == "Первый" else "345",
+               "name": query, "address": "Сочи", "categories": [],
+               "maps_url": "https://yandex.ru/maps/org/123",
+               "website": ""}
+        return {"organizations": [org]}
+    monkeypatch.setattr(yandex_sources, "search", lookup)
+    result, state = await yandex_sources.collect_sources(
+        SimpleNamespace(slug="company"),
+        SimpleNamespace(competitors=["Первый", "Второй", "Третий", "Первый"],
+                        region="Сочи"), tmp_path)
+    assert requested == [
+        ("Первый", "Сочи", 1), ("Второй", "Сочи", 1), ("Третий", "Сочи", 1)
+    ]
+    assert state == "partial"
+    assert result is not None
+    assert [source.competitor for source in result.sources] == ["Первый", "Третий"]
