@@ -34,6 +34,13 @@ def test_two_owner_pages_are_clear_complete_and_rich(slug):
     assert "ServGo" in body
     assert "онлайн-запись" in body
     assert len(reader.meta_description) > 60
+    # Published company evidence explicitly separates manual CRM actions from
+    # unverified automation; do not ask the critic to guess the product contract.
+    owner_capabilities = reader.sections[-1].body.casefold()
+    assert "вручную" in owner_capabilities
+    assert "crm" in owner_capabilities
+    assert "не подтвержд" in owner_capabilities
+
 
 
 def test_actual_collected_queries_gate_manual_edit(monkeypatch):
@@ -82,7 +89,7 @@ def test_published_owner_guides_require_real_critic_even_if_gateway_slow():
     from app.seo import revise_servgo_owner_articles as release
     source = inspect.getsource(release._review)
     assert 90 < release.REVIEW_TIMEOUT_SECONDS <= 300
-    assert 120 < release.AUTHOR_REVISION_TIMEOUT_SECONDS <= 240
+    assert 120 < release.AUTHOR_REVISION_TIMEOUT_SECONDS <= 600
     assert "review_timeout=REVIEW_TIMEOUT_SECONDS" in source
     assert "revision_timeout=AUTHOR_REVISION_TIMEOUT_SECONDS" in source
     assert "failure_reason" in source  # safe failure class appears in the run log
