@@ -59,7 +59,7 @@ def _safe_next(value: str | None) -> str:
 
 
 def _page(*, next_url: str, login: str = "", error: str | None = None, notice: str | None = None,
-          status: int = 200) -> HTMLResponse:
+          status: int = 200, canonical: bool = False) -> HTMLResponse:
     message = ""
     if error:
         message = f'<div class="alert error" role="alert">{html.escape(error)}</div>'
@@ -84,6 +84,7 @@ def _page(*, next_url: str, login: str = "", error: str | None = None, notice: s
   <label>Пароль<input name="password" type="password" required autocomplete="current-password" maxlength="200"></label>
   <button type="submit">Войти</button>
   <p class="foot">Логин можно вводить с любой буквы — заглавной или строчной.</p>
+  {'<p class="foot"><a href="/login?next=%2Fworkspace%2Fstudio-entry">Войти через ServGo: Яндекс, Telegram или email</a></p>' if canonical else ""}
 </form>
 </main></body></html>"""
     return HTMLResponse(body, status_code=status, headers={"Cache-Control": "no-store",
@@ -116,21 +117,20 @@ def _clear_studio_cookies(response: Response, settings: Settings) -> Response:
 @router.get("/studio/login", response_class=HTMLResponse)
 def login_form(request: Request, next: str | None = None, logged_out: bool = False,
                legacy: bool = False, settings: Settings = Depends(get_settings)):
-    # On servgo.ru all regular users authenticate with the same Telegram,
-    # Yandex or email account they use in the admin. The legacy password form
-    # remains available only by an explicit emergency/operator request.
-    if _canonical_servgo(request, settings):
+    # The unified login remains the default, but existing Growth customers
+    # may explicitly select their already issued username and password.
+    if _canonical_servgo(request, settings) and not legacy:
         return RedirectResponse("/login?next=%2Fworkspace%2Fstudio-entry", status_code=303,
                                 headers={"Cache-Control": "no-store"})
     notice = "Вы вышли. Можно войти под другим логином." if logged_out else None
-    return _page(next_url=_safe_next(next), notice=notice)
+    return _page(next_url=_safe_next(next), notice=notice,
+                 canonical=_canonical_servgo(request, settings))
 
 
 @router.post("/studio/login", response_class=HTMLResponse)
 async def login_submit(request: Request, settings: Settings = Depends(get_settings)):
-    if _canonical_servgo(request, settings):
-        from fastapi import HTTPException
-        raise HTTPException(403, "Use the ServGo account on this host")
+    # A canonical-host password sign-in is an explicit independent login;
+    # Origin/Referer validation is still enforced by the router dependency.
     fields = await _studio_form(request)
     login, password = fields.get("username", ""), fields.get("password", "")
     next_url = _safe_next(fields.get("next"))
@@ -154,7 +154,7 @@ async def login_submit(request: Request, settings: Settings = Depends(get_settin
     response = RedirectResponse(next_url, status_code=303)
     response.set_cookie(COOKIE, issue(settings, name, credential), max_age=MAX_AGE, path="/",
                         httponly=True, samesite="lax", secure=_secure_cookie(settings))
-    # The password sign-in takes priority anyway; drop the ServGo one so nothing stale remains.
+    # Explicit password sign-in must not inherit an unrelated ServGo Studio SSO session.
     response.delete_cookie(SSO_COOKIE, path="/", httponly=True, samesite="lax", secure=_secure_cookie(settings))
     return response
 
