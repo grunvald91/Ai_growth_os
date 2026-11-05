@@ -1607,7 +1607,10 @@ body.home-page[data-growth-design="v4"] .dp-home .command-bar {
   -webkit-backdrop-filter:none!important;
   backdrop-filter:none!important;
 }
-body.home-page[data-growth-design="v4"] .dp-home .command-bar:focus-within {
+body.home-page[data-growth-design="v4"] .dp-home .command-bar:focus-within,
+body.home-page[data-growth-design="v4"] .dp-home .command-bar:is(
+  .voice-arming,.voice-recording,.voice-connecting,.voice-processing,.voice-sending
+) {
   border-color:var(--s-accent)!important;
   box-shadow:0 0 0 1px var(--s-accent)!important;
 }
