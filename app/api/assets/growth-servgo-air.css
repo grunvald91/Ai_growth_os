@@ -1602,7 +1602,7 @@ body.home-page[data-growth-design="v4"] .dp-home .dp-msg.bot {
 }
 body.home-page[data-growth-design="v4"] .dp-home .command-bar {
   background:var(--s-bg)!important;
-  border:1px solid var(--s-line-2)!important;
+  border:0!important;
   box-shadow:none!important;
   -webkit-backdrop-filter:none!important;
   backdrop-filter:none!important;
@@ -1612,7 +1612,9 @@ body.home-page[data-growth-design="v4"] .dp-home .command-bar:is(
   .voice-arming,.voice-recording,.voice-connecting,.voice-processing,.voice-sending
 ) {
   border-color:var(--s-accent)!important;
-  box-shadow:0 0 0 1px var(--s-accent)!important;
+  outline:1px solid var(--s-accent);
+  outline-offset:-1px;
+  box-shadow:none!important;
 }
 body.home-page[data-growth-design="v4"] .dp-home .command-bar textarea {
   background:transparent!important;
