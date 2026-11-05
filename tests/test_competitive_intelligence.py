@@ -342,3 +342,30 @@ async def test_run_automatically_collects_yandex_evidence(monkeypatch, db, produ
     assert state["source_discovery"]["status"] == "collected"
     assert state["counts"]["found"] >= 1
     assert service.evidence(run_id)[0]["platform"] == "Яндекс Карты"
+
+
+def test_directory_only_cannot_justify_reviews_or_weaknesses():
+    """A directory card proves listing, never customer sentiment or failures."""
+    from app.competitive_intelligence.contracts import Evidence, InsightDraft, SynthesisDraft
+    from app.competitive_intelligence.synthesis import validate_report
+    now = datetime.now(timezone.utc)
+    item = Evidence.model_validate({
+        "id": "e1", "competitor": "Тестовая организация",
+        "source_url": "https://yandex.ru/maps/org/123",
+        "source_type": "website", "platform": "Яндекс Карты",
+        "published_at": None, "observed_at": now,
+        "excerpt": "Справочник Яндекс Карты: Тестовая организация; адрес: Сочи",
+        "dedupe_hash": "unit-test", "disposition": "retained",
+        "decision_confidence": 0.95,
+    })
+    def draft(view):
+        return SynthesisDraft(insights=[InsightDraft(
+            view=view, statement="В источнике отмечен сигнал для проверки.",
+            impact="low", confidence=.9, state="signal", evidence_ids=["e1"],
+            suggested_test="Собрать независимые отзывы.")])
+    base = RunInput(product_id=uuid4(), brief="Проверь конкурента")
+    for view in ("reviews", "weaknesses", "pricing"):
+        report = validate_report(draft(view), [item], base, {})
+        assert not report.insights, view
+    opportunity = validate_report(draft("opportunities"), [item], base, {})
+    assert len(opportunity.insights) == 1
