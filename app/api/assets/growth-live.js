@@ -106,8 +106,16 @@ document.addEventListener('pointerdown',e=>{
   // becomes scroll padding so the latest reply stays visible as input resizes.
   const dock=root.querySelector('.command-dock');
   if(dock){
-   const syncDockSpace=()=>root.style.setProperty(
-    '--sg-chat-dock-height',Math.ceil(dock.getBoundingClientRect().height)+'px');
+   const syncDockSpace=()=>{
+    const next=Math.ceil(dock.getBoundingClientRect().height);
+    const current=parseInt(root.style.getPropertyValue('--sg-chat-dock-height')||'0',10);
+    if(next===current)return;
+    const messageFeed=root.querySelector('#dp-feed');
+    const atEnd=messageFeed &&
+     messageFeed.scrollTop+messageFeed.clientHeight>=messageFeed.scrollHeight-30;
+    root.style.setProperty('--sg-chat-dock-height',next+'px');
+    if(atEnd)requestAnimationFrame(()=>{messageFeed.scrollTop=messageFeed.scrollHeight});
+   };
    new ResizeObserver(syncDockSpace).observe(dock);
    syncDockSpace();
   }
