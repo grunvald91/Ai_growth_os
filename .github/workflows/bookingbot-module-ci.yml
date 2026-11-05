@@ -25,6 +25,16 @@ jobs:
         working-directory: services/booking_bot
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check whitespace in new BookingBot source changes
+        run: |
+          set -euo pipefail
+          if git cat-file -e 'HEAD^:services/booking_bot/README.md' 2>/dev/null; then
+            git diff --check HEAD^ HEAD -- services/booking_bot
+          else
+            echo 'Initial exact-history subtree import: keep legacy source bytes unchanged.'
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
