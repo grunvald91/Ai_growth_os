@@ -443,16 +443,17 @@ body.home-page:not(.home-empty) .dp-home.has-feed .dp-feed{
   max-height:none;
   box-sizing:border-box;
   margin:0;
-  padding:8px 8px 20px 30px;
+  padding:8px 8px calc(var(--sg-chat-dock-height, 150px) + 18px) 30px;
   scroll-padding-block:12px;
   scrollbar-gutter:stable;
   overflow-y:auto;
 }
 body.home-page:not(.home-empty) .dp-home.has-feed .command-dock{
-  position:relative;
-  flex:none;
+  position:absolute;
+  inset-inline:0;
+  bottom:0;
   width:100%;
-  z-index:auto; /* do not trap the portalled voice glow */
+  z-index:3; /* conversation scrolls under controls; voice glow stays portalled */
   box-sizing:border-box;
   margin:0;
   padding:0 0 8px!important;
