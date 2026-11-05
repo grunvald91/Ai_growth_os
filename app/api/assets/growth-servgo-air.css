@@ -1571,3 +1571,50 @@ body[data-growth-design="v4"] .command-bar.voice-text-editing textarea { padding
   body.home-page.sg-keyboard-open .command-dock { margin-top:auto;padding-bottom:8px!important; }
   body.home-page.sg-keyboard-open .command-hints { margin-top:6px; }
 }
+
+/* Growth home canvas: conversation is the page, not a stack of tinted panels.
+ * Keep this after all ServGo Air surface and reduced-transparency rules.
+ * Only the Growth home is affected: Create, forms and other pages retain cards.
+ * The composer remains an accessible bordered control, but its fill equals
+ * the page in both themes; the dock itself has no visible backdrop.
+ */
+body.home-page[data-growth-design="v4"],
+body.home-page[data-growth-design="v4"] .shell,
+body.home-page[data-growth-design="v4"] .workspace,
+body.home-page[data-growth-design="v4"] #main {
+  background:var(--s-bg)!important;
+}
+body.home-page[data-growth-design="v4"] .dp-home .dp-feed,
+body.home-page[data-growth-design="v4"] .dp-home .command-dock,
+body.home-page[data-growth-design="v4"] .dp-home .command-topicbar,
+body.home-page[data-growth-design="v4"] .dp-home .command-tools,
+body.home-page[data-growth-design="v4"] .dp-home .command-hints {
+  background:transparent!important;
+  box-shadow:none!important;
+}
+body.home-page[data-growth-design="v4"] .dp-home .command-dock {
+  border:0!important;
+}
+body.home-page[data-growth-design="v4"] .dp-home .dp-msg.bot {
+  background:transparent!important;
+  border:0!important;
+  box-shadow:none!important;
+}
+body.home-page[data-growth-design="v4"] .dp-home .command-bar {
+  background:var(--s-bg)!important;
+  border:1px solid var(--s-line-2)!important;
+  box-shadow:none!important;
+  -webkit-backdrop-filter:none!important;
+  backdrop-filter:none!important;
+}
+body.home-page[data-growth-design="v4"] .dp-home .command-bar:focus-within {
+  border-color:var(--s-accent)!important;
+  box-shadow:0 0 0 1px var(--s-accent)!important;
+}
+body.home-page[data-growth-design="v4"] .dp-home .command-bar textarea {
+  background:transparent!important;
+}
+body.home-page[data-growth-design="v4"] .dp-home .command-topicbar .dp-new {
+  background:transparent!important;
+  box-shadow:none!important;
+}
