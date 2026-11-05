@@ -34,7 +34,7 @@ jobs:
           import json
           from sqlalchemy import select
           from app.db.session import SessionLocal
-          from app.models.domain import Product, Task, Artifact, Publication
+          from app.models.domain import Product, Task, Artifact, Publication, AgentRun
           from app.seo.publishing import (critic_verdict, static_problems,
               unsupported_servgo_pricing, servgo_buyer_intent_problems,
               duplicate_page_problems, public_blog_ready)
@@ -72,4 +72,20 @@ jobs:
                   print("ARTICLE_REVIEW",json.dumps({"critic":verdict,"problems":problems[:8],
                       "publication_status":publication.status if publication else None,
                       "due_at":str(t.due_at)},ensure_ascii=False))
+                  runs=list(db.scalars(select(AgentRun).where(
+                      AgentRun.task_id==t.id,
+                      AgentRun.agent_name=="marketing_editor").order_by(
+                      AgentRun.created_at.desc()).limit(5)))
+                  print("EDITOR_RUNS",json.dumps([
+                      {"status":r.status,"error_class":str(r.error or "")[:120],
+                       "review_artifacts":len(list(db.scalars(select(Artifact.id).where(
+                           Artifact.agent_run_id==r.id,Artifact.kind=="seo_final_review"))))}
+                      for r in runs],ensure_ascii=False))
+                  reviews=list(db.scalars(select(Artifact).where(
+                      Artifact.task_id==t.id,Artifact.kind=="seo_final_review")
+                      .order_by(Artifact.created_at.desc()).limit(6)))
+                  print("REVIEW_RECORDS",json.dumps([
+                      {"status":(json.loads(v.content).get("status") if v.content else None),
+                       "has_hash":bool(json.loads(v.content).get("reader_hash"))}
+                      for v in reviews],ensure_ascii=False))
           PY
