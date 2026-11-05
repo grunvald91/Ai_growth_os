@@ -303,6 +303,10 @@ def main():
                     response = page.goto(origin + base + suffix)
                     assert response.status == 200, suffix
                     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'), suffix
+                response=page.goto(origin + '/studio/new')
+                assert response.status==200
+                page.locator('#bizBtn').click()
+                expect(page.locator('#sgOrgMenu button')).to_have_count(2)
                 assert not errors, errors
                 browser.close()
                 print('PASS: reference surfaces, root resume/dropdown, resize-visual keyboard with offset, compact review actions in both themes, drawer swipe closing on links/buttons, previews, touch cancellation, edge/vertical scroll and 6 routes')

@@ -210,8 +210,9 @@
     setTimeout(function () { suppressDrawerClick = false; }, 350);
   }
   var suppressDrawerClick = false;
-  drawer.addEventListener('click', function (event) {
-    if (suppressDrawerClick && (event.pointerType === 'touch' || event.sourceCapabilities?.firesTouchEvents) &&
+  document.addEventListener('click', function (event) {
+    if (suppressDrawerClick && drawer.contains(event.target) &&
+        (event.pointerType === 'touch' || event.sourceCapabilities?.firesTouchEvents) &&
         (suppressDrawerClick.contains(event.target) || event.target.contains(suppressDrawerClick))) {
       event.preventDefault(); event.stopPropagation();
     }

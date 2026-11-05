@@ -3,7 +3,7 @@
 The browser's existing ServGo JWT authorizes listing and SSO-ticket issuance.
 Growth never uses browser-supplied company IDs as permissions: both API calls
 validate the JWT/ownership and the landing verifies the current browser identity.
-The legacy Growth host does not load this script.
+The legacy host never requests the canonical list without verified session metadata.
 """
 
 JS = r"""

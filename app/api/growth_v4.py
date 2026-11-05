@@ -437,15 +437,14 @@ def render_v4(page, request, pid, switch):
     template = template.replace('Студия «Мята»',html.escape(company)).replace('<span class="avatar">М</span>',
                      '<span class="avatar">'+html.escape(company[:1])+'</span>')
     # Keep the header switch in place; populate a scoped dropdown on click.
-    if pid or current == '/studio':
-        template = template.replace('<button class="biz-switch" id="bizBtn">',
-            '<div class="sg-org-wrapper" id="sgOrgWrapper">'
-            '<button class="biz-switch" id="bizBtn" type="button" '
-            'aria-label="Сменить компанию" aria-haspopup="true" aria-expanded="false" '
-            'aria-controls="sgOrgMenu">', 1)
-        template = template.replace('<svg class="icon sm"><use href="#i-down"/></svg></button>',
-            '<svg class="icon sm"><use href="#i-down"/></svg></button>'
-            '<div class="sg-org-menu" id="sgOrgMenu" hidden></div></div>', 1)
+    template = template.replace('<button class="biz-switch" id="bizBtn">',
+        '<div class="sg-org-wrapper" id="sgOrgWrapper">'
+        '<button class="biz-switch" id="bizBtn" type="button" '
+        'aria-label="Сменить компанию" aria-haspopup="true" aria-expanded="false" '
+        'aria-controls="sgOrgMenu">', 1)
+    template = template.replace('<svg class="icon sm"><use href="#i-down"/></svg></button>',
+        '<svg class="icon sm"><use href="#i-down"/></svg></button>'
+        '<div class="sg-org-menu" id="sgOrgMenu" hidden></div></div>', 1)
     # Always display the active company name on mobile, not only an initial.
     template = template.replace('</head>',
         '<style>@media(max-width:780px){'
@@ -506,9 +505,8 @@ def render_v4(page, request, pid, switch):
             '<p class="sg-daily-hint">Нажмите вне панели, чтобы свернуть.</p></aside>'
         )
         template = template.replace('</body>', drawer+'</body>', 1)
-    if pid or current == '/studio':
-        extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
-        extras += '<script src="/studio/assets/growth-daily.js?v=3"></script>'
+    extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
+    extras += '<script src="/studio/assets/growth-daily.js?v=3"></script>'
     template = template.replace('</head>', (
         '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=20">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
