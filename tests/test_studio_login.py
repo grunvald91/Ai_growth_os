@@ -178,12 +178,11 @@ def test_account_form_ticks_the_current_company_and_shows_errors_at_the_form(stu
     assert f'name="company_{studio.mine.id}" value="on" checked' not in bad.text
     ok = c.post(url, auth=OWNER, data={"username": "manager", "role": "company", f"company_{studio.mine.id}": "on"})
     area = ok.text.split('id="account-result"', 1)[1]
-    assert "Аккаунт создан" in area and "прежнем отдельном адресе Studio" in area
-    assert "servgo.ru/studio/login?legacy=1" not in area
+    assert "Аккаунт создан" in area and "servgo.ru/studio/login?legacy=1" in area
 
 
 def test_canonical_servgo_studio_login_uses_main_account(studio):
-    # The configured same-origin gateway never shows a second password prompt.
+    # Unified login is the default, but explicitly selected Growth credentials work.
     studio.settings.studio_servgo_gateway_enabled = True
     with TestClient(app, base_url="https://servgo.ru") as client:
         page = client.get("/studio/login", follow_redirects=False)
@@ -191,11 +190,13 @@ def test_canonical_servgo_studio_login_uses_main_account(studio):
         assert page.headers["location"] == "/login?next=%2Fworkspace%2Fstudio-entry"
         assert page.headers["cache-control"] == "no-store"
 
-        # The old operator credential remains available for emergency migration,
-        # without appearing in normal ServGo navigation.
         legacy = client.get("/studio/login?legacy=1", follow_redirects=False)
-        assert legacy.status_code == 303
-        assert legacy.headers["location"] == "/login?next=%2Fworkspace%2Fstudio-entry"
+        assert legacy.status_code == 200
+        assert "Вход в Growth Studio" in legacy.text
+        assert client.post("/studio/login", headers={"Origin": "https://servgo.ru"},
+                           data={"username": OWNER[0], "password": OWNER[1]},
+                           follow_redirects=False).status_code == 303
+        assert client.get(f"/studio/products/{studio.mine.id}").status_code == 200
 
         # Signing out from Growth must finish the logout in the shared PWA.
         out = client.get("/studio/logout", follow_redirects=False)
@@ -219,3 +220,54 @@ def test_canonical_servgo_logout_clears_studio_cookies_same_origin_only(studio):
         cookies = response.headers.get_list("set-cookie")
         assert any(row.startswith("sg_session=") and "max-age=0" in row.lower() for row in cookies)
         assert any(row.startswith("sg_sso=") and "max-age=0" in row.lower() for row in cookies)
+
+
+def _signed_servgo_identity(secret: str, uid: int = 42) -> str:
+    import hashlib
+    import hmac
+    import json
+    import time
+    data = {"v": 1, "u": uid, "e": int(time.time()) + 3600, "n": "some-unique-signed-browser-nonce"}
+    body = base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip("=")
+    signature = base64.urlsafe_b64encode(
+        hmac.new(secret.encode(), b"servgo-browser-identity-v1:" + body.encode(),
+                 hashlib.sha256).digest()
+    ).decode().rstrip("=")
+    return body + "." + signature
+
+
+def test_canonical_company_account_links_without_creating_another_company(studio):
+    from app.core.studio_accounts import reset_password
+    password = _create(studio, username="manager", role="company",
+                       **{f"company_{studio.mine.id}": "on"})
+    studio.settings.studio_servgo_gateway_enabled = True
+    studio.settings.servgo_sso_secret = "S" * 48
+    with TestClient(app, base_url="https://servgo.ru",
+                    headers={"Origin": "https://servgo.ru"}) as client:
+        client.cookies.set("sg_identity", _signed_servgo_identity(studio.settings.servgo_sso_secret))
+        assert client.get(f"/studio/products/{studio.mine.id}/activity.json").status_code == 401
+        link_page = client.get("/studio/identity")
+        assert link_page.status_code == 200
+        bad = client.post("/studio/identity", data={"username": "manager", "password": "wrong"},
+                          follow_redirects=False)
+        assert bad.status_code == 401
+        connected = client.post("/studio/identity", data={"username": "Manager", "password": password},
+                                follow_redirects=False)
+        assert connected.status_code == 303
+        assert client.get(f"/studio/products/{studio.mine.id}").status_code == 200
+        assert client.get(f"/studio/products/{studio.other.id}").status_code == 404
+        assert client.get(f"/studio/products/{studio.mine.id}/accounts").status_code == 403
+        assert len(studio.db.query(Product).all()) == 2
+        reset_password(studio.settings, "manager")
+        assert client.get(f"/studio/products/{studio.mine.id}/activity.json").status_code == 401
+
+
+def test_canonical_identity_link_requires_real_servgo_browser_proof(studio):
+    studio.settings.studio_servgo_gateway_enabled = True
+    studio.settings.servgo_sso_secret = "S" * 48
+    with TestClient(app, base_url="https://servgo.ru",
+                    headers={"Origin": "https://servgo.ru"}) as client:
+        client.cookies.set("sg_identity", _signed_servgo_identity("wrong" * 10))
+        assert client.get("/studio/identity", follow_redirects=False).status_code == 401
+        assert client.post("/studio/identity", data={"username": OWNER[0], "password": OWNER[1]},
+                           follow_redirects=False).status_code == 401
