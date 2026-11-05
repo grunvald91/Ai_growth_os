@@ -1172,8 +1172,8 @@ def test_campaign_finish_post_company_auth_and_origin(live, monkeypatch, tmp_pat
     assert list(db.scalars(select(Decision))) == []
 
 
-def test_owner_home_reserves_space_for_the_transparent_command_dock():
-    """The dock keeps floating surfaces while cards stay outside its bounds."""
+def test_owner_home_scrolls_behind_floating_command_dock():
+    """Conversation fills the viewport; measured dock padding protects last reply."""
     from app.api.growth_v4 import ASSETS
     css = (ASSETS / "growth-live.css").read_text(encoding="utf-8")
     js = (ASSETS / "growth-live.js").read_text(encoding="utf-8")
@@ -1181,13 +1181,14 @@ def test_owner_home_reserves_space_for_the_transparent_command_dock():
     end = css.index("/* New Topic:", start)
     rules = css[start:end]
     dock = rules.split(".dp-home.has-feed .command-dock{", 1)[1].split("}", 1)[0]
-    assert "position:relative;" in dock
-    assert "position:absolute;" not in dock
-    assert "padding:8px 8px 20px 30px;" in rules
+    assert "position:absolute;" in dock
+    assert "position:relative;" not in dock
+    assert "calc(var(--sg-chat-dock-height, 150px) + 18px)" in rules
     assert "background:transparent!important;" in rules
     assert "border-bottom:0!important;" in rules
     assert "background:var(--bg);" in rules
-    assert "--v4-dock-height" not in js
+    assert "new ResizeObserver(syncDockSpace).observe(dock);" in js
+    assert "--sg-chat-dock-height" in js
 
 
 
