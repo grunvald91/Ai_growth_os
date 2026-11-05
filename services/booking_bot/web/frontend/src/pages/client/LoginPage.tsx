@@ -207,6 +207,12 @@ export function LoginPage() {
             Войдите в ваш аккаунт ServGo. После входа откроется Studio для доступной компании.
           </p>
         )}
+        {studioNext === STUDIO_ENTRY && (
+          <a href="/studio/login?legacy=1" className="ds-btn ds-btn--ghost"
+            style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+            Войти по логину и паролю Growth Studio
+          </a>
+        )}
         {yandexProblem && <p role="alert" style={{ color: 'var(--s-danger)', marginBottom: 12 }}>{yandexProblem}</p>}
         <div style={{ marginBottom: 16 }}><YandexLoginButton /></div>
         <EmailAuthForm />
