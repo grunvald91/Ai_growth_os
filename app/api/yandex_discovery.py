@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from sqlalchemy import select
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -19,7 +20,7 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.integrations.yandex_organizations import YandexOrganizationsError, search
 from app.integrations.yandex_evidence import sign_organization, verify_organization
-from app.models.domain import Product
+from app.models.domain import Artifact, Product
 from app.services.artifacts import ArtifactService
 from app.workflows.research_contracts import ResearchSource, ResearchSourceBundle
 
@@ -139,7 +140,7 @@ async def save_market_sources(product_id: UUID, body: SourceSelection, db=Depend
         content=bundle.model_dump_json())
     db.commit()
     return {"artifact_id": str(artifact.id), "saved": len(sources),
-            "intelligence_url": f"/intelligence?product_id={product_id}"}
+            "intelligence_url": f"/studio/products/{product_id}/market-research#ym-saved"}
 
 
 @router.get("/studio/products/{product_id}/market-research", response_class=HTMLResponse)
@@ -150,6 +151,26 @@ def market_research(product_id: UUID, db=Depends(get_db)):
     initial_niche = (identity.category or identity.industry or "") if identity else ""
     initial_city = (identity.service_geography[0] if identity and identity.service_geography
                     else identity.geography or "" if identity else "")
+    # Always show the current tenant only. /intelligence is an operator-only
+    # console and is not reachable by company-scoped ServGo accounts.
+    previous = list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id,
+        Artifact.kind == "research_source_bundle",
+    ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(12)))
+    source_cards = []
+    for entry in previous:
+        try:
+            bundle = ResearchSourceBundle.model_validate_json(entry.content)
+        except (ValueError, TypeError):
+            continue
+        source_cards.append(
+            '<li><strong>' + escape(bundle.label) + '</strong> · '
+            + str(len(bundle.sources)) + ' организаций и источников</li>'
+        )
+    saved_html = (
+        '<ul>' + ''.join(source_cards) + '</ul>' if source_cards
+        else '<p>Источники ещё не сохранены.</p>'
+    )
     body = f"""
 <section class="sg-surface" style="padding:20px">
   <h2>Организации и конкуренты по Яндекс Картам</h2>
@@ -162,7 +183,8 @@ def market_research(product_id: UUID, db=Depends(get_db)):
   <p id="ym-status" role="status" aria-live="polite"></p>
   <div id="ym-stats"></div><div id="ym-results"></div>
   <button id="ym-save" class="btn" type="button" hidden>Добавить выбранных в бизнес-разведку</button>
-  <a href="/intelligence?product_id={product_id}">Открыть бизнес-разведку</a>
+  <section id="ym-saved"><h3>Сохранённые источники компании</h3>
+  {saved_html}</section>
 </section>
 <script>
 (()=>{{'use strict';
@@ -194,7 +216,7 @@ $('ym-save').onclick=async()=>{{
  try{{
   const r=await fetch('/studio/products/'+id+'/market-research/sources',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{query,city,tokens}})}});
   const data=await r.json();if(!r.ok)throw Error(data.detail||'Ошибка сохранения');
-  $('ym-status').textContent='Сохранено источников: '+data.saved+'. Они доступны в бизнес-разведке.';
+  $('ym-status').textContent='Сохранено источников: '+data.saved+'. Обновите страницу для списка сохранённых источников.';
  }}catch(e){{$('ym-status').textContent=String(e.message||e);}}
 }};
 }})();
