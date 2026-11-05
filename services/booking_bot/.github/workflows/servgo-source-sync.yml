@@ -1,0 +1,28 @@
+name: Sync production source into a GitHub branch
+# Reads /opt/booking_bot (read-only), pushes a review branch with the server's own versions of the files that differ
+# from main. Nothing is merged and nothing on the server changes. File contents are never printed.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ops/servgo-source-sync]
+    paths:
+      - .github/workflows/servgo-source-sync.yml
+permissions:
+  contents: write
+concurrency:
+  group: servgo-source-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python -m pip install --disable-pip-version-check pytest 'paramiko==3.5.1'
+      - run: python -m pytest -q tests/test_sync_server_source.py
+      - name: Read the server and push the review branch
+        run: python scripts/sync_server_source.py sync/server-source-20261023

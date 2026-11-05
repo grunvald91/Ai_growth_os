@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Ваша клиентская база стоит больше, чем вы думаете — ServGo</title>
+    <meta name="description" content="ServGo собирает клиентскую базу салонов, барбершопов, бань, психологов и других сервисных бизнесов: онлайн-запись, расписание, напоминания. Первые три бизнеса в нише — бесплатно, дальше внесение {{ offer.entry_price_text }}.">
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <meta name="color-scheme" content="light dark">
+    <link rel="canonical" href="https://promo.servgo.ru/">
+    <meta property="og:title" content="Ваша клиентская база стоит больше, чем вы думаете — ServGo">
+    <meta property="og:description" content="Онлайн-запись для сервисного бизнеса: сайт и Telegram, предоплата, расписание и напоминания. Первые три бизнеса в нише — бесплатно.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://promo.servgo.ru/">
+    <meta property="og:locale" content="ru_RU">
+    <meta property="og:site_name" content="ServGo">
+    <meta property="og:image" content="https://promo.servgo.ru/static/og.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Ваша клиентская база стоит больше, чем вы думаете — ServGo">
+    <meta name="twitter:description" content="Онлайн запись для салонов красоты, барбершопов, бань, фотостудий, психологов и шиномонтажа.">
+    <meta name="twitter:image" content="https://promo.servgo.ru/static/og.png">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
+    <link rel="alternate icon" type="image/x-icon" href="/static/favicon.ico?v=3">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png?v=3">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png?v=3">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png?v=3">
+    <link rel="manifest" href="/static/site.webmanifest?v=2">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500;600;800&amp;display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/home.css?v=2">
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "ServGo",
+        "url": "https://promo.servgo.ru/",
+        "logo": "https://promo.servgo.ru/static/favicon.svg",
+        "description": "Сервис онлайн-записи и бронирования для малого бизнеса через Telegram-бот и веб-приложение.",
+        "areaServed": "RU"
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "ServGo",
+        "url": "https://promo.servgo.ru/",
+        "inLanguage": "ru-RU",
+        "publisher": {"@type": "Organization", "name": "ServGo"}
+    }
+    </script>
+    {% if niches %}
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": "ServGo для разных ниш",
+        "itemListElement": [
+            {% for n in niches %}{
+                "@type": "ListItem",
+                "position": {{ loop.index }},
+                "name": {{ n.label | tojson }},
+                "url": {{ ("https://promo.servgo.ru/" + n.slug) | tojson }}
+            }{% if not loop.last %},{% endif %}{% endfor %}
+        ]
+    }
+    </script>
+    {% endif %}
+</head>
+<body id="top">
+    <header class="topbar">
+        <div class="wrap">
+            <a class="brand" href="/" aria-label="ServGo — на главную">
+                <picture>
+                    <source media="(prefers-color-scheme: dark)" srcset="/static/brand/servgo-mark-on-dark.svg">
+                    <img src="/static/brand/servgo-mark.svg" alt="" width="36" height="36">
+                </picture>
+                <span class="brand-word">Serv<i>Go</i></span>
+            </a>
+            <nav class="nav" aria-label="Главная навигация">
+                <a href="#how">Как это работает</a>
+                <a href="#calculator">Ваша база</a>
+                <a href="#offer">Условия</a>
+                <a href="/roadmap">Дорожная карта</a>
+                <a href="https://servgo.ru/admin">Войти</a>
+            </nav>
+            <a class="login-link" href="https://servgo.ru/admin">Войти</a>
+        </div>
+    </header>
+
+    <main>
+        <section class="hero" aria-labelledby="hero-title">
+            <div class="wrap">
+                <div class="hero-main">
+                    <p class="eyebrow">Система роста для сервисного бизнеса</p>
+                    <h1 id="hero-title">Ваша клиентская база стоит <em>больше<span class="flow"></span></em>, чем вы думаете</h1>
+                    <p class="lead">ServGo собирает всех ваших клиентов в одном месте и показывает, где бизнес теряет деньги: ушедших клиентов, пустые окна, проседающие смены.</p>
+                    <div class="hero-cta">
+                        <a class="btn" href="#calculator">Узнать, сколько стоит моя база
+                            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg>
+                        </a>
+                        <p class="hero-note">Первые три бизнеса в каждой нише подключаем бесплатно.</p>
+                    </div>
+                </div>
+
+                <aside class="sample" aria-label="Пример разбора роста">
+                    <div class="sample-head"><b>Разбор роста</b><span>пример</span></div>
+                    <div class="sample-sum">
+                        <small>Можно вернуть в этом месяце</small>
+                        <strong><span class="blur" aria-hidden="true">000 000</span> ₽</strong>
+                    </div>
+                    <div class="sample-rows">
+                        <div><span>Ушли и не вернулись</span><span class="blur" aria-hidden="true">000 клиентов</span></div>
+                        <div><span>Пустые окна за месяц</span><span class="blur" aria-hidden="true">000 часов</span></div>
+                        <div><span>Первый шаг</span><span class="blur" aria-hidden="true">Вернуть спящих</span></div>
+                    </div>
+                    <div class="sample-lock">
+                        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="3"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>
+                        Ваши цифры откроются после разбора
+                    </div>
+                </aside>
+            </div>
+        </section>
+
+        <section class="section" id="how" aria-label="Что делает ServGo">
+            <div class="wrap">
+                <div class="cols">
+                    <div class="col">
+                        <span class="num">01</span>
+                        <h3>Находит клиентов</h3>
+                        <p>Студия маркетинга готовит контент для новых клиентов. Возврат ушедших мы готовим, он в <a href="/roadmap">дорожной карте</a>.</p>
+                    </div>
+                    <div class="col">
+                        <span class="num">02</span>
+                        <h3>Записывает без звонков</h3>
+                        <p>Онлайн-запись в пару касаний, в Telegram и на странице. Каждая запись остаётся в вашей базе.</p>
+                    </div>
+                    <div class="col">
+                        <span class="num">03</span>
+                        <h3>Держит под контролем</h3>
+                        <p>Расписание, предоплата, напоминания и «Смена» для команды: всё в одном месте.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="calculator">
+            <div class="wrap">
+                <div class="section-head">
+                    <p class="eyebrow">Посчитайте сами</p>
+                    <h2>Сколько стоит ваша база клиентов</h2>
+                    <p>Подставьте свои цифры. Это иллюстрация на ваших допущениях, а не прогноз и не обещание.</p>
+                </div>
+                <form class="calc" data-base-calc novalidate>
+                    <div class="calc-fields">
+                        <label class="field"><span>Сколько клиентов уже приходило к вам</span><input type="number" inputmode="numeric" min="0" step="1" name="clients" value="500"></label>
+                        <label class="field"><span>Средний чек, ₽</span><input type="number" inputmode="numeric" min="0" step="100" name="check" value="3000"></label>
+                        <label class="field"><span>Какая доля клиентов может вернуться, %</span><input type="number" inputmode="numeric" min="0" max="100" step="1" name="share" value="10"></label>
+                        <p class="calc-hint">Цифры в полях — пример, замените их своими. Результат считается только из ваших данных.</p>
+                    </div>
+                    <div class="calc-result" aria-live="polite">
+                        <span class="label">Ваша база может принести</span>
+                        <strong data-base-calc-total>150 000 ₽</strong>
+                        <small data-base-calc-formula>500 клиентов × 10% × 3 000 ₽, если каждый вернувшийся придёт один раз</small>
+                        <div class="hero-cta" style="padding-top:12px"><button class="btn" type="button" data-open-connect-form>Хочу собрать свою базу</button></div>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <section class="section" id="lost">
+            <div class="wrap">
+                <div class="section-head">
+                    <p class="eyebrow">Где теряется база</p>
+                    <h2>Клиенты у вас были. Контакта с ними у вас нет</h2>
+                </div>
+                <ul class="lost">
+                    <li><b>Переписки в мессенджерах</b><span>Записи тонут в чатах. Через месяц никто не найдёт, кто и когда приходил.</span></li>
+                    <li><b>Тетрадь и память администратора</b><span>Уволился администратор или потерялась тетрадь, и истории клиентов нет.</span></li>
+                    <li><b>Телефон мастера</b><span>Ушёл мастер — ушла его клиентская база. Вместе с ней уходят и деньги.</span></li>
+                    <li><b>Каталоги и агрегаторы</b><span>Клиент записан у них, а не у вас. Вы не знаете его контакт и не можете позвать обратно.</span></li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="section" id="today">
+            <div class="wrap">
+                <div class="section-head">
+                    <p class="eyebrow">Что есть сегодня и что будет</p>
+                    <h2>Мы пишем только о том, что уже работает</h2>
+                </div>
+                <div class="today">
+                    <div>
+                        <h3>Работает сейчас</h3>
+                        <ul>
+                            <li>Клиент записывается сам, в Telegram или на странице, а запись сохраняется в системе.</li>
+                            <li>Напоминания клиентам о визите.</li>
+                            <li>Предоплата с подтверждением владельцем.</li>
+                            <li>Расписание и цифры по записям для владельца.</li>
+                        </ul>
+                    </div>
+                    <div class="plans">
+                        <h3>В планах</h3>
+                        <ul>
+                            <li>Лист ожидания: освободилось время, и ждущие клиенты узнают первыми.</li>
+                            <li>Сообщения клиентам, которые давно не были. Отправка только после вашего одобрения.</li>
+                        </ul>
+                        <a class="btn btn-soft" href="/roadmap">Вся дорожная карта</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="offer">
+            <div class="wrap">
+                <div class="section-head">
+                    <p class="eyebrow">Условия старта</p>
+                    <h2>Первые три бизнеса в каждой нише — бесплатно</h2>
+                    <p>Мы сами вносим ваш бизнес на страницу онлайн-записи. Онлайн-запись, админ-панель с разбором бизнеса и «Смена» для учёта работы команды бесплатны. Когда бесплатные места в нише закончатся, внесение бизнеса стоит {{ offer.entry_price_text }} один раз.</p>
+                </div>
+                <div class="offer">
+                    <div>
+                        {% if niches %}
+                        <ul class="seats" aria-label="Свободные места по нишам">
+                            {% for n in niches %}
+                            <li><a href="/{{ n.slug }}#pricing"><span>{{ n.label }}</span><b>{% if n.seats_left > 0 %}Свободно {{ n.seats_left }} из {{ offer.seats_total }}{% else %}Места заняты{% endif %}</b></a></li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+                        <button class="btn" type="button" data-open-connect-form data-connect-intent="free_seat">Занять бесплатное место</button>
+                    </div>
+                    <div class="price-card" aria-label="Условия ServGo">
+                        <span class="label">Студия маркетинга</span>
+                        <strong>{{ offer.studio_price_text }}</strong>
+                        <span class="period">в месяц</span>
+                        {% if niches | selectattr('studio_free_left') | list %}<p>Первому бизнесу в каждой нише студия бесплатна на ближайшее время. Остальным — по этой цене.</p>{% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        {% if niches %}
+        <section class="section" id="segments" aria-label="ServGo для разных ниш">
+            <div class="wrap">
+                <div class="section-head">
+                    <p class="eyebrow">Выберите свой сегмент</p>
+                    <h2>ServGo для вашей ниши</h2>
+                    <p>Каждая страница отвечает на боли конкретного сегмента и показывает, как ServGo их закрывает.</p>
+                </div>
+                <div class="niches">
+                    {% for n in niches %}
+                    <a href="/{{ n.slug }}"><span style="color:inherit">{{ n.label }}</span><span aria-hidden="true">→</span></a>
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
+
+        <section class="section" id="launch">
+            <div class="wrap">
+                <div class="section-head">
+                    <p class="eyebrow">Запуск без лишней нагрузки</p>
+                    <h2>Вы не настраиваете сервис сами</h2>
+                    <p>Вы передаёте данные о бизнесе, услугах, сотрудниках, графике и оплате. Мы заводим карточку, проверяем тестовую запись и отдаём готовую ссылку клиентам.</p>
+                </div>
+                <ol class="steps">
+                    <li><small>01</small><b>Собираем анкету бизнеса</b></li>
+                    <li><small>02</small><b>Заводим услуги, команду и график</b></li>
+                    <li><small>03</small><b>Проверяем запись, чек и предоплату</b></li>
+                    <li><small>04</small><b>Публикуем ссылку или QR-код</b></li>
+                </ol>
+                <div class="demo">
+                    <button class="btn" type="button" data-open-connect-form>Подать заявку на подключение</button>
+                    <a class="btn btn-soft" href="/static/onboarding.html">Чек-лист для подключения</a>
+                    <a class="btn btn-soft" href="https://t.me/{{BOT_USERNAME}}" target="_blank" rel="noopener">Демо в Telegram</a>
+                    <a class="btn btn-soft" href="https://servgo.ru/">Демо на сайте</a>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer" aria-label="Ссылки и контакты ServGo">
+        <div class="wrap">
+            <div>
+                <a class="brand" href="/" aria-label="ServGo">
+                    <picture>
+                        <source media="(prefers-color-scheme: dark)" srcset="/static/brand/servgo-mark-on-dark.svg">
+                        <img src="/static/brand/servgo-mark.svg" alt="" width="28" height="28">
+                    </picture>
+                    <span class="brand-word">Serv<i>Go</i></span>
+                </a>
+                <nav aria-label="Страницы ServGo">
+                    <a href="/roadmap">Дорожная карта</a>
+                    <a href="/static/onboarding.html">Чек-лист подключения бизнеса</a>
+                    <a href="/blog">Блог о развитии бизнеса</a>
+                </nav>
+            </div>
+            {% if niches %}
+            <div>
+                <h2>Презентации для ниш</h2>
+                <nav class="footer-niche-links" aria-label="Презентации ServGo по нишам">
+                    {% for n in niches %}<a href="/{{ n.slug }}">{{ n.label }}</a>{% endfor %}
+                </nav>
+            </div>
+            {% endif %}
+            <div class="contacts">
+                <h2>Связаться</h2>
+                <a href="mailto:grunvaldlab@gmail.com">grunvaldlab@gmail.com</a>
+                <a href="tel:+79023911399">8 902 391-13-99</a>
+            </div>
+            <p class="note">ServGo · онлайн-запись и бронирование для сервисного бизнеса</p>
+        </div>
+    </footer>
+
+    <div class="dock" role="navigation" aria-label="Быстрые действия">
+        <a class="dock-link" href="#offer">Условия</a>
+        <a class="dock-link" href="/roadmap">Карта</a>
+        <button class="btn" type="button" data-open-connect-form data-connect-intent="free_seat">Занять место</button>
+    </div>
+
+    <div class="modal-backdrop" data-connect-modal hidden>
+        <div class="connect-modal" role="dialog" aria-modal="true" aria-labelledby="connect-form-title">
+            <button class="modal-close" type="button" data-close-connect-form aria-label="Закрыть форму">×</button>
+            <p class="eyebrow">Заявка на подключение</p>
+            <h2 id="connect-form-title" data-connect-title data-default-text="Расскажите, как с вами связаться" data-free-seat-text="Занять бесплатное место">Расскажите, как с вами связаться</h2>
+            <form class="connect-form" data-connect-form novalidate>
+                <input type="hidden" name="intent" value="">
+                <label class="field">
+                    <span>Ваша ниша</span>
+                    <select name="niche">
+                        <option value="">Выберите нишу</option>
+                        {% for n in niches %}<option value="{{ n.slug }}">{{ n.label }}</option>{% endfor %}
+                        <option value="other">Другое</option>
+                    </select>
+                </label>
+                <label class="field"><span>Имя</span><input type="text" name="name" autocomplete="name" required></label>
+                <div class="form-grid">
+                    <label class="field"><span>Телефон</span><input type="tel" name="phone" autocomplete="tel"></label>
+                    <label class="field"><span>Email</span><input type="email" name="email" autocomplete="email"></label>
+                </div>
+                <label class="field"><span>Что вас интересует?</span>
+                    <select name="seo_module">
+                        <option value="platform">ServGo — вся платформа</option>
+                        <option value="booking">Запись и расписание</option>
+                        <option value="growth">Growth — маркетинг</option>
+                        <option value="mail">Mail — почтовые кампании</option>
+                        <option value="shifts">Смена — учёт смен</option>
+                        <option value="seo">SEO-завод — статьи и поиск</option>
+                    </select>
+                </label>
+                <label class="field"><span>Комментарий</span><textarea name="comment" rows="4" placeholder="Коротко о бизнесе или удобном времени для связи"></textarea></label>
+                <label class="field"><span>Откуда вы узнали о ServGo?</span><input type="text" name="self_reported_source" maxlength="500" placeholder="Например: Telegram, поиск, знакомый, Instagram"></label>
+                <p class="form-hint">Обязательно укажите имя и телефон или email. Источник помогает понять, какие эксперименты реально приводят клиентов.</p>
+                <label class="field connect-consent"><span><input type="checkbox" name="consent" value="yes" required>
+                    Согласен(на) на обработку указанных контактных данных для ответа на заявку ServGo.
+                    Отправка формы не означает подписку на рекламные сообщения.</span></label>
+                <div class="form-status" data-connect-form-status role="status" aria-live="polite"></div>
+                <div class="form-actions">
+                    <button class="btn btn-soft" type="button" data-close-connect-form>Отмена</button>
+                    <button class="btn" type="submit">Отправить заявку</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/js/landing.js?v=10"></script>
+</body>
+</html>

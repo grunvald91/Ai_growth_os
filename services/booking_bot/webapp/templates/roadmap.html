@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Дорожная карта ServGo — что работает и что добавляем</title>
+<meta name="description" content="Что в ServGo уже работает, что дорабатываем и что планируем: онлайн-запись, помощник по маркетингу и учёт смен команды.">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://promo.servgo.ru/roadmap">
+<meta property="og:title" content="Дорожная карта ServGo">
+<meta property="og:description" content="Что в ServGo уже работает, что дорабатываем и что планируем.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://promo.servgo.ru/roadmap">
+<meta property="og:locale" content="ru_RU">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@300;400;450;500;550;600;700;800&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.sg{--bg:#ffffff;--s2:#f6f9fd;--s3:#eef5fc;--text:#1b2d42;--text2:#3d536b;--muted:#62778b;--muted2:#8996a4;--line:#edf2f8;--line2:#dfe8f2;--accent:#3478d6;--g1:#3174d4;--g2:#578fef;--f1:#307be8;--f2:#8ad8f3;--f3:#686fe4;--f4:#336be2;--f5:#67baf4;--now:#e0626a;
+font-family:"Onest",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--text);background:var(--bg);letter-spacing:-0.015em;-webkit-font-smoothing:antialiased;min-height:100%;display:flex;flex-direction:column}
+.sg *,.sg *::before,.sg *::after{box-sizing:border-box}
+.sg h1,.sg h2,.sg h3,.sg p{margin:0}
+.sg button{font:inherit;color:inherit}
+.sg a{color:var(--accent)}
+.sg button:focus-visible,.sg a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{width:100%;max-width:1080px;margin:0 auto;padding:0 16px}
+@media (min-width:900px){.wrap{padding:0 28px}}
+.eyebrow{font-size:10px;font-weight:500;letter-spacing:0.09em;text-transform:uppercase;color:var(--muted2)}
+
+.hero{display:flex;flex-wrap:wrap;gap:28px;align-items:center;padding:24px 0 8px}
+.hero-tx{flex:1 1 360px;min-width:0;display:flex;flex-direction:column;gap:14px}
+.hero h1{font-size:clamp(32px,7vw,56px);line-height:1.04;font-weight:600;letter-spacing:-0.045em}
+.lead{font-size:16px;line-height:1.5;color:var(--text2);max-width:540px}
+.note{font-size:13px;line-height:1.45;color:var(--muted);max-width:540px}
+.hero-art{flex:0 1 320px;width:100%;max-width:320px}
+.hero-art svg{display:block;width:100%;height:auto}
+
+.block{padding:28px 0 0}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:10px}
+@media (min-width:700px){.stats{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.stat{position:relative;border:0;border-radius:14px;background:var(--s2);padding:12px 14px 14px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:4px;min-height:64px}
+.stat .n{font-size:21px;font-weight:470;letter-spacing:-0.055em;color:var(--accent);font-variant-numeric:tabular-nums;line-height:1.06}
+.stat .l{font-size:12px;color:var(--muted)}
+.stat.on{background:var(--s3)}
+.hint{font-size:13px;line-height:1.45;color:var(--muted);margin-top:6px}
+
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chip{position:relative;min-height:40px;padding:0 14px;border:0;border-radius:13px;background:var(--s2);color:var(--muted);font-size:13px;font-weight:500;cursor:pointer}
+.chip.on{background:var(--s3);color:var(--accent)}
+
+.on::after{content:"";position:absolute;left:24%;width:52%;bottom:0;height:2.4px;pointer-events:none;background:linear-gradient(104deg,var(--f1),var(--f2),var(--f3),var(--f4),var(--f5),var(--f1));background-size:310% 100%;clip-path:polygon(0% 50%,10% 45%,24% 36%,36% 23%,45% 10%,55% 10%,64% 23%,76% 36%,90% 45%,100% 50%,90% 55%,76% 64%,64% 77%,55% 90%,45% 90%,36% 77%,24% 64%,10% 55%);animation:sgFlow 3.7s linear infinite}
+@keyframes sgFlow{from{background-position:0 50%}to{background-position:100% 50%}}
+@keyframes sgRise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.on::after{animation:none}.rise{animation:none!important}}
+
+.shown{font-size:12px;color:var(--muted);margin-top:22px}
+.list{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr));gap:6px;align-items:start;margin-top:10px}
+.area{grid-column:1 / -1;display:flex;align-items:center;gap:12px;padding:22px 0 6px}
+.area-ic{width:40px;height:40px;flex:none;border-radius:999px;background:var(--s3);color:var(--accent);display:grid;place-items:center}
+.area-ic svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.area-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.area-tx h2{font-size:17px;line-height:1.2;font-weight:480;letter-spacing:-0.035em}
+.area-tx p{font-size:13px;line-height:1.4;color:var(--muted);max-width:560px}
+.area-n{font-size:12px;color:var(--muted);white-space:nowrap;align-self:flex-start;padding-top:4px}
+
+.card{position:relative;border-radius:18px;background:var(--s2)}
+.card.on{background:var(--s3)}
+.ch{margin:0}
+.card-h{width:100%;display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:0;border-radius:18px;background:transparent;text-align:left;cursor:pointer;min-height:56px}
+.card-b{flex:1;min-width:0;display:block}
+.card-b>span{display:block}
+.ct{font-size:14px;line-height:1.25;font-weight:550;letter-spacing:-0.03em;margin-top:6px}
+.cs{font-size:13px;line-height:1.45;color:var(--muted);margin-top:4px}
+.chev{width:18px;height:18px;flex:none;margin-top:22px;fill:none;stroke:var(--muted);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;transition:transform .18s}
+.chev.up{transform:rotate(180deg)}
+.cd{padding:0 16px 18px;font-size:13.5px;line-height:1.55;color:var(--text2);animation:sgRise .2s ease-out}
+.badge{display:inline-flex;align-items:center;font-size:10.5px;font-weight:500;padding:3px 8px;border-radius:10px}
+.b-works{color:#25826d;background:#e7f5ee}
+.b-doing{color:#a8794d;background:#fcf1e6}
+.b-plans{color:#3478d6;background:#eef5fc}
+.card.on .b-plans{background:#ffffff}
+.b-ideas{color:#8470c5;background:#f0ecfc}
+
+.empty{grid-column:1 / -1;border-radius:18px;background:var(--s2);padding:20px 16px;display:flex;flex-direction:column;gap:12px;align-items:flex-start}
+.empty p{font-size:13.5px;line-height:1.5;color:var(--text2)}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:0 20px;border:0;border-radius:13px;font-size:13px;font-weight:550;text-decoration:none;cursor:pointer;background:linear-gradient(110deg,var(--g1),var(--g2));color:#ffffff;box-shadow:0 4px 16px rgba(57,118,212,0.15)}
+.sg a.btn{color:#ffffff}
+.btn:hover{filter:brightness(1.05)}
+.btn-soft{background:var(--s3);color:var(--accent);box-shadow:none}
+
+.pr{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px;margin-top:10px}
+.pr-i{border-radius:18px;background:var(--s2);padding:16px;display:flex;flex-direction:column;gap:6px}
+.pr-i h3{font-size:14px;line-height:1.25;font-weight:550;letter-spacing:-0.03em}
+.pr-i p{font-size:13px;line-height:1.5;color:var(--text2)}
+.h2{font-size:21px;line-height:1.12;font-weight:550;letter-spacing:-0.04em}
+.cta{margin-top:28px;border-radius:21px;background:var(--s3);padding:22px 20px;display:flex;flex-direction:column;align-items:flex-start;gap:12px}
+.cta p{font-size:14px;line-height:1.5;color:var(--text2);max-width:520px}
+.foot{display:flex;align-items:center;gap:10px;padding:28px 0 24px;font-size:12px;color:var(--muted)}
+
+.dock{position:sticky;bottom:0;z-index:10;margin-top:auto;background:var(--bg);box-shadow:0 -1px 0 var(--line);padding:8px 16px calc(8px + env(safe-area-inset-bottom))}
+.seg{display:flex;gap:2px;max-width:560px;margin:0 auto;padding:2px;border-radius:13px;background:var(--s2);overflow-x:auto;scrollbar-width:none}
+.seg::-webkit-scrollbar{display:none}
+.segb{position:relative;flex:1 0 auto;min-height:40px;padding:0 12px;border:0;border-radius:11px;background:transparent;font-size:12.5px;font-weight:500;color:var(--muted);white-space:nowrap;cursor:pointer}
+.segb.on{background:var(--bg);color:var(--accent)}
+.dock-l{display:block;text-align:center;margin-bottom:6px}
+
+.card summary{list-style:none;cursor:pointer;display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border-radius:18px;min-height:56px}
+.card summary::-webkit-details-marker{display:none}
+.card[open]{background:var(--s3)}
+.card[open] .chev{transform:rotate(180deg)}
+.card[open] .b-plans{background:#fff}
+.card[hidden],.area[hidden],.empty[hidden]{display:none}
+.stat,.chip,.segb{cursor:pointer}
+.offer-note{margin-top:28px;border-radius:21px;background:var(--s2);padding:18px 20px;font-size:14px;line-height:1.5;color:var(--text2)}
+.offer-note a{font-weight:550}
+</style>
+</head>
+<body>
+<div class="sg" style="width:100%">
+  <div class="wrap">
+    <div class="hero">
+      <div class="hero-tx">
+        <a href="/" aria-label="ServGo"><svg viewBox="0 0 168 48" height="30" width="105" role="img" aria-label="ServGo" style="display:block">
+          <rect x="5" y="8" width="34" height="33" rx="8" fill="#0D1B2A"/>
+          <rect x="9.5" y="18" width="25" height="18.5" rx="4" fill="#FFFFFF"/>
+          <rect x="13" y="4" width="4.5" height="9" rx="2.25" fill="#0D1B2A"/>
+          <rect x="26.5" y="4" width="4.5" height="9" rx="2.25" fill="#0D1B2A"/>
+          <g fill="#2F5BEB" opacity="0.5">
+            <rect x="13" y="22" width="4" height="4" rx="1.2"/>
+            <rect x="20" y="22" width="4" height="4" rx="1.2"/>
+            <rect x="27" y="22" width="4" height="4" rx="1.2"/>
+            <rect x="13" y="29" width="4" height="4" rx="1.2"/>
+            <rect x="20" y="29" width="4" height="4" rx="1.2"/>
+          </g>
+          <path d="M40.5 19.5 L44 23 L31.5 35.5 L27.5 36.5 L28.5 32.5 Z" fill="#2F5BEB" stroke="#FFFFFF" stroke-width="1.6" stroke-linejoin="round"/>
+          <text x="58" y="34" font-family="Onest, system-ui, sans-serif" font-size="28.8" font-weight="800" letter-spacing="-0.58" fill="#0D1B2A">Serv<tspan fill="#2F5BEB">Go</tspan></text>
+        </svg></a>
+        <div class="eyebrow">Дорожная карта · {{ updated_text }}</div>
+        <h1>Куда движется ServGo</h1>
+        <p class="lead">Запись клиентов, помощник по маркетингу и учёт смен команды. Здесь видно, что уже работает, что мы дорабатываем и что планируем дальше.</p>
+        <p class="note">Сроков не называем. Порядок меняется по тому, что оказывается нужнее владельцам бизнеса.</p>
+      </div>
+      <div class="hero-art"><svg viewBox="0 0 320 280" aria-hidden="true">
+          <defs>
+            <pattern id="hatch" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)"><rect width="4" height="8" fill="rgba(255,255,255,0.32)"/></pattern>
+          </defs>
+          <rect x="0" y="0" width="320" height="280" rx="21" fill="#eef5fc"/>
+          <g>
+            <rect x="24" y="28" width="82" height="64" rx="5" fill="#3279d2"/>
+            <rect x="24" y="100" width="82" height="40" rx="5" fill="#3279d2"/>
+            <rect x="24" y="156" width="82" height="76" rx="5" fill="#3279d2"/>
+            <rect x="24" y="156" width="82" height="76" rx="5" fill="url(#hatch)"/>
+            <rect x="119" y="52" width="82" height="44" rx="5" fill="#925dd1"/>
+            <rect x="119" y="104" width="82" height="76" rx="5" fill="#925dd1"/>
+            <rect x="119" y="192" width="82" height="40" rx="5" fill="#925dd1"/>
+            <rect x="214" y="28" width="82" height="40" rx="5" fill="#149985"/>
+            <rect x="214" y="76" width="82" height="64" rx="5" fill="#149985"/>
+            <rect x="214" y="148" width="82" height="44" rx="5" fill="#149985"/>
+            <rect x="214" y="148" width="82" height="44" rx="5" fill="url(#hatch)"/>
+            <rect x="214" y="200" width="82" height="32" rx="5" fill="#149985"/>
+          </g>
+          <line x1="16" y1="146" x2="304" y2="146" stroke="#e0626a" stroke-width="1.5"/>
+          <circle cx="16" cy="146" r="3.5" fill="#e0626a"/>
+          <rect x="24" y="250" width="272" height="6" rx="3" fill="#8ad8f3"/>
+        </svg></div>
+    </div>
+
+    <div class="block">
+      <div class="eyebrow">Состояние на сегодня</div>
+      <div class="stats">
+        {% for st in statuses %}
+        <button class="stat" type="button" data-status-pick="{{ st.id }}" aria-pressed="false"><span class="n">{{ counts[st.id] }}</span><span class="l">{{ st.label }}</span></button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="eyebrow">Что для вас важнее</div>
+      <div class="chips">
+        <button class="chip on" type="button" data-goal-pick="all" aria-pressed="true">Всё</button>
+        {% for g in goals %}<button class="chip" type="button" data-goal-pick="{{ g.id }}" aria-pressed="false">{{ g.label }}</button>{% endfor %}
+      </div>
+      <p class="hint">Выберите тему, и мы покажем только связанные с ней функции. Нажмите на функцию, чтобы увидеть подробности.</p>
+      <p class="shown" data-shown></p>
+
+      <div class="list">
+        {% for area in areas %}
+        <div class="area" data-area="{{ area.id }}">
+          <div class="area-ic">{% if area.icon == "cal" %}<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16.5" rx="3"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/></svg>{% elif area.icon == "spark" %}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3l1.9 5.1L18 10l-5.1 1.9L11 17l-1.9-5.1L4 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>{% else %}<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><circle cx="17.5" cy="9" r="2.5"/><path d="M17 14.5c2.6.2 4.2 1.7 4.7 4.5"/></svg>{% endif %}</div>
+          <div class="area-tx"><div class="eyebrow">{{ area.eyebrow }}</div><h2>{{ area.name }}</h2><p>{{ area.desc }}</p></div>
+          <div class="area-n" data-area-count="{{ area.id }}"></div>
+        </div>
+        {% for item in items if item.area == area.id %}
+        <details class="card" data-area-of="{{ area.id }}" data-status="{{ item.status }}" data-goals="{{ item.goals | join(' ') }}"{% if item.id == 'mkt-line' %} open{% endif %}>
+          <summary>
+            <span class="card-b">
+              <span><span class="badge b-{{ item.status }}">{{ status_labels[item.status] }}</span></span>
+              <span class="ct">{{ item.title }}</span>
+              <span class="cs">{{ item.summary }}</span>
+            </span>
+            <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          </summary>
+          <div class="cd">{{ item.details }}</div>
+        </details>
+        {% endfor %}
+        {% endfor %}
+        <div class="empty" data-empty hidden>
+          <p>По этому сочетанию пока ничего нет. Выберите другой статус или другую тему.</p>
+          <button class="btn btn-soft" type="button" data-reset>Показать всё</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="block" style="padding-top:40px">
+      <div class="eyebrow">Принципы</div>
+      <h2 class="h2" style="margin-top:6px">Как мы выбираем порядок</h2>
+      <div class="pr">
+        <div class="pr-i"><h3>Сначала довести до рабочего</h3><p>Новое добавляем после того, как заявленное уже работает в полную силу.</p></div>
+        <div class="pr-i"><h3>Статус говорит как есть</h3><p>«Работает» — то, что уже доступно. Остальное отмечено как «Дорабатываем», «В планах» или «Идеи».</p></div>
+        <div class="pr-i"><h3>Порядок зависит от владельцев</h3><p>Если для вашего бизнеса важнее другое, это меняет очередь.</p></div>
+      </div>
+
+      <div class="cta">
+        <h2 class="h2">Запись клиентов уже работает</h2>
+        <p>Клиент выбирает услугу, мастера и время сам, а вы видите всё расписание в одном месте.</p>
+        <a class="btn" href="https://servgo.ru">Открыть servgo.ru</a>
+      </div>
+      <p class="offer-note">Первые три бизнеса в каждой нише подключаются бесплатно. <a href="/">Посмотреть условия</a></p>
+
+      <div class="foot"><svg viewBox="0 0 48 48" width="20" height="20" role="img" aria-label="ServGo" style="display:block;flex:none">
+          <rect x="5" y="8" width="34" height="33" rx="8" fill="#0D1B2A"/>
+          <rect x="9.5" y="18" width="25" height="18.5" rx="4" fill="#FFFFFF"/>
+          <rect x="13" y="4" width="4.5" height="9" rx="2.25" fill="#0D1B2A"/>
+          <rect x="26.5" y="4" width="4.5" height="9" rx="2.25" fill="#0D1B2A"/>
+          <g fill="#2F5BEB" opacity="0.5">
+            <rect x="13" y="22" width="4" height="4" rx="1.2"/>
+            <rect x="20" y="22" width="4" height="4" rx="1.2"/>
+            <rect x="27" y="22" width="4" height="4" rx="1.2"/>
+            <rect x="13" y="29" width="4" height="4" rx="1.2"/>
+            <rect x="20" y="29" width="4" height="4" rx="1.2"/>
+          </g>
+          <path d="M40.5 19.5 L44 23 L31.5 35.5 L27.5 36.5 L28.5 32.5 Z" fill="#2F5BEB" stroke="#FFFFFF" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg><span>Дорожная карта обновлена {{ updated_text }}</span></div>
+    </div>
+  </div>
+
+  <div class="dock">
+    <span class="eyebrow dock-l">Показать по статусу</span>
+    <div class="seg" role="group" aria-label="Статус функции">
+      <button class="segb on" type="button" data-status-pick="all" aria-pressed="true">Все</button>
+      {% for st in statuses %}<button class="segb" type="button" data-status-pick="{{ st.id }}" aria-pressed="false">{{ st.label }}</button>{% endfor %}
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  var state = { status: 'all', goal: 'all' };
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.card'));
+  var areas = Array.prototype.slice.call(document.querySelectorAll('.area'));
+  var statusBtns = Array.prototype.slice.call(document.querySelectorAll('[data-status-pick]'));
+  var goalBtns = Array.prototype.slice.call(document.querySelectorAll('[data-goal-pick]'));
+  var empty = document.querySelector('[data-empty]');
+  var shown = document.querySelector('[data-shown]');
+  function plural(n, a, b, c) { var m10 = n % 10, m100 = n % 100; if (m10 === 1 && m100 !== 11) return a; if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return b; return c; }
+  function render() {
+    var total = 0;
+    areas.forEach(function (area) {
+      var id = area.getAttribute('data-area'), n = 0;
+      cards.forEach(function (card) {
+        if (card.getAttribute('data-area-of') !== id) return;
+        var okS = state.status === 'all' || card.getAttribute('data-status') === state.status;
+        var okG = state.goal === 'all' || (' ' + card.getAttribute('data-goals') + ' ').indexOf(' ' + state.goal + ' ') > -1;
+        card.hidden = !(okS && okG);
+        if (!card.hidden) n++;
+      });
+      area.hidden = n === 0;
+      var c = area.querySelector('[data-area-count]');
+      if (c) c.textContent = n + ' ' + plural(n, 'функция', 'функции', 'функций');
+      total += n;
+    });
+    empty.hidden = total !== 0;
+    shown.textContent = 'Показано: ' + total + ' ' + plural(total, 'функция', 'функции', 'функций');
+    statusBtns.forEach(function (b) { var on = b.getAttribute('data-status-pick') === state.status; b.setAttribute('aria-pressed', String(on)); b.classList.toggle('on', on); });
+    goalBtns.forEach(function (b) { var on = b.getAttribute('data-goal-pick') === state.goal; b.setAttribute('aria-pressed', String(on)); b.classList.toggle('on', on); });
+  }
+  statusBtns.forEach(function (b) { b.addEventListener('click', function () { var v = b.getAttribute('data-status-pick'); state.status = (state.status === v && v !== 'all') ? 'all' : v; render(); }); });
+  goalBtns.forEach(function (b) { b.addEventListener('click', function () { state.goal = b.getAttribute('data-goal-pick'); render(); }); });
+  document.querySelector('[data-reset]').addEventListener('click', function () { state.status = 'all'; state.goal = 'all'; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

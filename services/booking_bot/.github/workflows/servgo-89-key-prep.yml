@@ -1,0 +1,61 @@
+name: Prepare dedicated ServGo-to-89 public SSH key
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Prepare key on ServGo; output public half only
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64,hashlib,os,shlex,time
+          import paramiko
+          EXPECTED='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,client,hostname,key):
+                  fp=base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if fp!=EXPECTED:raise paramiko.SSHException('ServGo host key mismatch')
+                  client.get_host_keys().add(hostname,key.get_name(),key)
+          remote="""set -eu
+          install -d -m 700 /root/.ssh
+          if test -e /root/.ssh/servgo_89_ed25519 && ! test -f /root/.ssh/servgo_89_ed25519.pub; then
+            echo 'key_incomplete=yes'; exit 1
+          fi
+          if ! test -e /root/.ssh/servgo_89_ed25519; then
+            ssh-keygen -q -t ed25519 -N '' -f /root/.ssh/servgo_89_ed25519 -C servgo-bot-egress-89
+          fi
+          chmod 600 /root/.ssh/servgo_89_ed25519
+          chmod 644 /root/.ssh/servgo_89_ed25519.pub
+          derived=$(ssh-keygen -y -f /root/.ssh/servgo_89_ed25519 | cut -d ' ' -f1,2)
+          stored=$(cut -d ' ' -f1,2 /root/.ssh/servgo_89_ed25519.pub)
+          test "$derived" = "$stored" || exit 1
+          printf 'DEDICATED_PUBLIC_KEY='; cat /root/.ssh/servgo_89_ed25519.pub
+          """
+          if not os.environ.get('SERVER_PASSWORD'):raise RuntimeError('Missing SSH secret')
+          client=None
+          for attempt in range(3):
+              c=paramiko.SSHClient();c.set_missing_host_key_policy(Pinned())
+              try:
+                  c.connect('155.212.162.47',port=22,username='root',password=os.environ['SERVER_PASSWORD'],
+                            look_for_keys=False,allow_agent=False,timeout=12,banner_timeout=25,auth_timeout=15)
+                  client=c;break
+              except (paramiko.SSHException,OSError,EOFError):
+                  c.close()
+                  if attempt==2:raise
+                  time.sleep(3)
+          try:
+              _,out,err=client.exec_command('bash -c '+shlex.quote(remote),timeout=25)
+              body=out.read().decode('utf-8','replace')
+              if out.channel.recv_exit_status() or not body.startswith('DEDICATED_PUBLIC_KEY=ssh-ed25519 '):
+                  raise RuntimeError('Key preparation failed (details withheld)')
+              print(body)
+          finally:client.close()
+          PY

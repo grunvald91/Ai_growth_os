@@ -1,0 +1,77 @@
+name: Publish 100boats demo link to working ServGo card
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Back up and publish only the static redirect
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, pathlib, time
+          import paramiko
+          SOURCE='web/frontend/public/demo-100boats.html'
+          DEST='/opt/booking_bot/web/frontend/dist/demo-100boats.html'
+          EXPECTED='uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU'
+          class Pinned(paramiko.MissingHostKeyPolicy):
+              def missing_host_key(self,client,hostname,key):
+                  actual=base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')
+                  if actual!=EXPECTED:raise paramiko.SSHException('Host key mismatch')
+                  client.get_host_keys().add(hostname,key.get_name(),key)
+          data=pathlib.Path(SOURCE).read_bytes()
+          if b'url=/business/11' not in data or b"location.replace('/business/11')" not in data:
+              raise RuntimeError('Only the reviewed business-card redirect can be published')
+          if not os.environ.get('SERVER_PASSWORD'):raise RuntimeError('SSH secret unavailable')
+          ssh=None
+          for attempt in range(3):
+              conn=paramiko.SSHClient();conn.set_missing_host_key_policy(Pinned())
+              try:
+                  conn.connect('155.212.162.47',username='root',port=22,
+                               password=os.environ['SERVER_PASSWORD'],look_for_keys=False,allow_agent=False,
+                               timeout=12,banner_timeout=25,auth_timeout=15)
+                  ssh=conn;break
+              except (paramiko.SSHException,OSError,EOFError):
+                  conn.close()
+                  if attempt==2:raise
+                  time.sleep(3)
+          try:
+              sftp=ssh.open_sftp()
+              temp=DEST+'.tmp.'+str(int(time.time()))
+              backup=DEST+'.bak.'+str(int(time.time()))
+              sftp.put(SOURCE,temp)
+              with sftp.open(temp,'rb') as f: uploaded=f.read()
+              if hashlib.sha256(uploaded).digest()!=hashlib.sha256(data).digest():
+                  sftp.remove(temp)
+                  raise RuntimeError('Uploaded static file checksum mismatch')
+              try:
+                  sftp.stat(DEST)
+              except FileNotFoundError:
+                  backup=None
+              if backup:
+                  sftp.rename(DEST,backup)
+                  print('backed_up_previous_static_page=yes')
+              try:
+                  sftp.rename(temp,DEST)
+              except Exception:
+                  if backup:sftp.rename(backup,DEST)
+                  raise
+              print('published_static_redirect=yes; sha256='+hashlib.sha256(data).hexdigest())
+              sftp.close()
+              command="curl -kfsS --max-time 15 --resolve servgo.ru:443:127.0.0.1 https://servgo.ru/demo-100boats.html"
+              _,out,err=ssh.exec_command(command,timeout=20)
+              body=out.read();status=out.channel.recv_exit_status()
+              if status or b'url=/business/11' not in body:
+                  raise RuntimeError('Static HTTPS verification failed')
+              print('local_https_redirect_verified=yes')
+          finally:
+              ssh.close()
+          PY

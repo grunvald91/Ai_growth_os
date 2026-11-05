@@ -1,0 +1,855 @@
+/* Modern Analytics Styles */
+:root {
+    --bg-primary: #f8fafc;
+    --bg-secondary: #ffffff;
+    --bg-card: #ffffff;
+    --text-primary: #1e293b;
+    --text-secondary: #64748b;
+    --text-muted: #94a3b8;
+    --accent: #6366f1;
+    --accent-light: #818cf8;
+    --accent-bg: rgba(99, 102, 241, 0.1);
+    --success: #10b981;
+    --success-bg: rgba(16, 185, 129, 0.1);
+    --warning: #f59e0b;
+    --warning-bg: rgba(245, 158, 11, 0.1);
+    --danger: #ef4444;
+    --danger-bg: rgba(239, 68, 68, 0.1);
+    --border: #e2e8f0;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+    --radius: 16px;
+    --radius-sm: 12px;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    padding: 0;
+    margin: 0;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+}
+
+#app {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 20px 16px;
+    padding-bottom: 100px;
+}
+
+/* Loading */
+.loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    gap: 20px;
+}
+
+.spinner {
+    width: 44px;
+    height: 44px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading p {
+    color: var(--text-secondary);
+    font-size: 15px;
+}
+
+/* Header */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    gap: 16px;
+}
+
+.header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.5px;
+}
+
+.business-select {
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 500;
+    max-width: 180px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.business-select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+/* Schedule Button */
+.schedule-button-section {
+    margin-bottom: 24px;
+}
+
+.schedule-btn {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 16px 20px;
+    border: none;
+    border-radius: var(--radius);
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.schedule-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+}
+
+.schedule-btn:active {
+    transform: translateY(0);
+}
+
+.schedule-btn-icon {
+    font-size: 24px;
+}
+
+.schedule-btn-text {
+    flex: 1;
+    text-align: left;
+}
+
+.schedule-btn-arrow {
+    font-size: 20px;
+    opacity: 0.8;
+}
+
+/* Period Selector */
+.period-selector {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+    background: var(--bg-secondary);
+    padding: 6px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.period-btn {
+    flex: 1;
+    padding: 12px 16px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.period-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-primary);
+}
+
+.period-btn.active {
+    background: var(--accent);
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
+/* Summary Cards */
+.summary-cards {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-bottom: 28px;
+}
+
+.card {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    padding: 20px;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    transition: all 0.2s ease;
+}
+
+.card:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+}
+
+.card-icon {
+    font-size: 32px;
+    line-height: 1;
+}
+
+.card-content {
+    flex: 1;
+}
+
+.card-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.2;
+    letter-spacing: -0.5px;
+}
+
+.card-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    font-weight: 500;
+}
+
+.card-change {
+    font-size: 12px;
+    margin-top: 6px;
+    padding: 4px 8px;
+    border-radius: 20px;
+    display: inline-block;
+    font-weight: 600;
+}
+
+.card-change.positive {
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.card-change.negative {
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+
+.card-sublabel {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 6px;
+}
+
+/* Chart Sections */
+.chart-section {
+    margin-bottom: 28px;
+}
+
+.chart-section h2,
+.section h2 {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chart-container {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    padding: 20px;
+    height: 280px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+}
+
+.chart-container.chart-small {
+    height: 220px;
+}
+
+/* Sections */
+.section {
+    margin-bottom: 28px;
+}
+
+/* Lists */
+.list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.list-item {
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    padding: 16px 18px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    transition: all 0.2s ease;
+}
+
+.list-item:hover {
+    box-shadow: var(--shadow-lg);
+}
+
+.list-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.list-item-name {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.list-item-details {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.list-item-stats {
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.list-item-value {
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--text-primary);
+}
+
+.list-item-sublabel {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.list-item-rank {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.list-item-rank.gold {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+}
+
+.list-item-rank.silver {
+    background: linear-gradient(135deg, #94a3b8, #64748b);
+}
+
+.list-item-rank.bronze {
+    background: linear-gradient(135deg, #fb923c, #ea580c);
+}
+
+/* Progress Bar */
+.progress-bar {
+    height: 6px;
+    background: var(--bg-primary);
+    border-radius: 3px;
+    margin-top: 10px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-light));
+    border-radius: 3px;
+    transition: width 0.4s ease;
+}
+
+/* Stats Blocks */
+.client-stats,
+.subscription-stats,
+.prepayment-stats {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    padding: 8px 0;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+}
+
+.stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.stat-row:last-child {
+    border-bottom: none;
+}
+
+.stat-label {
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.stat-value {
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--text-primary);
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 48px 24px;
+    color: var(--text-secondary);
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+}
+
+.empty-state-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.6;
+}
+
+/* Error State */
+.error-state {
+    text-align: center;
+    padding: 48px 24px;
+    color: var(--danger);
+    background: var(--bg-card);
+    border-radius: var(--radius);
+}
+
+/* Responsive */
+@media (max-width: 400px) {
+    .summary-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .period-btn {
+        padding: 10px 12px;
+        font-size: 13px;
+    }
+
+    .card-value {
+        font-size: 20px;
+    }
+
+    .header h1 {
+        font-size: 24px;
+    }
+}
+
+/* Telegram WebApp Theme Support */
+body.tg-theme {
+    background: var(--tg-theme-bg-color, var(--bg-primary));
+}
+
+body.tg-theme .card,
+body.tg-theme .chart-container,
+body.tg-theme .list-item,
+body.tg-theme .client-stats,
+body.tg-theme .subscription-stats,
+body.tg-theme .prepayment-stats,
+body.tg-theme .empty-state,
+body.tg-theme .period-selector {
+    background: var(--tg-theme-secondary-bg-color, var(--bg-card));
+}
+
+body.tg-theme .header h1,
+body.tg-theme .card-value,
+body.tg-theme .list-item-name,
+body.tg-theme .list-item-value,
+body.tg-theme .stat-value,
+body.tg-theme .chart-section h2,
+body.tg-theme .section h2 {
+    color: var(--tg-theme-text-color, var(--text-primary));
+}
+
+body.tg-theme .card-label,
+body.tg-theme .list-item-details,
+body.tg-theme .stat-label,
+body.tg-theme .period-btn {
+    color: var(--tg-theme-hint-color, var(--text-secondary));
+}
+
+body.tg-theme .period-btn.active {
+    background: var(--tg-theme-button-color, var(--accent));
+    color: var(--tg-theme-button-text-color, #ffffff);
+}
+
+/* Dark mode override for Telegram */
+@media (prefers-color-scheme: dark) {
+    body:not(.tg-theme) {
+        --bg-primary: #0f172a;
+        --bg-secondary: #1e293b;
+        --bg-card: #1e293b;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --text-muted: #64748b;
+        --border: #334155;
+    }
+}
+
+/* ========== Schedule Section (Excel-like) ========== */
+.schedule-section {
+    margin-bottom: 28px;
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+
+.schedule-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+
+.schedule-header h2 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.schedule-nav {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.schedule-nav-btn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.schedule-nav-btn:hover {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+
+#scheduleWeekLabel {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    min-width: 120px;
+    text-align: center;
+}
+
+/* Schedule Table */
+.schedule-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.schedule-table {
+    width: 100%;
+    min-width: 600px;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.schedule-table thead {
+    background: #1e293b;
+    color: #e2e8f0;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.schedule-table th {
+    padding: 10px 8px;
+    font-weight: 600;
+    text-align: center;
+    border-right: 1px solid #334155;
+    font-size: 11px;
+}
+
+.schedule-table th:first-child {
+    width: 70px;
+    background: #0f172a;
+    position: sticky;
+    left: 0;
+    z-index: 11;
+}
+
+.schedule-table th .day-name {
+    font-size: 10px;
+    opacity: 0.8;
+}
+
+.schedule-table th .day-date {
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.schedule-table tbody tr {
+    border-bottom: 1px solid var(--border);
+}
+
+.schedule-table tbody tr:nth-child(even) {
+    background: rgba(0,0,0,0.02);
+}
+
+.schedule-table td {
+    padding: 0;
+    height: 36px;
+    border-right: 1px solid var(--border);
+    vertical-align: top;
+    position: relative;
+}
+
+.schedule-table td:first-child {
+    background: #f8fafc;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-align: center;
+    padding: 8px 4px;
+    font-size: 11px;
+    position: sticky;
+    left: 0;
+    z-index: 5;
+    border-right: 2px solid var(--border);
+}
+
+/* Booking cells */
+.schedule-booking {
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    top: 2px;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 10px;
+    font-weight: 500;
+    color: white;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    z-index: 1;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.schedule-booking:hover {
+    transform: scale(1.02);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    z-index: 10;
+}
+
+.schedule-booking .booking-name {
+    font-weight: 600;
+}
+
+.schedule-booking .booking-service {
+    font-size: 9px;
+    opacity: 0.9;
+}
+
+/* Booking colors - different for each client */
+.schedule-booking.color-1 { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+.schedule-booking.color-2 { background: linear-gradient(135deg, #ec4899, #db2777); }
+.schedule-booking.color-3 { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.schedule-booking.color-4 { background: linear-gradient(135deg, #10b981, #059669); }
+.schedule-booking.color-5 { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+.schedule-booking.color-6 { background: linear-gradient(135deg, #ef4444, #dc2626); }
+.schedule-booking.color-7 { background: linear-gradient(135deg, #06b6d4, #0891b2); }
+.schedule-booking.color-8 { background: linear-gradient(135deg, #84cc16, #65a30d); }
+.schedule-booking.color-9 { background: linear-gradient(135deg, #f43f5e, #e11d48); }
+.schedule-booking.color-10 { background: linear-gradient(135deg, #a855f7, #9333ea); }
+
+/* Status indicators */
+.schedule-booking.status-pending { opacity: 0.7; border: 2px dashed rgba(255,255,255,0.5); }
+.schedule-booking.status-cancelled { opacity: 0.4; text-decoration: line-through; }
+.schedule-booking.status-pending_prepayment {
+    background: repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(255,255,255,0.1) 3px, rgba(255,255,255,0.1) 6px);
+}
+
+/* Schedule Tabs (like Excel sheets) */
+.schedule-tabs {
+    display: flex;
+    background: #1e293b;
+    padding: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.schedule-tab {
+    flex-shrink: 0;
+    padding: 12px 20px;
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border-right: 1px solid #334155;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.schedule-tab:hover {
+    background: #334155;
+    color: #e2e8f0;
+}
+
+.schedule-tab.active {
+    background: #10b981;
+    color: white;
+    font-weight: 600;
+}
+
+.schedule-tab .tab-icon {
+    margin-right: 6px;
+}
+
+/* ========== Detailed Bookings List ========== */
+#detailedBookingsSection {
+    margin-bottom: 28px;
+}
+
+.bookings-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.booking-item {
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+}
+
+.booking-item.status-completed { border-left-color: var(--success); }
+.booking-item.status-cancelled { border-left-color: var(--danger); opacity: 0.7; }
+.booking-item.status-pending { border-left-color: var(--warning); }
+.booking-item.status-pending_prepayment { border-left-color: #f59e0b; }
+
+.booking-time {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 50px;
+}
+
+.booking-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.booking-client {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.booking-service-name {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.booking-employee {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.booking-price {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--text-primary);
+    text-align: right;
+}
+
+.booking-status-badge {
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.booking-status-badge.completed { background: var(--success-bg); color: var(--success); }
+.booking-status-badge.confirmed { background: var(--accent-bg); color: var(--accent); }
+.booking-status-badge.pending { background: var(--warning-bg); color: var(--warning); }
+.booking-status-badge.cancelled { background: var(--danger-bg); color: var(--danger); }
+
+/* Dark theme for schedule */
+body.tg-theme .schedule-section,
+body.tg-theme .schedule-table td:first-child {
+    background: var(--tg-theme-secondary-bg-color, #1e293b);
+}
+
+body.tg-theme .schedule-table tbody tr:nth-child(even) {
+    background: rgba(255,255,255,0.02);
+}
+
+@media (prefers-color-scheme: dark) {
+    .schedule-table td:first-child {
+        background: #1e293b;
+    }
+
+    .schedule-table tbody tr:nth-child(even) {
+        background: rgba(255,255,255,0.02);
+    }
+}

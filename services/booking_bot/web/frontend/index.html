@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="yandex-verification" content="24c86f64d4a09338" />
+    <meta name="description" content="ServGo — ИИ-платформа роста для бизнеса услуг: онлайн-запись, пустые окна, смены и зарплата сотрудников, контент, ответы клиентам и разведка конкурентов." />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ServGo" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta property="og:title" content="ServGo — ИИ-платформа роста для бизнеса услуг и онлайн-запись" />
+    <meta property="og:description" content="Онлайн-запись, заполнение пустых окон, смены и зарплата сотрудников, ИИ-контент, ответы клиентам и разведка конкурентов — всё для роста бизнеса услуг в одном месте." />
+    <meta property="og:image" content="https://servgo.ru/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="ServGo — ИИ-платформа роста для бизнеса услуг и онлайн-запись" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="ServGo" />
+    <!-- Resolve selected theme before loading the React bundle, preventing a light flash. -->
+    <script>
+      (function () {
+        try {
+          var value = localStorage.getItem('servgo-theme')
+            || localStorage.getItem('schedTheme')
+            || localStorage.getItem('servgo-desktop-theme')
+            || 'system';
+          if (value !== 'dark' && value !== 'light') value = 'system';
+          var telegram = window.Telegram && window.Telegram.WebApp
+            && window.Telegram.WebApp.colorScheme;
+          var dark = value === 'dark' || (value === 'system'
+            && ((telegram === 'dark' || telegram === 'light')
+              ? telegram === 'dark'
+              : window.matchMedia('(prefers-color-scheme: dark)').matches));
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+          document.documentElement.dataset.themePreference = value;
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.content = dark ? '#111a29' : '#ffffff';
+        } catch (_) { /* Storage can be disabled without blocking render. */ }
+      })();
+    </script>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- Не блокируем первую отрисовку, если Google Fonts медленный или недоступен. -->
+    <title>ServGo — ИИ-платформа роста для бизнеса услуг и онлайн-запись</title>
+    <script src="https://telegram.org/js/telegram-web-app.js" async></script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "name": "ServGo",
+            "url": "https://servgo.ru/",
+            "inLanguage": "ru-RU"
+          },
+          {
+            "@type": "Organization",
+            "name": "ServGo",
+            "description": "ИИ-платформа роста для бизнеса услуг: онлайн-запись, заполнение пустых окон, учёт смен и зарплаты сотрудников, контент, ответы клиентам, бизнес-разведка и аналитика.",
+            "url": "https://servgo.ru/",
+            "logo": "https://servgo.ru/og-image.png",
+            "email": "grunvaldlab@gmail.com",
+            "telephone": "+7 902 391-13-99"
+          }
+        ]
+      }
+    </script>
+    <style>
+      .seo-shell{max-width:560px;margin:0 auto;padding:32px 20px;font-family:Onest,system-ui,-apple-system,"Segoe UI",sans-serif;color:#1b2d42;background:#fff}
+      .seo-shell h1{font-size:30px;line-height:1.15;font-weight:600;margin:0 0 12px}
+      .seo-shell h1 span{color:#3478d6}
+      .seo-shell h2{font-size:18px;font-weight:600;margin:28px 0 8px}
+      .seo-shell p,.seo-shell li{font-size:16px;line-height:1.5;color:#62778b;margin:0 0 8px}
+      .seo-shell ul{padding-left:20px;margin:0}
+      .seo-shell b{color:#1b2d42;font-weight:600}
+      .seo-shell a{color:#3478d6}
+    </style>
+  </head>
+  <body>
+    <!-- Содержимое ниже видят поисковики и пользователи без JavaScript; React заменяет его при запуске. -->
+    <div id="root">
+      <main class="seo-shell">
+        <h1>ИИ-платформа роста <span>для бизнеса услуг</span></h1>
+        <p>ServGo — больше, чем онлайн-запись. Это команда ИИ-помощников, которая каждый день работает на рост вашего бизнеса: приводит клиентов, заполняет расписание, ведёт соцсети и подсказывает, что делать дальше.</p>
+        <h2>Что делает ServGo</h2>
+        <ul>
+          <li><b>Онлайн-запись 24/7.</b> Клиенты записываются сами, без звонков: напоминания, перенос и предоплата — онлайн.</li>
+          <li><b>Заполняет пустые окна.</b> ИИ видит свободное время в расписании и предлагает его нужным клиентам в нужный момент.</li>
+          <li><b>Создаёт контент.</b> Посты, сценарии коротких видео и ответы на комментарии в Telegram, ВКонтакте и YouTube — голосом вашего бренда.</li>
+          <li><b>Бизнес-разведка.</b> Собирает отзывы, слабые места и цены конкурентов и превращает их в конкретные идеи для роста.</li>
+          <li><b>Эксперименты роста.</b> Ставит гипотезы, запускает, считает результат и масштабирует то, что приносит деньги.</li>
+          <li><b>Смены и зарплата.</b> Сотрудники отмечают приход и уход по QR-коду на рабочем месте с селфи-подтверждением. Зарплата считается сама: часы по ставке, надбавки за смену и процент от личных продаж — владелец видит табель и подтверждает расчёт в Telegram.</li>
+          <li><b>Аналитика.</b> Выручка, загрузка мастеров и источники клиентов — на одном экране.</li>
+        </ul>
+        <h2>Для кого</h2>
+        <p>Салоны красоты, барбершопы, массаж, психологи, автосервисы, аренда площадок и техники — любой бизнес, который живёт записью.</p>
+        <h2>Клиентам</h2>
+        <p>Выберите место, услугу и удобное время — запись займёт пару минут, а напоминание придёт заранее. На сайте есть примеры и демо — посмотрите, как работает запись.</p>
+        <p>Учёт смен и зарплаты: <a href="https://t.me/servgo_smena_bot">@servgo_smena_bot</a></p>
+        <p>Связаться: <a href="mailto:grunvaldlab@gmail.com">grunvaldlab@gmail.com</a>, <a href="tel:+79023911399">8 902 391-13-99</a></p>
+      </main>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

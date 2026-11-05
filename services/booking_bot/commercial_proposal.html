@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Коммерческое предложение - SochiService</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #1a1a2e;
+            background: #fff;
+        }
+
+        .page {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 60px 50px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 50px;
+            padding-bottom: 30px;
+            border-bottom: 3px solid #0088cc;
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: 700;
+            color: #0088cc;
+        }
+
+        .logo span {
+            color: #1a1a2e;
+        }
+
+        .doc-type {
+            text-align: right;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .doc-type strong {
+            display: block;
+            font-size: 16px;
+            color: #1a1a2e;
+        }
+
+        /* Hero section */
+        .hero {
+            background: linear-gradient(135deg, #0088cc 0%, #005f8f 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 16px;
+            margin-bottom: 40px;
+        }
+
+        .hero h1 {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            line-height: 1.3;
+        }
+
+        .hero p {
+            font-size: 18px;
+            opacity: 0.95;
+            max-width: 600px;
+        }
+
+        /* Problem section */
+        .problem {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 40px;
+            border-left: 4px solid #ff6b6b;
+        }
+
+        .problem h3 {
+            color: #ff6b6b;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .problem ul {
+            list-style: none;
+            display: grid;
+            gap: 10px;
+        }
+
+        .problem li {
+            padding-left: 28px;
+            position: relative;
+        }
+
+        .problem li::before {
+            content: "✗";
+            position: absolute;
+            left: 0;
+            color: #ff6b6b;
+            font-weight: bold;
+        }
+
+        /* Section titles */
+        h2 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 25px;
+            color: #1a1a2e;
+        }
+
+        h2 .accent {
+            color: #0088cc;
+        }
+
+        /* Features grid */
+        .features {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 25px;
+            margin-bottom: 50px;
+        }
+
+        .feature-card {
+            background: #fff;
+            border: 1px solid #e8e8e8;
+            border-radius: 12px;
+            padding: 25px;
+            transition: box-shadow 0.3s;
+        }
+
+        .feature-card:hover {
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+        }
+
+        .feature-card h4 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #0088cc;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .feature-card h4 .icon {
+            width: 36px;
+            height: 36px;
+            background: #e8f4fd;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .feature-card ul {
+            list-style: none;
+        }
+
+        .feature-card li {
+            padding: 6px 0;
+            padding-left: 20px;
+            position: relative;
+            font-size: 14px;
+            color: #444;
+        }
+
+        .feature-card li::before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #34c759;
+            font-weight: bold;
+        }
+
+        /* Target audience */
+        .audience {
+            margin-bottom: 50px;
+        }
+
+        .audience-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .audience-tag {
+            background: #f0f7ff;
+            color: #0088cc;
+            padding: 10px 18px;
+            border-radius: 25px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        /* Pricing */
+        .pricing {
+            margin-bottom: 50px;
+        }
+
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        .price-card {
+            border: 2px solid #e8e8e8;
+            border-radius: 16px;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+            background: #fff;
+        }
+
+        .price-card.popular {
+            border-color: #0088cc;
+            box-shadow: 0 10px 40px rgba(0,136,204,0.15);
+        }
+
+        .price-card.popular::before {
+            content: "Популярный";
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #0088cc;
+            color: white;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .price-card h4 {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #1a1a2e;
+        }
+
+        .price-card .description {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .price-card .price {
+            font-size: 42px;
+            font-weight: 700;
+            color: #0088cc;
+            margin-bottom: 5px;
+        }
+
+        .price-card .price span {
+            font-size: 16px;
+            font-weight: 400;
+            color: #666;
+        }
+
+        .price-card .period {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 25px;
+        }
+
+        .price-card .price-custom {
+            font-size: 28px;
+            font-weight: 700;
+            color: #0088cc;
+            margin-bottom: 5px;
+            padding: 10px 0;
+        }
+
+        .price-card ul {
+            list-style: none;
+            text-align: left;
+            margin-bottom: 25px;
+        }
+
+        .price-card li {
+            padding: 8px 0;
+            padding-left: 26px;
+            position: relative;
+            font-size: 14px;
+            color: #444;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .price-card li:last-child {
+            border-bottom: none;
+        }
+
+        .price-card li::before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #34c759;
+            font-weight: bold;
+        }
+
+        /* Steps */
+        .steps {
+            margin-bottom: 50px;
+        }
+
+        .steps-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+        }
+
+        .step {
+            text-align: center;
+            position: relative;
+        }
+
+        .step::after {
+            content: "→";
+            position: absolute;
+            right: -15px;
+            top: 25px;
+            color: #ccc;
+            font-size: 20px;
+        }
+
+        .step:last-child::after {
+            display: none;
+        }
+
+        .step-number {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #0088cc 0%, #005f8f 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: 700;
+            margin: 0 auto 15px;
+        }
+
+        .step h4 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #1a1a2e;
+        }
+
+        .step p {
+            font-size: 13px;
+            color: #666;
+        }
+
+        /* CTA */
+        .cta {
+            background: linear-gradient(135deg, #1a1a2e 0%, #2d2d44 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 16px;
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .cta h2 {
+            color: white;
+            margin-bottom: 10px;
+        }
+
+        .cta p {
+            opacity: 0.8;
+            margin-bottom: 30px;
+        }
+
+        .contacts {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+        }
+
+        .contact-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .contact-item .icon {
+            width: 48px;
+            height: 48px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+        }
+
+        .contact-item .info {
+            text-align: left;
+        }
+
+        .contact-item .label {
+            font-size: 12px;
+            opacity: 0.7;
+        }
+
+        .contact-item .value {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding-top: 30px;
+            border-top: 1px solid #e8e8e8;
+            color: #888;
+            font-size: 13px;
+        }
+
+        .trial-badge {
+            display: inline-block;
+            background: #34c759;
+            color: white;
+            padding: 8px 20px;
+            border-radius: 25px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-top: 15px;
+        }
+
+        /* Print styles */
+        @media print {
+            body {
+                print-color-adjust: exact;
+                -webkit-print-color-adjust: exact;
+            }
+
+            .page {
+                padding: 40px 30px;
+            }
+
+            .hero, .cta, .price-card.popular, .step-number {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">Sochi<span>Service</span></div>
+            <div class="doc-type">
+                <strong>Коммерческое предложение</strong>
+                Telegram-бот для записи клиентов
+            </div>
+        </header>
+
+        <!-- Hero -->
+        <section class="hero">
+            <h1>Автоматизируйте запись клиентов с Telegram-ботом</h1>
+            <p>Бот работает 24/7 без выходных и больничных. Клиенты записываются сами, администраторы управляют расписанием в удобном календаре.</p>
+        </section>
+
+        <!-- Problem -->
+        <section class="problem">
+            <h3>Знакомые проблемы?</h3>
+            <ul>
+                <li>Администраторы часами отвечают на звонки и сообщения</li>
+                <li>Клиенты не могут записаться в нерабочее время</li>
+                <li>Забытые визиты и пустые окна в расписании</li>
+                <li>Потеря клиентов из-за долгого ответа</li>
+            </ul>
+        </section>
+
+        <!-- Features -->
+        <h2>Что <span class="accent">получает</span> ваш бизнес</h2>
+        <div class="features">
+            <div class="feature-card">
+                <h4><span class="icon">👤</span> Для клиентов</h4>
+                <ul>
+                    <li>Запись в 3 клика прямо в Telegram</li>
+                    <li>Выбор услуги, мастера, даты и времени</li>
+                    <li>Автоматические напоминания о визите</li>
+                    <li>Отмена и перенос записи онлайн</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h4><span class="icon">📋</span> Для администраторов</h4>
+                <ul>
+                    <li>Удобный календарь в мини-приложении</li>
+                    <li>Управление статусами записей</li>
+                    <li>Фильтрация по мастерам и датам</li>
+                    <li>Информация о клиенте в одном месте</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h4><span class="icon">📊</span> Для владельца</h4>
+                <ul>
+                    <li>Полный контроль над бизнесом</li>
+                    <li>Управление услугами и ценами</li>
+                    <li>Настройка расписания мастеров</li>
+                    <li>Статистика и аналитика</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h4><span class="icon">💰</span> Результат</h4>
+                <ul>
+                    <li>Снижение нагрузки на персонал</li>
+                    <li>Меньше неявок благодаря напоминаниям</li>
+                    <li>Больше записей в нерабочее время</li>
+                    <li>Рост лояльности клиентов</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Audience -->
+        <section class="audience">
+            <h2>Кому <span class="accent">подходит</span></h2>
+            <div class="audience-grid">
+                <span class="audience-tag">Салоны красоты</span>
+                <span class="audience-tag">Барбершопы</span>
+                <span class="audience-tag">Медицинские клиники</span>
+                <span class="audience-tag">Стоматологии</span>
+                <span class="audience-tag">Массажные салоны</span>
+                <span class="audience-tag">СПА-центры</span>
+                <span class="audience-tag">Автосервисы</span>
+                <span class="audience-tag">Шиномонтажи</span>
+                <span class="audience-tag">Фотостудии</span>
+                <span class="audience-tag">Любой бизнес по записи</span>
+            </div>
+        </section>
+
+        <!-- Pricing -->
+        <section class="pricing">
+            <h2>Тарифы</h2>
+            <div class="pricing-grid">
+                <div class="price-card">
+                    <h4>Стандарт</h4>
+                    <p class="description">Для одного бизнеса</p>
+                    <div class="price">2 000 <span>₽</span></div>
+                    <div class="period">в месяц</div>
+                    <ul>
+                        <li>1 бизнес</li>
+                        <li>Безлимит мастеров</li>
+                        <li>Безлимит услуг</li>
+                        <li>Календарь администратора</li>
+                        <li>Напоминания клиентам</li>
+                        <li>Техническая поддержка</li>
+                    </ul>
+                </div>
+                <div class="price-card popular">
+                    <h4>Бизнес</h4>
+                    <p class="description">Для нескольких точек</p>
+                    <div class="price">4 000 <span>₽</span></div>
+                    <div class="period">в месяц</div>
+                    <ul>
+                        <li>До 3 бизнесов</li>
+                        <li>Безлимит мастеров</li>
+                        <li>Безлимит услуг</li>
+                        <li>Единая база клиентов</li>
+                        <li>Расширенная аналитика</li>
+                        <li>Приоритетная поддержка</li>
+                    </ul>
+                </div>
+                <div class="price-card">
+                    <h4>Сеть</h4>
+                    <p class="description">Для крупных сетей</p>
+                    <div class="price-custom">По запросу</div>
+                    <div class="period">индивидуально</div>
+                    <ul>
+                        <li>Безлимит бизнесов</li>
+                        <li>Безлимит мастеров</li>
+                        <li>Безлимит услуг</li>
+                        <li>Единая база клиентов</li>
+                        <li>Индивидуальные доработки</li>
+                        <li>Персональный менеджер</li>
+                    </ul>
+                </div>
+            </div>
+            <div style="text-align: center; margin-top: 20px;">
+                <span class="trial-badge">Первые 14 дней — бесплатно</span>
+            </div>
+        </section>
+
+        <!-- Steps -->
+        <section class="steps">
+            <h2>Как <span class="accent">начать</span></h2>
+            <div class="steps-grid">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <h4>Напишите нам</h4>
+                    <p>Обсудим задачи вашего бизнеса</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <h4>Настроим бота</h4>
+                    <p>В течение 1 часа под ваши услуги</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <h4>Обучим</h4>
+                    <p>Инструкции и поддержка</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <h4>Запуск</h4>
+                    <p>Клиенты начинают записываться</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- CTA -->
+        <section class="cta">
+            <h2>Готовы автоматизировать запись?</h2>
+            <p>Свяжитесь с нами — ответим в течение 1 часа в рабочее время</p>
+            <div class="contacts">
+                <div class="contact-item">
+                    <div class="icon" style="background: #0088cc;">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
+                            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                        </svg>
+                    </div>
+                    <div class="info">
+                        <div class="label">Telegram</div>
+                        <div class="value">@grunvald</div>
+                    </div>
+                </div>
+                <div class="contact-item">
+                    <div class="icon">📞</div>
+                    <div class="info">
+                        <div class="label">Телефон</div>
+                        <div class="value">+7 902 391-13-99</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>© 2025 SochiService. Разработка Telegram-ботов для бизнеса.</p>
+        </footer>
+    </div>
+</body>
+</html>

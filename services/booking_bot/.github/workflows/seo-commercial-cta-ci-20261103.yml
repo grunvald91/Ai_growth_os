@@ -1,0 +1,35 @@
+name: ServGo SEO commercial CTA focused CI
+on:
+  push:
+    branches: [feat/seo-commercial-cta-lead-attribution-20261103]
+    paths: [.github/workflows/seo-commercial-cta-ci-20261103.yml]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-seo-cta-focused-20261103
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt pytest aiosqlite jinja2 fastapi PyYAML
+      - name: Compile all modified Python endpoints
+        run: python -m py_compile webapp/seo_commercial.py webapp/server.py webapp/blog_feed.py tests/test_seo_commercial.py
+      - name: Test SEO attribution and legacy booking blog/inquiry
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          BOT_TOKEN: "123:test"
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+        run: python -m pytest -q tests/test_seo_commercial.py tests/test_blog_feed.py tests/test_niche_landings.py tests/test_onboarding_requests.py
+      - name: Check changes for whitespace errors
+        run: git diff --check HEAD~1 HEAD

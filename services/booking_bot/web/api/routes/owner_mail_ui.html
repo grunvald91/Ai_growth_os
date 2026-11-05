@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<title>ServGo Почта — личный кабинет</title>
+<style>
+:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#182b4c;background:#f3f8ff;--blue:#1479f5;--border:#e1eaf6;--muted:#74829d;--shadow:0 6px 25px #0f3d7a0c}
+*{box-sizing:border-box}body{margin:0;min-height:100vh}button,input,textarea{font:inherit}button{cursor:pointer}button:disabled{opacity:.48;cursor:not-allowed}a{color:inherit;text-decoration:none}
+main{display:grid;grid-template-columns:222px minmax(0,1fr);min-height:100vh}
+aside{background:#fff;border-right:1px solid var(--border);padding:24px 14px;display:flex;flex-direction:column;gap:16px}
+.brand{display:flex;align-items:center;gap:10px;padding:0 9px 16px;font-weight:850;font-size:23px}.brand-mark{background:linear-gradient(135deg,#36c9fc,#0d6ff0);color:white;width:42px;height:42px;display:grid;place-items:center;border-radius:14px;box-shadow:0 8px 19px #0b7cff35}.sub{font-size:11px;color:var(--muted);font-weight:550;margin-top:2px}
+.nav{display:flex;flex-direction:column;gap:6px}.nav button,.nav a{background:transparent;color:#62718c;border:0;text-align:left;border-radius:13px;padding:13px;font-weight:650;display:flex;gap:12px;align-items:center}.nav button.active,.nav button:hover,.nav a:hover{background:#ebf4ff;color:#095ec4}
+.little{margin-top:auto;padding:14px;background:#f4f9ff;border:1px solid var(--border);border-radius:16px;font-size:12px;color:#647792;line-height:1.6}.little b{display:block;color:#174677}
+section.main{padding:24px 29px;min-width:0}.heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:21px}.heading .row{justify-content:flex-end}.heading h1{font-size:27px;letter-spacing:-.9px;margin:0 0 4px}.heading p{font-size:13px;color:var(--muted);margin:0}
+.primary,.secondary,.outline,.danger{border-radius:11px;padding:10px 15px;border:1px solid transparent;font-size:13px;font-weight:750}.primary{background:var(--blue);color:white;box-shadow:0 5px 16px #0d78f326}.secondary{background:#eaf3ff;color:#156cda}.outline{background:white;color:#566888;border-color:var(--border)}.danger{background:#fff1f1;color:#a73e45}.row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;margin-bottom:17px}.metric,.panel{background:white;border:1px solid var(--border);box-shadow:var(--shadow);border-radius:19px}.metric{padding:18px 20px}.metric small{display:block;color:var(--muted);font-size:12px;font-weight:650}.metric strong{display:block;font-size:29px;margin-top:5px;letter-spacing:-.8px}
+.workspace{display:grid;grid-template-columns:minmax(240px,36%) minmax(0,1fr);gap:15px}.panel{overflow:hidden}.panel-head{padding:18px 19px;border-bottom:1px solid var(--border);font-size:14px;font-weight:800;display:flex;justify-content:space-between;align-items:center;gap:12px}.muted{color:var(--muted)}.message-list{overflow:auto;max-height:calc(100vh - 275px);min-height:330px}.message{padding:15px 18px;border-bottom:1px solid #f0f3f8;cursor:pointer}.message:hover,.message.selected{background:#f3f9ff}.message strong{display:block;font-size:13px;margin-bottom:6px}.message span{display:block;font-size:12px;line-height:1.45;color:#7888a2;overflow-wrap:anywhere}.message .meta{font-size:11px;color:#8da0bd;margin-top:8px}
+.detail{padding:23px;min-height:380px}.detail h2{font-size:20px;line-height:1.35;margin:0 0 13px}.detail p{line-height:1.6;color:#62718b;font-size:13px}.tag{display:inline-block;border-radius:20px;padding:5px 9px;font-size:11px;font-weight:700;background:#eaf3ff;color:#1769ce}.tag.warn{background:#fff4dd;color:#9e7218}.tag.good{background:#e6f8ef;color:#187953}
+.field{display:flex;flex-direction:column;gap:6px;margin:13px 0}.field label{font-size:12px;font-weight:760;color:#425777}.field input,.field textarea{width:100%;border:1px solid #d9e4f4;border-radius:11px;padding:11px 12px;background:#fbfdff;color:#1c2d4a;outline:0}.field textarea{min-height:175px;resize:vertical;line-height:1.55}.field input:focus,.field textarea:focus{border-color:#63a5fd;box-shadow:0 0 0 3px #d8eaff}
+.empty{padding:34px 25px;text-align:center;color:#8292ad;line-height:1.7;font-size:13px}.empty strong{display:block;color:#33527d;font-size:16px;margin-bottom:7px}.status-line{padding:12px 18px;border-top:1px solid var(--border);font-size:12px;color:#71809b}
+.toast{position:fixed;bottom:20px;right:20px;background:#12335e;color:#fff;padding:14px 19px;border-radius:12px;box-shadow:0 15px 40px #112b5040;max-width:min(400px,90vw);z-index:30;display:none;font-size:13px}
+dialog{border:1px solid var(--border);border-radius:21px;padding:26px;box-shadow:0 30px 90px #173e7166;width:min(560px,calc(100vw - 26px))}dialog::backdrop{background:#07182b88}dialog h2{margin:0 0 8px;font-size:22px}dialog p{font-size:13px;color:var(--muted);line-height:1.55}
+.table-tip{font-size:12px;color:#75869e;margin:12px 0 20px}.note{background:#fff9ec;border:1px solid #f4e6ba;border-radius:13px;color:#7e641d;font-size:12px;line-height:1.6;padding:12px;margin:15px 0}
+.hide{display:none!important}
+.fab{display:none}
+.reply-row{margin-top:16px}
+@media(max-width:760px){
+.fab{display:flex;align-items:center;gap:6px;position:fixed;right:14px;bottom:calc(74px + env(safe-area-inset-bottom));z-index:26;border:0;border-radius:16px;padding:14px 18px;background:var(--blue);color:#fff;font-weight:800;font-size:15px;box-shadow:0 10px 26px #0d78f355}
+.toast{bottom:calc(140px + env(safe-area-inset-bottom))}
+section.main{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
+.reply-row{display:none}
+#compose{display:none}
+}
+.sent-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;font-size:13px;color:#314869;margin:14px 0}
+.empty .primary{margin-top:12px}
+@media(min-width:761px) and (max-width:1000px){main{grid-template-columns:76px minmax(0,1fr)}aside{padding:16px 8px}.brand{padding:0 8px;font-size:0}.brand .sub,.nav span,.little{display:none}.nav button,.nav a{justify-content:center;padding:14px}section.main{padding:20px 16px}.workspace{grid-template-columns:1fr}.message-list{max-height:340px;min-height:140px}.heading{flex-direction:column;align-items:stretch}}
+@media(max-width:760px){
+main{display:block}
+aside{position:fixed;left:0;right:0;bottom:0;z-index:25;flex-direction:row;padding:6px 4px calc(6px + env(safe-area-inset-bottom));border-right:0;border-top:1px solid var(--border);box-shadow:0 -6px 24px #0f3d7a14}
+.brand,.little{display:none}
+.nav{flex-direction:row;width:100%;gap:2px}
+.nav button,.nav a{flex:1 1 0;min-width:0;flex-direction:column;justify-content:center;gap:3px;padding:7px 2px;border-radius:12px;font-size:10.5px;font-weight:700;text-align:center}
+.nav b{font-size:17px;line-height:1}.nav span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+section.main{padding:16px 14px calc(92px + env(safe-area-inset-bottom))}
+.heading{flex-direction:column;align-items:stretch;gap:12px;margin-bottom:14px}.heading h1{font-size:23px;letter-spacing:-.5px}.heading p{font-size:12.5px;line-height:1.45}
+.heading .row{justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto;gap:8px;margin:0 -14px;padding:2px 14px 6px;scrollbar-width:none;-webkit-overflow-scrolling:touch}.heading .row::-webkit-scrollbar{display:none}
+.heading .row button{flex:none;white-space:nowrap;padding:9px 13px;font-size:13px}
+#compose{order:-1}
+.cards{gap:8px;margin-bottom:14px}.metric{padding:11px 12px;border-radius:15px}.metric small{font-size:10.5px;line-height:1.3}.metric strong{font-size:21px;margin-top:4px}
+.workspace{grid-template-columns:1fr;gap:12px}.panel{border-radius:16px}.panel-head{padding:14px 15px}
+.message-list{max-height:55vh;min-height:110px}.message{padding:13px 15px}
+.detail{padding:16px;min-height:0}.detail h2{font-size:18px}
+.toast{left:12px;right:12px;bottom:calc(84px + env(safe-area-inset-bottom));max-width:none}
+dialog{padding:18px;border-radius:18px}dialog .row{justify-content:stretch!important}dialog .row button{flex:1}
+}
+.back-admin{display:inline-flex;align-items:center;gap:4px;margin:0 0 8px;padding:6px 11px;border-radius:12px;background:#eef5ff;color:#176edb;font-size:12px;font-weight:750;text-decoration:none}
+</style>
+<link rel="stylesheet" href="/api/servgo-air-tokens.css?v=1">
+<link rel="stylesheet" href="/api/servgo-mail-air.css?v=3">
+<script src="/api/servgo-air-theme.js?v=1"></script>
+<script src="/api/servgo-mail-theme-picker.js?v=1" defer></script>
+</head>
+<body class="servgo-mail-v2 servgo-mail-inbox">
+<a class="mail-skip-link" href="#mail-main-content">Перейти к письмам</a>
+<main>
+<aside>
+  <div class="brand"><span class="brand-mark">S</span><div>ServGo<div class="sub">Личная почта</div></div></div>
+
+  <div class="little"><b>Личный доступ</b>Почта закрыта для клиентов, сотрудников и владельцев подключённых компаний.<br><a href="https://servgo.ru/admin" style="color:#176edb;font-weight:750">← Вернуться в ServGo</a></div>
+</aside>
+<section class="main" id="mail-main-content">
+  <nav class="mail-workspace-links" aria-label="Навигация ServGo">
+    <a class="mail-workspace-link mail-workspace-back" href="https://servgo.ru/admin">← Панель ServGo</a>
+    <a class="mail-workspace-link mail-workspace-studio" href="https://servgo.ru/workspace/growth">✦ AI-студия</a>
+    <a class="mail-workspace-link mail-workspace-logout" href="/api/logout">Выйти из почты</a>
+  </nav>
+  <div class="heading">
+    <div><a class="back-admin" href="https://servgo.ru/admin">← В админку ServGo</a><div class="mail-eyebrow">Рабочее пространство · Почта</div><h1 id="page-title">Входящие</h1><p id="page-subtitle">Корреспонденция ServGo и ответы компаний</p></div>
+    
+  </div>
+  <div class="cards">
+    <div class="metric"><small>Адресатов в списке</small><strong id="m-companies">—</strong></div>
+    <div class="metric"><small>ИИ-черновиков</small><strong id="m-drafts">—</strong></div>
+    <div class="metric"><small>Писем принято SMTP</small><strong id="m-sent">—</strong></div>
+  </div>
+  <div class="workspace" aria-label="Список писем и просмотр">
+    <div class="panel"><div class="panel-head"><span id="list-title">Письма</span><span class="row"><small class="muted" id="list-count"></small><button id="list-compose" class="primary hide" type="button">✉ Написать</button></span></div><div class="message-list" id="list"></div><div class="status-line" id="service-status">Подключение к почтовому сервису...</div></div>
+    <div class="panel"><div class="panel-head"><span id="detail-title">Просмотр</span><span class="tag" id="detail-label">ServGo</span></div><div class="detail" id="detail"><div class="empty"><strong>Выбери письмо</strong>Сообщения появятся здесь после подключения почтового ящика.</div></div></div>
+  </div>
+</section>
+</main>
+<div class="mail-v3-dock" aria-label="Управление почтой">
+  <div class="mail-v3-actionbar">
+    <details class="mail-v3-popover mail-v3-folders"><summary>☷ Папки</summary>
+        <nav class="nav" aria-label="Папки почты">
+    <button type="button" data-tab="inbox" class="active"><b>✉</b><span>Входящие</span></button>
+    <button type="button" data-tab="outbox"><b>↗</b><span>Исходящие</span></button>
+    <button type="button" data-tab="drafts"><b>✦</b><span>Черновики</span></button>
+    <button type="button" data-tab="prospects"><b>♧</b><span>Адресаты</span></button>
+    
+  </nav>
+    </details>
+    <details class="mail-v3-popover mail-v3-more"><summary>⋯ Действия</summary><div class="mail-v3-popover-content"><label class="servgo-mail-theme-picker">Тема <select id="servgo-mail-theme" aria-label="Тема оформления">
+<option value="system">Как в системе</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label><button id="refresh" class="outline">↻ Обновить</button><button id="bulk" class="secondary">⇪ Загрузить адреса</button><button id="prepare-all" class="secondary">✦ Создать предложения</button><button id="new" class="secondary">+ Адресат</button></div></details>
+    <button id="compose" class="primary" type="button">✉ Написать</button>
+  </div>
+  <nav class="mail-v3-nav" aria-label="Разделы почты">
+    <a href="/api/campaigns-dashboard#search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7.5"/><path d="m20 20-4-4"/></svg><span>Поиск</span></a>
+    <a href="/api/campaigns-dashboard#campaigns"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg><span>Рассылки</span></a>
+    <a href="/api/mailbox-dashboard#inbox" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span>Письма</span></a>
+  </nav>
+</div>
+<dialog id="create-dialog">
+  <form method="dialog" id="company-form"><h2>Добавить компанию</h2><p>Укажи адрес компании и имеющиеся сведения. Агент подготовит индивидуальный черновик.</p>
+  <div class="field"><label>Название компании</label><input name="company" required minlength="2" maxlength="150" placeholder="Например, студия «Мята»"></div>
+  <div class="field"><label>Рабочий email</label><input name="email" type="email" required placeholder="hello@example.ru"></div>
+  <div class="field"><label>Сайт (необязательно)</label><input name="website" type="url" placeholder="https://example.ru"></div>
+  <div class="field"><label>Что известно о компании</label><textarea name="notes" style="min-height:85px" placeholder="Профиль услуг, особенности, потребности и ссылки на источники"></textarea></div>
+  <div class="field"><label>Основание согласия на получение предложения (если есть)</label><input name="consent" placeholder="Например, заявка с сайта от 12.10.2026"></div>
+  <div class="row" style="justify-content:flex-end"><button class="outline" value="cancel">Отмена</button><button class="primary" id="save-company" value="save">Сохранить</button></div>
+  </form>
+</dialog>
+<dialog id="bulk-dialog">
+  <form method="dialog" id="bulk-form"><h2>Загрузить адреса</h2><p>Вставь email по одному на строке (до 100). Можно также добавить название, HTTPS-сайт и заметку через точку с запятой. Подготовка писем — отдельное действие.</p>
+  <div class="field"><label>Компании (до 100 строк)</label><textarea id="bulk-rows" style="min-height:210px" required placeholder="hello@example.ru&#10;office@example.org&#10;Студия Мята;mail@company.com;https://company.com;Студия красоты"></textarea></div>
+  <div class="row" style="justify-content:flex-end"><button class="outline" value="cancel">Отмена</button><button class="primary" value="save">Импортировать</button></div></form>
+</dialog>
+<dialog id="compose-dialog">
+  <form id="compose-form">
+    <h2 id="compose-title">Новое письмо</h2>
+    <p>Введите email, подготовьте текст самостоятельно или с ИИ. Сохранять адрес в контактах не обязательно.</p>
+    <div class="note hide" id="compose-warning">Исходящий адрес ServGo не настроен на сервере — отправка будет отклонена. Нужна переменная SERVGO_MAIL_FROM.</div>
+    <div class="field"><label>Кому</label><input id="compose-to" type="email" maxlength="250" required placeholder="office@example.com"></div>
+    <div class="field ai-field"><label>Название компании (для ИИ, необязательно)</label><input id="compose-company" maxlength="150" placeholder="Название компании"></div>
+    <div class="field ai-field"><label>Сайт компании (для ИИ, необязательно)</label><input id="compose-website" type="url" maxlength="500" placeholder="https://example.com"></div>
+    <div class="field ai-field"><label>Заметка (для ИИ, необязательно)</label><input id="compose-notes" maxlength="2500" placeholder="Услуги, особенности и потребности"></div>
+    <div class="field"><label>Тема</label><input id="compose-subject" minlength="3" maxlength="180" required></div>
+    <div class="field"><label>Текст</label><textarea id="compose-body" minlength="1" maxlength="20000" required style="min-height:180px"></textarea></div>
+    <div class="row" style="justify-content:flex-end">
+       <button id="compose-close" type="button" class="outline">Отмена</button>
+       <button id="compose-ai" type="button" class="secondary">✦ Подготовить с ИИ</button>
+       <button id="compose-submit" type="submit" class="primary">Отправить</button>
+    </div>
+  </form>
+</dialog>
+<button class="fab" id="fab-compose" type="button" aria-label="Написать письмо">✉ Написать</button>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+const tabs={inbox:["Входящие","Корреспонденция ServGo и ответы компаний","Письма"],outbox:["Отправленные","История принятия писем почтовым сервером","Отправки"],prospects:["Адресаты","Список адресов для персональных предложений","Адресаты"],drafts:["ИИ-предложения","Черновики персональных рекламных писем для каждого адресата","Черновики"]};
+const state={replyFull:null,tab:"inbox",selected:null,prospects:[],inbox:[],outbox:[],status:{}};
+const $=id=>document.getElementById(id);
+const escapeHtml=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function notify(message){const t=$("toast");t.textContent=message;t.style.display="block";clearTimeout(window.__toastTimeout);window.__toastTimeout=setTimeout(()=>t.style.display="none",4200)}
+async function api(path,method="GET",body=null){const init={method,credentials:"same-origin",headers:{"Accept":"application/json"}};if(body){init.headers["Content-Type"]="application/json";init.body=JSON.stringify(body)}const response=await fetch("/api"+path,init);let data;try{data=await response.json()}catch{data={detail:"Сервер недоступен"}}if(!response.ok){if(response.status===401){location.replace("/");}throw new Error(typeof data.detail==="string"?data.detail:"Ошибка "+response.status)}return data}
+function withError(task){return Promise.resolve().then(task).catch(e=>notify(e.message))}
+function displayTab(tab){state.tab=tab;document.querySelectorAll(".mail-v3-popover").forEach(x=>x.open=false);state.selected=null;document.querySelectorAll("[data-tab]").forEach(x=>x.classList.toggle("active",x.dataset.tab===tab));$("page-title").textContent=tabs[tab][0];$("page-subtitle").textContent=tabs[tab][1];$("list-title").textContent=tabs[tab][2];render()}
+function cards(){const prospects=state.prospects;$("m-companies").textContent=prospects.length;$("m-drafts").textContent=prospects.filter(x=>x.subject).length;$("m-sent").textContent=state.outbox.filter(x=>x.status==="smtp_accepted").length;const c=state.status;$("service-status").textContent="Входящие: "+(c.inbox_ready?"подключены":"ожидается IMAP")+" · AI: "+(c.ai_ready?"подключён":"не настроен")}
+function list(){if(state.tab==="inbox")return state.inbox.map(x=>({...x,id:x.uid,label:x.from,extra:x.date,title:x.subject||"(Без темы)"}));if(state.tab==="outbox")return state.outbox.map((x,i)=>({...x,id:i,label:x.email,extra:x.created_at,title:x.subject||"(Без темы)"}));const prospects=state.tab==="drafts"?state.prospects.filter(x=>x.subject):state.prospects;return prospects.map(x=>({...x,id:x.id,label:x.company,extra:x.email,title:x.subject||"Нужен персональный черновик"}))}
+function render(){cards();const entries=list();$("list-count").textContent=entries.length+" шт.";$("list").innerHTML=entries.length?entries.map(x=>'<article class="message '+(state.selected===String(x.id)?"selected":"")+'" data-id="'+escapeHtml(x.id)+'"><strong>'+escapeHtml(x.label)+'</strong><span>'+escapeHtml(x.title)+'</span><div class="meta">'+escapeHtml(x.extra)+'</div></article>').join(""):'<div class="empty"><strong>Здесь пока пусто</strong>'+(state.tab==="inbox"?"Открой почтовые настройки, если IMAP ещё не подключён.":state.tab==="outbox"?'Отправленных писем пока нет.<br><button class="primary" type="button" data-compose>✉ Написать письмо</button>':"Добавь компании или создай первый черновик.")+"</div>";document.querySelectorAll("[data-compose]").forEach(b=>b.onclick=()=>openCompose());$("list-compose").classList.toggle("hide",state.tab!=="outbox");document.querySelectorAll(".message").forEach(node=>node.onclick=()=>{state.selected=node.dataset.id;render();if(matchMedia("(max-width:760px)").matches)$("detail").scrollIntoView({behavior:"smooth",block:"start"})});const item=entries.find(x=>String(x.id)===state.selected);showDetail(item)}
+function updateFab(){const title=state.replyFull?"↩ Ответить":"✉ Написать";$("fab-compose").textContent=title;$("compose").textContent=title}
+function showDetail(item){state.replyFull=null;updateFab();const detail=$("detail"), label=$("detail-label");if(!item){label.textContent="ServGo";detail.innerHTML='<div class="empty"><strong>Рабочая область</strong>Выберите письмо в списке, чтобы открыть его.</div>';return}if(state.tab==="inbox"){label.textContent="Входящее";detail.innerHTML='<h2>'+escapeHtml(item.title)+'</h2><p>От: '+escapeHtml(item.label)+'</p><p>'+escapeHtml(item.date)+'</p><div class="note" id="message-loading">Открываем текст письма...</div>';withError(async()=>{const full=await api("/message/"+item.uid);if(state.tab==="inbox"&&state.selected===String(item.uid)){const content=document.createElement("div");content.style.cssText="white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;font-size:13px;color:#314869";content.textContent=full.body||"Текстовая часть отсутствует (HTML/вложения не показываются)";const placeholder=$("message-loading");if(placeholder)placeholder.replaceWith(content);const actions=document.createElement("div");actions.className="row reply-row";const reply=document.createElement("button");reply.className="primary";reply.type="button";reply.textContent="↩ Ответить";if(full.reply_to){reply.onclick=()=>openCompose(replyDraft(full));state.replyFull=full;updateFab()}else{reply.disabled=true;reply.title="В письме нет адреса для ответа"}actions.appendChild(reply);content.after(actions)}});return}if(state.tab==="outbox"){label.textContent=item.status==="smtp_accepted"?"Принято SMTP":"Не подтверждено";detail.innerHTML='<h2>'+escapeHtml(item.title)+'</h2><p>Кому: '+escapeHtml(item.email)+(item.company&&item.company!==item.email?' · '+escapeHtml(item.company):'')+'</p><p>'+escapeHtml(item.created_at)+'</p><div class="sent-body"></div><div class="row"><button class="primary" id="again" type="button">✉ Написать ещё раз</button><button class="outline" id="new-letter" type="button">Новое письмо</button></div><div class="note">«Принято SMTP» не гарантирует доставку адресату.'+(item.status!=="smtp_accepted"?' Отправка не подтверждена — проверьте, не дошло ли письмо, прежде чем отправлять снова.':'')+'</div>';detail.querySelector(".sent-body").textContent=item.body||"";$("again").onclick=()=>openCompose({to:item.email,subject:item.subject,body:item.body});$("new-letter").onclick=()=>openCompose();return}const p=state.prospects.find(x=>x.id===item.id);if(!p)return;label.textContent=p.state==="smtp_accepted"?"Отправлено":p.reviewed?"Согласовано":p.subject?"Черновик":"Новый";const hasDraft=!!p.subject;detail.innerHTML='<h2>'+escapeHtml(p.company)+'</h2><p>'+escapeHtml(p.email)+(p.website?' · '+escapeHtml(p.website):'')+'</p><div class="row"><span class="tag '+(p.consent?"good":"warn")+'">'+(p.consent?"Согласие указано":"Нет подтверждения согласия")+'</span>'+(p.excluded?'<span class="tag warn">Исключён</span>':'')+'</div>'+(!hasDraft?'<p>'+escapeHtml(p.notes||"Сведения о компании пока не добавлены.")+'</p><div class="row"><button id="generate" class="primary" '+(p.excluded?"disabled":"")+'>✦ Подготовить ИИ-письмо</button></div>':'<div class="field"><label>Тема</label><input id="subject" maxlength="180" value="'+escapeHtml(p.subject)+'" '+(p.state!=="draft"?"disabled":"")+'></div><div class="field"><label>Текст письма</label><textarea id="body" '+(p.state!=="draft"?"disabled":"")+'>'+escapeHtml(p.body)+'</textarea></div><div class="row">'+(!p.reviewed&&p.state==="draft"?'<button id="approve" class="primary">✓ Проверить и согласовать</button><button id="generate" class="secondary">✦ Переписать ИИ</button>':'')+(p.reviewed&&p.state==="draft"?'<button id="send" class="primary">↗ Отправить письмо</button>':'')+'</div>')+'<p class="table-tip">Отправка доступна только владельцу платформы после проверки текста и подтверждения согласия адресата.</p>'+(p.excluded?'':'<button class="danger" id="exclude">Не связываться с компанией</button>');const gen=$("generate");if(gen)gen.onclick=()=>withError(async()=>{gen.disabled=true;gen.textContent="Готовим письмо…";const d=await api("/draft/"+p.id,"POST");notify(d.critic_warning||"Черновик подготовлен. Проверь факты.");await loadData(false);state.selected=p.id;render()});const app=$("approve");if(app)app.onclick=()=>withError(async()=>{const proof=prompt("Укажи, где и когда получено согласие адресата на рекламное письмо:",p.consent||"");if(!proof||proof.trim().length<6)return;await api("/approve/"+p.id,"POST",{subject:$("subject").value,body:$("body").value,consent:proof});notify("Письмо согласовано");await loadData(false);state.selected=p.id;render()});const send=$("send");if(send)send.onclick=()=>withError(async()=>{if(!confirm("Отправить подтверждённое письмо на "+p.email+"?"))return;send.disabled=true;const result=await api("/send/"+p.id,"POST");notify(result.status==="smtp_accepted"?"Почтовый сервер принял письмо":"Неизвестный результат");await loadData(false);state.selected=p.id;render()});const stop=$("exclude");if(stop)stop.onclick=()=>withError(async()=>{if(!confirm("Больше не связываться с этой компанией?"))return;await api("/exclude/"+p.id,"POST");await loadData(false);state.selected=p.id;render()})}
+async function loadData(draw=true){const responses=await Promise.allSettled([api("/status"),api("/prospects"),api("/inbox"),api("/outbox")]);const [s,p,i,o]=responses;state.status=s.status==="fulfilled"?s.value:{};if(p.status==="fulfilled")state.prospects=p.value;if(i.status==="fulfilled")state.inbox=i.value;if(o.status==="fulfilled")state.outbox=o.value;if(draw)render();if(i.status==="rejected")notify("Входящие: "+i.reason.message)}
+$("bulk").onclick=()=>$("bulk-dialog").showModal();
+$("bulk-form").onsubmit=e=>{if(e.submitter?.value!=="save")return;e.preventDefault();withError(async()=>{const lines=$("bulk-rows").value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);if(lines.length>100)throw new Error("Максимум 100 компаний за раз");let okay=0,failed=0;for(const line of lines){const fields=line.split(";").map(x=>x.trim());const isAddress=fields.length===1;const email=isAddress?fields[0]:fields[1];const company=isAddress?email:fields[0];const website=isAddress?"":fields[2]||"";const notes=isAddress?"":fields[3]||"";try{await api("/prospects","POST",{company,email,website,notes});okay++}catch{failed++}}$("bulk-dialog").close();$("bulk-rows").value="";await loadData();displayTab("prospects");notify("Добавлено: "+okay+" · Пропущено/ошибки: "+failed)})};
+$("prepare-all").onclick=()=>withError(async()=>{const work=state.prospects.filter(x=>!x.subject&&!x.excluded).slice(0,10);if(!work.length){notify("Нет компаний без черновиков");return}if(!confirm("Создать до "+work.length+" персональных черновиков через ClaudeHub? Письма отправлены не будут."))return;let okay=0;for(const p of work){try{await api("/draft/"+p.id,"POST");okay++}catch(e){notify(p.company+": "+e.message)}}await loadData();displayTab("drafts");notify("Подготовлено черновиков: "+okay+" из "+work.length)});
+document.querySelectorAll("[data-tab]").forEach(x=>x.onclick=()=>displayTab(x.dataset.tab));$("refresh").onclick=()=>withError(async()=>{await loadData();notify("Данные обновлены")});$("new").onclick=()=>$("create-dialog").showModal();$("company-form").onsubmit=e=>{if(e.submitter?.value!=="save")return;e.preventDefault();withError(async()=>{const f=new FormData(e.currentTarget);const payload=Object.fromEntries(f.entries());await api("/prospects","POST",payload);$("create-dialog").close();$("company-form").reset();displayTab("prospects");await loadData();notify("Компания добавлена")})};
+let directSendId = null;
+function replyDraft(full){
+  const subject = /^re:/i.test(full.subject||"") ? full.subject : "Re: " + (full.subject||"");
+  const quoted = (full.body||"").split(/\r?\n/).slice(0,80).map(line => "> " + line).join("\n");
+  return {to: full.reply_to, subject: subject.slice(0,180), inReplyTo: full.message_id||"",
+          body: "\n\n" + (full.date||"") + ", " + (full.from||"") + ":\n" + quoted};
+}
+let replyTo = "";
+function openCompose(prefill={}){
+  $("compose-form").reset();
+  directSendId = null;
+  replyTo = prefill.inReplyTo || "";
+  $("compose-title").textContent = replyTo ? "Ответ на письмо" : "Новое письмо";
+  document.querySelectorAll(".ai-field,#compose-ai").forEach(node => node.classList.toggle("hide", !!replyTo));
+  if (prefill.to) $("compose-to").value = prefill.to;
+  if (prefill.subject) $("compose-subject").value = prefill.subject;
+  if (prefill.body) $("compose-body").value = prefill.body;
+  $("compose-warning").classList.toggle("hide", state.status.smtp_ready !== false);
+  $("compose-dialog").showModal();
+  if (prefill.body) { const body = $("compose-body"); body.focus(); body.setSelectionRange(0, 0); body.scrollTop = 0; }
+}
+$("compose").onclick = () => openCompose(state.replyFull ? replyDraft(state.replyFull) : {});
+$("list-compose").onclick = () => openCompose();
+$("fab-compose").onclick = () => openCompose(state.replyFull ? replyDraft(state.replyFull) : {});
+$("compose-close").onclick = () => $("compose-dialog").close();
+$("compose-form").querySelectorAll("input,textarea").forEach(field => {
+  field.addEventListener("input", () => { directSendId = null; });
+});
+$("compose-ai").onclick = () => withError(async () => {
+  const recipient = $("compose-to").value.trim();
+  if (!recipient) { notify("Укажите email получателя"); return; }
+  const button = $("compose-ai");
+  button.disabled = true;
+  try {
+    const data = await api("/direct-draft", "POST", {
+      recipient: recipient,
+      company: $("compose-company").value,
+      website: $("compose-website").value,
+      notes: $("compose-notes").value
+    });
+    $("compose-subject").value = data.subject;
+    $("compose-body").value = data.body;
+    directSendId = null;
+    notify(data.critic_warning || "Черновик готов. Проверьте содержание.");
+  } finally { button.disabled = false; }
+});
+$("compose-form").onsubmit = event => {
+  event.preventDefault();
+  withError(async () => {
+    const recipient = $("compose-to").value.trim();
+    if (!confirm("Отправить письмо на " + recipient + "?")) return;
+    const button = $("compose-submit");
+    button.disabled = true;
+    directSendId = directSendId || crypto.randomUUID().replaceAll("-", "");
+    try {
+      await api("/direct-send", "POST", {
+        recipient: recipient,
+        subject: $("compose-subject").value,
+        body: $("compose-body").value,
+        request_id: directSendId,
+        in_reply_to: replyTo
+      });
+      $("compose-dialog").close();
+      $("compose-form").reset();
+      directSendId = null;
+      await loadData();
+      displayTab("outbox");
+      notify("Письмо принято SMTP. Доставка адресату не подтверждена.");
+    } finally { button.disabled = false; }
+  });
+};
+displayTab(["outbox","drafts","prospects"].includes(location.hash.slice(1))?location.hash.slice(1):"inbox");
+loadData().then(()=>{if(location.hash==="#compose")openCompose()});
+</script>
+</body>
+</html>

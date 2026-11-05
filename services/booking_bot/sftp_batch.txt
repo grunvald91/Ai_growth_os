@@ -1,0 +1,3 @@
+put bot/handlers/client.py /opt/booking_bot/bot/handlers/client.py
+put bot/services/notifications.py /opt/booking_bot/bot/services/notifications.py
+bye

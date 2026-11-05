@@ -1,0 +1,43 @@
+# ---------- GET /telegram-photo/{file_id:path} ----------
+
+@router.get("/telegram-photo/{file_id:path}")
+async def get_telegram_photo(file_id: str):
+    """Proxy a Telegram photo by file_id — streams through server to hide bot token."""
+    from fastapi.responses import StreamingResponse
+    bot_token = os.getenv("BOT_TOKEN")
+    if not bot_token:
+        raise HTTPException(status_code=500, detail="Bot token not configured")
+
+    async with create_photo_client() as client:
+        resp = await client.get(
+            f"https://api.telegram.org/bot{bot_token}/getFile",
+            params={"file_id": file_id},
+        )
+        data = resp.json()
+
+    if not data.get("ok"):
+        raise HTTPException(status_code=404, detail="Photo not found")
+
+    file_path = data["result"]["file_path"]
+    url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+
+    # Stream the file through server instead of redirecting
+    async def _stream():
+        async with create_photo_client() as client:
+            async with client.stream("GET", url) as resp:
+                async for chunk in resp.aiter_bytes(4096):
+                    yield chunk
+
+    content_type = "image/jpeg"
+    if file_path.endswith(".png"):
+        content_type = "image/png"
+    elif file_path.endswith(".webp"):
+        content_type = "image/webp"
+
+    return StreamingResponse(
+        _stream(),
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+

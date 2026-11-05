@@ -1,0 +1,54 @@
+# Ручной деплой Сушефа с использованием секрета SERVER_SSH_PASSWORD этого репозитория.
+# Пароль нигде не читается и не печатается: он передаётся скрипту только через переменную окружения.
+# Запуск: Actions -> «Sushef deploy (manual)» -> Run workflow. Автозапусков нет.
+# Код Сушефа берётся из публичного репозитория grunvald91/Sushef (нужна публичность).
+name: Sushef deploy (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      sushef_ref:
+        description: "Ветка или коммит Сушефа (обычно main)"
+        required: false
+        default: "main"
+      set_model:
+        description: "Сменить CLAUDEHUB_MODEL на сервере (например claude-haiku-5-5). Пусто — не трогать."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sushef-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45  # по AGENTS.md; запас, чтобы не оборвать выкладку и бэкап на середине
+    env:
+      SUSHEF_SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SUSHEF_SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SUSHEF_SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: grunvald91/Sushef
+          ref: ${{ inputs.sushef_ref }}
+          path: Sushef
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Tests, backup, deploy, smoke
+        working-directory: Sushef
+        env:
+          SUSHEF_SET_MODEL: ${{ inputs.set_model }}
+        run: bash scripts/deploy_via_codespaces.sh

@@ -1,0 +1,101 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environment
+.env
+.env.*
+!.env.example
+deployment.env
+.env.deploy
+
+# IDE and local tooling
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+*.code-workspace
+
+# Database
+*.db
+*.sqlite3
+
+# Logs
+*.log
+
+# Archives and backups
+*.tar.gz
+*.b64
+*.backup
+
+# Local scratch files
+tmpclaude-*
+155.212.162.47*
+
+# Local backups and server snapshots
+*.local_backup.py
+*.server
+*.py.server
+*.bak
+
+# OMC / agent tooling state
+.omc/
+.agent/
+.agents/
+.bot_memory/
+.autosave.md
+
+# Frontend build artifacts
+node_modules/
+web/frontend/dist/
+
+# One-off diagnostic / patch / debug scripts
+debug_*.py
+diagnose*.py
+final_diagnostic.py
+patch_*.py
+apply_security_patches.py
+check_syntax.py
+check_webhook.py
+run_bot_debug.py
+deploy_old_bot.py
+bot/handlers/client_server.py
+
+# Ad-hoc test scripts and their captured outputs
+test_client.py
+test_client_result.txt
+test_db_result.txt
+test_filter.py
+test_full_handler.py
+test_import.py
+test_main.py
+test_main2.py
+test_main*_result.txt
+test_output.txt
+tmp_*.py
+
+# Runtime media cache
+webapp/static/media_cache/

@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Запись на услугу · ServGo</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=2">
+    <link rel="apple-touch-icon" href="/static/favicon.svg?v=2">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="/static/css/booking.css?v=14">
+</head>
+<body>
+    <!-- Swipe back animated hint -->
+    <div id="swipe-hint" class="swipe-hint hidden">
+        <div class="swipe-hint-content">
+            <div class="swipe-hint-hand">👆</div>
+            <div class="swipe-hint-trail"></div>
+            <div class="swipe-hint-text">назад</div>
+        </div>
+    </div>
+
+    <!-- Drawer Overlay -->
+    <div id="drawer-overlay" class="drawer-overlay hidden" onclick="closeDrawer()"></div>
+
+    <!-- Drawer Menu -->
+    <div id="drawer" class="drawer">
+        <div class="drawer-header">
+            <span class="drawer-title">Меню</span>
+        </div>
+        <div class="drawer-menu">
+            <button class="drawer-item" onclick="showMyBookings()">
+                <span class="drawer-icon">📋</span>
+                <span>Мои записи</span>
+            </button>
+            <button class="drawer-item" onclick="showSubscriptions()">
+                <span class="drawer-icon">🎫</span>
+                <span>Абонементы</span>
+            </button>
+            <button class="drawer-item" onclick="showMySubscriptions()">
+                <span class="drawer-icon">💳</span>
+                <span>Мои абонементы</span>
+            </button>
+        </div>
+    </div>
+
+    <div id="app">
+        <!-- Skeleton loading -->
+        <div id="skeleton-loader" class="skeleton-container">
+            <div class="skeleton skeleton-header"></div>
+            <div class="skeleton skeleton-card"></div>
+            <div class="skeleton skeleton-card"></div>
+            <div class="skeleton skeleton-card"></div>
+        </div>
+
+        <!-- Step 1: Business Selection -->
+        <div id="step-business" class="step hidden">
+            <div class="sticky-header">
+                <h1 class="page-title">Выберите заведение</h1>
+            </div>
+            <div class="quick-actions">
+                <button class="quick-action-btn" onclick="openDrawer()">
+                    <span class="quick-action-icon">☰</span>
+                    <span class="quick-action-text">Меню</span>
+                </button>
+                <button id="repeat-booking-btn" class="quick-action-btn hidden" onclick="toggleRepeatMenu()">
+                    <span class="quick-action-icon">🔄</span>
+                    <span class="quick-action-text">Повторить</span>
+                </button>
+            </div>
+            <div id="repeat-menu" class="repeat-menu hidden">
+                <!-- Items will be added dynamically -->
+            </div>
+            <div id="businesses-list" class="cards-container"></div>
+        </div>
+
+        <!-- Business Info Modal -->
+        <div id="business-modal" class="modal hidden">
+            <div class="modal-overlay" onclick="closeBusinessModal()"></div>
+            <div class="modal-content">
+                <button class="modal-close" onclick="closeBusinessModal()">✕</button>
+                <div id="modal-business-photo" class="modal-photo"></div>
+                <div class="modal-body">
+                    <h2 id="modal-business-name"></h2>
+                    <div id="modal-business-type" class="modal-type"></div>
+                    <div id="modal-business-info" class="modal-info"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Service Selection -->
+        <div id="step-services" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBack('business')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Выберите услуги</h1>
+                <button id="subscriptions-btn" class="header-action-btn hidden" onclick="showBusinessSubscriptions()">
+                    🎫
+                </button>
+            </div>
+            <div id="business-info" class="business-header"></div>
+            <div id="services-list" class="cards-container"></div>
+            <div id="selected-services-summary" class="summary-bar hidden">
+                <div class="summary-info">
+                    <span id="summary-count">0 услуг</span>
+                    <span id="summary-duration">0 мин</span>
+                    <span id="summary-price">0 ₽</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step: Rooms Gallery -->
+        <div id="step-rooms" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBack('services')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Залы</h1>
+            </div>
+            <div id="rooms-gallery" class="cards-container"></div>
+        </div>
+
+        <!-- Step: Tariff Info (contact-only services) -->
+        <div id="step-tariff-info" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBack('services')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Информация</h1>
+            </div>
+            <div id="tariff-info-content" class="tariff-info-container"></div>
+        </div>
+
+        <!-- Step 3: Employee Selection -->
+        <div id="step-employee" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBack('services')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title" id="employee-title">Выберите специалиста</h1>
+            </div>
+            <div id="employees-list" class="cards-container"></div>
+        </div>
+
+        <!-- Step 4: Date Selection -->
+        <div id="step-date" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBack('services')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Выберите дату</h1>
+            </div>
+            <div id="calendar-strip" class="calendar-strip"></div>
+            <div id="slots-container" class="slots-container">
+                <div id="slots-list" class="slots-grid"></div>
+                <div id="no-slots" class="no-slots hidden">
+                    <div class="no-slots-icon">📅</div>
+                    <p>Нет свободных слотов на эту дату</p>
+                    <p class="hint">Попробуйте выбрать другой день</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Employee/Room tabs (Excel-style, fixed — outside step-date so position:fixed works) -->
+        <div id="employee-tabs" class="employee-tabs hidden">
+            <div id="employee-tabs-list" class="employee-tabs-list"></div>
+        </div>
+
+        <!-- Step 4.5: Venue Price Breakdown -->
+        <div id="step-venue-price" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBack('date')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Стоимость аренды</h1>
+            </div>
+            <div id="venue-price-details" class="cards-container"></div>
+        </div>
+
+        <!-- Step 4.6: Booking Format (solo/group) -->
+        <div id="step-booking-format" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBack('venue-price')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Формат занятия</h1>
+            </div>
+            <div id="booking-format-list" class="cards-container"></div>
+        </div>
+
+        <!-- Step 4.5: Additional Services (venue_rental only) -->
+        <div id="step-additional-services" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBack('date')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Доп. услуги</h1>
+            </div>
+            <div class="additional-services-hint">Выберите дополнительные услуги или пропустите этот шаг</div>
+            <div id="additional-services-list" class="cards-container"></div>
+        </div>
+
+        <!-- Step 5: Confirmation -->
+        <div id="step-confirm" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBackFromConfirm()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Подтверждение</h1>
+            </div>
+            <div class="confirm-container">
+                <div id="confirm-details" class="confirm-card"></div>
+                <div id="confirm-notes" class="notes-section">
+                    <label for="booking-notes">Комментарий (необязательно)</label>
+                    <textarea id="booking-notes" placeholder="Пожелания к записи..." maxlength="500"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step: My Bookings -->
+        <div id="step-my-bookings" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBackFromDrawerScreen()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Мои записи</h1>
+            </div>
+            <div id="my-bookings-list" class="cards-container"></div>
+        </div>
+
+        <!-- Step: Reschedule Date -->
+        <div id="step-reschedule-date" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBackFromReschedule()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Перенос записи</h1>
+            </div>
+            <div id="reschedule-info-banner" class="reschedule-info-banner"></div>
+            <div id="reschedule-calendar-strip" class="calendar-strip"></div>
+            <div class="slots-container">
+                <div id="reschedule-slots-list" class="slots-grid"></div>
+                <div id="reschedule-no-slots" class="no-slots hidden">
+                    <div class="no-slots-icon">📅</div>
+                    <p>Нет свободных слотов на эту дату</p>
+                    <p class="hint">Попробуйте выбрать другой день</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step: Reschedule Confirm -->
+        <div id="step-reschedule-confirm" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBack('reschedule-date')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Подтверждение переноса</h1>
+            </div>
+            <div class="cards-container">
+                <div id="reschedule-confirm-details" class="reschedule-confirm-card"></div>
+            </div>
+        </div>
+
+        <!-- Step: Subscriptions -->
+        <div id="step-subscriptions" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBackFromDrawerScreen()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Абонементы</h1>
+            </div>
+            <div id="subscriptions-list" class="cards-container"></div>
+        </div>
+
+        <!-- Step: Subscription Details -->
+        <div id="step-subscription-details" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBack('subscriptions')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Детали абонемента</h1>
+            </div>
+            <div id="subscription-details-content" class="cards-container"></div>
+        </div>
+
+        <!-- Step: Subscription Payment -->
+        <div id="step-subscription-payment" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBack('subscription-details')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Оплата</h1>
+            </div>
+            <div class="cards-container">
+                <div id="payment-info" class="payment-card"></div>
+                <div class="payment-actions">
+                    <button class="primary-btn" onclick="confirmPaymentSent()">Оплата отправлена</button>
+                    <button class="secondary-btn" onclick="showReceiptUpload()">Прикрепить чек</button>
+                </div>
+                <input type="file" id="receipt-input" accept="image/*" hidden onchange="uploadReceipt(this.files[0])">
+            </div>
+        </div>
+
+        <!-- Step: My Subscriptions -->
+        <div id="step-my-subscriptions" class="step hidden">
+            <div class="sticky-header">
+                <button class="back-btn" onclick="goBackFromDrawerScreen()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <h1 class="page-title">Мои абонементы</h1>
+            </div>
+            <div id="my-subscriptions-list" class="cards-container"></div>
+        </div>
+
+        <!-- Payment Pending Screen -->
+        <div id="step-payment-pending" class="step hidden">
+            <div class="pending-container">
+                <div class="pending-icon">⏳</div>
+                <h2>Ожидаем подтверждения</h2>
+                <p class="pending-message">Ваша заявка на абонемент отправлена владельцу бизнеса.</p>
+                <p class="pending-hint">После подтверждения получения средств абонемент будет активирован. Вы получите уведомление в Telegram.</p>
+                <div class="pending-actions">
+                    <button class="primary-btn" onclick="goToMySubscriptions()">Мои абонементы</button>
+                    <button class="secondary-btn" onclick="goBackFromDrawerScreen()">На главную</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step: Prepayment Required -->
+        <div id="step-prepayment" class="step hidden">
+            <div class="sticky-header">
+                <h1 class="page-title">Оплата</h1>
+            </div>
+            <div class="cards-container">
+                <div id="prepayment-info" class="payment-card"></div>
+                <div class="payment-actions">
+                    <button class="primary-btn" onclick="confirmPrepaymentSent()">Оплата отправлена</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Prepayment Pending Screen -->
+        <div id="step-prepayment-pending" class="step hidden">
+            <div class="pending-container">
+                <div class="pending-icon">⏳</div>
+                <h2>Ожидаем подтверждения</h2>
+                <p class="pending-message">Мы уведомили владельца о вашей оплате.</p>
+                <p class="pending-hint">После подтверждения получения средств запись будет подтверждена. Вы получите уведомление в Telegram.</p>
+                <div class="pending-actions">
+                    <button class="primary-btn" onclick="showMyBookings()">Мои записи</button>
+                    <button class="secondary-btn" onclick="goBackFromDrawerScreen()">На главную</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Success Screen -->
+        <div id="step-success" class="step hidden">
+            <div class="success-container">
+                <div class="success-icon">✓</div>
+                <h2>Запись создана!</h2>
+                <p id="success-message"></p>
+                <button class="primary-btn" onclick="closeWebApp()">Закрыть</button>
+            </div>
+        </div>
+
+        <!-- Error Screen -->
+        <div id="step-error" class="step hidden">
+            <div class="error-container">
+                <div class="error-icon">!</div>
+                <h2>Упс!</h2>
+                <p id="error-message">Что-то пошло не так</p>
+                <button class="primary-btn" onclick="location.reload()">Попробовать снова</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fixed Bottom Button -->
+    <div id="bottom-action" class="bottom-action hidden">
+        <button id="action-btn" class="primary-btn">Продолжить</button>
+    </div>
+
+    <script src="/static/js/booking.js?v=14"></script>
+</body>
+</html>

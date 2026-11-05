@@ -1,0 +1,45 @@
+name: Deploy ServGo local mail server fix (scoped)
+# Replaces bot/services/email_notifications.py and restarts booking-web-api and booking-bot, with a backup
+# and automatic rollback. Afterwards a dry SMTP session against the local mail server shows it accepts mail
+# (no message is sent).
+# Manual only. apply=false is a read-only preflight (nothing on the server changes).
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Change production (false = read-only preflight)'
+        required: true
+        type: boolean
+        default: false
+  # Read-only preflight on pushes of this branch; a commit message with the marker applies.
+  push:
+    branches: [ ops/smtp-loopback-deploy ]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-smtp-loopback-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      APPLY: ${{ inputs.apply || contains(github.event.head_commit.message, '[apply-smtp-loopback]') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check pytest aiosqlite 'paramiko==3.5.1' -r requirements.txt -r web/api/requirements.txt
+      - name: Verify the change locally
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m compileall -q bot database web scripts
+          python -m pytest -q tests/test_smtp_loopback.py tests/test_smtp_loopback_deploy.py
+      - name: Roll out (or preflight) and verify
+        run: python scripts/deploy_smtp_loopback_fix.py

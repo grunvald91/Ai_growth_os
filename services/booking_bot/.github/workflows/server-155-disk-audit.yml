@@ -1,0 +1,41 @@
+name: Server 155 disk audit
+
+on:
+  push:
+    paths:
+      - '.github/workflows/server-155-disk-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Disk audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" 'bash -s' <<'REMOTE'
+          set +e
+          echo '===== DF ====='; df -hT
+          echo '===== INODES ====='; df -ih
+          echo '===== TOP ROOT ====='; du -xhd1 / 2>/dev/null | sort -h | tail -20
+          echo '===== /VAR ====='; du -xhd2 /var 2>/dev/null | sort -h | tail -30
+          echo '===== /OPT ====='; du -xhd2 /opt 2>/dev/null | sort -h | tail -30
+          echo '===== /ROOT ====='; du -xhd2 /root 2>/dev/null | sort -h | tail -30
+          echo '===== DOCKER ====='; docker system df -v 2>/dev/null || true
+          echo '===== JOURNAL ====='; journalctl --disk-usage 2>/dev/null || true
+          echo '===== LARGE LOGS ====='; find /var/log -type f -size +20M -printf '%s %p\n' 2>/dev/null | sort -n | tail -30
+          echo '===== LARGE FILES ====='; find / -xdev -type f -size +500M -printf '%s %p\n' 2>/dev/null | sort -n | tail -30
+          REMOTE

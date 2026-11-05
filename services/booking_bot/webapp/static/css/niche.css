@@ -1,0 +1,221 @@
+/* Niche-specific overlay on top of landing.css.
+   After the ServGo redesign, all heavy styles live in landing.css;
+   this file keeps a couple of small layout safety nets. */
+
+/* Client-steps wrapping (prevent narrow text from collapsing the row). */
+.client-steps .step-text { min-width: 0; }
+.client-steps .step-text b,
+.client-steps .step-text small {
+    display: block;
+    overflow-wrap: anywhere;
+    word-break: normal;
+}
+
+/* Inter-niche footer — internal links for SEO crawl + page authority. */
+.band-related .related-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-top: 28px;
+}
+.band-related .related-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 18px 22px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    color: inherit;
+    text-decoration: none;
+    font-weight: 500;
+    transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+.band-related .related-card:hover,
+.band-related .related-card:focus-visible {
+    transform: translateY(-2px);
+    background: #fff;
+    box-shadow: 0 10px 30px -16px rgba(0, 0, 0, 0.25);
+}
+.band-related .related-arrow {
+    opacity: 0.5;
+    font-size: 1.1em;
+}
+
+
+/* First-screen explanation of the digital marketing team. */
+.hero-team-card {
+    margin-top: 20px;
+    padding: 18px;
+    border: 1px solid rgba(47, 91, 235, 0.16);
+    border-radius: 18px;
+    background: rgba(47, 91, 235, 0.06);
+}
+.hero-team-card > strong {
+    display: block;
+    font-size: 16px;
+    line-height: 1.35;
+}
+.hero-team-card > p {
+    margin: 7px 0 0;
+    opacity: .78;
+}
+.hero-team-roles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+.hero-team-roles span {
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: #fff;
+    border: 1px solid rgba(13, 27, 42, 0.08);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.25;
+}
+
+
+/* First screen: the two core ServGo systems. */
+.hero-core-systems {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    align-self: stretch;
+}
+.hero-system-card {
+    padding: 22px;
+    border-radius: 22px;
+    background: #fff;
+    border: 1px solid rgba(13, 27, 42, 0.08);
+    box-shadow: 0 16px 40px -28px rgba(13, 27, 42, 0.45);
+}
+.hero-system-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    height: 34px;
+    padding: 0 9px;
+    border-radius: 10px;
+    background: rgba(47, 91, 235, 0.09);
+    color: #2f5beb;
+    font-size: 12px;
+    font-weight: 800;
+}
+.hero-system-card h2 {
+    margin: 14px 0 8px;
+    font-size: clamp(18px, 2vw, 24px);
+    line-height: 1.18;
+}
+.hero-system-card p {
+    margin: 0;
+    line-height: 1.55;
+    opacity: .82;
+}
+.hero-system-card ul {
+    display: grid;
+    gap: 7px;
+    margin: 14px 0 0;
+    padding: 0;
+    list-style: none;
+}
+.hero-system-card li {
+    position: relative;
+    padding-left: 17px;
+    font-size: 13px;
+    line-height: 1.4;
+    font-weight: 650;
+}
+.hero-system-card li::before {
+    content: "✓";
+    position: absolute;
+    left: 0;
+    color: #2f5beb;
+}
+@media (max-width: 760px) {
+    .hero-core-systems { grid-template-columns: 1fr; }
+    .hero-system-card { padding: 18px; }
+}
+
+/* Counter of free places in the niche (edited by hand in _offer.yaml). */
+.seats-counter {
+    display: inline-block;
+    margin: 6px 0 18px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(52, 120, 214, 0.1);
+    color: #3478d6;
+    font-weight: 700;
+}
+.seats-counter-empty { background: rgba(0, 0, 0, 0.06); color: inherit; }
+
+/* Root landing: base calculator, today/plans columns, seats list. */
+.base-calc {
+    max-width: 760px;
+    margin: 0 auto;
+    display: grid;
+    gap: 14px;
+}
+.base-calc label { display: grid; gap: 6px; font-weight: 600; }
+.base-calc label span { font-size: 14px; }
+.base-calc input {
+    width: 100%;
+    min-height: 48px;
+    padding: 0 14px;
+    border: 1px solid var(--line-dk);
+    border-radius: 12px;
+    font: inherit;
+    font-size: 16px;
+}
+.base-calc-result {
+    display: grid;
+    gap: 4px;
+    padding: 18px 20px;
+    border-radius: 18px;
+    background: var(--sky-soft);
+}
+.base-calc-label { font-size: 13px; color: var(--gray); font-weight: 600; }
+.base-calc-result strong { font-size: clamp(30px, 8vw, 44px); line-height: 1.1; color: var(--navy); }
+.base-calc-result small { font-size: 13px; color: var(--gray); }
+.today-grid {
+    max-width: 1120px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+}
+.today-col { padding: 22px; border-radius: 18px; background: var(--bg); }
+.today-col h3 { margin: 0 0 10px; font-size: 18px; }
+.today-col ul { margin: 0; padding-left: 18px; display: grid; gap: 8px; }
+.seats-list { list-style: none; margin: 16px 0; padding: 0; display: grid; gap: 6px; }
+.seats-list a {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.7);
+    color: inherit;
+    text-decoration: none;
+}
+.seats-list b { color: #3478d6; white-space: nowrap; }
+
+/* Niche select in the connect form (root landing). */
+.connect-form select {
+    padding: 11px 14px;
+    border-radius: 11px;
+    border: 1px solid var(--line-dk);
+    font-size: 16px;
+    font-family: var(--font);
+    color: var(--navy);
+    background: #fff;
+    width: 100%;
+}
+.connect-form select:focus {
+    outline: none;
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px rgba(47,91,235,.16);
+}

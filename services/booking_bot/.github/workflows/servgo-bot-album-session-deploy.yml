@@ -1,0 +1,17 @@
+name: Deploy ServGo bot album session race fix (manual, scoped)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Paramiko
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Guard live SHA, patch only photo handlers, verify and rollback
+        run: python -m scripts.deploy_bot_album_session_fix

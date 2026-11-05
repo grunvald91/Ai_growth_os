@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="ru">
+{% macro rich(content, spans) -%}
+    {%- if spans -%}
+        {%- for span in spans -%}
+            {%- if span.style == 'strong' -%}<strong>{{ span.text }}</strong>
+            {%- elif span.style == 'em' -%}<em>{{ span.text }}</em>
+            {%- elif span.style == 'strong_em' -%}<strong><em>{{ span.text }}</em></strong>
+            {%- else -%}{{ span.text }}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- else -%}{{ content }}{%- endif -%}
+{%- endmacro %}
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ article.title if article else "Блог ServGo — маркетинг, онлайн-запись и рост бизнеса" }} | ServGo</title>
+    <meta name="description" content="{{ article.description if article else 'Практические статьи ServGo об ИИ-маркетинге, онлайн-записи и развитии малого бизнеса. Полезные инструкции без лишней сложности.' }}">
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+    <link rel="canonical" href="{{ canonical }}">
+    <meta property="og:type" content="{{ 'article' if article else 'website' }}">
+    <meta property="og:title" content="{{ article.title if article else 'Блог ServGo — полезное для владельцев бизнеса' }}">
+    <meta property="og:description" content="{{ article.description if article else 'ИИ-маркетинг, запись клиентов и развитие бизнеса. Практические разборы от ServGo.' }}">
+    <meta property="og:locale" content="ru_RU">
+    <meta property="og:site_name" content="ServGo">
+    <meta property="og:url" content="{{ canonical }}">
+    <meta property="og:image" content="{{ origin }}/static/og.png">
+    {# The PNG sharing image stays until raster OG covers exist; SVG works as on-page artwork. #}
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
+    <link rel="stylesheet" href="/static/css/landing.css?v=12">
+    <link rel="stylesheet" href="/static/css/blog.css?v=4">
+    {% if article %}
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "headline": {{ article.title | tojson }},
+        "description": {{ article.description | tojson }},
+        {% if not article.from_feed %}"image": {{ (origin + "/static/blog/" + article.slug + ".svg") | tojson }},{% endif %}
+        "mainEntityOfPage": {"@type":"WebPage","@id":{{ canonical | tojson }}},
+        {% if article.published %}"datePublished": {{ article.published | tojson }},{% endif %}
+        "dateModified": {{ article.updated | tojson }},
+        "author": {"@type":"Organization","name":"ServGo","url":{{ origin | tojson }}},
+        "publisher": {"@type":"Organization","name":"ServGo","url":{{ origin | tojson }}},
+        "inLanguage": "ru-RU"
+    }
+    </script>
+    {% if article.faq %}
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "inLanguage": "ru-RU",
+        "mainEntity": [{% for item in article.faq %}{"@type":"Question","name":{{ item.question | tojson }},"acceptedAnswer":{"@type":"Answer","text":{{ item.answer | tojson }}}}{% if not loop.last %},{% endif %}{% endfor %}]
+    }
+    </script>
+    {% endif %}
+    {% else %}
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Blog",
+        "name": "Блог ServGo",
+        "url": {{ canonical | tojson }},
+        "description": "Практические статьи об ИИ-маркетинге, онлайн-записи и развитии бизнеса.",
+        "inLanguage": "ru-RU",
+        "publisher": {"@type":"Organization","name":"ServGo","url":{{ origin | tojson }}}
+    }
+    </script>
+    {% endif %}
+</head>
+<body class="blog-page">
+    <header class="topbar">
+        <a class="brand" href="/" aria-label="ServGo — на главную">
+            <span class="brand-mark">SG</span><span class="brand-name">ServGo</span>
+        </a>
+        <nav class="nav-links" aria-label="Основная навигация">
+            <a href="/#owners">Возможности</a>
+            <a href="/#launch">Подключение</a>
+            <a href="/blog" aria-current="page" class="blog-nav-current">Блог</a>
+        </nav>
+        <a class="nav-cta" href="/#launch">Узнать о ServGo</a>
+    </header>
+
+    <main id="top">
+    {% if not article %}
+        <section class="blog-hero" aria-labelledby="blog-title">
+            <div class="blog-wrap blog-hero-inner">
+                <div>
+                    <p class="eyebrow">Журнал для владельцев бизнеса</p>
+                    <h1 id="blog-title">Меньше рутины.<br><span>Больше возможностей.</span></h1>
+                    <p class="blog-hero-lead">Понятно рассказываем, как находить клиентов, автоматизировать маркетинг и превращать обращения в записи. Без сложных терминов и пустых обещаний.</p>
+                    <a class="primary-action" href="#articles" style="margin-left:0">Читать статьи <span aria-hidden="true">↗</span></a>
+                    <ul class="blog-pillar-list">
+                        <li>ИИ-маркетинг</li>
+                        <li>Онлайн-запись 24/7</li>
+                        <li>Рост бизнеса</li>
+                    </ul>
+                </div>
+                <div class="blog-hero-visual" aria-hidden="true">
+                    <span class="visual-kicker">SERVGO / БИЗНЕС В ПОРЯДКЕ</span>
+                    <div class="visual-title">Маркетинг и запись<br>в одной системе</div>
+                    <div class="visual-dash">
+                        <div><span>Контент-план</span><strong>Идея → публикация</strong></div>
+                        <div class="visual-accent"><span>Онлайн-запись</span><strong>Удобные слоты</strong></div>
+                        <div><span>Клиенты</span><strong>Заявка → визит</strong></div>
+                        <div><span>Аналитика</span><strong>Понятные решения</strong></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="blog-content" id="articles" aria-labelledby="articles-heading">
+            <div class="blog-wrap">
+                <div class="blog-controls">
+                    <nav class="blog-topics" aria-label="Темы статей">
+                        {% for key, label in categories %}
+                        <a class="blog-topic{% if selected_topic == key %} is-active{% endif %}"
+                           href="/blog{% if key != 'all' %}?topic={{ key }}{% endif %}"
+                           {% if selected_topic == key %}aria-current="page"{% endif %}>{{ label }}</a>
+                        {% endfor %}
+                    </nav>
+                    <form class="blog-search" method="get" action="/blog" role="search" aria-label="Поиск по статьям">
+                        {% if selected_topic != 'all' %}<input type="hidden" name="topic" value="{{ selected_topic }}">{% endif %}
+                        <input type="search" name="q" value="{{ query }}" maxlength="120" placeholder="Поиск по статьям" aria-label="Поиск по статьям">
+                        <button type="submit">Найти</button>
+                    </form>
+                </div>
+                <h2 class="blog-section-title" id="articles-heading">{% if query or selected_topic != 'all' %}Подходящие материалы{% else %}Начните с полезного{% endif %}</h2>
+                {% if articles %}
+                    <p class="blog-count">Материалов: {{ articles | length }}</p>
+                    {% set featured = articles[0] %}
+                    <a class="blog-feature" href="/blog/{{ featured.slug }}" aria-label="Читать: {{ featured.title }}">
+                        <div class="blog-feature-body">
+                            <span class="blog-kicker">{{ featured.category }} · В центре внимания</span>
+                            <h2>{{ featured.title }}</h2>
+                            <p>{{ featured.description }}</p>
+                            <span class="blog-text-link">Читать статью <span aria-hidden="true">→</span></span>
+                        </div>
+                        <div class="blog-feature-art">
+                            {% if featured.from_feed %}<span class="blog-art-text" aria-hidden="true">{{ featured.category }}</span>
+                            {% else %}<img src="/static/blog/{{ featured.slug }}.svg" width="1200" height="650"
+                                 alt="{{ featured.image_alt }}" loading="eager" decoding="async">{% endif %}
+                        </div>
+                    </a>
+                    {% if articles | length > 1 %}
+                    <div class="blog-cards" aria-label="Другие статьи">
+                        {% for post in articles[1:] %}
+                        <a class="blog-card" href="/blog/{{ post.slug }}">
+                            <div class="blog-card-art">
+                                {% if post.from_feed %}<span class="blog-art-text" aria-hidden="true">{{ post.category }}</span>
+                                {% else %}<img src="/static/blog/{{ post.slug }}.svg" width="1200" height="650"
+                                     alt="{{ post.image_alt }}" loading="lazy" decoding="async">{% endif %}
+                            </div>
+                            <div class="blog-card-body">
+                                <span class="blog-kicker">{{ post.category }}</span>
+                                <h3>{{ post.title }}</h3>
+                                <p>{{ post.description }}</p>
+                                <span class="blog-text-link">Читать <span aria-hidden="true">→</span></span>
+                            </div>
+                        </a>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                {% else %}
+                    <div class="blog-empty" role="status">
+                        <h2>Пока ничего не нашли</h2>
+                        <p>Попробуйте другой запрос или откройте все темы.</p>
+                        <a href="/blog">Смотреть все статьи →</a>
+                    </div>
+                {% endif %}
+                <aside class="blog-cta" aria-label="О платформе ServGo">
+                    <div>
+                        <span class="blog-kicker" style="color:#AEC3FF">От советов к действиям</span>
+                        <h2>Меньше ручной работы — больше времени на клиентов</h2>
+                        <p>В ServGo мы объединяем ИИ-маркетинг и онлайн-запись в понятный путь для сервисного бизнеса.</p>
+                    </div>
+                    <a class="primary-action" href="/#launch">Посмотреть платформу <span aria-hidden="true">↗</span></a>
+                </aside>
+            </div>
+        </section>
+    {% else %}
+        <header class="blog-article-head">
+            <div class="blog-wrap">
+                <nav class="blog-breadcrumb" aria-label="Навигационная цепочка">
+                    <a href="/">Главная</a><span aria-hidden="true">/</span>
+                    <a href="/blog">Блог</a><span aria-hidden="true">/</span>
+                    <span>{{ article.category }}</span>
+                </nav>
+                <span class="blog-kicker">{{ article.category }}</span>
+                <h1>{{ article.title }}</h1>
+                <p class="blog-intro">{{ article.lead }}</p>
+                <div class="blog-article-meta">
+                    <span>Редакция ServGo</span><span class="blog-meta-dot" aria-hidden="true"></span>
+                    <time datetime="{{ article.updated }}">Обновлено {{ article.date_label }}</time>
+                </div>
+            </div>
+        </header>
+        <div class="blog-wrap blog-reading-layout">
+            <article class="blog-article-body" aria-label="{{ article.title }}">
+                {% if not article.from_feed %}<figure class="blog-article-figure">
+                    <img src="/static/blog/{{ article.slug }}.svg" width="1200" height="650"
+                         alt="{{ article.image_alt }}" decoding="async" fetchpriority="high">
+                    <figcaption>{{ article.image_caption }}</figcaption>
+                </figure>{% endif %}
+                {% if article.direct_answer %}
+                <aside class="blog-takeaways" aria-labelledby="direct-answer-title">
+                    <h2 id="direct-answer-title">Коротко</h2>
+                    <p>{{ article.direct_answer }}</p>
+                </aside>
+                {% endif %}
+                {% if article.summary %}
+                <aside class="blog-takeaways" aria-labelledby="takeaways-title">
+                    <h2 id="takeaways-title">Коротко, если нет времени читать</h2>
+                    <ul>{% for point in article.summary %}<li>{{ point }}</li>{% endfor %}</ul>
+                </aside>
+                {% endif %}
+                {% if article.from_feed and article.company_facts %}
+                <section class="blog-verified-facts" aria-labelledby="verified-facts-title">
+                    <h2 id="verified-facts-title">Проверенные возможности</h2>
+                    <ul>{% for fact in article.company_facts %}<li>{{ fact }}</li>{% endfor %}</ul>
+                </section>
+                {% endif %}
+                {% if article.method_note %}<p class="blog-method-note">{{ article.method_note }}</p>{% endif %}
+                {% for section in article.sections %}
+                    <section aria-labelledby="section-{{ loop.index }}">
+                        <h2 id="section-{{ loop.index }}">{{ section.title }}</h2>
+                        {% if section.blocks %}
+                            {% for block in section.blocks %}
+                                {% if block.type == 'paragraph' %}<p>{{ rich(block.text, block.spans) }}</p>
+                                {% elif block.type == 'subheading' %}<h3 class="blog-subheading">{{ block.text }}</h3>
+                                {% elif block.type == 'quote' %}<blockquote class="blog-editorial-note">{{ rich(block.text, block.spans) }}</blockquote>
+                                {% elif block.type == 'list' %}
+                                    {% if block.ordered %}
+                                        <ol class="blog-ordered-list">{% for point in block["items"] %}<li>{{ rich(point, block.item_spans[loop.index0] if block.item_spans else none) }}</li>{% endfor %}</ol>
+                                    {% else %}
+                                        <ul>{% for point in block["items"] %}<li>{{ rich(point, block.item_spans[loop.index0] if block.item_spans else none) }}</li>{% endfor %}</ul>
+                                    {% endif %}
+                                {% endif %}
+                            {% endfor %}
+                        {% else %}
+                            {% for paragraph in section.paragraphs %}<p>{{ paragraph }}</p>{% endfor %}
+                        {% endif %}
+                        {% if section.figure %}
+                        <figure class="blog-inline-figure">
+                            <img src="/static/blog/{{ section.figure }}" alt="{{ section.figure_alt }}"
+                                 loading="lazy" decoding="async" width="1200" height="650">
+                            <figcaption>{{ section.figure_caption }}</figcaption>
+                        </figure>
+                        {% endif %}
+                        {% if section.gallery %}
+                        <div class="blog-demo-gallery" role="group" aria-label="Скриншоты демонстрационного интерфейса ServGo: {{ section.title }}">
+                            {% for shot in section.gallery %}
+                            <figure class="blog-demo-shot">
+                                <img src="/static/blog/{{ shot.src }}" alt="{{ shot.alt }}"
+                                     loading="lazy" decoding="async" width="360" height="737">
+                                <figcaption>{{ shot.caption }}</figcaption>
+                            </figure>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        {% if section.table %}
+                        <div class="blog-data-scroll" role="region" tabindex="0" aria-label="Таблица: {{ section.title }}">
+                            <table class="blog-data-table">
+                                <thead><tr>{% for label in section.table_headers %}<th scope="col">{{ label }}</th>{% endfor %}</tr></thead>
+                                <tbody>{% for row in section.table %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+                            </table>
+                        </div>
+                        {% endif %}
+                        {% if section.bullets and not section.blocks %}
+                        <ul>{% for bullet in section.bullets %}<li>{{ bullet }}</li>{% endfor %}</ul>
+                        {% endif %}
+                        {% if section.example %}
+                        <div class="blog-example">
+                            <h3>{{ section.example_title or 'Практический пример' }}</h3>
+                            <div class="blog-example-content">{{ section.example }}</div>
+                        </div>
+                        {% endif %}
+                    </section>
+                    {% if not loop.last %}<div class="blog-divider" aria-hidden="true"></div>{% endif %}
+                {% endfor %}
+                {% if article.closing %}<p>{{ article.closing }}</p>{% endif %}
+                {% if article.faq %}
+                <section aria-labelledby="faq-heading" class="blog-faq">
+                    <h2 id="faq-heading">Частые вопросы</h2>
+                    {% for item in article.faq %}
+                    <h3>{{ item.question }}</h3>
+                    <p>{{ item.answer }}</p>
+                    {% endfor %}
+                </section>
+                {% endif %}
+                {% if article.pitfall %}
+                <aside class="blog-pitfall">
+                    <h2>Типичная ошибка</h2><p>{{ article.pitfall }}</p>
+                </aside>
+                {% endif %}
+                {% if article.today %}
+                <section class="blog-today" aria-labelledby="today-heading">
+                    <h2 id="today-heading">Что можно сделать уже сегодня</h2>
+                    <ol>{% for action in article.today %}<li>{{ action }}</li>{% endfor %}</ol>
+                </section>
+                {% endif %}
+                {% if article.sources %}
+                <section class="blog-sources" aria-labelledby="sources-heading">
+                    <h2 id="sources-heading">Полезные первоисточники</h2>
+                    <ul>{% for title,url in article.sources %}
+                        <li><a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ title }} ↗</a></li>
+                    {% endfor %}</ul>
+                </section>
+                {% endif %}
+                <a class="blog-text-link" href="/blog">← Вернуться ко всем статьям</a>
+            </article>
+            <aside class="blog-side" aria-label="Оглавление статьи">
+                <h2>В этой статье</h2>
+                <ol>{% for section in article.sections %}<li><a href="#section-{{ loop.index }}">{{ section.title }}</a></li>{% endfor %}</ol>
+                <p class="blog-side-small">Примеры внутри статей приведены для объяснения, а не как подтверждённые результаты клиентов.</p>
+            </aside>
+        </div>
+        {% if related %}
+        <section class="blog-related" aria-labelledby="related-heading">
+            <div class="blog-wrap">
+                <h2 class="blog-section-title" id="related-heading">Читайте также</h2>
+                <div class="blog-cards">
+                {% for post in related %}
+                    <a class="blog-card" href="/blog/{{ post.slug }}">
+                        <div class="blog-card-art">{% if post.from_feed %}<span class="blog-art-text" aria-hidden="true">{{ post.category }}</span>{% else %}<img src="/static/blog/{{ post.slug }}.svg" width="1200" height="650" alt="{{ post.image_alt }}" loading="lazy" decoding="async">{% endif %}</div>
+                        <div class="blog-card-body"><span class="blog-kicker">{{ post.category }}</span><h3>{{ post.title }}</h3><p>{{ post.description }}</p><span class="blog-text-link">Читать <span aria-hidden="true">→</span></span></div>
+                    </a>
+                {% endfor %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
+        <div class="blog-wrap">
+            <aside class="blog-cta" aria-label="О платформе ServGo">
+                <div><span class="blog-kicker" style="color:#AEC3FF">ServGo для бизнеса</span>
+                    <h2>{{ article.cta_title or 'Хотите применить эти идеи на практике?' }}</h2>
+                    <p>{{ article.cta_text or 'Маркетинг и запись клиентов могут работать в одной системе.' }}</p>
+                </div>
+                <div class="blog-cta-actions">
+                    <a class="primary-action" rel="nofollow" href="{{ commercial_cta_url or '/#launch' }}">Обсудить подключение ServGo <span aria-hidden="true">↗</span></a>
+                    {% if article.from_feed %}
+                    <details class="blog-cta-modules">
+                        <summary>Интересует конкретная возможность?</summary>
+                        <nav aria-label="Запросить информацию о модуле ServGo">
+                            <a rel="nofollow" href="{{ commercial_cta_url }}?module=booking">Запись и расписание</a>
+                            <a rel="nofollow" href="{{ commercial_cta_url }}?module=growth">Growth</a>
+                            <a rel="nofollow" href="{{ commercial_cta_url }}?module=mail">Mail</a>
+                            <a rel="nofollow" href="{{ commercial_cta_url }}?module=shifts">Смена</a>
+                            <a rel="nofollow" href="{{ commercial_cta_url }}?module=seo">SEO-завод</a>
+                        </nav>
+                    </details>
+                    {% endif %}
+                </div>
+            </aside>
+        </div>
+    {% endif %}
+    </main>
+
+    <footer class="site-footer" aria-label="Контакты ServGo">
+        <div class="site-footer-inner">
+            <div>
+                <p class="eyebrow">ServGo</p>
+                <h2>Одна платформа для развития бизнеса</h2>
+                <nav class="footer-niche-links" aria-label="Разделы сайта">
+                    <a href="/">Главная</a><a href="/blog">Блог</a><a href="/#launch">Подключение</a>
+                </nav>
+                <p class="footer-brand-note">ИИ-маркетинг · Онлайн-запись · Развитие бизнеса</p>
+            </div>
+            <div class="footer-contacts">
+                <strong>Связаться</strong>
+                <div class="footer-contact-links">
+                    <a href="mailto:grunvaldlab@gmail.com">grunvaldlab@gmail.com</a>
+                    <a href="tel:+79023911399">8 902 391-13-99</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

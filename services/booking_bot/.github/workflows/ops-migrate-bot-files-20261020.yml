@@ -1,0 +1,20 @@
+name: Move Telegram files from old bot to new bot (owner-approved 2026-10-20)
+# Запуск только вручную: Actions → этот workflow → Run workflow.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      OLD_BOT_TOKEN: ${{ secrets.OLD_TOKEN_BOT }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install -q --disable-pip-version-check 'paramiko==3.5.1'
+      - run: python .github/ops/migrate_bot_files.py

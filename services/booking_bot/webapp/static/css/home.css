@@ -1,0 +1,331 @@
+/* ServGo Air — главная рекламная страница (promo.servgo.ru).
+   Макет: «ServGo — главный экран» (светлая и ночная версии).
+   Mobile first: информация сверху, управление внизу у большого пальца. */
+
+:root {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --soft: #f6f9fd;
+    --soft-2: #eef5fc;
+    --line: #edf2f8;
+    --ink: #0d1b2a;
+    --text: #1b2d42;
+    --text-2: #3d536b;
+    --muted: #62778b;
+    --accent: #3478d6;
+    --accent-ink: #2f5beb;
+    --accent-hi: #2f5beb;
+    --cta-from: #2a66be;
+    --cta-to: #3174d4;
+    --cta-shadow: rgba(42, 102, 190, .22);
+    --ok: #1f8a5b;
+    --err: #c0392b;
+    --glow: none;
+    color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --bg: #0d1b2a;
+        --surface: #172237;
+        --soft: rgba(23, 34, 55, .82);
+        --soft-2: #1e2b40;
+        --line: rgba(150, 180, 215, .14);
+        --ink: #ffffff;
+        --text: #f0f5fc;
+        --text-2: #d3deea;
+        --muted: #9aaabe;
+        --accent: #8cb7ff;
+        --accent-ink: #8cb7ff;
+        --accent-hi: #7fa0ff;
+        --cta-from: #2f5beb;
+        --cta-to: #3478d6;
+        --cta-shadow: rgba(47, 91, 235, .30);
+        --ok: #55c58f;
+        --err: #ff8a7a;
+        --glow: radial-gradient(1200px 600px at 78% 12%, #16294a 0%, #0d1b2a 60%);
+        color-scheme: dark;
+    }
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+body {
+    margin: 0;
+    background: var(--bg);
+    background-image: var(--glow);
+    background-repeat: no-repeat;
+    color: var(--text);
+    font-family: Onest, system-ui, -apple-system, "Segoe UI", sans-serif;
+    letter-spacing: -.015em;
+    line-height: 1.5;
+    padding-bottom: 96px;
+}
+body.modal-open { overflow: hidden; }
+a { color: var(--text-2); text-decoration: none; }
+a:hover { color: var(--ink); }
+h1, h2, h3, p, ul, ol { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+.wrap { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+@media (min-width: 720px) { .wrap { padding: 0 24px; } }
+
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 3px;
+}
+
+/* ── Шапка ── */
+.topbar { padding: 20px 0; }
+.topbar .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.brand { font-size: 24px; font-weight: 800; letter-spacing: -.04em; }
+.brand b { color: var(--ink); font-weight: 800; }
+.brand span { color: var(--accent-hi); }
+.nav { display: none; align-items: center; gap: 32px; font-size: 15px; }
+.nav a:last-child { color: var(--ink); font-weight: 500; }
+.login-link { font-size: 15px; font-weight: 500; color: var(--ink); }
+@media (min-width: 900px) {
+    .nav { display: flex; }
+    .login-link { display: none; }
+}
+
+/* ── Кнопки ── */
+.btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 12px;
+    min-height: 56px; padding: 0 28px; border: 0; border-radius: 16px; cursor: pointer;
+    font: inherit; font-size: 17px; font-weight: 500; letter-spacing: -.02em;
+    color: #fff; background: linear-gradient(110deg, var(--cta-from), var(--cta-to));
+    box-shadow: 0 10px 28px var(--cta-shadow);
+    transition: transform .2s ease, box-shadow .2s ease;
+}
+.btn:hover { color: #fff; transform: translateY(-1px); box-shadow: 0 14px 34px var(--cta-shadow); }
+.btn-soft {
+    background: var(--soft); color: var(--text); box-shadow: none; min-height: 48px; padding: 0 22px; font-size: 15px;
+}
+.btn-soft:hover { color: var(--ink); background: var(--soft-2); box-shadow: none; }
+.btn svg { flex: none; }
+
+/* ── Hero ── */
+.hero { padding: 24px 0 48px; }
+.hero .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 40px 72px; }
+.hero-main { flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+.eyebrow { font-size: 13px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.hero h1 {
+    font-size: clamp(38px, 9.5vw, 76px); line-height: 1.02; font-weight: 500; letter-spacing: -.055em;
+    color: var(--ink); max-width: 760px; overflow-wrap: break-word;
+}
+.hero h1 em { display: inline-block; font-style: normal; color: var(--accent-ink); }
+.flow {
+    display: block; height: 3px; margin-top: 6px; border-radius: 3px;
+    background: linear-gradient(90deg, #307be8, #8ad8f3, #686fe4, #336be2, #67baf4, #307be8);
+    background-size: 300% 100%; animation: flow 3.8s linear infinite;
+    -webkit-mask: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent);
+    mask: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent);
+}
+@keyframes flow { to { background-position: 300% 0; } }
+@media (prefers-reduced-motion: reduce) { .flow { animation: none; } html { scroll-behavior: auto; } }
+.lead { font-size: clamp(17px, 4.6vw, 20px); font-weight: 300; color: var(--text-2); max-width: 560px; }
+.hero-cta { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; padding-top: 4px; }
+.hero-note { font-size: 14px; color: var(--muted); max-width: 520px; }
+
+.sample {
+    flex: 1 1 340px; min-width: 0; max-width: 460px; padding: 28px 28px 24px; border-radius: 28px;
+    background: var(--soft); display: flex; flex-direction: column; gap: 22px;
+}
+@media (min-width: 720px) { .sample { padding: 36px 36px 32px; gap: 28px; } }
+.sample-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13px; color: var(--muted); }
+.sample-head b { font-weight: 500; letter-spacing: .12em; text-transform: uppercase; }
+.sample-sum small { display: block; font-size: 15px; color: var(--text-2); margin-bottom: 8px; }
+.sample-sum strong {
+    display: block; font-size: clamp(40px, 11vw, 52px); line-height: 1; font-weight: 500; letter-spacing: -.05em;
+    color: var(--ink); font-variant-numeric: tabular-nums;
+}
+.blur { filter: blur(9px); user-select: none; }
+.sample-rows > div {
+    display: flex; justify-content: space-between; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); font-size: 15px;
+}
+.sample-rows span:first-child { color: var(--text-2); }
+.sample-rows span:last-child { font-weight: 500; font-variant-numeric: tabular-nums; color: var(--ink); }
+.sample-lock { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--accent); }
+
+/* ── Секции ── */
+.section { padding: 48px 0; }
+@media (min-width: 720px) { .section { padding: 72px 0; } }
+.section + .section { border-top: 1px solid var(--line); }
+.section-head { display: flex; flex-direction: column; gap: 12px; max-width: 760px; margin-bottom: 32px; }
+.section-head h2 {
+    font-size: clamp(28px, 6.6vw, 44px); line-height: 1.08; font-weight: 500; letter-spacing: -.045em; color: var(--ink);
+}
+.section-head p { font-size: 17px; font-weight: 300; color: var(--text-2); }
+
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 32px 40px; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.col .num { font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.col h3 { font-size: 18px; font-weight: 500; color: var(--ink); }
+.col p { font-size: 15px; color: var(--muted); }
+.col p a { color: var(--accent); }
+
+/* ── Калькулятор ── */
+.calc { display: grid; gap: 28px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 900px) { .calc { grid-template-columns: 1fr 1fr; gap: 56px; } }
+.calc-fields { display: flex; flex-direction: column; gap: 16px; }
+.field { display: flex; flex-direction: column; gap: 8px; }
+.field > span { font-size: 14px; color: var(--text-2); }
+.field input, .field select, .field textarea {
+    width: 100%; min-height: 52px; padding: 0 16px; border: 0; border-radius: 14px;
+    background: var(--soft); color: var(--ink); font: inherit; font-size: 16px; letter-spacing: -.01em;
+}
+.field textarea { padding: 14px 16px; min-height: 110px; resize: vertical; }
+.field input::placeholder, .field textarea::placeholder { color: var(--muted); }
+.field select { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 22px) 50%, calc(100% - 16px) 50%; background-size: 6px 6px; background-repeat: no-repeat; padding-right: 40px; }
+.calc-result { padding: 28px; border-radius: 28px; background: var(--soft); display: flex; flex-direction: column; gap: 10px; }
+.calc-result .label { font-size: 15px; color: var(--text-2); }
+.calc-result strong {
+    font-size: clamp(40px, 11vw, 56px); line-height: 1; font-weight: 500; letter-spacing: -.05em; color: var(--ink);
+    font-variant-numeric: tabular-nums;
+}
+.calc-result small { font-size: 14px; color: var(--muted); }
+.calc-hint { font-size: 14px; color: var(--muted); }
+
+/* ── Где теряется база ── */
+.lost { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 28px 40px; }
+.lost li { display: flex; flex-direction: column; gap: 6px; padding-top: 18px; border-top: 1px solid var(--line); }
+.lost b { font-size: 18px; font-weight: 500; color: var(--ink); }
+.lost span { font-size: 15px; color: var(--muted); }
+
+/* ── Сегодня и дальше ── */
+.today { display: grid; gap: 32px 56px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.today h3 { font-size: 18px; font-weight: 500; color: var(--ink); margin-bottom: 14px; }
+.today li { position: relative; padding: 0 0 12px 22px; font-size: 15px; color: var(--text-2); }
+.today li::before { content: ""; position: absolute; left: 0; top: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.today .plans li::before { background: var(--muted); opacity: .6; }
+.today .btn { margin-top: 12px; }
+
+/* ── Условия ── */
+.offer { display: grid; gap: 24px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 900px) { .offer { grid-template-columns: 1.4fr 1fr; gap: 40px; } }
+.seats { display: flex; flex-direction: column; margin: 8px 0 24px; }
+.seats a {
+    display: flex; justify-content: space-between; align-items: center; gap: 16px; min-height: 56px; padding: 12px 0;
+    border-top: 1px solid var(--line); font-size: 16px; color: var(--text);
+}
+.seats li:last-child a { border-bottom: 1px solid var(--line); }
+.seats b { font-weight: 500; color: var(--accent); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.price-card { padding: 28px; border-radius: 28px; background: var(--soft); display: flex; flex-direction: column; gap: 8px; }
+.price-card .label { font-size: 13px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.price-card strong { font-size: clamp(36px, 9vw, 48px); line-height: 1.05; font-weight: 500; letter-spacing: -.05em; color: var(--ink); font-variant-numeric: tabular-nums; }
+.price-card .period { font-size: 15px; color: var(--text-2); }
+.price-card p { font-size: 14px; color: var(--muted); margin-top: 8px; }
+
+/* ── Ниши, запуск ── */
+.niches { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.niches a {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 64px; padding: 0 22px;
+    border-radius: 18px; background: var(--soft); color: var(--ink); font-size: 16px; font-weight: 500;
+}
+.niches a:hover { background: var(--soft-2); }
+.niches span { color: var(--accent); }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px 32px; counter-reset: s; }
+.steps li { display: flex; flex-direction: column; gap: 6px; padding-top: 16px; border-top: 1px solid var(--line); }
+.steps small { font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.steps b { font-size: 17px; font-weight: 500; color: var(--ink); }
+.demo { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+
+/* ── Подвал ── */
+.footer { padding: 40px 0 24px; border-top: 1px solid var(--line); }
+.footer .wrap { display: grid; gap: 28px 48px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.footer h2 { font-size: 15px; font-weight: 500; color: var(--ink); margin-bottom: 12px; }
+.footer nav, .footer .contacts { display: flex; flex-direction: column; gap: 6px; font-size: 15px; }
+.footer a { color: var(--text-2); display: inline-block; padding: 6px 0; }
+.footer .note { grid-column: 1 / -1; font-size: 14px; color: var(--muted); }
+
+/* ── Нижняя панель на телефоне (зона большого пальца) ── */
+.dock {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: var(--bg);
+    box-shadow: 0 -1px 0 var(--line);
+}
+.dock a.dock-link {
+    flex: none; min-height: 48px; padding: 0 12px; display: inline-flex; align-items: center; font-size: 14px; color: var(--text-2);
+}
+.dock .btn { flex: 1; min-height: 48px; padding: 0 16px; font-size: 16px; border-radius: 14px; }
+@media (min-width: 900px) { .dock { display: none; } body { padding-bottom: 0; } }
+body.modal-open .dock { display: none; }
+
+/* ── Форма заявки ── */
+.modal-backdrop {
+    position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end; justify-content: center;
+    background: rgba(13, 27, 42, .55); backdrop-filter: blur(4px);
+}
+.modal-backdrop[hidden] { display: none; }
+.connect-modal {
+    position: relative; width: 100%; max-width: 520px; max-height: 94vh; overflow-y: auto;
+    padding: 28px 20px calc(24px + env(safe-area-inset-bottom)); border-radius: 28px 28px 0 0;
+    background: var(--surface); color: var(--text);
+}
+@media (min-width: 720px) {
+    .modal-backdrop { align-items: center; padding: 16px; }
+    .connect-modal { border-radius: 28px; padding: 36px 32px; }
+}
+.connect-modal h2 { font-size: 26px; font-weight: 500; letter-spacing: -.04em; color: var(--ink); margin: 10px 40px 20px 0; line-height: 1.1; }
+.modal-close {
+    position: absolute; top: 14px; right: 14px; width: 44px; height: 44px; border: 0; border-radius: 14px;
+    background: var(--soft); color: var(--text-2); font-size: 22px; line-height: 1; cursor: pointer;
+}
+.connect-form { display: flex; flex-direction: column; gap: 14px; }
+.form-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+@media (min-width: 520px) { .form-grid { grid-template-columns: 1fr 1fr; } }
+.form-hint { font-size: 13px; color: var(--muted); }
+.form-status { font-size: 14px; min-height: 18px; }
+.form-status.is-success { color: var(--ok); font-weight: 500; }
+.form-status.is-error { color: var(--err); font-weight: 500; }
+.form-actions { display: flex; flex-direction: column-reverse; gap: 10px; }
+.form-actions .btn { width: 100%; }
+@media (min-width: 520px) { .form-actions { flex-direction: row; } .form-actions .btn-soft { flex: 0 0 auto; } .form-actions .btn:not(.btn-soft) { flex: 1; } }
+
+/* ── Логотип: знак + словесный знак Onest 800 ── */
+.brand { display: inline-flex; align-items: center; gap: 8px; }
+.brand img { display: block; width: 36px; height: 36px; }
+.brand-word { font-size: 24px; font-weight: 800; letter-spacing: -.04em; color: var(--ink); }
+.brand-word i { font-style: normal; color: var(--accent-hi); }
+.footer .brand { padding: 0; margin-bottom: 12px; }
+.footer .brand img { width: 28px; height: 28px; }
+.footer .brand-word { font-size: 20px; }
+
+/* форма: поля на подложке второго уровня, кнопки прижаты к низу листа */
+.connect-modal .field input, .connect-modal .field select, .connect-modal .field textarea { background: var(--soft-2); }
+.connect-form .form-actions {
+    position: sticky; bottom: calc(-24px - env(safe-area-inset-bottom)); margin: 0 -20px; padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+    background: var(--surface);
+}
+@media (min-width: 720px) { .connect-form .form-actions { position: static; margin: 0; padding: 0; } }
+
+/* ── Страницы ниш ── */
+.systems { flex: 1 1 340px; min-width: 0; max-width: 460px; display: flex; flex-direction: column; gap: 16px; }
+.sample.sys { max-width: none; gap: 10px; padding: 24px; }
+.sample.sys h2 { font-size: 20px; font-weight: 500; color: var(--ink); letter-spacing: -.03em; }
+.sample.sys p { font-size: 15px; color: var(--text-2); }
+.sample.sys ul { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+.sample.sys li { position: relative; padding-left: 20px; font-size: 14px; color: var(--muted); }
+.sample.sys li::before { content: ""; position: absolute; left: 0; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.pains { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 28px 40px; }
+.pains li { display: flex; flex-direction: column; gap: 6px; padding-top: 18px; border-top: 1px solid var(--line); }
+.pains small { font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.pains b { font-size: 18px; font-weight: 500; color: var(--ink); }
+.pains span { font-size: 15px; color: var(--muted); }
+.pains em { font-style: normal; font-size: 15px; font-weight: 500; color: var(--text); }
+.step-sub { font-size: 14px; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; }
+.chips li { padding: 12px 18px; border-radius: 14px; background: var(--soft); color: var(--text); font-size: 15px; }
+.seats-counter { font-size: 20px; font-weight: 500; letter-spacing: -.03em; color: var(--accent); margin: 8px 0 20px; }
+.seats-counter-empty { color: var(--muted); }
+.price-sub { display: flex; flex-direction: column; gap: 4px; padding-top: 14px; margin-top: 6px; border-top: 1px solid var(--line); }
+.price-sub b { font-size: 17px; font-weight: 500; color: var(--ink); }
+.price-sub span { font-size: 14px; color: var(--muted); }
+.faq { display: flex; flex-direction: column; max-width: 820px; }
+.faq details { border-top: 1px solid var(--line); padding: 4px 0; }
+.faq details:last-child { border-bottom: 1px solid var(--line); }
+.faq summary { cursor: pointer; list-style: none; min-height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; font-size: 17px; font-weight: 500; color: var(--ink); }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; font-size: 22px; font-weight: 300; color: var(--accent); flex: none; }
+.faq details[open] summary::after { content: "−"; }
+.faq p { padding: 0 0 18px; font-size: 16px; color: var(--text-2); max-width: 680px; }

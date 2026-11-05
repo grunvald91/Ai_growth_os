@@ -1,0 +1,23 @@
+{
+  "_comment": "Единый источник условий старта. Меняйте цифры только здесь: страницы ниш и главная подхватят их сами. Файлы _offer.yaml и _shared.yaml не считаются нишами.",
+  "entry_price": 990,
+  "studio_price_month": 2990,
+  "seats_total": 3,
+  "updated": "2026-10-24",
+  "seats_left": {
+    "banya": 3,
+    "barbershop": 3,
+    "beauty": 3,
+    "hall-rental": 3,
+    "psy": 3,
+    "shinomontazh": 3
+  },
+  "studio_free_left": {
+    "banya": 1,
+    "barbershop": 1,
+    "beauty": 1,
+    "hall-rental": 1,
+    "psy": 1,
+    "shinomontazh": 1
+  }
+}

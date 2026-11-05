@@ -1,0 +1,23 @@
+User-agent: *
+Allow: /
+# Служебные и личные разделы — не для поиска
+Disallow: /admin
+Disallow: /account
+Disallow: /login
+Disallow: /mail
+Disallow: /my
+Disallow: /chat
+Disallow: /subscriptions
+Disallow: /b/
+Disallow: /rental/b/
+Disallow: /book
+Disallow: /legal/
+Disallow: /schedule
+Disallow: /analytics
+Disallow: /calendar
+Disallow: /demo-100boats.html
+Disallow: /rental-admin-11.html
+
+Sitemap: https://servgo.ru/sitemap.xml
+Sitemap: https://servgo.ru/blog/sitemap.xml
+Sitemap: https://servgo.ru/business-blog-sitemap.xml

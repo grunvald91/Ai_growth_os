@@ -1,0 +1,30 @@
+name: Blog rich-text focused regression CI
+on:
+  push:
+    branches: [fix/blog-safe-rich-text-20261103]
+    paths: [.github/workflows/blog-rich-text-ci-20261103.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install backend and test dependencies
+        run: python -m pip install -r requirements.txt pytest aiosqlite jinja2 fastapi
+      - name: Compile server and blog pipeline
+        run: python -m py_compile webapp/server.py webapp/blog_feed.py webapp/blog_content.py
+      - name: Tests - blog feed and legacy redirects
+        env:
+          BOT_TOKEN: "123:test"
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+        run: python -m pytest -q tests/test_blog_feed.py
+      - name: Whitespace
+        run: git diff --check HEAD^ HEAD

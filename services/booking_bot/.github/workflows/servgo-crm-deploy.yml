@@ -1,0 +1,38 @@
+name: Deploy ServGo CRM backend
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply backend rollout after preflight
+        type: boolean
+        default: false
+  push:
+    branches: [feature/servgo-light-crm]
+    paths:
+      - scripts/deploy_crm.py
+      - .github/workflows/servgo-crm-deploy.yml
+permissions:
+  contents: read
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check pytest aiosqlite 'paramiko==3.5.1' -r requirements.txt -r web/api/requirements.txt
+      - name: Test CRM and account linking
+        run: python -m pytest -q tests/test_crm_api.py tests/test_crm_deploy.py tests/test_email_merge_regression.py tests/test_yandex_telegram_join.py
+      - name: Backup, migrate, deploy and verify backend
+        env:
+          SERVGO_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+          APPLY: ${{ inputs.apply || contains(github.event.head_commit.message, '[apply-crm]') }}
+        run: python scripts/deploy_crm.py
