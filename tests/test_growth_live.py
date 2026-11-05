@@ -270,9 +270,9 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=20' in page.text
+    assert '/studio/assets/growth-live.css?v=21' in page.text
     assert '/studio/assets/dispatcher.js?v=light-polish-20261105' in page.text
-    assert '/studio/assets/growth-live.js?v=13' in page.text
+    assert '/studio/assets/growth-live.js?v=14' in page.text
     # A video is a creation format, not a standalone main-menu section.
     nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
     assert 'Простое видео' not in nav
@@ -1172,8 +1172,8 @@ def test_campaign_finish_post_company_auth_and_origin(live, monkeypatch, tmp_pat
     assert list(db.scalars(select(Decision))) == []
 
 
-def test_owner_home_reserves_space_for_the_transparent_command_dock():
-    """The dock keeps floating surfaces while cards stay outside its bounds."""
+def test_owner_home_scrolls_behind_floating_command_dock():
+    """Conversation fills the viewport; measured dock padding protects last reply."""
     from app.api.growth_v4 import ASSETS
     css = (ASSETS / "growth-live.css").read_text(encoding="utf-8")
     js = (ASSETS / "growth-live.js").read_text(encoding="utf-8")
@@ -1181,13 +1181,14 @@ def test_owner_home_reserves_space_for_the_transparent_command_dock():
     end = css.index("/* New Topic:", start)
     rules = css[start:end]
     dock = rules.split(".dp-home.has-feed .command-dock{", 1)[1].split("}", 1)[0]
-    assert "position:relative;" in dock
-    assert "position:absolute;" not in dock
-    assert "padding:8px 8px 20px 30px;" in rules
+    assert "position:absolute;" in dock
+    assert "position:relative;" not in dock
+    assert "calc(var(--sg-chat-dock-height, 150px) + 18px)" in rules
     assert "background:transparent!important;" in rules
     assert "border-bottom:0!important;" in rules
     assert "background:var(--bg);" in rules
-    assert "--v4-dock-height" not in js
+    assert "new ResizeObserver(syncDockSpace).observe(dock);" in js
+    assert "--sg-chat-dock-height" in js
 
 
 
@@ -1250,7 +1251,7 @@ def test_mobile_seo_dashboard_prioritizes_status_and_hides_process_details(live)
     assert 'Запусков пока нет.' in page.text
     assert 'Подключить SEO-завод' in page.text
     assert 'после отдельного серверного выпуска' not in page.text
-    assert '/studio/assets/growth-servgo-air.css?v=11' in page.text
+    assert '/studio/assets/growth-servgo-air.css?v=12' in page.text
 
 
 def test_notification_bell_is_real_svg_centered_on_every_v4_screen(live):
@@ -1374,3 +1375,25 @@ def test_new_content_task_descriptions_are_russian_and_seo_specific(live):
     assert "SEO article" not in package.description
     assert seo.description == "Создание SEO-статьи по контент-плану."
     assert seo.title == seo_title
+
+
+def test_owner_home_chat_canvas_overrides_later_air_surface_styles():
+    """Later ServGo Air CSS must not recolor the approved Growth chat surface."""
+    from app.api.growth_v4 import ASSETS
+    css = (ASSETS / "growth-servgo-air.css").read_text(encoding="utf-8")
+    marker = "/* Growth home canvas: conversation is the page"
+    assert css.count(marker) == 1
+    guard = css.split(marker, 1)[1]
+    # The regression was caused by preceding soft/gray composer rules;
+    # the final scoped rules must win without changing Create or other pages.
+    assert css.index('background:color-mix(in srgb,var(--s-surface-2) 92%,transparent);') < css.index(marker)
+    assert 'body.home-page[data-growth-design="v4"] .dp-home .command-bar {' in guard
+    assert 'background:var(--s-bg)!important;' in guard
+    assert 'body.home-page[data-growth-design="v4"] .dp-home .dp-feed,' in guard
+    assert 'body.home-page[data-growth-design="v4"] .dp-home .dp-msg.bot {' in guard
+    assert 'background:transparent!important;' in guard
+    assert '-webkit-backdrop-filter:none!important;' in guard
+    assert 'border-color:var(--s-accent)!important;' in guard
+    assert (ASSETS.parent / "growth_v4.py").read_text(encoding="utf-8").count(
+        "growth-servgo-air.css?v=12"
+    ) == 1
