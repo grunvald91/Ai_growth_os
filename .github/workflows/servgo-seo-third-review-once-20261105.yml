@@ -1,0 +1,66 @@
+name: ServGo third article independent critic recovery (one time)
+on:
+  push:
+    branches: [ops/servgo-seo-3-manual-action-20261105]
+    paths: [.github/workflows/servgo-seo-third-review-once-20261105.yml]
+permissions:
+  contents: read
+concurrency:
+  group: servgo-seo-third-critic-recovery-once
+  cancel-in-progress: false
+jobs:
+  review:
+    if: github.repository == 'grunvald91/Ai_growth_os'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inspect and compile bounded independent critic procedure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile deploy/ops/20261105/seo_recritic_completed.py
+      - name: Verify exact production release and server identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is missing"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/server-keys
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/server-key
+            if ssh-keygen -lf /tmp/server-key 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/server-keys
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Pinned server identity mismatch"; exit 1; }
+          image="$(sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'docker inspect --format "{{.Config.Image}}" ai-growth-os-api-1')"
+          case "$image" in
+            *servgo-growth:87f26c19e4d0*) echo "Production version verified" ;;
+            *) echo "::error::Production image does not match vetted release"; exit 1 ;;
+          esac
+      - name: Review only the finished unreviewed AI-business article and publish if clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            -o ConnectTimeout=20 "root@$HOST" \
+            'docker exec -i ai-growth-os-api-1 python -u -' \
+            < deploy/ops/20261105/seo_recritic_completed.py | tee /tmp/seo-third-critic.log
+          grep -q '"published": true' /tmp/seo-third-critic.log
+      - name: Preserve result
+        if: always()
+        shell: bash
+        run: |
+          if [ -f /tmp/seo-third-critic.log ]; then
+            grep -E '^SEO_THIRD_(CRITIC|PUBLISH)' /tmp/seo-third-critic.log >> "$GITHUB_STEP_SUMMARY" || true
+          fi
