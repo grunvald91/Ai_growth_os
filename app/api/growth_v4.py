@@ -203,7 +203,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             </div>
             <p class="dp-voice-note" id="dp-voice-note" role="status" aria-live="polite" hidden></p>
             <div class="command-topicbar">
-              <button class="dp-new" id="dp-new" type="button">＋ Новая тема</button>
+              <button class="dp-new" id="dp-new" type="button">{icon("plus")}<span>Новая тема</span></button>
             </div>
             <button type="button" class="sg-create-history-open" id="sg-create-history-open"
               aria-label="Развернуть историю сообщений" aria-controls="dp-feed" aria-expanded="false">
@@ -326,7 +326,7 @@ def render_v4(page, request, pid, switch):
                    inner.outer(inner.find(ident='dp-voice-note'))+
                    '<div class="command-topicbar">'
                    '<button class="dp-new" id="dp-new" type="button" aria-label="Новая тема" title="Начать новый диалог">'
-                   '<span aria-hidden="true">＋</span><span class="dp-new-label">Новая тема</span></button>'
+                   f'{icon("plus")}<span class="dp-new-label">Новая тема</span></button>'
                    '</div>'+form+
                    '<div class="command-tools">'
                    '<div class="command-hints" id="dp-chips" aria-label="Подсказки"></div>'
@@ -464,10 +464,10 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>admin-parity-20261105', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>light-polish-20261105', extras)
     if pid and current == base+'/create':
         extras += '<script src="/studio/assets/create-studio.js?v=history-20261104"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=admin-parity-20261105"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=light-polish-20261105"></script>'
     if pid and (home or current == base+'/create'):
         # The glow measures the existing recorder stream; load before dispatcher.js.
         extras = '<script src="/studio/assets/voice-glow.js?v=2"></script>' + extras
@@ -486,14 +486,15 @@ def render_v4(page, request, pid, switch):
         '<meta name="apple-mobile-web-app-title" content="ServGo">'
         '<link rel="manifest" href="/manifest.webmanifest">'
         '<link rel="apple-touch-icon" href="/apple-touch-icon.png">'
-        '<link rel="stylesheet" href="/studio/assets/growth-daily.css?v=3">'
+        '<link rel="stylesheet" href="/studio/assets/growth-daily.css?v=4">'
         '</head>'
     ), 1)
     if home:
         drawer = (
             '<button id="sgDailyHandle" class="sg-daily-handle" type="button" '
             'aria-label="Сводка на сегодня" aria-controls="sgDailyDrawer" aria-expanded="false">'
-            + icon('calendar') + '<span>Сегодня</span></button>'
+            '<span class="sg-daily-tab" aria-hidden="true">'
+            + icon('calendar') + '<span>Сегодня</span></span></button>'
             '<div id="sgDailyBackdrop" class="sg-daily-backdrop" aria-hidden="true"></div>'
             '<aside id="sgDailyDrawer" class="sg-daily-drawer" role="dialog" '
             'aria-modal="true" aria-label="Ежедневная сводка" aria-hidden="true" inert tabindex="-1">'
@@ -508,11 +509,11 @@ def render_v4(page, request, pid, switch):
     if pid:
         extras += '<script src="/studio/assets/growth-daily.js?v=2"></script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=19">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=20">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
-        '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=9">'
+        '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=10">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
         '</head>'
     ))
-    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=11"></script></body>')
+    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=12"></script></body>')
     return template

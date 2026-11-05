@@ -493,8 +493,8 @@ def main():
                 assert geometry['topicParent']=='command-topicbar', geometry
                 assert geometry['topicBottom']<=geometry['composerTop']+2, geometry
                 assert geometry['toolbarTop']>=geometry['composerBottom']-2, geometry
-                # Regression for the owner-approved overlay: transparent
-                # dock over the scrolling feed, with the final card accessible.
+                # The transparent dock keeps its place below the scrolling feed;
+                # neither a short nor a long history may paint under the controls.
                 page.evaluate("""() => {
                   const feed=document.querySelector('#dp-feed');
                   for(let i=0;i<14;i++){
@@ -505,8 +505,8 @@ def main():
                 }""")
                 page.wait_for_function("""() => {
                   const dock=document.querySelector('.command-dock');
-                  return parseFloat(getComputedStyle(document.querySelector('#dp-feed')).paddingBottom)
-                    >=dock.getBoundingClientRect().height+12;
+                  return document.querySelector('#dp-feed').getBoundingClientRect().bottom
+                    <=dock.getBoundingClientRect().top+1;
                 }""")
                 overlay=page.evaluate("""() => {
                   const feed=document.querySelector('#dp-feed'),
@@ -539,12 +539,12 @@ def main():
                 assert overlay['toolsBg']=='rgba(0, 0, 0, 0)',overlay
                 assert overlay['hintsBg']=='rgba(0, 0, 0, 0)',overlay
                 assert overlay['composerBg']!='rgba(0, 0, 0, 0)',overlay
-                assert overlay['dockPosition']=='absolute',overlay
+                assert overlay['dockPosition']=='relative',overlay
                 assert overlay['headerBorder']=='0px',overlay
                 assert overlay['mainBg']==overlay['workspaceBg'],overlay
-                assert overlay['feedBottom']>=overlay['dockBottom']-12,overlay
-                assert overlay['dockTop']<overlay['feedBottom']-45,overlay
-                assert overlay['reserved']>=overlay['dockHeight']+12,overlay
+                assert overlay['feedBottom']<=overlay['dockTop']+1,overlay
+                assert overlay['dockBottom']>overlay['dockTop'],overlay
+                assert overlay['reserved']>=16,overlay
                 assert overlay['feedScrollHeight']>overlay['feedClientHeight'],overlay
                 assert overlay['lastBottom']<=overlay['dockTop']+3,overlay
                 assert overlay['composerWidth']>=overlay['homeWidth']-4,overlay
@@ -553,7 +553,7 @@ def main():
                 assert overlay['screenOverflow']<=2,overlay
                 page.screenshot(path=str(OUT/'transparent-floating-composer-390.png'),animations='disabled')
                 result['checks'].append({'page':'transparent-floating-composer-390',
-                    'dock_transparent':True,'feed_scrolls_behind_dock':True,
+                    'dock_transparent':True,'feed_ends_above_dock':True,
                     'latest_message_readable':True,'no_header_strip':True,
                     'placeholder_integrated':True})
                 page.route('**/studio/products/*/dispatch/new',

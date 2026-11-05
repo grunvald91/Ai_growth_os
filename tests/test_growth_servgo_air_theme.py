@@ -24,7 +24,7 @@ def test_growth_v4_loads_canonical_css_and_theme_script():
         "/studio/team?design=classic",
     )
     assert "/studio/assets/servgo-air-tokens.css?v=1" in html
-    assert "/studio/assets/growth-servgo-air.css?v=9" in html
+    assert "/studio/assets/growth-servgo-air.css?v=10" in html
     assert "/studio/assets/servgo-air-theme.js?v=1" in html
     assert 'action="/studio/team/apply"' in html
     assert 'name="role"' in html
@@ -140,8 +140,8 @@ def test_growth_profile_adapter_is_after_legacy_studio_css_in_html_head():
     result = render_v4(legacy, request, None, "/studio?design=classic")
     assert "Материалы · 1" in result
     assert "ServGo: данные заведения" in result
-    assert result.index("/studio/assets/studio.css?v=14") < result.index("/studio/assets/growth-servgo-air.css?v=9")
-    assert result.count("/studio/assets/growth-servgo-air.css?v=9") == 1
+    assert result.index("/studio/assets/studio.css?v=14") < result.index("/studio/assets/growth-servgo-air.css?v=10")
+    assert result.count("/studio/assets/growth-servgo-air.css?v=10") == 1
 
 
 
@@ -230,5 +230,5 @@ def test_dispatcher_review_cards_keep_video_subjects_and_material_status_separat
         '-webkit-line-clamp: 5',
     ):
         assert fragment in adapter, fragment
-    assert 'growth-servgo-air.css?v=9' in v4
+    assert 'growth-servgo-air.css?v=10' in v4
     assert 'history-20261104' in v4
