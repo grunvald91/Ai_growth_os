@@ -285,14 +285,19 @@ def _company(db: Session, product: Product, products_root: Path, privacy: Privac
 
 
 async def plan_seeds(db: Session, llm: LLMService, privacy: PrivacyGateway, product_id: UUID, *,
-                     products_root: Path, model: str, focus: str | None = None) -> list[str]:
+                     products_root: Path, model: str, focus: str | None = None,
+                     factory_task_id: UUID | None = None) -> list[str]:
     product = db.get(Product, product_id)
     if product is None:
         raise LookupError("Product not found")
     company = _company(db, product, products_root, privacy)
     if not company["profile"].strip() and not company["industry"]:
         raise PlanError("The company profile is empty; fill in the business industry before planning queries")
-    company["local_market"] = snapshot_for_plan(db, product_id)
+    # Never reuse a competitor snapshot from an unrelated/earlier SEO run.
+    company["local_market"] = (
+        snapshot_for_plan(db, product_id, factory_task_id)
+        if factory_task_id is not None else None
+    )
     payload = {"company": company, **({"owner_focus": privacy.sanitize_text(focus)} if focus else {})}
     seeds = await _ask(llm, model=model, prompt=SEED_PROMPT, payload=payload, schema=SeedList,
                        role="semantic_researcher", validate=lambda _: None)
