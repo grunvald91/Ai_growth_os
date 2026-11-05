@@ -99,14 +99,52 @@ CONTENT = json.loads(r'''{"/blog/zapis-k-psihologu":{"new_slug":"/blog/kak-psiho
 
 
 def _query_in_collected_core(db, product_id, query: str):
-    core = latest_semantic_core(db, product_id)
-    if core is None:
-        raise ValueError("No collected semantic core; cannot assert query provenance")
-    matches = [(c, q) for c in core.clusters for q in c.queries
-               if normalize(q) == normalize(query)]
-    if len(matches) != 1:
-        raise ValueError("New primary query must match one current collected cluster")
-    return matches[0][0]
+    """Verify the query against a REAL saved search core, not only the latest one.
+
+    Later SEO runs legitimately replace the current core with a different niche
+    or search scope. Previously collected queries remain verifiable evidence
+    for a one-time correction of an already published article. Every checked
+    historical core must belong to this company, retain a source-engine record,
+    and contain the query in exactly one cluster.
+    """
+    def verified_cluster(core):
+        if core is None:
+            return None
+        matching = [c for c in core.clusters if any(
+            normalize(q) == normalize(query) for q in c.queries)]
+        if not matching:
+            return None
+        if len(matching) != 1:
+            raise ValueError("Search query belongs to multiple collected clusters")
+        cluster = matching[0]
+        if not any(source.engine in cluster.engines and source.queries_found > 0
+                   for source in core.sources):
+            raise ValueError("Collected query has no recorded search source")
+        return cluster
+
+    current = verified_cluster(latest_semantic_core(db, product_id))
+    if current is not None:
+        return current
+
+    # Only the same product's durable collected semantic cores, newest first.
+    # Never substitute AI guesses, manually written queries, or another tenant's
+    # semantic core. Invalid/obsolete serialized records do not count.
+    from app.seo.contracts import SemanticCore
+    if db is None:
+        raise ValueError("New primary query must match one saved collected cluster")
+    previous = db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id,
+        Artifact.kind == "semantic_core",
+    ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(150))
+    for row in previous:
+        try:
+            core = SemanticCore.model_validate_json(row.content)
+        except (TypeError, ValueError):
+            continue
+        match = verified_cluster(core)
+        if match is not None:
+            return match
+    raise ValueError("New primary query must match one saved collected cluster")
 
 
 def candidate_for(original: ArticleArtifact, slug: str, cluster) -> ArticleArtifact:
