@@ -163,9 +163,16 @@ def market_research(product_id: UUID, db=Depends(get_db)):
             bundle = ResearchSourceBundle.model_validate_json(entry.content)
         except (ValueError, TypeError):
             continue
+        links = ''.join(
+            '<li><a href="' + escape(str(source.url), quote=True)
+            + '" target="_blank" rel="noopener noreferrer">'
+            + escape(source.title) + '</a> · ' + escape(source.platform) + '</li>'
+            for source in bundle.sources[:15]
+        )
         source_cards.append(
-            '<li><strong>' + escape(bundle.label) + '</strong> · '
-            + str(len(bundle.sources)) + ' организаций и источников</li>'
+            '<li><details><summary>' + escape(bundle.label) + ' · '
+            + str(len(bundle.sources)) + ' источников</summary><ul>'
+            + links + '</ul></details></li>'
         )
     saved_html = (
         '<ul>' + ''.join(source_cards) + '</ul>' if source_cards
