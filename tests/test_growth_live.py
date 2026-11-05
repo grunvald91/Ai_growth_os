@@ -270,9 +270,9 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=20' in page.text
+    assert '/studio/assets/growth-live.css?v=21' in page.text
     assert '/studio/assets/dispatcher.js?v=light-polish-20261105' in page.text
-    assert '/studio/assets/growth-live.js?v=13' in page.text
+    assert '/studio/assets/growth-live.js?v=14' in page.text
     # A video is a creation format, not a standalone main-menu section.
     nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
     assert 'Простое видео' not in nav
@@ -1251,7 +1251,7 @@ def test_mobile_seo_dashboard_prioritizes_status_and_hides_process_details(live)
     assert 'Запусков пока нет.' in page.text
     assert 'Подключить SEO-завод' in page.text
     assert 'после отдельного серверного выпуска' not in page.text
-    assert '/studio/assets/growth-servgo-air.css?v=11' in page.text
+    assert '/studio/assets/growth-servgo-air.css?v=12' in page.text
 
 
 def test_notification_bell_is_real_svg_centered_on_every_v4_screen(live):
