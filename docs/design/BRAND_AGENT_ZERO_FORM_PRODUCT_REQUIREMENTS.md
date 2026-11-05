@@ -1,7 +1,7 @@
 # ServGo Brand Agent — фирменный стиль без форм
-## Замена ручной настройки на агента с одним полем ввода · PRD v1
+## Замена ручной настройки на агента с одним полем ввода · PRD v2 (Browser-first)
 
-**Дата:** 2026-11-04
+**Дата:** 2026-11-05
 **Статус:** дизайн-проект; код нового агента ещё не реализован.
 **Основа:** уже внедрённые Brand Kit A–E, PR #264, #266, #267.
 
@@ -48,21 +48,20 @@
 6. Сохранить новую draft-версию в действующем Brand Kit и отрендерить три фирменных примера через имеющийся deterministic renderer **без платной генерации картинок**.
 7. Показать владельцу крупные визуальные превью и компактное описание — не HEX-таблицу. При необходимости задать максимум один осмысленный вопрос за ход диалога.
 8. На фразу «сделай ярче/логотип левее/без красного» создать изменение draft, отрендерить ещё раз локально, сохранить revision и историю.
-9. Только по явной кнопке «Применить» и проверке версии/прав вызвать existing approve_version. Закреплять Brand Kit за новыми Stories. Публикация ничего не запускает.
+9. Только по явной кнопке «Применить» и проверке версии/прав вызвать existing approve_version. Закреплять Brand Kit за новыми Stories. Публикация ничего### 5. Архитектура: полноценный Browser Inspector, без ограничивающих компромиссов
 
-### 5. Архитектура: использовать существующее
+**Основной способ анализа сайта — реальный Chromium под Playwright с оригинальным Dembrandt (Node.js/TypeScript).** Это не внешний fallback: Browser Inspector — штатный отдельный сервис ServGo, развёрнутый на собственном хосте с подходящей RAM. Если нынешний VPS слаб, нужно расширить/заменить инфраструктуру, а не отказываться от browser-first извлечения.
 
-**Не писать второго большого Company Intake и второго STT:**
-- Веб-сайты: app/intake/sources.py:PublicWebsiteFetcher (проверка DNS/IP/redirect для SSRF). Дополнить безопасным извлечением CSS/logo/fonts и изображений.
-- PDF/OCR: app/intake/file_extract.py и parse_file_async, а для визуальных элементов отдельный рендер PDF-страниц/embedded-image extraction. OCR сам по себе не определяет стиль.
-- Vision: проверенный мультимодальный паттерн ClaudeHubChat из app/content/whiteboard/adapters.py. Подключить структурированное извлечение с собственным контрактом для цветов, fonts, logo-candidates, visual_style, layouts, evidence. Не путать vision analysis с платной image generation.
-- Voice: уже существующие POST /studio/voice/dictate и MediaRecorder/VoiceGlow. Повторно использовать их логику и авторизацию, не создавать новый STT, не сохранять аудио без необходимости.
-- Сохранение: app/brand_kit/service.py:store_asset/save_draft/approve_version, схемы BrandStyle, версии BrandVersion, официальный deterministic renderer из app/brand_kit/renderer.py.
-- Уровень доступа: product_id, авторизованный SSO-владелец или делегированный approver. Защищённые URL к ресурсам, multipart limits, file type validation.
+- Browser Inspector: services/brand-inspector (Node.js, Playwright, Chromium, Dembrandt MIT) исследует JavaScript-загруженные страницы, DOM computed styles, логотипы, web fonts, цвета, поверхности, тени, композиции, desktop/mobile/dark, захватывает оригинальные файлы и screenshots с источниками.
+- Document Visual Analyzer: существующие pypdf/Pillow/Poppler/OCR и новая обработка embedded images/vector из брендбука, PDF и изображения. Для неочевидного смысла используем существующий удалённый vision API, не переносим браузер в cloud.
+- Agent Orchestrator: Python/FastAPI, PostgreSQL, durable jobs, файловые артефакты компании, строгие права, idempotency, progress.
+- Brand Intelligence: подтверждаемые источники и confidence per field, структурированный BrandStyle v2 (совместимый с утверждёнными v1), разрешённые шрифты с кириллицей, проверенные оригинальные логотипы, дополнительные параметры композиции.
+- Design Engine v2: расширяем существующий локальный renderer до 1080x1920, свободнее выбираем layouts, поправки по тексту/голосу без повторной платной генерации.
+- Studio: один диалог снизу с URL/PDF/файлами/голосом и тремя превью; прежняя форма скрыта в «Расширенные настройки». Возвращаем owner-approved версии через существующее хранилище.
 
-Новые компоненты (имена проектные): app/brand_kit/agent/contracts.py, source_collector.py, vision.py, orchestrator.py, chat_service.py; API app/api/brand_agent.py; небольшой frontend JS+CSS для composer, attachment-preview и сообщений; таблицы brand_agent_sessions/messages/sources/jobs (или аналогичная персистентная модель).
+**Инфраструктура:** отдельный browser-worker контейнер и document-worker с контролем прав/ресурсов, API, PostgreSQL и остальные работающие сервисы ServGo. Браузер запускается с sandbox и отдельным пользователем, с сетевой защитой от SSRF, включая перенаправления и подресурсы. Никаких открытых для интернета управляющих портов. Стартовый проектный ориентир — 4 vCPU/8 GiB RAM, а при измеренной необходимости 16 GiB или более; это **не подтверждённый порог**, конкретное sizing только после benchmark на реальном стеке. Лимиты параллельности — управление надёжностью, не урезание функций.
 
-Все дорогие и длительные операции выполняются асинхронно воркером/очередью, не в HTTP request и не в памяти процесса. Идемпотентность, статус running/failed/ready, сохранение частичных источников, явное восстановление без повторного списания.
+**Подробная архитектура, структура новых сервисов, задачи, безопасность и тесты:** [BRAND_AGENT_FULL_BROWSER_ARCHITECTURE.md](BRAND_AGENT_FULL_BROWSER_ARCHITECTURE.md).
 
 ### 6. Контракт API (проект, ещё не создан)
 
@@ -86,15 +85,15 @@
 - Нельзя зависать с неподвижным UI без прогресса и возможности продолжить.
 - Старую многостраничную форму оставить только под «Расширенные настройки»/rollback, не показывать как основной путь.
 
-### 8. Этапы и definition of done
+### 8. Этапы и definition of done (актуализированы в полнофункциональной архитектуре)
 
-**BA-01 — UI:** единый чат снизу, прикрепление документов/изображений/сайта, диктовка, история, превью, компактная мобильная верстка; ручные настройки в скрытой секции.
+**BA-01 — Infra + Browser Inspector:** собственный Node.js/Playwright/Chromium/Dembrandt на измеренно достаточном сервере, sandbox и контроль SSRF; затем UI:** единый чат снизу, прикрепление документов/изображений/сайта, диктовка, история, превью, компактная мобильная верстка; ручные настройки в скрытой секции.
 
-**BA-02 — Durable collection:** company scoped sessions/sources/jobs, безопасное извлечение PDF и website, очередь и прогресс; тесты tenant, лимитов, SSRF, отмены и повторов.
+**BA-02 — Durable collection и browser-based extraction:** company scoped sessions/sources/jobs, безопасное извлечение PDF и website, очередь и прогресс; тесты tenant, лимитов, SSRF, отмены и повторов.
 
-**BA-03 — Visual agent:** мультимодальный разбор и структурная валидируемая extraction; provenance per field; тестовые брендбуки и разные типы картинок; проверка «не подделывать оригинал».
+**BA-03 — PDF, изображения и Visual agent:** мультимодальный разбор и структурная валидируемая extraction; provenance per field; тестовые брендбуки и разные типы картинок; проверка «не подделывать оригинал».
 
-**BA-04 — Draft + chat correction:** автосоздание BrandStyle draft, трёх локальных превью, корректировки по тексту/голосу, no extra image API, версия/аудит.
+**BA-04 — Design Engine v2, Draft + chat correction:** автосоздание BrandStyle draft, трёх локальных превью, корректировки по тексту/голосу, no extra image API, версия/аудит.
 
 **BA-05 — Approval + rollout:** одна явная кнопка утверждения, E2E URL-only/PDF-only/image-only/mixed/voice, Android и iPhone, светлая/тёмная тема, canary компании и feature flag, rollback.
 
