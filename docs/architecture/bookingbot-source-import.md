@@ -21,3 +21,20 @@ Do not change booking_bot main or production in this source-import task. No serv
 Production-only source capture: https://github.com/grunvald91/booking_bot/actions/runs/42039217502
 
 AST and live-service check: https://github.com/grunvald91/booking_bot/actions/runs/42037871076
+
+## CI/CD boundary after the source import
+
+- The root `.github/workflows/ci.yml` remains the required GitHub status `CI`. Its monorepo scope check skips expensive Growth tests when a change affects only `services/booking_bot/` or the explicitly listed import/CI bookkeeping files. Growth changes still run the original complete test suite.
+- `.github/workflows/bookingbot-module-ci.yml` runs BookingBot Python syntax/regression checks and the React/Vite frontend build for booking code changes. The first imported source tree deliberately preserves historical whitespace; later edits are whitespace-checked against the existing BookingBot tree.
+- `.github/workflows/deploy-growth.yml` has an independent impact job **outside** the production environment. A Booking-only or import-only commit does not start the Growth deployment job. If a newer Booking-only commit supersedes the latest tested Growth commit, the freshness gate still allows the older Growth code to deploy, preventing a missed release.
+- The original `booking_bot` repository remains **the BookingBot production deployment source** until an explicit, separately tested cutover. GitHub workflow files inside `services/booking_bot/.github/workflows/` are preserved source history, not active monorepo workflows. **Do not assume a code change in this directory deploys BookingBot automatically yet.** No BookingBot production deploy keys, databases or servers are switched in this merge.
+- An operator must verify the server’s SSH credentials/target path, reconcile the existing six source differences and the active promo service, and stage an actual BookingBot release from the monorepo before enabling an automatic booking deployment. There must not be two independent automatic deployment writers to `/opt/booking_bot`.
+- Tenant isolation between BookingBot `business_id` and Growth `product_id` remains enforced by separate existing services and the canonical SaaS ADR. Sharing a Git repository does not merge databases or weaken access controls.
+
+### Verification
+
+- Main-vs-production source audit: https://github.com/grunvald91/booking_bot/actions/runs/42034462917
+- Classification / semantic equivalence: https://github.com/grunvald91/booking_bot/actions/runs/42037871076
+- Verified subtree import: https://github.com/grunvald91/Ai_growth_os/actions/runs/42038408510
+- BookingBot scoped tests: https://github.com/grunvald91/Ai_growth_os/actions/runs/42057981272
+- CI and release routing: `scripts/ci/monorepo_scope.py` (tested source classifier).
