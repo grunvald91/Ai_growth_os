@@ -41,7 +41,10 @@ def test_switch_both_ways_preserves_query_and_real_forms(live):
     new = client.get(base+'/create?design=v4')
     assert new.status_code == 200
     assert 'data-growth-design="v4"' in new.text
-    assert 'Старый дизайн' in new.text
+    assert 'Старый дизайн' not in new.text
+    assert 'id="openSearch"' not in new.text
+    assert 'id="themeTop"' not in new.text
+    assert 'data-sg-theme' in new.text
     assert client.cookies['growth_design'] == 'v4'
     assert 'id="sg-create-settings"' in new.text
     assert 'id="sg-create-audience"' in new.text
@@ -69,8 +72,8 @@ def test_daily_drawer_and_compact_navigation_use_v4_real_routes(live):
     assert 'id="sgDailyDrawer"' in page.text
     assert 'id="sgDailyHandle"' in page.text
     assert 'id="sgDailyBackdrop"' in page.text
-    assert '/studio/assets/growth-daily.js?v=1' in page.text
-    assert '/studio/assets/growth-daily.css?v=2' in page.text
+    assert '/studio/assets/growth-daily.js?v=2' in page.text
+    assert '/studio/assets/growth-daily.css?v=3' in page.text
     assert 'id="sgOrgMenu" hidden' in page.text
     nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
     assert nav.index(">Календарь</span>") < nav.index(">Ещё</span>")
@@ -103,7 +106,7 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="sg-create-brief"' in page.text
     assert 'id="sg-create-form"' not in page.text
     assert '/studio/assets/create-studio.js?v=history-20261104' in page.text
-    assert '/studio/assets/dispatcher.js?v=voice-glow-audio-20261102' in page.text
+    assert '/studio/assets/dispatcher.js?v=admin-parity-20261105' in page.text
     assert page.text.count('id="dp-input"') == 1
     assert page.text.index('Что создаём?') < page.text.index('id="dp-input"')
     js = client.get('/studio/assets/dispatcher.js')
@@ -170,9 +173,9 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=18' in page.text
-    assert '/studio/assets/dispatcher.js?v=voice-glow-audio-20261102' in page.text
-    assert '/studio/assets/growth-live.js?v=10' in page.text
+    assert '/studio/assets/growth-live.css?v=19' in page.text
+    assert '/studio/assets/dispatcher.js?v=admin-parity-20261105' in page.text
+    assert '/studio/assets/growth-live.js?v=11' in page.text
     # A video is a creation format, not a standalone main-menu section.
     nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
     assert 'Простое видео' not in nav
@@ -1085,7 +1088,7 @@ def test_approved_growth_home_has_floating_transparent_overlay():
     assert "background:transparent!important;" in rules
     assert "pointer-events:none;" in rules
     assert "border-bottom:0!important;" in rules
-    assert "background:var(--card);" in rules
+    assert "background:var(--bg);" in rules
     assert "ResizeObserver(measureDock)" in js
     assert "--v4-dock-height" in js
     assert "position:relative;\n  left:auto;\n  right:auto;" not in rules
@@ -1151,7 +1154,7 @@ def test_mobile_seo_dashboard_prioritizes_status_and_hides_process_details(live)
     assert 'Запусков пока нет.' in page.text
     assert 'Подключить SEO-завод' in page.text
     assert 'после отдельного серверного выпуска' not in page.text
-    assert '/studio/assets/growth-servgo-air.css?v=8' in page.text
+    assert '/studio/assets/growth-servgo-air.css?v=9' in page.text
 
 
 def test_notification_bell_is_real_svg_centered_on_every_v4_screen(live):
