@@ -1,10 +1,15 @@
 """Safety boundaries for the owner-requested one-off SEO release."""
-from dataclasses import replace
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
 
 from app.seo import servgo_three_article_release as release
+
+
+@dataclass
+class _Prefs:
+    publications_per_day: int = 3
 
 
 def test_release_refuses_global_autorun(monkeypatch):
@@ -21,7 +26,7 @@ def test_release_refuses_global_autorun(monkeypatch):
 def test_release_does_not_modify_global_or_other_tenant_publication_quota(monkeypatch):
     from app.seo import publishing
     saved = publishing.editorial_preferences
-    original = SimpleNamespace(publications_per_day=3)
+    original = _Prefs()
     observed = []
 
     def preferences(db, product_id, **kwargs):
@@ -45,7 +50,7 @@ def test_release_does_not_modify_global_or_other_tenant_publication_quota(monkey
 
 def test_release_restores_quota_even_if_publisher_raises(monkeypatch):
     from app.seo import publishing
-    original = SimpleNamespace(publications_per_day=3)
+    original = _Prefs()
 
     def preferences(db, product_id, **kwargs):
         return original
