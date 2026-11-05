@@ -36,6 +36,17 @@ def validate_report(draft: SynthesisDraft, evidence, request, routing) -> Report
         if candidate.view == "pricing" and not all(row.source_type == "pricing" for row in rows):
             rejected += 1
             continue
+        # Source-type invariants must be enforced in code, not just in the LLM
+        # prompt. A Yandex directory listing is not a customer review and
+        # does not establish a competitor's weaknesses or service problems.
+        if candidate.view == "reviews" and not all(row.source_type == "review" for row in rows):
+            rejected += 1
+            continue
+        if candidate.view == "weaknesses" and not any(
+            row.platform != "Яндекс Карты" for row in rows
+        ):
+            rejected += 1
+            continue
         # Never accept a novel numeric fact (price/rating/date/count) in model prose.
         supplied_numbers = {number for row in rows for number in re.findall(r"\d+(?:[.,]\d+)?", row.excerpt)}
         claimed_numbers = set(re.findall(r"\d+(?:[.,]\d+)?", candidate.statement))
