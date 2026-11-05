@@ -240,6 +240,20 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
     )
     search_progress = ('<details><summary>Поисковые источники</summary><ul>'
                        + search_progress + '</ul></details>') if search_progress else ''
+    local_status = row.get("local_market") or {}
+    local_labels = {
+        "collected": "собраны сведения об организациях",
+        "unavailable": "источник временно недоступен",
+        "skipped": "поиск пропущен: недостаточно сведений о компании",
+    }
+    local_state = local_status.get("status")
+    local_text = local_labels.get(local_state, "")
+    if local_status.get("reason"):
+        local_text += " · " + str(local_status["reason"])[:180]
+    local_progress = (
+        '<p>Яндекс Карты · локальное SEO: ' + html.escape(local_text) + '</p>'
+        if local_text else ""
+    )
     queued = (f'<p>Статей поставлено в очередь: <b>{row["articles_queued"]}</b></p>'
               if row["articles_queued"] is not None else
               '<p>Количество поставленных статей пока не подтверждено.</p>')
@@ -342,7 +356,7 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
         f'<div class="seo-run-head"><h3>{html.escape(row["title"])}</h3>'
         f'<span class="seo-run-status">{html.escape(row["status_label"])}</span></div>'
         f'<p>Последнее обновление: {html.escape(row["updated_at"] or "неизвестно")}</p>'
-        + stage + attempts + queued + error + search_progress
+        + stage + attempts + queued + error + search_progress + local_progress
         + '<details class="seo-run-details"><summary>Этапы и источники данных</summary>'
         + '<ul>'
         + state('Семантическое ядро', row['semantic_ready'])
