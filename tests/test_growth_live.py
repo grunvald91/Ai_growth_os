@@ -73,7 +73,7 @@ def test_daily_drawer_and_compact_navigation_use_v4_real_routes(live):
     assert 'id="sgDailyHandle"' in page.text
     assert 'id="sgDailyBackdrop"' in page.text
     assert '/studio/assets/growth-daily.js?v=2' in page.text
-    assert '/studio/assets/growth-daily.css?v=3' in page.text
+    assert '/studio/assets/growth-daily.css?v=4' in page.text
     assert 'id="sgOrgMenu" hidden' in page.text
     nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
     assert nav.index(">Календарь</span>") < nav.index(">Ещё</span>")
@@ -106,7 +106,7 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="sg-create-brief"' in page.text
     assert 'id="sg-create-form"' not in page.text
     assert '/studio/assets/create-studio.js?v=history-20261104' in page.text
-    assert '/studio/assets/dispatcher.js?v=admin-parity-20261105' in page.text
+    assert '/studio/assets/dispatcher.js?v=light-polish-20261105' in page.text
     assert page.text.count('id="dp-input"') == 1
     assert page.text.index('Что создаём?') < page.text.index('id="dp-input"')
     js = client.get('/studio/assets/dispatcher.js')
@@ -173,9 +173,9 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=19' in page.text
-    assert '/studio/assets/dispatcher.js?v=admin-parity-20261105' in page.text
-    assert '/studio/assets/growth-live.js?v=11' in page.text
+    assert '/studio/assets/growth-live.css?v=20' in page.text
+    assert '/studio/assets/dispatcher.js?v=light-polish-20261105' in page.text
+    assert '/studio/assets/growth-live.js?v=12' in page.text
     # A video is a creation format, not a standalone main-menu section.
     nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
     assert 'Простое видео' not in nav
@@ -1075,23 +1075,22 @@ def test_campaign_finish_post_company_auth_and_origin(live, monkeypatch, tmp_pat
     assert list(db.scalars(select(Decision))) == []
 
 
-def test_approved_growth_home_has_floating_transparent_overlay():
-    """Keep the approved #192 layout from regressing to flow/separate grey bands."""
+def test_owner_home_reserves_space_for_the_transparent_command_dock():
+    """The dock keeps floating surfaces while cards stay outside its bounds."""
     from app.api.growth_v4 import ASSETS
     css = (ASSETS / "growth-live.css").read_text(encoding="utf-8")
     js = (ASSETS / "growth-live.js").read_text(encoding="utf-8")
-    start = css.index("Approved home-screen geometry")
+    start = css.index("The conversation owns the space")
     end = css.index("/* New Topic:", start)
     rules = css[start:end]
-    assert "position:absolute;" in rules
-    assert "padding:4px 8px calc(var(--v4-dock-height,142px) + 16px) 4px;" in rules
+    dock = rules.split(".dp-home.has-feed .command-dock{", 1)[1].split("}", 1)[0]
+    assert "position:relative;" in dock
+    assert "position:absolute;" not in dock
+    assert "padding:8px 8px 20px 30px;" in rules
     assert "background:transparent!important;" in rules
-    assert "pointer-events:none;" in rules
     assert "border-bottom:0!important;" in rules
     assert "background:var(--bg);" in rules
-    assert "ResizeObserver(measureDock)" in js
-    assert "--v4-dock-height" in js
-    assert "position:relative;\n  left:auto;\n  right:auto;" not in rules
+    assert "--v4-dock-height" not in js
 
 
 
@@ -1154,7 +1153,7 @@ def test_mobile_seo_dashboard_prioritizes_status_and_hides_process_details(live)
     assert 'Запусков пока нет.' in page.text
     assert 'Подключить SEO-завод' in page.text
     assert 'после отдельного серверного выпуска' not in page.text
-    assert '/studio/assets/growth-servgo-air.css?v=9' in page.text
+    assert '/studio/assets/growth-servgo-air.css?v=10' in page.text
 
 
 def test_notification_bell_is_real_svg_centered_on_every_v4_screen(live):

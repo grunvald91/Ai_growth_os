@@ -11,6 +11,7 @@
   var newButton = document.getElementById('dp-new');
   var state = JSON.parse(document.getElementById('dp-state').textContent);
   var busy = false;
+  var hydrated = false;
 
   function el(tag, className, text) {
     var node = document.createElement(tag);
@@ -190,7 +191,12 @@
 
   // A ready material: kind and status on top, a short text, a link to the full view. Its buttons come as chips.
   function renderMaterial(block) {
-    var card = el('div', 'dp-material');
+    var productBase = api.replace(/\/dispatch\/?$/, '');
+    var videoPath = String(block.href || '').slice(productBase.length);
+    var isVideo = voiceHoldEnabled && String(block.href || '').indexOf(productBase) === 0 &&
+      /^\/whiteboard\/[0-9a-f-]{36}$/i.test(videoPath);
+    var card = el(isVideo ? 'a' : 'div', 'dp-material' + (isVideo ? ' dp-material--video' : ''));
+    if (isVideo) card.href = block.href;
     var top = el('div', 'dp-material-top');
     top.appendChild(el('span', 'dp-material-kind', voiceHoldEnabled ? friendlyKind(block.kind) : block.kind));
     var status = el('span', 'dp-material-status',
@@ -203,27 +209,25 @@
     if (voiceHoldEnabled && /^(Простое видео|Видео)$/.test(friendlyKind(block.kind)))
       title = legacyVideoTitle(title).replace(/^Видео:\s*/i, '');
     card.appendChild(el('strong', 'dp-material-title', title));
-    if (block.excerpt) card.appendChild(el('p', 'dp-material-text', block.excerpt));
+    if (block.excerpt && !(isVideo && block.excerpt === 'Видео готово к просмотру.'))
+      card.appendChild(el('p', 'dp-material-text', block.excerpt));
     // Use the existing protected file route only for a completed video's scoped
     // job URL. Never infer a thumbnail for an arbitrary material or another company.
-    var productBase = api.replace(/\/dispatch\/?$/, '');
-    var videoPath = String(block.href || '').slice(productBase.length);
-    var isVideo = voiceHoldEnabled && String(block.href || '').indexOf(productBase) === 0 &&
-      /^\/whiteboard\/[0-9a-f-]{36}$/i.test(videoPath);
     if (isVideo) {
-      var preview = el('a', 'dp-video-preview');
-      preview.href = block.href;
-      preview.setAttribute('aria-label', 'Посмотреть видео: ' + friendlyTitle(block.title));
+      card.setAttribute('aria-label', 'Посмотреть видео: ' + title);
+      var preview = el('span', 'dp-video-preview');
       var image = el('img', '');
       image.alt = ''; image.loading = 'lazy'; image.decoding = 'async';
-      image.addEventListener('error', function () { preview.remove(); });
+      image.addEventListener('error', function () {
+        preview.remove(); card.classList.add('dp-material--no-preview');
+      });
       image.src = block.href + '/files/video.png';
       var play = el('span', 'dp-video-play');
       play.setAttribute('aria-hidden','true'); play.appendChild(el('span', '', '▶'));
       preview.appendChild(image); preview.appendChild(play); card.appendChild(preview);
     }
-    var open = el('a', 'dp-link', isVideo ? 'Посмотреть видео' : 'Открыть полностью');
-    open.href = block.href;
+    var open = el(isVideo ? 'span' : 'a', 'dp-link', isVideo ? 'Посмотреть видео →' : 'Открыть полностью');
+    if (!isVideo) open.href = block.href;
     card.appendChild(open);
     return card;
   }
@@ -433,6 +437,12 @@
       return bubble;
     }
     var blocks = message.blocks || [];
+    var shortProgress = voiceHoldEnabled && blocks.some(function (block) {
+      return block.type === 'text' && /^Запустил (?:рисованное|простое) видео\. Оно появится в ленте, когда будет готово\.$/.test(block.text);
+    }) && blocks.some(function (block) {
+      return block.type === 'links' && block.items.some(function (item) { return item.label === 'Ход создания'; });
+    });
+    if (shortProgress) bubble.classList.add('dp-msg--progress');
     var materials = blocks.filter(function (block) { return block.type === 'material'; });
     function topic(text) {
       return friendlyTitle(text).replace(/^Готово:\s*/i, '')
@@ -445,7 +455,8 @@
         // warnings and any other text, including messages from saved conversations.
         var duplicate = voiceHoldEnabled && /^Готово:\s*/i.test(block.text) &&
           materials.some(function (item) { return topic(block.text) === topic(item.title); });
-        if (!duplicate) bubble.appendChild(el('p', 'dp-text', voiceHoldEnabled ?
+        var started = /^Запустил (?:рисованное|простое) видео\. Оно появится в ленте, когда будет готово\.$/.test(block.text);
+        if (!duplicate) bubble.appendChild(el('p', 'dp-text', shortProgress && started ? 'Видео создаётся' : voiceHoldEnabled ?
           String(block.text).replace(/^Запустил рисованное видео\./, 'Запустил простое видео.') : block.text));
       }
       else if (block.type === 'chips') bubble.appendChild(renderChips(block.items, sendChip));
@@ -474,6 +485,7 @@
       feed.replaceChild(node, existing);
       return;
     }
+    if (hydrated && voiceHoldEnabled) node.classList.add('dp-enter');
     // Requests and update polling can finish out of order. Keep the
     // conversation oldest -> newest, with the newest next to the composer.
     var following = Array.from(feed.children).find(function (child) {
@@ -1130,6 +1142,7 @@
   document.addEventListener('visibilitychange', function () { if (!document.hidden) checkUpdates(); });
 
   (state.messages || []).forEach(upsert);
+  hydrated = true;
   syncConversationLayout();
   renderHints();
   toBottom();

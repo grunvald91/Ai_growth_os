@@ -416,10 +416,8 @@ body[data-growth-design="v4"] .dp-home:not(.has-feed) .command-tools .dp-new{
 }
 
 
-/* Approved home-screen geometry (Growth #192): the conversation is the
-   scroll plane. The composer, New Topic and shortcuts FLOAT over it.
-   Only real controls paint backgrounds; no full-width dock/grey footer.
-   Keep the latest message readable using the measured dock-height padding. */
+/* The conversation owns the space above the transparent command dock.
+   Controls keep their floating surfaces, without covering cards or links. */
 body.home-page[data-growth-design="v4"],
 body.home-page[data-growth-design="v4"] .shell,
 body.home-page[data-growth-design="v4"] .workspace,
@@ -445,16 +443,13 @@ body.home-page:not(.home-empty) .dp-home.has-feed .dp-feed{
   max-height:none;
   box-sizing:border-box;
   margin:0;
-  padding:4px 8px calc(var(--v4-dock-height,142px) + 16px) 4px;
-  scroll-padding-bottom:calc(var(--v4-dock-height,142px) + 16px);
+  padding:8px 8px 20px 30px;
+  scroll-padding-block:12px;
   scrollbar-gutter:stable;
   overflow-y:auto;
 }
 body.home-page:not(.home-empty) .dp-home.has-feed .command-dock{
-  position:absolute;
-  left:0;
-  right:0;
-  bottom:0;
+  position:relative;
   flex:none;
   width:100%;
   z-index:auto; /* do not trap the portalled voice glow */
@@ -464,7 +459,7 @@ body.home-page:not(.home-empty) .dp-home.has-feed .command-dock{
   border:0!important;
   background:transparent!important;
   box-shadow:none!important;
-  pointer-events:none;
+  pointer-events:auto;
 }
 body.home-page:not(.home-empty) .dp-home.has-feed .command-tools{
   position:relative;

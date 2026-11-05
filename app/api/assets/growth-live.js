@@ -92,17 +92,8 @@ document.addEventListener('pointerdown',e=>{
   viewport?.addEventListener('resize',fitConversation);
   window.addEventListener('resize',fitConversation);
   fitConversation();
-  // A transparent, floating dock overlaps the feed. Reserve space *inside*
-  // the scroll pane so the last message can be scrolled above the controls,
-  // including after a keyboard resize, voice-mode switch or multi-line draft.
-  const dock=root.querySelector('.command-dock');
-  if(dock){
-   const measureDock=()=>root.style.setProperty(
-     '--v4-dock-height',Math.ceil(dock.getBoundingClientRect().height)+'px');
-   new ResizeObserver(measureDock).observe(dock);
-   viewport?.addEventListener('resize',measureDock);
-   requestAnimationFrame(measureDock);
-  }
+  // Flex layout reserves the dock's actual height, including multiline drafts
+  // and voice states. The feed cannot paint or receive taps under the controls.
   const feed=document.getElementById('dp-feed');
   let previousHeight=feed.clientHeight,previousContent=feed.scrollHeight;
   new ResizeObserver(()=>{
@@ -114,7 +105,12 @@ document.addEventListener('pointerdown',e=>{
   const hints=document.getElementById('dp-chips');
   function compactHints(){hints.querySelectorAll('.dp-chip').forEach(button=>{
    const label=button.getAttribute('aria-label')||button.textContent;
-   if(label.length>34){button.setAttribute('aria-label',label);button.title=label;const short=label.slice(0,31)+'…';if(button.textContent!==short)button.textContent=short}
+   let short=label.replace(/^Утвердить контент-план$/,'Утвердить план')
+     .replace(/^Составить контент-план$/,'Контент-план')
+     .replace(/^Проверить готовое \((\d+)\)$/,'На проверке · $1');
+   if(short.length>34)short=short.slice(0,31)+'…';
+   if(short!==label){button.setAttribute('aria-label',label);button.title=label;}
+   if(button.textContent!==short)button.textContent=short;
   })}
   new MutationObserver(compactHints).observe(hints,{childList:true,subtree:true});compactHints();
   const sync=()=>{const has=root.classList.contains('has-feed');body.classList.toggle('home-empty',!has)};

@@ -50,8 +50,13 @@ def main():
         base = f'/studio/products/{product.id}'
         for seq in range(1, 9):
             text = f'Сообщение {seq}. Команда готовит материалы для бизнеса.'
+            blocks = [{'type':'text','text':text}]
+            if seq == 8:
+                text = 'Запустил простое видео. Оно появится в ленте, когда будет готово.'
+                blocks = [{'type':'text','text':text}, {'type':'links','items':[
+                    {'label':'Ход создания','href':base+'/work'}]}]
             db.add(DispatcherMessage(conversation_id=conversation.id, product_id=product.id,
-                seq=seq, role='assistant', text=text, blocks=[{'type':'text','text':text}]))
+                seq=seq, role='assistant', text=text, blocks=blocks))
         subject = 'Что быстрее упадёт — тяжёлый молоток или лёгкое перо'
         video = base + '/whiteboard/' + str(uuid4())
         material = {'type':'material','artifact_id':str(uuid4()),'kind':'Рисованное видео',
@@ -96,10 +101,13 @@ def main():
                 assert page.locator('#dp-mic').count() == 0
                 assert page.locator('#vgKnob').count() == 1
                 assert page.locator('.dp-material').count() == 1
-                assert page.locator('.dp-material-top').inner_text() == 'Простое видео\nНа проверке'
+                assert page.locator('.dp-material-kind').inner_text() == 'Простое видео'
+                assert page.locator('.dp-material-status').inner_text() == 'На проверке'
                 assert page.locator('.dp-material-title').inner_text() == subject
                 assert page.get_by_text('Готово: Видео: '+subject+'.',exact=True).count() == 0
                 assert page.get_by_text('Открыть полностью',exact=True).count() == 0
+                expect(page.locator('.dp-msg--progress .dp-text')).to_have_text('Видео создаётся')
+                assert page.get_by_role('link',name='Ход создания',exact=True).get_attribute('href') == base+'/work'
                 expect(page.locator('.dp-video-preview img')).to_be_visible()
                 for mode in ('dark','light'):
                     page.evaluate('(mode)=>window.ServGoTheme.setPreference(mode)', mode)
@@ -112,8 +120,22 @@ def main():
                         expect(page.locator('body')).to_have_css('background-color', 'rgb(17, 26, 41)' if mode == 'dark' else 'rgb(255, 255, 255)')
                         if width <= 780:
                             expect(page.locator('#mobileNav')).to_have_css('background-color', 'rgb(17, 26, 41)' if mode == 'dark' else 'rgb(255, 255, 255)')
-                        expect(bar).to_have_css('background-color', bar.evaluate(
-                            '(el)=>{const n=document.createElement("i");n.style.color="var(--s-surface-2)";el.append(n);const c=getComputedStyle(n).color;n.remove();return c}'))
+                        assert bar.evaluate('(el)=>getComputedStyle(el).backgroundColor') != 'rgba(0, 0, 0, 0)'
+                        if width <= 780:
+                            expect(page.locator('.topbar .mobile-brand')).to_be_visible()
+                            expect(page.locator('#crumbTitle')).to_be_hidden()
+                        bounds = page.evaluate("""() => ({
+                          feed:document.querySelector('#dp-feed').getBoundingClientRect().bottom,
+                          dock:document.querySelector('.command-dock').getBoundingClientRect().top,
+                          tab:document.querySelector('.sg-daily-tab').getBoundingClientRect().right,
+                          card:document.querySelector('.dp-material').getBoundingClientRect().left
+                        })""")
+                        assert bounds['feed'] <= bounds['dock'] + 1, (mode,width,bounds)
+                        assert bounds['tab'] < bounds['card'], (mode,width,bounds)
+                        assert page.locator('.dp-material--video').get_attribute('href') == video
+                        assert page.locator('.dp-material--video a').count() == 0
+                        thumb=page.locator('.dp-video-preview').bounding_box()
+                        assert abs(thumb['width']/thumb['height']-9/16)<.01, thumb
                         assert page.locator('#dp-send').evaluate('(el)=>getComputedStyle(el).borderRadius') == '12px'
                         assert page.locator('#dp-new').bounding_box()['y'] < bar.bounding_box()['y']
                         assert page.locator('#dp-chips').bounding_box()['y'] >= bar.bounding_box()['y'] + bar.bounding_box()['height']
@@ -162,13 +184,21 @@ def main():
                 page.locator('#mobileNav [data-sg-theme]').click()
                 expect(page.locator('html')).to_have_attribute('data-theme','light')
                 page.keyboard.press('Escape')
+                # Failed thumbnails leave the material readable and actionable.
+                page.unroute('**/files/video.png')
+                page.route('**/files/video.png', lambda route: route.fulfill(status=404))
+                page.reload()
+                expect(page.locator('.dp-material--no-preview')).to_be_visible()
+                assert page.locator('.dp-video-preview').count() == 0
+                assert page.locator('.dp-material--video').get_attribute('href') == video
+                expect(page.locator('.dp-material-title')).to_have_text(subject)
                 for suffix in ('/create','/work','/materials','/calendar','/profile','/seo'):
                     response = page.goto(origin + base + suffix)
                     assert response.status == 200, suffix
                     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'), suffix
                 assert not errors, errors
                 browser.close()
-                print('PASS: reference surfaces, preserved controls, preview, 8 viewport/theme combinations, real touch drag, cancellation, edge/vertical scroll and 6 routes')
+                print('PASS: reference surfaces, logo, progress link, preview and missing-thumbnail fallback, 8 viewport/theme combinations, real touch drag, cancellation, edge/vertical scroll and 6 routes')
         finally:
             server.should_exit = True
             thread.join(timeout=5)
