@@ -304,26 +304,49 @@ def require_studio_auth(
     settings: Settings = Depends(get_settings),
     db=Depends(get_db),
 ):
-    # The canonical PWA uses only ServGo SSO. Legacy passwords may be
-    # unconfigured here, but a missing SSO configuration must never bypass auth.
-    # The canonical PWA is authenticated only by the active ServGo account.
-    # Never fall back to an unrelated Growth password/Basic cookie on this host.
+    # Canonical users can explicitly sign in with their existing Growth password.
+    # ServGo identity links are separate and require proof of both credentials.
     from app.api.studio_sso import _canonical_pwa
     if _canonical_pwa(request, settings):
         operator_accounts_healthy = True
         try:
             users = _load_users(settings)
         except HTTPException:
-            # The old password database is not an identity prerequisite.
-            # Fail closed for *operator elevation*, not for normal ServGo SSO.
+            # Broken legacy account storage must not block valid ServGo SSO.
             _logger.warning("studio_legacy_accounts_unavailable_for_canonical_sso")
             users = {}
             operator_accounts_healthy = False
+
+        if operator_accounts_healthy:
+            password_session = _session_login(request, settings, users)
+            if password_session is not None:
+                return _apply_scope(request, *password_session, users=users)
+
         sso = _sso_login(request, settings, db, users=users,
                          operator_accounts_healthy=operator_accounts_healthy)
-        if sso is None:
-            _login_required(request)
-        return _apply_scope(request, *sso, users=users)
+
+        from app.sso.browser_identity import COOKIE as IDENTITY_COOKIE, read_identity
+        identity = read_identity(settings, request.cookies.get(IDENTITY_COOKIE))
+        linked = None
+        if identity is not None and operator_accounts_healthy:
+            from app.core.studio_operator_links import linked_account
+            linked = linked_account(settings, identity[0], users)
+        if linked is not None:
+            # Combine only the live, authenticated scopes of the same ServGo
+            # identity. A linked company login never becomes a platform admin.
+            if sso is not None and linked[1] is not None and sso[1] is not None:
+                linked = linked[0], sorted(set(linked[1]) | set(sso[1]))
+            return _apply_scope(request, *linked, users=users)
+        if sso is not None:
+            return _apply_scope(request, *sso, users=users)
+
+        # The linking page needs a signed ServGo browser identity, but it
+        # grants no business access until a Growth password is also proved.
+        if identity is not None and request.url.path in {
+            "/studio/identity", "/studio/identity/disconnect",
+        }:
+            return _apply_scope(request, f"servgo:{identity[0]}", [], users=users)
+        _login_required(request)
 
     # Legacy host keeps strict account-file and password validation.
     users = _load_users(settings)
