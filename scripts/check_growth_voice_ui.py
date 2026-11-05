@@ -538,7 +538,7 @@ def main():
                 assert overlay['dockBg']=='rgba(0, 0, 0, 0)',overlay
                 assert overlay['toolsBg']=='rgba(0, 0, 0, 0)',overlay
                 assert overlay['hintsBg']=='rgba(0, 0, 0, 0)',overlay
-                assert overlay['composerBg']!='rgba(0, 0, 0, 0)',overlay
+                assert overlay['composerBg']==overlay['mainBg'],overlay
                 assert overlay['dockPosition']=='absolute',overlay
                 assert overlay['headerBorder']=='0px',overlay
                 assert overlay['mainBg']==overlay['workspaceBg'],overlay
