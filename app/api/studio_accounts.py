@@ -237,6 +237,14 @@ def connections_delete(product_id: UUID, link_id: str, request: Request, db: Ses
 # The password is verified once, never copied into BookingBot and never stored
 # with the binding. Both identities must be proved in the same browser.
 def _live_servgo_identity(request: Request, settings, db: Session) -> int | None:
+    # A signed ServGo browser session proves its user ID, but NOT business
+    # ownership. Linking requires an independent verified Growth password.
+    from app.api.studio_sso import _canonical_pwa
+    if _canonical_pwa(request, settings):
+        from app.sso.browser_identity import COOKIE, read_identity
+        identity = read_identity(settings, request.cookies.get(COOKIE))
+        return identity[0] if identity is not None else None
+
     from app.sso import access, tickets
     from app.api.content_studio_auth import _sso_link_current
     if not tickets.configured(settings):
@@ -253,7 +261,7 @@ def _live_servgo_identity(request: Request, settings, db: Session) -> int | None
 def _identity_html(*, connected: bool = False, linked: bool = False, error: str = "",
                    status: int = 200) -> HTMLResponse:
     notice = ('<p class="sg-link-success" role="status">Профили объединены. '
-              'Вы можете открывать Growth из ServGo с правами существующего администратора.</p>'
+              'Вы можете открывать Growth из ServGo с доступом к прежним компаниям.</p>'
               if linked else "")
     alert = f'<p role="alert" class="sg-link-error">{esc(error)}</p>' if error else ""
     form = (
@@ -264,8 +272,8 @@ def _identity_html(*, connected: bool = False, linked: bool = False, error: str 
         'required maxlength="200" placeholder="Текущий пароль"></label>'
         '<button type="submit">Подтвердить и объединить</button></form>'
         if connected and not linked else (
-            '<p class="sg-link-hint">Сначала откройте Growth кнопкой «Маркетинг» из '
-            '<a href="https://servgo.ru/admin">админки ServGo</a>, '
+            '<p class="sg-link-hint">Сначала войдите в ваш аккаунт ServGo через '
+            '<a href="https://servgo.ru/admin">страницу входа</a>, '
             'чтобы подтвердить вашу учётную запись ServGo.</p>' if not connected else ''
         )
     )
@@ -300,7 +308,7 @@ def _identity_html(*, connected: bool = False, linked: bool = False, error: str 
                '<p>Войдите с вашим существующим логином Growth один раз. '
                'Пароль проверяется на сервере Growth и не передаётся BookingBot. '
                'После привязки права старого профиля будут доступны при входе через ServGo. '
-               'Смена пароля Growth автоматически отменит привязку.</p>'
+               'Права на компании сохраняются прежними. Смена пароля Growth автоматически отменит привязку.</p>'
                + notice + alert + form +
                '<p><a href="/studio?choose=1">← К компаниям</a></p>'
                '</main></body></html>')
@@ -313,9 +321,9 @@ def studio_identity(request: Request, db: Session = Depends(get_db),
     uid = _live_servgo_identity(request, settings, db)
     connected = uid is not None
     if connected:
-        from app.core.studio_operator_links import linked_operator
+        from app.core.studio_operator_links import linked_account
         from app.api.content_studio_auth import _load_users
-        linked = linked_operator(settings, uid, _load_users(settings)) is not None
+        linked = linked_account(settings, uid, _load_users(settings)) is not None
     else:
         linked = False
     return _identity_html(connected=connected, linked=linked)
@@ -341,15 +349,15 @@ async def studio_identity_connect(request: Request, db: Session = Depends(get_db
                               error="Слишком много попыток входа. Попробуйте позже.")
     users = _load_users(settings)
     verified = check_credentials(settings, users, login, password) if login and password else None
-    if verified is None or verified[1] is not None:
+    if verified is None:
         for key in keys:
             record_failure(key)
         return _identity_html(connected=True, status=401,
-                              error="Логин или пароль не подошёл либо аккаунт не имеет прав администратора Growth.")
+                              error="Неверный логин или пароль Growth.")
     name, _ = verified
     current = credential_fingerprint(settings, users, name)
-    if current is None or current[1] is not None:
-        return _identity_html(connected=True, status=403, error="Нет прав администратора Growth.")
+    if current is None:
+        return _identity_html(connected=True, status=403, error="Аккаунт Growth недоступен.")
     bind_operator(settings, uid, name, current[0])
     for key in keys:
         clear_failures(key)
