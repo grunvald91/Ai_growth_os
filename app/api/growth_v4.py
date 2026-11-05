@@ -414,10 +414,22 @@ def render_v4(page, request, pid, switch):
         + ''.join(link(by_key[key]) for key in keys if key in by_key)+'</section>'
         for title,keys in more_groups
     ) if pid else ''.join(link(r) for r in links)
-    nav += f'<details><summary>{icon("layers")}<span>Ещё</span></summary><div class="v4-more">'+more_html+'</div></details>'
+    theme_button = ('<button type="button" class="nav-btn sg-theme-action" data-sg-theme>'
+                    + icon('sun') + '<span>Тема оформления</span></button>')
+    template = template.replace('</nav>', theme_button + '</nav>', 1)
+    more_html += '<section class="sg-v4-more-group"><strong>Оформление</strong>'+theme_button+'</section>'
+    nav += f'<details><summary>{icon("more")}<span>Ещё</span></summary><div class="v4-more">'+more_html+'</div></details>'
     template = template.replace('<nav class="mobile-nav" id="mobileNav"></nav>', '<nav class="mobile-nav" id="mobileNav" aria-label="Быстрая навигация">'+nav+'</nav>')
     template = template.replace('Единый интерфейс 4.0 · демоданные','Growth OS · интерфейс 4.0')
-    template = template.replace('Демо · API не подключены', f'<a href="{switch}">Старый дизайн</a>')
+    # Shared legacy handlers still own validation and permissions, but their
+    # migration switch is no longer part of the new owner interface.
+    template = re.sub(r'<span class="chip"[^>]*>Демо · API не подключены</span>', '', template, count=1)
+    for control_id in ('themeTop', 'openSearch'):
+        controls = Document(template)
+        template = template.replace(controls.outer(controls.find(ident=control_id)), '', 1)
+    template = template.replace('</defs>',
+        '<symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/>'
+        '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol></defs>', 1)
     company_link = original.find(cls='sg-mobile-project')
     company = (company_link[1].get('aria-label', '').removeprefix('Сменить компанию: ')
                if company_link else ('Выберите компанию' if pid is None and current == '/studio' else 'Моя компания'))
@@ -451,10 +463,10 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>voice-glow-audio-20261102', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>admin-parity-20261105', extras)
     if pid and current == base+'/create':
         extras += '<script src="/studio/assets/create-studio.js?v=history-20261104"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=voice-glow-audio-20261102"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=admin-parity-20261105"></script>'
     if pid and (home or current == base+'/create'):
         # The glow measures the existing recorder stream; load before dispatcher.js.
         extras = '<script src="/studio/assets/voice-glow.js?v=2"></script>' + extras
@@ -473,7 +485,7 @@ def render_v4(page, request, pid, switch):
         '<meta name="apple-mobile-web-app-title" content="ServGo">'
         '<link rel="manifest" href="/manifest.webmanifest">'
         '<link rel="apple-touch-icon" href="/apple-touch-icon.png">'
-        '<link rel="stylesheet" href="/studio/assets/growth-daily.css?v=2">'
+        '<link rel="stylesheet" href="/studio/assets/growth-daily.css?v=3">'
         '</head>'
     ), 1)
     if home:
@@ -483,7 +495,7 @@ def render_v4(page, request, pid, switch):
             + icon('calendar') + '<span>Сегодня</span></button>'
             '<div id="sgDailyBackdrop" class="sg-daily-backdrop" aria-hidden="true"></div>'
             '<aside id="sgDailyDrawer" class="sg-daily-drawer" role="dialog" '
-            'aria-modal="true" aria-label="Ежедневная сводка" aria-hidden="true" tabindex="-1">'
+            'aria-modal="true" aria-label="Ежедневная сводка" aria-hidden="true" inert tabindex="-1">'
             '<div class="sg-daily-heading"><div><h2>Сводка на сегодня</h2>'
             '<small id="sgDailyCompany"></small></div>'
             '<button id="sgDailyClose" class="sg-daily-close" type="button" '
@@ -493,13 +505,14 @@ def render_v4(page, request, pid, switch):
         )
         template = template.replace('</body>', drawer+'</body>', 1)
     if pid:
-        extras += '<script src="/studio/assets/growth-daily.js?v=1"></script>'
+        extras += '<script src="/studio/assets/growth-daily.js?v=2"></script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=18">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=19">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
-        '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=8">'
+        '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=9">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
         '</head>'
     ))
-    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=10"></script></body>')
+    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=11"></script></body>')
     return template
+

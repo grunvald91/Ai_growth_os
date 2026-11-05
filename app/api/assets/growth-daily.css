@@ -1,8 +1,8 @@
-/* Owner daily brief: anchored compact overlay, no edge-swipe hijacking. */
+/* Owner daily brief: ServGo Air surfaces with an optional central-screen drag. */
 body[data-growth-design="v4"] .sg-daily-handle {
  position:fixed;left:0;top:46%;z-index:91;width:42px;min-height:68px;
- border:1px solid var(--s-line-2);border-left:0;border-radius:0 12px 12px 0;
- background:var(--s-surface);color:var(--s-accent);box-shadow:var(--sh-2);
+ border:0;border-radius:0 var(--r-lg) var(--r-lg) 0;
+ background:var(--s-surface-2);color:var(--s-accent);box-shadow:var(--sh-2);
  display:flex;flex-direction:column;gap:5px;align-items:center;justify-content:center;
  font:600 10px var(--ds-font,system-ui);cursor:pointer;touch-action:manipulation;
 }
@@ -18,8 +18,8 @@ body[data-growth-design="v4"] .sg-daily-handle {
  max-height:calc(100dvh - 32px);min-height:0;
  display:flex;flex-direction:column;
  background:var(--s-surface,var(--card));color:var(--s-text,var(--text));
- border:1px solid var(--s-line-2,var(--line));border-radius:20px;
- box-shadow:0 18px 58px rgba(0,0,0,.24);
+ border:0;border-radius:20px;
+ box-shadow:var(--sh-pop);
  transform:translate3d(calc(-100% - 24px),-50%,0);
  visibility:hidden;transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility .28s;
  padding:16px 14px 12px;overflow:hidden;
@@ -27,21 +27,28 @@ body[data-growth-design="v4"] .sg-daily-handle {
 body.sg-daily-open .sg-daily-backdrop{opacity:1;pointer-events:auto}
 body.sg-daily-open .sg-daily-drawer{visibility:visible;transform:translate3d(0,-50%,0)}
 body.sg-daily-open .sg-daily-handle{visibility:hidden;pointer-events:none}
+body.sg-daily-dragging .sg-daily-drawer{
+ visibility:visible;transition:none!important;
+ transform:translate3d(calc((1 - var(--sg-daily-progress,0)) * (-100% - 24px)),-50%,0);
+ will-change:transform;
+}
+body.sg-daily-dragging .sg-daily-backdrop{opacity:var(--sg-daily-progress,0);transition:none!important}
+body.sg-daily-dragging .sg-daily-handle{visibility:hidden;pointer-events:none}
 .sg-daily-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex:none}
 .sg-daily-heading h2{font-size:18px;line-height:1.25;letter-spacing:-.35px;margin:0;color:var(--s-text,var(--text))}
 .sg-daily-heading small{display:block;margin-top:4px;font-size:11px;color:var(--s-muted,var(--muted))}
 .sg-daily-close{
- display:grid;place-items:center;flex:none;min-width:40px;min-height:40px;
- border:1px solid var(--s-line-2,var(--line));border-radius:12px;
+ display:grid;place-items:center;flex:none;min-width:44px;min-height:44px;
+ border:0;border-radius:var(--r-md);
  background:var(--s-surface-2,var(--tint));color:var(--s-text,var(--text));
  font-size:22px;line-height:1;cursor:pointer;
 }
 .sg-daily-content{overflow-y:auto;overscroll-behavior:contain;flex:1;min-height:0;padding-right:2px;scrollbar-width:thin}
 .sg-daily-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-bottom:12px}
-.sg-daily-stat{min-width:0;background:var(--s-surface-2,var(--tint));border:1px solid var(--s-line,var(--line));border-radius:12px;padding:9px 5px;text-align:center}
+.sg-daily-stat{min-width:0;background:var(--s-surface-2,var(--tint));border:0;border-radius:var(--r-md);padding:9px 5px;text-align:center}
 .sg-daily-stat b{display:block;font-size:23px;color:var(--s-text,var(--text));font-variant-numeric:tabular-nums;line-height:1.2}
 .sg-daily-stat span{display:block;font-size:10px;color:var(--s-muted,var(--muted));line-height:1.3}
-.sg-daily-section{border:1px solid var(--s-line-2,var(--line));border-radius:14px;padding:12px;margin-bottom:10px;background:var(--s-surface,var(--card))}
+.sg-daily-section{border:0;border-radius:var(--r-lg);padding:12px;margin-bottom:10px;background:var(--s-surface-2,var(--tint))}
 .sg-daily-section h3{display:flex;align-items:center;justify-content:space-between;font-size:13px;line-height:1.4;color:var(--s-text,var(--text));margin:0 0 6px}
 .sg-daily-row{display:block;border-top:1px solid var(--s-line,var(--line));color:var(--s-text,var(--text));padding:10px 0;font-size:12px;line-height:1.45;overflow-wrap:anywhere}
 .sg-daily-row:first-of-type{border:0}
@@ -77,3 +84,4 @@ body.sg-daily-open .sg-daily-handle{visibility:hidden;pointer-events:none}
 @media(prefers-reduced-motion:reduce){
  .sg-daily-drawer,.sg-daily-backdrop,.sg-daily-drawer[data-first="true"] .sg-daily-hint{transition:none;animation:none}
 }
+

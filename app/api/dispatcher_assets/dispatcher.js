@@ -111,7 +111,7 @@
     return ({
       whiteboard_renderer:'Простое видео',company_intake:'Профиль компании',
       distribution:'Публикация',seo_factory:'SEO-завод',content_factory:'Создание контента',
-      article:'Статья',whiteboard:'Простое видео'
+      article:'Статья',whiteboard:'Простое видео','Рисованное видео':'Простое видео'
     })[text] || (/^[a-z_]+$/.test(String(text || '')) ? 'Материал' : text);
   }
 
@@ -119,7 +119,8 @@
     var value = String(title || '');
     if (/^WHITEBOARD-JOB:\s*[a-f0-9-]{6,}$/i.test(value)) return 'Создание простого видео';
     if (/^Request approval to publish own-site SEO article/i.test(value)) return 'Подтвердить публикацию статьи';
-    return value.replace(/^Рисованное видео:/i, 'Простое видео:');
+    return value.replace(/^Рисованное видео:/i, 'Простое видео:')
+      .replace(/рисованное видео/gi, 'простое видео');
   }
 
   function renderTable(block) {
@@ -192,11 +193,36 @@
     var card = el('div', 'dp-material');
     var top = el('div', 'dp-material-top');
     top.appendChild(el('span', 'dp-material-kind', voiceHoldEnabled ? friendlyKind(block.kind) : block.kind));
-    top.appendChild(el('span', 'dp-material-status', block.status));
+    var status = el('span', 'dp-material-status',
+      voiceHoldEnabled && block.status === 'Ждёт вашего решения' ? 'На проверке' : block.status);
+    status.dataset.state = ({'Утверждён':'approved','Опубликован':'published',
+      'Ждёт вашего решения':'review','Отклонён':'rejected'})[block.status] || 'draft';
+    top.appendChild(status);
     card.appendChild(top);
-    card.appendChild(el('strong', 'dp-material-title', voiceHoldEnabled ? friendlyTitle(block.title) : block.title));
+    var title = voiceHoldEnabled ? friendlyTitle(block.title) : block.title;
+    if (voiceHoldEnabled && /^(Простое видео|Видео)$/.test(friendlyKind(block.kind)))
+      title = legacyVideoTitle(title).replace(/^Видео:\s*/i, '');
+    card.appendChild(el('strong', 'dp-material-title', title));
     if (block.excerpt) card.appendChild(el('p', 'dp-material-text', block.excerpt));
-    var open = el('a', 'dp-link', 'Открыть полностью');
+    // Use the existing protected file route only for a completed video's scoped
+    // job URL. Never infer a thumbnail for an arbitrary material or another company.
+    var productBase = api.replace(/\/dispatch\/?$/, '');
+    var videoPath = String(block.href || '').slice(productBase.length);
+    var isVideo = voiceHoldEnabled && String(block.href || '').indexOf(productBase) === 0 &&
+      /^\/whiteboard\/[0-9a-f-]{36}$/i.test(videoPath);
+    if (isVideo) {
+      var preview = el('a', 'dp-video-preview');
+      preview.href = block.href;
+      preview.setAttribute('aria-label', 'Посмотреть видео: ' + friendlyTitle(block.title));
+      var image = el('img', '');
+      image.alt = ''; image.loading = 'lazy'; image.decoding = 'async';
+      image.addEventListener('error', function () { preview.remove(); });
+      image.src = block.href + '/files/video.png';
+      var play = el('span', 'dp-video-play');
+      play.setAttribute('aria-hidden','true'); play.appendChild(el('span', '', '▶'));
+      preview.appendChild(image); preview.appendChild(play); card.appendChild(preview);
+    }
+    var open = el('a', 'dp-link', isVideo ? 'Посмотреть видео' : 'Открыть полностью');
     open.href = block.href;
     card.appendChild(open);
     return card;
@@ -406,10 +432,31 @@
       bubble.appendChild(el('p', 'dp-text', message.text));
       return bubble;
     }
-    (message.blocks || []).forEach(function (block) {
-      if (block.type === 'text') bubble.appendChild(el('p', 'dp-text', block.text));
+    var blocks = message.blocks || [];
+    var materials = blocks.filter(function (block) { return block.type === 'material'; });
+    function topic(text) {
+      return friendlyTitle(text).replace(/^Готово:\s*/i, '')
+        .replace(/^(?:Простое видео|Видео|Пост|Статья):\s*/i, '')
+        .replace(/[.!\s]+$/, '').trim();
+    }
+    blocks.forEach(function (block) {
+      if (block.type === 'text') {
+        // Suppress only an exact redundant completion caption. Keep instructions,
+        // warnings and any other text, including messages from saved conversations.
+        var duplicate = voiceHoldEnabled && /^Готово:\s*/i.test(block.text) &&
+          materials.some(function (item) { return topic(block.text) === topic(item.title); });
+        if (!duplicate) bubble.appendChild(el('p', 'dp-text', voiceHoldEnabled ?
+          String(block.text).replace(/^Запустил рисованное видео\./, 'Запустил простое видео.') : block.text));
+      }
       else if (block.type === 'chips') bubble.appendChild(renderChips(block.items, sendChip));
-      else if (block.type === 'links') bubble.appendChild(renderLinks(block.items));
+      else if (block.type === 'links') {
+        var items = voiceHoldEnabled ? block.items.filter(function (item) {
+          return !materials.some(function (material) {
+            return material.href === item.href && /^(Открыть|Открыть полностью)$/.test(item.label);
+          });
+        }) : block.items;
+        if (items.length) bubble.appendChild(renderLinks(items));
+      }
       else if (block.type === 'table') bubble.appendChild(renderTable(block));
       else if (block.type === 'resource_list') bubble.appendChild(renderResourceList(block));
       else if (block.type === 'task') bubble.appendChild(renderTask(block));
@@ -1105,3 +1152,4 @@
       }).catch(function () { /* No network means no restored card, not a page failure. */ });
   }
 })();
+

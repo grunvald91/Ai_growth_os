@@ -188,11 +188,15 @@ def main():
                 page.set_viewport_size({'width':390,'height':844})
                 page.screenshot(path='/tmp/growth-v4-conversation.png',full_page=True)
                 page.evaluate("window.ServGoTheme.setPreference('light')")
-                page.locator('#themeTop').click()
+                page.locator('#mobileNav summary').click()
+                page.locator('#mobileNav [data-sg-theme]').click()
+                page.keyboard.press('Escape')
                 assert page.locator('body').evaluate("e=>e.classList.contains('dark')")
                 page.reload()
                 assert page.locator('body').evaluate("e=>e.classList.contains('dark')")
-                page.get_by_text('Старый дизайн', exact=True).click()
+                assert page.get_by_text('Старый дизайн', exact=True).count() == 0
+                assert page.locator('#openSearch').count() == 0
+                page.goto(base+'?design=classic')
                 expect(page.locator('[data-growth-design]')).to_have_count(0)
                 expect(page.get_by_text('Новый дизайн →', exact=True)).to_be_visible()
                 # A populated paid-video approval, without running any provider.
@@ -359,7 +363,7 @@ def main():
                     expect(page.locator('#dp-input')).to_have_value('Черновик сохраняется при изменении окна')
                 assert not errors, errors
                 browser.close()
-                print('PASS: 32 live page layouts + 3 global pages, queue creation, real dispatcher, theme persistence, both switches, 30-message history at 5 viewport sizes; no JS errors')
+                print('PASS: 32 live page layouts + 3 global pages, queue creation, real dispatcher, theme persistence, legacy entry and new UI without migration/search controls, 30-message history at 5 viewport sizes; no JS errors')
         finally:
             server.should_exit = True
             thread.join(timeout=10)
@@ -371,3 +375,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

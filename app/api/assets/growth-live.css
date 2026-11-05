@@ -424,12 +424,12 @@ body.home-page[data-growth-design="v4"],
 body.home-page[data-growth-design="v4"] .shell,
 body.home-page[data-growth-design="v4"] .workspace,
 body.home-page[data-growth-design="v4"] #main {
-  background:var(--card);
+  background:var(--bg);
 }
 body.home-page[data-growth-design="v4"] .workspace>.topbar{
   border-bottom:0!important;
   box-shadow:none!important;
-  background:var(--card);
+  background:var(--bg);
 }
 body.home-page:not(.home-empty) #main{
   padding-top:0!important;
@@ -840,3 +840,4 @@ body[data-growth-design="v4"] .dp-confirm .dp-btn:disabled{opacity:.5}
 /* Create: optional completion-time guidance, no invented ETA. */
 body[data-growth-design="v4"] .sg-create-timing{border:0;border-bottom:1px solid var(--line);margin-top:5px}
 body[data-growth-design="v4"] .sg-create-timing>p{font-size:12px;line-height:1.55;margin:0 0 11px;color:var(--muted)}
+

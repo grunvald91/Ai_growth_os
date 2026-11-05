@@ -3,25 +3,25 @@
  'use strict';
  const body=document.body, main=document.getElementById('main');
  const themeApi=window.ServGoTheme;
- const themeTop=document.getElementById('themeTop');
+ const themeControls=document.querySelectorAll('[data-sg-theme],#themeTop');
  const themeNames={light:'Светлая',dark:'Тёмная',system:'Как в системе'};
  function syncTheme(){
    const mode=themeApi ? themeApi.getPreference() : 'system';
    const resolved=themeApi ? themeApi.resolve(mode) : 'light';
    body.classList.toggle('dark',resolved==='dark');
-   if(themeTop) {
-     themeTop.title='Тема оформления: '+themeNames[mode]+'. Нажмите, чтобы переключить';
-     themeTop.setAttribute('aria-label',themeTop.title);
-   }
+   themeControls.forEach(control=>{
+     control.title='Тема оформления: '+themeNames[mode]+'. Нажмите, чтобы переключить';
+     control.setAttribute('aria-label',control.title);
+   });
  }
  syncTheme();
  window.addEventListener('servgo-themechange',syncTheme);
- themeTop?.addEventListener('click',()=>{
+ themeControls.forEach(control=>control.addEventListener('click',()=>{
    if(!themeApi)return;
    const available=['system','light','dark'];
    const current=themeApi.getPreference();
    themeApi.setPreference(available[(available.indexOf(current)+1)%available.length]);
- });
+ }));
  // Keep internal SEO and video drilldowns in the *current* WebView.
  // Some embedded mobile browsers hand native anchor navigations to their host;
  // location.assign after preventDefault avoids asking the host to open/close a tab.
@@ -77,7 +77,7 @@ document.addEventListener('pointerdown',e=>{
   input.oninput=update;document.body.append(searchBox);document.querySelector('.shell').inert=true;update();input.focus();
   searchBox.addEventListener('keydown',e=>{if(e.key!=='Tab')return;const nodes=[...searchBox.querySelectorAll('button,input,a')];if(e.shiftKey&&document.activeElement===nodes[0]){e.preventDefault();nodes.at(-1).focus()}else if(!e.shiftKey&&document.activeElement===nodes.at(-1)){e.preventDefault();nodes[0].focus()}});
  }
- document.getElementById('openSearch').onclick=search;
+ document.getElementById('openSearch')?.addEventListener('click',search);
  const root=document.querySelector('.dp-home');
  if(root){
   const viewport=window.visualViewport;
@@ -164,3 +164,4 @@ document.addEventListener('pointerdown',e=>{
   }).catch(()=>{view.innerHTML='<p class="v4-error" role="alert">Не удалось загрузить карточки. Ниже доступен рабочий список. <button type="button" class="link" onclick="location.reload()">Повторить</button></p>'});
  }
 })();
+

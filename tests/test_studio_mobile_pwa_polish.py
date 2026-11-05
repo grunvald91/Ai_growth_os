@@ -56,7 +56,9 @@ def test_daily_panel_is_a_rounded_compact_click_drawer():
     js = (ASSETS / "growth-daily.js").read_text()
     assert "handle.addEventListener('click'" in js
     assert "backdrop.addEventListener('click',closeDrawer)" in js
-    assert "touchstart" not in js
+    assert "touchstart" in js
+    assert "inCenter" in js
+    assert "--sg-daily-progress" in js
 
 
 def test_material_text_never_reverts_to_classic_dark_ink():
@@ -71,3 +73,4 @@ def test_material_text_never_reverts_to_classic_dark_ink():
     assert "color:var(--s-accent-press)" in bridge
     assert "-webkit-text-fill-color:currentColor !important" in bridge
     assert "background:var(--s-surface-2) !important" in bridge
+
