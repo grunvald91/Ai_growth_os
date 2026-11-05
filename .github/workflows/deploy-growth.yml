@@ -129,11 +129,26 @@ jobs:
         run: |
           set -euo pipefail
           install -m 700 -d ~/.ssh
-          if [ "$PREPARE" != "true" ] && [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_KNOWN_HOSTS" ] && [ -z "$API_YANDEX" ]; then
-            [ "$PREPARE" != "true" ] || { echo "::error::The preparation needs the password path, not the restricted key"; exit 1; }
-            # Preferred: the key's forced command only allows "deploy <sha>" or "rollback".
+          if [ "$PREPARE" != "true" ] && [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            # Always use the restricted forced-command key for the actual
+            # deployment, irrespective of which provider credentials exist.
             printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
             printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+            if [ -n "$API_YANDEX" ] && [ -n "$SSHPASS" ]; then
+              # One-time server .env sync uses a separate authenticated channel.
+              # The restricted key is intentionally unable to write secrets.
+              sudo apt-get install -y -qq sshpass >/dev/null
+              SSH_OPTS=(-o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ControlMaster=auto
+                        -o ControlPath=/tmp/ssh-growth-secret-%C -o ControlPersist=60)
+              sync_run() { sshpass -e ssh "${SSH_OPTS[@]}" "root@$HOST" "$@"; }
+              git show "$SHA:deploy/ops/sync_yandex_env.py" \
+                | sync_run 'umask 077; cat > /opt/ai_growth_os/deploy/sync_yandex_env.py'
+              printf '%s' "$API_YANDEX" \
+                | sync_run "python3 /opt/ai_growth_os/deploy/sync_yandex_env.py"
+              ssh -O exit -o ControlPath=/tmp/ssh-growth-secret-%C "root@$HOST" >/dev/null 2>&1 || true
+            elif [ -n "$API_YANDEX" ]; then
+              echo "::warning::GitHub API_YANDEX is configured but no password-based secret-provisioning channel is available. The restricted deploy key cannot update server .env; Yandex runtime availability is unverified."
+            fi
             git archive --format=tar.gz "$SHA" app alembic/versions pyproject.toml products \
               | ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes -o BatchMode=yes "root@$HOST" "deploy $SHA"
             exit 0
