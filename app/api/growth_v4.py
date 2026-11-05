@@ -508,11 +508,11 @@ def render_v4(page, request, pid, switch):
     extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
     extras += '<script src="/studio/assets/growth-daily.js?v=3"></script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=20">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=21">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=12">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
         '</head>'
     ))
-    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=13"></script></body>')
+    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=14"></script></body>')
     return template
