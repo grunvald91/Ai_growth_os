@@ -130,6 +130,8 @@ def _query_in_collected_core(db, product_id, query: str):
     # Never substitute AI guesses, manually written queries, or another tenant's
     # semantic core. Invalid/obsolete serialized records do not count.
     from app.seo.contracts import SemanticCore
+    if db is None:
+        raise ValueError("New primary query must match one saved collected cluster")
     previous = db.scalars(select(Artifact).where(
         Artifact.product_id == product_id,
         Artifact.kind == "semantic_core",
