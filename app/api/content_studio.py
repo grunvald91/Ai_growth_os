@@ -1863,6 +1863,33 @@ def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)
     products = list(db.scalars(query.order_by(Product.name).limit(100)))
     preferred = next((p for p in products if p.slug == "servgo"), None)
     canonical_user = _canonical_servgo_user(request, settings)
+    from app.api.studio_sso import _canonical_pwa
+    choice = request.query_params.get("design")
+    choice = choice if choice in {"v4", "classic"} else request.cookies.get("growth_design")
+    modern = choice == "v4" or (choice != "classic" and _canonical_pwa(request, settings))
+    if modern:
+        # The last company is a preference, never an access grant. Resolve it
+        # only against the companies already authorised for this request.
+        selected = next((p for p in products if str(p.id) == request.cookies.get("studio_last_product")), None)
+        if selected is None and canonical_user is not None:
+            from app.sso.tickets import COOKIE, read_session
+            session = read_session(settings, request.cookies.get(COOKIE))
+            selected = next((p for p in products if session and str(p.id) == session.product_id), None)
+        selected = selected or preferred or next(iter(products), None)
+        if selected is not None:
+            params = []
+            if choose:
+                params.append("companies=1")
+            if request.query_params.get("design") == "v4":
+                params.append("design=v4")
+            target = f"/studio/products/{selected.id}" + ("?" + "&".join(params) if params else "")
+            return RedirectResponse(target, status_code=302, headers={"Cache-Control": "no-store"})
+        # First-time accounts have the same header dropdown, without a second
+        # full-page company selector or an implicitly created workspace.
+        return HTMLResponse('<!doctype html><html lang="ru"><head><title>ServGo</title></head>'
+            '<body><main><section class="sg-studio-welcome"><h1>Добро пожаловать</h1>'
+            '<p>Откройте список компаний справа вверху, чтобы начать работу.</p>'
+            '</section></main></body></html>', headers={"Cache-Control": "no-store"})
     # On canonical ServGo, even a linked Growth operator sees the common
     # chooser. The old automatic operator redirect remains on the legacy host.
     if canonical_user is None and not choose and (len(products) == 1 or (preferred is not None and allowed is None)):

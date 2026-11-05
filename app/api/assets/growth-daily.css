@@ -30,7 +30,7 @@ body[data-growth-design="v4"] .sg-daily-handle {
  box-shadow:0 10px 32px rgba(0,0,0,.12);
  transform:translate3d(calc(-100% - 24px),-50%,0);
  visibility:hidden;transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility .28s;
- padding:24px 22px 18px;overflow:hidden;
+ padding:24px 22px 18px;overflow:hidden;touch-action:pan-y;
 }
 body.sg-daily-open .sg-daily-backdrop{opacity:1;pointer-events:auto}
 body.sg-daily-open .sg-daily-drawer{visibility:visible;transform:translate3d(0,-50%,0)}

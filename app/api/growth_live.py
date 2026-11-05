@@ -103,6 +103,12 @@ class GrowthDesignMiddleware(BaseHTTPMiddleware):
             if request.method == 'GET' and choice in {'v4', 'classic'} and response.status_code < 400:
                 response.set_cookie(COOKIE, choice, httponly=True, samesite='lax',
                                     secure=request.url.scheme == 'https', max_age=31536000)
+            if new and request.method == 'GET' and response.status_code == 200 and 'text/html' in response.headers.get('content-type', ''):
+                company = re.match(r'^/studio/products/([0-9a-f-]{36})(?:/|$)', path, re.I)
+                if company:
+                    response.set_cookie('studio_last_product', company[1], path='/studio',
+                                        httponly=True, samesite='lax', secure=canonical or request.url.scheme == 'https',
+                                        max_age=31536000)
         return response
 
 

@@ -437,7 +437,7 @@ def render_v4(page, request, pid, switch):
     template = template.replace('Студия «Мята»',html.escape(company)).replace('<span class="avatar">М</span>',
                      '<span class="avatar">'+html.escape(company[:1])+'</span>')
     # Keep the header switch in place; populate a scoped dropdown on click.
-    if pid:
+    if pid or current == '/studio':
         template = template.replace('<button class="biz-switch" id="bizBtn">',
             '<div class="sg-org-wrapper" id="sgOrgWrapper">'
             '<button class="biz-switch" id="bizBtn" type="button" '
@@ -486,7 +486,7 @@ def render_v4(page, request, pid, switch):
         '<meta name="apple-mobile-web-app-title" content="ServGo">'
         '<link rel="manifest" href="/manifest.webmanifest">'
         '<link rel="apple-touch-icon" href="/apple-touch-icon.png">'
-        '<link rel="stylesheet" href="/studio/assets/growth-daily.css?v=4">'
+        '<link rel="stylesheet" href="/studio/assets/growth-daily.css?v=5">'
         '</head>'
     ), 1)
     if home:
@@ -506,14 +506,15 @@ def render_v4(page, request, pid, switch):
             '<p class="sg-daily-hint">Нажмите вне панели, чтобы свернуть.</p></aside>'
         )
         template = template.replace('</body>', drawer+'</body>', 1)
-    if pid:
-        extras += '<script src="/studio/assets/growth-daily.js?v=2"></script>'
+    if pid or current == '/studio':
+        extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
+        extras += '<script src="/studio/assets/growth-daily.js?v=3"></script>'
     template = template.replace('</head>', (
         '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=20">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
-        '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=10">'
+        '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=11">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
         '</head>'
     ))
-    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=12"></script></body>')
+    template = template.replace('</body>', extras+'<script src="/studio/assets/growth-live.js?v=13"></script></body>')
     return template

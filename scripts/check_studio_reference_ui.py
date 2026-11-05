@@ -6,6 +6,7 @@ No model calls, publications or production data are used.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import socket
 import sys
@@ -24,7 +25,7 @@ from app.core.config import Settings, get_settings
 from app.db.models import Base
 from app.db.session import get_db
 from app.dispatcher.models import DispatcherConversation, DispatcherMessage
-from app.models.domain import Product
+from app.models.domain import Product, Artifact, ArtifactStatus
 
 
 def main():
@@ -66,6 +67,12 @@ def main():
             seq=9, role='assistant', text='Готово: Видео: '+subject+'.', blocks=[
                 {'type':'text','text':'Готово: Видео: '+subject+'.'}, material,
                 {'type':'links','items':[{'label':'Открыть полностью','href':video}]}]))
+        title = 'ИИ для продвижения бизнеса: задачи, ограничения и критерии выбора'
+        for kind, channel in [('article','own_site'), ('channel_text','telegram')]:
+            db.add(Artifact(product_id=product.id, kind=kind, title=title,
+                status=ArtifactStatus.AWAITING_APPROVAL,
+                content=json.dumps({'platform':channel,'body':'# '+title+'\n\n'+
+                    'Владелец небольшого сервисного бизнеса тратит часы на переписку и планирование записей. '*8})))
         db.commit()
         app.dependency_overrides[get_db] = lambda: db
         app.dependency_overrides[get_settings] = lambda: Settings(app_env='development', _env_file=None)
@@ -96,6 +103,13 @@ def main():
                 page.locator('#sgDailyClose').click()
                 expect(page.locator('#sgDailyDrawer')).to_have_attribute('aria-hidden','true')
                 expect(page.locator('#sgDailyDrawer')).to_have_attribute('inert','')
+                page.goto(origin + '/studio')
+                assert page.url == origin + base
+                assert page.get_by_text('Ваши компании',exact=True).count() == 0
+                page.goto(origin + '/studio?choose=1')
+                expect(page.locator('#sgOrgMenu')).to_be_visible()
+                expect(page.locator('#sgOrgMenu .sg-org-option')).to_have_count(1)
+                page.locator('#bizBtn').click()
                 assert page.locator('#openSearch,#themeTop').count() == 0
                 assert page.get_by_text('Старый дизайн',exact=True).count() == 0
                 assert page.locator('#dp-mic').count() == 0
@@ -143,6 +157,43 @@ def main():
                             page.screenshot(path=str(captures / f'home-{mode}-390.png'))
                 page.set_viewport_size({'width':390,'height':844})
                 page.evaluate("window.ServGoTheme.setPreference('dark')")
+                # Android resize-visual: layout remains 844px while the visible
+                # viewport shrinks. A normal Playwright viewport resize misses this.
+                page.locator('#dp-input').focus()
+                page.locator('#dp-input').fill('Первая строка\nВторая строка')
+                page.evaluate("""() => {
+                  window.testVisibleHeight=410;window.testVisibleOffset=0;
+                  Object.defineProperty(visualViewport,'height',{configurable:true,get:()=>window.testVisibleHeight});
+                  Object.defineProperty(visualViewport,'offsetTop',{configurable:true,get:()=>window.testVisibleOffset});
+                  visualViewport.dispatchEvent(new Event('resize'));
+                }""")
+                expect(page.locator('body')).to_have_class(__import__('re').compile('sg-keyboard-open'))
+                expect(page.locator('#mobileNav')).to_be_hidden()
+                expect(page.locator('#sgDailyHandle')).to_be_hidden()
+                for offset in (0,35):
+                    page.evaluate('(offset)=>{window.testVisibleOffset=offset;visualViewport.dispatchEvent(new Event("scroll"))}', offset)
+                    bounds=page.evaluate("""() => {
+                      const box=s=>document.querySelector(s).getBoundingClientRect().toJSON();
+                      return {dock:box('.command-dock'),form:box('#dp-form'),input:box('#dp-input'),
+                        chips:box('#dp-chips'),feed:box('#dp-feed'),header:box('.topbar'),height:innerHeight};
+                    }""")
+                    assert bounds['height']==844, bounds
+                    assert bounds['header']['width']==390, bounds
+                    assert 410+offset-14 <= bounds['dock']['bottom'] <= 410+offset, bounds
+                    assert bounds['feed']['bottom'] <= bounds['dock']['top']+1, bounds
+                    assert bounds['form']['x']>=12 and bounds['form']['right']<=378, bounds
+                    assert bounds['input']['x']-bounds['form']['x']>=10, bounds
+                    assert bounds['input']['top']-bounds['form']['top']>=5, bounds
+                    assert bounds['chips']['bottom']<=410+offset-4, bounds
+                page.screenshot(path=str(captures / 'keyboard-dark-390.png'))
+                page.evaluate("""() => {
+                  delete visualViewport.height;delete visualViewport.offsetTop;
+                  visualViewport.dispatchEvent(new Event('resize'));
+                  document.activeElement.blur();
+                }""")
+                expect(page.locator('#mobileNav')).to_be_visible()
+                assert page.locator('#dp-input').input_value()=='Первая строка\nВторая строка'
+                page.locator('#dp-input').fill('')
                 # Exercise real Chromium touch events, including native scroll arbitration.
                 cdp = context.new_cdp_session(page)
                 def touch(kind,x=None,y=None):
@@ -179,6 +230,37 @@ def main():
                 page.locator('#sgDailyHandle').click()
                 expect(page.locator('#sgDailyDrawer')).to_have_attribute('aria-hidden','false')
                 page.locator('#sgDailyClose').click()
+                # Closing must start on the actual clickable stats/buttons too,
+                # not only on an empty part of the drawer.
+                for selector in ('.sg-daily-stat:nth-child(2)', '#sgDailyClose'):
+                    page.locator('#sgDailyHandle').click()
+                    page.wait_for_function('Math.abs(document.querySelector("#sgDailyDrawer").getBoundingClientRect().x-16)<1')
+                    rect=page.locator(selector).bounding_box()
+                    x=rect['x']+rect['width']/2;y=rect['y']+rect['height']/2
+                    touch('touchStart',x,y);touch('touchMove',x-100,y);touch('touchEnd')
+                    expect(page.locator('#sgDailyDrawer')).to_have_attribute('aria-hidden','true')
+                    assert page.url == origin + base + '?companies=1'
+                page.locator('#sgDailyHandle').click()
+                page.locator('.sg-daily-stat').nth(1).click()
+                page.wait_for_url('**/review')
+                for mode in ('dark','light'):
+                    page.evaluate('(mode)=>window.ServGoTheme.setPreference(mode)',mode)
+                    for width in (320,390,430):
+                        page.set_viewport_size({'width':width,'height':844})
+                        assert page.locator('.sg-review-item').count()==2
+                        item=page.locator('.sg-review-item').first
+                        actions=item.locator('.sg-inline-actions .btn')
+                        a,b=actions.nth(0).bounding_box(),actions.nth(1).bounding_box()
+                        assert abs(a['y']-b['y'])<=1 and b['x']>=a['x']+a['width']+8,(width,a,b)
+                        assert 44<=a['height']<=48 and 44<=b['height']<=48,(width,a,b)
+                        assert item.locator('p').bounding_box()['height']<90
+                        assert not item.locator('p').inner_text().startswith('#')
+                        assert page.locator('.sg-filters').bounding_box()['height']<=44
+                        assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+                        if width==390: page.screenshot(path=str(captures / f'review-{mode}-390.png'))
+                page.set_viewport_size({'width':390,'height':844})
+                page.evaluate("window.ServGoTheme.setPreference('dark')")
+                page.goto(origin + base)
                 # Theme remains available in More; navigation still opens real pages.
                 page.locator('#mobileNav summary').click()
                 page.locator('#mobileNav [data-sg-theme]').click()
@@ -192,13 +274,38 @@ def main():
                 assert page.locator('.dp-video-preview').count() == 0
                 assert page.locator('.dp-material--video').get_attribute('href') == video
                 expect(page.locator('.dp-material-title')).to_have_text(subject)
+                # Canonical dropdown expands the list through the existing
+                # JWT/ticket contract, including a company not yet connected.
+                page.route('**/organizations.json', lambda route: route.fulfill(json={
+                    'items':[{'id':str(product.id),'name':product.name}], 'can_add':False,
+                    'unified_user_id':7,'linked_business_ids':[12], 'current_business_ids':[12],
+                    'current_product_id':str(product.id), 'platform_product':None}))
+                page.route('**/api/studio/businesses', lambda route: route.fulfill(json=[
+                    {'id':12,'name':'Авто точка'},{'id':13,'name':'Новая организация'}]))
+                page.evaluate("localStorage.setItem('token','fixture.'+btoa(JSON.stringify({sub:7}))+'.fixture')")
+                page.locator('#bizBtn').click()
+                expect(page.locator('#sgOrgMenu button')).to_have_count(2)
+                expect(page.locator('#sgOrgMenu [aria-current="true"]')).to_have_text('Авто точка')
+                assert page.locator('#sgOrgMenu .sg-company-choice').count()==0
+                assert page.locator('#sgOrgMenu').bounding_box()['height']<230
+                page.screenshot(path=str(captures / 'company-dropdown-dark-390.png'))
+                issued=[]
+                def ticket(route):
+                    issued.append(route.request.post_data_json)
+                    route.fulfill(json={'url':origin+'/studio/sso?t=fixture'})
+                page.route('**/api/studio/ticket', ticket)
+                page.route('**/studio/sso?t=fixture', lambda route: route.fulfill(
+                    content_type='text/html',body='<main>Fixture SSO entry</main>'))
+                page.locator('#sgOrgMenu button').filter(has_text='Новая организация').click()
+                page.wait_for_url('**/studio/sso?t=fixture')
+                assert issued==[{'business_id':13}]
                 for suffix in ('/create','/work','/materials','/calendar','/profile','/seo'):
                     response = page.goto(origin + base + suffix)
                     assert response.status == 200, suffix
                     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'), suffix
                 assert not errors, errors
                 browser.close()
-                print('PASS: reference surfaces, logo, progress link, preview and missing-thumbnail fallback, 8 viewport/theme combinations, real touch drag, cancellation, edge/vertical scroll and 6 routes')
+                print('PASS: reference surfaces, root resume/dropdown, resize-visual keyboard with offset, compact review actions in both themes, drawer swipe closing on links/buttons, previews, touch cancellation, edge/vertical scroll and 6 routes')
         finally:
             server.should_exit = True
             thread.join(timeout=5)

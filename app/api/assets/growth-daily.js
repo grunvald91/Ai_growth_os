@@ -2,8 +2,7 @@
 (function () {
   'use strict';
   var match = location.pathname.match(/\/studio\/products\/([0-9a-f-]{36})(?:\/|$)/i);
-  if (!match) return;
-  var companyId = match[1], base = '/studio/products/' + companyId;
+  var companyId = match ? match[1] : '', base = match ? '/studio/products/' + companyId : '/studio';
   var companyButton = document.getElementById('bizBtn');
   var companyMenu = document.getElementById('sgOrgMenu');
   var companyWrapper = document.getElementById('sgOrgWrapper');
@@ -34,8 +33,11 @@
     });
     if (data.can_add) {
       var add = create('a', 'sg-org-footer', '+ Управление организациями');
-      add.href = '/studio?choose=1';
+      add.href = '/studio/new';
       companyMenu.appendChild(add);
+    }
+    if (data.unified_user_id && window.ServGoOrganizations) {
+      window.ServGoOrganizations(companyMenu, data);
     }
   }
   if (companyButton && companyMenu) {
@@ -67,6 +69,9 @@
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') closeCompany();
   });
+  if (new URLSearchParams(location.search).get('companies') === '1' && companyButton) {
+    companyButton.click();
+  }
 
   var drawer = document.getElementById('sgDailyDrawer');
   var backdrop = document.getElementById('sgDailyBackdrop');
@@ -190,7 +195,8 @@
     var finished = gesture;
     gesture = null;
     if (!finished.locked) return;
-    var open = cancelled ? finished.wasOpen : finished.progress >= .35;
+    var open = cancelled ? finished.wasOpen :
+      (finished.wasOpen ? finished.progress > .75 : finished.progress >= .25);
     // Apply the final state while the progress transform is still in effect.
     if (open) { showDrawer(); if (!finished.wasOpen) { refresh(); saveSeen(); } }
     else closeDrawer();
@@ -200,14 +206,24 @@
       suppressHandleClick = true;
       setTimeout(function () { suppressHandleClick = false; }, 350);
     }
+    suppressDrawerClick = finished.target;
+    setTimeout(function () { suppressDrawerClick = false; }, 350);
   }
+  var suppressDrawerClick = false;
+  drawer.addEventListener('click', function (event) {
+    if (suppressDrawerClick && (event.pointerType === 'touch' || event.sourceCapabilities?.firesTouchEvents) &&
+        (suppressDrawerClick.contains(event.target) || event.target.contains(suppressDrawerClick))) {
+      event.preventDefault(); event.stopPropagation();
+    }
+  }, true);
   document.addEventListener('touchstart', function (event) {
     if (event.touches.length !== 1) { stopGesture(true); return; }
     if (!(event.target instanceof Element)) return;
     var target = event.target, touch = event.touches[0];
     var fromHandle = handle.contains(target);
     var inDrawer = drawer.contains(target);
-    if (!fromHandle && (!inDrawer && isOpen || target.closest(
+    if (target.closest('input,textarea,select,[contenteditable]')) return;
+    if (!fromHandle && !inDrawer && (isOpen || target.closest(
       'a,button,input,textarea,select,summary,video,[contenteditable],.command-dock,' +
       '.dp-tablewrap,.command-hints,.v4-more,[role="dialog"]:not(.sg-daily-drawer)'
     ))) return;
@@ -218,7 +234,7 @@
       touch.clientY > height * .22 && touch.clientY < height * .78;
     if (!fromHandle && !inDrawer && (!inCenter || !target.closest('#main'))) return;
     gesture = {id:touch.identifier, x:touch.clientX, y:touch.clientY,
-      progress:isOpen ? 1 : 0, wasOpen:isOpen, fromHandle:fromHandle, locked:false};
+      progress:isOpen ? 1 : 0, wasOpen:isOpen, fromHandle:fromHandle, target:target, locked:false};
   }, {passive:true});
   document.addEventListener('touchmove', function (event) {
     if (!gesture) return;
