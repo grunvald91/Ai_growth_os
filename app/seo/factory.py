@@ -209,7 +209,7 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client, h
                                                        Artifact.kind == "seo_suggest_checkpoint"))
         seeds = (json.loads(checkpoint.content)["seeds"] if checkpoint else
                  await plan_seeds(db, llm, privacy, product_id, products_root=settings.products_root,
-                                  model=settings.llm_model, focus=focus))
+                                  model=settings.llm_model, focus=focus, factory_task_id=task_id))
         record_stage(db, product_id, task_id, "collect_suggestions")
         core_artifact = await build_semantic_core(db, product_id, seeds, client=client, task_id=task_id)
     core = SemanticCore.model_validate_json(core_artifact.content)
