@@ -3,19 +3,21 @@
 The browser's existing ServGo JWT authorizes listing and SSO-ticket issuance.
 Growth never uses browser-supplied company IDs as permissions: both API calls
 validate the JWT/ownership and the landing verifies the current browser identity.
-The legacy Growth host does not load this script.
+The legacy host never requests the canonical list without verified session metadata.
 """
 
 JS = r"""
 (() => {
   'use strict';
-  const mount = document.getElementById('sg-servgo-organisations');
+  function init(mount, metadata = null) {
   if (!mount) return;
+  const compact = metadata !== null;
 
-  const legacy = document.getElementById('sg-growth-connected');
-  const expectedUser = mount.dataset.userId || '';
-  const linked = new Set((mount.dataset.linkedBusinesses || '').split(',').filter(Boolean));
-  const state = mount.querySelector('[role="status"]');
+  const legacy = compact ? null : document.getElementById('sg-growth-connected');
+  const expectedUser = String(compact ? metadata.unified_user_id : mount.dataset.userId || '');
+  const linked = new Set(compact ? (metadata.linked_business_ids || []).map(String) : (mount.dataset.linkedBusinesses || '').split(',').filter(Boolean));
+  let state = mount.querySelector('[role="status"]') || document.createElement('p');
+  if (compact) { state.className = 'sg-org-menu-heading'; state.setAttribute('role', 'status'); mount.prepend(state); }
 
   // The canonical picker is served as Growth HTML, not by the React SPA.
   // Explicit ServGo theme preference therefore needs applying here as well.
@@ -72,23 +74,24 @@ JS = r"""
   const show = (companies) => {
     if (!Array.isArray(companies)) throw new Error('Invalid company list');
     const items = document.createElement('div');
-    items.className = 'sg-company-items';
+    items.className = compact ? 'sg-org-options' : 'sg-company-items';
     const unique = new Set();
     let connectedCount = 0;
     // Existing platform-wide Growth project is a separate, protected record,
     // not a newly created BookingBot business. The server emits its product
     // UUID only when this SSO user has a VERIFIED linked operator account.
-    const platformId = mount.dataset.platformProduct || '';
-    const platformName = mount.dataset.platformName || '';
+    const platformId = compact ? metadata.platform_product?.id || '' : mount.dataset.platformProduct || '';
+    const platformName = compact ? metadata.platform_product?.name || '' : mount.dataset.platformName || '';
     if (platformId && platformName) {
-      const platformButton = text('a', 'sg-company-choice', '');
+      const platformButton = text('a', compact ? 'sg-org-option' : 'sg-company-choice', '');
       platformButton.href = '/studio/products/' + encodeURIComponent(platformId);
-      platformButton.appendChild(text('span', 'sg-company-avatar', 'S'));
-      const platformCopy = text('span', 'sg-company-choice-copy', '');
+      if (compact && metadata.current_product_id === platformId) platformButton.setAttribute('aria-current', 'true');
+      if (!compact) platformButton.appendChild(text('span', 'sg-company-avatar', 'S'));
+      const platformCopy = text('span', compact ? 'sg-org-copy' : 'sg-company-choice-copy', '');
       platformCopy.appendChild(text('strong', '', platformName));
-      platformCopy.appendChild(text('small', '', 'Платформа · существующий проект администратора'));
+      if (!compact) platformCopy.appendChild(text('small', '', 'Платформа · существующий проект администратора'));
       platformButton.appendChild(platformCopy);
-      platformButton.appendChild(text('span', 'sg-company-arrow', '›'));
+      if (!compact) platformButton.appendChild(text('span', 'sg-company-arrow', '›'));
       items.appendChild(platformButton);
       connectedCount += 1;
     }
@@ -99,14 +102,15 @@ JS = r"""
       unique.add(company.id);
       const connected = linked.has(String(company.id));
       if (connected) connectedCount++;
-      const button = text('button', 'sg-company-choice sg-company-action', '');
+      const button = text('button', compact ? 'sg-org-option' : 'sg-company-choice sg-company-action', '');
       button.type = 'button';
-      button.appendChild(text('span', 'sg-company-avatar', company.name.trim().slice(0, 1).toUpperCase()));
-      const copy = text('span', 'sg-company-choice-copy', '');
+      if (compact && (metadata.current_business_ids || []).includes(company.id)) button.setAttribute('aria-current', 'true');
+      if (!compact) button.appendChild(text('span', 'sg-company-avatar', company.name.trim().slice(0, 1).toUpperCase()));
+      const copy = text('span', compact ? 'sg-org-copy' : 'sg-company-choice-copy', '');
       copy.appendChild(text('strong', '', company.name));
-      copy.appendChild(text('small', '', connected ? 'Открыть маркетинг' : 'Подключить маркетинг для организации'));
+      if (!compact || !connected) copy.appendChild(text('small', '', compact ? 'Подключить маркетинг' : connected ? 'Открыть маркетинг' : 'Подключить маркетинг для организации'));
       button.appendChild(copy);
-      button.appendChild(text('span', 'sg-company-arrow', '›'));
+      if (!compact) button.appendChild(text('span', 'sg-company-arrow', '›'));
       button.addEventListener('click', async () => {
         button.disabled = true;
         showMessage('Проверяем доступ к выбранной организации…');
@@ -131,6 +135,13 @@ JS = r"""
       });
       items.appendChild(button);
     }
+    if (compact) {
+      if (!companies.length && !platformId) items.appendChild(text('p', 'sg-org-menu-heading', 'Нет доступных организаций.'));
+      state = text('div', 'sg-org-menu-heading', 'Выберите организацию');
+      state.setAttribute('role', 'status');
+      mount.replaceChildren(state, items);
+      return;
+    }
     mount.replaceChildren(
       text('p', 'sg-company-caption',
            'Доступных организаций и проектов: ' + (companies.length + (platformId ? 1 : 0)) +
@@ -152,5 +163,8 @@ JS = r"""
     // Do not misreport the two linked Growth products as the full ServGo list.
     showMessage('Не удалось получить все организации ServGo. Ниже показаны только уже подключённые.', true);
   });
+  }
+  window.ServGoOrganizations = init;
+  init(document.getElementById('sg-servgo-organisations'));
 })();
 """

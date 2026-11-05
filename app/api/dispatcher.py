@@ -180,24 +180,50 @@ def daily_home_summary(product_id: UUID, request: Request, db: Session = Depends
 
 
 @router.get("/studio/products/{product_id}/organizations.json")
-def home_organizations(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+def home_organizations(product_id: UUID, request: Request, db: Session = Depends(get_db),
+                       settings: Settings = Depends(get_settings)):
     """Company dropdown uses the same scope as Studio's company selector."""
     permitted = getattr(request.state, "studio_product_ids", None)
     if permitted is not None and str(product_id) not in {str(p) for p in permitted}:
         raise HTTPException(403, "Нет доступа к компании")
     _owner_product(db, product_id)
+    return organization_choices(request, db, settings, product_id)
+
+
+@router.get("/studio/organizations.json")
+def studio_organizations(request: Request, db: Session = Depends(get_db),
+                         settings: Settings = Depends(get_settings)):
+    return organization_choices(request, db, settings)
+
+
+def organization_choices(request: Request, db: Session, settings: Settings, product_id: UUID | None = None):
+    permitted = getattr(request.state, "studio_product_ids", None)
     from sqlalchemy import select
     q = select(Product)
     if permitted is not None:
         q = q.where(Product.id.in_([UUID(str(p)) for p in permitted]))
     products = list(db.scalars(q.order_by(Product.name, Product.id).limit(100)))
-    if not any(item.id == product_id for item in products):
+    if product_id is not None and not any(item.id == product_id for item in products):
         current = db.get(Product, product_id)
         if current is not None:
             products.append(current)
+    from app.api.content_studio import _canonical_servgo_user
+    user_id = _canonical_servgo_user(request, settings)
+    metadata = {}
+    if user_id is not None:
+        from app.sso.models import StudioBusinessLink
+        linked = list(db.scalars(select(StudioBusinessLink).where(
+            StudioBusinessLink.product_id.in_([item.id for item in products]))))
+        platform = next((item for item in products if item.slug == 'servgo'), None) if permitted is None else None
+        metadata = {"unified_user_id": user_id,
+                    "linked_business_ids": [item.servgo_business_id for item in linked],
+                    "current_business_ids": [item.servgo_business_id for item in linked if item.product_id == product_id],
+                    "current_product_id": str(product_id) if product_id else None,
+                    "platform_product": {"id": str(platform.id), "name": platform.name} if platform else None}
     return JSONResponse({
         "items": [{"id": str(item.id), "name": item.name} for item in products],
-        "can_add": permitted is None,
+        "can_add": permitted is None and user_id is None,
+        **metadata,
     }, headers={"Cache-Control": "private, no-store"})
 
 

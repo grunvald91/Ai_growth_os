@@ -60,7 +60,6 @@ document.addEventListener('pointerdown',e=>{
  const product=location.pathname.match(/\/studio\/products\/([0-9a-f-]{36})/i);
  const base=product?'/studio/products/'+product[1]:null;
  // Company selection is handled by growth-daily.js; notifications own their dropdown.
- if(!base)document.getElementById('bizBtn')?.addEventListener('click',()=>location.assign('/studio?choose=1'));
  document.querySelector('[data-focusvoice]').onclick=()=>{const input=document.getElementById('dp-input');if(input)input.focus();else location.assign(base||'/studio')};
  let searchBox,returnFocus;
  function closeSearch(){if(searchBox){searchBox.remove();searchBox=null;document.querySelector('.shell').inert=false;returnFocus?.focus()}}
@@ -81,8 +80,15 @@ document.addEventListener('pointerdown',e=>{
  const root=document.querySelector('.dp-home');
  if(root){
   const viewport=window.visualViewport;
+  let fullHeight=window.innerHeight;
   const fitConversation=()=>{
-   body.style.setProperty('--v4-viewport',(viewport?.height||window.innerHeight)+'px');
+   const height=viewport?.height||window.innerHeight;
+   const editing=document.activeElement?.matches('textarea,input,[contenteditable="true"]');
+   if(!editing)fullHeight=Math.max(height,window.innerHeight);
+   const keyboard=innerWidth<=780 && editing && Math.max(fullHeight,window.innerHeight)-height>120;
+   body.classList.toggle('sg-keyboard-open',!!keyboard);
+   body.style.setProperty('--v4-viewport',height+'px');
+   body.style.setProperty('--v4-viewport-offset',(viewport?.offsetTop||0)+'px');
    body.style.setProperty('--v4-header',document.querySelector('.topbar').getBoundingClientRect().height+'px');
    body.style.setProperty('--v4-nav',document.getElementById('mobileNav').getBoundingClientRect().height+'px');
   };
@@ -90,6 +96,10 @@ document.addEventListener('pointerdown',e=>{
   layoutObserver.observe(document.querySelector('.topbar'));
   layoutObserver.observe(document.getElementById('mobileNav'));
   viewport?.addEventListener('resize',fitConversation);
+  viewport?.addEventListener('scroll',fitConversation);
+  document.addEventListener('focusin',fitConversation);
+  document.addEventListener('focusout',()=>requestAnimationFrame(fitConversation));
+  window.addEventListener('orientationchange',()=>{fullHeight=window.innerHeight;fitConversation()});
   window.addEventListener('resize',fitConversation);
   fitConversation();
   // Flex layout reserves the dock's actual height, including multiline drafts

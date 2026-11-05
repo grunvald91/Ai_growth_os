@@ -72,8 +72,8 @@ def test_daily_drawer_and_compact_navigation_use_v4_real_routes(live):
     assert 'id="sgDailyDrawer"' in page.text
     assert 'id="sgDailyHandle"' in page.text
     assert 'id="sgDailyBackdrop"' in page.text
-    assert '/studio/assets/growth-daily.js?v=2' in page.text
-    assert '/studio/assets/growth-daily.css?v=4' in page.text
+    assert '/studio/assets/growth-daily.js?v=3' in page.text
+    assert '/studio/assets/growth-daily.css?v=5' in page.text
     assert 'id="sgOrgMenu" hidden' in page.text
     nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
     assert nav.index(">Календарь</span>") < nav.index(">Ещё</span>")
@@ -83,6 +83,103 @@ def test_daily_drawer_and_compact_navigation_use_v4_real_routes(live):
     assert "Другая компания" not in nav
     assert client.get("/studio/assets/growth-daily.js").status_code == 200
     assert client.get("/studio/assets/growth-daily.css").status_code == 200
+
+
+def test_modern_entry_resumes_last_authorized_company_and_old_picker_opens_dropdown(live):
+    client, db, product = live
+    other = Product(name="Second company", slug="second")
+    db.add(other)
+    db.commit()
+    first = client.get('/studio?design=v4', follow_redirects=False)
+    assert first.status_code == 302
+    assert first.headers['location'] == f'/studio/products/{product.id}?design=v4'
+    client.get(f'/studio/products/{other.id}?design=v4')
+    assert client.cookies['studio_last_product'] == str(other.id)
+    resumed = client.get('/studio', follow_redirects=False)
+    assert resumed.headers['location'] == f'/studio/products/{other.id}'
+    switched = client.get('/studio?choose=1')
+    assert switched.url.path == f'/studio/products/{other.id}'
+    assert switched.url.query == b'companies=1'
+    assert 'id="sgOrgMenu"' in switched.text
+    assert 'Ваши компании' not in switched.text
+
+
+def test_last_company_cookie_never_grants_access_outside_current_scope(live, monkeypatch):
+    from fastapi import Request
+    from app.api.content_studio_auth import require_studio_auth
+    client, db, product = live
+    forbidden = Product(name="Other tenant", slug="other-tenant")
+    db.add(forbidden)
+    db.commit()
+    def scoped(request: Request):
+        request.state.studio_product_ids = [str(product.id)]
+        return 'scoped-test'
+    monkeypatch.setitem(app.dependency_overrides, require_studio_auth, scoped)
+    client.cookies.set('studio_last_product', str(forbidden.id), path='/studio')
+    response = client.get('/studio?design=v4', follow_redirects=False)
+    assert response.headers['location'] == f'/studio/products/{product.id}?design=v4'
+    companies = client.get('/studio/organizations.json').json()
+    assert companies['items'] == [{'id': str(product.id), 'name': product.name}]
+    assert not companies['can_add']
+
+
+def test_modern_entry_without_workspaces_has_only_the_header_dropdown(live):
+    client, db, product = live
+    db.delete(product)
+    db.commit()
+    page = client.get('/studio?design=v4')
+    assert page.status_code == 200
+    assert 'id="sgOrgMenu"' in page.text
+    assert 'Ваши компании' not in page.text
+    assert 'class="sg-company-choice"' not in page.text
+    assert client.get('/studio/organizations.json').json()['items'] == []
+
+
+def test_canonical_entry_defaults_to_company_home_without_a_chooser(live, monkeypatch):
+    from fastapi import Request
+    from app.api.content_studio_auth import require_studio_auth
+    _, _, product = live
+    config = Settings(app_env='development', studio_servgo_gateway_enabled=True, _env_file=None)
+    monkeypatch.setitem(app.dependency_overrides, get_settings, lambda: config)
+    def account(request: Request):
+        request.state.studio_product_ids = [str(product.id)]
+        return 'canonical-layout-test'
+    monkeypatch.setitem(app.dependency_overrides, require_studio_auth, account)
+    with TestClient(app, base_url='https://servgo.ru') as client:
+        response = client.get('/studio', follow_redirects=False)
+        assert response.status_code == 302
+        assert response.headers['location'] == f'/studio/products/{product.id}'
+        home = client.get('/studio')
+        assert 'id="dp-input"' in home.text
+        assert 'Ваши компании' not in home.text
+        cookie = client.cookies['studio_last_product']
+        assert cookie == str(product.id)
+
+
+def test_unified_dropdown_metadata_contains_only_authorized_linked_businesses(live, monkeypatch):
+    from fastapi import Request
+    from app.api.content_studio_auth import require_studio_auth
+    from app.api import content_studio
+    from app.sso.models import StudioBusinessLink
+    client, db, product = live
+    other = Product(name='Private company', slug='private-company')
+    db.add(other)
+    db.flush()
+    db.add_all([StudioBusinessLink(servgo_business_id=12, product_id=product.id),
+                StudioBusinessLink(servgo_business_id=99, product_id=other.id)])
+    db.commit()
+    def scoped(request: Request):
+        request.state.studio_product_ids = [str(product.id)]
+        return 'scoped-test'
+    monkeypatch.setitem(app.dependency_overrides, require_studio_auth, scoped)
+    monkeypatch.setattr(content_studio, '_canonical_servgo_user', lambda *args: 7)
+    data = client.get(f'/studio/products/{product.id}/organizations.json').json()
+    assert data['unified_user_id'] == 7
+    assert data['linked_business_ids'] == [12]
+    assert data['platform_product'] is None
+    assert not data['can_add']
+    denied = client.get(f'/studio/products/{other.id}/organizations.json')
+    assert denied.status_code == 403
 
 
 def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
@@ -175,7 +272,7 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
     assert '/studio/assets/growth-live.css?v=20' in page.text
     assert '/studio/assets/dispatcher.js?v=light-polish-20261105' in page.text
-    assert '/studio/assets/growth-live.js?v=12' in page.text
+    assert '/studio/assets/growth-live.js?v=13' in page.text
     # A video is a creation format, not a standalone main-menu section.
     nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
     assert 'Простое видео' not in nav
@@ -1153,7 +1250,7 @@ def test_mobile_seo_dashboard_prioritizes_status_and_hides_process_details(live)
     assert 'Запусков пока нет.' in page.text
     assert 'Подключить SEO-завод' in page.text
     assert 'после отдельного серверного выпуска' not in page.text
-    assert '/studio/assets/growth-servgo-air.css?v=10' in page.text
+    assert '/studio/assets/growth-servgo-air.css?v=11' in page.text
 
 
 def test_notification_bell_is_real_svg_centered_on_every_v4_screen(live):

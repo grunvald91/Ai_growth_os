@@ -6,6 +6,7 @@ dynamic string is HTML escaped; no backend side effects occur here.
 from __future__ import annotations
 import html
 import json
+import re
 from datetime import datetime
 from urllib.parse import quote
 
@@ -178,7 +179,7 @@ def speed_html(product_id, calls, durations, *, days=7) -> str:
 def review_html(product_id, records, *, filter_name="all") -> str:
     base=f"/studio/products/{product_id}"
     tabs=[]
-    types=[("all","Всё"),("text","Тексты и статьи"),("creative","Сценарии и визуалы")]
+    types=[("all","Всё"),("text","Тексты"),("creative","Визуалы")]
     for value,label in types:
         tabs.append(f'<a class="sg-filter {"is-active" if value==filter_name else ""}" '
                     f'href="{base}/review?kind={value}">{label}</a>')
@@ -194,8 +195,14 @@ def review_html(product_id, records, *, filter_name="all") -> str:
                  (data.get("production_brief") or {}).get("voiceover_or_dialogue_script") or "")
         if not isinstance(preview, str):
             preview=str(preview)
-        preview=preview[:320]
-        channel=data.get("platform") or data.get("channel") or "Материал"
+        lines=preview.strip().splitlines()
+        if lines and re.sub(r'^#+\s*', '', lines[0]).strip().casefold() == (row.title or '').strip().casefold():
+            lines=lines[1:]
+        preview=re.sub(r'\s+', ' ', '\n'.join(lines)).strip()
+        if len(preview)>220:
+            preview=preview[:220].rsplit(' ',1)[0]+'…'
+        channel=str(data.get("platform") or data.get("channel") or "Материал")
+        channel={"own_site":"Сайт", "telegram":"Telegram", "vk":"ВКонтакте", "zen":"Дзен"}.get(channel, channel)
         kind={"creative_brief":"Креативный бриф", "video_script":"Сценарий", "video_render":"Готовый MP4",
               "article":"Статья", "channel_text":"Пост"}.get(row.kind, "Материал")
         action=f'{base}/materials/{row.id}'
@@ -209,7 +216,7 @@ def review_html(product_id, records, *, filter_name="all") -> str:
             <h3>{esc(row.title)}</h3><p>{esc(preview)}</p>
             <div class="sg-review-footer"><span>Ожидает решения</span>
               <div class="sg-inline-actions">
-                <a class="btn secondary" href="{action}">Открыть и исправить</a>
+                <a class="btn secondary" href="{action}" aria-label="Открыть и исправить: {esc(row.title)}">Открыть</a>
                 <form method="post" action="{approve}">
                   {'<a class="btn primary" href="' + action + '">Проверить факты</a>' if data.get('fact_check_required') else '<button class="btn primary" type="submit">Утвердить ✓</button>'}
                 </form>
@@ -219,7 +226,7 @@ def review_html(product_id, records, *, filter_name="all") -> str:
     empty_title = "В этом разделе нет материалов" if filter_name != "all" else "Материалы проверены"
     empty_note = "Попробуйте фильтр «Всё»." if filter_name != "all" else "Сейчас ничего не требует согласования."
     empty=f'<div class="sg-empty"><div>✓</div><h3>{empty_title}</h3><p>{empty_note}</p><a class="btn primary" href="{base}/create">Создать материал →</a></div>'
-    return (f'<section class="sg-surface"><div class="sg-section-head"><div>'
+    return (f'<section class="sg-surface sg-review-page"><div class="sg-section-head"><div>'
             f'<span class="sg-overline">ВАШЕ ВНИМАНИЕ</span><h2>Очередь согласования</h2>'
             f'<p>Сначала проверяйте материал, затем разрешайте публикацию.</p></div>'
             f'<span class="sg-count">{len(records)} на проверке</span></div>'
