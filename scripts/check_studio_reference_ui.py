@@ -141,10 +141,11 @@ def main():
                         bounds = page.evaluate("""() => ({
                           feed:document.querySelector('#dp-feed').getBoundingClientRect().bottom,
                           dock:document.querySelector('.command-dock').getBoundingClientRect().top,
+                          dockBottom:document.querySelector('.command-dock').getBoundingClientRect().bottom,
                           tab:document.querySelector('.sg-daily-tab').getBoundingClientRect().right,
                           card:document.querySelector('.dp-material').getBoundingClientRect().left
                         })""")
-                        assert bounds['feed'] <= bounds['dock'] + 1, (mode,width,bounds)
+                        assert bounds['feed'] >= bounds['dockBottom'] - 1, (mode,width,bounds)
                         assert bounds['tab'] < bounds['card'], (mode,width,bounds)
                         assert page.locator('.dp-material--video').get_attribute('href') == video
                         assert page.locator('.dp-material--video a').count() == 0
@@ -180,7 +181,7 @@ def main():
                     assert bounds['height']==844, bounds
                     assert bounds['header']['width']==390, bounds
                     assert 410+offset-14 <= bounds['dock']['bottom'] <= 410+offset, bounds
-                    assert bounds['feed']['bottom'] <= bounds['dock']['top']+1, bounds
+                    assert bounds['feed']['bottom'] >= bounds['dock']['bottom']-1, bounds
                     assert bounds['form']['x']>=12 and bounds['form']['right']<=378, bounds
                     assert bounds['input']['x']-bounds['form']['x']>=10, bounds
                     assert bounds['input']['top']-bounds['form']['top']>=5, bounds
