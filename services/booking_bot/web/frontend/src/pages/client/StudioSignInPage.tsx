@@ -16,8 +16,10 @@ export function StudioSignInPage() {
           </p>
           <StudioEntry autoOpen showUnavailable />
           <p className="ds-caption">
-            Если компании нет в списке, проверьте доступ у владельца организации.
+            Если компания уже есть в Growth, привяжите её к этому аккаунту ServGo: существующие материалы сохранятся.
           </p>
+          <a href="/studio/identity" className="ds-btn ds-btn--ghost"
+            style={{ display: 'inline-flex', marginTop: 12, marginRight: 8 }}>Привязать аккаунт Growth</a>
           <Link to="/account" className="ds-btn ds-btn--ghost"
             style={{ display: 'inline-flex', marginTop: 12 }}>Мой аккаунт</Link>
         </section>
