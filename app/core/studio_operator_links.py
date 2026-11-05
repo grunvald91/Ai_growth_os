@@ -36,11 +36,11 @@ def bind_operator(settings, user_id: int, login: str, credential_fingerprint: st
         _write(path, links)
 
 
-def linked_operator(settings, user_id: int, accounts: dict) -> str | None:
-    """Return admin username only while that credential remains active.
+def linked_account(settings, user_id: int, accounts: dict) -> tuple[str, list[str] | None] | None:
+    """Return the original Growth login and scope after explicit two-account proof.
 
-    A password reset, deleted account, changed operator secret or invalid link
-    revokes the elevated role automatically. Fail closed for bad files.
+    This grants no extra tenant permissions: the linked account's current scope
+    comes from the live Growth account file, and password changes revoke the link.
     """
     try:
         links = json.loads(_path(settings).read_text(encoding="utf-8"))
@@ -52,13 +52,19 @@ def linked_operator(settings, user_id: int, accounts: dict) -> str | None:
             return None
         from app.api.content_studio_auth import credential_fingerprint
         active = credential_fingerprint(settings, accounts, name)
-        if active is not None and active[1] is None and hmac.compare_digest(active[0], previous):
-            return name
+        if active is not None and hmac.compare_digest(active[0], previous):
+            return name, active[1]
     except FileNotFoundError:
         return None
     except (OSError, ValueError, TypeError):
-        log.warning("growth_operator_link_invalid")
+        log.warning("growth_account_link_invalid")
     return None
+
+
+def linked_operator(settings, user_id: int, accounts: dict) -> str | None:
+    """Only an explicitly linked *admin* credential can elevate platform access."""
+    account = linked_account(settings, user_id, accounts)
+    return account[0] if account is not None and account[1] is None else None
 
 
 def unbind_operator(settings, user_id: int) -> None:
