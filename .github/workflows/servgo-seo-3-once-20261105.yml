@@ -38,6 +38,15 @@ jobs:
             fi
           done < /tmp/host-keys
           [ -s ~/.ssh/known_hosts ] || { echo "::error::Pinned host fingerprint mismatch"; exit 1; }
+      - name: Confirm tested production release
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$(sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'docker inspect --format "{{.Config.Image}}" ai-growth-os-api-1')"
+          case "$image" in
+            *fbc0ae2dfafa3606027f444e1931d537395b21d9*) echo "Production release verified: fbc0ae2" ;;
+            *) echo "::error::Growth container release changed; abort before paid calls"; exit 1 ;;
+          esac
       - name: Inspect exact three article release (read-only)
         shell: bash
         run: |
@@ -53,6 +62,81 @@ jobs:
             -o ConnectTimeout=20 "root@$HOST" \
             'docker exec ai-growth-os-api-1 python -u -m app.seo.servgo_three_article_release --apply' \
             | tee /tmp/servgo-seo-3-release.log
+      - name: Require all three accepted articles and verify public HTTPS
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import re
+          import time
+          import urllib.error
+          import urllib.request
+          from html.parser import HTMLParser
+
+          with open("/tmp/servgo-seo-3-release.log", encoding="utf-8") as f:
+              records = [line.partition("=")[2].strip() for line in f
+                         if line.startswith("SERVGO_THREE_ARTICLES=")]
+          if len(records) != 1:
+              raise SystemExit("Expected exactly one structured release result")
+          report = json.loads(records[0])
+          rewrites = report.get("rewrites") or []
+          assert len(rewrites) == 2, "Two legacy articles must be reviewed"
+          assert all(r.get("state") in ("published", "already_revised") for r in rewrites), rewrites
+          fresh = report.get("new_article") or {}
+          assert fresh.get("state") in ("published", "already_published"), fresh
+          third = fresh.get("slug")
+          assert isinstance(third, str) and third.startswith("/blog/") and re.fullmatch(r"/blog/[a-z0-9-]{1,120}", third), third
+          slugs = [
+              "/blog/kak-psihologu-organizovat-zapis-klientov",
+              "/blog/kak-masteru-manikyura-vesti-zapis-klientov",
+              third,
+          ]
+          if len(set(slugs)) != 3:
+              raise SystemExit("New article must have a distinct public URL")
+          class Page(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.canonical = None
+                  self.cta = False
+                  self.title_seen = False
+              def handle_starttag(self, tag, attrs):
+                  a = dict(attrs)
+                  if tag == "link" and a.get("rel") == "canonical":
+                      self.canonical = a.get("href")
+                  if tag == "a" and str(a.get("href", "")).startswith("/blog/cta/"):
+                      self.cta = True
+                  if tag == "title":
+                      self.title_seen = True
+          def fetch(path):
+              req = urllib.request.Request("https://servgo.ru" + path, headers={"User-Agent":"ServGoSEOReleaseAcceptance/1.0"})
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  return response.status, response.read(2_000_000).decode("utf-8", "replace")
+          for attempt in range(25):
+              try:
+                  sitemap_code, sitemap = fetch("/blog/sitemap.xml")
+                  robots_code, robots = fetch("/robots.txt")
+                  assert sitemap_code == robots_code == 200
+                  assert "Disallow: /blog" not in robots
+                  checks = []
+                  for slug in slugs:
+                      status, html = fetch(slug)
+                      page = Page()
+                      page.feed(html)
+                      success = (status == 200 and page.canonical == "https://servgo.ru" + slug
+                                 and "https://servgo.ru" + slug in sitemap
+                                 and page.cta and page.title_seen)
+                      checks.append(success)
+                      print("SEO_PUBLIC", json.dumps({"slug":slug, "status":status, "canonical":page.canonical == "https://servgo.ru" + slug, "sitemap":"https://servgo.ru" + slug in sitemap,"cta":page.cta},ensure_ascii=False), flush=True)
+                  if all(checks):
+                      break
+              except (AssertionError, OSError, urllib.error.URLError) as exc:
+                  print("SEO_PUBLIC_RETRY", type(exc).__name__, flush=True)
+              if attempt == 24:
+                  raise SystemExit("Public pages did not all pass HTTPS/canonical/sitemap/CTA checks")
+              time.sleep(15)
+          print("SEO_RELEASE_ACCEPTED", json.dumps({"published_articles":3,"slugs":slugs},ensure_ascii=False))
+          PY
       - name: Summarize exact result without exposing credentials
         if: always()
         shell: bash
