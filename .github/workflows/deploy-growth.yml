@@ -60,15 +60,49 @@ jobs:
       - name: Tests
         run: python -m pytest -q
 
+  # Running this lightweight job outside the production environment avoids
+  # requesting deployment credentials for BookingBot-only changes.
+  impact:
+    if: >-
+      ${{ github.event_name == 'workflow_run' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.head_repository.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      growth_changed: ${{ steps.scope.outputs.growth_changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - name: Determine whether this CI-tested commit changes Growth runtime
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f scripts/ci/monorepo_scope.py ]; then
+            python3 scripts/ci/monorepo_scope.py --self-test
+            python3 scripts/ci/monorepo_scope.py --base HEAD^ --head HEAD
+          else
+            # Old tested commits predate the gate; never silently suppress deployment.
+            echo "growth_changed=true" >> "$GITHUB_OUTPUT"
+            echo "MONOREPO_SCOPE_LEGACY_COMMIT fail_closed=true"
+          fi
+
   deploy:
-    needs: test
+    needs: [test, impact]
     if: >-
       ${{ always() && (
         (github.event_name == 'workflow_run' &&
          github.event.workflow_run.conclusion == 'success' &&
          github.event.workflow_run.event == 'push' &&
          github.event.workflow_run.head_branch == 'main' &&
-         github.event.workflow_run.head_repository.full_name == github.repository) ||
+         github.event.workflow_run.head_repository.full_name == github.repository &&
+         needs.impact.result == 'success' &&
+         needs.impact.outputs.growth_changed == 'true') ||
         (github.event_name == 'workflow_dispatch' &&
          github.actor == github.repository_owner &&
          needs.test.result == 'success')
@@ -111,8 +145,26 @@ jobs:
           if [ "$latest" = "${{ github.event.workflow_run.head_sha }}" ]; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"
           else
-            echo "deploy=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping superseded main commit (a newer main exists)."
+            # A newer commit may change only BookingBot. The preceding tested
+            # Growth commit must still deploy; otherwise its CI can be
+            # superseded and production would silently miss Growth changes.
+            git fetch --no-tags origin refs/heads/main
+            if [ ! -f scripts/ci/monorepo_scope.py ]; then
+              echo "deploy=false" >> "$GITHUB_OUTPUT"
+              echo "Older commit predates the scope gate; cannot prove safe ordering."
+            else
+              python3 scripts/ci/monorepo_scope.py --base HEAD --head "$latest" \
+                --github-output "$RUNNER_TEMP/subsequent-scope"
+              # File contains only booleans emitted by our checked-in classifier.
+              source "$RUNNER_TEMP/subsequent-scope"
+              if [ "$growth_changed" = "false" ]; then
+                echo "deploy=true" >> "$GITHUB_OUTPUT"
+                echo "Later main changes only touch BookingBot or monorepo housekeeping; deploy the already-tested Growth commit."
+              else
+                echo "deploy=false" >> "$GITHUB_OUTPUT"
+                echo "A newer main commit changes Growth; wait for its successful CI."
+              fi
+            fi
           fi
       - name: Deploy (restricted key, or SERVER_SSH_PASSWORD when no key is set)
         if: github.event_name == 'workflow_dispatch' || steps.freshness.outputs.deploy == 'true'
