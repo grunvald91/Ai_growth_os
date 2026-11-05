@@ -196,13 +196,20 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client, h
     require_enabled(db, product_id)
     record_stage(db, product_id, task_id, "prepare_queries")
     llm, privacy = build_seo_llm(settings, provider)
+    # Local competitor data augments the plan; it does not substitute for real
+    # search suggestions, frequencies or the selected company's own profile.
+    from app.seo.local_market import collect_local_market, KIND as LOCAL_KIND
+    cached = db.scalar(select(Artifact).where(
+        Artifact.task_id == task_id, Artifact.kind == LOCAL_KIND))
+    if cached is None:
+        await collect_local_market(db, product_id, task_id, settings.products_root)
     core_artifact = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == KIND))
     if core_artifact is None:
         checkpoint = db.scalar(select(Artifact).where(Artifact.task_id == task_id,
                                                        Artifact.kind == "seo_suggest_checkpoint"))
         seeds = (json.loads(checkpoint.content)["seeds"] if checkpoint else
                  await plan_seeds(db, llm, privacy, product_id, products_root=settings.products_root,
-                                  model=settings.llm_model, focus=focus))
+                                  model=settings.llm_model, focus=focus, factory_task_id=task_id))
         record_stage(db, product_id, task_id, "collect_suggestions")
         core_artifact = await build_semantic_core(db, product_id, seeds, client=client, task_id=task_id)
     core = SemanticCore.model_validate_json(core_artifact.content)

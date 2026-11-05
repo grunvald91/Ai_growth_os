@@ -8,6 +8,8 @@ owner confirms it.
 from __future__ import annotations
 
 import logging
+import json
+import re
 import time
 from urllib.parse import quote, urlsplit
 from uuid import UUID, uuid4
@@ -113,9 +115,15 @@ def _new_company_page(fields: dict | None = None, error: str | None = None, *, r
 <section class="panel hero">{brand_html()}<h1>Новая компания</h1>
 <p class="subtitle">Опишите бизнес своими словами и дайте всё, что уже есть: сайт, ИНН, прайс. Агенты соберут профиль компании, а вы проверите его перед работой.</p></section>
 {notice}
-<form class="panel sg-company-form sg-intake-form" method="post" action="/studio/new" enctype="multipart/form-data" data-once>
+<form class="panel sg-company-form sg-intake-form" method="post" action="/studio/new" enctype="multipart/form-data" data-once data-ym-company-form>
   <label class="sg-field"><span>Название компании</span>
     <input name="name" required minlength="2" maxlength="200" value="{esc(fields.get('name', ''))}"></label>
+  <div class="sg-field" data-ym-lookup>
+    <label><span>Город для поиска в Яндекс Картах</span><input data-ym-city maxlength="80" placeholder="Сочи"></label>
+    <button class="btn" type="button" data-ym-find>Найти организацию</button>
+    <div data-ym-results role="status" aria-live="polite"></div>
+    <input type="hidden" name="yandex_org" value="">
+  </div>
   <label class="sg-field"><span>Сайт <em>· если есть</em></span>
     <input name="website" type="text" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="500" placeholder="nogotok.ru" value="{esc(fields.get('website', ''))}">
     <small>Прочитаем главную и до 7 страниц: услуги, цены, о компании, контакты, отзывы.</small></label>
@@ -128,7 +136,7 @@ def _new_company_page(fields: dict | None = None, error: str | None = None, *, r
   {_file_field()}
   <div class="sg-intake-actions"><a href="/studio?choose=1">← К компаниям</a>
   <button class="btn primary" type="submit">Собрать профиль</button></div>
-</form>{ONCE_SCRIPT}</main></body></html>"""
+</form>{ONCE_SCRIPT}<script src="/studio/assets/yandex-company.js" defer></script></main></body></html>"""
 
 ONCE_SCRIPT = """<script>document.querySelectorAll('form[data-once]').forEach(function(f){f.addEventListener('submit',function(){
 var b=f.querySelector('button[type=submit],button:not([type])');if(b){setTimeout(function(){b.disabled=true;b.textContent='Отправляю…';},0);}});});</script>"""
@@ -219,6 +227,33 @@ def new_company_form(request: Request, db: Session = Depends(get_db)):
                         headers={"Cache-Control": "no-store"})
 
 
+def _ingest_yandex_selection(service: CompanyIntakeService, product_id: UUID,
+                             session_id: UUID, raw: str, *, scope: str | None = None) -> None:
+    """Accept only a signed, tenant-scoped Yandex result as third-party evidence."""
+    if not raw:
+        return
+    from app.integrations.yandex_evidence import verify_organization
+    from app.intake.sources import make_source
+
+    try:
+        record = verify_organization(raw, scope=scope or str(product_id))
+    except ValueError as exc:
+        raise IntakeError(str(exc)) from None
+    org_id = record["id"]
+    label = str(record.get("name") or "")[:200]
+    address = str(record.get("address") or "")[:300]
+    categories = [str(x)[:100] for x in (record.get("categories") or [])
+                  if isinstance(x, str)][:10]
+    website = str(record.get("website") or "")[:500]
+    lines = ["Яндекс Карты: карточка выбранной организации.", "Название: " + label,
+             "Адрес: " + address, "Категории: " + ", ".join(categories),
+             "Сайт: " + website]
+    source = make_source(
+        "public_third_party", "https://yandex.ru/maps/org/" + org_id,
+        "\n".join(v for v in lines if v.split(": ", 1)[-1].strip()))
+    service.add_source(product_id, session_id, source, actor=ACTOR)
+
+
 async def _add_materials(service: CompanyIntakeService, product_id: UUID, session_id: UUID,
                          fields: dict, files: list[tuple[str, bytes]], *, text_reference: str,
                          on_progress=None) -> list[str]:
@@ -283,6 +318,7 @@ async def new_company_submit(request: Request, background: BackgroundTasks, db: 
         session = service.start(product.id, actor=ACTOR)
         session_id = UUID(session["session_id"])
         service.add_text(product.id, session_id, about, actor=ACTOR, reference="growth studio: описание владельца")
+        _ingest_yandex_selection(service, product.id, session_id, fields.get("yandex_org", ""), scope="new")
         # Parse uploaded files in the background as well: multi-page OCR must
         # never hold the POST connection open for its entire worker timeout.
         _start_job(background, product.id, session_id, website=website, identifier=identifier,
@@ -365,13 +401,19 @@ def _collect_company_form(product: Product, registry_hint: str, review: dict | N
     return f"""<section class="sg-surface sg-intake-section sg-company-collect"><h2>Добавить материалы</h2>
 <p class="sg-muted">Заполните всё необходимое и приложите файлы. Только после нажатия кнопки ниже
 система сохранит сведения и запустит анализ. Результат будет черновиком для вашего подтверждения.</p>
-<form method="post" action="{base}/profile/collect" enctype="multipart/form-data" class="sg-intake-form" data-once>
+<form method="post" action="{base}/profile/collect" enctype="multipart/form-data" class="sg-intake-form" data-once data-ym-company-form>
   <label class="sg-field"><span>Название компании</span>
     <input name="name" required minlength="2" maxlength="200" value="{esc(product.name)}"></label>
   <label class="sg-field"><span>Краткое описание</span>
     <textarea name="description" rows="3" maxlength="10000">{esc(product.description or '')}</textarea></label>
   <label class="sg-field"><span>Дополнительные сведения</span>
     <textarea name="text" rows="4" maxlength="12000"></textarea></label>
+  <div class="sg-field" data-ym-lookup>
+    <label><span>Город для поиска в Яндекс Картах</span><input data-ym-city maxlength="80" placeholder="Сочи"></label>
+    <button class="btn" type="button" data-ym-find>Найти организацию</button>
+    <div data-ym-results role="status" aria-live="polite"></div>
+    <input type="hidden" name="yandex_org" value="">
+  </div>
   <label class="sg-field"><span>Сайт или страница</span>
     <input name="link" type="text" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false"
            maxlength="500" placeholder="nogotok.ru">
@@ -382,7 +424,7 @@ def _collect_company_form(product: Product, registry_hint: str, review: dict | N
   {_file_field("Файлы")}
   {questions_block}
   <div class="sg-intake-actions"><button class="btn primary" type="submit">Собрать профиль</button></div>
-</form></section>"""
+</form><script src="/studio/assets/yandex-company.js" defer></script></section>"""
 
 
 def _edit_page_body(product: Product, profile: CompanyProfile | None, error: str | None) -> str:
@@ -637,6 +679,7 @@ async def company_profile_action(product_id: UUID, action: str, request: Request
                 identity += "\nОписание компании: " + product.description
             service.add_text(product.id, session_id, identity, actor=ACTOR,
                              reference="growth studio: данные компании")
+            _ingest_yandex_selection(service, product.id, session_id, fields.get("yandex_org", ""))
             # Answers must be durable BEFORE the background build reads sources.
             await _apply_answers(service, product, session_id, fields)
             website = normalize_site(fields.get("link", ""))

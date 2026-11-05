@@ -199,7 +199,7 @@ def overlay_document(settings: dict, image: str, sha: str) -> dict:
     """Compose overlay for api/worker/telegram. The two sign-in secrets are only *references* (${NAME}), which
     compose fills in from /opt/ai_growth_os/.env when the containers are created; the file never holds a value.
     Without them in .env the references are empty and the ServGo sign-in and schedule stay switched off."""
-    references = {key: "${" + key + ":-}" for key in (*SSO_KEYS, VOICE_KEY)}
+    references = {key: "${" + key + ":-}" for key in (*SSO_KEYS, VOICE_KEY, "API_YANDEX", "SERVGO_YANDEX_PPO_DAILY_BUDGET")}
     return {"services": {s: {"image": image, "environment": {
         **settings["overlay_env"], **references, "RELEASE_SHA": sha}} for s in SERVICES}}
 

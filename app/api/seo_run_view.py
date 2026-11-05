@@ -22,6 +22,7 @@ SEO_KINDS = (
     "seo_factory_report", "seo_factory_request", "seo_factory_attempt",
     "semantic_core", "seo_content_plan",
     "seo_factory_stage", "seo_suggest_checkpoint",
+    "seo_local_market", "seo_local_market_status",
 )
 SEO_STATUS_NAMES = {
     "queued": "В очереди",
@@ -93,6 +94,12 @@ def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
         if isinstance(data, dict)
     }
     state = task.status.value if hasattr(task.status, "value") else str(task.status)
+    local_rows = sorted(
+        (a for a in artifacts if a.kind == "seo_local_market_status"),
+        key=lambda a: (a.created_at, a.id), reverse=True)
+    local_status = _report_data(local_rows[0].content) if local_rows else {}
+    if "seo_local_market" in kinds and not local_status:
+        local_status = {"provider": "yandex_organizations", "status": "collected"}
     return {
         "id": str(task.id),
         "title": task.title,
@@ -116,6 +123,7 @@ def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
         "last_error_retryable": failure.get("retryable"),
         "current_stage": stage_data.get("stage"),
         "source_progress": source_progress,
+        "local_market": local_status,
         # Task/AgentRun currently have no authoritative provider billing value.
         "cost_amount": None,
         "cost_status": "not_recorded",

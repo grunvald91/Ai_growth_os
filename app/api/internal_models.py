@@ -53,6 +53,34 @@ def model_for_role(role: str, settings: Settings = Depends(require_servgo)):
     return {"role": role, "models": [m for m in models if isinstance(m, str) and m]}
 
 
+@router.get("/studio/internal/yandex-organizations/capabilities")
+def yandex_organizations_capabilities(_: Settings = Depends(require_servgo)):
+    """Key metadata only; never return the key or claim unverified entitlement."""
+    from app.integrations.yandex_organizations import capability
+    return capability()
+
+
+@router.get("/studio/internal/yandex-organizations/search")
+async def yandex_organizations_search(
+    query: str, city: str, skip: int = 0,
+    settings: Settings = Depends(require_servgo),
+):
+    """Transient lookup for internal consumers. No Yandex data is persisted here."""
+    from pathlib import Path
+    from fastapi.responses import JSONResponse
+    from app.integrations.yandex_organizations import (
+        YandexOrganizationsError, search as search_yandex,
+    )
+    try:
+        value = await search_yandex(
+            query, city, results=25, skip=skip,
+            quota_path=Path(settings.products_root) / "_integrations" / "yandex_ppo_usage.sqlite",
+        )
+    except YandexOrganizationsError as exc:
+        raise HTTPException(503, str(exc)) from None
+    return JSONResponse(value, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
 @router.get("/studio/internal/companies")
 def companies(_: Settings = Depends(require_servgo), db=Depends(get_db)):
     rows = db.scalars(select(Product).order_by(Product.name))
