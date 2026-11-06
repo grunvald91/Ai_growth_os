@@ -107,7 +107,7 @@ def begin_oauth(settings, product_id, account_id, *, owner_login=None):
         cookie = store.cipher().encrypt(json.dumps(payload).encode()).decode("ascii")
     # These are the VK ID authorization-code + PKCE fields used by the official SDK.
     query = urlencode({
-        "client_id": app_id, "redirect_uri": payload["redirect_uri"],
+        "client_id": app_id, "app_id": app_id, "redirect_uri": payload["redirect_uri"],
         "response_type": "code", "state": state, "scope": "groups wall",
         "code_challenge": challenge, "code_challenge_method": "s256",
     })
