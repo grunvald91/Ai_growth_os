@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import json
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 from uuid import UUID
@@ -20,7 +21,7 @@ from app.db.session import get_db
 from app.models.domain import Artifact, Publication
 from app.social_vk import (
     OAUTH_COOKIE, OAUTH_PATH, VKStore, approved_posts, begin_oauth,
-    cancel, connected, finish_oauth, read_oauth_cookie, schedule,
+    cancel, connected, connect_community, finish_oauth, read_oauth_cookie, schedule,
 )
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -36,7 +37,8 @@ def feedback(key):
             "scheduled": "Публикация поставлена в очередь.",
             "cancelled": "Запланированная публикация отменена.",
             "checked": "Результат ручной проверки сохранён.",
-            "disconnected": "VK отключён, будущие публикации отменены."}.get(key, "")
+            "disconnected": "VK отключён, будущие публикации отменены.",
+            "connected_key": "Ключ сообщества сохранён. Отправьте один тестовый пост, чтобы проверить доступ."}.get(key, "")
 
 
 @router.get("/studio/products/{product_id}/vk", response_class=HTMLResponse)
@@ -78,7 +80,9 @@ def vk_page(product_id: UUID, done: str = "", db: Session = Depends(get_db),
     if channel:
         current = (f'<div class="sg-channel-line"><span class="sg-link-dot">✓</span><div>'
                    f'<b>{esc(channel.account_name)}</b><small>Сообщество VK · ID {esc(channel.account_id)}</small></div>'
-                   '<span class="sg-channel-status">Доступ к комментариям проверен</span></div>'
+                   ('<span class="sg-channel-status">Ключ сообщества · отправка не проверена</span></div>'
+                    if channel.is_community_token else
+                    '<span class="sg-channel-status">VK ID · отправка не проверена</span></div>')
                    f'<form method="post" action="/studio/products/{product_id}/vk/disconnect">'
                    '<button type="submit" class="btn secondary small">Отключить VK</button></form>')
     else:
@@ -98,7 +102,18 @@ def vk_page(product_id: UUID, done: str = "", db: Session = Depends(get_db),
   </label>
   <button class="btn secondary" type="submit">Подключить через VK ID →</button>
  </form>
- <p class="sg-footnote">Авторизация подтверждает управление сообществом. Публикация на стене отдельно проверяется реальным тестовым постом.</p>
+ <p class="sg-footnote">Новые токены VK ID не всегда позволяют выполнять wall.post. При отказе используйте ключ своего сообщества.</p>
+ <details><summary>Альтернатива: подключить по ключу сообщества</summary>
+   <p class="sg-footnote">Создайте ключ в разделе Управление сообществом → Работа с API. Он сохраняется зашифрованным.
+   Вставляйте ключ только на этой защищённой странице ServGo, не отправляйте в чат.</p>
+   <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
+     <label class="sg-field">Числовой ID сообщества
+       <input name="group_id" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="15" required></label>
+     <label class="sg-field">Ключ сообщества
+       <input name="access_token" type="password" autocomplete="off" maxlength="8000" required></label>
+     <button type="submit" class="btn secondary">Подключить ключ сообщества</button>
+   </form>
+ </details>
 </section>
 <section class="sg-surface">
  <div class="sg-section-head"><div><span class="sg-overline">АВТОПУБЛИКАЦИЯ</span>
@@ -142,6 +157,21 @@ async def vk_connect(product_id: UUID, request: Request, db: Session = Depends(g
                         secure=settings.app_env.casefold() in {"prod", "production"},
                         httponly=True, samesite="lax")
     return response
+
+
+@router.post("/studio/products/{product_id}/vk/community-key")
+async def vk_community_key(product_id: UUID, request: Request,
+                           db: Session = Depends(get_db), settings=Depends(get_settings)):
+    _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    try:
+        connect_community(db, settings, product_id, fields.get("group_id", ""),
+                          fields.get("access_token", ""))
+    except (LookupError, ValueError) as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc)) from None
+    return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_key",
+                            status_code=303)
 
 
 @router.get(OAUTH_PATH)
@@ -222,11 +252,17 @@ async def vk_reconcile(product_id: UUID, request: Request, db: Session = Depends
             post_id = int(fields.get("post_id") or "")
             if post_id <= 0:
                 raise ValueError("Нужен ID опубликованного поста")
-            channel = connected(db, product_id)
-            if not channel:
-                raise ValueError("Сообщество VK отключено")
+            intent = db.scalar(select(Artifact).where(
+                Artifact.product_id == product_id, Artifact.kind == "vk_publish_intent",
+                Artifact.title == "VK schedule " + str(pub.id)))
+            if intent is None:
+                raise ValueError("Не найден первоначальный адрес публикации")
+            details = json.loads(intent.content)
+            original_group = str(details.get("group_id") or "")
+            if not original_group.isdigit() or original_group.startswith("0"):
+                raise ValueError("Нет действительного ID сообщества")
             pub.status = "published"
-            pub.external_reference = f"vk:-{channel.account_id}_{post_id}"
+            pub.external_reference = f"vk:-{original_group}_{post_id}"
         elif fields.get("outcome") == "not_sent":
             pub.status = "failed_before_send"
         else:
@@ -249,8 +285,20 @@ async def vk_disconnect(product_id: UUID, db: Session = Depends(get_db),
         raise HTTPException(409, "Публикация ещё отправляется. Проверьте её статус")
     channel = connected(db, product_id)
     if channel:
-        CommentService(db, settings).disconnect(product_id, "vk")
-        VKStore(settings.products_root).forget(channel.id)
+        service = CommentService(db, settings)
+        if service.channel(product_id, "vk"):
+            try:
+                service.disconnect(product_id, "vk")
+            except ValueError as exc:
+                db.rollback()
+                raise HTTPException(409, str(exc)) from None
+        publishers = list(db.scalars(select(Artifact).where(
+            Artifact.product_id == product_id,
+            Artifact.kind == "vk_publish_connection",
+            Artifact.status == "approved")))
+        for publisher in publishers:
+            publisher.status = "rejected"
+            VKStore(settings.products_root).forget(publisher.id)
     for pub in db.scalars(select(Publication).where(
         Publication.product_id == product_id, Publication.channel == "vk",
         Publication.status == "scheduled")):
