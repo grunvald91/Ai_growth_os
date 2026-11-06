@@ -13,7 +13,7 @@ class VKAdapter:
 
     async def call(self, method, token, **params):
         # Tokens go in the form body, never in a URL or cursor.
-        data = await self.gateway.request("POST", f"https://api.vk.com/method/{method}", token,
+        data = await self.gateway.request("POST", f"https://api.vk.ru/method/{method}", token,
                                           data={**params, "v": "5.199", "access_token": token})
         if "response" not in data:
             raise PlatformError("VK не подтвердил запрос")
