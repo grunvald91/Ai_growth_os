@@ -11,7 +11,7 @@ from app.core.config import Settings
 from app.models.domain import Artifact, Product, Publication
 from app.social_vk import (
     VKStore, begin_oauth, read_oauth_cookie, approved_posts,
-    cancel, schedule, deliver_once, redirect_uri,
+    cancel, schedule, deliver_once, redirect_uri, connect_community, connected,
 )
 
 
@@ -166,3 +166,36 @@ async def test_vk_worker_disabled_and_changed_approved_material(db, tmp_path):
     db.refresh(pub)
     assert pub.status == "failed_before_send"
     assert not calls
+
+
+def test_vk_publisher_key_is_encrypted_and_isolated(db, tmp_path):
+    product, post = business_and_post(db, slug="community-key")
+    second = Product(name="Чужая компания", slug="community-key-other")
+    db.add(second)
+    db.commit()
+    settings = Settings(products_root=tmp_path)
+    private_key = "vk1.a.pretendSecretForTests"
+    connection = connect_community(db, settings, product.id, "123456", private_key)
+    assert connection.kind == "vk_publish_connection"
+    assert connection.product_id == product.id
+    assert connected(db, product.id).is_community_token is True
+    assert connected(db, second.id) is None
+    assert VKStore(tmp_path).load_token(connection.id) == private_key
+    assert private_key.encode() not in VKStore(tmp_path).path(connection.id).read_bytes()
+    with pytest.raises(ValueError):
+        connect_community(db, settings, second.id, "-321", private_key)
+    when = datetime.now(timezone.utc) + timedelta(minutes=25)
+    pub = schedule(db, product.id, post.id, when)
+    assert pub.product_id == product.id
+
+
+def test_vk_publisher_key_rotation_invalidates_previous_scheduled_post(db, tmp_path):
+    product, post = business_and_post(db, slug="community-rotate")
+    settings = Settings(products_root=tmp_path)
+    old = connect_community(db, settings, product.id, "123456", "first-test-token")
+    pub = schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(minutes=25))
+    new = connect_community(db, settings, product.id, "654321", "second-test-token")
+    assert new.id != old.id
+    assert connected(db, product.id).account_id == "654321"
+    assert not VKStore(tmp_path).path(old.id).exists()
+    assert pub.status == "scheduled"  # Worker must reject the old destination at claim.
