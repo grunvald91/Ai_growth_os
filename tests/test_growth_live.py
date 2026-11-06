@@ -1251,7 +1251,7 @@ def test_mobile_seo_dashboard_prioritizes_status_and_hides_process_details(live)
     assert 'Запусков пока нет.' in page.text
     assert 'Подключить SEO-завод' in page.text
     assert 'после отдельного серверного выпуска' not in page.text
-    assert '/studio/assets/growth-servgo-air.css?v=12' in page.text
+    assert '/studio/assets/growth-servgo-air.css?v=13' in page.text
 
 
 def test_notification_bell_is_real_svg_centered_on_every_v4_screen(live):
@@ -1393,7 +1393,16 @@ def test_owner_home_chat_canvas_overrides_later_air_surface_styles():
     assert 'body.home-page[data-growth-design="v4"] .dp-home .dp-msg.bot {' in guard
     assert 'background:transparent!important;' in guard
     assert '-webkit-backdrop-filter:none!important;' in guard
-    assert 'border-color:var(--s-accent)!important;' in guard
+    composer = guard.split('body.home-page[data-growth-design="v4"] .dp-home .command-bar {', 1)[1].split('}', 1)[0]
+    assert 'border:1px solid color-mix(in srgb,var(--s-accent) 38%,transparent)!important;' in composer
+    assert '0 0 16px color-mix(in srgb,var(--s-accent) 12%,transparent)!important;' in composer
+    assert 'border:0!important;' not in composer
+    assert 'box-shadow:none!important;' not in composer
+    active = guard.split('body.home-page[data-growth-design="v4"] .dp-home .command-bar:focus-within,', 1)[1].split('}', 1)[0]
+    assert 'border-color:color-mix(in srgb,var(--s-accent) 50%,transparent)!important;' in active
+    assert '0 0 18px color-mix(in srgb,var(--s-accent) 16%,transparent)!important;' in active
+    assert 'outline:none;' in active
+    assert 'outline:1px solid var(--s-accent);' not in active
     assert (ASSETS.parent / "growth_v4.py").read_text(encoding="utf-8").count(
-        "growth-servgo-air.css?v=12"
+        "growth-servgo-air.css?v=13"
     ) == 1
