@@ -148,7 +148,8 @@ async def vk_connect(product_id: UUID, request: Request, db: Session = Depends(g
     _owner_product(db, product_id)
     fields = await _studio_form(request)
     try:
-        url, cookie = begin_oauth(settings, product_id, fields.get("group_id", ""))
+        url, cookie = begin_oauth(settings, product_id, fields.get("group_id", ""),
+                                  owner_login=getattr(request.state, "studio_login", None))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
     response = RedirectResponse(url, status_code=303,
@@ -181,6 +182,8 @@ async def vk_callback(request: Request, state: str = "", code: str = "", device_
     # Even an admin's OAuth callback must retain the original business scope.
     try:
         data = read_oauth_cookie(settings, request.cookies.get(OAUTH_COOKIE), state)
+        if data.get("owner_login") is not None and data["owner_login"] != getattr(request.state, "studio_login", None):
+            raise ValueError("Вы вошли под другим аккаунтом ServGo. Начните подключение VK заново")
         scope = getattr(request.state, "studio_product_ids", None)
         if scope is not None and data["product_id"] not in scope:
             raise ValueError("Нет доступа к этой организации")
