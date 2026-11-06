@@ -45,6 +45,10 @@ def test_vk_oauth_pkce_and_company_binding(tmp_path):
     url, cookie = begin_oauth(settings, "3ecb2135-1077-428e-9a65-ea1d895a8432", "123456")
     assert url.startswith("https://id.vk.ru/authorize?")
     assert "code_challenge_method=s256" in url
+    from urllib.parse import urlsplit, parse_qs
+    params = parse_qs(urlsplit(url).query)
+    assert params["app_id"] == ["12345678"]
+    assert params["client_id"] == ["12345678"]
     assert "scope=groups+wall" in url
     assert "code_verifier" not in url
     assert redirect_uri(settings) == "https://servgo.ru/studio/social/vk/callback"
