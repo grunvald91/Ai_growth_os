@@ -130,7 +130,9 @@ def main():
                         page.locator('#dp-feed').evaluate('(el)=>el.scrollTop=el.scrollHeight')
                         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'), (mode,width,'overflow')
                         bar = page.locator('#dp-form')
-                        assert bar.evaluate('(el)=>getComputedStyle(el).borderTopWidth') == '0px'
+                        assert bar.evaluate('(el)=>getComputedStyle(el).borderTopWidth') == '1px'
+                        assert bar.evaluate('(el)=>getComputedStyle(el).boxShadow') != 'none'
+                        assert bar.evaluate('(el)=>getComputedStyle(el).backgroundColor') == page.locator('body').evaluate('(el)=>getComputedStyle(el).backgroundColor')
                         expect(page.locator('body')).to_have_css('background-color', 'rgb(17, 26, 41)' if mode == 'dark' else 'rgb(255, 255, 255)')
                         if width <= 780:
                             expect(page.locator('#mobileNav')).to_have_css('background-color', 'rgb(17, 26, 41)' if mode == 'dark' else 'rgb(255, 255, 255)')
