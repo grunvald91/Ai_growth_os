@@ -91,7 +91,7 @@ class VKStore(CommentSecrets):
                 path.unlink(missing_ok=True)
 
 
-def begin_oauth(settings, product_id, account_id):
+def begin_oauth(settings, product_id, account_id, *, owner_login=None):
     group_id(account_id)
     app_id = client_id(settings)
     verifier = secrets.token_urlsafe(48)
@@ -99,7 +99,8 @@ def begin_oauth(settings, product_id, account_id):
     state = secrets.token_urlsafe(32)
     payload = {
         "state": state, "verifier": verifier, "product_id": str(product_id),
-        "account_id": account_id, "redirect_uri": redirect_uri(settings),
+        "account_id": account_id, "owner_login": owner_login,
+        "redirect_uri": redirect_uri(settings),
     }
     store = VKStore(settings.products_root)
     with store.locked():
