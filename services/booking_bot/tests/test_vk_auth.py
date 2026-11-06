@@ -85,6 +85,7 @@ class VkAuthTests(unittest.IsolatedAsyncioTestCase):
         u = urlparse(response.headers["location"])
         params = parse_qs(u.query)
         self.assertEqual((u.netloc, u.path), ("id.vk.ru", "/authorize"))
+        self.assertEqual(params["app_id"], ["12345678"])
         self.assertEqual(params["redirect_uri"], ["https://servgo.ru/api/auth/vk/callback"])
         self.assertEqual(params["scope"], ["email phone"])
         self.assertEqual(params["code_challenge_method"], ["s256"])
