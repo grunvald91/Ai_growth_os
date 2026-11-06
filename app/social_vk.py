@@ -391,6 +391,7 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
         pub.status = "sending"
         pub.sending_started_at = now
         publication_id = pub.id
+        publication_product_id = pub.product_id
         group = channel.account_id
         channel_id = channel.id
         text = data["text"]
@@ -398,7 +399,7 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
     try:
         if sender is None:
             with session_factory() as db:
-                ch = connected(db, pub.product_id)
+                ch = connected(db, publication_product_id)
                 if ch is None or ch.id != channel_id or ch.account_id != group:
                     raise ValueError("VK отключён или сменилось сообщество")
                 if ch.is_community_token:
