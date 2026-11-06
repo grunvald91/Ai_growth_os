@@ -13,6 +13,7 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlencode, urlsplit
 from uuid import UUID
 
@@ -165,6 +166,11 @@ async def finish_oauth(db, settings, payload, state, code, device_id):
         raise ValueError("VK ID не подтвердил параметры подключения")
     connection = await CommentService(db, settings).connect(product_id, ConnectInput(
         platform="vk", account_id=payload["account_id"], token=result["access_token"]))
+    # OAuth success supersedes any previous community-token publishing connection.
+    for old in db.scalars(select(Artifact).where(Artifact.product_id == product_id,
+            Artifact.kind == "vk_publish_connection", Artifact.status == ArtifactStatus.APPROVED)):
+        old.status = ArtifactStatus.REJECTED
+    db.commit()
     VKStore(settings.products_root).save_oauth(connection.id, {
         "device_id": device_id, "refresh_token": result.get("refresh_token"),
         "expires_at": expiry(result.get("expires_in")),
@@ -202,9 +208,58 @@ async def active_token(settings, channel):
 
 
 def connected(db, product_id):
-    return db.scalar(select(CommentChannel).where(
+    # Dedicated publisher token takes precedence over legacy comment-token connection.
+    row = db.scalar(select(Artifact).where(
+        Artifact.product_id == product_id, Artifact.kind == "vk_publish_connection",
+        Artifact.status == ArtifactStatus.APPROVED).order_by(Artifact.created_at.desc()).limit(1))
+    if row:
+        try:
+            details = json.loads(row.content)
+            account_id = group_id(details["group_id"])
+        except (TypeError, ValueError, KeyError):
+            return None
+        return SimpleNamespace(id=row.id, product_id=product_id, account_id=account_id,
+            account_name="Сообщество VK #" + account_id, is_community_token=True)
+    account = db.scalar(select(CommentChannel).where(
         CommentChannel.product_id == product_id,
         CommentChannel.platform == "vk", CommentChannel.status == "connected"))
+    if account:
+        return SimpleNamespace(id=account.id, product_id=product_id,
+            account_id=account.account_id, account_name=account.account_name,
+            is_community_token=False)
+    return None
+
+
+def connect_community(db, settings, product_id, account_id, token):
+    """Owner supplies the official community key; never claim permission before a real post."""
+    group_id(account_id)
+    if not isinstance(token, str) or not token or len(token) > 8000 or any(
+            ord(ch) < 32 for ch in token):
+        raise ValueError("Неверный ключ доступа сообщества")
+    product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
+    if product is None:
+        raise LookupError("Компания не найдена")
+    running = db.scalar(select(Publication.id).where(
+        Publication.product_id == product_id, Publication.channel == "vk",
+        Publication.status == "sending").limit(1))
+    if running:
+        raise ValueError("Нельзя менять ключ во время отправки VK")
+    existing = list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id, Artifact.kind == "vk_publish_connection",
+        Artifact.status == ArtifactStatus.APPROVED).with_for_update()))
+    row = Artifact(product_id=product_id, kind="vk_publish_connection",
+        title="Публикации VK: сообщество #" + account_id,
+        status=ArtifactStatus.APPROVED,
+        content=json.dumps({"group_id": account_id, "auth_type": "community_token"}))
+    db.add(row)
+    db.flush()
+    VKStore(settings.products_root).save_token(row.id, token)
+    for previous in existing:
+        previous.status = ArtifactStatus.REJECTED
+    db.commit()
+    for previous in existing:
+        VKStore(settings.products_root).forget(previous.id)
+    return row
 
 
 def approved_posts(db, product_id):
@@ -343,14 +398,16 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
     try:
         if sender is None:
             with session_factory() as db:
-                ch = db.scalar(select(CommentChannel).where(
-                    CommentChannel.id == channel_id,
-                    CommentChannel.platform == "vk", CommentChannel.status == "connected"))
-                if ch is None or ch.account_id != group:
-                    raise ValueError("VK отключён")
-                token = await active_token(settings, ch)
+                ch = connected(db, pub.product_id)
+                if ch is None or ch.id != channel_id or ch.account_id != group:
+                    raise ValueError("VK отключён или сменилось сообщество")
+                if ch.is_community_token:
+                    token = VKStore(settings.products_root).load_token(ch.id)
+                else:
+                    token = await active_token(settings, ch)
             adapter = VKAdapter(CommentGateway(), "vk")
-            await adapter.manager(group, token)
+            if not ch.is_community_token:
+                await adapter.manager(group, token)
             response = await adapter.call("wall.post", token, owner_id=-int(group),
                     from_group=1, message=text, guid=str(publication_id))
             post_id = response.get("post_id") if isinstance(response, dict) else None
