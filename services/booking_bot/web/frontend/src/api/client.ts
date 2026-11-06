@@ -734,6 +734,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   emailCapabilities: () => request<{ available: boolean }>('/auth/email/capabilities'),
+  vkCapabilities: () => request<{ available: boolean }>('/auth/vk/capabilities'),
+  vkAccount: () => request<{ available: boolean; linked: boolean; name: string | null }>('/auth/vk/account'),
+  vkLinkStart: () => request<{ url: string }>('/auth/vk/link/start', { method: 'POST' }),
+  vkExchange: (body: { ticket: string; merge?: boolean }) =>
+    request<({ status: 'ok' } & AuthResponse) | { status: 'linked' | 'merge_required' }>(
+      '/auth/vk/exchange', { method: 'POST', body: JSON.stringify(body) }),
   yandexCapabilities: () => request<{ available: boolean }>('/auth/yandex/capabilities'),
   yandexAccount: () => request<{ available: boolean; linked: boolean; login: string | null; telegram_join: boolean }>('/auth/yandex/account'),
   yandexLinkStart: () => request<{ url: string }>('/auth/yandex/link/start', { method: 'POST' }),

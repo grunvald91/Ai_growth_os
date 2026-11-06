@@ -13,6 +13,7 @@ import { MyBookingsPage } from './pages/client/MyBookingsPage'
 import { SubscriptionsPage } from './pages/client/SubscriptionsPage'
 import { LoginPage } from './pages/client/LoginPage'
 import { YandexLoginPage } from './pages/client/YandexLoginPage'
+import { VkLoginPage } from './pages/client/VkLoginPage'
 import { OwnerMailPage } from './pages/client/OwnerMailPage'
 import { GrowthWorkspacePage } from './pages/client/GrowthWorkspacePage'
 import { StudioSignInPage } from './pages/client/StudioSignInPage'
@@ -216,6 +217,7 @@ function App() {
             loginPath="/login?next=%2Fworkspace%2Fstudio-entry"><StudioSignInPage /></ProtectedRoute>
         } />
         <Route path="/login/yandex" element={<YandexLoginPage />} />
+        <Route path="/login/vk" element={<VkLoginPage />} />
         <Route path="/mail" element={<OwnerMailPage />} />
         <Route path="/workspace/mail" element={<AdminRoute restorationPending={authRestoring}><OwnerMailPage /></AdminRoute>} />
         <Route path="/workspace/growth" element={<AdminRoute restorationPending={authRestoring}><GrowthWorkspacePage /></AdminRoute>} />

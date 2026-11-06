@@ -117,6 +117,26 @@ class YandexIdentity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
+
+class VkIdentity(Base):
+    """VK ID provider subject (not a VK community publishing credential)."""
+    __tablename__ = "vk_identities"
+    vk_user_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class VkLoginTicket(Base):
+    """One-time, browser-bound handoff after VK OAuth; stores no OAuth tokens."""
+    __tablename__ = "vk_login_tickets"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    link_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
 class YandexTicket(Base):
     """One-time pass from the Yandex callback to the web app. Only a hash of the secret is stored."""
     __tablename__ = "yandex_tickets"

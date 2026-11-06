@@ -8,6 +8,7 @@ import { TelegramAccountLink } from '../../components/TelegramAccountLink'
 import { ClientShell } from '../../components/ClientShell'
 import { StudioEntry } from '../../components/StudioEntry'
 import { YandexAccountLink } from '../../components/YandexAccountLink'
+import { VkAccountLink } from '../../components/VkAccountLink'
 
 export function AccountPage() {
   const [account, setAccount] = useState<Awaited<ReturnType<typeof api.emailAccount>> | null>(null)
@@ -35,6 +36,7 @@ export function AccountPage() {
       </div> : <><p>Привяжите подтверждённую почту к текущему аккаунту — ваши бизнесы и права сохранятся.</p><EmailAuthForm link /></>)}
       {account?.telegram ? <div className="bf-account-card"><span className="bf-kicker">Telegram привязан</span><strong>{account.telegram.username ? `@${account.telegram.username}` : account.telegram.id}</strong></div> : account?.email && (account.telegram_link_available ? <TelegramAccountLink /> : <p className="bf-intro">Привязка Telegram пока не настроена администратором платформы.</p>)}
       <YandexAccountLink />
+      <VkAccountLink />
       <div className="bf-account-actions">
         <StudioEntry />
         {isMaster && <Link to="/master" className="bf-account-row"><CalendarDays /><span>Моё расписание мастера</span></Link>}
