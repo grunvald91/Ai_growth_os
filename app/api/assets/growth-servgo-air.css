@@ -1602,19 +1602,22 @@ body.home-page[data-growth-design="v4"] .dp-home .dp-msg.bot {
 }
 body.home-page[data-growth-design="v4"] .dp-home .command-bar {
   background:var(--s-bg)!important;
-  border:0!important;
-  box-shadow:none!important;
+  /* The composer stays visible without adding a tinted panel to the chat. */
+  border:1px solid color-mix(in srgb,var(--s-accent) 38%,transparent)!important;
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--s-accent) 7%,transparent),
+             0 0 16px color-mix(in srgb,var(--s-accent) 12%,transparent)!important;
   -webkit-backdrop-filter:none!important;
   backdrop-filter:none!important;
+  transition:border-color .18s ease,box-shadow .18s ease;
 }
 body.home-page[data-growth-design="v4"] .dp-home .command-bar:focus-within,
 body.home-page[data-growth-design="v4"] .dp-home .command-bar:is(
   .voice-arming,.voice-recording,.voice-connecting,.voice-processing,.voice-sending
 ) {
-  border-color:var(--s-accent)!important;
-  outline:1px solid var(--s-accent);
-  outline-offset:-1px;
-  box-shadow:none!important;
+  border-color:color-mix(in srgb,var(--s-accent) 50%,transparent)!important;
+  outline:none;
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--s-accent) 11%,transparent),
+             0 0 18px color-mix(in srgb,var(--s-accent) 16%,transparent)!important;
 }
 body.home-page[data-growth-design="v4"] .dp-home .command-bar textarea {
   background:transparent!important;
