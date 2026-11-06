@@ -282,6 +282,11 @@ def channels_html(product_id, connections, publications, approved_posts, *, adde
     dispatch_status = ("Автоотправка включена" if autopost_enabled else
                        "Автоотправка выключена — запланированные посты пока не отправляются")
     return f"""
+    <section class="sg-surface" style="margin-bottom:12px">
+      <div class="sg-section-head"><div><span class="sg-overline">КАНАЛЫ ПУБЛИКАЦИИ</span>
+        <h2>ВКонтакте</h2><p>Подключение сообщества через VK ID, публикация утверждённых постов и расписание.</p>
+      </div><a class="btn secondary" href="{base}/vk">Управлять VK →</a></div>
+    </section>
     <div class="sg-layout-two">
       <div class="sg-aside-stack">
         <section class="sg-surface"><div class="sg-section-head"><div><span class="sg-overline">ПОДКЛЮЧЕНИЯ</span>
