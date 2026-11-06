@@ -114,10 +114,14 @@ def begin_oauth(settings, product_id, account_id):
 
 
 def read_oauth_cookie(settings, cookie, state):
+    if not isinstance(cookie, str) or not cookie:
+        raise ValueError("Подключение VK истекло. Начните заново")
     try:
-        raw = VKStore(settings.products_root).cipher().decrypt(cookie.encode("ascii"), ttl=OAUTH_TTL)
+        store = VKStore(settings.products_root)
+        with store.locked():
+            raw = store.cipher().decrypt(cookie.encode("ascii"), ttl=OAUTH_TTL)
         data = json.loads(raw)
-    except (InvalidToken, UnicodeError, ValueError, TypeError, AttributeError):
+    except (OSError, InvalidToken, UnicodeError, ValueError, TypeError, AttributeError):
         raise ValueError("Подключение VK истекло. Начните заново") from None
     if (not isinstance(data, dict) or not isinstance(state, str)
             or not secrets.compare_digest(data.get("state", ""), state)
