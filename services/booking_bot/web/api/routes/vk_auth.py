@@ -98,7 +98,8 @@ def start_flow(response: Response, link_user_id: int | None = None) -> str:
     }), max_age=FLOW_SECONDS, path=COOKIE_PATH, httponly=True,
         secure=True, samesite="lax")
     return VK_AUTHORIZE + "?" + urlencode({
-        "client_id": app_id(), "response_type": "code", "redirect_uri": REDIRECT,
+        "client_id": app_id(), "app_id": app_id(),
+        "response_type": "code", "redirect_uri": REDIRECT,
         "state": state, "code_challenge": challenge,
         "code_challenge_method": "s256", "scope": "email phone",
     })
