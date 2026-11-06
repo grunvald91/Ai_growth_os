@@ -101,7 +101,9 @@ def begin_oauth(settings, product_id, account_id):
         "state": state, "verifier": verifier, "product_id": str(product_id),
         "account_id": account_id, "redirect_uri": redirect_uri(settings),
     }
-    cookie = VKStore(settings.products_root).cipher().encrypt(json.dumps(payload).encode()).decode("ascii")
+    store = VKStore(settings.products_root)
+    with store.locked():
+        cookie = store.cipher().encrypt(json.dumps(payload).encode()).decode("ascii")
     # These are the VK ID authorization-code + PKCE fields used by the official SDK.
     query = urlencode({
         "client_id": app_id, "redirect_uri": payload["redirect_uri"],
