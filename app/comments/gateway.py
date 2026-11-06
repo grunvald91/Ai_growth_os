@@ -16,7 +16,7 @@ class CommentGateway:
 
     async def request(self, method, url, token, *, telegram=False, **kwargs):
         headers = {} if telegram else {"Authorization": f"Bearer {token}"}
-        direct = urlsplit(url).hostname in {"api.vk.com", "api.vk.ru"}
+        direct = urlsplit(url).hostname == "api.vk.com"
         if self.client is None and not direct and not self.proxy_url:
             raise PlatformError("Настройте доступ через зарубежный сервер. Прямое подключение отключено.")
         if not direct and self.proxy_url and urlsplit(self.proxy_url).scheme not in {"http", "https"}:
