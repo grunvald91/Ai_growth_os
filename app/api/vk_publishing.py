@@ -79,10 +79,10 @@ def vk_page(product_id: UUID, done: str = "", db: Session = Depends(get_db),
     alert = f'<p role="status" class="sg-notice">{esc(feedback(done))}</p>' if feedback(done) else ""
     if channel:
         current = (f'<div class="sg-channel-line"><span class="sg-link-dot">✓</span><div>'
-                   f'<b>{esc(channel.account_name)}</b><small>Сообщество VK · ID {esc(channel.account_id)}</small></div>'
+                   f'<b>{esc(channel.account_name)}</b><small>Сообщество VK · ID {esc(channel.account_id)}</small></div>' +
                    ('<span class="sg-channel-status">Ключ сообщества · отправка не проверена</span></div>'
                     if channel.is_community_token else
-                    '<span class="sg-channel-status">VK ID · отправка не проверена</span></div>')
+                    '<span class="sg-channel-status">VK ID · отправка не проверена</span></div>') +
                    f'<form method="post" action="/studio/products/{product_id}/vk/disconnect">'
                    '<button type="submit" class="btn secondary small">Отключить VK</button></form>')
     else:
