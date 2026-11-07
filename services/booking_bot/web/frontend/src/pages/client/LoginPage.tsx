@@ -7,6 +7,7 @@ import { errorMessage, saveLogin } from '../../authUtils'
 import { ClientShell } from '../../components/ClientShell'
 import { EmailAuthForm } from '../../components/EmailAuthForm'
 import { YandexLoginButton } from '../../components/YandexLoginButton'
+import { VkLoginButton } from '../../components/VkLoginButton'
 
 // Кнопка Telegram сначала берётся через собственный прокси ServGo (tg.servgo.ru, сервер relay 89): в РФ
 // telegram.org и oauth.telegram.org у многих не открываются. Скрипт кнопки сам берёт адрес рамки и окна
@@ -28,6 +29,9 @@ export function LoginPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const yandexProblem = YANDEX_PROBLEMS[searchParams.get('yandex') || '']
+  const vkProblem = ({ expired: 'Ссылка VK ID устарела. Повторите вход.', denied: 'Вход через VK отменён.',
+    failed: 'VK ID не подтвердил авторизацию. Повторите или выберите другой способ.',
+    unavailable: 'Вход через VK пока не настроен.' } as Record<string, string>)[searchParams.get('vk') || '']
   const studioNext = searchParams.get('next')
   // Пришли из профиля Яндекс-аккаунта, чтобы объединить его с Telegram: сразу показываем кнопку Telegram.
   const joinTelegram = searchParams.get('join') === 'telegram'
@@ -208,7 +212,9 @@ export function LoginPage() {
           </p>
         )}
         {yandexProblem && <p role="alert" style={{ color: 'var(--s-danger)', marginBottom: 12 }}>{yandexProblem}</p>}
-        <div style={{ marginBottom: 16 }}><YandexLoginButton /></div>
+        {vkProblem && <p role="alert" style={{ color: 'var(--s-danger)', marginBottom: 12 }}>{vkProblem}</p>}
+        <div style={{ marginBottom: 12 }}><YandexLoginButton /></div>
+        <div style={{ marginBottom: 16 }}><VkLoginButton /></div>
         <EmailAuthForm />
         <p className="ds-hint" style={{ margin: '16px 0' }}>Для аккаунтов с привязанным Telegram доступны прежние способы входа:</p>
         {joinTelegram && <p className="ds-hint" role="status" style={{ marginBottom: 12, fontWeight: 600 }}>Войдите через Telegram — если номер телефона в нём тот же, что в Яндексе, аккаунты объединятся автоматически.</p>}

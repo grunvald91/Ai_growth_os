@@ -51,6 +51,8 @@ app.include_router(tune_router)
 
 from app.api.comments import router as comments_router
 app.include_router(comments_router, dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
+from app.api.vk_publishing import router as vk_publishing_router
+app.include_router(vk_publishing_router)
 from app.api.team_dashboard import router as team_dashboard_router
 app.include_router(team_dashboard_router)
 

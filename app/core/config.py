@@ -111,6 +111,10 @@ class Settings(BaseSettings):
     team_worker_busy_poll_seconds: int = 2
     telegram_proxy_url: str | None = None
     content_telegram_autopost_enabled: bool = False
+    # VK ID web app ID, canonical OAuth callback and explicit publish kill switch.
+    social_vk_client_id: str | None = None
+    social_vk_redirect_base: str = "https://servgo.ru"
+    content_vk_autopost_enabled: bool = False
     content_telegram_max_lateness_minutes: int = 30
     comment_platform_proxy_url: str | None = None
     viral_research_mode: Literal["public_multisource", "youtube_public", "disabled"] = "public_multisource"

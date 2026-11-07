@@ -18,8 +18,19 @@ test('login/account shell overrides light-only card and account panels for dark 
 
 test('sign-in components use theme classes rather than static white fields', () => {
   assert.match(login, /<YandexLoginButton \/>/)
+  assert.match(login, /<VkLoginButton \/>/)
   assert.match(login, /<EmailAuthForm \/>/)
   assert.match(email, /className="ds-card"/)
   assert.match(email, /className="ds-input"/)
   assert.doesNotMatch(email, /background:\s*['\"](?:white|#fff)/i)
+})
+
+test('VK sign-in and explicit identity linking are exposed in the current account experience', () => {
+  const account = readFileSync(new URL('../src/pages/client/AccountPage.tsx', import.meta.url), 'utf8')
+  const routes = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const vkLink = readFileSync(new URL('../src/components/VkAccountLink.tsx', import.meta.url), 'utf8')
+  assert.match(account, /<VkAccountLink \/>/)
+  assert.match(routes, /path="\/login\/vk"/)
+  assert.match(vkLink, /vkLinkStart/)
+  assert.doesNotMatch(vkLink, /background:\s*['\"](?:white|#fff)/i)
 })
