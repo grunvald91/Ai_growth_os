@@ -339,7 +339,8 @@ def test_active_plan_is_stable_when_new_draft_is_generated(studio_db):
 
         draft_page = client.get(base + "/plan?view=draft")
         assert "Новый план" in draft_page.text
-        assert f'/plans/{draft_row.id}/approve' in draft_page.text
+        assert "Сроки черновика истекли" in draft_page.text
+        assert f'/plans/{draft_row.id}/approve' not in draft_page.text
         assert "Действующий план" in draft_page.text
     finally:
         app.dependency_overrides.clear()
