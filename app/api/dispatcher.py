@@ -54,7 +54,8 @@ def _account(request: Request) -> str:
 
 
 def _context(db: Session, product: Product, settings: Settings, request: Request) -> Context:
-    return Context(db=db, product=product, settings=settings, account=_account(request))
+    return Context(db=db, product=product, settings=settings, account=_account(request),
+                   studio_role=getattr(request.state, "studio_sso_role", None))
 
 
 class ChipIn(BaseModel):
