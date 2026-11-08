@@ -175,6 +175,16 @@ def test_generic_task_retry_must_reuse_seo_owner_gate_and_reject_cancelled_jobs(
 
         app.dependency_overrides[get_db] = override
         try:
+            from starlette.requests import Request
+            from fastapi import HTTPException
+            from app.api.content_studio import studio_retry_task
+            viewer_request = Request({"type": "http", "method": "POST",
+                                      "path": "/studio/seo/retry", "headers": []})
+            viewer_request.state.studio_sso_role = "viewer"
+            with pytest.raises(HTTPException) as denied:
+                studio_retry_task(company.id, task.id, viewer_request, db=db)
+            assert denied.value.status_code == 403
+            assert task.status == TaskStatus.FAILED
             with TestClient(app) as client:
                 base = f"/studio/products/{company.id}"
                 bad = client.post(f"{base}/tasks/{cancelled.id}/retry",
