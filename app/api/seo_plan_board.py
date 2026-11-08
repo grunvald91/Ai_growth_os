@@ -57,6 +57,11 @@ def visible_plan_run(runs: list[dict]) -> tuple[dict | None, bool]:
     """
     if not runs:
         return None, False
+    # A plan artifact can exist before its article tasks have been queued.
+    # Keep the latest actionable calendar visible during that transition.
+    for index, run in enumerate(runs):
+        if run.get("plan_ready") and run.get("articles"):
+            return run, index != 0
     for index, run in enumerate(runs):
         if run.get("plan_ready"):
             return run, index != 0
