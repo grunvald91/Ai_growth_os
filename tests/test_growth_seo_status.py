@@ -125,3 +125,23 @@ def test_seo_run_without_article_schedule_explains_absence():
                 status=TaskStatus.RUNNING, assigned_agent="seo_factory")
     page = seo_run_card(seo_run_summary(task, []))
     assert "Плановые даты статей пока не сформированы" in page
+
+
+def test_seo_run_detail_uses_publication_record_without_permalink():
+    task = Task(id=uuid4(), product_id=uuid4(), title="SEO-завод",
+                status=TaskStatus.COMPLETED, assigned_agent="seo_factory")
+    row = seo_run_summary(task, [])
+    row["timezone_name"] = "Europe/Moscow"
+    row["articles"] = [{
+        "title": "Вышедшая статья без адреса в записи публикации",
+        "scheduled_at": "08.11.2026 12:00",
+        "scheduled_iso": "2026-11-08T09:00:00+00:00",
+        "task_status": "completed", "article_status": "approved",
+        "publication_path": None, "published_confirmed": True,
+        "task_id": str(uuid4()), "article_id": str(uuid4()),
+        "critic_status": "no_material_issues", "critic_findings": [],
+    }]
+    page = seo_run_card(row, task.product_id)
+    assert "Опубликована" in page
+    assert "Согласована" not in page
+    assert "Запись о публикации есть" not in page  # no external URL to open
