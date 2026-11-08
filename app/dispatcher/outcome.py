@@ -16,6 +16,7 @@ class Context:
     product: Product
     settings: object
     account: str
+    studio_role: str | None = None
 
 
 @dataclass
