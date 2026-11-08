@@ -553,7 +553,7 @@ async def make_plan(ctx: Context, params) -> Outcome:
 
 async def describe_seo_factory(ctx: Context, params) -> Outcome | Confirmation:
     from app.seo.activation import is_enabled
-    if ctx.studio_role not in (None, "owner", "co_owner"):
+    if getattr(ctx, "studio_role", None) not in (None, "owner", "co_owner"):
         return Outcome("Запускать платный SEO-завод может только владелец компании.", ok=False)
     if not is_enabled(ctx.db, ctx.product.id):
         href = f"/studio/products/{ctx.product.id}/seo"
@@ -577,7 +577,7 @@ async def confirm_seo_factory(ctx: Context, stored: dict, via: str) -> Outcome:
     from app.seo.factory import queue_factory
     # Recheck the role at confirmation time. A previously issued card never
     # grants write rights if the company membership was changed meanwhile.
-    if ctx.studio_role not in (None, "owner", "co_owner"):
+    if getattr(ctx, "studio_role", None) not in (None, "owner", "co_owner"):
         return Outcome("Запускать платный SEO-завод может только владелец компании.", ok=False)
     try:
         task = queue_factory(ctx.db, ctx.product.id, stored.get("focus"),
