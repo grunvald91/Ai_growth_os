@@ -93,6 +93,13 @@ def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
         for engine, data in checkpoint.get("results", {}).items()
         if isinstance(data, dict)
     }
+    factory_requests = sorted(
+        (a for a in artifacts if a.kind == "seo_factory_request"),
+        key=lambda a: (a.created_at, a.id), reverse=True)
+    request_data = _report_data(factory_requests[0].content) if factory_requests else {}
+    horizon = request_data.get("horizon_days")
+    if horizon not in (7, 30) or isinstance(horizon, bool):
+        horizon = None
     state = task.status.value if hasattr(task.status, "value") else str(task.status)
     local_rows = sorted(
         (a for a in artifacts if a.kind == "seo_local_market_status"),
@@ -108,6 +115,7 @@ def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
         "attempts": sum(a.kind == "seo_factory_attempt" for a in artifacts),
+        "horizon_days": horizon,
         "semantic_ready": "semantic_core" in kinds,
         "plan_ready": "seo_content_plan" in kinds,
         "articles_queued": success["articles_queued"] if success is not None else None,
@@ -193,7 +201,13 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
         Publication.status == "published",
         Publication.artifact_id.in_(completed_ids),
     ))) if completed_ids else []
-    published = {p.artifact_id: p.external_reference for p in publications}
+    published = {p.artifact_id: p for p in publications}
+    failures = list(db.scalars(select(AgentRun).where(
+        AgentRun.task_id.in_(article_ids), AgentRun.status == "failed",
+    ).order_by(AgentRun.created_at.desc(), AgentRun.id.desc())))
+    failed_by_task = {}
+    for failed_run in failures:
+        failed_by_task.setdefault(failed_run.task_id, failed_run)
 
     # Batch-read latest final-editor runs and reviews. No model calls, changes
     # to article status, or hidden approval decisions during page rendering.
@@ -236,13 +250,30 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
             "critic_status": "not_ready", "critic_findings": [],
         }
         approval = approval_by_article.get(article.id) if article else None
+        publish_record = published.get(article.id) if article else None
+        failed_run = failed_by_task.get(task.id)
+        failure_code = None
+        if state == "failed" and failed_run is not None:
+            diagnostic = failed_run.error or ""
+            if "invalid_article_output" in diagnostic:
+                failure_code = "invalid_article_output"
+            elif "timeout" in diagnostic.casefold():
+                failure_code = "timeout"
+            else:
+                failure_code = "production_failed"
+        brief = request.get("seo_brief") or {}
+        if not isinstance(brief, dict):
+            brief = {}
         by_run[plan_run[parts_of_title[1]]].append({
             **critic,
             "approval_reason": approval.reason if approval and approval.status == "pending" else None,
             "needs_fact_check": bool(_report_data(article.content).get("fact_check_required")) if article else False,
             "task_id": str(task.id),
             "title": title,
+            "primary_query": str(brief.get("primary_query") or "")[:300],
+            "reader_problem": str(brief.get("reader_problem") or "")[:1500],
             "task_status": state,
+            "failure_code": failure_code,
             "scheduled_iso": task.due_at.isoformat() if task.due_at else None,
             "scheduled_at": (
                 (task.due_at.replace(tzinfo=timezone.utc) if task.due_at.tzinfo is None
@@ -251,7 +282,13 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
             ),
             "article_id": str(article.id) if article else None,
             "article_status": article.status.value if article else None,
-            "publication_path": published.get(article.id) if article else None,
+            "publication_path": publish_record.external_reference if publish_record else None,
+            "published_at": (
+                (publish_record.published_at.replace(tzinfo=timezone.utc)
+                 if publish_record.published_at.tzinfo is None
+                 else publish_record.published_at).astimezone(company_timezone).strftime("%d.%m.%Y %H:%M")
+                if publish_record and publish_record.published_at else None
+            ),
         })
     for row, task in zip(rows, tasks):
         row["articles"] = by_run.get(task.id, [])
