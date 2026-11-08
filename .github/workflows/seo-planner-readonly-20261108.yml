@@ -5,6 +5,7 @@ on:
       - ops/seo-prod-diagnostics-20261108
     paths:
       - .github/workflows/seo-planner-readonly-20261108.yml
+      - scripts/ops/seo_planner_readonly_20261108.py
   workflow_dispatch:
 
 permissions:
