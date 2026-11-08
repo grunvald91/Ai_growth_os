@@ -29,6 +29,7 @@ from app.services.campaign_readiness import load_resources
 from app.api.seo_run_view import seo_runs
 from app.api.seo_plan_board import seo_plan_board
 from app.seo.control import SeoControlError, create_seo_run, change_seo_run
+from app.seo.article_retry import retry_failed_article
 from app.seo.activation import (is_enabled, set_enabled, editorial_preferences,
                                 set_editorial_preferences)
 from app.seo.visibility import VisibilityError, change_article_visibility
@@ -539,6 +540,24 @@ def seo_retry_run(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)
     except LookupError:
         raise HTTPException(404, 'Запуск SEO-завода не найден') from None
     except SeoControlError as exc:
+        raise HTTPException(409, str(exc)) from None
+    return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
+
+
+@router.post('/studio/products/{product_id}/seo/articles/{task_id}/retry')
+def seo_article_retry(product_id: UUID, task_id: UUID, request: Request,
+                      db: Session = Depends(get_db)):
+    """An explicit owner click; never restart the whole SEO factory."""
+    _owner_product(db, product_id)
+    if getattr(request.state, 'studio_sso_role', None) not in (None, 'owner', 'co_owner'):
+        raise HTTPException(403, 'Повторять SEO-статьи может только владелец компании')
+    try:
+        retry_failed_article(db, product_id=product_id, task_id=task_id,
+                             actor=getattr(request.state, 'studio_login', 'studio_owner'))
+    except LookupError:
+        raise HTTPException(404, 'SEO-статья не найдена') from None
+    except ValueError as exc:
+        db.rollback()
         raise HTTPException(409, str(exc)) from None
     return RedirectResponse(f'/studio/products/{product_id}/seo', status_code=303)
 
