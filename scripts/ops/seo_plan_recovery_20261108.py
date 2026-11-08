@@ -77,7 +77,7 @@ with SessionLocal() as db:
                          "proresultat_new_task_needed":not existing_fresh})
     for item in sorted(EXPECTED_ITEMS):
         if items[item].status==TaskStatus.FAILED:
-            task=__import__("app.seo.article_retry",fromlist=["retry_failed_article"]).retry_failed_article(
+            task=retry_failed_article(
                 db, product_id=servgo.id,task_id=items[item].id,actor="github_actions_owner_recovery_20261108")
             print("SEO_ITEM_REQUEUED",item,str(task.id))
         else:
