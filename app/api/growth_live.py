@@ -44,6 +44,12 @@ router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_s
 COOKIE = 'growth_design'
 
 
+def _require_seo_owner_role(request: Request) -> None:
+    """SEO generation, cancellation and publish controls incur owner-level risk."""
+    if getattr(request.state, 'studio_sso_role', None) not in (None, 'owner', 'co_owner'):
+        raise HTTPException(403, 'Управлять SEO-заводом может только владелец компании')
+
+
 def switch_url(request: Request, design: str) -> str:
     pairs = [(k, v) for k, v in request.query_params.multi_items() if k != 'design']
     return request.url.path + '?' + urlencode(pairs + [('design', design)])
@@ -509,6 +515,7 @@ async def seo_preferences_submit(product_id: UUID, request: Request, db: Session
 async def seo_queue_submit(product_id: UUID, request: Request,
                            db: Session = Depends(get_db)):
     _owner_product(db, product_id)
+    _require_seo_owner_role(request)
     values = await _studio_form(request)
     focus = values.get('focus', '')
     if not isinstance(focus, str) or len(focus) > 300:
@@ -526,8 +533,10 @@ async def seo_queue_submit(product_id: UUID, request: Request,
 
 
 @router.post('/studio/products/{product_id}/seo/{task_id}/cancel')
-def seo_cancel_queued(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
+def seo_cancel_queued(product_id: UUID, task_id: UUID, request: Request,
+                      db: Session = Depends(get_db)):
     _owner_product(db, product_id)
+    _require_seo_owner_role(request)
     try:
         change_seo_run(db, product_id=product_id, task_id=task_id, action='cancel')
     except LookupError:
@@ -538,8 +547,10 @@ def seo_cancel_queued(product_id: UUID, task_id: UUID, db: Session = Depends(get
 
 
 @router.post('/studio/products/{product_id}/seo/{task_id}/retry')
-def seo_retry_run(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
+def seo_retry_run(product_id: UUID, task_id: UUID, request: Request,
+                  db: Session = Depends(get_db)):
     _owner_product(db, product_id)
+    _require_seo_owner_role(request)
     try:
         change_seo_run(db, product_id=product_id, task_id=task_id, action='retry')
     except LookupError:
