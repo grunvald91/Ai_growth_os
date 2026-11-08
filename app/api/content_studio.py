@@ -2513,7 +2513,8 @@ def studio_creative_images_zip(product_id: UUID, task_id: UUID,
 
 
 @router.post("/studio/products/{product_id}/tasks/{task_id}/retry")
-def studio_retry_task(product_id: UUID, task_id: UUID, db: Session = Depends(get_db)):
+def studio_retry_task(product_id: UUID, task_id: UUID, request: Request,
+                      db: Session = Depends(get_db)):
     _owner_product(db, product_id)
     db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     task = db.scalar(select(Task).where(Task.id == task_id, Task.product_id == product_id).with_for_update().execution_options(populate_existing=True))
@@ -2521,6 +2522,32 @@ def studio_retry_task(product_id: UUID, task_id: UUID, db: Session = Depends(get
         raise HTTPException(404, "Задание не найдено")
     if task.assigned_agent not in {"content_factory", "content_creative", "content_editor"}:
         raise HTTPException(409, "Это задание нельзя повторить из страницы создания")
+    if task.assigned_agent == "content_factory":
+        # This legacy route is also linked from the generic task detail page.
+        # SEO must NEVER bypass its explicit owner/plan/artifact retry gate.
+        from app.seo.queue import SEO_TASK_PREFIX
+        request_row = db.scalar(select(Artifact).where(
+            Artifact.product_id == product_id, Artifact.task_id == task_id,
+            Artifact.kind == "content_request").limit(1))
+        try:
+            body = parse_json(request_row) if request_row is not None else {}
+        except (TypeError, ValueError):
+            body = {}
+        if task.title.startswith(SEO_TASK_PREFIX) or body.get("seo_brief") is not None:
+            if getattr(request.state, "studio_sso_role", None) not in (None, "owner", "co_owner"):
+                raise HTTPException(403, "Повторять SEO-статьи может только владелец компании")
+            from app.seo.article_retry import retry_failed_article
+            try:
+                retry_failed_article(
+                    db, product_id=product_id, task_id=task_id,
+                    actor=getattr(request.state, "studio_login", "studio_owner"))
+            except LookupError:
+                db.rollback()
+                raise HTTPException(404, "SEO-статья не найдена") from None
+            except ValueError as exc:
+                db.rollback()
+                raise HTTPException(409, str(exc)) from None
+            return RedirectResponse(f"/studio/products/{product_id}/seo", status_code=303)
     if task.status not in {TaskStatus.FAILED, TaskStatus.CANCELLED}:
         raise HTTPException(409, "Повторить можно только остановленное задание")
     duplicate = db.scalar(select(Task.id).where(Task.product_id == product_id,

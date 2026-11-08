@@ -27,7 +27,7 @@ def _when(value: str | None, zone: str) -> str:
 
 
 def _state(item: dict) -> tuple[str, str]:
-    if item.get("publication_path"):
+    if item.get("published_confirmed") or item.get("publication_path"):
         return "published", "Опубликована"
     if item.get("task_status") == "failed":
         reason = item.get("failure_code")
@@ -47,6 +47,25 @@ def _state(item: dict) -> tuple[str, str]:
     if item.get("task_status") == "cancelled":
         return "cancelled", "Отменена"
     return "unknown", "Состояние уточняется"
+
+
+def visible_plan_run(runs: list[dict]) -> tuple[dict | None, bool]:
+    """Keep the previous prepared plan visible while a new run is pending/failed.
+
+    Returns (the plan to show, whether a newer run exists). Only persisted
+    SEO plan artifacts qualify; do not promote a queued task to a plan.
+    """
+    if not runs:
+        return None, False
+    # A plan artifact can exist before its article tasks have been queued.
+    # Keep the latest actionable calendar visible during that transition.
+    for index, run in enumerate(runs):
+        if run.get("plan_ready") and run.get("articles"):
+            return run, index != 0
+    for index, run in enumerate(runs):
+        if run.get("plan_ready"):
+            return run, index != 0
+    return runs[0], False
 
 
 def seo_plan_board(run: dict | None, product_id: UUID, *, autorun: bool,

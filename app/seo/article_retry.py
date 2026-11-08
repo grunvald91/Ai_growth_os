@@ -67,7 +67,11 @@ def retry_failed_article(db: Session, *, product_id: UUID, task_id: UUID,
     # Requeued tasks are subject to the usual per-company daily limits,
     # original article grounding, and final critic validation.
     task.status = TaskStatus.QUEUED
-    task.due_at = datetime.now(timezone.utc)
+    # Preserve the original SEO calendar: a retry is not a new plan slot.
+    # Failed articles had already reached their due date in the worker.
+    # Old legacy tasks without any slot remain runnable immediately.
+    if task.due_at is None:
+        task.due_at = datetime.now(timezone.utc)
     db.add(Artifact(
         product_id=product_id, task_id=task.id, kind="seo_article_manual_retry",
         title="Повтор генерации SEO-статьи",

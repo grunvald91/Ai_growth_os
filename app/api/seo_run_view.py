@@ -282,6 +282,7 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
             ),
             "article_id": str(article.id) if article else None,
             "article_status": article.status.value if article else None,
+            "published_confirmed": publish_record is not None,
             "publication_path": publish_record.external_reference if publish_record else None,
             "published_at": (
                 (publish_record.published_at.replace(tzinfo=timezone.utc)
