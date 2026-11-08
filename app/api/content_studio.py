@@ -1244,6 +1244,40 @@ def studio_page_shell(
 </body></html>"""
 
 
+def planner_notice_html(db: Session, product_id: UUID) -> str:
+    """Show the latest company's planner outcome, not only still-running work."""
+    task = db.scalar(select(Task).where(
+        Task.product_id == product_id, Task.assigned_agent == "editorial_planner"
+    ).order_by(Task.created_at.desc(), Task.id.desc()).limit(1))
+    if task is None:
+        return ""
+    if task.status in {TaskStatus.QUEUED, TaskStatus.RUNNING}:
+        return ('<p class="sg-notice" role="status">Редактор готовит новый вариант контент-плана. '
+                'Действующий план продолжит работать. Статус появится здесь после завершения.</p>')
+    if task.status != TaskStatus.FAILED:
+        return ""
+    run = db.scalar(select(AgentRun).where(
+        AgentRun.task_id == task.id, AgentRun.agent_name == "editorial_planner"
+    ).order_by(AgentRun.started_at.desc(), AgentRun.id.desc()).limit(1))
+    diagnostic = (run.error or "") if run is not None else ""
+    if ":schema" in diagnostic or ":incomplete_response:" in diagnostic:
+        reason = "Ответ генератора не прошёл проверку структуры контент-плана."
+    elif ":provider:" in diagnostic:
+        reason = "Во время обращения к модели произошла ошибка или истекло время ожидания."
+    elif ":context:" in diagnostic:
+        reason = "Не удалось подготовить данные компании для генерации."
+    else:
+        reason = "Причина требует проверки журналов задания."
+    task_url = f"/studio/products/{product_id}/tasks/{task.id}"
+    detail = ('<small>Код диагностики: ' + esc(diagnostic[:240]) + '</small>'
+              if diagnostic else "")
+    return ('<section class="sg-notice" role="alert"><strong>Не удалось создать новый контент-план.</strong> '
+            + reason + ' Ранее сохранённые планы не изменены. '
+            + f'<a href="{task_url}">Открыть задание</a>. '
+            + 'Ниже можно повторно запросить создание плана.'
+            + detail + '</section>')
+
+
 def plan_page(db: Session, product: Product, status: str = "all", view: str = "current") -> str:
     state = studio_state(db, product, view=view)
     plan_row = state["plan_row"]
@@ -1291,14 +1325,7 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
         switcher = f'<a class="btn secondary small" href="/studio/products/{product.id}/plan?view=draft">Новый черновик →</a>'
     view_q = "&view=draft" if view == "draft" else ""
     plan_q = "?view=draft" if view == "draft" else ""
-    pending_planner = next((task for task in state["tasks"]
-                            if task.assigned_agent == "editorial_planner"
-                            and task.status in {TaskStatus.QUEUED, TaskStatus.RUNNING}), None)
-    planner_notice = (
-        '<p class="sg-notice" role="status">Редактор готовит новый вариант контент-плана. '
-        'Обновите эту страницу позже. Действующий план продолжит работать.</p>'
-        if pending_planner else ""
-    )
+    planner_notice = planner_notice_html(db, product.id)
     body = f"""
     {planner_notice}
     <section class="panel route-summary">
