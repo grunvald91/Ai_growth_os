@@ -867,7 +867,7 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     visible_run, older_visible = visible_plan_run(runs)
     historical_note = (
         '<p class="seo-schedule-empty" role="status">'
-        'Новый SEO-запуск ещё не создал план или завершился ошибкой. '
+        'Новый SEO-запуск ещё не сформировал расписание статей либо завершился ошибкой. '
         'Ниже показан последний сформированный SEO-план; '
         'состояние нового запуска находится в истории.</p>'
         if older_visible else ''
