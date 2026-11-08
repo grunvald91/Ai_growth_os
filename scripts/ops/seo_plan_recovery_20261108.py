@@ -96,7 +96,7 @@ with SessionLocal() as db:
     target=db.get(Product,PRORESULTAT)
     rendered=seo_page(servgo.id,db=db)
     seo_html=rendered if isinstance(rendered,str) else rendered.body.decode("utf-8")
-    if "SEO-план и календарь" not in seo_html or "Плановый старт подготовки" not in seo_html:
+    if "SEO-план и календарь" not in seo_html or "плановый старт подготовки" not in seo_html:
         raise SystemExit("SEO_PRODUCTION_BOARD_FAILED")
     editorial_html=plan_page(db,target)
     if "Контент-план" not in editorial_html or "Следить за заданием" not in editorial_html:
