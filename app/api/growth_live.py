@@ -308,9 +308,14 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
     article_cards = []
     if base:
         for article in row.get("articles", []):
-            status = (saved_labels.get(article["article_status"], article["article_status"])
-                      if article["article_status"] else
-                      article_labels.get(article["task_status"], article["task_status"]))
+            if article.get("published_confirmed") or article.get("publication_path"):
+                status = "Опубликована"
+            elif article.get("task_status") == "failed":
+                status = "Ошибка создания"
+            else:
+                status = (saved_labels.get(article["article_status"], article["article_status"])
+                          if article["article_status"] else
+                          article_labels.get(article["task_status"], article["task_status"]))
             target = (f'/studio/products/{product_id}/materials/{article["article_id"]}'
                       if article["article_id"] else
                       f'/studio/products/{product_id}/tasks/{article["task_id"]}')
