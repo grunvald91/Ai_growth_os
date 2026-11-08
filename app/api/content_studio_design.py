@@ -733,6 +733,8 @@ STUDIO_CSS += """
 .seo-board-state.state-failed{color:#a43140;border-color:#e9bbc4}
 .seo-board-state.state-published{color:#12754b;border-color:#bde5d4}
 .seo-board-state.state-review{color:#986516;border-color:#e9d8b8}
+.seo-board-retry{grid-column:2/-1;margin:0;display:flex;justify-content:flex-start}
+.seo-board-retry .btn{font-size:11px;padding:7px 10px;min-height:34px}
 .seo-board-more>summary{cursor:pointer;font-size:12px;font-weight:650;padding:12px 2px;color:var(--sg-text)}
 .seo-board-more .seo-board-list{margin-top:6px}
 .seo-board-empty{font-size:13px;margin:0;color:var(--sg-muted)}
