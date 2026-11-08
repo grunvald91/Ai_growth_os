@@ -1,5 +1,9 @@
 name: ServGo SEO two-item + ProResultat one-task guarded recovery
 on:
+  push:
+    branches: [ops/seo-plan-recovery-20261108]
+    paths:
+      - .github/workflows/seo-plan-recovery-20261108.yml
   workflow_dispatch:
 permissions:
   contents: read
