@@ -342,7 +342,8 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
                     critic += '<p>Статья не прошла автоматическую проверку. Причина указана выше.</p>'
             scheduled = article.get("scheduled_at")
             scheduled_note = (
-                '<span>Запланировано: ' + html.escape(str(scheduled)) + ' МСК</span>'
+                '<span>Плановая дата: ' + html.escape(str(scheduled))
+                + ' (' + html.escape(row.get("timezone_name") or "Europe/Moscow") + ')</span>'
                 if scheduled else ''
             )
             article_cards.append(
@@ -357,6 +358,46 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
         '<ul>' + ''.join(article_cards) + '</ul></details>'
         if article_cards else ''
     )
+    # A collapsed article list must not hide the release calendar from owners.
+    scheduled_articles = sorted(
+        (article for article in row.get("articles", []) if article.get("scheduled_at")),
+        key=lambda article: article.get("scheduled_iso") or "",
+    )
+    if scheduled_articles:
+        preview_items = []
+        for article in scheduled_articles[:5]:
+            if article.get("publication_path"):
+                current_status = "Опубликована"
+            elif article.get("task_status") == "failed":
+                current_status = "Ошибка создания"
+            elif article.get("article_status") == "awaiting_approval":
+                current_status = "Ждёт проверки"
+            elif article.get("task_status") == "queued":
+                current_status = "Ожидает генерации"
+            elif article.get("task_status") == "running":
+                current_status = "Создаётся"
+            else:
+                current_status = "В обработке"
+            preview_items.append(
+                '<li><strong>' + html.escape(str(article.get("title") or "Статья"))
+                + '</strong><span>' + html.escape(str(article["scheduled_at"]))
+                + ' · ' + html.escape(current_status) + '</span></li>'
+            )
+        remainder = (f'<p>Ещё статей: {len(scheduled_articles) - 5}. '
+                     'Полный список находится ниже.</p>'
+                     if len(scheduled_articles) > 5 else '')
+        schedule_preview = (
+            '<section class="seo-schedule-preview" aria-label="Расписание SEO-статей">'
+            '<h4>Плановые даты SEO-статей</h4><p>Часовой пояс: '
+            + html.escape(row.get("timezone_name") or "Europe/Moscow")
+            + '. Дата ориентировочная: фактическая публикация зависит от завершения генерации и проверки.</p>'
+            + '<ul>' + ''.join(preview_items) + '</ul>' + remainder + '</section>'
+        )
+    else:
+        schedule_preview = (
+            '<p class="seo-schedule-empty">Плановые даты статей пока не сформированы. '
+            'Проверьте состояние SEO-запуска и постановку статей в очередь.</p>'
+        )
     return (
         f'<article class="panel seo-run" data-seo-status="{html.escape(row["status"], quote=True)}">'
         f'<div class="seo-run-head"><h3>{html.escape(row["title"])}</h3>'
@@ -373,6 +414,7 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
            '<p>Количество источников пока не подтверждено.</p>')
         + '<p>Стоимость: нет подтверждённых данных о списании провайдера.</p>'
         + '</details>'
+        + schedule_preview
         + article_list
         + actions
         + ('<p class="seo-run-hint">Запущенное выполнение нельзя прервать этой кнопкой.</p>'
@@ -733,6 +775,16 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     else:
         destination = ('Место публикации: персональный блог компании на ServGo. '
                        'Ссылка появится после привязки бизнеса.')
+    autorun_enabled = (
+        platform.seo_autorun_enabled or
+        (product.slug == "servgo" and platform.seo_servgo_autorun_enabled)
+    )
+    autorun_note = (
+        "Автоматическое обновление SEO-плана на сервере включено."
+        if autorun_enabled else
+        "Автоматическое обновление SEO-плана на сервере отключено. "
+        "Ручной запуск доступен независимо от этого режима."
+    )
     activation_form = (
         '<section class="panel seo-activation" aria-label="Подключение SEO-завода">'
         '<div class="seo-status-head"><h2>SEO-завод компании</h2>'
@@ -741,6 +793,7 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
         + '</div>'
         + ('<p>SEO-завод подключён. Запустите подготовку плана.</p>' if enabled
            else '<p>Для этой компании генерация статей отключена.</p>')
+        + '<p class="seo-autorun-note">' + html.escape(autorun_note) + '</p>'
         + (f'<form method="post" action="{base}/seo/activation">'
            f'<input type="hidden" name="action" value="{"disable" if enabled else "enable"}">'
            f'<button class="btn {"danger" if enabled else "primary"}" type="submit">'

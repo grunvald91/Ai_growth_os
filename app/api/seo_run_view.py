@@ -151,6 +151,9 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
     for artifact in parts:
         grouped[artifact.task_id].append(artifact)
     rows = [seo_run_summary(task, grouped[task.id]) for task in tasks]
+    preferences = editorial_preferences(db, product_id)
+    for row in rows:
+        row["timezone_name"] = preferences.timezone_name
 
     # The SEO factory queues article work for content_factory. Each task name
     # contains the generated plan artifact UUID (SEO-ARTICLE:<plan-uuid>:<item>).
@@ -218,7 +221,7 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
     approval_by_article = {}
     for approval in approvals:
         approval_by_article.setdefault(approval.artifact_id, approval)
-    company_timezone = ZoneInfo(editorial_preferences(db, product_id).timezone_name)
+    company_timezone = ZoneInfo(preferences.timezone_name)
     by_run = defaultdict(list)
     for task in article_tasks:
         parts_of_title = task.title.split(":", 2)
@@ -240,6 +243,7 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
             "task_id": str(task.id),
             "title": title,
             "task_status": state,
+            "scheduled_iso": task.due_at.isoformat() if task.due_at else None,
             "scheduled_at": (
                 (task.due_at.replace(tzinfo=timezone.utc) if task.due_at.tzinfo is None
                  else task.due_at).astimezone(company_timezone).strftime("%d.%m.%Y %H:%M")

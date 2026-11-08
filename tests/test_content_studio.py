@@ -512,3 +512,69 @@ def test_desktop_sidebar_shows_accounts_link_without_opening_the_extras():
     main, extras = html.split('<details class="sg-side-extras">')
     assert f'/studio/products/{product_id}/accounts' in main and 'Аккаунты' in main
     assert 'Аккаунты' not in extras
+
+
+def test_planner_failed_run_is_visible_only_to_its_company(studio_db):
+    from app.api.content_studio import planner_notice_html
+    from app.models.domain import AgentRun
+
+    a = Product(name="ProResultat", slug="proresultat-planner-status")
+    b = Product(name="Other", slug="other-planner-status")
+    studio_db.add_all([a, b])
+    studio_db.flush()
+    task = Task(product_id=a.id, title="Редактор: контент-план",
+                assigned_agent="editorial_planner", status=TaskStatus.FAILED)
+    studio_db.add(task)
+    studio_db.flush()
+    studio_db.add(AgentRun(task_id=task.id, agent_name="editorial_planner",
+                           status="failed",
+                           error="editorial_plan_failed:schema:ValidationError:<script>alert(1)</script>"))
+    studio_db.commit()
+
+    notice = planner_notice_html(studio_db, a.id)
+    assert "Не удалось создать новый контент-план" in notice
+    assert "не прошёл проверку структуры" in notice
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in notice
+    assert "<script>alert(1)</script>" not in notice
+    assert planner_notice_html(studio_db, b.id) == ""
+
+    client = client_for(studio_db)
+    try:
+        page = client.get(f"/studio/products/{a.id}/plan")
+        assert page.status_code == 200
+        assert "Не удалось создать новый контент-план" in page.text
+        assert "Подготовить новый контент-план" in page.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_completed_proresultat_plan_is_visible_as_draft_and_needs_approval(studio_db):
+    from app.api.content_studio import planner_notice_html
+    db = studio_db
+    company = Product(name="ProResultat", slug="proresultat-plan-ready")
+    db.add(company)
+    db.flush()
+    task = Task(product_id=company.id, title="Редактор: контент-план",
+                assigned_agent="editorial_planner", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    payload = make_plan(approval_state="draft")
+    payload["generated_at"] = "2026-11-05T18:30:26+00:00"
+    plan = Artifact(product_id=company.id, task_id=task.id, kind="editorial_plan",
+                    title="Новый контент-план",
+                    content=json.dumps(payload, ensure_ascii=False),
+                    status=ArtifactStatus.AWAITING_APPROVAL)
+    db.add(plan)
+    db.commit()
+    notice = planner_notice_html(db, company.id)
+    assert "Новый контент-план готов" in notice
+    assert f"/studio/products/{company.id}/plan?view=draft" in notice
+    client = client_for(db)
+    try:
+        page = client.get(f"/studio/products/{company.id}/plan")
+        assert page.status_code == 200
+        assert "Новый контент-план готов" in page.text
+        assert "Черновик плана" in page.text
+        assert f"/plans/{plan.id}/approve" in page.text
+    finally:
+        app.dependency_overrides.clear()
