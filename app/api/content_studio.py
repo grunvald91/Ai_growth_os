@@ -1252,8 +1252,10 @@ def planner_notice_html(db: Session, product_id: UUID) -> str:
     if task is None:
         return ""
     if task.status in {TaskStatus.QUEUED, TaskStatus.RUNNING}:
+        url = f"/studio/products/{product_id}/tasks/{task.id}"
         return ('<p class="sg-notice" role="status">Редактор готовит новый вариант контент-плана. '
-                'Действующий план продолжит работать. Статус появится здесь после завершения.</p>')
+                'Ранее сохранённый план не изменяется до утверждения нового. '
+                f'<a href="{url}">Следить за заданием</a>.</p>')
     if task.status == TaskStatus.COMPLETED:
         draft_row = db.scalar(select(Artifact).where(
             Artifact.product_id == product_id, Artifact.task_id == task.id,
@@ -1289,7 +1291,8 @@ def planner_notice_html(db: Session, product_id: UUID) -> str:
             + detail + '</section>')
 
 
-def plan_page(db: Session, product: Product, status: str = "all", view: str = "current") -> str:
+def plan_page(db: Session, product: Product, status: str = "all", view: str = "current",
+              feedback_error: str | None = None) -> str:
     state = studio_state(db, product, view=view)
     plan_row = state["plan_row"]
     plan = state["plan"]
@@ -1337,7 +1340,13 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
     view_q = "&view=draft" if view == "draft" else ""
     plan_q = "?view=draft" if view == "draft" else ""
     planner_notice = planner_notice_html(db, product.id)
+    error_notice = (
+        '<section class="sg-notice" role="alert"><strong>Контент-план не поставлен в очередь.</strong> '
+        + esc(feedback_error[:280]) + '</section>'
+        if feedback_error else ""
+    )
     body = f"""
+    {error_notice}
     {planner_notice}
     <section class="panel route-summary">
       <div class="panel-head">
@@ -2682,13 +2691,19 @@ async def studio_slot_move(product_id: UUID, plan_id: UUID, slot_id: str,
 
 @router.post("/studio/products/{product_id}/plan/generate")
 async def studio_generate_plan(product_id: UUID, request: Request, db: Session = Depends(get_db)):
-    _owner_product(db, product_id)
+    product = _owner_product(db, product_id)
     values = await _studio_form(request)
     text = values.get("requirements", "").strip()
     try:
         if text:
             save_preferences(db, product_id, text)
-        queue_plan(db, product_id)
+        task = queue_plan(db, product_id)
     except (ValueError, LookupError) as exc:
-        raise HTTPException(409, str(exc)) from None
-    return RedirectResponse(f"/studio/products/{product_id}/plan", status_code=303)
+        db.rollback()
+        return HTMLResponse(plan_page(db, product, feedback_error=str(exc)),
+                            status_code=409, headers={"Cache-Control": "no-store"})
+    # The destination contains an actual persisted task ID, not a generic
+    # promise that an LLM response is already ready.
+    return RedirectResponse(
+        f"/studio/products/{product_id}/tasks/{task.id}", status_code=303
+    )
