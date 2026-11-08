@@ -2,7 +2,7 @@ name: ServGo SEO recovery post-check (read-only)
 on:
   push:
     branches: [ops/seo-plan-recovery-20261108]
-    paths: [.github/workflows/seo-recovery-status-readonly-20261108.yml]
+    paths: [.github/workflows/seo-recovery-status-readonly-20261108.yml, scripts/ops/seo_recovery_status_20261108.py]
 permissions:
   contents: read
 jobs:
