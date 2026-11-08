@@ -72,6 +72,9 @@ def test_retry_reuses_original_article_only_when_failed_and_enabled():
         db.add(SeoFactoryActivation(
             product_id=product.id, enabled=True,
             changed_at=datetime.now(timezone.utc), changed_by="owner"))
+        db.add(SeoFactoryActivation(
+            product_id=other.id, enabled=True,
+            changed_at=datetime.now(timezone.utc), changed_by="other-owner"))
         plan = Artifact(product_id=product.id, kind="seo_content_plan",
                         title="План", content='{"items":[]}')
         db.add(plan)
