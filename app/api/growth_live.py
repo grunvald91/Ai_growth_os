@@ -27,6 +27,7 @@ from app.models.domain import Artifact, Experiment, Task
 from app.api.growth_campaigns import campaign_list_card
 from app.services.campaign_readiness import load_resources
 from app.api.seo_run_view import seo_runs
+from app.api.seo_plan_board import seo_plan_board
 from app.seo.control import SeoControlError, create_seo_run, change_seo_run
 from app.seo.activation import (is_enabled, set_enabled, editorial_preferences,
                                 set_editorial_preferences)
@@ -390,7 +391,7 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
             '<section class="seo-schedule-preview" aria-label="Расписание SEO-статей">'
             '<h4>Плановые даты SEO-статей</h4><p>Часовой пояс: '
             + html.escape(row.get("timezone_name") or "Europe/Moscow")
-            + '. Дата ориентировочная: фактическая публикация зависит от завершения генерации и проверки.</p>'
+            + '. Это время начала подготовки; выход статьи зависит от генерации и проверки.</p>'
             + '<ul>' + ''.join(preview_items) + '</ul>' + remainder + '</section>'
         )
     else:
@@ -847,7 +848,10 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
         f'{artifact_content(row.content)}</article>' for row in rows
     )
     content = (
-        activation_form + preferences_form + available_actions
+        activation_form
+        + seo_plan_board(runs[0] if runs else None, product_id,
+                         autorun=autorun_enabled, enabled=enabled)
+        + preferences_form + available_actions
         + '<p class="seo-publish-destination">' + destination + '</p>'
         + '<div class="seo-dash-stats" aria-label="SEO-статистика">'
           f'<div><span>Запусков</span><strong>{len(runs)}</strong></div>'
