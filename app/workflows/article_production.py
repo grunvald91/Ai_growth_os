@@ -633,6 +633,29 @@ def _compact_stage_inputs(name: str, stage_inputs: dict) -> dict:
     return compact
 
 
+
+def _verified_seo_strategy(request: ArticleProductionInput) -> ArticleStrategy:
+    """A typed, non-generative recovery from the approved SEO brief.
+
+    Only a failed *format validation* of the strategist stage can use this.
+    It does not invent research, product claims or bypass the article critic.
+    """
+    brief = request.seo_brief
+    if brief is None:
+        raise ValueError("An approved SEO brief is required")
+    return ArticleStrategy.model_validate({
+        "audience": brief.target_segment or f"Читатели по запросу «{brief.primary_query}»",
+        "pain": brief.reader_problem,
+        "search_intent": f"Поисковое намерение: {brief.intent}; запрос: {brief.primary_query}",
+        "angle": f"Ответить на вопрос «{brief.primary_query}». Следующий шаг: {brief.next_step}",
+        "titles": [request.topic],
+        "hypothesis": (
+            "Проверить, получает ли читатель практический ответ на запрос "
+            f"«{brief.primary_query}» и понимает следующий шаг."
+        ),
+    })
+
+
 def _validation_failure(name: str, exc: Exception, fallback: str) -> str:
     if not isinstance(exc, ValidationError):
         return f'{type(exc).__name__}:{fallback}'[:300]
@@ -1230,7 +1253,17 @@ class ArticleProduction:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    if name not in OPTIONAL_DERIVATIVE_STAGES:
+                    if (name == 'content_strategist' and safe_request.seo_brief is not None
+                            and isinstance(exc, (ValueError, ValidationError))
+                            and error.startswith('invalid_article_output:')):
+                        # The preceding AI response and one repair both failed
+                        # structural validation. Use the company's vetted SEO
+                        # brief, not invented model text or a broken partial JSON.
+                        parsed = _verified_seo_strategy(safe_request)
+                        fallback_reason = 'verified_seo_brief_after_invalid_strategist_output'
+                        fallback_stages.add(name)
+                        logger.warning('SEO strategist validated-brief fallback task=%s', task_id)
+                    elif name not in OPTIONAL_DERIVATIVE_STAGES:
                         if isinstance(exc, ValidationError):
                             locations = []
                             for item in exc.errors(include_url=False, include_input=False):
@@ -1239,12 +1272,13 @@ class ArticleProduction:
                                 locations.append(f"{loc}:{err_type}" if loc else err_type)
                             error = f'invalid_article_output:{name}:' + ",".join(locations[:8])
                         raise
-                    fallback_reason = _validation_failure(name, exc, error)
-                    fallback_stages.add(name)
-                    if name == 'platform_writer':
-                        parsed = schema.model_validate(_platform_text_fallback_payload(stage_inputs))
                     else:
-                        parsed = schema.model_validate(_creative_fallback_payload(name, stage_inputs))
+                        fallback_reason = _validation_failure(name, exc, error)
+                        fallback_stages.add(name)
+                        if name == 'platform_writer':
+                            parsed = schema.model_validate(_platform_text_fallback_payload(stage_inputs))
+                        else:
+                            parsed = schema.model_validate(_creative_fallback_payload(name, stage_inputs))
                 if name in {'youtube_shorts_director', 'instagram_reels_director'}:
                     parsed = _normalize_ready_video_timeline(parsed)
                 if safe_request.seo_brief and name == 'marketing_editor':
