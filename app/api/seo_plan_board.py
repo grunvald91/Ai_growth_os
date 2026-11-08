@@ -49,6 +49,20 @@ def _state(item: dict) -> tuple[str, str]:
     return "unknown", "Состояние уточняется"
 
 
+def visible_plan_run(runs: list[dict]) -> tuple[dict | None, bool]:
+    """Keep the previous prepared plan visible while a new run is pending/failed.
+
+    Returns (the plan to show, whether a newer run exists). Only persisted
+    SEO plan artifacts qualify; do not promote a queued task to a plan.
+    """
+    if not runs:
+        return None, False
+    for index, run in enumerate(runs):
+        if run.get("plan_ready"):
+            return run, index != 0
+    return runs[0], False
+
+
 def seo_plan_board(run: dict | None, product_id: UUID, *, autorun: bool,
                    enabled: bool, max_visible: int = 12) -> str:
     base = f"/studio/products/{product_id}"
