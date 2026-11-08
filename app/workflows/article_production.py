@@ -1144,6 +1144,7 @@ class ArticleProduction:
                     + '\nSchema: ' + json.dumps(schema.model_json_schema())
                 )
                 fallback_reason = None
+                strategist_twice_invalid = False
 
                 def validate_stage_revision(data):
                     """Apply the same Pydantic validators and grounded source scope
@@ -1249,11 +1250,20 @@ class ArticleProduction:
                         review_enabled=False), timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
                         if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
                             raise rejected
-                        parsed = accept(response.content)
+                        try:
+                            parsed = accept(response.content)
+                        except (ValueError, ValidationError):
+                            # Only TWO structurally rejected strategist outputs
+                            # authorize the deterministic, approved-brief fallback.
+                            # Transport failures and truncated repairs remain errors.
+                            if name == 'content_strategist':
+                                strategist_twice_invalid = True
+                            raise
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
                     if (name == 'content_strategist' and safe_request.seo_brief is not None
+                            and strategist_twice_invalid
                             and isinstance(exc, (ValueError, ValidationError))
                             and error.startswith('invalid_article_output:')):
                         # The preceding AI response and one repair both failed
