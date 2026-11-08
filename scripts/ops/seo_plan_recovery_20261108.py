@@ -88,3 +88,18 @@ with SessionLocal() as db:
         task=queue_plan(db,target.id)
         print("PRORESULTAT_PLAN_QUEUED",str(task.id),task.status.value)
 print("RECOVERY_ACTIONS_COMPLETE")
+# Real production rendering, without sending or exposing user content.
+with SessionLocal() as db:
+    from app.api.growth_live import seo_page
+    from app.api.content_studio import plan_page
+    servgo=db.scalar(select(Product).where(Product.slug=="servgo"))
+    target=db.get(Product,PRORESULTAT)
+    rendered=seo_page(servgo.id,db=db)
+    seo_html=rendered.body.decode("utf-8")
+    if "SEO-план и календарь" not in seo_html or "Плановый старт подготовки" not in seo_html:
+        raise SystemExit("SEO_PRODUCTION_BOARD_FAILED")
+    editorial_html=plan_page(db,target)
+    if "Контент-план" not in editorial_html or "Следить за заданием" not in editorial_html:
+        raise SystemExit("PRORESULTAT_PRODUCTION_PLANNER_UI_FAILED")
+    print("SEO_PRODUCTION_BOARD_OK")
+    print("PRORESULTAT_PRODUCTION_PLANNER_UI_OK")
