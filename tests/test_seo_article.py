@@ -205,3 +205,33 @@ def test_seo_plan_parser_rejects_unclosed_or_multiple_json_objects():
         _parse_stage_payload(SEOPlan, raw + raw)
     with pytest.raises(ValueError):
         _parse_stage_payload(SEOPlan, '{"primary_query":"запись клиентов"}')
+
+
+@pytest.mark.asyncio
+async def test_invalid_seo_strategist_recovers_only_from_verified_plan_brief(db, product, tmp_path):
+    """Two malformed responses cannot erase an approved SEO article plan."""
+    outputs = [{}, {}, *outputs_with_geo()[:6][1:]]
+    provider = SequenceProvider(outputs)
+    workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    result = await workflow.run(request_for(product).model_copy(update={"light": True}))
+    assert result.status == "completed", result.error
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    assert article.strategy.pain == BRIEF.reader_problem
+    assert article.strategy.search_intent.find(BRIEF.primary_query) >= 0
+    assert article.seo_brief.primary_query == BRIEF.primary_query
+    checkpoints = list(db.scalars(select(Artifact).where(
+        Artifact.task_id == result.task_id, Artifact.kind == "content_stage_output")))
+    saved = [__import__("json").loads(a.content) for a in checkpoints]
+    strategist = next(x for x in saved if x["stage"] == "content_strategist")
+    assert strategist["fallback_used"] is True
+    assert strategist["fallback_reason"] == "verified_seo_brief_after_invalid_strategist_output"
+    assert len(provider.requests) == 7  # two failed attempts, then normal downstream stages
+
+
+@pytest.mark.asyncio
+async def test_strategist_fallback_never_applies_to_unplanned_articles(db, product, tmp_path):
+    provider = SequenceProvider([{}, {}])
+    workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    result = await workflow.run(ArticleProductionInput(product_id=product.id, topic="Без SEO-плана"))
+    assert result.status == "failed"
+    assert not list(db.scalars(select(Artifact).where(Artifact.kind == "article")))
