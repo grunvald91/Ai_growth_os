@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.api.seo_plan_board import seo_plan_board
+from app.api.seo_plan_board import seo_plan_board, visible_plan_run
 from app.db.models import Base
 from app.models.domain import Artifact, Product, Task, TaskStatus
 from app.seo.activation import SeoFactoryActivation
@@ -49,6 +49,13 @@ def test_seo_board_distinguishes_preparation_from_actual_publication_and_escapes
     assert "Ждёт проверки" in page
     assert "Автопланирование: выключено" in page
     assert "Повторить генерацию" in page
+    # A publication can be confirmed even if a public link is not stored.
+    page_confirmed = seo_plan_board({
+        **run, "articles": [{**run["articles"][1],
+                             "publication_path": None, "published_confirmed": True}]
+    }, product_id, autorun=False, enabled=True)
+    assert "Опубликована" in page_confirmed
+    assert "Вышла 08.11.2026 12:32" in page_confirmed
     assert "&lt;script&gt;" in page and "<script>" not in page
     assert page.index("Опубликованная статья") < page.index("&lt;script&gt;")
 
@@ -85,7 +92,8 @@ def test_retry_reuses_original_article_only_when_failed_and_enabled():
             reader_problem="Владельцу сложно вести запись без единого календаря",
             ai_questions=["Как вести онлайн запись"], next_step="Проверить расписание")
         task = Task(product_id=product.id, title=f"SEO-ARTICLE:{plan.id}:a001",
-                    assigned_agent="content_factory", status=TaskStatus.FAILED)
+                    assigned_agent="content_factory", status=TaskStatus.FAILED,
+                    due_at=datetime(2026, 11, 3, 9, 0, tzinfo=timezone.utc))
         db.add(task)
         db.flush()
         request = ArticleProductionInput(
@@ -99,10 +107,88 @@ def test_retry_reuses_original_article_only_when_failed_and_enabled():
         assert task.status == TaskStatus.FAILED
         retried = retry_failed_article(db, product_id=product.id, task_id=task.id, actor="owner")
         assert retried.id == task.id and retried.status == TaskStatus.QUEUED
-        assert retried.due_at is not None
+        assert retried.due_at == datetime(2026, 11, 3, 9, 0, tzinfo=timezone.utc)
         assert db.scalar(select(Artifact).where(Artifact.task_id == task.id,
             Artifact.kind == "seo_article_manual_retry")) is not None
         with pytest.raises(ValueError):
             retry_failed_article(db, product_id=product.id, task_id=task.id, actor="owner")
         assert len(list(db.scalars(select(Task)))) == 1
+    engine.dispose()
+
+
+def test_visible_plan_keeps_previous_calendar_during_new_build():
+    previous = {"id": "older", "status": "completed", "plan_ready": True,
+                "articles": [{"title": "Старая действующая статья"}]}
+    latest = {"id": "new", "status": "running", "plan_ready": False}
+    chosen, older = visible_plan_run([latest, previous])
+    assert chosen == previous and older is True
+    assert visible_plan_run([previous]) == (previous, False)
+    assert visible_plan_run([latest]) == (latest, False)
+    assert visible_plan_run([]) == (None, False)
+
+
+def test_generic_task_retry_must_reuse_seo_owner_gate_and_reject_cancelled_jobs():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.db.session import get_db
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with Session(engine, expire_on_commit=False) as db:
+        company = Product(name="SEO", slug="retry-generic-seo")
+        db.add(company)
+        db.flush()
+        db.add(SeoFactoryActivation(
+            product_id=company.id, enabled=True,
+            changed_at=datetime.now(timezone.utc), changed_by="owner"))
+        plan = Artifact(product_id=company.id, kind="seo_content_plan",
+                        title="SEO", content='{"items":[]}')
+        db.add(plan)
+        db.flush()
+        task = Task(product_id=company.id,
+                    title=f"SEO-ARTICLE:{plan.id}:a001",
+                    assigned_agent="content_factory", status=TaskStatus.FAILED)
+        cancelled = Task(product_id=company.id,
+                         title=f"SEO-ARTICLE:{plan.id}:a002",
+                         assigned_agent="content_factory", status=TaskStatus.CANCELLED)
+        db.add_all([task, cancelled])
+        db.flush()
+        brief = SeoBrief(
+            plan_item_id="a001", primary_query="онлайн запись",
+            related_queries=[], stage="awareness", intent="informational",
+            reader_problem="Как уменьшить ручную запись без выдуманных обещаний",
+            ai_questions=["Как работает онлайн запись"], next_step="Посмотреть услуги")
+        db.add(Artifact(product_id=company.id, task_id=task.id,
+                        kind="content_request", title="Request",
+                        content=ArticleProductionInput(
+                            product_id=company.id, task_id=task.id,
+                            topic="Программа онлайн записи",
+                            channel="own_site", seo_brief=brief, light=True,
+                        ).model_dump_json()))
+        db.commit()
+
+        def override():
+            yield db
+
+        app.dependency_overrides[get_db] = override
+        try:
+            with TestClient(app) as client:
+                base = f"/studio/products/{company.id}"
+                bad = client.post(f"{base}/tasks/{cancelled.id}/retry",
+                                  follow_redirects=False)
+                assert bad.status_code == 409
+                assert cancelled.status == TaskStatus.CANCELLED
+                first = client.post(f"{base}/tasks/{task.id}/retry",
+                                    follow_redirects=False)
+                assert first.status_code == 303
+                assert first.headers["location"] == f"{base}/seo"
+                assert task.status == TaskStatus.QUEUED
+                duplicate = client.post(f"{base}/tasks/{task.id}/retry",
+                                        follow_redirects=False)
+                assert duplicate.status_code == 409
+                assert len(list(db.scalars(select(Artifact).where(
+                    Artifact.task_id == task.id,
+                    Artifact.kind == "seo_article_manual_retry")))) == 1
+        finally:
+            app.dependency_overrides.clear()
     engine.dispose()
