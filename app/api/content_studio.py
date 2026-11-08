@@ -1244,6 +1244,19 @@ def studio_page_shell(
 </body></html>"""
 
 
+def _draft_has_past_slots(plan: dict, now: datetime | None = None) -> bool:
+    """Match the approval gate: any past publication slot rejects a draft."""
+    reference = now or datetime.now(timezone.utc)
+    for slot in plan.get("slots") or []:
+        try:
+            moment = datetime.fromisoformat(str(slot.get("publish_at", "")))
+        except (ValueError, TypeError, AttributeError):
+            return True
+        if moment.tzinfo is None or moment <= reference:
+            return True
+    return False
+
+
 def planner_notice_html(db: Session, product_id: UUID) -> str:
     """Show the latest company's planner outcome, not only still-running work."""
     task = db.scalar(select(Task).where(
@@ -1252,18 +1265,26 @@ def planner_notice_html(db: Session, product_id: UUID) -> str:
     if task is None:
         return ""
     if task.status in {TaskStatus.QUEUED, TaskStatus.RUNNING}:
+        url = f"/studio/products/{product_id}/tasks/{task.id}"
         return ('<p class="sg-notice" role="status">Редактор готовит новый вариант контент-плана. '
-                'Действующий план продолжит работать. Статус появится здесь после завершения.</p>')
+                'Ранее сохранённый план не изменяется до утверждения нового. '
+                f'<a href="{url}">Следить за заданием</a>.</p>')
     if task.status == TaskStatus.COMPLETED:
         draft_row = db.scalar(select(Artifact).where(
             Artifact.product_id == product_id, Artifact.task_id == task.id,
             Artifact.kind == "editorial_plan",
         ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
         if draft_row is not None and parse_json(draft_row).get("approval_state") == "draft":
+            draft = parse_json(draft_row)
             url = f"/studio/products/{product_id}/plan?view=draft"
+            detail = (
+                "Часть сроков публикаций уже прошла; такой черновик нельзя утвердить. "
+                "Создайте новый с актуальными датами. "
+                if _draft_has_past_slots(draft) else
+                "План создан и ожидает вашего согласования. "
+            )
             return ('<section class="sg-notice" role="status"><strong>Новый контент-план готов.</strong> '
-                    'План создан и ожидает вашего согласования. '
-                    f'<a href="{url}">Открыть черновик для проверки</a>.</section>')
+                    + detail + f'<a href="{url}">Открыть черновик для проверки</a>.</section>')
         return ""
     if task.status != TaskStatus.FAILED:
         return ""
@@ -1289,7 +1310,8 @@ def planner_notice_html(db: Session, product_id: UUID) -> str:
             + detail + '</section>')
 
 
-def plan_page(db: Session, product: Product, status: str = "all", view: str = "current") -> str:
+def plan_page(db: Session, product: Product, status: str = "all", view: str = "current",
+              feedback_error: str | None = None) -> str:
     state = studio_state(db, product, view=view)
     plan_row = state["plan_row"]
     plan = state["plan"]
@@ -1298,10 +1320,17 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
     action_html = ""
     if plan_row:
         if plan.get("approval_state") == "draft":
-            action_html = (
-                f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/approve">'
-                '<button class="btn primary" type="submit">✓ Подтвердить план</button></form>'
-            )
+            if _draft_has_past_slots(plan):
+                action_html = (
+                    '<div class="sg-notice" role="alert"><strong>Сроки черновика истекли.</strong> '
+                    'Нельзя запускать публикации на прошедшие даты. '
+                    '<a href="#plan-new">Создать план с актуальными датами</a>.</div>'
+                )
+            else:
+                action_html = (
+                    f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/approve">'
+                    '<button class="btn primary" type="submit">✓ Подтвердить план</button></form>'
+                )
         elif plan.get("approval_state") == "active":
             action_html = (
                 f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/pause">'
@@ -1337,7 +1366,13 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
     view_q = "&view=draft" if view == "draft" else ""
     plan_q = "?view=draft" if view == "draft" else ""
     planner_notice = planner_notice_html(db, product.id)
+    error_notice = (
+        '<section class="sg-notice" role="alert"><strong>Контент-план не поставлен в очередь.</strong> '
+        + esc(feedback_error[:280]) + '</section>'
+        if feedback_error else ""
+    )
     body = f"""
+    {error_notice}
     {planner_notice}
     <section class="panel route-summary">
       <div class="panel-head">
@@ -1353,7 +1388,7 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
       </div>
     </section>
     <section class="package-grid route-package-grid">{"".join(cards) or '<div class="panel empty">По выбранному фильтру пакетов нет.</div>'}</section>
-    <section class="sg-surface">
+    <section class="sg-surface" id="plan-new">
       <div class="sg-section-head"><div><span class="sg-overline">ПЕРЕСМОТР СТРАТЕГИИ</span>
       <h2>Нужен новый план?</h2>
       <p>Напишите свободно, что важно компании. ИИ предложит новый черновик; действующий план не изменится до утверждения.</p></div></div>
@@ -2682,13 +2717,19 @@ async def studio_slot_move(product_id: UUID, plan_id: UUID, slot_id: str,
 
 @router.post("/studio/products/{product_id}/plan/generate")
 async def studio_generate_plan(product_id: UUID, request: Request, db: Session = Depends(get_db)):
-    _owner_product(db, product_id)
+    product = _owner_product(db, product_id)
     values = await _studio_form(request)
     text = values.get("requirements", "").strip()
     try:
         if text:
             save_preferences(db, product_id, text)
-        queue_plan(db, product_id)
+        task = queue_plan(db, product_id)
     except (ValueError, LookupError) as exc:
-        raise HTTPException(409, str(exc)) from None
-    return RedirectResponse(f"/studio/products/{product_id}/plan", status_code=303)
+        db.rollback()
+        return HTMLResponse(plan_page(db, product, feedback_error=str(exc)),
+                            status_code=409, headers={"Cache-Control": "no-store"})
+    # The destination contains an actual persisted task ID, not a generic
+    # promise that an LLM response is already ready.
+    return RedirectResponse(
+        f"/studio/products/{product_id}/tasks/{task.id}", status_code=303
+    )

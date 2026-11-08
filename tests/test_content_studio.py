@@ -339,7 +339,8 @@ def test_active_plan_is_stable_when_new_draft_is_generated(studio_db):
 
         draft_page = client.get(base + "/plan?view=draft")
         assert "Новый план" in draft_page.text
-        assert f'/plans/{draft_row.id}/approve' in draft_page.text
+        assert "Сроки черновика истекли" in draft_page.text
+        assert f'/plans/{draft_row.id}/approve' not in draft_page.text
         assert "Действующий план" in draft_page.text
     finally:
         app.dependency_overrides.clear()
@@ -575,6 +576,7 @@ def test_completed_proresultat_plan_is_visible_as_draft_and_needs_approval(studi
         assert page.status_code == 200
         assert "Новый контент-план готов" in page.text
         assert "Черновик плана" in page.text
-        assert f"/plans/{plan.id}/approve" in page.text
+        assert "Сроки черновика истекли" in page.text
+        assert f"/plans/{plan.id}/approve" not in page.text
     finally:
         app.dependency_overrides.clear()

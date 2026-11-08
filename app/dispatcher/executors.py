@@ -535,9 +535,19 @@ async def make_plan(ctx: Context, params) -> Outcome:
     except LookupError:
         ctx.db.rollback()
         return Outcome("Компания не найдена.", ok=False)
-    text = "Принял. Составляю контент-план. Он ничего не опубликует: сначала я покажу его на утверждение."
-    return Outcome(text, "Принял, составляю контент-план. Покажу его на утверждение.",
-                   [_task_block(ctx, task, "Контент-план", f"/studio/products/{ctx.product.id}/tasks/{task.id}")],
+    except ValueError:
+        ctx.db.rollback()
+        return Outcome("Не удалось поставить контент-план в очередь. Проверьте профиль компании "
+                       "и откройте раздел «Контент-план» для повторного запуска.",
+                       blocks=[_links(ctx, "plan")], ok=False)
+    # A task ID is the receipt; never claim a new draft already exists.
+    text = ("Контент-план готовится. Задание уже в работе, его статус доступен по ссылке."
+            if task.status.value == "running" else
+            "Задание на контент-план в очереди. Результат появится после генерации "
+            "и будет ожидать вашего утверждения.")
+    return Outcome(text, text,
+                   [_task_block(ctx, task, "Контент-план", f"/studio/products/{ctx.product.id}/tasks/{task.id}"),
+                    _links(ctx, "plan")],
                    task_id=task.id)
 
 
