@@ -475,6 +475,16 @@ h1{font-size:31px;line-height:1.06;margin:5px 0 4px;letter-spacing:-1.1px;color:
   .package-detail-slots{padding:0 13px 14px}
 }
 
+
+/* SEO article schedule: visible and compact on phones without opening details. */
+.route-content .seo-schedule-preview{padding:12px;margin:10px 0;border:1px solid var(--sg-line);border-radius:var(--sg-radius-sm);background:var(--sg-bg)}
+.route-content .seo-schedule-preview h4{margin:0 0 5px;font-size:14px;font-weight:700}
+.route-content .seo-schedule-preview p,.route-content .seo-schedule-empty{font-size:12px;line-height:1.5;color:var(--sg-muted);margin:5px 0}
+.route-content .seo-schedule-preview ul{padding:0;margin:10px 0 0;display:grid;gap:7px;list-style:none}
+.route-content .seo-schedule-preview li{min-width:0;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px;padding:9px 10px;border:1px solid var(--sg-line);border-radius:10px;background:var(--sg-card)}
+.route-content .seo-schedule-preview li strong{font-size:12px;overflow-wrap:anywhere}
+.route-content .seo-schedule-preview li span{font-size:11px;color:var(--sg-muted);white-space:normal}
+
 """
 
 STUDIO_JS = r"""
