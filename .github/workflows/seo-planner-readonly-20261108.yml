@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/seo-planner-readonly-20261108.yml
       - scripts/ops/seo_planner_readonly_20261108.py
+      - scripts/ops/seo_release_verify_20261108.py
   workflow_dispatch:
 
 permissions:
@@ -42,3 +43,10 @@ jobs:
           sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST"             "docker ps --filter name=ai-growth-os --format '{{.Names}} {{.Status}}'"
           echo "== Company-scoped statuses / error categories"
           sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST"             'docker exec -i ai-growth-os-api-1 python -' < scripts/ops/seo_planner_readonly_20261108.py
+
+      - name: Verify latest ServGo SEO article failures (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'docker exec -i ai-growth-os-api-1 python -' < scripts/ops/seo_release_verify_20261108.py
