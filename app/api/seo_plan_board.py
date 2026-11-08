@@ -118,6 +118,14 @@ def seo_plan_board(run: dict | None, product_id: UUID, *, autorun: bool,
             '<span>Подготовка по плану: ' + _esc(preparation) + '</span>'
             if preparation else '<span>Дата подготовки не назначена</span>'
         )
+        retry = (
+            '<form class="seo-board-retry" method="post" action="'
+            + _esc(f"{base}/seo/articles/{task_id}/retry") + '">'
+            '<button class="btn secondary" type="submit"'
+            ' title="Запускает платную повторную генерацию только этой статьи">'
+            'Повторить генерацию</button></form>'
+            if state == "failed" and enabled and task_id else ""
+        )
         return (
             '<li class="seo-board-item" data-state="' + _esc(state) + '">'
             '<div class="seo-board-date">' + (_esc(preparation[:10]) if preparation else "Без даты") + '</div>'
@@ -125,7 +133,7 @@ def seo_plan_board(run: dict | None, product_id: UUID, *, autorun: bool,
             + query_html + '<div class="seo-board-dates">' + prepare_html
             + '<span>' + publication + '</span></div></div>'
             + '<span class="seo-board-state state-' + _esc(state) + '">' + _esc(label) + '</span>'
-            + '</li>'
+            + retry + '</li>'
         )
     visible = "".join(article_html(item) for item in items[:max_visible])
     remainder = ("<details class=\"seo-board-more\"><summary>Показать остальные "
@@ -148,7 +156,7 @@ def seo_plan_board(run: dict | None, product_id: UUID, *, autorun: bool,
             if run.get("status") in ("queued", "running")
             else "Статьи пока не поставлены в очередь. Откройте последний запуск для подробностей."
         )
-    run_status = run.get("status_label") or run.get("status") or "Неизвестно"
+    run_status = "Создание плана: " + str(run.get("status_label") or run.get("status") or "неизвестно")
     updated_at = _when(run.get("updated_at"), tz)
     return (
         '<section class="panel seo-plan-board" aria-label="SEO-план и календарь">'
