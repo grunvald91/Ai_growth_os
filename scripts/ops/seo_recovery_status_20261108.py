@@ -45,4 +45,18 @@ with SessionLocal() as db:
     print("PRORESULTAT_NEW_PLANNER_STATUS",task.status.value,
           "draft_exists",bool(output),"approval_state",content.get("approval_state"),
           "slot_count",len(content.get("slots") or []))
+    from app.core.config import get_settings
+    from app.seo.queue import articles_started_today, quota_exhausted
+    from app.models.domain import TaskStatus
+    settings=get_settings()
+    quota=settings.seo_articles_per_day
+    started=articles_started_today(db,product_id=sg.id)
+    blocked=quota_exhausted(db,quota,product_id=sg.id)
+    pending=db.scalars(select(Task).where(Task.status==TaskStatus.QUEUED,
+        Task.assigned_agent.in_(["content_factory","editorial_planner","seo_factory"]))
+        .order_by(Task.priority.desc(), Task.created_at).limit(10))
+    print("SEO_QUOTA",{"daily_start_limit":quota,"today_starts":started,"blocked_by_daily_limit":blocked})
+    print("WORKER_QUEUE_HEAD",[(t.assigned_agent,t.status.value,
+        "servgo" if t.product_id==sg.id else "proresultat" if t.product_id==pro else "other")
+        for t in pending])
     print("READONLY_STATUS_OK")
