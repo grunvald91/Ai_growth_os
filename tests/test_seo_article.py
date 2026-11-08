@@ -235,3 +235,16 @@ async def test_strategist_fallback_never_applies_to_unplanned_articles(db, produ
     result = await workflow.run(ArticleProductionInput(product_id=product.id, topic="Без SEO-плана"))
     assert result.status == "failed"
     assert not list(db.scalars(select(Artifact).where(Artifact.kind == "article")))
+
+
+@pytest.mark.asyncio
+async def test_invalid_seo_strategist_does_not_silently_recover_truncated_repair(db, product, tmp_path):
+    """Only two parsed validation rejections may trigger the approved brief fallback."""
+    # First answer fails schema validation; the second repair is oversized,
+    # so it was not actually validated as a usable strategy.
+    provider = SequenceProvider([{}, "x" * 150001])
+    workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    result = await workflow.run(request_for(product).model_copy(update={"light": True}))
+    assert result.status == "failed"
+    assert result.error.startswith("invalid_article_output:content_strategist")
+    assert not list(db.scalars(select(Artifact).where(Artifact.kind == "article")))
