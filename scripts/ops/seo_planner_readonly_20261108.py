@@ -100,8 +100,33 @@ with SessionLocal() as db:
         plans=list(db.scalars(select(Artifact).where(Artifact.product_id==p.id,
             Artifact.kind=="editorial_plan").order_by(Artifact.created_at.desc()).limit(3)))
         print("EDITORIAL_PLANS",json.dumps([
-            {"created":iso(a.created_at),"status":a.status.value} for a in plans
+            {"created":iso(a.created_at),"status":a.status.value,
+             "meta": {k: json.loads(a.content).get(k) for k in
+                      ("approval_state","generated_at","starts_at","ends_at","review_at","horizon_days")
+                      if isinstance(json.loads(a.content),dict)},
+             "slot_count": len(json.loads(a.content).get("slots") or [])
+                          if isinstance(json.loads(a.content),dict) else None}
+            for a in plans
         ]))
+        seo_task_rows=[t for t in tasks if t.assigned_agent=="content_factory"
+                       and t.title.startswith("SEO-ARTICLE:")][:25]
+        for t in seo_task_rows:
+            article_rows=list(db.scalars(select(Artifact).where(
+                Artifact.product_id==p.id,Artifact.task_id==t.id,
+                Artifact.kind.in_(("article","seo_final_review","content_request")))
+                .order_by(Artifact.created_at.desc()).limit(10)))
+            r=db.scalar(select(AgentRun).where(AgentRun.task_id==t.id)
+                .order_by(AgentRun.started_at.desc()).limit(1))
+            print("SEO_ITEM",json.dumps({
+                "key_item":t.title.rsplit(":",1)[-1],
+                "status":t.status.value,
+                "due":iso(t.due_at),
+                "artifact_kinds":[a.kind for a in article_rows],
+                "last_run_status":r.status if r else None,
+                "has_run_error":bool(r.error) if r else None,
+                "run_error_class":re.search(r"(?:Error|Exception|Timeout|Cancelled)",r.error or "").group(0)
+                                  if r and r.error and re.search(r"(?:Error|Exception|Timeout|Cancelled)",r.error) else None,
+            }))
         pubs=list(db.scalars(select(Publication).where(Publication.product_id==p.id,
             Publication.channel=="own_site").order_by(Publication.created_at.desc()).limit(20)))
         print("OWN_SITE_PUBLICATIONS",json.dumps([
