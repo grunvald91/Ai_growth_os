@@ -40,6 +40,16 @@ with SessionLocal() as db:
                     pubs=list(db.scalars(select(Publication).where(
                         Publication.product_id==servgo.id,
                         Publication.artifact_id.in_(article_ids)))) if article_ids else []
+                    strategist=next((r for r in runs if r.agent_name=="content_strategist"),None)
+                    if strategist is None:
+                        strategist=db.scalar(select(AgentRun).where(
+                            AgentRun.task_id==t.id,AgentRun.agent_name=="content_strategist"
+                        ).order_by(AgentRun.started_at.desc()).limit(1))
+                    if strategist and strategist.error:
+                        print("STRATEGIST_ERROR",json.dumps({
+                            "item":t.title.rsplit(":",1)[-1],
+                            "reason":re.sub(r"[^A-Za-z0-9_:.,-]","_",strategist.error)[:280],
+                        }))
                     print("LATEST_SEO_ARTICLE",json.dumps({
                         "item":t.title.rsplit(":",1)[-1],"task_status":t.status.value,
                         "due":stamp(t.due_at),"article_ready":bool(article_ids),
