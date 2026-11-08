@@ -124,6 +124,9 @@ def test_visible_plan_keeps_previous_calendar_during_new_build():
     assert chosen == previous and older is True
     assert visible_plan_run([previous]) == (previous, False)
     assert visible_plan_run([latest]) == (latest, False)
+    queued_plan = {"id": "newer-plan", "status": "running", "plan_ready": True,
+                   "articles": []}
+    assert visible_plan_run([queued_plan, previous]) == (previous, True)
     assert visible_plan_run([]) == (None, False)
 
 
