@@ -1244,6 +1244,19 @@ def studio_page_shell(
 </body></html>"""
 
 
+def _draft_has_past_slots(plan: dict, now: datetime | None = None) -> bool:
+    """Match the approval gate: any past publication slot rejects a draft."""
+    reference = now or datetime.now(timezone.utc)
+    for slot in plan.get("slots") or []:
+        try:
+            moment = datetime.fromisoformat(str(slot.get("publish_at", "")))
+        except (ValueError, TypeError, AttributeError):
+            return True
+        if moment.tzinfo is None or moment <= reference:
+            return True
+    return False
+
+
 def planner_notice_html(db: Session, product_id: UUID) -> str:
     """Show the latest company's planner outcome, not only still-running work."""
     task = db.scalar(select(Task).where(
@@ -1262,10 +1275,16 @@ def planner_notice_html(db: Session, product_id: UUID) -> str:
             Artifact.kind == "editorial_plan",
         ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
         if draft_row is not None and parse_json(draft_row).get("approval_state") == "draft":
+            draft = parse_json(draft_row)
             url = f"/studio/products/{product_id}/plan?view=draft"
+            detail = (
+                "Часть сроков публикаций уже прошла; такой черновик нельзя утвердить. "
+                "Создайте новый с актуальными датами. "
+                if _draft_has_past_slots(draft) else
+                "План создан и ожидает вашего согласования. "
+            )
             return ('<section class="sg-notice" role="status"><strong>Новый контент-план готов.</strong> '
-                    'План создан и ожидает вашего согласования. '
-                    f'<a href="{url}">Открыть черновик для проверки</a>.</section>')
+                    + detail + f'<a href="{url}">Открыть черновик для проверки</a>.</section>')
         return ""
     if task.status != TaskStatus.FAILED:
         return ""
@@ -1301,10 +1320,17 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
     action_html = ""
     if plan_row:
         if plan.get("approval_state") == "draft":
-            action_html = (
-                f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/approve">'
-                '<button class="btn primary" type="submit">✓ Подтвердить план</button></form>'
-            )
+            if _draft_has_past_slots(plan):
+                action_html = (
+                    '<div class="sg-notice" role="alert"><strong>Сроки черновика истекли.</strong> '
+                    'Нельзя запускать публикации на прошедшие даты. '
+                    '<a href="#plan-new">Создать план с актуальными датами</a>.</div>'
+                )
+            else:
+                action_html = (
+                    f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/approve">'
+                    '<button class="btn primary" type="submit">✓ Подтвердить план</button></form>'
+                )
         elif plan.get("approval_state") == "active":
             action_html = (
                 f'<form method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/pause">'
@@ -1362,7 +1388,7 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
       </div>
     </section>
     <section class="package-grid route-package-grid">{"".join(cards) or '<div class="panel empty">По выбранному фильтру пакетов нет.</div>'}</section>
-    <section class="sg-surface">
+    <section class="sg-surface" id="plan-new">
       <div class="sg-section-head"><div><span class="sg-overline">ПЕРЕСМОТР СТРАТЕГИИ</span>
       <h2>Нужен новый план?</h2>
       <p>Напишите свободно, что важно компании. ИИ предложит новый черновик; действующий план не изменится до утверждения.</p></div></div>
