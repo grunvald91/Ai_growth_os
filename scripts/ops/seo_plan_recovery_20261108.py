@@ -99,7 +99,7 @@ with SessionLocal() as db:
     if "SEO-план и календарь" not in seo_html or "плановый старт подготовки" not in seo_html:
         raise SystemExit("SEO_PRODUCTION_BOARD_FAILED")
     editorial_html=plan_page(db,target)
-    if "Контент-план" not in editorial_html or "Следить за заданием" not in editorial_html:
+    if "Контент-план" not in editorial_html or "Нужен новый план?" not in editorial_html:
         raise SystemExit("PRORESULTAT_PRODUCTION_PLANNER_UI_FAILED")
     print("SEO_PRODUCTION_BOARD_OK")
     print("PRORESULTAT_PRODUCTION_PLANNER_UI_OK")
