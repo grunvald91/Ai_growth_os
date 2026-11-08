@@ -775,6 +775,16 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     else:
         destination = ('Место публикации: персональный блог компании на ServGo. '
                        'Ссылка появится после привязки бизнеса.')
+    autorun_enabled = (
+        platform.seo_autorun_enabled or
+        (product.slug == "servgo" and platform.seo_servgo_autorun_enabled)
+    )
+    autorun_note = (
+        "Автоматическое обновление SEO-плана на сервере включено."
+        if autorun_enabled else
+        "Автоматическое обновление SEO-плана на сервере отключено. "
+        "Ручной запуск доступен независимо от этого режима."
+    )
     activation_form = (
         '<section class="panel seo-activation" aria-label="Подключение SEO-завода">'
         '<div class="seo-status-head"><h2>SEO-завод компании</h2>'
@@ -783,6 +793,7 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
         + '</div>'
         + ('<p>SEO-завод подключён. Запустите подготовку плана.</p>' if enabled
            else '<p>Для этой компании генерация статей отключена.</p>')
+        + '<p class="seo-autorun-note">' + html.escape(autorun_note) + '</p>'
         + (f'<form method="post" action="{base}/seo/activation">'
            f'<input type="hidden" name="action" value="{"disable" if enabled else "enable"}">'
            f'<button class="btn {"danger" if enabled else "primary"}" type="submit">'
