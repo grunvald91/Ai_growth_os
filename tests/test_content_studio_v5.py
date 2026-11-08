@@ -214,6 +214,8 @@ def test_web_planner_can_receive_requirements_without_replacing_current_plan(stu
         Task.product_id == company.id, Task.assigned_agent == "editorial_planner",
     ))
     assert task is not None and task.status == TaskStatus.QUEUED
+    assert result.headers["location"] == f"{base}/tasks/{task.id}"
+    assert "Следить за заданием" in client.get(base + "/plan").text
     assert list(db.scalars(select(Publication))) == []
 
 
