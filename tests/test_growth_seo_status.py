@@ -85,3 +85,43 @@ def test_database_seo_status_is_scoped_to_current_company_and_read_only():
         assert len(payload["runs"]) == 1
         assert len(list(db.query(Task).all())) == count_before
     engine.dispose()
+
+
+def test_seo_run_shows_tenant_schedule_and_clear_pending_states():
+    task = Task(id=uuid4(), product_id=uuid4(), title="SEO-завод",
+                status=TaskStatus.COMPLETED, assigned_agent="seo_factory")
+    row = seo_run_summary(task, [])
+    row["timezone_name"] = "Europe/Berlin"
+    row["articles"] = [
+        {
+            "title": "<script>alert(1)</script>",
+            "scheduled_at": "09.11.2026 09:00",
+            "scheduled_iso": "2026-11-09T08:00:00+00:00",
+            "task_status": "queued", "article_status": None,
+            "publication_path": None, "task_id": str(uuid4()), "article_id": None,
+            "critic_findings": [], "critic_status": "missing",
+        },
+        {
+            "title": "Вторая статья",
+            "scheduled_at": "10.11.2026 09:00",
+            "scheduled_iso": "2026-11-10T08:00:00+00:00",
+            "task_status": "completed", "article_status": "published",
+            "publication_path": "/blog/second", "task_id": str(uuid4()), "article_id": str(uuid4()),
+            "critic_findings": [], "critic_status": "missing",
+        },
+    ]
+    page = seo_run_card(row, task.product_id, blog_base="https://servgo.ru")
+    assert "Плановые даты SEO-статей" in page
+    assert "Europe/Berlin" in page
+    assert "Ожидает генерации" in page
+    assert "Опубликована" in page
+    assert "МСК</span>" not in page
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page
+    assert "<script>alert(1)</script>" not in page
+
+
+def test_seo_run_without_article_schedule_explains_absence():
+    task = Task(id=uuid4(), product_id=uuid4(), title="SEO-завод",
+                status=TaskStatus.RUNNING, assigned_agent="seo_factory")
+    page = seo_run_card(seo_run_summary(task, []))
+    assert "Плановые даты статей пока не сформированы" in page
