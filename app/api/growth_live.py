@@ -27,7 +27,7 @@ from app.models.domain import Artifact, Experiment, Task
 from app.api.growth_campaigns import campaign_list_card
 from app.services.campaign_readiness import load_resources
 from app.api.seo_run_view import seo_runs
-from app.api.seo_plan_board import seo_plan_board
+from app.api.seo_plan_board import seo_plan_board, visible_plan_run
 from app.seo.control import SeoControlError, create_seo_run, change_seo_run
 from app.seo.article_retry import retry_failed_article
 from app.seo.activation import (is_enabled, set_enabled, editorial_preferences,
@@ -859,6 +859,14 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
         f'<a class="btn secondary" href="{base}/work">Задания</a></nav>'
         if enabled else ''
     )
+    visible_run, older_visible = visible_plan_run(runs)
+    historical_note = (
+        '<p class="seo-schedule-empty" role="status">'
+        'Новый SEO-запуск ещё не создал план или завершился ошибкой. '
+        'Ниже показан последний сформированный SEO-план; '
+        'состояние нового запуска находится в истории.</p>'
+        if older_visible else ''
+    )
     run_cards = ''.join(seo_run_card(row, product_id, blog_base=blog_base, enabled=enabled)
                         for row in runs)
     saved_cards = ''.join(
@@ -868,7 +876,8 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     )
     content = (
         activation_form
-        + seo_plan_board(runs[0] if runs else None, product_id,
+        + historical_note
+        + seo_plan_board(visible_run, product_id,
                          autorun=autorun_enabled, enabled=enabled)
         + preferences_form + available_actions
         + '<p class="seo-publish-destination">' + destination + '</p>'
