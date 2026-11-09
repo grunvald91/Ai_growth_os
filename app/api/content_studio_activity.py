@@ -22,7 +22,7 @@ WORK_AGENTS = ("content_factory", "content_creative", "content_editor", "content
 STATES = {
     "queued": ("В очереди", "queued", "Задание принято. Ожидает свободного обработчика."),
     "running": ("Создаётся", "running", "ИИ-команда работает. Можно закрыть страницу."),
-    "waiting_approval": ("Нужно подтверждение", "review", "Проверьте тему и подтвердите создание видео. Платные вызовы требуют отдельного согласия."),
+    "waiting_approval": ("Нужно подтверждение", "review", "Задание ожидает решения. Посмотрите детали, прежде чем продолжать."),
     "completed": ("Подготовлено", "done", "Задание завершено. Результаты доступны ниже."),
     "failed": ("Ошибка подготовки", "error", "Задание остановилось с ошибкой, а не исчезло."),
     "cancelled": ("Отменено", "error", "Создание остановлено."),
@@ -91,6 +91,13 @@ def task_state(task: Task) -> str:
     return getattr(task.status, "value", str(task.status))
 
 
+def is_seo_publish_proposal(task: Task) -> bool:
+    """Daily growth review proposals are not article production or publication."""
+    return (task.assigned_agent == "distribution" and
+            bool(re.match(r"^Request approval to publish own-site SEO article\b",
+                          str(task.title or ""), flags=re.I)))
+
+
 def task_title(task: Task, request: Artifact | None = None) -> str:
     """Friendly names instead of internal title/UUID strings."""
     data = {}
@@ -102,6 +109,10 @@ def task_title(task: Task, request: Artifact | None = None) -> str:
         except (ValueError, TypeError):
             pass
     topic = str(data.get("topic") or "").strip()
+    if task.assigned_agent == "company_intake":
+        return "Профиль компании: сбор сведений"
+    if is_seo_publish_proposal(task):
+        return "Предложение публикации SEO-статьи"
     # SEO-ARTICLE:<plan UUID>:<item id> is an idempotency key used by workers.
     # It is never a business-facing title; show the original plan topic instead.
     if (task.title or "").startswith("SEO-ARTICLE:"):
@@ -137,6 +148,11 @@ def task_title(task: Task, request: Artifact | None = None) -> str:
 
 def task_public_description(task: Task) -> str:
     """Show truthful Russian owner copy without rewriting historical task keys."""
+    if task.assigned_agent == "company_intake":
+        return "Сведения о компании проверяются в разделе «Профиль компании»."
+    if is_seo_publish_proposal(task):
+        return ("Предложение ИИ-команды о публикации SEO-статьи. "
+                "Оно не подтверждает готовность статьи и не запускает публикацию.")
     if (task.title or "").startswith("SEO-ARTICLE:"):
         return "Создание SEO-статьи по контент-плану."
     detail = str(task.description or "").strip()
@@ -456,11 +472,19 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
     base = f"/studio/products/{product_id}"
     key = task_state(task)
     label, tone, description = STATES.get(key, ("Проверить", "queued", ""))
+    seo_proposal = is_seo_publish_proposal(task)
+    if seo_proposal and key == "waiting_approval":
+        label = "Предложение на согласовании"
     count = len(results)
     steps = []
     if not runs:
-        steps.append("<li>Ожидаем запуска обработки</li>" if key == "queued" else
-                     "<li>Обработка запущена. Подробные этапы ещё не поступили.</li>")
+        if seo_proposal:
+            steps.append("<li>Предложение сформировано. Этапы создания статьи здесь не выполнялись.</li>")
+        elif key == "waiting_approval":
+            steps.append("<li>Ожидается решение о запуске или продолжении задания.</li>")
+        else:
+            steps.append("<li>Ожидаем запуска обработки</li>" if key == "queued" else
+                         "<li>Обработка запущена. Подробные этапы ещё не поступили.</li>")
     latest_completed = {run.agent_name for run in runs if run.status == "completed"}
     for run in runs[-16:]:
         stage = STAGE_NAMES.get(run.agent_name, "Подготовка материала")
@@ -492,6 +516,12 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
                        'пока не найден. Проверьте историю задания или сообщите об ошибке.')
     elif key == "completed" and count:
         explanation = f"Готово материалов: {count}. Откройте каждый, чтобы посмотреть и утвердить."
+    elif seo_proposal and key == "waiting_approval":
+        explanation = ("ИИ-команда предложила публикацию SEO-статьи. Это не готовый материал "
+                       "и не разрешение на публикацию. Проверьте реальную статью и её статус "
+                       "в SEO-заводе; из этой карточки ничего не публикуется.")
+    elif key == "waiting_approval" and task.assigned_agent == "whiteboard_renderer":
+        explanation = "Нужно подтвердить создание видео. Платные вызовы требуют отдельного согласия."
     else:
         explanation = description
     refresh = ('<p class="sg-work-refresh" role="status">Состояние обновляется каждые 15 секунд. '
@@ -508,6 +538,11 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         in {"content_factory", "content_creative", "content_editor"}
         and (creative_resume or not results) else ""
     )
+    empty_result = ("<p>Готовая статья к этому предложению не прикреплена. "
+                    "Проверьте статьи и их статус в SEO-заводе.</p>" if seo_proposal
+                    else "<p>Результаты появятся здесь после подготовки.</p>")
+    next_action = (f'<p><a class="btn secondary" href="{base}/seo">Открыть SEO-завод</a></p>'
+                   if seo_proposal else "")
     stage_sig = "|".join(str(run.id) + ":" + run.status for run in runs[-20:])
     return (
         f'<section class="sg-surface sg-work-detail" data-sg-task="{task.id}" data-sg-state="{key}" data-sg-stage="{safe(stage_sig)}">'
@@ -515,7 +550,7 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         f'{safe(label)}</span><h2>{safe(task_title(task, request))}</h2><p>{safe(explanation)}</p>'
         f'<div class="sg-work-steps"><h3>Этапы создания</h3><ol>{"".join(steps)}</ol></div>'
         f'<div class="sg-work-results"><h3>Результаты</h3>'
-        + ("".join(rendered) or '<p>Результаты появятся здесь после подготовки.</p>')
-        + '</div>' + refresh + fail
+        + ("".join(rendered) or empty_result)
+        + '</div>' + refresh + fail + next_action
         + f'<p><a class="sg-mini-link" href="{base}/work">← Все задания</a></p></section>'
     )
