@@ -2376,6 +2376,8 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
         raise HTTPException(404, "Задание не найдено")
     if task.assigned_agent == "whiteboard_renderer":
         return RedirectResponse(f"/studio/products/{product_id}/whiteboard/{task_id}", status_code=303)
+    if task.assigned_agent == "company_intake":
+        return RedirectResponse(f"/studio/products/{product_id}/profile", status_code=303)
     from app.insights.worker import AGENT as INSIGHTS_AGENT
     if task.assigned_agent == INSIGHTS_AGENT:
         from app.insights.page import review_html
@@ -2426,9 +2428,13 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
             Artifact.kind == "creative_image_error")))
         body += gallery_html(product.id, task.id, images, errors=errors,
                              invalid_frames=invalid_frames)
+    from app.api.content_studio_activity import is_seo_publish_proposal
+    proposal = is_seo_publish_proposal(task)
     response = HTMLResponse(studio_page_shell(
-        product, active="work", title="Создание материала",
-        subtitle="Настоящий статус задания, этапы ИИ-команды и готовые результаты.",
+        product, active="work",
+        title="Предложение по SEO" if proposal else "Создание материала",
+        subtitle=("Предложение команды: публикация не запущена и готовность статьи не подтверждена."
+                  if proposal else "Настоящий статус задания, этапы ИИ-команды и готовые результаты."),
         body=body,
     ))
     response.headers["Cache-Control"] = "private, no-store"

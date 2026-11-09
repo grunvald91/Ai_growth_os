@@ -164,7 +164,7 @@ document.addEventListener('pointerdown',e=>{
  const friendlyTaskDetail=t=>{
   const detail=String(t.detail||'');
   if(/^Human-approval request only:/i.test(detail))
-   return 'Статья подготовлена. Проверьте её перед публикацией.';
+   return 'Предложение на согласование. Проверьте наличие готового материала и дальнейшие действия.';
   return detail.replace(/^Рисованное видео:/i,'Простое видео:');
  };
  if(base&&suffix==='/work'){

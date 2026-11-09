@@ -953,8 +953,12 @@ def campaigns_page(product_id: UUID, page: int = 1, db: Session = Depends(get_db
 def v4_data(product_id: UUID, db: Session = Depends(get_db)):
     """Company-scoped records for the reviewed board/library components."""
     _owner_product(db, product_id)
-    tasks = list(db.scalars(select(Task).where(Task.product_id == product_id)
-                           .order_by(Task.created_at.desc()).limit(200)))
+    # Company profile intake is managed on /profile, not on the materials board.
+    # Preserve unassigned tasks instead of excluding them with SQL NULL comparison.
+    tasks = list(db.scalars(select(Task).where(
+        Task.product_id == product_id,
+        (Task.assigned_agent != "company_intake") | Task.assigned_agent.is_(None),
+    ).order_by(Task.created_at.desc()).limit(200)))
     # Keep stored task titles as immutable worker/deduplication keys. Build a
     # company-scoped map of the original requests for owner-facing article topics.
     from app.api.content_studio_activity import task_title, task_public_description
