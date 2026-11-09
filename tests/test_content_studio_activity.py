@@ -320,3 +320,64 @@ def test_failed_creative_with_saved_brief_can_resume_original_task(owner_studio)
     assert resumed.headers["location"] == base
     assert db.get(Task, task.id).status == TaskStatus.QUEUED
     assert client.post(base + "/retry").status_code == 409
+
+
+def test_company_intake_task_routes_to_profile_not_empty_material_view(owner_studio):
+    client, db, company, other = owner_studio
+    task = Task(product_id=company.id, title="Сбор данных компании",
+                assigned_agent="company_intake", status=TaskStatus.WAITING_APPROVAL)
+    db.add(task)
+    db.commit()
+    base = f"/studio/products/{company.id}"
+    redirect = client.get(f"{base}/tasks/{task.id}", follow_redirects=False)
+    assert redirect.status_code == 303
+    assert redirect.headers["location"] == base + "/profile"
+    assert client.get(f"/studio/products/{other.id}/tasks/{task.id}").status_code == 404
+    board = client.get(base + "/v4/data").json()
+    assert all(item["id"] != str(task.id) for item in board["tasks"])
+
+
+def test_seo_proposal_is_not_misrepresented_as_ready_article_or_video(owner_studio):
+    client, db, company, _ = owner_studio
+    task = Task(product_id=company.id,
+                title="Request approval to publish own-site SEO article c8aebdc2",
+                assigned_agent="distribution", status=TaskStatus.WAITING_APPROVAL,
+                description="Human-approval request only: do not execute.")
+    db.add(task)
+    db.commit()
+    base = f"/studio/products/{company.id}"
+    page = client.get(f"{base}/tasks/{task.id}?design=v4")
+    assert page.status_code == 200
+    assert "Предложение по SEO" in page.text
+    assert "Предложение публикации SEO-статьи" in page.text
+    assert "Предложение на согласовании" in page.text
+    assert "Готовая статья к этому предложению не прикреплена" in page.text
+    assert f'href="{base}/seo"' in page.text
+    assert "Request approval to publish" not in page.text
+    assert "Платные вызовы требуют отдельного согласия" not in page.text
+    assert "Подтвердите создание видео" not in page.text
+    assert "Статья подготовлена" not in page.text
+    board = client.get(base + "/v4/data").json()
+    record = next(row for row in board["tasks"] if row["id"] == str(task.id))
+    assert record["title"] == "Предложение публикации SEO-статьи"
+    assert "не запускает публикацию" in record["detail"]
+
+
+def test_generic_approval_does_not_claim_video_expense(owner_studio):
+    client, db, company, _ = owner_studio
+    task = Task(product_id=company.id, title="Новая задача",
+                assigned_agent="content_factory", status=TaskStatus.WAITING_APPROVAL)
+    db.add(task)
+    db.commit()
+    page = client.get(f"/studio/products/{company.id}/tasks/{task.id}")
+    assert page.status_code == 200
+    assert "Задание ожидает решения" in page.text
+    assert "Платные вызовы требуют отдельного согласия" not in page.text
+    assert "Ожидается решение о запуске" in page.text
+
+
+def test_work_steps_use_theme_surface_and_ink_instead_of_white_on_dark():
+    from app.api.content_studio_work_ui import CSS
+    assert ".sg-work-steps li{" in CSS
+    assert "background:var(--s-surface-2,#F7F9FC)" in CSS
+    assert "color:var(--s-text,#344D64)" in CSS
