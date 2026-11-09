@@ -61,15 +61,16 @@ CSS = r"""
 .sg-work-empty p{font-size:14px;margin:0 0 16px}
 .sg-work-detail>h2{font-size:23px;font-weight:700;margin:15px 0 8px;overflow-wrap:anywhere}
 .sg-work-detail>p{font-size:14px;line-height:1.6}
-.sg-work-steps,.sg-work-results{border-top:1px solid #E5EAF1;margin:21px 0 0;padding:17px 0 0}
+.sg-work-steps,.sg-work-results{border-top:1px solid var(--s-line,#E5EAF1);margin:21px 0 0;padding:17px 0 0}
 .sg-work-steps h3,.sg-work-results h3{font-size:17px;margin:0 0 10px;font-weight:700}
 .sg-work-steps ol{list-style:none;margin:0;padding:0;display:grid;gap:5px}
 .sg-work-steps li{display:flex;justify-content:space-between;align-items:center;gap:10px;
-  padding:11px 12px;background:#F7F9FC;border-radius:10px;font-size:13px;color:#344D64}
-.sg-work-steps li b{font-weight:600;white-space:nowrap;color:#335D92}
+  padding:11px 12px;background:var(--s-surface-2,#F7F9FC);border:1px solid var(--s-line,#E8EDF2);border-radius:10px;font-size:13px;color:var(--s-text,#344D64)}
+.sg-work-steps li span{min-width:0;overflow-wrap:anywhere}
+.sg-work-steps li b{font-weight:600;white-space:nowrap;color:var(--s-text,#335D92)}
 .sg-work-result{display:flex;justify-content:space-between;align-items:center;gap:12px;
-  border:1px solid #E1E7F0;border-radius:11px;padding:12px 14px;margin:9px 0;
-  color:#234D9E;text-decoration:none}
+  border:1px solid var(--s-line,#E1E7F0);border-radius:11px;padding:12px 14px;margin:9px 0;
+  color:var(--s-accent,#234D9E);text-decoration:none}
 .sg-work-result>div{display:grid;gap:5px;min-width:0}
 .sg-work-result span{font-size:12px;font-weight:600}
 .sg-work-result b{font-size:14px;line-height:1.45;font-weight:650;color:#283E55;overflow-wrap:anywhere}
