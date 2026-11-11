@@ -1,0 +1,96 @@
+name: Voice latency check (read-only)
+
+# Manual, owner only, through the production environment. From the server, with the container's own settings,
+# measures how long (milliseconds) the round trip through the proxy, three recognition models and three
+# correction models take. Sends a 6-second synthetic tone and one invented sentence; no real audio or text,
+# nothing is stored. Costs a fraction of a cent. Prints numbers and statuses only, never keys.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voice-latency-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Measure latency from the server
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SERVER_SSH_PASSWORD is not set"; exit 1; }
+          install -m 700 -d ~/.ssh
+          sudo apt-get install -y -qq sshpass >/dev/null
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Server host key does not match the pinned fingerprint"; exit 1; }
+          cat > /tmp/latency.py <<'PY2'
+          import asyncio, io, math, os, re, struct, time, wave
+
+          import httpx
+
+          from app.api.voice import get_voice_llm
+          from app.core.config import get_settings
+          from app.voice.cleanup import clean_text
+
+          settings = get_settings()
+          proxy = settings.whiteboard_proxy_url or None
+
+          def ms(start):
+              return int((time.monotonic() - start) * 1000)
+
+          def clean(text):
+              return re.sub(r"sk-[A-Za-z0-9_-]+", "[key]", str(text))[:120]
+
+          client = httpx.Client(base_url="https://openrouter.ai/api/v1/", proxy=proxy, trust_env=False, timeout=90,
+                                headers={"Authorization": "Bearer " + (settings.openrouter_api_key or "")},
+                                follow_redirects=False)
+          print("proxy round trip (GET /key), ms:", end=" ")
+          for _ in range(3):
+              start = time.monotonic(); status = client.get("key").status_code; print(f"{ms(start)} (HTTP {status})", end="; ")
+          print()
+
+          buf = io.BytesIO()
+          with wave.open(buf, "wb") as w:
+              w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+              w.writeframes(b"".join(struct.pack("<h", int(6000 * math.sin(2 * math.pi * (200 + 80 * math.sin(i / 4000)) * i / 16000)))
+                                     for i in range(16000 * 6)))
+          audio = buf.getvalue()
+          print("recognition of 6 s of audio, ms (first call, second call):")
+          for model in ("openai/whisper-large-v3", "openai/whisper-large-v3-turbo", "openai/gpt-4o-transcribe"):
+              times = []
+              for _ in range(2):
+                  start = time.monotonic()
+                  r = client.post("audio/transcriptions", data={"model": model, "language": "ru"},
+                                  files={"file": ("tone.wav", audio, "audio/wav")})
+                  times.append(f"{ms(start)} (HTTP {r.status_code}{'' if r.status_code == 200 else ' ' + clean(r.text)})")
+              print(" ", model, "->", "; ".join(times))
+
+          raw = "проверь вин автомобиля который стоит на втором боксе и э-э запиши что клиент приедет завтра"
+          print("correction of one sentence, ms (first call, second call):")
+          async def correct(model):
+              llm = get_voice_llm(settings.model_copy(update={"voice_cleanup_model": model}))
+              out = []
+              for _ in range(2):
+                  start = time.monotonic()
+                  result = await clean_text(raw, llm=llm, model=model, terms=[], context=[], timeout_seconds=60)
+                  out.append(f"{ms(start)} (cleaned={result.cleaned}{'' if result.cleaned else ' ' + str(result.fallback_reason)})")
+              return out
+          for model in ("claude-haiku-5-5", "gemini-flash-3.8", "grok-4.7"):
+              print(" ", model, "->", "; ".join(asyncio.run(correct(model))))
+          PY2
+          SSH_OPTS=(-o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          sshpass -e ssh "${SSH_OPTS[@]}" "root@$HOST" "docker exec -i ai-growth-os-api-1 python -" < /tmp/latency.py
