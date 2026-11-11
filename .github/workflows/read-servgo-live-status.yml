@@ -1,0 +1,84 @@
+name: Read ServGo live status
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/read-servgo-live-status.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST || '155.212.162.47' }}
+      SERVER_USER: ${{ vars.SERVER_USER || 'root' }}
+      SERVER_PORT: ${{ vars.SERVER_PORT || '22' }}
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      EXPECTED_RELEASE: d8ff1ea962b46225e4fab198adc271705cad7f50
+
+    steps:
+      - name: Install SSH helper
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Inspect recent ServGo content runs
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ]
+          OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15 -o ServerAliveCountMax=20"
+          sshpass -e ssh $OPTS -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "EXPECTED_RELEASE='$EXPECTED_RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          CURRENT="$(basename "$(readlink /opt/ai_growth_os/current)")"
+          echo "Current release: $CURRENT"
+          [ "$CURRENT" = "$EXPECTED_RELEASE" ] || { echo "Expected deployed release $EXPECTED_RELEASE; refusing inspection."; exit 42; }
+          cd /opt/ai_growth_os/current
+          docker compose --env-file /opt/ai_growth_os/.env -p ai-growth-os -f docker-compose.prod.yml exec -T api python - <<'PY'
+          import json
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import AgentRun, Artifact, Product, Task
+
+          with SessionLocal() as db:
+              product = db.scalar(select(Product).where(Product.slug == "servgo"))
+              tasks = list(db.scalars(
+                  select(Task).where(Task.product_id == product.id)
+                  .order_by(Task.created_at.desc(), Task.id.desc()).limit(12)
+              ))
+              out = []
+              for task in tasks:
+                  runs = list(db.scalars(select(AgentRun).where(AgentRun.task_id == task.id)
+                                         .order_by(AgentRun.started_at, AgentRun.id)))
+                  arts = list(db.scalars(select(Artifact).where(Artifact.task_id == task.id)
+                                         .order_by(Artifact.created_at, Artifact.id)))
+                  out.append({
+                      "task_id": str(task.id),
+                      "title": task.title,
+                      "assigned_agent": task.assigned_agent,
+                      "status": task.status.value if hasattr(task.status, "value") else str(task.status),
+                      "created_at": task.created_at.isoformat() if task.created_at else None,
+                      "runs": [{
+                          "id": str(r.id),
+                          "agent": r.agent_name,
+                          "provider": r.provider,
+                          "model": r.model,
+                          "status": r.status,
+                          "error": r.error,
+                          "started_at": r.started_at.isoformat() if r.started_at else None,
+                          "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+                      } for r in runs],
+                      "artifacts": [{
+                          "id": str(a.id),
+                          "kind": a.kind,
+                          "title": a.title,
+                          "status": a.status,
+                          "content_preview": a.content[:2500],
+                      } for a in arts],
+                  })
+              print("E2E_STATUS_JSON_START")
+              print(json.dumps(out, ensure_ascii=False, indent=2))
+              print("E2E_STATUS_JSON_END")
+          PY
+          REMOTE
