@@ -173,6 +173,7 @@ def build_article_production(
         provider_name=settings.llm_provider,
         model=settings.llm_model,
         seo_default_articles_per_day=settings.seo_articles_per_day,
+        schema_repair_model=settings.llm_schema_repair_model,
     )
 
 
