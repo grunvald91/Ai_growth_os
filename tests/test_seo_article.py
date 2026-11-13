@@ -156,6 +156,41 @@ def test_schema_normalizer_preserves_original_reader_copy():
 
 
 
+
+@pytest.mark.asyncio
+async def test_invalid_writer_section_kind_is_repaired_once_with_targeted_instructions(db, product, tmp_path):
+    outputs = outputs_with_geo()[:6]
+    malformed = copy.deepcopy(outputs[2])
+    malformed["sections"][0]["kind"] = "fact"
+    outputs.insert(2, malformed)
+    provider = SequenceProvider(outputs)
+    workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    result = await workflow.run(request_for(product).model_copy(update={"light": True}))
+    assert result.status == "completed", result.error
+    assert len(provider.requests) == 7
+    prompt = provider.requests[3].system_prompt
+    assert "sections.0.kind:literal_error" in prompt
+    assert 'kind must be exactly lowercase "advice" or "hypothesis"' in prompt
+    assert "Do not simply relabel an unsupported" in prompt
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    assert article.reader_article is not None
+
+
+@pytest.mark.asyncio
+async def test_repeated_invalid_writer_kind_never_creates_article(db, product, tmp_path):
+    outputs = outputs_with_geo()[:6]
+    invalid = copy.deepcopy(outputs[2])
+    invalid["sections"][0]["kind"] = "fact"
+    outputs[2] = invalid
+    outputs.insert(3, copy.deepcopy(invalid))
+    provider = SequenceProvider(outputs)
+    workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    result = await workflow.run(request_for(product).model_copy(update={"light": True}))
+    assert result.status == "failed"
+    assert not list(db.scalars(select(Artifact).where(Artifact.kind == "article")))
+
+
+
 @pytest.mark.asyncio
 async def test_plain_articles_are_unchanged(db, product, tmp_path):
     provider = SequenceProvider(valid_outputs())
