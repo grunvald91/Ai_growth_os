@@ -176,6 +176,9 @@
     }
     attachGrip(historyClose,false,1); // pull down
     attachGrip(historyOpen,true,-1);  // pull up
+    // Voice and typed requests reopen the conversation where the reply appears.
+    // Keep focus on the composer to avoid Android keyboard/focus jumps.
+    root.addEventListener('sg:dispatcher:outgoing',()=>showHistory(true,false));
   }
   // Only the lower dispatcher composer can submit a request.
   // Settings are read at send time, including immediately after voice transcription.

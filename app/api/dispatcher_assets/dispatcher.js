@@ -549,6 +549,10 @@
 
   function send(body, echo, voiceRequest) {
     if (busy) return false;
+    // Never send a request into an invisible Create conversation panel.
+    if (root.classList.contains('sg-create-dispatch')) {
+      root.dispatchEvent(new CustomEvent('sg:dispatcher:outgoing'));
+    }
     // Preserve the same idempotency key when retrying an ambiguous network failure.
     var key = body.client_key || newKey();
     body.client_key = key;
