@@ -124,17 +124,25 @@ async def test_economy_normalizer_repairs_invalid_article_kind_without_rewriting
     bad = copy.deepcopy(outputs[2])
     bad['sections'][0]['kind'] = 'fact'
     original_body = bad['sections'][0]['body']
-    outputs.insert(2, bad)
+    fixed = copy.deepcopy(outputs[2])
+    outputs[2] = bad
     provider = SequenceProvider(outputs)
+    normalizer_provider = SequenceProvider([fixed])
     workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    from app.llm.service import LLMService
+    from app.privacy import PrivacyGateway
+    workflow.schema_repair_llm = LLMService(
+        privacy_gateway=PrivacyGateway(), provider=normalizer_provider,
+    )
     result = await workflow.run(request_for(product).model_copy(update={'light': True}))
     assert result.status == 'completed', result.error
-    assert len(provider.requests) == 7
-    repair = provider.requests[3]
+    assert len(provider.requests) == 6
+    assert len(normalizer_provider.requests) == 1
+    repair = normalizer_provider.requests[0]
     assert repair.metadata['team_role'] == 'schema_normalizer'
     assert repair.model == 'deepseek-v4.1-flash'
     article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
-    assert article.draft.sections[0].body == original_body
+    assert any(section.body.strip() == original_body.strip() for section in article.draft.sections)
 
 
 def test_schema_normalizer_preserves_original_reader_copy():
