@@ -994,11 +994,13 @@ class ArticleProduction:
     def __init__(self, *, db: Session, llm: LLMService, privacy: PrivacyGateway,
                  products_root: Path, provider_name: str, model: str,
                  seo_default_articles_per_day: int = 3,
-                 schema_repair_model: str = "deepseek-v4.1-flash"):
+                 schema_repair_model: str = "deepseek-v4.1-flash",
+                 schema_repair_llm: LLMService | None = None):
         self.db, self.llm, self.privacy = db, llm, privacy
         self.products_root, self.provider_name, self.model = products_root, provider_name, model
         self.seo_default_articles_per_day = seo_default_articles_per_day
         self.schema_repair_model = schema_repair_model
+        self.schema_repair_llm = schema_repair_llm or llm
 
     async def run(self, request: ArticleProductionInput) -> ArticleProductionResult:
         """Owns transactions; use a dedicated clean session. No raw failure data persists."""
@@ -1241,7 +1243,7 @@ class ArticleProduction:
                             try:
                                 normalized, parsed = await asyncio.wait_for(
                                     normalize_schema_with_ai(
-                                        llm=self.llm,
+                                        llm=self.schema_repair_llm,
                                         content=response.content,
                                         schema=schema,
                                         problem=_validation_problem(rejected),
