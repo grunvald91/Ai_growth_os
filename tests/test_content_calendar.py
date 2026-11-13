@@ -107,11 +107,20 @@ async def test_calendar_repairs_schema_with_economy_model_without_regenerating_t
                                usage=LLMUsage(input_tokens=12, output_tokens=34))
 
     provider = Provider()
-    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=provider)
-    assert await run_planner_once(lambda: Borrow(db), settings, llm) == 1
-    assert len(provider.requests) == 2
-    assert provider.requests[1].metadata['team_role'] == 'schema_normalizer'
-    assert provider.requests[1].model == settings.llm_schema_repair_model
+    normalizer_provider = Provider()
+    # The author gets its first invalid response; a separate model receives the correction.
+    author = LLMService(privacy_gateway=PrivacyGateway(), provider=provider)
+    normalizer = LLMService(privacy_gateway=PrivacyGateway(), provider=normalizer_provider)
+    normalizer_provider.generate = lambda request: normalizer_generate(request)
+    async def normalizer_generate(request):
+        normalizer_provider.requests.append(request)
+        return LLMResponse(content=json.dumps(good, ensure_ascii=False),
+                           model=request.model or 'unknown',
+                           usage=LLMUsage(input_tokens=12, output_tokens=34))
+    assert await run_planner_once(lambda: Borrow(db), settings, author, schema_repair_llm=normalizer) == 1
+    assert len(provider.requests) == len(normalizer_provider.requests) == 1
+    assert normalizer_provider.requests[0].metadata['team_role'] == 'schema_normalizer'
+    assert normalizer_provider.requests[0].model == settings.llm_schema_repair_model
     result = db.scalar(select(Artifact).where(Artifact.kind == 'editorial_plan'))
     assert result is not None
     assert json.loads(result.content)['slots'][0]['topic'] == good['slots'][0]['topic']
