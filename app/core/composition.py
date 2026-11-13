@@ -168,6 +168,7 @@ def build_article_production(
     *,
     force_critic: bool = False,
 ) -> ArticleProduction:
+    injected_provider = provider is not None
     provider = provider or build_llm_provider(settings)
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     # SEO articles contain a verified company profile, references and multiple
@@ -190,7 +191,7 @@ def build_article_production(
         model=settings.llm_model,
         seo_default_articles_per_day=settings.seo_articles_per_day,
         schema_repair_model=settings.llm_schema_repair_model,
-        schema_repair_llm=(build_schema_normalizer_llm(settings) if provider is None else None),
+        schema_repair_llm=(None if injected_provider else build_schema_normalizer_llm(settings)),
     )
 
 
