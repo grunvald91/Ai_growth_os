@@ -608,7 +608,7 @@ def _validation_problem(exc: Exception) -> str:
 
 def _stage_schema_repair_hint(name: str, problem: str) -> str:
     """Specific schema-only repair guidance, never a license to invent facts."""
-    if name == "article_writer" and re.search(r"sections\\.\\d+\\.kind:", problem):
+    if name == "article_writer" and re.search(r"sections\.\d+\.kind:", problem):
         return (
             ' For EVERY section, kind must be exactly lowercase "advice" or "hypothesis" '
             '(no other value, especially not "fact"). Verified factual sections '
