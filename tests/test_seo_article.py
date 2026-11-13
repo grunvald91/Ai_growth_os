@@ -117,6 +117,41 @@ async def test_article_without_answer_after_repair_fails_instead_of_publishing_t
     assert not list(db.scalars(select(Artifact).where(Artifact.kind == "article")))
 
 
+
+
+@pytest.mark.asyncio
+async def test_failed_seo_writer_kind_gets_strict_targeted_repair_then_completes(db, product, tmp_path):
+    outputs = outputs_with_geo()[:6]
+    bad = copy.deepcopy(outputs[2])
+    bad['sections'][0]['kind'] = 'fact'
+    outputs.insert(2, bad)
+    provider = SequenceProvider(outputs)
+    workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    result = await workflow.run(request_for(product).model_copy(update={'light': True}))
+    assert result.status == 'completed', result.error
+    assert len(provider.requests) == 7
+    repair_prompt = provider.requests[3].system_prompt
+    assert 'sections.0.kind:literal_error' in repair_prompt
+    assert 'kind must be exactly lowercase "advice" or "hypothesis"' in repair_prompt
+    assert 'Do not merely relabel an unsupported factual claim' in repair_prompt
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    assert all(section.kind in {'advice', 'hypothesis', 'fact'} for section in article.draft.sections)
+
+
+@pytest.mark.asyncio
+async def test_seo_writer_repeated_invalid_kind_still_fails_closed(db, product, tmp_path):
+    outputs = outputs_with_geo()[:6]
+    bad = copy.deepcopy(outputs[2])
+    bad['sections'][0]['kind'] = 'fact'
+    outputs[2] = bad
+    outputs.insert(3, copy.deepcopy(bad))
+    provider = SequenceProvider(outputs)
+    workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    result = await workflow.run(request_for(product).model_copy(update={'light': True}))
+    assert result.status == 'failed'
+    assert not list(db.scalars(select(Artifact).where(Artifact.kind == 'article')))
+
+
 @pytest.mark.asyncio
 async def test_plain_articles_are_unchanged(db, product, tmp_path):
     provider = SequenceProvider(valid_outputs())
