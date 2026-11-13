@@ -8,7 +8,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 
-from app.content.calendar import EditorialPlan
+from app.content.calendar import EditorialPlan, Slot
 from app.models.domain import Artifact, Product
 
 
@@ -58,6 +58,10 @@ def update_draft_package(db, *, product_id: UUID, plan_id: UUID,
     # Validate the complete original plan contract; derived calendar timestamps
     # and tenant-only metadata are not part of the model's source schema.
     source = {name: plan[name] for name in EditorialPlan.model_fields if name in plan}
+    source['slots'] = [
+        {name: slot[name] for name in Slot.model_fields if name in slot}
+        for slot in plan['slots']
+    ]
     EditorialPlan.model_validate(source)
     row.content = json.dumps(plan, ensure_ascii=False)
     db.commit()
