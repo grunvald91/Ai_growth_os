@@ -118,6 +118,8 @@ jobs:
                       print('seo_explicit_article_limit', override.articles_per_day if override else None)
                       from app.core.config import get_settings
                       print('seo_config_articles_per_day', get_settings().seo_articles_per_day)
+                      import os
+                      print('seo_config_override_in_env', 'SEO_ARTICLES_PER_DAY' in os.environ)
                       print('seo_explicit_publication_limit', override.publications_per_day if override else None)
                       print('seo_daily_limit', p.articles_per_day,
                             'local_tz', p.timezone_name,
