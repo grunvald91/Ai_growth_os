@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from app.llm.lenient import relax
+from app.llm.schema_normalizer import normalize_schema_with_ai
 from app.llm.errors import ProviderEmptyResponseError, ProviderMalformedResponseError
 from app.llm.audit import persist_critic_audit, persist_observed_llm_call
 from app.llm.schemas import LLMMessage, LLMRequest
@@ -992,10 +993,14 @@ def validate_grounding(draft: ArticleDraft, facts: dict[str, str]) -> None:
 class ArticleProduction:
     def __init__(self, *, db: Session, llm: LLMService, privacy: PrivacyGateway,
                  products_root: Path, provider_name: str, model: str,
-                 seo_default_articles_per_day: int = 3):
+                 seo_default_articles_per_day: int = 3,
+                 schema_repair_model: str = "deepseek-v4.1-flash",
+                 schema_repair_llm: LLMService | None = None):
         self.db, self.llm, self.privacy = db, llm, privacy
         self.products_root, self.provider_name, self.model = products_root, provider_name, model
         self.seo_default_articles_per_day = seo_default_articles_per_day
+        self.schema_repair_model = schema_repair_model
+        self.schema_repair_llm = schema_repair_llm
 
     async def run(self, request: ArticleProductionInput) -> ArticleProductionResult:
         """Owns transactions; use a dedicated clean session. No raw failure data persists."""
@@ -1231,34 +1236,61 @@ class ArticleProduction:
                     try:
                         parsed = accept(response.content)
                     except ValueError as rejected:
-                        if name in OPTIONAL_DERIVATIVE_STAGES:
-                            raise  # These stages have a deterministic fallback.
-                        # One repair attempt with the exact problem, without a second critic round.
-                        problem = _validation_problem(rejected)
-                        repair = self.llm
-                        response = await asyncio.wait_for(repair.generate(LLMRequest(
-                            system_prompt=prompt + '\nYour previous answer was rejected by validation: ' + problem
-                            + '. Fix exactly this and return the complete JSON again.',
-                            messages=[LLMMessage(role='user', content=json.dumps(stage_inputs, ensure_ascii=False))],
-                            model=self.model, max_tokens=min(20000, STAGE_MAX_TOKENS.get(name, 10000) * 2),
-                            response_schema=schema.model_json_schema(),
-                            metadata={'reasoning_effort': 'low', 'team_role': name,
-                                      'seo_article': bool(safe_request.seo_brief),
-                                      'task_type': 'article_production',
-                                      'provider_timeout_seconds': STAGE_PROVIDER_TIMEOUT_SECONDS.get(name, 90)},
-                        ), validate_revision=validate_stage_revision, on_observed=record_model_call,
-                        review_enabled=False), timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
-                        if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
-                            raise rejected
-                        try:
-                            parsed = accept(response.content)
-                        except (ValueError, ValidationError):
-                            # Only TWO structurally rejected strategist outputs
-                            # authorize the deterministic, approved-brief fallback.
-                            # Transport failures and truncated repairs remain errors.
-                            if name == 'content_strategist':
-                                strategist_twice_invalid = True
-                            raise
+                        # Attempt one low-cost format-only repair before asking the
+                        # expensive author to regenerate the entire stage response.
+                        parsed = None
+                        if isinstance(rejected, ValidationError) and self.schema_repair_llm is not None:
+                            try:
+                                normalized, parsed = await asyncio.wait_for(
+                                    normalize_schema_with_ai(
+                                        llm=self.schema_repair_llm,
+                                        content=response.content,
+                                        schema=schema,
+                                        problem=_validation_problem(rejected),
+                                        model=self.schema_repair_model,
+                                        parse=accept,
+                                        on_observed=lambda _, observed: record_model_call("schema_repair", observed),
+                                        budget_tokens=8500,
+                                    ),
+                                    timeout=STAGE_TIMEOUT_SECONDS.get(name, 300),
+                                )
+                                response = normalized.model_copy(update={
+                                    "quality_review": response.quality_review,
+                                })
+                            except (ValueError, asyncio.TimeoutError, httpx.HTTPError,
+                                    ProviderEmptyResponseError, ProviderMalformedResponseError):
+                                # The existing one-shot author repair remains the
+                                # fallback. No invalid/partial JSON is saved.
+                                logger.info("schema_normalizer_did_not_repair stage=%s task=%s", name, task_id)
+                        if parsed is None and name in OPTIONAL_DERIVATIVE_STAGES:
+                            raise rejected  # Retain the safe deterministic derivative fallback.
+                        if parsed is None:
+                            # One repair attempt with the exact problem, without a second critic round.
+                            problem = _validation_problem(rejected)
+                            repair = self.llm
+                            response = await asyncio.wait_for(repair.generate(LLMRequest(
+                                system_prompt=prompt + '\nYour previous answer was rejected by validation: ' + problem
+                                + '. Fix exactly this and return the complete JSON again.',
+                                messages=[LLMMessage(role='user', content=json.dumps(stage_inputs, ensure_ascii=False))],
+                                model=self.model, max_tokens=min(20000, STAGE_MAX_TOKENS.get(name, 10000) * 2),
+                                response_schema=schema.model_json_schema(),
+                                metadata={'reasoning_effort': 'low', 'team_role': name,
+                                          'seo_article': bool(safe_request.seo_brief),
+                                          'task_type': 'article_production',
+                                          'provider_timeout_seconds': STAGE_PROVIDER_TIMEOUT_SECONDS.get(name, 90)},
+                            ), validate_revision=validate_stage_revision, on_observed=record_model_call,
+                            review_enabled=False), timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
+                            if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
+                                raise rejected
+                            try:
+                                parsed = accept(response.content)
+                            except (ValueError, ValidationError):
+                                # Only TWO structurally rejected strategist outputs
+                                # authorize the deterministic, approved-brief fallback.
+                                # Transport failures and truncated repairs remain errors.
+                                if name == 'content_strategist':
+                                    strategist_twice_invalid = True
+                                raise
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:

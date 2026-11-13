@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     xai_reasoning_effort: Literal["low", "medium", "high", "xhigh"] = "low"
     xai_timeout_seconds: float = 300.0
     llm_fallback_models: str = "grok-4.7"
+    # Format-only recovery, never a second content author or publication approver.
+    llm_schema_repair_model: str = "deepseek-v4.1-flash"
     openrouter_api_key: str | None = None
     # Direct OpenAI Images API, separate from LLM provider routing.
     openai_api_key: str | None = None

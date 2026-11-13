@@ -138,6 +138,22 @@ def build_llm_provider(settings: Settings) -> LLMProvider:
     raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
 
+def build_schema_normalizer_llm(settings: Settings) -> LLMService:
+    """Dedicated economy-model gateway; the author's fallback chain must not override it."""
+    selected = settings.llm_schema_repair_model.strip()
+    if not selected:
+        raise ValueError("LLM_SCHEMA_REPAIR_MODEL not configured")
+    dedicated = settings.model_copy(update={
+        "llm_model": selected,
+        "llm_fallback_models": "",
+    })
+    return LLMService(
+        privacy_gateway=PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS),
+        provider=build_llm_provider(dedicated),
+        critic_enabled=False,
+    )
+
+
 def build_seo_llm(settings: Settings, provider: LLMProvider | None = None) -> tuple[LLMService, PrivacyGateway]:
     """The model service used by the SEO factory: same privacy gateway and critic settings as the article pipeline."""
     provider = provider or build_llm_provider(settings)
@@ -152,6 +168,7 @@ def build_article_production(
     *,
     force_critic: bool = False,
 ) -> ArticleProduction:
+    injected_provider = provider is not None
     provider = provider or build_llm_provider(settings)
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     # SEO articles contain a verified company profile, references and multiple
@@ -173,6 +190,9 @@ def build_article_production(
         provider_name=settings.llm_provider,
         model=settings.llm_model,
         seo_default_articles_per_day=settings.seo_articles_per_day,
+        schema_repair_model=settings.llm_schema_repair_model,
+        schema_repair_llm=(build_schema_normalizer_llm(settings)
+                           if not injected_provider and settings.llm_schema_repair_model.strip() else None),
     )
 
 

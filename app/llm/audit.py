@@ -96,7 +96,7 @@ def persist_observed_llm_call(db, *, product_id, task_id, run_id, response,
     without usage, produce exactly one cost observation. An unknown token count
     is stored as SQL NULL, never as a claimed zero.
     """
-    if stage not in {"author", "critic", "revision"}:
+    if stage not in {"author", "critic", "revision", "schema_repair"}:
         raise ValueError("Unsupported LLM observation stage")
     usage = response.usage
     db.add(CostRecord(

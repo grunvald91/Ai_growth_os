@@ -117,6 +117,45 @@ async def test_article_without_answer_after_repair_fails_instead_of_publishing_t
     assert not list(db.scalars(select(Artifact).where(Artifact.kind == "article")))
 
 
+
+@pytest.mark.asyncio
+async def test_economy_normalizer_repairs_invalid_article_kind_without_rewriting_prose(db, product, tmp_path):
+    outputs = outputs_with_geo()[:6]
+    bad = copy.deepcopy(outputs[2])
+    bad['sections'][0]['kind'] = 'fact'
+    original_body = bad['sections'][0]['body']
+    fixed = copy.deepcopy(outputs[2])
+    outputs[2] = bad
+    provider = SequenceProvider(outputs)
+    normalizer_provider = SequenceProvider([fixed])
+    workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    from app.llm.service import LLMService
+    from app.privacy import PrivacyGateway
+    workflow.schema_repair_llm = LLMService(
+        privacy_gateway=PrivacyGateway(), provider=normalizer_provider,
+    )
+    result = await workflow.run(request_for(product).model_copy(update={'light': True}))
+    assert result.status == 'completed', result.error
+    assert len(provider.requests) == 6
+    assert len(normalizer_provider.requests) == 1
+    repair = normalizer_provider.requests[0]
+    assert repair.metadata['team_role'] == 'schema_normalizer'
+    assert repair.model == 'deepseek-v4.1-flash'
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    assert any(section.body.strip() == original_body.strip() for section in article.draft.sections)
+
+
+def test_schema_normalizer_preserves_original_reader_copy():
+    from app.llm.schema_normalizer import preserve_generated_copy
+
+    original = {'sections': [{'heading': 'Заголовок', 'body': 'Исходный текст', 'kind': 'fact'}]}
+    changed_kind = {'sections': [{'heading': 'Заголовок', 'body': 'Исходный текст', 'kind': 'advice'}]}
+    preserve_generated_copy(original, changed_kind)
+    with pytest.raises(ValueError, match='prose'):
+        preserve_generated_copy(original, {'sections': [{'heading': 'Заголовок', 'body': 'Изменённый текст', 'kind': 'advice'}]})
+
+
+
 @pytest.mark.asyncio
 async def test_plain_articles_are_unchanged(db, product, tmp_path):
     provider = SequenceProvider(valid_outputs())
