@@ -109,6 +109,16 @@ jobs:
                       ).order_by(Task.created_at.desc()).limit(12)))
                       from collections import Counter
                       print('seo_articles_status_counts', dict(Counter(t.status.value for t in article_tasks)))
+
+                      from app.seo.activation import editorial_preferences
+                      from app.seo.queue import articles_started_today
+                      p = editorial_preferences(db, servgo.id)
+                      print('seo_daily_limit', p.articles_per_day,
+                            'local_tz', p.timezone_name,
+                            'started_today', articles_started_today(db, product_id=servgo.id))
+                      for t in article_tasks:
+                          if t.status == TaskStatus.QUEUED:
+                              print('seo_queued_due', str(t.due_at)[:19])
                       from app.models.domain import Publication
                       pub_statuses = list(db.scalars(select(Publication.status).where(
                           Publication.product_id == servgo.id, Publication.channel == 'own_site'
