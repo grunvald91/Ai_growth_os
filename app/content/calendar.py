@@ -726,11 +726,11 @@ async def run_planner_once(session_factory, settings, llm=None):
                                 validate_plan_context(candidate, context)
                                 return candidate
 
+                            from app.core.composition import build_schema_normalizer_llm
+                            normalizer = llm if injected_llm else build_schema_normalizer_llm(settings)
                             normalized, repaired_plan = await asyncio.wait_for(
                                 normalize_schema_with_ai(
-                                    llm=(llm if injected_llm else
-                                         __import__("app.core.composition", fromlist=["build_schema_normalizer_llm"])
-                                         .build_schema_normalizer_llm(settings)),
+                                    llm=normalizer,
                                     content=response.content, schema=EditorialPlan,
                                     problem=error_code,
                                     model=settings.llm_schema_repair_model,
