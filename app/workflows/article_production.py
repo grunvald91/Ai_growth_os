@@ -1000,7 +1000,7 @@ class ArticleProduction:
         self.products_root, self.provider_name, self.model = products_root, provider_name, model
         self.seo_default_articles_per_day = seo_default_articles_per_day
         self.schema_repair_model = schema_repair_model
-        self.schema_repair_llm = schema_repair_llm or llm
+        self.schema_repair_llm = schema_repair_llm
 
     async def run(self, request: ArticleProductionInput) -> ArticleProductionResult:
         """Owns transactions; use a dedicated clean session. No raw failure data persists."""
@@ -1239,7 +1239,7 @@ class ArticleProduction:
                         # Attempt one low-cost format-only repair before asking the
                         # expensive author to regenerate the entire stage response.
                         parsed = None
-                        if isinstance(rejected, ValidationError):
+                        if isinstance(rejected, ValidationError) and self.schema_repair_llm is not None:
                             try:
                                 normalized, parsed = await asyncio.wait_for(
                                     normalize_schema_with_ai(
