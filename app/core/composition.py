@@ -191,7 +191,8 @@ def build_article_production(
         model=settings.llm_model,
         seo_default_articles_per_day=settings.seo_articles_per_day,
         schema_repair_model=settings.llm_schema_repair_model,
-        schema_repair_llm=(None if injected_provider else build_schema_normalizer_llm(settings)),
+        schema_repair_llm=(build_schema_normalizer_llm(settings)
+                           if not injected_provider and settings.llm_schema_repair_model.strip() else None),
     )
 
 
