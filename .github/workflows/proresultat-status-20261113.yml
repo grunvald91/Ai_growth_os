@@ -1,0 +1,89 @@
+name: ProResultat planner status (read-only)
+
+on:
+  push:
+    branches: [ops/proresultat-status-20261113]
+    paths:
+      - .github/workflows/proresultat-status-20261113.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proresultat-planner-readonly
+  cancel-in-progress: false
+
+jobs:
+  status:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: production
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Read production task, attempts, draft status (no business content)
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::Server SSH credential not available"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Server host key mismatch or SSH offline"; exit 1; }
+          cat > /tmp/inspect.py <<'PY'
+          import json
+          from sqlalchemy import select, func
+          from app.db.session import SessionLocal
+          from app.models.domain import Product, Task, AgentRun, Artifact, TaskStatus
+          try:
+              with SessionLocal() as db:
+                  companies = list(db.scalars(select(Product).where(func.lower(Product.name) == 'proresultat').order_by(Product.created_at.desc()).limit(5)))
+                  print('matching_companies', len(companies))
+                  for index, company in enumerate(companies):
+                      tasks = list(db.scalars(select(Task).where(
+                          Task.product_id == company.id, Task.assigned_agent == 'editorial_planner'
+                      ).order_by(Task.created_at.desc(), Task.id.desc()).limit(8)))
+                      print('company_index', index, 'planner_tasks', len(tasks))
+                      plans = list(db.scalars(select(Artifact).where(
+                          Artifact.product_id == company.id, Artifact.kind == 'editorial_plan'
+                      ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(6)))
+                      print('editorial_plans', len(plans))
+                      for row in plans:
+                          try:
+                              data = json.loads(row.content)
+                              state = data.get('approval_state', 'unknown')
+                              slots = len(data.get('slots') or [])
+                          except (TypeError, ValueError, AttributeError):
+                              state, slots = 'invalid_json', -1
+                          print('plan', 'state', state, 'slots', slots, 'artifact_status', row.status.value,
+                                'created', str(row.created_at)[:19])
+                      for ordinal, task in enumerate(tasks):
+                          print('task', ordinal, 'state', task.status.value, 'created', str(task.created_at)[:19],
+                                'updated', str(task.updated_at)[:19])
+                          runs = list(db.scalars(select(AgentRun).where(AgentRun.task_id == task.id)
+                              .order_by(AgentRun.started_at.desc(), AgentRun.id.desc()).limit(5)))
+                          print('task_runs', len(runs))
+                          for run in runs:
+                              err = (run.error or '').split(':')
+                              family = err[0] if err else 'none'
+                              stage = err[1] if len(err) > 1 else 'none'
+                              if not family.replace('_', '').isalnum(): family = 'unclassified'
+                              if not stage.replace('_', '').isalnum(): stage = 'unclassified'
+                              print('run', run.status, 'error_family', family[:35], 'error_stage', stage[:35],
+                                    'started', str(run.started_at)[:19], 'finished', str(run.finished_at)[:19])
+                  print('queued_editorial_total', db.scalar(select(func.count()).select_from(Task).where(
+                      Task.assigned_agent == 'editorial_planner', Task.status == TaskStatus.QUEUED)))
+                  print('running_editorial_total', db.scalar(select(func.count()).select_from(Task).where(
+                      Task.assigned_agent == 'editorial_planner', Task.status == TaskStatus.RUNNING)))
+          except Exception as exc:
+              print('diagnostic_failed_type', type(exc).__name__)
+              raise SystemExit(2)
+          PY
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" "docker exec -i ai-growth-os-api-1 python -" < /tmp/inspect.py
