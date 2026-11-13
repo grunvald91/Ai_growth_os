@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
-from app.content.calendar import (EditorialPlan, _expand_anchor_slots, approve_plan, pause_plan, plan_record, planning_context,
+from app.content.calendar import (EditorialPlan, _parse_editorial_plan_response, _expand_anchor_slots, approve_plan, pause_plan, plan_record, planning_context,
     queue_plan, record_publication, render_calendar, run_planner_once, save_preferences, tick_calendar, reschedule_slot)
 from app.core.config import Settings
 from app.llm.fake import FakeLLMProvider
@@ -50,6 +50,41 @@ def test_compact_anchor_expands_across_tested_channels():
     assert by_platform['youtube_shorts'].format=='short_video'
     assert by_platform['instagram_reels'].day_offset==5
     assert by_platform['instagram_reels'].prepare_lead_hours==72
+
+
+
+
+def test_proresultat_known_extra_fields_only_recovered_after_strict_validation():
+    from pydantic import ValidationError
+
+    raw = draft()
+    raw['company'] = {'name': 'echoed-model-metadata-not-authoritative'}
+    raw['assets'] = [{'description': 'unsupported duplicate content'}]
+    cleaned = _parse_editorial_plan_response(json.dumps(raw, ensure_ascii=False))
+    assert cleaned.model_dump() == EditorialPlan.model_validate(draft()).model_dump()
+    assert not hasattr(cleaned, 'company') and not hasattr(cleaned, 'assets')
+
+    with pytest.raises(ValidationError):
+        _parse_editorial_plan_response(json.dumps({**raw, 'unverified': 'unsafe'}))
+    broken = copy.deepcopy(raw)
+    broken['slots'][0]['format'] = 'short_video'
+    with pytest.raises(ValidationError):
+        _parse_editorial_plan_response(json.dumps(broken))
+
+
+@pytest.mark.asyncio
+async def test_proresultat_extra_envelope_is_not_a_failed_or_repaid_planner_attempt(db, tmp_path):
+    product, settings = setup(db, tmp_path)
+    response = draft()
+    response.update(company={'name': 'ProResultat'}, assets=['model-generated-unused-envelope'])
+    plan, provider = await make_plan(db, settings, response)
+    assert plan is not None
+    assert len(provider.requests) == 1
+    assert db.scalar(select(Task).where(Task.assigned_agent == 'editorial_planner')).status == TaskStatus.COMPLETED
+    saved = json.loads(plan.content)
+    assert saved['approval_state'] == 'draft'
+    assert 'company' not in saved and 'assets' not in saved
+    assert len(list(db.scalars(select(CostRecord)))) == 1
 
 
 class Borrow:
