@@ -133,30 +133,49 @@ def articles_started_today(db: Session, now: datetime | None = None, product_id:
                and _started_in_local_day(timestamp, now, tz))
 
 
-def exhausted_products(db: Session, limit: int, now: datetime | None = None) -> set[UUID]:
-    """Compare each company's daily spend to its own generation limit and timezone."""
+def quota_task_ids_today(db: Session, now: datetime | None = None) -> dict[UUID, set[UUID]]:
+    """Distinct SEO article jobs occupying daily generation capacity.
+
+    A failed or cancelled article is not generated content. Its attempts still
+    remain in the immutable SEO start log for cost/audit, but cannot exhaust
+    the content quota. Multiple attempts for the same active article count once.
+    """
     now = now or datetime.now(timezone.utc)
     preferences = {}
-    counts: dict[UUID, int] = {}
-    exhausted = set()
-    for task, timestamp in _recent_starts(db, now):
-        p = preferences.get(task.product_id)
-        if p is None:
-            p = editorial_preferences(db, task.product_id, default_articles_per_day=limit)
-            preferences[task.product_id] = p
-        if _started_in_local_day(timestamp, now, p.timezone_name):
-            counts[task.product_id] = counts.get(task.product_id, 0) + 1
-            if counts[task.product_id] >= p.articles_per_day:
-                exhausted.add(task.product_id)
-    return exhausted
+    by_company: dict[UUID, set[UUID]] = {}
+    for task, started_at in _recent_starts(db, now):
+        if task.status in {TaskStatus.FAILED, TaskStatus.CANCELLED}:
+            continue
+        prefs = preferences.get(task.product_id)
+        if prefs is None:
+            prefs = editorial_preferences(db, task.product_id)
+            preferences[task.product_id] = prefs
+        if _started_in_local_day(started_at, now, prefs.timezone_name):
+            by_company.setdefault(task.product_id, set()).add(task.id)
+    return by_company
 
 
-def quota_exhausted(db: Session, limit: int, now: datetime | None = None, product_id: UUID | None = None) -> bool:
+def exhausted_products(db: Session, limit: int, now: datetime | None = None) -> set[UUID]:
+    """Only unique active/completed SEO articles use per-company daily slots."""
+    by_company = quota_task_ids_today(db, now)
+    return {
+        product_id for product_id, ids in by_company.items()
+        if len(ids) >= editorial_preferences(
+            db, product_id, default_articles_per_day=limit,
+        ).articles_per_day
+    }
+
+
+def quota_exhausted(db: Session, limit: int, now: datetime | None = None,
+                    product_id: UUID | None = None, task_id: UUID | None = None) -> bool:
+    used = quota_task_ids_today(db, now)
     if product_id is not None:
-        p = editorial_preferences(db, product_id, default_articles_per_day=limit)
-        return articles_started_today(db, now, product_id) >= p.articles_per_day
-    return articles_started_today(db, now) >= limit
-
+        # A retry on the SAME article already occupies its original slot.
+        if task_id is not None and task_id in used.get(product_id, set()):
+            return False
+        prefs = editorial_preferences(db, product_id, default_articles_per_day=limit)
+        return len(used.get(product_id, set())) >= prefs.articles_per_day
+    return sum(map(len, used.values())) >= limit
 
 def record_article_start(db, task):
     """Persist an event for each claimed generation attempt, even after failure."""
