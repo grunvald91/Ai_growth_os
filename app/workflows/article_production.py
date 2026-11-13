@@ -1012,7 +1012,7 @@ def validate_grounding(draft: ArticleDraft, facts: dict[str, str]) -> None:
 class ArticleProduction:
     def __init__(self, *, db: Session, llm: LLMService, privacy: PrivacyGateway,
                  products_root: Path, provider_name: str, model: str,
-                 seo_default_articles_per_day: int = 3,
+                 seo_default_articles_per_day: int = 30,
                  schema_repair_model: str = "deepseek-v4.1-flash",
                  schema_repair_llm: LLMService | None = None):
         self.db, self.llm, self.privacy = db, llm, privacy
@@ -1042,7 +1042,7 @@ class ArticleProduction:
                 if self.seo_default_articles_per_day > 0:
                     from app.seo.queue import quota_exhausted, SeoQuotaDeferred
                     if quota_exhausted(self.db, self.seo_default_articles_per_day,
-                                       product_id=product.id):
+                                       product_id=product.id, task_id=request.task_id):
                         self.db.rollback()
                         raise SeoQuotaDeferred("Company SEO generation budget exhausted")
             task = self.db.get(Task, request.task_id)
