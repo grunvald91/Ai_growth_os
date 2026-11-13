@@ -334,7 +334,7 @@ def seo_task(db, product_id, key, status, updated=None):
     return task
 
 
-def test_only_todays_moscow_day_counts_and_failed_attempts_count(env):
+def test_failed_attempts_remain_audited_but_do_not_consume_article_quota(env):
     factory, _, product_id = env
     now = datetime(2026, 10, 28, 20, 0, tzinfo=timezone.utc)  # 23:00 in Moscow; the Moscow day began at 21:00 UTC on the 27th
     with factory() as db:
@@ -343,7 +343,8 @@ def test_only_todays_moscow_day_counts_and_failed_attempts_count(env):
         seo_task(db, product_id, "old", TaskStatus.COMPLETED, now - timedelta(hours=24))
         seo_task(db, product_id, "waiting", TaskStatus.QUEUED, now)
         assert articles_started_today(db, now) == 2
-        assert not quota_exhausted(db, 3, now) and quota_exhausted(db, 2, now)
+        assert not quota_exhausted(db, 2, now)
+        assert quota_exhausted(db, 1, now)
 
 
 @pytest.mark.asyncio
@@ -373,6 +374,69 @@ async def test_worker_leaves_blog_articles_for_tomorrow_after_the_daily_limit(en
         assert db.get(Task, waiting_id).status == TaskStatus.QUEUED
     settings = settings.model_copy(update={"seo_articles_per_day": 4})
     assert await worker.run_content_once(factory, settings) == 1 and ran == ["a009"]
+
+
+def test_quota_collapses_multiple_attempts_for_one_article(env):
+    from app.seo.queue import record_article_start, quota_task_ids_today
+    factory, _, product_id = env
+    with factory() as db:
+        task = seo_task(db, product_id, "same-article", TaskStatus.RUNNING)
+        record_article_start(db, task)
+        record_article_start(db, task)
+        assert articles_started_today(db, product_id=product_id) == 3
+        assert quota_task_ids_today(db)[product_id] == {task.id}
+        assert not quota_exhausted(db, 2, product_id=product_id)
+        assert quota_exhausted(db, 1, product_id=product_id)
+        assert not quota_exhausted(db, 1, product_id=product_id, task_id=task.id)
+
+
+@pytest.mark.asyncio
+async def test_failed_article_does_not_block_different_queued_article(env, monkeypatch):
+    factory, settings, product_id = env
+    settings = settings.model_copy(update={"seo_articles_per_day": 1})
+    from app.seo.queue import record_article_start
+    ran = []
+    class Fake:
+        async def run(self, data):
+            ran.append(data.seo_brief.plan_item_id)
+            return SimpleNamespace(status="failed", artifact_ids=[])
+    monkeypatch.setattr(worker, "build_article_production", lambda db, settings, **kwargs: Fake())
+    brief = dict(plan_item_id="a009", primary_query="запись клиентов", stage="awareness", intent="informational",
+                 reader_problem="Мастер теряет клиентов.", ai_questions=["как вести запись"], next_step="Онлайн-запись")
+    with factory() as db:
+        failed = seo_task(db, product_id, "broken", TaskStatus.FAILED)
+        record_article_start(db, failed)
+        waiting = seo_task(db, product_id, "next", TaskStatus.QUEUED)
+        db.scalar(select(Artifact).where(Artifact.task_id == waiting.id)).content = ArticleProductionInput(
+            product_id=product_id, topic="Как вести запись", channel="own_site",
+            light=True, seo_brief=brief).model_dump_json()
+        db.commit()
+    assert await worker.run_content_once(factory, settings) == 1
+    assert ran == ["a009"]
+
+
+@pytest.mark.asyncio
+async def test_existing_queued_retry_is_not_blocked_by_full_daily_quota(env, monkeypatch):
+    factory, settings, product_id = env
+    settings = settings.model_copy(update={"seo_articles_per_day": 1})
+    from app.seo.queue import record_article_start
+    ran = []
+    class Fake:
+        async def run(self, data):
+            ran.append(data.seo_brief.plan_item_id)
+            return SimpleNamespace(status="failed", artifact_ids=[])
+    monkeypatch.setattr(worker, "build_article_production", lambda db, settings, **kwargs: Fake())
+    brief = dict(plan_item_id="a009", primary_query="запись клиентов", stage="awareness", intent="informational",
+                 reader_problem="Мастер теряет клиентов.", ai_questions=["как вести запись"], next_step="Онлайн-запись")
+    with factory() as db:
+        retry = seo_task(db, product_id, "original", TaskStatus.QUEUED)
+        record_article_start(db, retry)
+        db.scalar(select(Artifact).where(Artifact.task_id == retry.id)).content = ArticleProductionInput(
+            product_id=product_id, topic="Как вести запись", channel="own_site",
+            light=True, seo_brief=brief).model_dump_json()
+        db.commit()
+    assert await worker.run_content_once(factory, settings) == 1
+    assert ran == ["a009"]
 
 
 @pytest.mark.asyncio
@@ -634,6 +698,12 @@ def test_seo_generation_attempt_quota_counts_retries(env):
         assert articles_started_today(db, product_id=product_id) == 1
         record_article_start(db, task)
         assert articles_started_today(db, product_id=product_id) == 2
+        # Raw attempts remain auditable, but failed work does not consume quota.
+        assert not quota_exhausted(db, 1, product_id=product_id)
+        task.status = TaskStatus.QUEUED
+        db.commit()
+        assert quota_exhausted(db, 1, product_id=product_id)
+        assert not quota_exhausted(db, 1, product_id=product_id, task_id=task.id)
 
 
 def test_fresh_core_preserves_unwritten_queries_from_partial_cluster():
@@ -659,7 +729,7 @@ async def test_seo_quota_is_rechecked_under_product_lock_before_model_spend(env,
     factory, settings, product_id = env
     settings = settings.model_copy(update={"seo_articles_per_day": 1})
     with factory() as db:
-        seo_task(db, product_id, "already-started", TaskStatus.FAILED)
+        seo_task(db, product_id, "already-started", TaskStatus.COMPLETED)
         pending = TaskService(db).create(product_id=product_id, title="SEO-ARTICLE:next",
             assigned_agent="content_factory", status=TaskStatus.QUEUED)
         db.commit()
