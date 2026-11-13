@@ -117,6 +117,37 @@ async def test_article_without_answer_after_repair_fails_instead_of_publishing_t
     assert not list(db.scalars(select(Artifact).where(Artifact.kind == "article")))
 
 
+
+@pytest.mark.asyncio
+async def test_economy_normalizer_repairs_invalid_article_kind_without_rewriting_prose(db, product, tmp_path):
+    outputs = outputs_with_geo()[:6]
+    bad = copy.deepcopy(outputs[2])
+    bad['sections'][0]['kind'] = 'fact'
+    original_body = bad['sections'][0]['body']
+    outputs.insert(2, bad)
+    provider = SequenceProvider(outputs)
+    workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+    result = await workflow.run(request_for(product).model_copy(update={'light': True}))
+    assert result.status == 'completed', result.error
+    assert len(provider.requests) == 7
+    repair = provider.requests[3]
+    assert repair.metadata['team_role'] == 'schema_normalizer'
+    assert repair.model == 'deepseek-v4.1-flash'
+    article = ArticleArtifact.model_validate_json(db.get(Artifact, result.artifact_ids[0]).content)
+    assert article.draft.sections[0].body == original_body
+
+
+def test_schema_normalizer_preserves_original_reader_copy():
+    from app.llm.schema_normalizer import preserve_generated_copy
+
+    original = {'sections': [{'heading': 'Заголовок', 'body': 'Исходный текст', 'kind': 'fact'}]}
+    changed_kind = {'sections': [{'heading': 'Заголовок', 'body': 'Исходный текст', 'kind': 'advice'}]}
+    preserve_generated_copy(original, changed_kind)
+    with pytest.raises(ValueError, match='prose'):
+        preserve_generated_copy(original, {'sections': [{'heading': 'Заголовок', 'body': 'Изменённый текст', 'kind': 'advice'}]})
+
+
+
 @pytest.mark.asyncio
 async def test_plain_articles_are_unchanged(db, product, tmp_path):
     provider = SequenceProvider(valid_outputs())
