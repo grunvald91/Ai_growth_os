@@ -87,6 +87,39 @@ async def test_proresultat_extra_envelope_is_not_a_failed_or_repaid_planner_atte
     assert len(list(db.scalars(select(CostRecord)))) == 1
 
 
+
+@pytest.mark.asyncio
+async def test_calendar_repairs_schema_with_economy_model_without_regenerating_topics(db, tmp_path):
+    product, settings = setup(db, tmp_path)
+    bad = draft()
+    bad['slots'][0]['format'] = 'post'
+    good = draft()
+
+    class Provider:
+        def __init__(self):
+            self.requests = []
+
+        async def generate(self, request):
+            self.requests.append(request)
+            value = bad if len(self.requests) == 1 else good
+            return LLMResponse(content=json.dumps(value, ensure_ascii=False),
+                               model=request.model or 'unknown',
+                               usage=LLMUsage(input_tokens=12, output_tokens=34))
+
+    provider = Provider()
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=provider)
+    assert await run_planner_once(lambda: Borrow(db), settings, llm) == 1
+    assert len(provider.requests) == 2
+    assert provider.requests[1].metadata['team_role'] == 'schema_normalizer'
+    assert provider.requests[1].model == settings.llm_schema_repair_model
+    result = db.scalar(select(Artifact).where(Artifact.kind == 'editorial_plan'))
+    assert result is not None
+    assert json.loads(result.content)['slots'][0]['topic'] == good['slots'][0]['topic']
+    assert db.scalar(select(Task).where(Task.assigned_agent == 'editorial_planner')).status == TaskStatus.COMPLETED
+    assert len(list(db.scalars(select(CostRecord)))) == 2
+
+
+
 class Borrow:
     def __init__(self, db): self.db=db
     def __enter__(self): return self.db
