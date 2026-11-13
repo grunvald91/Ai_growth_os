@@ -735,7 +735,8 @@ async def run_planner_once(session_factory, settings, llm=None):
                                     problem=error_code,
                                     model=settings.llm_schema_repair_model,
                                     parse=parse_normalized,
-                                    on_observed=record_model_call if per_call_accounted else None,
+                                    on_observed=(lambda _, observed: record_model_call("schema_repair", observed))
+                                    if per_call_accounted else None,
                                 ),
                                 CALL_WAIT_SECONDS,
                             )
