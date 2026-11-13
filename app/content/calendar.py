@@ -192,6 +192,39 @@ class EditorialPlan(Contract):
         return self
 
 
+
+def _parse_editorial_plan_response(content: str) -> EditorialPlan:
+    """Accept a valid plan even if the model echoes known, unused envelope fields.
+
+    The 2026-11-08 ProResultat response added top-level "company" and "assets".
+    Only those two exact extra keys can be dropped, and only when they are the
+    *only* validation errors. Required fields, slot contracts, evidence references,
+    and later company-specific rules remain strictly validated.
+    """
+    sanitized = PrivacyGateway().sanitize_text(content)
+    try:
+        return EditorialPlan.model_validate_json(sanitized)
+    except ValidationError as exc:
+        errors = exc.errors(include_url=False, include_input=False)
+        known_extras = {"company", "assets"}
+        if not errors or any(
+            error["type"] != "extra_forbidden"
+            or tuple(error["loc"]) not in {("company",), ("assets",)}
+            for error in errors
+        ):
+            raise
+        payload = json.loads(sanitized)
+        if not isinstance(payload, dict):
+            raise
+        cleaned = {key: value for key, value in payload.items() if key not in known_extras}
+        plan = EditorialPlan.model_validate(cleaned)
+        logging.getLogger(__name__).info(
+            "editorial_plan_dropped_unused_model_envelope_fields keys=%s",
+            ",".join(sorted(set(payload) - set(cleaned))),
+        )
+        return plan
+
+
 def _compact_research_artifact(row: Artifact, privacy: PrivacyGateway) -> dict:
     """Keep planning evidence useful without feeding raw research blobs to the planner."""
     artifact_id = 'artifact:' + str(row.id)
@@ -665,7 +698,7 @@ async def run_planner_once(session_factory, settings, llm=None):
                     raise ValueError('Incomplete planner response')
                 try:
                     error_code = 'schema'
-                    plan = EditorialPlan.model_validate_json(PrivacyGateway().sanitize_text(response.content))
+                    plan = _parse_editorial_plan_response(response.content)
                     validate_plan_context(plan, context)
                     plan = _expand_anchor_slots(plan)
                     validate_plan_context(plan, context)
