@@ -122,6 +122,13 @@ jobs:
                                   AgentRun.task_id == task.id
                               ).order_by(AgentRun.started_at.desc(), AgentRun.id.desc()).limit(6)))
                               print('seo_failed_runs', index, len(runs))
+                              from app.models.domain import CostRecord
+                              cost_rows = list(db.scalars(select(CostRecord).where(
+                                  CostRecord.agent_run_id.in_([run.id for run in runs])
+                              ).limit(250)))
+                              print('seo_failed_cost_stage_counts', index,
+                                    dict(Counter(str((row.details or {}).get('llm_stage', 'none'))
+                                                 for row in cost_rows)))
                               for run in runs:
                                   parts = (run.error or '').split(':')
                                   safe_codes = [''.join(c for c in value if c.isascii() and (c.isalnum() or c in '._-'))[:65] for value in parts[:4]]
