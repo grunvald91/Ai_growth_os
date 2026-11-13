@@ -57,8 +57,9 @@ class Settings(BaseSettings):
     # Strict default-off per-company canary; no implicit '*' activation.
     brand_stories_enabled: bool = False
     brand_story_canary_product_ids: str = ""
-    # Owner's decision: at most this many blog articles of the SEO plan are started per day (Moscow time).
-    seo_articles_per_day: int = Field(default=3, ge=1)
+    # Default SEO generation slots per company/day (distinct active articles, not attempts).
+    # The limit does not apply to ordinary Studio posts or content plans.
+    seo_articles_per_day: int = Field(default=30, ge=1)
     seo_publications_per_day: int = Field(default=3, ge=1)
     # Global safe rollout switch; individual owners also must enable SEO.
     # Keep it OFF until three real end-to-end production canaries pass.
