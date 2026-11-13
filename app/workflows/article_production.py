@@ -1234,8 +1234,6 @@ class ArticleProduction:
                     try:
                         parsed = accept(response.content)
                     except ValueError as rejected:
-                        if name in OPTIONAL_DERIVATIVE_STAGES:
-                            raise  # These stages have a deterministic fallback.
                         # Attempt one low-cost format-only repair before asking the
                         # expensive author to regenerate the entire stage response.
                         parsed = None
@@ -1257,10 +1255,13 @@ class ArticleProduction:
                                 response = normalized.model_copy(update={
                                     "quality_review": response.quality_review,
                                 })
-                            except (ValueError, asyncio.TimeoutError, httpx.HTTPError):
+                            except (ValueError, asyncio.TimeoutError, httpx.HTTPError,
+                                    ProviderEmptyResponseError, ProviderMalformedResponseError):
                                 # The existing one-shot author repair remains the
                                 # fallback. No invalid/partial JSON is saved.
                                 logger.info("schema_normalizer_did_not_repair stage=%s task=%s", name, task_id)
+                        if parsed is None and name in OPTIONAL_DERIVATIVE_STAGES:
+                            raise rejected  # Retain the safe deterministic derivative fallback.
                         if parsed is None:
                             # One repair attempt with the exact problem, without a second critic round.
                             problem = _validation_problem(rejected)
