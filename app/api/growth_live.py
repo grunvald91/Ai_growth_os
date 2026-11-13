@@ -862,8 +862,11 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
         '<label class="field">Публикаций в день '
         f'<input type="number" name="publications_per_day" min="1" max="30" required value="{prefs.publications_per_day}"></label>'
         '<label class="field">Генераций статей в день '
-        f'<input type="number" name="articles_per_day" min="1" max="30" required value="{prefs.articles_per_day}"></label>'
-        '<p>Сохранение расписания не включает SEO-завод. '
+        f'<input type="number" name="articles_per_day" min="1" max="300" required value="{prefs.articles_per_day}"></label>'
+        '<p>Генерации — число разных SEO-статей в сутки, а не число запросов к ИИ. '
+        'Неудачные статьи не занимают слот, повторная попытка не расходует новый. '
+        'Публикации ограничиваются отдельно. '
+        'Сохранение расписания не включает SEO-завод. '
         'Глобальный автозапуск включается только после сквозной проверки.</p>'
         '<button class="btn primary" type="submit">Сохранить расписание</button></form></details>'
     )
