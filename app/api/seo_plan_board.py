@@ -1,7 +1,7 @@
 """An owner-readable, company-scoped SEO factory plan and work calendar.
 
-This module only renders persisted run rows. Article task.due_at is the
-earliest *preparation* date, not a guaranteed publication date.
+This module renders persisted run rows. Article task.due_at reserves the
+planned *publication* slot; generation may complete ahead of that date.
 """
 from __future__ import annotations
 
@@ -132,10 +132,10 @@ def seo_plan_board(run: dict | None, product_id: UUID, *, autorun: bool,
             released = item.get("published_at")
             publication = ("Вышла " + _esc(released)) if released else "Опубликована; время не записано"
         else:
-            publication = "Дата выхода пока не определена"
+            publication = "Ещё не опубликована"
         prepare_html = (
-            '<span>Подготовка по плану: ' + _esc(preparation) + '</span>'
-            if preparation else '<span>Дата подготовки не назначена</span>'
+            '<span>Плановая дата выхода: ' + _esc(preparation) + '</span>'
+            if preparation else '<span>Дата выхода не назначена</span>'
         )
         retry = (
             '<form class="seo-board-retry" method="post" action="'
@@ -187,9 +187,9 @@ def seo_plan_board(run: dict | None, product_id: UUID, *, autorun: bool,
         '<ol class="seo-board-stages">' + stage_html + '</ol>'
         '<div class="seo-board-summary"><p>Последнее изменение: ' + _esc(updated_at)
         + '. Автопланирование: ' + ("включено" if autorun and enabled else "выключено") + '.</p>'
-        '<p>Время в календаре — <strong>плановый старт подготовки</strong>, '
-        'а не обещанная дата публикации. Фактический выход зависит от генерации, '
-        'проверки и дневного лимита.</p>'
+        '<p>Время в календаре — <strong>запланированная дата выхода</strong>. '
+        'Статьи могут готовиться заранее; публикация наступает не раньше этой даты '
+        'и зависит от проверки качества и отдельного дневного лимита публикаций.</p>'
         '<p class="seo-board-next">' + _esc(next_actions) + '</p></div>'
         + ('<h3>Статьи по плану</h3><ol class="seo-board-list">' + visible
            + '</ol>' + remainder if total else
