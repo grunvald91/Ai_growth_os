@@ -85,13 +85,13 @@ class SeoEditorialPreferences:
     autorun_interval_days: int = 7
     autorun_horizon_days: int = 7
     publications_per_day: int = 3
-    articles_per_day: int = 3
+    articles_per_day: int = 30
 
 
 def editorial_preferences(db: Session, product_id: UUID, *,
                           default_interval_days: int = 7,
                           default_publications_per_day: int = 3,
-                          default_articles_per_day: int = 3) -> SeoEditorialPreferences:
+                          default_articles_per_day: int = 30) -> SeoEditorialPreferences:
     """Return ONLY this company's overrides, falling back to global defaults."""
     row = db.get(SeoFactoryActivation, product_id)
     if row is None:
@@ -125,9 +125,10 @@ def set_editorial_preferences(db: Session, product_id: UUID, *,
         raise ValueError("Интервал SEO-плана должен быть 1–90 дней")
     if autorun_horizon_days not in (7, 30):
         raise ValueError("План составляется на 7 или 30 дней")
-    for name, value in (("публикаций", publications_per_day), ("генераций", articles_per_day)):
-        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 30:
-            raise ValueError(f"Количество {name} должно быть от 1 до 30 в сутки")
+    for name, value, maximum in (("публикаций", publications_per_day, 30),
+                                 ("генераций", articles_per_day, 300)):
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
+            raise ValueError(f"Количество {name} должно быть от 1 до {maximum} в сутки")
     locked = db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
     if locked is None:
         raise LookupError("Компания не найдена")

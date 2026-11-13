@@ -29,8 +29,17 @@ async def run_content_once(session_factory, settings):
         exhausted = (exhausted_products(db, settings.seo_articles_per_day)
                      if settings.seo_articles_per_day > 0 else set())
         if exhausted:
-            # A company's blog articles for today are used up; they wait for tomorrow while everything else runs.
-            query = query.where(~and_(Task.title.like(f'{SEO_TASK_PREFIX}%'), Task.product_id.in_(exhausted)))
+            # Existing queued retries that already occupied a slot today may
+            # continue. New jobs wait for the next local day at capacity.
+            from app.seo.queue import quota_task_ids_today
+            previously_counted = {
+                task_id for task_ids in quota_task_ids_today(db).values()
+                for task_id in task_ids
+            }
+            query = query.where(or_(
+                ~and_(Task.title.like(f'{SEO_TASK_PREFIX}%'), Task.product_id.in_(exhausted)),
+                Task.id.in_(previously_counted),
+            ))
         # SEO articles enter production only on their assigned calendar date.
         # Other content workers and old unscheduled jobs are unaffected.
         from app.seo.schedule import db_time

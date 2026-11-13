@@ -9,7 +9,7 @@ Order of rollout:
 2. Make `servgo.ru/blog` reach the BookingBot blog (not the SPA shell).
 3. Deploy the BookingBot blog branch `seo-blog`. It redirects promo.servgo.ru/blog to servgo.ru/blog, so step 2 comes first.
 
-Settings: `SEO_ARTICLES_PER_DAY` (default 3, per company, Moscow day). Critic must stay on (`AGENT_CRITIC_ENABLED=true`):
+Settings: `SEO_ARTICLES_PER_DAY` (default 30 distinct active SEO articles per company/local day; failed jobs and repeated attempts are not counted as additional articles). Publication default remains 3/day. Critic must stay on (`AGENT_CRITIC_ENABLED=true`):
 only articles with a clean critic review publish on their own; the rest wait for the owner and go live once approved.
 
 Rollback: redeploy the previous app set; the factory only adds tasks and artifacts, published rows stay valid.
