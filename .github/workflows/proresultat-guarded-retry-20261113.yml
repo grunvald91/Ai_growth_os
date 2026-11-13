@@ -22,7 +22,7 @@ jobs:
       SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
       HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
       HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
-      APPLY_REQUEUE: 'false'
+      APPLY_REQUEUE: 'true'
     steps:
       - name: Guarded one-time recovery (no output of private business content)
         shell: bash
