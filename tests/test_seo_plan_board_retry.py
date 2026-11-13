@@ -16,7 +16,7 @@ from app.seo.article_retry import retry_failed_article
 from app.workflows.article_contracts import ArticleProductionInput, SeoBrief
 
 
-def test_seo_board_distinguishes_preparation_from_actual_publication_and_escapes():
+def test_seo_board_distinguishes_planned_from_actual_publication_and_escapes():
     product_id = uuid4()
     run = {
         "status": "completed", "status_label": "Завершён",
@@ -42,8 +42,8 @@ def test_seo_board_distinguishes_preparation_from_actual_publication_and_escapes
     }
     page = seo_plan_board(run, product_id, autorun=False, enabled=True)
     assert "План на 30 дней" in page
-    assert "Плановый старт подготовки" in page or "плановый старт подготовки" in page
-    assert "Фактический выход" in page or "Фактический" in page
+    assert "запланированная дата выхода" in page and "Плановая дата выхода:" in page
+    assert "Ещё не опубликована" in page
     assert "Вышла 08.11.2026 12:32" in page
     assert "Ошибка формата ответа ИИ" in page
     assert "Ждёт проверки" in page

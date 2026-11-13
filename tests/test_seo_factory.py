@@ -770,6 +770,8 @@ async def test_transient_article_provider_error_schedules_only_one_delayed_retry
         task = TaskService(db).create(product_id=product_id,
             title="SEO-ARTICLE:transient", assigned_agent="content_factory",
             status=TaskStatus.QUEUED)
+        task.due_at = datetime.now(timezone.utc) + timedelta(days=3)
+        scheduled_release = task.due_at
         ArtifactService(db).create(product_id=product_id, task_id=task.id,
             kind="content_request", title="SEO request",
             content=ArticleProductionInput(
@@ -781,8 +783,7 @@ async def test_transient_article_provider_error_schedules_only_one_delayed_retry
     with factory() as db:
         task = db.get(Task, task_id)
         assert task.status == TaskStatus.QUEUED
-        due = task.due_at
-        assert due is not None
+        assert task.due_at == scheduled_release.replace(tzinfo=None) or task.due_at == scheduled_release
         assert len(list(db.scalars(select(Artifact).where(
             Artifact.task_id == task_id, Artifact.kind == "seo_article_started")))) == 1
         assert len(list(db.scalars(select(Artifact).where(
@@ -791,10 +792,12 @@ async def test_transient_article_provider_error_schedules_only_one_delayed_retry
     assert await worker.run_content_once(factory, settings) == 0
     assert len(calls) == 1
 
-    # Simulate the 10-minute cooldown expiring without sleeping or network.
+    # Simulate the 10-minute cooldown expiring without changing publication date.
     with factory() as db:
-        task = db.get(Task, task_id)
-        task.due_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        marker = db.scalar(select(Artifact).where(
+            Artifact.task_id == task_id,
+            Artifact.kind == "seo_article_retry_scheduled"))
+        marker.created_at = datetime.now(timezone.utc) - timedelta(minutes=11)
         db.commit()
     assert await worker.run_content_once(factory, settings) == 1
     with factory() as db:
@@ -806,6 +809,39 @@ async def test_transient_article_provider_error_schedules_only_one_delayed_retry
             Artifact.task_id == task_id,
             Artifact.kind == "seo_article_retry_scheduled")))) == 1
     assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_future_publication_slot_does_not_block_early_seo_article_generation(env, monkeypatch):
+    from app.content import worker
+    from test_seo_article import BRIEF
+    factory, settings, product_id = env
+    settings = settings.model_copy(update={"seo_articles_per_day": 30})
+    seen = []
+
+    class Fake:
+        async def run(self, data):
+            seen.append(data.seo_brief.plan_item_id)
+            return SimpleNamespace(status="failed", artifact_ids=[], retryable=False)
+
+    monkeypatch.setattr(worker, "build_article_production", lambda db, cfg, **kw: Fake())
+    with factory() as db:
+        task = seo_task(db, product_id, "future-article", TaskStatus.QUEUED)
+        from datetime import datetime, timedelta, timezone
+        task.due_at = datetime.now(timezone.utc) + timedelta(days=5)
+        original_release = task.due_at
+        request = db.scalar(select(Artifact).where(
+            Artifact.task_id == task.id, Artifact.kind == "content_request"))
+        request.content = ArticleProductionInput(
+            product_id=product_id, topic="Подготовить материал заранее",
+            channel="own_site", light=True, seo_brief=BRIEF).model_dump_json()
+        db.commit()
+        task_id = task.id
+    assert await worker.run_content_once(factory, settings) == 1
+    assert seen == [BRIEF.plan_item_id]
+    with factory() as db:
+        task = db.get(Task, task_id)
+        assert task.due_at == original_release.replace(tzinfo=None) or task.due_at == original_release
 
 
 @pytest.mark.asyncio

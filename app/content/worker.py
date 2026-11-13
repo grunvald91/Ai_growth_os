@@ -40,14 +40,23 @@ async def run_content_once(session_factory, settings):
                 ~and_(Task.title.like(f'{SEO_TASK_PREFIX}%'), Task.product_id.in_(exhausted)),
                 Task.id.in_(previously_counted),
             ))
-        # SEO articles enter production only on their assigned calendar date.
-        # Other content workers and old unscheduled jobs are unaffected.
+        # SEO may be generated BEFORE its publication slot (Task.due_at).
+        # Publication checks the original slot separately. A transient-provider
+        # retry has its own ten-minute cooldown, stored in the recovery marker,
+        # so early preparation cannot bypass that paid-request safeguard.
         from app.seo.schedule import db_time
-        from sqlalchemy import or_
+        from sqlalchemy import func
+        last_transient_retry = (
+            select(func.max(Artifact.created_at))
+            .where(Artifact.task_id == Task.id,
+                   Artifact.kind == 'seo_article_retry_scheduled')
+            .correlate(Task).scalar_subquery()
+        )
+        retry_ready = db_time(db, datetime.now(timezone.utc) - timedelta(minutes=10))
         query = query.where(or_(
             ~Task.title.like(f'{SEO_TASK_PREFIX}%'),
-            Task.due_at.is_(None),
-            Task.due_at <= db_time(db, datetime.now(timezone.utc)),
+            last_transient_retry.is_(None),
+            last_transient_retry <= retry_ready,
         ))
         task = db.scalar(query.order_by(Task.priority.desc(), Task.created_at, Task.id).limit(1))
         if task is None:
@@ -84,16 +93,15 @@ async def run_content_once(session_factory, settings):
                             Artifact.task_id == task_id,
                             Artifact.kind == 'seo_article_started')))
                         if len(started) < 2:
-                            retry_at = datetime.now(timezone.utc) + timedelta(minutes=10)
                             moved = db.execute(update(Task).where(
                                 Task.id == task_id, Task.product_id == product_id,
                                 Task.status == TaskStatus.FAILED).values(
-                                status=TaskStatus.QUEUED,
-                                due_at=db_time(db, retry_at)))
+                                status=TaskStatus.QUEUED))
                             if moved.rowcount == 1:
                                 ArtifactService(db).create(product_id=product_id, task_id=task_id,
                                     kind='seo_article_retry_scheduled', title='SEO retry after transient failure',
-                                    content=json.dumps({'retry_delay_minutes': 10, 'reason': 'provider_transient'}))
+                                    content=json.dumps({'retry_delay_minutes': 10,
+                                                        'reason': 'provider_transient'}))
                             db.commit()
                     if data.seo_brief is not None and result.status == 'completed':
                         # Clean critic verdict + static checks publish automatically; failures wait for review.
