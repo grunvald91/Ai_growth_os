@@ -728,7 +728,10 @@ async def run_planner_once(session_factory, settings, llm=None):
 
                             normalized, repaired_plan = await asyncio.wait_for(
                                 normalize_schema_with_ai(
-                                    llm=llm, content=response.content, schema=EditorialPlan,
+                                    llm=(llm if injected_llm else
+                                         __import__("app.core.composition", fromlist=["build_schema_normalizer_llm"])
+                                         .build_schema_normalizer_llm(settings)),
+                                    content=response.content, schema=EditorialPlan,
                                     problem=error_code,
                                     model=settings.llm_schema_repair_model,
                                     parse=parse_normalized,
