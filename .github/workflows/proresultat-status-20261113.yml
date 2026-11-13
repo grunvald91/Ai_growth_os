@@ -130,3 +130,5 @@ jobs:
               raise SystemExit(2)
           PY
           sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" "docker exec -i ai-growth-os-api-1 python -" < /tmp/inspect.py
+
+# Read-only status refresh after guarded retry 2026-11-13
