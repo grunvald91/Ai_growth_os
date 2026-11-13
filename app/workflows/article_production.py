@@ -313,6 +313,8 @@ def _default_stage_rule(name: str) -> str:
             'Свободно чередуй короткие и длинные абзацы. Конкретные примеры, образы, '
             'уместный юмор и практические советы нужны только там, где помогают читателю. '
             'Не растягивай текст ради числа символов и не сокращай полезные мысли ради лимита. '
+            'Для каждого sections[*].kind используй строго одно значение — advice или hypothesis; ' 
+            'НЕ используй fact, informative, explanation и русские значения. '
             'Разделы kind=advice или kind=hypothesis; не придумывай факты о компании '
             'и не выводи claim_ids: приложение добавит только подтверждённые факты. '
             'Если что-то требует проверки, запиши это в proof_needed_notes; иначе верни пустой список.'
@@ -601,6 +603,21 @@ def _validation_problem(exc: Exception) -> str:
             ".".join(str(part) for part in item.get("loc", ())) + ":" + item.get("type", "validation")
             for item in exc.errors(include_url=False, include_input=False)[:8])
     return " ".join(str(exc).split())[:200]
+
+
+
+def _stage_schema_repair_hint(name: str, problem: str) -> str:
+    """Specific schema-only repair guidance, never a license to invent facts."""
+    if name == "article_writer" and re.search(r"sections\\.\\d+\\.kind:", problem):
+        return (
+            ' For EVERY section, kind must be exactly lowercase "advice" or "hypothesis" '
+            '(no other value, especially not "fact"). Verified factual sections '
+            'are added by the application from approved product facts, not by the author. '
+            'If a factual assertion lacks verified support, remove that assertion and '
+            'record the gap in proof_needed_notes. Do not merely relabel an unsupported '
+            'factual claim as advice. Return a complete ArticleBodyDraft JSON.'
+        )
+    return ""
 
 
 def _compact_stage_inputs(name: str, stage_inputs: dict) -> dict:
@@ -1238,6 +1255,7 @@ class ArticleProduction:
                         repair = self.llm
                         response = await asyncio.wait_for(repair.generate(LLMRequest(
                             system_prompt=prompt + '\nYour previous answer was rejected by validation: ' + problem
+                            + _stage_schema_repair_hint(name, problem)
                             + '. Fix exactly this and return the complete JSON again.',
                             messages=[LLMMessage(role='user', content=json.dumps(stage_inputs, ensure_ascii=False))],
                             model=self.model, max_tokens=min(20000, STAGE_MAX_TOKENS.get(name, 10000) * 2),
