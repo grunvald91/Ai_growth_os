@@ -1,0 +1,98 @@
+name: ProResultat content plan — guarded single retry
+
+on:
+  push:
+    branches: [ops/proresultat-retry-20261113]
+    paths: [.github/workflows/proresultat-guarded-retry-20261113.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proresultat-single-retry
+  cancel-in-progress: false
+
+jobs:
+  guarded-retry:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: production
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+      APPLY_REQUEUE: 'false'
+    steps:
+      - name: Guarded one-time recovery (no output of private business content)
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::Server SSH credential missing"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::Host key mismatch or SSH unavailable"; exit 1; }
+          cat > /tmp/requeue.py <<'PY'
+          import hashlib
+          import os
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Product, Task, TaskStatus, Artifact
+          from app.content import calendar
+
+          TARGET = "cacb3ec7f0e8edfbf9f73c3040498872391547147f2545cd0d82fb183e04263b"
+          MARKER = "[proresultat_schema_extras_recovery_20261113]"
+          should_apply = os.environ.get("APPLY_REQUEUE") == "true"
+
+          if not callable(getattr(calendar, "_parse_editorial_plan_response", None)):
+              print("recovery_blocked_reason", "new_parser_not_deployed")
+              raise SystemExit(3)
+          with SessionLocal() as db:
+              ids = list(db.scalars(select(Task.id).where(
+                  Task.assigned_agent == "editorial_planner"
+              )))
+              found = [x for x in ids if hashlib.sha256(str(x).encode()).hexdigest() == TARGET]
+              if len(found) != 1:
+                  print("recovery_blocked_reason", "task_identity_not_unique_or_missing")
+                  raise SystemExit(4)
+              task = db.scalar(select(Task).where(
+                  Task.id == found[0], Task.assigned_agent == "editorial_planner"
+              ).with_for_update())
+              product = db.get(Product, task.product_id)
+              check = ((product.name if product else "") + " " + (product.slug if product else "")).casefold()
+              if not any(part in check for part in ("result", "результат", "rezultat")):
+                  print("recovery_blocked_reason", "company_mismatch")
+                  raise SystemExit(5)
+              if task.status != TaskStatus.FAILED or MARKER in (task.description or ""):
+                  print("recovery_blocked_reason", "task_not_failed_or_already_recovered", "state", task.status.value)
+                  raise SystemExit(6)
+              existing = db.scalar(select(Artifact.id).where(
+                  Artifact.task_id == task.id, Artifact.product_id == product.id,
+                  Artifact.kind == "editorial_plan"
+              ).limit(1))
+              if existing is not None:
+                  print("recovery_blocked_reason", "target_already_has_plan")
+                  raise SystemExit(7)
+              planner_tasks = list(db.scalars(select(Task).where(
+                  Task.product_id == product.id, Task.assigned_agent == "editorial_planner"
+              ).order_by(Task.created_at.desc(), Task.id.desc()).limit(8)))
+              if not planner_tasks or planner_tasks[0].id != task.id:
+                  print("recovery_blocked_reason", "newer_planner_task_exists")
+                  raise SystemExit(8)
+              if any(t.status in {TaskStatus.QUEUED, TaskStatus.RUNNING} for t in planner_tasks):
+                  print("recovery_blocked_reason", "another_planner_active")
+                  raise SystemExit(9)
+              if not should_apply:
+                  print("guarded_requeue_preflight_ok", "task_is_failed", "prior_plans_preserved")
+                  raise SystemExit(0)
+              task.description = (task.description or "") + " " + MARKER
+              task.status = TaskStatus.QUEUED
+              db.commit()
+              print("guarded_requeue_applied", "one_task", "await_worker")
+          PY
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" "docker exec -i -e APPLY_REQUEUE=$APPLY_REQUEUE ai-growth-os-api-1 python -" < /tmp/requeue.py
