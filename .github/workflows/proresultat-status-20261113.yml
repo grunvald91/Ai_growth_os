@@ -38,21 +38,50 @@ jobs:
           done < /tmp/scanned
           [ -s ~/.ssh/known_hosts ] || { echo "::error::Server host key mismatch or SSH offline"; exit 1; }
           cat > /tmp/inspect.py <<'PY'
+          import hashlib
           import json
-          from sqlalchemy import select, func
+          from sqlalchemy import select, func, or_
           from app.db.session import SessionLocal
           from app.models.domain import Product, Task, AgentRun, Artifact, TaskStatus
+          
+          TARGET_HASH = 'cacb3ec7f0e8edfbf9f73c3040498872391547147f2545cd0d82fb183e04263b'
           try:
               with SessionLocal() as db:
-                  companies = list(db.scalars(select(Product).where(func.lower(Product.name) == 'proresultat').order_by(Product.created_at.desc()).limit(5)))
-                  print('matching_companies', len(companies))
-                  for index, company in enumerate(companies):
+                  candidate_count = db.scalar(select(func.count()).select_from(Product).where(
+                      or_(func.lower(Product.name).like('%result%'),
+                          func.lower(Product.slug).like('%result%'),
+                          func.lower(Product.name).like('%результат%'),
+                          func.lower(Product.slug).like('%rezultat%'))))
+                  print('candidate_companies', candidate_count)
+                  ids = list(db.scalars(select(Task.id).where(Task.assigned_agent == 'editorial_planner')))
+                  matching = [task_id for task_id in ids if hashlib.sha256(str(task_id).encode()).hexdigest() == TARGET_HASH]
+                  print('planner_total', len(ids), 'target_matches', len(matching))
+                  if matching:
+                      task = db.get(Task, matching[0])
+                      company = db.get(Product, task.product_id)
+                      print('task', 'status', task.status.value, 'agent', task.assigned_agent,
+                            'created', str(task.created_at)[:19], 'updated', str(task.updated_at)[:19])
+                      print('target_company_exists', bool(company))
                       tasks = list(db.scalars(select(Task).where(
-                          Task.product_id == company.id, Task.assigned_agent == 'editorial_planner'
+                          Task.product_id == task.product_id, Task.assigned_agent == 'editorial_planner'
                       ).order_by(Task.created_at.desc(), Task.id.desc()).limit(8)))
-                      print('company_index', index, 'planner_tasks', len(tasks))
+                      for i, other in enumerate(tasks):
+                          print('other_task', i, 'same_as_target', other.id == task.id,
+                                'status', other.status.value, 'created', str(other.created_at)[:19])
+                      runs = list(db.scalars(select(AgentRun).where(AgentRun.task_id == task.id)
+                          .order_by(AgentRun.started_at.desc(), AgentRun.id.desc()).limit(8)))
+                      print('target_runs', len(runs))
+                      for run in runs:
+                          err = (run.error or '').split(':')
+                          family = err[0] if err else 'none'
+                          stage = err[1] if len(err) > 1 else 'none'
+                          if not family.replace('_','').isalnum(): family = 'unclassified'
+                          if not stage.replace('_','').isalnum(): stage = 'unclassified'
+                          print('run', run.status, 'model', run.model, 'error_family', family[:35],
+                                'error_stage', stage[:35], 'started', str(run.started_at)[:19],
+                                'finished', str(run.finished_at)[:19])
                       plans = list(db.scalars(select(Artifact).where(
-                          Artifact.product_id == company.id, Artifact.kind == 'editorial_plan'
+                          Artifact.product_id == task.product_id, Artifact.kind == 'editorial_plan'
                       ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(6)))
                       print('editorial_plans', len(plans))
                       for row in plans:
@@ -62,22 +91,9 @@ jobs:
                               slots = len(data.get('slots') or [])
                           except (TypeError, ValueError, AttributeError):
                               state, slots = 'invalid_json', -1
-                          print('plan', 'state', state, 'slots', slots, 'artifact_status', row.status.value,
+                          print('plan', 'from_target', row.task_id == task.id, 'state', state,
+                                'slots', slots, 'artifact_status', row.status.value,
                                 'created', str(row.created_at)[:19])
-                      for ordinal, task in enumerate(tasks):
-                          print('task', ordinal, 'state', task.status.value, 'created', str(task.created_at)[:19],
-                                'updated', str(task.updated_at)[:19])
-                          runs = list(db.scalars(select(AgentRun).where(AgentRun.task_id == task.id)
-                              .order_by(AgentRun.started_at.desc(), AgentRun.id.desc()).limit(5)))
-                          print('task_runs', len(runs))
-                          for run in runs:
-                              err = (run.error or '').split(':')
-                              family = err[0] if err else 'none'
-                              stage = err[1] if len(err) > 1 else 'none'
-                              if not family.replace('_', '').isalnum(): family = 'unclassified'
-                              if not stage.replace('_', '').isalnum(): stage = 'unclassified'
-                              print('run', run.status, 'error_family', family[:35], 'error_stage', stage[:35],
-                                    'started', str(run.started_at)[:19], 'finished', str(run.finished_at)[:19])
                   print('queued_editorial_total', db.scalar(select(func.count()).select_from(Task).where(
                       Task.assigned_agent == 'editorial_planner', Task.status == TaskStatus.QUEUED)))
                   print('running_editorial_total', db.scalar(select(func.count()).select_from(Task).where(
