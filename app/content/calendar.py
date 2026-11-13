@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import httpx
 import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,7 @@ from app.models.domain import AgentRun, Artifact, ArtifactStatus, CostRecord, Me
 from app.services.artifacts import ArtifactService
 from app.privacy import PrivacyGateway
 from app.llm.timeouts import CALL_WAIT_SECONDS
+from app.llm.errors import ProviderEmptyResponseError, ProviderMalformedResponseError
 from app.llm.schema_normalizer import normalize_schema_with_ai
 
 PLATFORMS = {
@@ -738,7 +740,8 @@ async def run_planner_once(session_factory, settings, llm=None):
                             attempts.append(normalized)
                             plan = repaired_plan
                             break
-                        except (ValueError, asyncio.TimeoutError):
+                        except (ValueError, asyncio.TimeoutError, httpx.HTTPError,
+                                ProviderEmptyResponseError, ProviderMalformedResponseError):
                             logging.getLogger(__name__).info(
                                 "schema_normalizer_did_not_repair planner_task=%s", task.id)
                     messages = [messages[0], LLMMessage(role='user', content=encode({
