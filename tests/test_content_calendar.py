@@ -237,7 +237,7 @@ async def test_changed_requirements_invalidate_draft_and_pause_blocks_future_job
     p,settings=setup(db,tmp_path)
     row,_=await make_plan(db,settings)
     save_preferences(db,p.id,'Есть Дзен, на проверку два часа в неделю.')
-    with pytest.raises(ValueError,match='Исходные данные'):
+    with pytest.raises(ValueError,match='требования владельца'):
         approve_plan(db,settings,row.id)
     queue_plan(db,p.id)
     row,_=await make_plan(db,settings)
@@ -718,3 +718,60 @@ def test_calendar_topics_are_reader_value_first_and_hard_rules_stay():
     prompt = REGISTRY["calendar.plan"].default
     assert "КАЧЕСТВО ТЕМ" in prompt and "{evidence_refs}" in prompt
     assert prompt.index("КАЧЕСТВО ТЕМ") < prompt.index("HARD CALENDAR RULES")
+
+
+@pytest.mark.asyncio
+async def test_new_analytics_do_not_invalidate_an_owner_reviewed_draft(db, tmp_path):
+    p, settings = setup(db, tmp_path)
+    row, _ = await make_plan(db, settings)
+    original = json.loads(row.content)
+    db.add(Metric(
+        product_id=p.id, name='content_views', value=18, source='owner_report',
+        observed_at=datetime.now(timezone.utc),
+        dimensions={'article_id': 'new', 'channel': 'telegram', 'url': 'sample'},
+    ))
+    db.commit()
+    assert planning_context(db, settings, p.id)[1] != original['context_hash']
+    approve_plan(db, settings, row.id)
+    assert json.loads(row.content)['approval_state'] == 'active'
+
+
+@pytest.mark.asyncio
+async def test_preexisting_draft_without_basis_still_can_be_approved(db, tmp_path):
+    p, settings = setup(db, tmp_path)
+    row, _ = await make_plan(db, settings)
+    old_plan = json.loads(row.content)
+    old_plan.pop('approval_basis_hash', None)
+    old_plan['context_hash'] = 'outdated-analytics-hash'
+    row.content = json.dumps(old_plan, ensure_ascii=False)
+    db.commit()
+    approve_plan(db, settings, row.id)
+    approved = json.loads(row.content)
+    assert approved['approval_state'] == 'active'
+    assert approved['context_changed_before_approval'] is True
+
+
+@pytest.mark.asyncio
+async def test_approval_moves_elapsed_draft_dates_without_losing_plan(db, tmp_path):
+    p, settings = setup(db, tmp_path)
+    row, _ = await make_plan(db, settings)
+    value = json.loads(row.content)
+    before = [datetime.fromisoformat(slot['publish_at']) for slot in value['slots']]
+    earliest = min(before)
+    move_back = datetime.now(timezone.utc) - timedelta(days=2) - earliest
+    for slot in value['slots']:
+        slot['publish_at'] = (datetime.fromisoformat(slot['publish_at']) + move_back).isoformat()
+        slot['prepare_at'] = (datetime.fromisoformat(slot['prepare_at']) + move_back).isoformat()
+    for key in ('starts_at', 'ends_at', 'review_at'):
+        value[key] = (datetime.fromisoformat(value[key]) + move_back).isoformat()
+    gap = (datetime.fromisoformat(value['slots'][1]['publish_at']) -
+           datetime.fromisoformat(value['slots'][0]['publish_at']))
+    row.content = json.dumps(value, ensure_ascii=False)
+    db.commit()
+    approve_plan(db, settings, row.id)
+    approved = json.loads(row.content)
+    after = [datetime.fromisoformat(slot['publish_at']) for slot in approved['slots']]
+    assert min(after) > datetime.now(timezone.utc)
+    assert after[1] - after[0] == gap
+    assert approved['approval_rescheduled_days'] >= 1
+    assert approved['approval_state'] == 'active'

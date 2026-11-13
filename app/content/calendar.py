@@ -443,6 +443,47 @@ def planning_context(db, settings, product_id):
     return safe, digest
 
 
+def approval_basis_hash(context: dict) -> str:
+    """Invalidate an unapproved plan only when owner-controlled planning inputs change.
+
+    New performance observations or new external research after generation
+    should inform the NEXT plan, not make the already-reviewed draft impossible
+    to approve. The company profile, explicit requirements and connections
+    remain hard invalidation inputs.
+    """
+    relevant = {key: context.get(key) for key in (
+        'company', 'stable_business_context', 'owner_requirements',
+        'owner_requirements_ref', 'verified_telegram_channels',
+    )}
+    return hashlib.sha256(encode(relevant).encode()).hexdigest()
+
+
+def _rebase_past_draft_slots(plan: dict, now: datetime) -> int:
+    """Advance an old draft by whole local days without changing the owner's cadence."""
+    slots = plan.get('slots') or []
+    if not slots:
+        raise ValueError('У плана нет публикаций. Создай свежий контент-план.')
+    zone = ZoneInfo(plan['timezone'])
+    first = min(datetime.fromisoformat(slot['publish_at']).astimezone(zone) for slot in slots)
+    if first > now.astimezone(zone):
+        return 0
+    days = max(1, (now.astimezone(zone).date() - first.date()).days + 1)
+    delta = timedelta(days=days)
+
+    def shifted(value: str) -> str:
+        return (datetime.fromisoformat(value).astimezone(zone) + delta).isoformat()
+
+    for slot in slots:
+        slot['publish_at'] = shifted(slot['publish_at'])
+        slot['prepare_at'] = shifted(slot['prepare_at'])
+    for key in ('starts_at', 'ends_at', 'review_at'):
+        if plan.get(key):
+            plan[key] = shifted(plan[key])
+    plan['approval_rescheduled_days'] = days
+    plan['approval_rescheduled_at'] = now.isoformat()
+    return days
+
+
 def save_preferences(db, product_id, text):
     if not text.strip() or len(text) > 6000:
         raise ValueError('Опиши требования одним сообщением, до 6000 символов.')
@@ -763,6 +804,7 @@ async def run_planner_once(session_factory, settings, llm=None, schema_repair_ll
                     'prepare_at': (publish - timedelta(hours=slot.prepare_lead_hours)).isoformat(),
                     'task_id': None, 'state': 'planned', 'publication_url': None})
             value = {**plan.model_dump(), 'slots': slots, 'context_hash': digest,
+                      'approval_basis_hash': approval_basis_hash(context),
                      'sources': context['research'] + context['observations'] + GUIDANCE + ([{'id': owner_ref, 'type': 'owner_requirements'}] if owner_ref else []),
                      'starts_at': base.isoformat(), 'ends_at': (base + timedelta(days=plan.horizon_days)).isoformat(),
                      'review_at': (base + timedelta(days=plan.review_after_days)).isoformat(),
@@ -834,10 +876,15 @@ def approve_plan(db, settings, plan_id):
         return row
     if plan['approval_state'] != 'draft':
         raise ValueError('Создай свежий план: этот план уже остановлен или заменён.')
-    if planning_context(db, settings, row.product_id)[1] != plan['context_hash']:
-        raise ValueError('Исходные данные изменились. Создай свежий план перед подтверждением.')
-    if any(datetime.fromisoformat(s['publish_at']) <= now_utc() for s in plan['slots']):
-        raise ValueError('Даты плана устарели. Создай свежий план.')
+    current_context, current_hash = planning_context(db, settings, row.product_id)
+    basis = plan.get('approval_basis_hash')
+    if basis is not None and approval_basis_hash(current_context) != basis:
+        raise ValueError('Профиль компании, требования владельца или подключения изменились. Создай свежий план.')
+    # Older drafts do not store the narrower hash. The owner may explicitly
+    # approve the existing draft without discarding it over new research/metrics.
+    if basis is None and current_hash != plan.get('context_hash'):
+        plan['context_changed_before_approval'] = True
+    _rebase_past_draft_slots(plan, now_utc())
     for previous in db.scalars(select(Artifact).where(Artifact.product_id == row.product_id, Artifact.kind == 'editorial_plan', Artifact.id != row.id).with_for_update()):
         old = json.loads(previous.content)
         if old['approval_state'] == 'active':
