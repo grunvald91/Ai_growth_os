@@ -77,6 +77,7 @@ jobs:
                           stage = err[1] if len(err) > 1 else 'none'
                           if not family.replace('_','').isalnum(): family = 'unclassified'
                           if not stage.replace('_','').isalnum(): stage = 'unclassified'
+                          print('validation_signature', [''.join(c for c in part if c.isascii() and (c.isalnum() or c in '._-'))[:70] for part in err[2:5]])
                           print('run', run.status, 'model', run.model, 'error_family', family[:35],
                                 'error_stage', stage[:35], 'started', str(run.started_at)[:19],
                                 'finished', str(run.finished_at)[:19])
