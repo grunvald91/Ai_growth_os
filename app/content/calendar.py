@@ -566,7 +566,7 @@ def _persist_planner_attempts(db, *, task, run, attempts, attempt_failures, sett
 
 
 
-async def run_planner_once(session_factory, settings, llm=None):
+async def run_planner_once(session_factory, settings, llm=None, schema_repair_llm=None):
     injected_llm = llm is not None
     with session_factory() as db:
         task = db.scalar(select(Task).where(Task.assigned_agent == 'editorial_planner', Task.status == TaskStatus.QUEUED)
@@ -717,7 +717,8 @@ async def run_planner_once(session_factory, settings, llm=None):
                         raise
                     # A schema mismatch should not cost another full editorial
                     # draft. Try one economy-model, copy-preserving correction.
-                    if isinstance(exc, ValidationError):
+                    if (isinstance(exc, ValidationError)
+                            and (not injected_llm or schema_repair_llm is not None)):
                         try:
                             def parse_normalized(raw: str) -> EditorialPlan:
                                 candidate = _parse_editorial_plan_response(raw)
@@ -727,7 +728,7 @@ async def run_planner_once(session_factory, settings, llm=None):
                                 return candidate
 
                             from app.core.composition import build_schema_normalizer_llm
-                            normalizer = llm if injected_llm else build_schema_normalizer_llm(settings)
+                            normalizer = schema_repair_llm or build_schema_normalizer_llm(settings)
                             normalized, repaired_plan = await asyncio.wait_for(
                                 normalize_schema_with_ai(
                                     llm=normalizer,
