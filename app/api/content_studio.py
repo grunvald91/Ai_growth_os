@@ -38,6 +38,7 @@ from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.content.calendar import (PLATFORMS, approve_plan, pause_plan,
     reschedule_slot, queue_plan, save_preferences)
 from app.content.service import queue_content
+from app.content.plan_edit import update_draft_package
 from app.content.revisions import post_history, queue_post_edit
 from app.content.revisions import source_fingerprint
 from app.content.manual_edits import editable_fields, save_manual_edit
@@ -535,6 +536,7 @@ def package_card(
     group: list[dict],
     package_artifacts: list[Artifact],
     index: int,
+    view: str = "current",
 ) -> str:
     topic = group[0].get("topic") or key
     state = state_for_group(group)
@@ -576,7 +578,7 @@ def package_card(
           <span>□ {fmt_dt(first_publish)}</span>
           <span>{len(group)} публикац.</span>
         </div>
-        <div class="preview-actions"><a class="btn primary small" href="/studio/products/{product.id}/packages/{quote(str(key), safe='')}">Открыть пакет</a>{open_button}{queue_button}</div>
+        <div class="preview-actions"><a class="btn primary small" href="/studio/products/{product.id}/packages/{quote(str(key), safe='')}{'?view=draft' if view == 'draft' else ''}">Открыть пакет</a>{open_button}{queue_button}</div>
       </div>
     </article>
     """
@@ -1352,7 +1354,7 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
             package_artifacts.extend([a for a in by_task.get(str(task_id), []) if a.kind in MATERIAL_KINDS])
         cards.append(package_card(
             product=product, plan_row=plan_row, plan=plan, key=key, group=group,
-            package_artifacts=package_artifacts, index=index,
+            package_artifacts=package_artifacts, index=index, view=view,
         ))
 
     unknowns = plan.get("unknowns") or []
@@ -1785,8 +1787,10 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
     )
 
 
-def package_detail_page(db: Session, product: Product, package_key: str) -> str:
-    state = studio_state(db, product)
+def package_detail_page(db: Session, product: Product, package_key: str, *,
+                        view: str = 'current', feedback_error: str | None = None,
+                        updated: bool = False) -> str:
+    state = studio_state(db, product, view=view)
     group = state["groups"].get(package_key)
     if not group:
         raise HTTPException(404, "Package not found")
@@ -1807,6 +1811,25 @@ def package_detail_page(db: Session, product: Product, package_key: str) -> str:
         for slot in sorted(group, key=lambda x: x.get("publish_at") or "")
     )
     material_cards = "".join(material_card(product.id, record) for record in materials)
+    editing = ""
+    if plan_row and plan and plan.get("approval_state") == "draft":
+        editing = (
+            '<section class="panel"><div class="panel-head"><h2>Изменить пакет до утверждения</h2></div>'
+            + ('<p class="sg-notice" role="alert">' + esc(feedback_error) + '</p>'
+               if feedback_error else '')
+            + ('<p class="sg-notice" role="status">Изменения сохранены в черновике плана.</p>'
+               if updated else '')
+            + f'<form class="sg-inline-form" method="post" action="/studio/products/{product.id}/plans/{plan_row.id}/packages/{quote(str(package_key), safe="")}/edit">'
+            + '<label class="sg-field"><span>Тема пакета</span>'
+            + f'<textarea name="topic" maxlength="300" rows="2" required>{esc(group[0].get("topic") or "")}</textarea></label>'
+            + '<label class="sg-field"><span>Цель материала</span>'
+            + f'<textarea name="objective" maxlength="600" rows="3" required>{esc(group[0].get("objective") or "")}</textarea></label>'
+            + '<label class="sg-field"><span>Целевая аудитория</span>'
+            + f'<textarea name="audience" maxlength="300" rows="2" required>{esc(group[0].get("audience") or "")}</textarea></label>'
+            + '<button class="btn primary" type="submit">Сохранить изменения</button></form>'
+            + '<p class="sg-muted">Тема и цель обновятся сразу для всех площадок этого пакета. Даты и публикации не меняются.</p>'
+            + '</section>'
+        )
     queue = ""
     if plan_row and plan.get("approval_state") == "active" and (
         not task_ids or state_for_group(group) in {"failed", "cancelled"}
@@ -1822,6 +1845,7 @@ def package_detail_page(db: Session, product: Product, package_key: str) -> str:
       <span class="status {status_class(state_for_group(group))}">{esc(status_label(state_for_group(group)))}</span></div>
       <div class="package-detail-slots">{slot_rows}</div>
     </section>
+    {editing}
     <section class="panel">
       <div class="panel-head"><div class="panel-title"><span class="ico">▤</span><div><h2>Материалы пакета</h2>
       <div class="panel-sub">Все адаптации, уже созданные для этой темы</div></div></div><span class="chip blue">{len(materials)}</span></div>
@@ -2105,12 +2129,42 @@ def studio_rendered_asset(product_id: UUID, render_id: UUID, filename: str,
     return response
 
 
+@router.post("/studio/products/{product_id}/plans/{plan_id}/packages/{package_key}/edit")
+async def studio_edit_plan_package(product_id: UUID, plan_id: UUID, package_key: str,
+                                  request: Request, db: Session = Depends(get_db)):
+    """Explicit owner edit of the draft, not a paid regeneration."""
+    product = _owner_product(db, product_id)
+    if getattr(request.state, "studio_sso_role", None) not in (None, "owner", "co_owner"):
+        raise HTTPException(403, "Изменять план может только владелец компании")
+    fields = await _studio_form(request)
+    try:
+        update_draft_package(
+            db, product_id=product_id, plan_id=plan_id, package_key=package_key,
+            topic=fields.get("topic", ""), objective=fields.get("objective", ""),
+            audience=fields.get("audience", ""),
+        )
+    except LookupError as exc:
+        db.rollback()
+        raise HTTPException(404, str(exc)) from None
+    except ValueError as exc:
+        db.rollback()
+        return HTMLResponse(
+            package_detail_page(db, product, package_key, view="draft", feedback_error=str(exc)),
+            status_code=409, headers={"Cache-Control": "no-store"},
+        )
+    return RedirectResponse(
+        f"/studio/products/{product_id}/packages/{quote(package_key, safe='')}?view=draft&updated=1",
+        status_code=303,
+    )
+
+
 @router.get("/studio/products/{product_id}/packages/{package_key}", response_class=HTMLResponse)
-def studio_package_detail(product_id: UUID, package_key: str, db: Session = Depends(get_db)):
+def studio_package_detail(product_id: UUID, package_key: str, view: str = 'current',
+                          updated: bool = False, db: Session = Depends(get_db)):
     product = db.get(Product, product_id)
     if product is None:
         raise HTTPException(404, "Product not found")
-    response = HTMLResponse(package_detail_page(db, product, package_key))
+    response = HTMLResponse(package_detail_page(db, product, package_key, view=view, updated=updated))
     response.headers["Cache-Control"] = "no-store"
     return response
 
