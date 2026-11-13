@@ -144,7 +144,7 @@ def test_owner_can_configure_each_company_without_implicit_seo_activation(env):
     {"autorun_interval_days": 0},
     {"autorun_horizon_days": 16},
     {"publications_per_day": 0},
-    {"articles_per_day": 31},
+    {"articles_per_day": 301},
 ])
 def test_bad_company_calendar_preferences_do_not_change_stored_values(env, changes):
     from app.seo.activation import editorial_preferences, set_editorial_preferences
