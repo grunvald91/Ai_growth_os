@@ -95,6 +95,22 @@ jobs:
                           print('plan', 'from_target', row.task_id == task.id, 'state', state,
                                 'slots', slots, 'artifact_status', row.status.value,
                                 'created', str(row.created_at)[:19])
+                  servgo = db.scalar(select(Product).where(Product.slug == 'servgo').limit(1))
+                  print('servgo_seo_company_exists', bool(servgo))
+                  if servgo:
+                      factory_tasks = list(db.scalars(select(Task).where(
+                          Task.product_id == servgo.id, Task.assigned_agent == 'seo_factory'
+                      ).order_by(Task.created_at.desc()).limit(4)))
+                      for index, task in enumerate(factory_tasks):
+                          print('seo_factory_task', index, task.status.value, 'created', str(task.created_at)[:19])
+                      article_tasks = list(db.scalars(select(Task).where(
+                          Task.product_id == servgo.id, Task.assigned_agent == 'content_factory',
+                          Task.title.like('SEO-ARTICLE:%')
+                      ).order_by(Task.created_at.desc()).limit(12)))
+                      from collections import Counter
+                      print('seo_articles_status_counts', dict(Counter(t.status.value for t in article_tasks)))
+                      for index, task in enumerate(article_tasks[:8]):
+                          print('seo_article_task', index, task.status.value, 'updated', str(task.updated_at)[:19])
                   print('queued_editorial_total', db.scalar(select(func.count()).select_from(Task).where(
                       Task.assigned_agent == 'editorial_planner', Task.status == TaskStatus.QUEUED)))
                   print('running_editorial_total', db.scalar(select(func.count()).select_from(Task).where(
