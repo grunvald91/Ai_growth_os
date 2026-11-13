@@ -113,6 +113,10 @@ jobs:
                       from app.seo.activation import editorial_preferences
                       from app.seo.queue import articles_started_today
                       p = editorial_preferences(db, servgo.id)
+                      from app.seo.activation import SeoFactoryActivation
+                      override = db.get(SeoFactoryActivation, servgo.id)
+                      print('seo_explicit_article_limit', override.articles_per_day if override else None)
+                      print('seo_explicit_publication_limit', override.publications_per_day if override else None)
                       print('seo_daily_limit', p.articles_per_day,
                             'local_tz', p.timezone_name,
                             'started_today', articles_started_today(db, product_id=servgo.id))
