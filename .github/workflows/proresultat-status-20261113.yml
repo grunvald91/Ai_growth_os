@@ -109,6 +109,12 @@ jobs:
                       ).order_by(Task.created_at.desc()).limit(12)))
                       from collections import Counter
                       print('seo_articles_status_counts', dict(Counter(t.status.value for t in article_tasks)))
+                      from app.models.domain import Publication
+                      pub_statuses = list(db.scalars(select(Publication.status).where(
+                          Publication.product_id == servgo.id, Publication.channel == 'own_site'
+                      )))
+                      print('seo_site_publication_status_counts', dict(Counter(pub_statuses)))
+
                       for index, task in enumerate(article_tasks[:8]):
                           print('seo_article_task', index, task.status.value, 'updated', str(task.updated_at)[:19])
                           if task.status == TaskStatus.FAILED:
