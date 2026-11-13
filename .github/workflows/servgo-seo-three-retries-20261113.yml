@@ -1,0 +1,70 @@
+name: ServGo SEO — guarded three failed article retries (owner authorized)
+
+on:
+  push:
+    branches: [ops/servgo-seo-three-retries-20261113]
+    paths: [.github/workflows/servgo-seo-three-retries-20261113.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servgo-seo-paid-retry-20261113
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: production
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Requeue only failed ServGo SEO articles using production safety gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::Production connection missing"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || { echo "::error::SSH host key mismatch"; exit 1; }
+          cat > /tmp/retry.py <<'PY'
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Product, Task, TaskStatus
+          from app.seo.article_retry import retry_failed_article
+          from app.seo.activation import require_enabled
+          from app.seo.queue import SEO_TASK_PREFIX
+
+          with SessionLocal() as db:
+              product = db.scalar(select(Product).where(Product.slug == "servgo").with_for_update())
+              if product is None:
+                  raise SystemExit("ServGo product missing")
+              require_enabled(db, product.id)
+              failed = list(db.scalars(select(Task).where(
+                  Task.product_id == product.id,
+                  Task.assigned_agent == "content_factory",
+                  Task.title.like(f"{SEO_TASK_PREFIX}%"),
+                  Task.status == TaskStatus.FAILED,
+              ).order_by(Task.created_at.asc(), Task.id.asc()).limit(4)))
+              print("eligible_failed_seo_article_tasks", len(failed))
+              if len(failed) == 0:
+                  print("No failed SEO articles remain; no action")
+                  raise SystemExit(0)
+              if len(failed) != 3:
+                  raise SystemExit("Unexpected number of failed tasks: refuse broad retries")
+              for row in failed:
+                  retry_failed_article(db, product_id=product.id, task_id=row.id,
+                                       actor="owner_authorized_20261113")
+              print("SERVGO_SEO_ARTICLES_REQUEUED", len(failed))
+          PY
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            "docker exec -i ai-growth-os-api-1 python -" < /tmp/retry.py
