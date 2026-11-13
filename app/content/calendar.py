@@ -22,6 +22,7 @@ from app.models.domain import AgentRun, Artifact, ArtifactStatus, CostRecord, Me
 from app.services.artifacts import ArtifactService
 from app.privacy import PrivacyGateway
 from app.llm.timeouts import CALL_WAIT_SECONDS
+from app.llm.schema_normalizer import normalize_schema_with_ai
 
 PLATFORMS = {
     'own_site': ('Сайт / SEO', 'article'), 'dzen': ('Дзен', 'article'),
@@ -712,6 +713,34 @@ async def run_planner_once(session_factory, settings, llm=None):
                     error_code = 'schema:' + ','.join((i['field'] + ':' + i['type'] + ':' + PrivacyGateway().sanitize_text(i['message'])[:150]) for i in issues[:4])
                     if attempt:
                         raise
+                    # A schema mismatch should not cost another full editorial
+                    # draft. Try one economy-model, copy-preserving correction.
+                    if isinstance(exc, ValidationError):
+                        try:
+                            def parse_normalized(raw: str) -> EditorialPlan:
+                                candidate = _parse_editorial_plan_response(raw)
+                                validate_plan_context(candidate, context)
+                                candidate = _expand_anchor_slots(candidate)
+                                validate_plan_context(candidate, context)
+                                return candidate
+
+                            normalized, repaired_plan = await asyncio.wait_for(
+                                normalize_schema_with_ai(
+                                    llm=llm, content=response.content, schema=EditorialPlan,
+                                    problem=error_code,
+                                    model=settings.llm_schema_repair_model,
+                                    parse=parse_normalized,
+                                    on_observed=record_model_call if per_call_accounted else None,
+                                ),
+                                CALL_WAIT_SECONDS,
+                            )
+                            response = normalized
+                            attempts.append(normalized)
+                            plan = repaired_plan
+                            break
+                        except (ValueError, asyncio.TimeoutError):
+                            logging.getLogger(__name__).info(
+                                "schema_normalizer_did_not_repair planner_task=%s", task.id)
                     messages = [messages[0], LLMMessage(role='user', content=encode({
                         'action': 'Repair this draft to match the schema and supplied resources exactly. Fix each validation error. Never repeat the same asset on one platform; use separate package_key for a new article/topic, share one key only for genuine cross-channel reuse. Return complete JSON only.',
                         'validation_errors': issues[:15],
