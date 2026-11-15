@@ -184,7 +184,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
                 if reply.get("used_fact_ids"):
                     reply_html += f'<p class="c-meta">Источники: {esc(", ".join(reply["used_fact_ids"]))}</p>'
                 reply_html += f'<button class="btn ghost" data-copy-reply="{copy_id}">Копировать ответ</button>'
-                if not terminal and comment.source == "platform" and comment.platform in live and reply.get("action") != "skip":
+                if comment.status in {"draft", "review"} and comment.source == "platform" and comment.platform in live and reply.get("action") != "skip":
                     reply_html += f'<button class="btn primary" data-send="{comment.id}" data-text-id="{copy_id}">Одобрить и отправить</button>'
             if comment.status == "delivery_unknown":
                 reply_html += '<p class="c-warning">Проверьте комментарий на площадке. Повторная отправка заблокирована, чтобы не продублировать ответ.</p>'
