@@ -9,7 +9,7 @@ import logging
 from sqlalchemy import and_, or_, select
 
 from app.comments.models import BusinessComment, CommentChannel
-from app.comments.service import CommentService
+from app.comments.service import CommentService, recent_platform_comment
 from app.comments.polling import SUPPORTED
 
 log = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ async def run_comment_draft_once(session_factory, settings, *, llm=None):
     while True:
         with session_factory() as db:
             query = (
-                select(BusinessComment.created_at, BusinessComment.id, BusinessComment.product_id)
+                select(BusinessComment.created_at, BusinessComment.id, BusinessComment.product_id, BusinessComment.target)
                 .join(CommentChannel,
                       (CommentChannel.product_id == BusinessComment.product_id)
                       & (CommentChannel.platform == BusinessComment.platform))
@@ -49,7 +49,13 @@ async def run_comment_draft_once(session_factory, settings, *, llm=None):
         if not candidates:
             return 0
 
-        for created_at, comment_id, product_id in candidates:
+        for created_at, comment_id, product_id, target in candidates:
+            # Historical imports without an authoritative source timestamp
+            # must never burn the auto-draft daily quota.
+            from types import SimpleNamespace
+            if not recent_platform_comment(
+                    SimpleNamespace(target=target), settings.comment_background_draft_max_age_days):
+                continue
             with session_factory() as db:
                 try:
                     service = CommentService(db, settings, llm=llm)
