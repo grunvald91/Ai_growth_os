@@ -90,3 +90,6 @@ app.add_middleware(GrowthDesignMiddleware)
 
 from app.api.growth_campaigns import router as growth_campaigns_router
 app.include_router(growth_campaigns_router)
+
+from app.api.ai_chat import router as ai_chat_router
+app.include_router(ai_chat_router)

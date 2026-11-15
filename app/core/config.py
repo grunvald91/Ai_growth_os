@@ -166,6 +166,12 @@ class Settings(BaseSettings):
     voice_cost_alert_factor: float = Field(default=3.0, ge=1.0, le=100)
     voice_cost_alert_min_usd: str = "0.5"
 
+    # ServGo AI Chat (/studio/chat): per-user limits and bounds.
+    ai_chat_max_requests_per_hour: int = Field(default=60, ge=1, le=10000)
+    ai_chat_max_requests_per_day: int = Field(default=300, ge=1, le=100000)
+    ai_chat_daily_spend_limit_usd: str | None = None
+    ai_chat_max_message_chars: int = Field(default=32000, ge=1000, le=200000)
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("studio_users_file", "whiteboard_proxy_url", mode="before")

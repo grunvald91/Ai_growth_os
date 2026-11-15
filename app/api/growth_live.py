@@ -76,9 +76,10 @@ class GrowthDesignMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
         path = request.url.path
-        # SSO landing and consent are protocol endpoints, not studio pages.
+        # SSO landing, consent, and standalone AI Chat have their own layout/API surface.
         is_sso = path == '/studio/sso' or path.startswith('/studio/sso/')
-        eligible = (path == '/intelligence' or path.startswith('/studio')) and not is_sso and not any(
+        is_ai_chat = path == '/studio/chat' or path.startswith('/studio/chat/') or path.startswith('/studio/api/ai-chat')
+        eligible = (path == '/intelligence' or path.startswith('/studio')) and not is_sso and not is_ai_chat and not any(
             part in path for part in ('/assets/', '/login', '/logout', '/design-preview'))
         from app.api.studio_sso import _canonical_pwa
         from app.core.config import get_settings
