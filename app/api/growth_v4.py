@@ -384,6 +384,10 @@ def render_v4(page, request, pid, switch):
     title_tag = original.outer(original.find(tag='title')) or '<title>Growth OS</title>'
     styles = ''.join(m.group() for m in re.finditer(r'<link\b[^>]*rel="stylesheet"[^>]*>', page))
     styles = re.sub(r'<link[^>]*dispatcher\.css[^>]*>', '', styles)
+    # V4 intentionally removes the old dispatcher layout CSS; bring back only
+    # the UI SDK controls (post review + optional creation parameters).
+    if pid and (home or current == base + '/create'):
+        styles += '<link rel="stylesheet" href="/studio/assets/dispatcher-review.css?v=1">'
     # Page-specific form styles and scripts belong to their original modules.
     styles += ''.join(original.outer(e) for e in original.elements if e[0]=='style')
     replacements = [(doc.find(ident='main'), content), (doc.find(ident='leftNav'), ''.join(link(r) for r in links)),
