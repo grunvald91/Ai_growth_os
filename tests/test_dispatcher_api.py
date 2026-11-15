@@ -483,6 +483,10 @@ def test_inline_post_review_fragment_rework_and_final_approval_are_separate(env)
     assert newer[0]["body"] == updated and newer[0]["version"] == 2
     assert newer[0]["artifact_id"] == str(revised.id)
     assert newer[0]["revision_of"] == str(source.id)
+    rejected = blocks(command("revise_material", {
+        "material_id": str(source.id), "source_version": "1",
+        "feedback": "Сделай старый абзац короче"}, "rejected-version"), "confirm")
+    assert rejected == []
     assert blocks(client.get(f"/studio/products/{servgo.id}/dispatch/updates"), "material") == []
 
     bad_fragment = blocks(command("revise_material", {
@@ -520,3 +524,13 @@ def test_post_review_block_hides_full_text_when_not_awaiting_approval(env):
     result = card(Context(db=db, product=company, settings=None, account="local-owner"), row)
     assert result["reviewable"] is False and result["body"] == ""
     assert result["version"] == 3
+    # Previously approved (but unscheduled) posts remain editable through
+    # the dispatcher's existing confirmation-based revision flow.
+    response = TestClient(app).post(f"/studio/products/{company.id}/dispatch/messages", json={
+        "mode": "chip", "client_key": "approved-revision",
+        "chip": {"label": "Исправить утверждённый пост", "capability": "revise_material",
+                 "params": {"material_id": str(row.id), "source_version": "3",
+                            "feedback": "Добавь короткий полезный пример"}}})
+    assert response.status_code == 200
+    assert any(b["type"] == "confirm" for m in response.json()["messages"]
+               for b in m["blocks"])
