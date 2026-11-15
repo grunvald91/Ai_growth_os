@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -36,7 +37,7 @@ class Gateway:
 
     async def fetch(self, channel, token):
         return [{"external_id": "c-1", "text": "Сколько стоит?", "post_text": "О сервисе",
-                 "target": {"video_id": "video"}}], {"page": None}
+                 "target": {"video_id": "video", "published_at": datetime.now(timezone.utc).isoformat()}}], {"page": None}
 
     async def send(self, channel, token, comment, text):
         self.sent.append(text)
