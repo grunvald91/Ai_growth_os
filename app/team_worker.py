@@ -318,7 +318,8 @@ async def _comments_loop(settings):
 async def main() -> None:
     settings = get_settings()
     calendar_task = asyncio.create_task(_calendar_loop(settings))
-    comments_task = asyncio.create_task(_comments_loop(settings)) if settings.comment_background_poll_enabled else None
+    comments_task = (asyncio.create_task(_comments_loop(settings))
+                     if settings.comment_background_poll_enabled or settings.comment_background_draft_enabled else None)
     try:
         while True:
             try:
