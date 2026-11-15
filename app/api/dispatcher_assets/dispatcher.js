@@ -239,6 +239,15 @@
     var open = el(isVideo ? 'span' : 'a', 'dp-link', isVideo ? 'Посмотреть видео →' : 'Открыть полностью');
     if (!isVideo) open.href = block.href;
     card.appendChild(open);
+    // UI SDK may enhance this card after the asynchronous module loads.
+    // Never put material body into HTML attributes or executable markup.
+    if (block.reviewable && block.body && block.artifact_id) {
+      card.__sgMaterialReview = {
+        block: block,
+        send: function (chip, clientKey) { return sendChip(chip, clientKey); }
+      };
+      document.dispatchEvent(new CustomEvent('sg:dispatcher:material-ready', { detail: { card: card } }));
+    }
     return card;
   }
 
@@ -608,8 +617,9 @@
     return true;
   }
 
-  function sendChip(chip) {
-    send({ mode: 'chip', chip: { label: chip.label, capability: chip.capability, params: chip.params || {} } }, chip.label);
+  function sendChip(chip, clientKey) {
+    return send({ mode: 'chip', client_key: clientKey,
+      chip: { label: chip.label, capability: chip.capability, params: chip.params || {} } }, chip.label);
   }
 
   function createCommand(text) {
