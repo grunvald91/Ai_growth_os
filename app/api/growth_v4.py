@@ -463,10 +463,10 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>ui-sdk-default-20261115', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>inline-post-review-20261115', extras)
     if pid and current == base+'/create':
         extras += '<script src="/studio/assets/create-studio.js?v=history-20261104"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=ui-sdk-default-20261115"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=inline-post-review-20261115"></script>'
     if pid and (home or current == base+'/create'):
         # The glow measures the existing recorder stream; load before dispatcher.js.
         extras = '<script src="/studio/assets/voice-glow.js?v=2"></script>' + extras
