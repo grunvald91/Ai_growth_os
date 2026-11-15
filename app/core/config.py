@@ -123,6 +123,9 @@ class Settings(BaseSettings):
     # Background comment import: operator switch AND per-business opt-in, both off by default.
     comment_background_poll_enabled: bool = False
     comment_background_poll_seconds: int = Field(default=600, ge=60, le=86400)
+    # Paid generation is independently guarded and limited per company, per UTC day.
+    comment_background_draft_enabled: bool = False
+    comment_background_draft_daily_limit: int = Field(default=20, ge=1, le=500)
     viral_research_mode: Literal["public_multisource", "youtube_public", "disabled"] = "public_multisource"
     viral_research_max_queries: int = 4
     viral_research_max_candidates: int = 16
