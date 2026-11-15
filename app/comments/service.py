@@ -294,6 +294,23 @@ class CommentService:
                 Task.created_at >= today)) or 0
             if attempts >= self.settings.comment_background_draft_daily_limit:
                 raise ValueError("Дневной лимит автоматических черновиков исчерпан")
+            usage = self.db.execute(
+                select(
+                    func.coalesce(func.sum(func.coalesce(CostRecord.input_tokens, 0)
+                                           + func.coalesce(CostRecord.output_tokens, 0)), 0),
+                    func.count(CostRecord.id).filter(CostRecord.input_tokens.is_(None)),
+                )
+                .join(AgentRun, AgentRun.id == CostRecord.agent_run_id)
+                .join(Task, Task.id == AgentRun.task_id)
+                .where(Task.product_id == product_id,
+                       Task.title == "Авто-черновик комментария",
+                       Task.created_at >= today)
+            ).one()
+            if usage[1]:
+                # Missing provider usage cannot safely be interpreted as 0 cost.
+                raise ValueError("Провайдер не сообщил расход токенов. Продолжите вручную после проверки")
+            if usage[0] >= self.settings.comment_background_draft_daily_token_limit:
+                raise ValueError("Достигнут дневной лимит токенов автоматических черновиков")
         if not config.enabled:
             raise ValueError("Агент на паузе")
         if self.llm is None:
@@ -319,11 +336,12 @@ class CommentService:
                     "settings": {**config.model_dump(exclude={"facts"}), "max_length": reply_limit(comment.platform, config.max_length)},
                     "platform": comment.platform, "untrusted_comment": comment.text,
                     "untrusted_post_context": comment.post_text}, ensure_ascii=False))]))
-            if response.usage:
-                self.db.add(CostRecord(product_id=product_id, agent_run_id=run.id, category="llm",
-                    provider=self.settings.llm_provider, amount=0, currency="USD", incurred_at=now(),
-                    input_tokens=max(0, response.usage.input_tokens), output_tokens=max(0, response.usage.output_tokens),
-                    details={"cost_known": False, "note": "Usage recorded; monetary price unavailable."}))
+            self.db.add(CostRecord(product_id=product_id, agent_run_id=run.id, category="llm",
+                provider=self.settings.llm_provider, amount=0, currency="USD", incurred_at=now(),
+                input_tokens=max(0, response.usage.input_tokens) if response.usage else None,
+                output_tokens=max(0, response.usage.output_tokens) if response.usage else None,
+                details={"cost_known": False, "usage_known": bool(response.usage),
+                         "note": "Monetary cost unknown; zero amount must not be treated as free."}))
             # The owner may have explicitly released a stale claim while the
             # provider was slow; do not resurrect an obsolete background request.
             self.db.refresh(comment, with_for_update=True)
