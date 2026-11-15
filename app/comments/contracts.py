@@ -25,6 +25,8 @@ class AgentSettings(Strict):
     enabled: bool = True
     # Per-company permission to import comments in the background. Never authorizes publication.
     auto_import: bool = False
+    # Independent opt-in for paid background LLM draft generation. Never publishes.
+    auto_draft: bool = False
 
 
 class CommentInput(Strict):
