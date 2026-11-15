@@ -682,3 +682,143 @@ def test_background_option_is_visible_in_studio_and_defaults_off(ctx):
     response = client.post(f"/products/{product.id}/comments/settings", json=settings.model_dump())
     assert response.status_code == 200
     assert svc.config(product.id)[0].auto_import
+
+
+
+@pytest.mark.asyncio
+async def test_auto_drafts_require_both_opt_ins_and_never_publish(ctx):
+    from app.comments.drafting import run_comment_draft_once
+    db, product, svc, provider, gateway = ctx
+    channel = await svc.connect(product.id, ConnectInput(platform="youtube", account_id="UCbusiness", token="private-token"))
+    await svc.sync(product.id, "youtube")
+    factory = lambda: Session(db.get_bind(), expire_on_commit=False)
+
+    assert await run_comment_draft_once(factory, svc.settings, llm=svc.llm) == 0
+    svc.settings.comment_background_draft_enabled = True
+    assert await run_comment_draft_once(factory, svc.settings, llm=svc.llm) == 0
+    svc.configure(product.id, AgentSettings(auto_draft=True))
+    assert await run_comment_draft_once(factory, svc.settings, llm=svc.llm) == 1
+    db.expire_all()
+    comment = db.scalar(select(BusinessComment))
+    assert comment.status == "draft" and comment.reply_id
+    assert db.scalar(select(AgentRun)).status == "completed"
+    assert db.get(Artifact, comment.reply_id).kind == "comment_reply"
+    assert not list(db.scalars(select(Approval)))
+    assert not list(db.scalars(select(Publication)))
+    assert not gateway.sent
+    assert await run_comment_draft_once(factory, svc.settings, llm=svc.llm) == 0
+    assert len(list(db.scalars(select(AgentRun)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_auto_draft_durable_claim_blocks_concurrent_llm_calls(ctx):
+    import asyncio
+    from app.comments.drafting import run_comment_draft_once
+
+    db, product, svc, provider, gateway = ctx
+    await svc.connect(product.id, ConnectInput(platform="youtube", account_id="UCbusiness", token="private-token"))
+    await svc.sync(product.id, "youtube")
+    comment = db.scalar(select(BusinessComment))
+    svc.configure(product.id, AgentSettings(auto_draft=True))
+    svc.settings.comment_background_draft_enabled = True
+    factory = lambda: Session(db.get_bind(), expire_on_commit=False)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    class HeldLLM:
+        calls = 0
+
+        async def generate(self, request):
+            self.calls += 1
+            started.set()
+            await release.wait()
+            return await svc.llm.generate(request)
+
+    held = HeldLLM()
+    ongoing = asyncio.create_task(run_comment_draft_once(factory, svc.settings, llm=held))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+        db.expire_all()
+        assert db.get(BusinessComment, comment.id).status == "drafting"
+        assert await run_comment_draft_once(factory, svc.settings, llm=held) == 0
+        with pytest.raises(ValueError, match="обрабатывается"):
+            await svc.draft(product.id, comment.id)
+        with pytest.raises(ValueError, match="дождитесь"):
+            svc.close(product.id, comment.id, "skipped")
+        db.rollback()
+        assert held.calls == 1
+    finally:
+        release.set()
+        await ongoing
+    db.expire_all()
+    assert db.get(BusinessComment, comment.id).status == "draft"
+    assert held.calls == 1
+    assert not gateway.sent
+
+
+@pytest.mark.asyncio
+async def test_auto_draft_failure_does_not_repeat_paid_request(ctx):
+    from app.comments.drafting import run_comment_draft_once
+
+    db, product, svc, _, gateway = ctx
+    await svc.connect(product.id, ConnectInput(platform="youtube", account_id="UCbusiness", token="private-token"))
+    await svc.sync(product.id, "youtube")
+    svc.configure(product.id, AgentSettings(auto_draft=True))
+    svc.settings.comment_background_draft_enabled = True
+    factory = lambda: Session(db.get_bind(), expire_on_commit=False)
+
+    class BrokenLLM:
+        calls = 0
+
+        async def generate(self, request):
+            self.calls += 1
+            raise RuntimeError("private credential must not appear in database")
+
+    llm = BrokenLLM()
+    assert await run_comment_draft_once(factory, svc.settings, llm=llm) == 0
+    db.expire_all()
+    comment = db.scalar(select(BusinessComment))
+    assert comment.status == "draft_failed"
+    assert llm.calls == 1
+    assert db.scalar(select(AgentRun)).status == "failed"
+    assert "private credential" not in db.scalar(select(AgentRun)).error
+    assert await run_comment_draft_once(factory, svc.settings, llm=llm) == 0
+    assert llm.calls == 1
+    assert not gateway.sent
+    # Explicit manual generation still remains possible for the owner.
+    await svc.draft(product.id, comment.id)
+    assert comment.status == "draft"
+
+
+@pytest.mark.asyncio
+async def test_auto_draft_daily_limit_is_per_company_and_counts_attempts(ctx):
+    from app.comments.drafting import run_comment_draft_once
+
+    db, product, svc, _, gateway = ctx
+    channel = await svc.connect(product.id, ConnectInput(platform="youtube", account_id="UCbusiness", token="private-token"))
+    await svc.sync(product.id, "youtube")
+    db.add(BusinessComment(product_id=product.id, platform="youtube", external_id="second",
+        text="Какие условия?", post_text="Пост", target={"channel_id": str(channel.id)},
+        source="platform", status="new"))
+    db.commit()
+    svc.configure(product.id, AgentSettings(auto_draft=True))
+    svc.settings.comment_background_draft_enabled = True
+    svc.settings.comment_background_draft_daily_limit = 1
+    factory = lambda: Session(db.get_bind(), expire_on_commit=False)
+    assert await run_comment_draft_once(factory, svc.settings, llm=svc.llm) == 1
+    assert await run_comment_draft_once(factory, svc.settings, llm=svc.llm) == 0
+    db.expire_all()
+    assert len(list(db.scalars(select(AgentRun)))) == 1
+    assert len(list(db.scalars(select(BusinessComment).where(BusinessComment.status == "new")))) == 1
+    assert not gateway.sent
+
+
+def test_auto_draft_toggle_visible_and_defaults_off(ctx):
+    db, product, svc, _, _ = ctx
+    client = client_for(ctx)
+    html = client.get(f"/studio/products/{product.id}/comments?tab=agent").text
+    assert 'name="auto_draft"' in html
+    assert "выключены" in html
+    assert not svc.config(product.id)[0].auto_draft
+    assert client.post(f"/products/{product.id}/comments/settings",
+        json=AgentSettings(auto_draft=True).model_dump()).status_code == 200
+    assert svc.config(product.id)[0].auto_draft
