@@ -108,6 +108,7 @@ class MaterialBlock(_Block):
     body: str = Field(default="", max_length=14000)
     version: int = Field(default=1, ge=1)
     reviewable: bool = False
+    revision_of: str | None = Field(default=None, max_length=64)
     href: str
 
     def model_post_init(self, __context) -> None:
