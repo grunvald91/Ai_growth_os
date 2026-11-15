@@ -1,13 +1,13 @@
 """Opt-in background comment intake; no LLM requests or publishing.
 
-Keyset pagination scans beyond paused channels without loading the entire
+Bounded offset pagination scans beyond paused channels without loading the entire
 table or starving a later opted-in business.
 """
 import asyncio
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 
 from app.comments.models import CommentChannel
 from app.comments.service import CommentService
@@ -31,7 +31,7 @@ async def run_comment_poll_once(session_factory, settings, *, gateway=None):
     """Poll one due channel, scanning all pages for enabled companies."""
     if not settings.comment_background_poll_enabled:
         return 0
-    after = None
+    offset = 0
     paused_products = set()
     while True:
         with session_factory() as db:
@@ -40,14 +40,9 @@ async def run_comment_poll_once(session_factory, settings, *, gateway=None):
                        CommentChannel.cursor, CommentChannel.updated_at, CommentChannel.id)
                 .where(CommentChannel.status == "connected", CommentChannel.platform.in_(SUPPORTED))
                 .order_by(CommentChannel.updated_at.asc(), CommentChannel.id.asc())
+                .offset(offset)
                 .limit(PAGE_SIZE)
             )
-            if after is not None:
-                timestamp, channel_id = after
-                query = query.where(or_(
-                    CommentChannel.updated_at > timestamp,
-                    and_(CommentChannel.updated_at == timestamp, CommentChannel.id > channel_id),
-                ))
             candidates = list(db.execute(query).all())
 
         if not candidates:
@@ -72,6 +67,6 @@ async def run_comment_poll_once(session_factory, settings, *, gateway=None):
                     db.rollback()
                     log.warning("comment_poll_failed product=%s platform=%s type=%s",
                                 product_id, platform, type(exc).__name__)
-        after = candidates[-1][3], candidates[-1][4]
+        offset += len(candidates)
         if len(candidates) < PAGE_SIZE:
             return 0
