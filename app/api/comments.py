@@ -23,7 +23,7 @@ from app.models.domain import Artifact
 from app.privacy import PrivacyGateway
 
 router = APIRouter()
-STATUS = {"new": "Новый", "draft": "Черновик", "review": "Нужна проверка", "sent": "Отправлен",
+STATUS = {"new": "Новый", "drafting": "ИИ готовит ответ", "draft_failed": "Не удалось подготовить", "draft": "Черновик", "review": "Нужна проверка", "sent": "Отправлен",
           "sending": "Отправляется", "delivery_unknown": "Проверьте доставку", "skipped": "Пропущен", "handled": "Передан человеку"}
 
 
