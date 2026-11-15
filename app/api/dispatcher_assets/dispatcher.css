@@ -248,3 +248,6 @@
   color:var(--dp-text,#1b2d42);background:var(--dp-bg,#fff);font:inherit;font-size:14px}
 .dp-post-review-form .dp-btn{min-height:44px}
 .dp-post-review-feedback{font-size:12px;color:var(--dp-text2,#3d536b);margin:0}
+
+.dp-material--superseded .dp-material-status{color:var(--dp-muted,#62778b)}
+.dp-material--superseded .dp-post-review-form{display:none}
