@@ -47,6 +47,9 @@ for (const [path, expected] of [
   ['/business/42', 'https://servgo.ru/business/42'],
   ['/business/42/', 'https://servgo.ru/business/42'],
   ['/business/00042', 'https://servgo.ru/business/42'],
+  ['/business/42/blog', 'https://servgo.ru/business/42/blog'],
+  ['/business/00042/blog/', 'https://servgo.ru/business/42/blog'],
+  ['/business/42/blog/article-slug', 'https://servgo.ru/business/42/blog/article-slug'],
 ]) {
   test(`canonical for ${path}`, () => {
     const result = bootstrap(path)
@@ -58,7 +61,7 @@ for (const [path, expected] of [
 
 for (const path of [
   '/business/0', '/business/unknown', '/business/999999999999999999999999',
-  '/business/42/blog', '/business/42/blog/article', '/book/42', '/admin', '/studio',
+  '/business/42/blog/sitemap.xml', '/business/42/blog/INVALID', '/book/42', '/admin', '/studio',
 ]) {
   test(`no premature index of SPA fallback on ${path}`, () => {
     const result = bootstrap(path)
