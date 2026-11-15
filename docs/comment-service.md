@@ -288,6 +288,11 @@ one product. Reconnect or revoke access if permissions change.
 and set:
 - Callback `https://servgo.ru/api/integrations/instagram/webhook` (public).
 - Verify token exactly `COMMENT_META_WEBHOOK_VERIFY_TOKEN`.
+- In Nginx add the **single** route for this callback from
+  `services/booking_bot/deploy/nginx/servgo-growth-gateway.inc.example`.
+  BookingBot must keep its generic `/api/`; do not proxy all API paths to
+  Growth. This file is a staging template, **not deployed**. Confirm the live
+  HTTPS virtual host config and run `nginx -t` before any live change.
 
 GET performs Meta's verification handshake. POST enforces a 256 KiB body cap,
 checks `X-Hub-Signature-256` against the **original raw bytes**, validates
