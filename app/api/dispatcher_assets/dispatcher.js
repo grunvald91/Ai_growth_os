@@ -219,8 +219,83 @@
     if (voiceHoldEnabled && /^(Простое видео|Видео)$/.test(friendlyKind(block.kind)))
       title = legacyVideoTitle(title).replace(/^Видео:\s*/i, '');
     card.appendChild(el('strong', 'dp-material-title', title));
-    if (block.excerpt && !(isVideo && block.excerpt === 'Видео готово к просмотру.'))
+    if (!block.body && block.excerpt && !(isVideo && block.excerpt === 'Видео готово к просмотру.'))
       card.appendChild(el('p', 'dp-material-text', block.excerpt));
+    if (block.body) {
+      // The real stored text from this company's artifact, never an AI guess or HTML.
+      var preview = el('section', 'dp-post-preview');
+      preview.setAttribute('aria-label', 'Текст готового поста');
+      preview.appendChild(el('span', 'dp-post-preview-label', block.truncated ?
+        'Текст поста · показано начало' : 'Текст поста · можно выделить фрагмент'));
+      var bodyText = el('div', 'dp-post-body', block.body);
+      bodyText.setAttribute('tabindex', '0');
+      preview.appendChild(bodyText);
+      if (block.truncated) {
+        preview.appendChild(el('p', 'dp-post-preview-hint',
+          'Пост слишком длинный для карточки. Перед утверждением откройте полный текст.'));
+      } else if (block.can_revise && block.artifact_id) {
+        var controls = el('div', 'dp-post-actions');
+        var reviseButton = el('button', 'dp-btn ghost dp-post-revise-button', 'Изменить фрагмент');
+        reviseButton.type = 'button';
+        var reviseForm = el('form', 'dp-post-revise-form');
+        reviseForm.hidden = true;
+        var quote = el('blockquote', 'dp-post-quote'); quote.hidden = true;
+        var label = el('label', 'dp-post-feedback-label');
+        label.appendChild(el('span', '', 'Что нужно изменить?'));
+        var feedback = el('textarea', '');
+        feedback.required = true; feedback.minLength = 8; feedback.maxLength = 1250;
+        feedback.rows = 3;
+        feedback.setAttribute('aria-label', 'Инструкция редактору');
+        feedback.setAttribute('placeholder', 'Например: убери обещание результата, сохрани остальной текст');
+        label.appendChild(feedback);
+        var submit = el('button', 'dp-btn primary', 'Отправить правку');
+        submit.type = 'submit';
+        var cancel = el('button', 'dp-btn ghost', 'Отмена'); cancel.type = 'button';
+        var row = el('div', 'dp-post-revise-actions');
+        row.appendChild(submit); row.appendChild(cancel);
+        reviseForm.appendChild(quote); reviseForm.appendChild(label); reviseForm.appendChild(row);
+        var selectedFragment = '';
+        function selectedText() {
+          var selection = window.getSelection && window.getSelection();
+          if (!selection || !selection.rangeCount || selection.isCollapsed) return '';
+          // Reject selections outside this exact material. No cross-card text leakage.
+          var range = selection.getRangeAt(0);
+          if (!bodyText.contains(range.commonAncestorContainer)) return '';
+          return selection.toString().trim().slice(0, 380);
+        }
+        reviseButton.addEventListener('pointerdown', function () {
+          selectedFragment = selectedText();
+        });
+        reviseButton.addEventListener('click', function () {
+          selectedFragment = selectedFragment || selectedText();
+          quote.textContent = selectedFragment ? 'Выделенный фрагмент: «' + selectedFragment + '»' : '';
+          quote.hidden = !selectedFragment;
+          reviseForm.hidden = false;
+          feedback.focus();
+        });
+        cancel.addEventListener('click', function () {
+          reviseForm.hidden = true;
+          selectedFragment = '';
+        });
+        reviseForm.addEventListener('submit', function (event) {
+          event.preventDefault();
+          if (busy || !reviseForm.reportValidity()) return;
+          var instruction = feedback.value.trim();
+          if (instruction.length < 8) return;
+          var request = selectedFragment ?
+            'Измени только этот фрагмент: «' + selectedFragment + '».\\nУказание: ' + instruction :
+            instruction;
+          // Explicit confirmation is still required before the existing
+          // content-editor worker queues a revision. No auto-publication.
+          sendChip({ label: 'Доработать этот пост', capability: 'revise_material',
+            params: { material_id: block.artifact_id, feedback: request } });
+        });
+        controls.appendChild(reviseButton);
+        controls.appendChild(reviseForm);
+        preview.appendChild(controls);
+      }
+      card.appendChild(preview);
+    }
     // Use the existing protected file route only for a completed video's scoped
     // job URL. Never infer a thumbnail for an arbitrary material or another company.
     if (isVideo) {
