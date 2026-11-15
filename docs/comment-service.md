@@ -203,6 +203,9 @@ still required for every outbound message.
   retried automatically**. A person may explicitly use the existing draft button.
   Crash-interrupted `drafting` claims remain locked until manual investigation;
   do not auto-unlock them because a model request may already have been billed.
+  A business owner can explicitly choose **Сбросить зависшую генерацию** in Studio
+  after 15 minutes; the prior run is marked failed, and a late model response
+  cannot overwrite the recovered state. This reset does not call the model.
 - A disconnected channel, manual comment, test comment, already drafted or
   handled comment cannot be automatically regenerated. A complaint or unknown
   fact still goes to human review under the existing safety policy.
