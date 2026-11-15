@@ -873,3 +873,45 @@ async def test_stale_generation_requires_explicit_owner_reset_and_never_resurrec
     assert not list(db.scalars(select(Approval)))
     assert not list(db.scalars(select(Publication)))
     assert await run_comment_draft_once(factory, svc.settings, llm=slow) == 0
+
+
+
+@pytest.mark.asyncio
+async def test_replaced_draft_claim_cannot_be_overwritten_by_late_llm(ctx):
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import update
+    from app.comments.drafting import run_comment_draft_once
+
+    db, product, svc, _, gateway = ctx
+    await svc.connect(product.id, ConnectInput(platform="youtube", account_id="UCbusiness", token="private-token"))
+    await svc.sync(product.id, "youtube")
+    comment_id = db.scalar(select(BusinessComment.id))
+    svc.configure(product.id, AgentSettings(auto_draft=True))
+    svc.settings.comment_background_draft_enabled = True
+    factory = lambda: Session(db.get_bind(), expire_on_commit=False)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    class PausedLLM:
+        async def generate(self, request):
+            started.set()
+            await release.wait()
+            return await svc.llm.generate(request)
+
+    original = asyncio.create_task(run_comment_draft_once(factory, svc.settings, llm=PausedLLM()))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+        db.execute(update(BusinessComment).where(BusinessComment.id == comment_id).values(
+            updated_at=datetime.now(timezone.utc) - timedelta(minutes=16)))
+        db.commit()
+        svc.recover_stalled_draft(product.id, comment_id)
+        replacement = await svc.draft(product.id, comment_id)
+        assert replacement.id is not None
+    finally:
+        release.set()
+        await original
+    db.expire_all()
+    comment = db.get(BusinessComment, comment_id)
+    assert comment.status == "draft" and comment.reply_id == replacement.id
+    assert db.get(Artifact, replacement.id).kind == "comment_reply"
+    assert not gateway.sent
