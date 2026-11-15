@@ -38,8 +38,12 @@ def test_pilot_is_explicit_and_only_changes_existing_form():
     assert "sg:dispatcher:editor-ready" in js
     assert "sg:dispatcher:editor-ready" in pilot
     assert "data-ui-sdk-advanced" in js
-    assert "import \"@ui-sdk/web/toggle\"" in pilot
-    assert "pressedchange" in pilot
+    assert "import \"@ui-sdk/web/collapsible\"" in pilot
+    assert "ui-collapsible-trigger" in pilot
+    assert "ui-collapsible-panel" in pilot
+    assert "default-open" in pilot
+    assert "panel.hidden = !expanded" in pilot
+    assert "pressedchange" not in pilot
     # The pilot must not invent its own path for commands, changes, or confirmations.
     assert "fetch(" not in pilot
     assert "/dispatch/confirm" not in pilot
