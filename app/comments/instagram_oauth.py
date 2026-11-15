@@ -38,8 +38,22 @@ def valid_public_base(settings) -> str:
     return base
 
 
-def redirect_uri(settings, product_id) -> str:
-    return f"{valid_public_base(settings)}/products/{product_id}/comments/instagram/oauth/callback"
+def redirect_uri(settings, product_id=None) -> str:
+    # Single registered redirect for every company in the SaaS.
+    return f"{valid_public_base(settings)}/studio/integrations/instagram/oauth/callback"
+
+
+def state_product_id(state: str) -> str | None:
+    """Read untrusted routing hint only; verify_state MUST validate its HMAC."""
+    if len(state) > 1500:
+        return None
+    try:
+        encoded = state.split(".", 1)[0]
+        data = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        candidate = json.loads(data).get("p")
+        return candidate if isinstance(candidate, str) and len(candidate) == 36 else None
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return None
 
 
 def new_state(settings, product_id, login: str) -> tuple[str, str]:
