@@ -34,10 +34,10 @@ def test_pilot_is_default_on_with_legacy_query_override_and_only_changes_existin
     js = (ROOT / "app/api/dispatcher_assets/dispatcher.js").read_text(encoding="utf-8")
     pilot = (ROOT / "studio_ui_sdk/pilot.js").read_text(encoding="utf-8")
     assert "get('ui_sdk') !== '0'" in js
-    assert "/studio/assets/ui-sdk-pilot.bundle.js?v=1" in js
+    assert "/studio/assets/ui-sdk-pilot.bundle.js?v=2" in js
     assert "?ui_sdk=0" in js
     growth = (ROOT / "app/api/growth_v4.py").read_text(encoding="utf-8")
-    assert "dispatcher.js?v=ui-sdk-default-20261115" in growth
+    assert "dispatcher.js?v=ui-sdk-review-20261115" in growth
     assert "sg:dispatcher:editor-ready" in js
     assert "sg:dispatcher:editor-ready" in pilot
     assert "data-ui-sdk-advanced" in js
