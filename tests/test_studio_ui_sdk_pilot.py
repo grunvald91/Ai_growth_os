@@ -30,11 +30,14 @@ def test_pilot_bundle_is_served_from_same_origin(monkeypatch, tmp_path):
     assert result.body == bundle.read_bytes()
 
 
-def test_pilot_is_explicit_and_only_changes_existing_form():
+def test_pilot_is_default_on_with_legacy_query_override_and_only_changes_existing_form():
     js = (ROOT / "app/api/dispatcher_assets/dispatcher.js").read_text(encoding="utf-8")
     pilot = (ROOT / "studio_ui_sdk/pilot.js").read_text(encoding="utf-8")
-    assert "get('ui_sdk') === '1'" in js
+    assert "get('ui_sdk') !== '0'" in js
     assert "/studio/assets/ui-sdk-pilot.bundle.js?v=1" in js
+    assert "?ui_sdk=0" in js
+    growth = (ROOT / "app/api/growth_v4.py").read_text(encoding="utf-8")
+    assert "dispatcher.js?v=ui-sdk-default-20261115" in growth
     assert "sg:dispatcher:editor-ready" in js
     assert "sg:dispatcher:editor-ready" in pilot
     assert "data-ui-sdk-advanced" in js

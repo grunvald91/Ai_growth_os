@@ -1,82 +1,51 @@
-# ServGo Studio — UI SDK opt-in pilot
+# ServGo Studio — UI SDK pilot
 
-Status: **experimental, isolated branch**, no rollout or production deployment.
+Status: **merged, enabled by default for testing**, no database migrations.
 
-## Baseline and rollback guarantee
+## Enable and rollback behavior
 
-- Repository: `grunvald91/Ai_growth_os`
-- Baseline main commit (15 November 2026): `ef20cb0d7b086fa7a6acaf11406846fe04515a3c`
-- Branch: `feature/studio-ui-sdk-pilot-20261115`
-- Pilot is off by default: Studio's existing CSS, dispatch routes, approvals, history,
-  voice input, and executors continue untouched unless the preview query is used.
-- View pilot by adding `?ui_sdk=1` to a company Studio URL **after** its asset is built.
-- Stop using the pilot instantly by removing `?ui_sdk=1` or reopening the normal URL.
-- If the branch is not merged, closing the draft PR and deleting the branch fully
-  abandons the experiment without changing production.
-- If this is merged in a future release, revert the isolated feature commits and redeploy
-  the previously known-good release; removing the query parameter turns off only the
-  pilot presentation, not any future server-side migrations.
+- Existing baseline before PR #320: `ef20cb0d7b086fa7a6acaf11406846fe04515a3c`.
+- UI SDK is now loaded by default on Studio pages that use the dispatcher.
+- To test the legacy editor on a page, append `?ui_sdk=0` to that page's URL.
+- To return to UI SDK mode, remove that query parameter or use `?ui_sdk=1`.
+- This only affects presentation in the dispatcher edit form. The underlying
+  API, approvals, executor, user and company scope are unchanged.
+- To revert the feature entirely, revert the merge commit for PR #320
+  (`84dcf815033dde3660c4e4cb5b686a7a56e65618`) and the subsequent
+  default-enabled commit, and redeploy the previous known-good revision.
+- Source-code rollback does not replace database backup. No migrations were
+  introduced by the pilot.
 
-The baseline SHA protects source-code rollback. It is **not** a database backup.
-No database migrations, network calls to external UI SDK CDNs, or production flags
-are added in this pilot.
+## What is actually new
 
-## Scope of the first working form
+Ask dispatcher to prepare a post. Open its pending confirmation with
+`Изменить`. The existing edit form now wraps its two optional fields
+(`Аудитория` and `Дополнительные требования`) into a native UI SDK
+`<ui-collapsible>` section. If optional fields contain values, the section
+starts open. Closing it does not clear typed values.
 
-In the current dispatcher, create a post in the conversation; a pending confirmation
-appears. Press `Изменить` to open the existing edit form. The pilot replaces only the
-presentation of the two optional fields (audience and editorial brief) with a UI SDK
-`<ui-toggle>` section. If either field already contains a value, the section starts
-expanded. Hidden inputs are **not** removed or discarded.
+Editing stays on `POST /studio/products/{id}/dispatch/edit` with a server
+revision check. Creating or publishing requires a separate explicit
+confirmation on the existing dispatcher endpoint.
 
-The rest of the scenario is unchanged:
-1. Edit the topic, platform and optional fields.
-2. Save with the existing `POST /studio/products/{id}/dispatch/edit`.
-3. See the updated confirmation.
-4. Explicitly confirm to run the existing executor.
+The SDK is not a replacement for the dispatcher or its one-action-per-turn
+execution logic. More UI modules, multi-action orchestration and a full
+conversation-driven content editing loop are future work.
 
-The pilot only enhances an already-created editor after the authenticated Studio
-page has loaded. It introduces no new LLM actions, costs or permission scopes.
+## Verification
 
-## Build and test (Codespaces/local)
+`studio_ui_sdk` contains pinned package and lock files, bundling commands
+and a Chromium test scaffold. The built asset is self-hosted at
+`/studio/assets/ui-sdk-pilot.bundle.js`, not loaded from an external CDN.
 
 ```sh
-git checkout feature/studio-ui-sdk-pilot-20261115
-cd studio_ui_sdk
-npm ci   # uses the committed, reproducible package-lock.json
-npm run build
+cd studio_ui_sdk && npm ci && npm run build
 cd ..
 python -m pytest -q tests/test_studio_ui_sdk_pilot.py tests/test_dispatcher_api.py
 ```
 
-Serve the normal FastAPI app; its authenticated asset route reads the built
-`app/api/dispatcher_assets/ui-sdk-pilot.bundle.js`. The generated JavaScript is committed to the pilot branch and is
-self-hosted on ServGo's origin, not loaded from an SDK CDN.
-
-First isolated CI build: [GitHub Actions run 43707730288](https://github.com/grunvald91/Ai_growth_os/actions/runs/43707730288) —
-25 dispatcher and pilot tests passed. Browser/visual testing is still pending.
-
-## Stage 1 review: dispatcher coverage
-
-The code currently has a single-capability registry, one decision per request, an
-`/edit` endpoint for pending creation confirmations, revision checks, and separate
-`/confirm` calls. For actual code, see `app/dispatcher/registry.py`,
-`app/dispatcher/service.py`, `app/dispatcher/editable.py`,
-`app/api/dispatcher.py`, and `app/api/dispatcher_assets/dispatcher.js`.
-
-The registry currently contains 26 named capabilities. The first integration
-uses `create_post`; broader multi-action orchestration, publication/SEO forms,
-and voice-driven sequential workflows are **not implemented by this change**.
-
-## Release gates
-
-- The bundle must build with the pinned SDK versions and load under the actual
-  deployed content-security policy.
-- Check desktop/mobile, light/dark themes, keyboard tab/space and screen-reader
-  announcement, plus background/offline behavior.
-- Run real authenticated single-tenant and cross-tenant API tests.
-- Confirm editing and rejecting without creating a paid task; then test a deliberate
-  confirm with a low-cost test company.
-- Check `ui_sdk=0` / no parameter against original design and voice dictation.
-- Review bundle size, supply chain and generated lockfile before any `main` merge.
-- Do not treat a green build as end-to-end visual or production validation.
+Latest earlier verified pilot run:
+[GitHub Actions 43709893591](https://github.com/grunvald91/Ai_growth_os/actions/runs/43709893591) —
+25 Python tests and Chromium smoke (toggle, keyboard, values, default-open).
+The live authenticated Studio and production deployment must be verified
+separately from the isolated browser smoke.
