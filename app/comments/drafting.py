@@ -82,10 +82,20 @@ async def run_comment_draft_once(session_factory, settings, *, llm=None):
                     db.rollback()
                     log.warning("comment_auto_draft_rejected product=%s comment=%s type=%s",
                                 product_id, comment_id, type(exc).__name__)
+                    # A failed paid call is already a claim. Never start many
+                    # other paid calls in the same tick after this failure.
+                    status = db.scalar(select(BusinessComment.status).where(
+                        BusinessComment.id == comment_id))
+                    if status == "draft_failed":
+                        return 0
                 except Exception as exc:
                     db.rollback()
                     log.warning("comment_auto_draft_failed product=%s comment=%s type=%s",
                                 product_id, comment_id, type(exc).__name__)
+                    status = db.scalar(select(BusinessComment.status).where(
+                        BusinessComment.id == comment_id))
+                    if status in {"draft_failed", "drafting"}:
+                        return 0
 
         after = candidates[-1][0], candidates[-1][1]
         if len(candidates) < PAGE_SIZE:
