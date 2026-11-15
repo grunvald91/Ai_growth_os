@@ -9,8 +9,15 @@ def test_index_has_yandex_verification_and_meta():
     assert '<meta name="yandex-verification" content="24c86f64d4a09338" />' in html
     assert '<meta name="description"' in html
     assert 'og:image" content="https://servgo.ru/og-image.png"' in html
-    # Общий canonical на главную склеил бы страницы бизнесов с главной — его ставит JS по маршруту.
-    assert 'rel="canonical"' not in html
+    # Общий статический canonical склеил бы страницы бизнесов с главной.
+    assert '<link rel="canonical"' not in html
+    # Canonical appears immediately in the head, before the app bundle starts.
+    assert '<script id="seo-route-bootstrap">' in html
+    assert "canonical.rel = 'canonical'" in html
+    assert "canonical.href = 'https://servgo.ru' + canonicalPath" in html
+    assert "'/business/' + businessId" in html
+    # Non-public SPA routes must not expose the generic homepage shell for indexing.
+    assert "robots.setAttribute('content', 'noindex, follow')" in html
 
 
 def test_robots_blocks_private_but_not_api():
