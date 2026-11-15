@@ -330,10 +330,15 @@ async def main() -> None:
             )
     finally:
         calendar_task.cancel()
-        try:
-            await calendar_task
-        except asyncio.CancelledError:
-            pass
+        if comments_task is not None:
+            comments_task.cancel()
+        for task in (calendar_task, comments_task):
+            if task is None:
+                continue
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 if __name__ == "__main__":
