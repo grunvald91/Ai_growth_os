@@ -91,6 +91,9 @@ def test_owner_creates_company_and_admin_accounts(studio):
 
 # The sign-in page must be reachable without a login; logout only clears the cookie.
 PUBLIC = {"/health", "/health/version", "/studio/login", "/studio/logout", "/studio/session/logout", "/studio/sso", "/studio/sso/create",  # sso: signed one-time link from ServGo
+          # Meta's public endpoint authenticates with verify token (GET)
+          # or raw-body HMAC-SHA256 (POST), tested in test_instagram_unified.py.
+          "/api/integrations/instagram/webhook",
           # Read-only feed of already published blog articles; the public blog on servgo.ru renders pages from it.
           "/public/blog/{product_slug}/articles", "/public/blog/{product_slug}/articles/{slug}",
           "/public/blog/businesses/with-articles", "/public/blog/businesses/{business_id}/articles",
