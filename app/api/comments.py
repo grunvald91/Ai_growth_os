@@ -169,7 +169,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
         for comment in rows:
             record = svc.db.get(Artifact, comment.reply_id) if comment.reply_id else None
             reply = json.loads(record.content) if record else {}
-            terminal = comment.status in {"sending", "sent", "delivery_unknown", "skipped", "handled"}
+            terminal = comment.status in {"drafting", "sending", "sent", "delivery_unknown", "skipped", "handled"}
             controls = ''
             if not terminal:
                 controls = f'<button class="btn ghost" data-draft="{comment.id}">{"Подготовить заново" if record else "Подготовить ответ"}</button>'
