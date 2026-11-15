@@ -202,3 +202,19 @@
 .dp-confirm:has(.dp-create-details) .dp-confirm-actions .dp-btn:last-child{grid-column:1/-1;
   background:transparent;border:0;min-height:32px;font-weight:500;text-decoration:underline}
 .dp-confirm:has(.dp-create-details) .dp-confirm-actions[hidden]{display:none!important}
+
+/* Experimental UI SDK Web Component: created only in ?ui_sdk=1 mode. */
+.dp-create-editor .dp-ui-sdk-collapsible{display:block;min-width:0}
+.dp-create-editor .dp-ui-sdk-trigger{display:block}
+.dp-create-editor .dp-ui-sdk-trigger>button{
+  width:100%;min-height:44px;padding:9px 13px;border:1px solid var(--dp-line,#d8e4f0);
+  border-radius:11px;background:var(--dp-soft,#f6f9fd);color:var(--dp-text2,#3d536b);
+  font:inherit;font-size:13px;font-weight:650;text-align:left;cursor:pointer;
+}
+.dp-create-editor .dp-ui-sdk-trigger>button::after{content:"⌄";float:right;font-size:18px;line-height:1}
+.dp-create-editor .dp-ui-sdk-collapsible[data-open] .dp-ui-sdk-trigger>button::after{content:"⌃"}
+.dp-create-editor .dp-ui-sdk-trigger>button:focus-visible{
+  outline:2px solid var(--dp-accent,#3478d6);outline-offset:2px
+}
+.dp-create-editor .dp-ui-sdk-advanced{display:grid;gap:9px;min-width:0;padding-top:9px}
+.dp-create-editor .dp-ui-sdk-advanced[hidden]{display:none!important}
