@@ -35,3 +35,6 @@ docs/*.tgz
 docs/*.tar.gz
 docs/*.zip
 deploy/server/deploy.json
+
+# Experimental Studio UI SDK local dependencies (bundle is versioned separately)
+studio_ui_sdk/node_modules/
