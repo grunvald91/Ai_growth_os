@@ -167,12 +167,46 @@ class CommentService:
                 status="executed", request_data={"platform": platform, "channel_id": str(channel.id)}, executed_at=now()))
             self.db.commit()
 
-    async def sync(self, product_id, platform):
+    async def sync(self, product_id, platform, *, background=False):
+        """Import a bounded batch. Background mode requires business opt-in and is read-only."""
+        from datetime import timedelta
+        import logging
+
         self.product(product_id, lock=True)
         channel = self.channel(product_id, platform, lock=True)
         if not channel or channel.status != "connected":
             raise ValueError("Сначала подключите площадку")
-        rows, cursor = await self.gateway.fetch(channel, self.secrets.load_token(channel.id))
+        previous = dict(channel.cursor or {})
+        poll = dict(previous.get("_poll") or {})
+        if background:
+            config, _ = self.config(product_id)
+            if not config.enabled or not config.auto_import:
+                return 0
+            try:
+                due = datetime.fromisoformat(poll["next_at"])
+                if due.tzinfo is not None and due > now():
+                    return 0
+            except (KeyError, TypeError, ValueError):
+                pass
+
+        try:
+            rows, cursor = await self.gateway.fetch(channel, self.secrets.load_token(channel.id))
+        except Exception as exc:
+            if not background:
+                raise
+            # Record bounded backoff without storing access tokens or raw error messages.
+            attempts = min(10, int(poll.get("failures", 0)) + 1)
+            delay = min(3600, 60 * (2 ** min(attempts - 1, 6)))
+            poll.update({"failures": attempts, "last_failure_at": now().isoformat(),
+                         "next_at": (now() + timedelta(seconds=delay)).isoformat(),
+                         "last_error": "fetch_failed"})
+            channel.cursor = {**previous, "_poll": poll}
+            self.db.commit()
+            logging.getLogger(__name__).warning(
+                "comment_background_fetch_failed product=%s platform=%s type=%s",
+                product_id, platform, type(exc).__name__)
+            return 0
+
         count = 0
         for item in rows:
             if not item.get("text"):
@@ -186,6 +220,15 @@ class CommentService:
                 source="platform", target={**item["target"], "channel_id": str(channel.id)}))
             count += 1
             self.db.flush()
+        cursor = dict(cursor)
+        if background:
+            poll.update({"failures": 0, "last_success_at": now().isoformat(),
+                         "next_at": (now() + timedelta(seconds=self.settings.comment_background_poll_seconds)).isoformat(),
+                         "last_error": None})
+            cursor["_poll"] = poll
+        elif "_poll" in previous:
+            # Manual refresh must not delete the background worker's durable schedule.
+            cursor["_poll"] = previous["_poll"]
         channel.cursor = cursor
         self.db.commit()
         return count
