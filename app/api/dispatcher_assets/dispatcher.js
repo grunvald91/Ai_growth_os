@@ -19,7 +19,7 @@
   if (new URLSearchParams(window.location.search).get('ui_sdk') !== '0') {
     var pilotScript = document.createElement('script');
     pilotScript.type = 'module';
-    pilotScript.src = '/studio/assets/ui-sdk-pilot.bundle.js?v=1';
+    pilotScript.src = '/studio/assets/ui-sdk-pilot.bundle.js?v=3';
     document.head.appendChild(pilotScript);
   }
 
@@ -206,6 +206,7 @@
     var isVideo = voiceHoldEnabled && String(block.href || '').indexOf(productBase) === 0 &&
       /^\/whiteboard\/[0-9a-f-]{36}$/i.test(videoPath);
     var card = el(isVideo ? 'a' : 'div', 'dp-material' + (isVideo ? ' dp-material--video' : ''));
+    card.dataset.artifactId = String(block.artifact_id || "");
     if (isVideo) card.href = block.href;
     var top = el('div', 'dp-material-top');
     top.appendChild(el('span', 'dp-material-kind', voiceHoldEnabled ? friendlyKind(block.kind) : block.kind));
@@ -255,6 +256,8 @@
         row.appendChild(submit); row.appendChild(cancel);
         reviseForm.appendChild(quote); reviseForm.appendChild(label); reviseForm.appendChild(row);
         var selectedFragment = '';
+        var lastRequestSignature = '';
+        var lastRequestKey = '';
         function selectedText() {
           var selection = window.getSelection && window.getSelection();
           if (!selection || !selection.rangeCount || selection.isCollapsed) return '';
@@ -282,13 +285,20 @@
           if (busy || !reviseForm.reportValidity()) return;
           var instruction = feedback.value.trim();
           if (instruction.length < 8) return;
-          var request = selectedFragment ?
-            'Измени только этот фрагмент: «' + selectedFragment + '».\\nУказание: ' + instruction :
-            instruction;
-          // Explicit confirmation is still required before the existing
-          // content-editor worker queues a revision. No auto-publication.
+          // Send the fragment separately so the server verifies that it still
+          // belongs to this exact company-owned post and version.
+          var params = { material_id: block.artifact_id, feedback: instruction,
+            source_version: String(block.version || 1) };
+          if (selectedFragment) params.fragment = selectedFragment;
+          var signature = JSON.stringify(params);
+          if (lastRequestSignature !== signature) {
+            lastRequestSignature = signature;
+            lastRequestKey = newKey();
+          }
+          // Explicit confirmation is still required before the editor queues
+          // generation; retrying a mobile request reuses the same client key.
           sendChip({ label: 'Доработать этот пост', capability: 'revise_material',
-            params: { material_id: block.artifact_id, feedback: request } });
+            params: params }, lastRequestKey);
         });
         controls.appendChild(reviseButton);
         controls.appendChild(reviseForm);
@@ -314,6 +324,10 @@
     var open = el(isVideo ? 'span' : 'a', 'dp-link', isVideo ? 'Посмотреть видео →' : 'Открыть полностью');
     if (!isVideo) open.href = block.href;
     card.appendChild(open);
+    if (block.body && !block.truncated && !isVideo) {
+      card.__sgPostReview = { version: block.version || 1 };
+      document.dispatchEvent(new CustomEvent('sg:dispatcher:post-ready', { detail: { card: card } }));
+    }
     return card;
   }
 
@@ -568,12 +582,28 @@
     return bubble;
   }
 
+  function markSupersededPost(message) {
+    (message.blocks || []).forEach(function (block) {
+      if (block.type !== 'material' || !block.revision_of) return;
+      var old = Array.from(feed.querySelectorAll('.dp-material')).find(function (node) {
+        return node.dataset.artifactId === block.revision_of;
+      });
+      if (!old) return;
+      old.classList.add('dp-material--superseded');
+      var status = old.querySelector('.dp-material-status');
+      if (status) status.textContent = 'Есть новая версия';
+      var oldEdit = old.querySelector('.dp-post-actions');
+      if (oldEdit) oldEdit.remove();
+    });
+  }
+
   function upsert(message) {
     var node = renderMessage(message);
     var existing = feed.querySelector('[data-id="' + message.id + '"]');
     if (Number.isInteger(message.seq)) node.setAttribute('data-seq', String(message.seq));
     if (existing) {
       feed.replaceChild(node, existing);
+      markSupersededPost(message);
       return;
     }
     if (hydrated && voiceHoldEnabled) node.classList.add('dp-enter');
@@ -585,6 +615,7 @@
     });
     if (following) feed.insertBefore(node, following);
     else feed.appendChild(node);
+    markSupersededPost(message);
   }
 
   function renderHints() {
@@ -683,8 +714,9 @@
     return true;
   }
 
-  function sendChip(chip) {
-    send({ mode: 'chip', chip: { label: chip.label, capability: chip.capability, params: chip.params || {} } }, chip.label);
+  function sendChip(chip, clientKey) {
+    return send({ mode: 'chip', client_key: clientKey,
+      chip: { label: chip.label, capability: chip.capability, params: chip.params || {} } }, chip.label);
   }
 
   function createCommand(text) {

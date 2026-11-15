@@ -84,13 +84,15 @@ def card(ctx: Context, row: Artifact) -> dict:
     """
     item = {"type": "material", "artifact_id": str(row.id), "kind": KIND_LABELS.get(row.kind, "Материал"),
             "title": row.title[:300], "status": STATUS_LABELS.get(_status(row), _status(row)),
-            "excerpt": excerpt(row, EXCERPT_CARD), "href": _page(ctx, row)}
+            "excerpt": excerpt(row, EXCERPT_CARD), "version": row.version,
+            "href": _page(ctx, row)}
     if row.kind == "channel_text" and _status(row) == "awaiting_approval":
         data = material_data(row)
         body = str(data.get("body") or "").strip()
         item["body"] = body[:12000]
         item["truncated"] = len(body) > 12000
         item["can_revise"] = bool(body) and not item["truncated"]
+        item["revision_of"] = str(data.get("revision_of") or "")[:64] or None
     return item
 
 
@@ -175,10 +177,27 @@ async def describe_revise_material(ctx: Context, params: ReviseParams) -> Outcom
     if row is None:
         return Outcome("Не нашёл пост на проверке, который можно доработать.",
                        "Не нашёл пост для доработки.", [links_block(ctx, "review")], ok=False)
+    if _status(row) not in {"awaiting_approval", "approved"}:
+        return Outcome("Эта версия поста уже недоступна для правки. Откройте актуальную версию.",
+                       "Пост изменился. Откройте актуальную версию.", [card(ctx, row)], ok=False)
+    if params.source_version is not None and params.source_version != row.version:
+        return Outcome("Выбранная версия поста устарела. Откройте актуальную версию.",
+                       "Версия устарела.", [card(ctx, row)], ok=False)
+    feedback = params.feedback
+    if params.fragment:
+        source = str(material_data(row).get("body") or "")
+        if params.fragment not in source:
+            return Outcome("Выделенный фрагмент больше не найден. Выделите текст заново.",
+                           "Фрагмент изменился.", [card(ctx, row)], ok=False)
+        feedback = ("Измени только выделенный фрагмент: «" + params.fragment +
+                    "». Остальное сохрани. Указание владельца: " + feedback)
+        if len(feedback) > 1800:
+            return Outcome("Замечание вместе с выделенным текстом слишком длинное.",
+                           "Сократите выделение.", ok=False)
     return Confirmation(title="Доработать пост?",
-                        details=[row.title[:120], f"Что поправить: {params.feedback}",
+                        details=[row.title[:120], f"Что поправить: {feedback}",
                                  "Команда перепишет пост по вашей правке. Новая версия снова придёт вам на проверку."],
-                        params={"material_id": str(row.id), "version": row.version, "feedback": params.feedback},
+                        params={"material_id": str(row.id), "version": row.version, "feedback": feedback},
                         confirm_label="Доработать")
 
 

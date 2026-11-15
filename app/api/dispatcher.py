@@ -30,7 +30,7 @@ from app.voice.dictionary import SLUG
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ASSETS = Path(__file__).parent / "dispatcher_assets"
-ASSET_VERSION = "13"
+ASSET_VERSION = "14"
 MAX_BODY_BYTES = 1_000_000  # same guard as the Studio forms
 
 
@@ -232,6 +232,12 @@ def organization_choices(request: Request, db: Session, settings: Settings, prod
 def dispatcher_css():
     return Response((ASSETS / "dispatcher.css").read_text(encoding="utf-8"), media_type="text/css",
                     headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/studio/assets/dispatcher-review.css")
+def dispatcher_review_css():
+    return Response((ASSETS / "dispatcher-review.css").read_text(encoding="utf-8"),
+                    media_type="text/css", headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/studio/assets/dispatcher.js")

@@ -384,6 +384,9 @@ def render_v4(page, request, pid, switch):
     title_tag = original.outer(original.find(tag='title')) or '<title>Growth OS</title>'
     styles = ''.join(m.group() for m in re.finditer(r'<link\b[^>]*rel="stylesheet"[^>]*>', page))
     styles = re.sub(r'<link[^>]*dispatcher\.css[^>]*>', '', styles)
+    # V4 keeps its own layout. Import only the post preview / UI SDK controls.
+    if pid and (home or current == base + '/create'):
+        styles += '<link rel="stylesheet" href="/studio/assets/dispatcher-review.css?v=1">'
     # Page-specific form styles and scripts belong to their original modules.
     styles += ''.join(original.outer(e) for e in original.elements if e[0]=='style')
     replacements = [(doc.find(ident='main'), content), (doc.find(ident='leftNav'), ''.join(link(r) for r in links)),
@@ -463,10 +466,10 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>inline-post-review-20261115', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>inline-post-review-v2-20261115', extras)
     if pid and current == base+'/create':
         extras += '<script src="/studio/assets/create-studio.js?v=history-20261104"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=inline-post-review-20261115"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=inline-post-review-v2-20261115"></script>'
     if pid and (home or current == base+'/create'):
         # The glow measures the existing recorder stream; load before dispatcher.js.
         extras = '<script src="/studio/assets/voice-glow.js?v=2"></script>' + extras

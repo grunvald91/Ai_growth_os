@@ -485,3 +485,52 @@ async def test_inline_selected_fragment_rewrite_returns_reviewable_new_version(d
     db.refresh(original)
     assert original.status == ArtifactStatus.REJECTED
     assert db.scalar(select(Publication)) is None  # approving never sends the post
+
+
+@pytest.mark.asyncio
+async def test_inline_fragment_is_scoped_to_current_version_and_exact_saved_text(db, product):
+    source = material(db, product, body="Первая часть. Сложный фрагмент. Последняя часть.")
+    preview = blocks(await chip(db, product, "show_material",
+                                {"material_id": str(source.id)}, key="preview-current"), "material")[0]
+    assert preview["version"] == source.version
+    assert preview["body"] == "Первая часть. Сложный фрагмент. Последняя часть."
+
+    valid = await chip(db, product, "revise_material", {
+        "material_id": str(source.id), "source_version": str(source.version),
+        "fragment": "Сложный фрагмент", "feedback": "Замени понятными словами"},
+        key="selected-post-1")
+    request = blocks(valid, "confirm")[0]
+    assert "Сложный фрагмент" in " ".join(request["details"])
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_editor")) is None
+
+    outdated = await chip(db, product, "revise_material", {
+        "material_id": str(source.id), "source_version": str(source.version + 1),
+        "fragment": "Сложный фрагмент", "feedback": "Замени понятными словами"},
+        key="selected-stale")
+    assert not blocks(outdated, "confirm")
+    invalid = await chip(db, product, "revise_material", {
+        "material_id": str(source.id), "source_version": str(source.version),
+        "fragment": "Несуществующая фраза", "feedback": "Замени понятными словами"},
+        key="selected-outdated-fragment")
+    assert not blocks(invalid, "confirm")
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_editor")) is None
+
+
+@pytest.mark.asyncio
+async def test_rejected_old_post_version_cannot_be_revised(db, product):
+    row = material(db, product, status=ArtifactStatus.REJECTED)
+    request = await chip(db, product, "revise_material", {
+        "material_id": str(row.id), "source_version": str(row.version),
+        "feedback": "Сделай первый абзац более конкретным"}, key="old-rejected")
+    assert not blocks(request, "confirm")
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_editor")) is None
+
+
+@pytest.mark.asyncio
+async def test_updated_post_carries_revision_lineage_for_old_card_marker(db, product):
+    original = material(db, product)
+    updated = material(db, product, revision_of=str(original.id), body="Новый текст для просмотра")
+    card = blocks(await chip(db, product, "show_material",
+                             {"material_id": str(updated.id)}, key="view-revision"), "material")[0]
+    assert card["revision_of"] == str(original.id)
+    assert card["version"] == updated.version
