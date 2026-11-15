@@ -47,6 +47,12 @@ def test_pilot_is_default_on_with_legacy_query_override_and_only_changes_existin
     assert "default-open" in pilot
     assert "panel.hidden = !expanded" in pilot
     assert "pressedchange" not in pilot
+    assert "sg:dispatcher:post-ready" in js
+    assert "sg:dispatcher:post-ready" in pilot
+    assert "enhancePostPreview" in pilot
+    assert "source_version: String(block.version" in js
+    assert "params.fragment = selectedFragment" in js
+    assert "markSupersededPost" in js
     # The pilot must not invent its own path for commands, changes, or confirmations.
     assert "fetch(" not in pilot
     assert "/dispatch/confirm" not in pilot
