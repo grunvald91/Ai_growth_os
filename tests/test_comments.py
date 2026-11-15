@@ -21,7 +21,7 @@ from app.db.session import get_db
 from app.llm.fake import FakeLLMProvider, LLMResponse, LLMUsage
 from app.llm.service import LLMService
 from app.main import app
-from app.models.domain import AgentRun, Approval, Artifact, CostRecord, Product, Publication, ToolCall
+from app.models.domain import AgentRun, Approval, Artifact, CostRecord, Product, Publication, Task, ToolCall
 from app.privacy import PrivacyGateway
 
 
