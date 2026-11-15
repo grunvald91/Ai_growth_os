@@ -400,3 +400,87 @@ async def test_result_of_an_earlier_topic_arrives_in_the_new_one(db, product):
     current = service.open_conversation(db, product.id, "owner")
     assert added[0].conversation_id == current.id
     assert updates(db, product) == []
+
+
+# ---- Inline post preview and selected-fragment revision flow -----------------------------
+
+@pytest.mark.asyncio
+async def test_inline_review_returns_genuine_post_body_not_only_excerpt(db, product):
+    actual = "Первый абзац.\\n\\nВторой абзац с подробным описанием."
+    row = material(db, product, body=actual)
+    answer = await chip(db, product, "show_material", {"material_id": str(row.id)})
+    preview = blocks(answer, "material")[0]
+    assert preview["body"] == actual
+    assert preview["can_revise"] is True and preview["truncated"] is False
+    assert preview["artifact_id"] == str(row.id)
+    assert "Утвердить" in [x["label"] for x in blocks(answer, "chips")[0]["items"]]
+
+
+@pytest.mark.asyncio
+async def test_inline_review_does_not_offer_approval_of_truncated_post(db, product):
+    row = material(db, product, body="А" * 12030)
+    answer = await chip(db, product, "show_material", {"material_id": str(row.id)})
+    preview = blocks(answer, "material")[0]
+    assert len(preview["body"]) == 12000
+    assert preview["truncated"] is True and preview["can_revise"] is False
+    assert not blocks(answer, "chips")
+    assert preview["href"].endswith(f"/materials/{row.id}")
+
+
+@pytest.mark.asyncio
+async def test_inline_review_never_leaks_body_from_another_company(db, product):
+    outsider = Product(name="Чужая фирма", slug="foreign-company-inline")
+    db.add(outsider)
+    db.commit()
+    secret = material(db, outsider, body="Секретный текст другой компании")
+    result = await chip(db, product, "show_material", {"material_id": str(secret.id)})
+    assert blocks(result, "material") == []
+    assert "Секретный" not in json.dumps(result, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_inline_selected_fragment_rewrite_returns_reviewable_new_version(db, product):
+    original = material(db, product, body="Первый абзац. Второй абзац требует исправления.")
+    feedback = "Измени только этот фрагмент: «Второй абзац требует исправления». Указание: замени обещание."
+    answer = await chip(db, product, "revise_material",
+                        {"material_id": str(original.id), "feedback": feedback}, key="fragment-request")
+    card_ = blocks(answer, "confirm")[0]
+    assert feedback in " ".join(card_["details"])
+    # Nothing is edited or approved until the user explicitly confirms revision.
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_editor")) is None
+    again = await chip(db, product, "revise_material",
+                       {"material_id": str(original.id), "feedback": feedback}, key="fragment-request")
+    assert again["id"] == answer["id"]  # mobile retry does not create a new action
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_editor")) is None
+
+    await service.confirm(db, ctx(db, product), card_["confirmation_id"], accept=True)
+    task = db.scalar(select(Task).where(Task.assigned_agent == "content_editor"))
+    assert task is not None
+    # Simulate the existing editor worker completing and appending its new
+    # artifact; its real LLM integration is covered in revisions tests.
+    original.status = ArtifactStatus.REJECTED
+    revised_body = "Первый абзац. Второй абзац больше не обещает результат."
+    revised = material(db, product, body=revised_body)
+    revised.task_id = task.id
+    revised.version = original.version + 1
+    task.status = TaskStatus.COMPLETED
+    db.commit()
+    messages = updates(db, product)
+    assert len(messages) == 1
+    new_card = blocks(service.to_dict(messages[0]), "material")[0]
+    assert new_card["artifact_id"] == str(revised.id)
+    assert new_card["body"] == revised_body
+    assert new_card["can_revise"] is True
+    assert updates(db, product) == []
+
+    approval_request = await chip(db, product, "approve_material",
+                                  {"material_id": str(revised.id)}, key="approve-new-version")
+    approval = blocks(approval_request, "confirm")[0]
+    db.refresh(revised)
+    assert revised.status == ArtifactStatus.AWAITING_APPROVAL
+    await service.confirm(db, ctx(db, product), approval["confirmation_id"], accept=True)
+    db.refresh(revised)
+    assert revised.status == ArtifactStatus.APPROVED
+    db.refresh(original)
+    assert original.status == ArtifactStatus.REJECTED
+    assert db.scalar(select(Publication)) is None  # approving never sends the post
