@@ -46,6 +46,8 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/services/booking_bot
         run: python -m pytest -q tests/test_rental_logic.py tests/test_create_deploy_archive.py test_booking_utils.py test_schedule_business_guard.py
+      - name: Check frontend SEO source regressions
+        run: python -m pytest -q tests/test_frontend_seo.py
   frontend:
     name: Frontend install and production build
     runs-on: ubuntu-latest
@@ -62,5 +64,7 @@ jobs:
           cache-dependency-path: services/booking_bot/web/frontend/package-lock.json
       - name: Install npm dependencies from imported lockfile
         run: npm ci --legacy-peer-deps
+      - name: Run canonical bootstrap regression
+        run: node --test tests/seo-bootstrap.test.mjs
       - name: Typecheck and build frontend
         run: npm run build

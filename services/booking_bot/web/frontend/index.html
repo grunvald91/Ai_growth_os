@@ -5,6 +5,39 @@
     <meta name="yandex-verification" content="24c86f64d4a09338" />
     <meta name="description" content="ServGo — ИИ-платформа роста для бизнеса услуг: онлайн-запись, пустые окна, смены и зарплата сотрудников, контент, ответы клиентам и разведка конкурентов." />
     <meta name="robots" content="index, follow" />
+    <!-- Route canonical is published before the React bundle and API requests.
+         This generic SPA shell is shared by all routes, so a fixed root canonical
+         would incorrectly merge business pages into the homepage. -->
+    <script id="seo-route-bootstrap">
+      (function () {
+        var pathname = window.location.pathname;
+        var business = /^\/business\/(0*[1-9][0-9]*)\/?$/.exec(pathname);
+        var blog = /^\/business\/(0*[1-9][0-9]*)\/blog(?:\/([a-z0-9]+(?:-[a-z0-9]+)*))?\/?$/.exec(pathname);
+        var idPart = business ? business[1] : blog ? blog[1] : null;
+        var businessId = idPart ? Number(idPart) : null;
+        var canonicalPath = pathname === '/'
+          ? '/'
+          : (idPart && Number.isSafeInteger(businessId))
+            ? '/business/' + businessId + (blog ? '/blog' + (blog[2] ? '/' + blog[2] : '') : '')
+            : null;
+        var robots = document.head.querySelector('meta[name="robots"]');
+        // Keep business blogs indexable even when the server-rendered route
+        // falls back to the SPA: Google may skip rendering pages with noindex.
+        // Other SPA routes are private/utility.
+        if (!canonicalPath) {
+          if (robots) robots.setAttribute('content', 'noindex, follow');
+          return;
+        }
+        var canonical = document.createElement('link');
+        canonical.rel = 'canonical';
+        canonical.href = 'https://servgo.ru' + canonicalPath;
+        document.head.appendChild(canonical);
+        var ogUrl = document.createElement('meta');
+        ogUrl.setAttribute('property', 'og:url');
+        ogUrl.setAttribute('content', canonical.href);
+        document.head.appendChild(ogUrl);
+      })();
+    </script>
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="ServGo" />
     <meta property="og:locale" content="ru_RU" />

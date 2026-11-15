@@ -98,7 +98,8 @@ export function BusinessPage() {
 
   useEffect(() => {
     if (!id) return
-    const path = `/business/${id}`
+    // Aliases such as /business/0012 must not declare a separate canonical.
+    const path = `/business/${business ? business.id : id}`
     if (error) {
       applySeo({ path, noindex: true })
       return

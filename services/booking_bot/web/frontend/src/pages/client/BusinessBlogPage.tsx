@@ -9,7 +9,9 @@ import { applySeo, shortText } from '../../utils/seo'
 export function BusinessBlogPage() {
   const { id, slug } = useParams<{ id: string; slug?: string }>()
   const businessId = Number(id)
-  const base = `/business/${id}`
+  // Normalize numeric IDs so leading-zero URL variants point to the same page.
+  const base = Number.isSafeInteger(businessId) && businessId > 0
+    ? `/business/${businessId}` : `/business/${id}`
   const [business, setBusiness] = useState<BusinessDetail | null>(null)
   const [feed, setFeed] = useState<BusinessBlogFeed | null>(null)
   const [article, setArticle] = useState<BusinessBlogArticle | null>(null)
