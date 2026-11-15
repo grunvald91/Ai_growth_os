@@ -30,7 +30,7 @@ from app.voice.dictionary import SLUG
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ASSETS = Path(__file__).parent / "dispatcher_assets"
-ASSET_VERSION = "10"
+ASSET_VERSION = "11"
 MAX_BODY_BYTES = 1_000_000  # same guard as the Studio forms
 
 
@@ -238,6 +238,17 @@ def dispatcher_css():
 def dispatcher_js():
     return Response((ASSETS / "dispatcher.js").read_text(encoding="utf-8"), media_type="application/javascript",
                     headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/studio/assets/ui-sdk-pilot.bundle.js")
+def dispatcher_ui_sdk_pilot_js():
+    """Optional self-hosted pilot. No SDK code is loaded in the normal Studio flow."""
+    bundle = ASSETS / "ui-sdk-pilot.bundle.js"
+    if not bundle.is_file():
+        raise HTTPException(404, "Пилот UI SDK ещё не собран")
+    return Response(bundle.read_bytes(), media_type="application/javascript",
+                    headers={"Cache-Control": "private, no-store",
+                             "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/studio/products/{product_id}/dispatch/state")
