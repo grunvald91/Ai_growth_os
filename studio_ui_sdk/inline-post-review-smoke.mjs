@@ -121,11 +121,11 @@ try {
     assert.match(requested.body.chip.params.feedback, /без обещаний/);
     assert.equal(revisionStarted, false, "revision must wait for the confirmation");
     await page.locator(".dp-confirm-actions .primary").first().click();
+    await page.locator('[data-id="revision-confirmation-ok"]').waitFor();
     assert.equal(revisionStarted, true);
     await page.evaluate(()=>document.dispatchEvent(new Event("visibilitychange")));
-    await page.locator(".dp-post-body").last().getByText("Исправленная формулировка").waitFor()
-      .catch(async ()=>{ await page.waitForFunction(
-        ()=>document.querySelectorAll(".dp-post-body").length===2); });
+    await page.waitForFunction(
+      ()=>document.querySelectorAll(".dp-post-body").length===2);
     assert.equal(await page.locator(".dp-post-body").last().textContent(), newBody);
     const approveButtons = page.getByRole("button", {name:"Утвердить", exact:true});
     await approveButtons.last().click();
@@ -133,7 +133,7 @@ try {
     assert.equal(approval.body.chip.params.material_id, revisedId);
     assert.equal(calls.filter(c=>c.path.endsWith("/confirm") &&
       c.body.confirmation_id==="approve-confirmation").length,
-      width === 390 ? 0 : 1, "approval is never automatic");
+      0, "approval is never automatic");
     await page.screenshot({path:`../studio-inline-review-${width}.png`, fullPage:true});
     assert.deepEqual(errors, [], "real dispatcher must not throw");
     await page.close();
