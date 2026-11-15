@@ -103,6 +103,13 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
                 steps += f'<li>{esc(step)}<div class="c-step-links">{links}</div></li>' if links else f'<li>{esc(step)}</li>'
             docs = f'<a class="c-docs" href="{esc(item["docs"])}" target="_blank" rel="noopener noreferrer">Официальная документация ↗</a>' if item["docs"] else ''
             help_text = esc(item.get("help", ""))
+            poll_state = (channel.cursor or {}).get("_poll", {}) if channel else {}
+            poll_status = ""
+            if key in {"youtube", "instagram"} and channel:
+                last = esc(str(poll_state.get("last_success_at") or "ещё не выполнялась"))
+                next_at = esc(str(poll_state.get("next_at") or "после включения"))
+                failure = ' · <strong>Предыдущая проверка завершилась ошибкой</strong>' if poll_state.get("last_error") else ""
+                poll_status = f'<p class="c-meta">Автоматическая проверка: {last}. Следующая: {next_at}{failure}</p>'
             if item["live"]:
                 controls = (f'<form class="c-connect" data-platform="{key}"><label>{esc(item["account_label"])}<input name="account_id" required value="{esc(channel.account_id if channel else "")}" autocomplete="off"></label>'
                     '<label>Токен доступа<input name="token" type="password" required autocomplete="new-password" placeholder="Хранится зашифрованным на сервере"></label>'
@@ -111,7 +118,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
                     controls += f'<div class="c-actions"><button class="btn ghost" data-sync="{key}">Загрузить комментарии</button><button class="btn ghost" data-disconnect="{key}">Отключить</button></div>'
             else:
                 controls = f'<a class="btn ghost" href="{base}?tab=test&platform={key}">Подготовить ответ</a>'
-            cards.append(f'<section class="panel c-platform"><div class="c-card-head"><h2>{esc(item["name"])}</h2><span class="chip {"blue" if channel else ""}">{esc(badge)}</span></div><p class="c-meta">{"Доступ напрямую" if key in {"vk", "vk_video"} else "Через зарубежный сервер" if item["live"] else "Ручной режим"}</p><details class="c-guide"><summary>Как получить ID и токен · {len(item["steps"])} шага</summary><ol>{steps}</ol>{docs}</details><p>{esc(item["limits"])}</p>{controls}</section>')
+            cards.append(f'<section class="panel c-platform"><div class="c-card-head"><h2>{esc(item["name"])}</h2><span class="chip {"blue" if channel else ""}">{esc(badge)}</span></div><p class="c-meta">{"Доступ напрямую" if key in {"vk", "vk_video"} else "Через зарубежный сервер" if item["live"] else "Ручной режим"}</p><details class="c-guide"><summary>Как получить ID и токен · {len(item["steps"])} шага</summary><ol>{steps}</ol>{docs}</details><p>{esc(item["limits"])}</p>{poll_status}{controls}</section>')
         content = ('<section class="panel c-platform-intro"><h2>Подключите аккаунты бизнеса</h2>'
             '<p>Для каждой площадки нужны два значения: ID аккаунта и токен доступа — ключ, который площадка выдаёт для работы с комментариями. Это не пароль от аккаунта.</p>'
             '<p>Откройте инструкцию ниже, получите данные по ссылкам, заполните форму и нажмите «Проверить и подключить». Затем загрузите комментарии. В этой версии токены вводятся вручную; при истечении срока действия их нужно заменить.</p>'
