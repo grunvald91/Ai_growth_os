@@ -13,6 +13,15 @@
   var busy = false;
   var hydrated = false;
 
+  // Opt-in preview only. The regular Studio page never loads the SDK bundle.
+  // The bundle is self-hosted and contains no alternative dispatcher executor.
+  if (new URLSearchParams(window.location.search).get('ui_sdk') === '1') {
+    var pilotScript = document.createElement('script');
+    pilotScript.type = 'module';
+    pilotScript.src = '/studio/assets/ui-sdk-pilot.bundle.js?v=1';
+    document.head.appendChild(pilotScript);
+  }
+
   function el(tag, className, text) {
     var node = document.createElement(tag);
     if (className) node.className = className;
@@ -334,8 +343,12 @@
       form.appendChild(platformField);
       form.appendChild(modelField);
       form.appendChild(aspectField);
-      form.appendChild(field('Аудитория (необязательно)', audience));
-      form.appendChild(field('Дополнительные требования', brief));
+      var audienceField = field('Аудитория (необязательно)', audience);
+      audienceField.setAttribute('data-ui-sdk-advanced', '');
+      form.appendChild(audienceField);
+      var briefField = field('Дополнительные требования', brief);
+      briefField.setAttribute('data-ui-sdk-advanced', '');
+      form.appendChild(briefField);
       refreshOptions();
       form.appendChild(status);
       var buttons = el('div','dp-create-edit-actions');
@@ -348,6 +361,8 @@
       });
       buttons.append(discard,save);form.appendChild(buttons);
       details.hidden=true; actions.hidden=true; card.appendChild(form);
+      // Only enhances presentation; the existing form and /dispatch/edit remain authoritative.
+      document.dispatchEvent(new CustomEvent('sg:dispatcher:editor-ready', { detail: { form: form } }));
       form.addEventListener('submit',function (event) {
         event.preventDefault();
         if (!topic.value.trim() || topic.value.trim().length < 3) {
