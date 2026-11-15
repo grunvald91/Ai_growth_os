@@ -21,7 +21,20 @@ function html(prefilled) {
       <label class="dp-create-edit-field" data-ui-sdk-advanced>
         <span>Дополнительные требования</span><textarea name="brief"></textarea></label>
       <button type="submit">Сохранить</button>
-    </form></article></div></section></main>
+    </form>
+    <div class="dp-material" id="post-card">
+      <p class="dp-material-text">Фрагмент</p><a class="dp-link" href="/studio/material">Открыть полностью</a>
+    </div></article></div></section></main>
+    <script>
+      window.reviewRequests = [];
+      const postCard = document.getElementById("post-card");
+      postCard.__sgMaterialReview = {
+        block: {artifact_id:"post-123", kind:"Пост", reviewable:true,
+          body:"Первый абзац. Измени выбранный фрагмент. Последний абзац.",
+          version:2},
+        send(chip,key) {window.reviewRequests.push({chip,key});return true;}
+      };
+    </script>
     <script type="module" src="/ui-sdk-pilot.bundle.js"></script>
   </body></html>`;
 }
@@ -60,6 +73,36 @@ try {
   assert.equal(await panel.isVisible(), true, "Space should reopen panel");
   assert.equal(await page.locator('input[name="audience"]').inputValue(), "Новые клиенты",
     "collapse must not discard form values");
+  // The material is populated by the server and enhanced after lazy module load.
+  const postPreview = page.locator("#post-card ui-collapsible-panel");
+  await postPreview.waitFor();
+  assert.equal(await postPreview.isVisible(), true);
+  assert.equal(await page.locator(".dp-post-review-body").innerText(),
+    "Первый абзац. Измени выбранный фрагмент. Последний абзац.");
+  await page.evaluate(() => {
+    const body = document.querySelector(".dp-post-review-body");
+    const node = body.firstChild;
+    const text = node.textContent;
+    const start = text.indexOf("Измени выбранный фрагмент");
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, start + "Измени выбранный фрагмент".length);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    body.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+  });
+  assert.equal(await page.locator(".dp-post-review-selected").isVisible(), true);
+  await page.locator(".dp-post-review-form textarea").fill("Перепиши проще, не меняя смысл");
+  await page.locator(".dp-post-review-form button[type=submit]").click();
+  const request = await page.evaluate(() => window.reviewRequests[0]);
+  assert.equal(request.chip.capability, "revise_material");
+  assert.equal(request.chip.params.material_id, "post-123");
+  assert.equal(request.chip.params.source_version, "2");
+  assert.equal(request.chip.params.fragment, "Измени выбранный фрагмент");
+  assert.equal(request.chip.params.feedback, "Перепиши проще, не меняя смысл");
+  assert.equal((await page.locator(".dp-post-review-feedback").innerText()).includes("Подтвердите"), true);
+  // The UI sends a request to the dispatcher, not approval or publication.
   await page.screenshot({ path: "../studio-ui-sdk-mobile-smoke.png", fullPage: true });
   await page.goto(origin + "/?prefilled=1", { waitUntil: "networkidle" });
   await page.locator("ui-collapsible-trigger button").waitFor();
