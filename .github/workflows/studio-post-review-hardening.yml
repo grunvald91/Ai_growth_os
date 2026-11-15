@@ -65,7 +65,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install backend test dependencies
-        run: python -m pip install -e . pytest
+        run: python -m pip install -e '.[test]'
       - name: Verify dispatcher material version and backend API
         run: python -m pytest -q tests/test_dispatcher_materials.py tests/test_dispatcher_api.py tests/test_studio_ui_sdk_pilot.py tests/test_growth_live.py
       - name: Vendor reproducible bundle only on feature branch
