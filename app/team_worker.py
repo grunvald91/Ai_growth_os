@@ -303,18 +303,23 @@ async def _comments_loop(settings):
     """Independent intake loop: never runs the publication endpoint."""
     import logging
     from app.comments.polling import run_comment_poll_once
+    from app.comments.drafting import run_comment_draft_once
     while True:
         try:
-            await run_comment_poll_once(SessionLocal, settings)
+            if settings.comment_background_poll_enabled:
+                await run_comment_poll_once(SessionLocal, settings)
+            if settings.comment_background_draft_enabled:
+                await run_comment_draft_once(SessionLocal, settings)
         except Exception:
-            logging.getLogger(__name__).warning("comment_poll_tick_failed", exc_info=False)
+            logging.getLogger(__name__).warning("comment_tick_failed", exc_info=False)
         await asyncio.sleep(15)
 
 
 async def main() -> None:
     settings = get_settings()
     calendar_task = asyncio.create_task(_calendar_loop(settings))
-    comments_task = asyncio.create_task(_comments_loop(settings)) if settings.comment_background_poll_enabled else None
+    comments_task = (asyncio.create_task(_comments_loop(settings))
+                     if settings.comment_background_poll_enabled or settings.comment_background_draft_enabled else None)
     try:
         while True:
             try:

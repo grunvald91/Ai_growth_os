@@ -178,7 +178,42 @@ The opt-in **background import** is implemented for YouTube and Instagram only:
 
 The import loop is off in the default production Compose configuration. Do not
 enable it until operators check real proxy connectivity, YouTube API quota and
-Instagram account credentials. Webhooks, auto-replies, built-in OAuth applications,
-automatic token refresh and live account verification are still **not implemented**.
+Instagram account credentials.
+
+## Background AI reply drafts (separate opt-in)
+
+Automatic **draft generation** is available for newly imported YouTube and Instagram
+comments, but **never publishes any reply**. Existing Studio manual approval is
+still required for every outbound message.
+
+- The API and worker must both receive `COMMENT_BACKGROUND_DRAFT_ENABLED=true`.
+  This operator switch defaults to **false**.
+- Each company must separately enable **Автоматически создавать ИИ-черновики**
+  in the `Бизнес и агент` tab. `auto_draft=false` by default. It can be enabled
+  for manually refreshed comments even when background import is disabled.
+- `COMMENT_BACKGROUND_DRAFT_DAILY_LIMIT` defaults to **20** claim attempts per
+  company per UTC day. It counts attempted calls, including failed generations;
+  only one new comment per worker tick is prepared. This is an operator cap,
+  not a claim about the LLM provider's own billing or limits.
+- Before the model is called, the agent locks the business/comment, creates
+  `Task` and `AgentRun`, sets the comment status to `drafting`, and commits.
+  Other worker instances and manual actions cannot start a second simultaneous
+  generation. Successful calls produce a standard, auditable `draft` or
+  `review` artifact. Failed calls become `draft_failed` and **are never
+  retried automatically**. A person may explicitly use the existing draft button.
+  Crash-interrupted `drafting` claims remain locked until manual investigation;
+  do not auto-unlock them because a model request may already have been billed.
+  A business owner can explicitly choose **Сбросить зависшую генерацию** in Studio
+  after 15 minutes; the prior run is marked failed, and a late model response
+  cannot overwrite the recovered state. This reset does not call the model.
+- A disconnected channel, manual comment, test comment, already drafted or
+  handled comment cannot be automatically regenerated. A complaint or unknown
+  fact still goes to human review under the existing safety policy.
+- There is no background call to `send`, `Publication` or external reply API.
+
+The feature is opt-in and requires an authorized LLM provider already configured
+in the worker. Monitor usage after controlled rollout. Webhooks, **auto-replies
+without human approval**, built-in OAuth applications, automatic token refresh
+and live account verification are still **not implemented**.
 Real end-to-end testing needs authorized platform accounts; offline tests use fake
 providers and HTTP transport mocks.

@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.comments.platforms import reply_limit
@@ -250,23 +250,47 @@ class CommentService:
             raise LookupError("Комментарий не найден")
         return row
 
-    async def draft(self, product_id, comment_id):
+    async def draft(self, product_id, comment_id, *, background=False):
         self.product(product_id, lock=True)
         comment = self.comment(product_id, comment_id, lock=True)
-        if comment.status in {"sending", "sent", "delivery_unknown", "skipped", "handled"}:
-            raise ValueError("Этот комментарий уже обработан или ожидает проверки доставки")
+        if comment.status in {"drafting", "sending", "sent", "delivery_unknown", "skipped", "handled"}:
+            raise ValueError("Этот комментарий уже обрабатывается или завершён")
         facts, profile_digest, config, settings_record = self.knowledge(product_id)
+        if background:
+            if not self.settings.comment_background_draft_enabled or not config.auto_draft:
+                raise ValueError("Автоматическая генерация выключена")
+            if comment.status != "new" or comment.source != "platform" or comment.reply_id:
+                raise ValueError("Автоматическая генерация разрешена только для новых импортированных комментариев")
+            channel = self.channel(product_id, comment.platform, lock=True)
+            if (comment.platform not in {"youtube", "instagram"} or not channel
+                    or channel.status != "connected" or comment.target.get("channel_id") != str(channel.id)):
+                raise ValueError("Исходная площадка не подключена")
+            # Count claims, not only completed LLM calls; failed attempts consume budget too.
+            from datetime import timedelta
+            today = now().replace(hour=0, minute=0, second=0, microsecond=0)
+            attempts = self.db.scalar(select(func.count(Task.id)).where(
+                Task.product_id == product_id, Task.title == "Авто-черновик комментария",
+                Task.created_at >= today)) or 0
+            if attempts >= self.settings.comment_background_draft_daily_limit:
+                raise ValueError("Дневной лимит автоматических черновиков исчерпан")
         if not config.enabled:
             raise ValueError("Агент на паузе")
         if self.llm is None:
             raise ValueError("AI-провайдер не настроен")
-        task = Task(product_id=product_id, title="Ответ на комментарий", assigned_agent="comment_sales",
-                    status=TaskStatus.RUNNING)
+        task = Task(product_id=product_id,
+                    title="Авто-черновик комментария" if background else "Ответ на комментарий",
+                    assigned_agent="comment_sales", status=TaskStatus.RUNNING)
         self.db.add(task); self.db.flush()
         run = AgentRun(task_id=task.id, agent_name="comment_sales", provider=self.settings.llm_provider,
             model=self.settings.llm_model, status="running", started_at=now(),
             input_references=[str(comment.id), "profile:" + profile_digest] + ([str(settings_record.id)] if settings_record else []))
         self.db.add(run); self.db.flush()
+        # Durable claim before the paid model request. Other workers/manual actions
+        # see "drafting" and cannot make a second concurrent LLM call.
+        claim_id = str(uuid4())
+        comment.target = {**(comment.target or {}), "_draft_claim": claim_id}
+        comment.status = "drafting"
+        self.db.commit()
         try:
             response = await self.llm.generate(LLMRequest(system_prompt=prompt_text("comments.reply"), model=self.settings.llm_model,
                 max_tokens=1800, response_schema=ReplyDraft.model_json_schema(),
@@ -279,6 +303,11 @@ class CommentService:
                     provider=self.settings.llm_provider, amount=0, currency="USD", incurred_at=now(),
                     input_tokens=max(0, response.usage.input_tokens), output_tokens=max(0, response.usage.output_tokens),
                     details={"cost_known": False, "note": "Usage recorded; monetary price unavailable."}))
+            # The owner may have explicitly released a stale claim while the
+            # provider was slow; do not resurrect an obsolete background request.
+            self.db.refresh(comment, with_for_update=True)
+            if comment.status != "drafting" or (comment.target or {}).get("_draft_claim") != claim_id:
+                raise ValueError("Генерация была отменена или заменена владельцем")
             result = ReplyDraft.model_validate_json(response.content)
             known_ids = {f["id"] for f in facts}
             if set(result.used_fact_ids) - known_ids:
@@ -305,14 +334,53 @@ class CommentService:
             self.db.commit()
             return artifact
         except Exception:
+            # No automatic retry: the model may already have charged for this call.
+            # A person can explicitly retry from Studio if needed.
+            if comment.status == "drafting" and (comment.target or {}).get("_draft_claim") == claim_id:
+                comment.status = "draft_failed"
             task.status, run.status, run.finished_at = TaskStatus.FAILED, "failed", now()
             run.error = "Не удалось подготовить корректный ответ"
             self.db.commit()
             raise ValueError("Не удалось подготовить корректный ответ. Проверьте настройки AI и повторите.") from None
 
+    def recover_stalled_draft(self, product_id, comment_id):
+        """Owner-only explicit recovery after 15 minutes; never automatically re-generates."""
+        from datetime import timedelta
+
+        self.product(product_id, lock=True)
+        comment = self.comment(product_id, comment_id, lock=True)
+        if comment.status != "drafting":
+            raise ValueError("Нет незавершённой генерации")
+        started = comment.updated_at
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        if started > now() - timedelta(minutes=15):
+            raise ValueError("Генерация ещё выполняется; повторная попытка пока заблокирована")
+        comment.status = "draft_failed"
+        # Preserve an audit trail and mark the interrupted run as failed.
+        runs = self.db.scalars(
+            select(AgentRun).join(Task, AgentRun.task_id == Task.id).where(
+                Task.product_id == product_id, Task.assigned_agent == "comment_sales",
+                AgentRun.status == "running",
+            ).order_by(AgentRun.started_at.desc()).limit(100)
+        )
+        for run in runs:
+            if str(comment.id) not in (run.input_references or []):
+                continue
+            run.status, run.finished_at = "failed", now()
+            run.error = "Незавершённая генерация сброшена владельцем после проверки"
+            task = self.db.get(Task, run.task_id)
+            if task and task.status == TaskStatus.RUNNING:
+                task.status = TaskStatus.FAILED
+            break
+        self.db.commit()
+        return comment
+
     def close(self, product_id, comment_id, status):
         self.product(product_id, lock=True)
         comment = self.comment(product_id, comment_id, lock=True)
+        if comment.status == "drafting":
+            raise ValueError("Сначала дождитесь окончания генерации")
         if comment.status in {"sending", "sent", "delivery_unknown"}:
             raise ValueError("Проверьте доставку на площадке; этот ответ нельзя отправлять повторно")
         comment.status = status

@@ -23,7 +23,7 @@ from app.models.domain import Artifact
 from app.privacy import PrivacyGateway
 
 router = APIRouter()
-STATUS = {"new": "Новый", "draft": "Черновик", "review": "Нужна проверка", "sent": "Отправлен",
+STATUS = {"new": "Новый", "drafting": "ИИ готовит ответ", "draft_failed": "Не удалось подготовить", "draft": "Черновик", "review": "Нужна проверка", "sent": "Отправлен",
           "sending": "Отправляется", "delivery_unknown": "Проверьте доставку", "skipped": "Пропущен", "handled": "Передан человеку"}
 
 
@@ -142,8 +142,9 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
         <label>Примеры хороших ответов<textarea name="examples" rows="4" maxlength="6000">{esc(config.examples)}</textarea></label>
         <label>Что нельзя обещать<textarea name="forbidden_claims" rows="3" maxlength="3000">{esc(config.forbidden_claims)}</textarea></label>
         <label class="c-check"><input name="enabled" type="checkbox" {"checked" if config.enabled else ""}> Агент включён</label>
-        <label class="c-check"><input name="auto_import" type="checkbox" {"checked" if config.auto_import else ""}> Автоматически загружать комментарии (без отправки ответов)</label>
-        <p class="c-help">Импорт работает только после включения оператором на сервере. Сейчас: {"разрешён" if svc.settings.comment_background_poll_enabled else "выключен на сервере"}. Публикация ответов всегда требует вашего подтверждения.</p>
+        <label class="c-check"><input name="auto_import" type="checkbox" {"checked" if config.auto_import else ""}> Автоматически загружать комментарии</label>
+        <label class="c-check"><input name="auto_draft" type="checkbox" {"checked" if config.auto_draft else ""}> Автоматически создавать ИИ-черновики (может расходовать лимит API)</label>
+        <p class="c-help">Импорт: {"включён" if svc.settings.comment_background_poll_enabled else "выключен"} на сервере. ИИ-черновики: {"включены" if svc.settings.comment_background_draft_enabled else "выключены"} на сервере. Лимит: {svc.settings.comment_background_draft_daily_limit} автоматических попыток на компанию за сутки (UTC). Ответы публикуются только после вашего подтверждения.</p>
         <button class="btn primary" type="submit">Сохранить настройки</button></form></section>
         <aside class="panel c-card"><h2>Знания о {esc(product.name)}</h2>{readiness}<p>Профиль бизнеса читается перед каждым ответом. Дополнительные факты вводите только после проверки.</p>
         <details><summary>Данные из профиля</summary><ul class="c-knowledge">{business_facts}</ul></details>
@@ -168,7 +169,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
         for comment in rows:
             record = svc.db.get(Artifact, comment.reply_id) if comment.reply_id else None
             reply = json.loads(record.content) if record else {}
-            terminal = comment.status in {"sending", "sent", "delivery_unknown", "skipped", "handled"}
+            terminal = comment.status in {"drafting", "sending", "sent", "delivery_unknown", "skipped", "handled"}
             controls = ''
             if not terminal:
                 controls = f'<button class="btn ghost" data-draft="{comment.id}">{"Подготовить заново" if record else "Подготовить ответ"}</button>'
@@ -183,10 +184,15 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
                 if reply.get("used_fact_ids"):
                     reply_html += f'<p class="c-meta">Источники: {esc(", ".join(reply["used_fact_ids"]))}</p>'
                 reply_html += f'<button class="btn ghost" data-copy-reply="{copy_id}">Копировать ответ</button>'
-                if not terminal and comment.source == "platform" and comment.platform in live and reply.get("action") != "skip":
+                if comment.status in {"draft", "review"} and comment.source == "platform" and comment.platform in live and reply.get("action") != "skip":
                     reply_html += f'<button class="btn primary" data-send="{comment.id}" data-text-id="{copy_id}">Одобрить и отправить</button>'
             if comment.status == "delivery_unknown":
                 reply_html += '<p class="c-warning">Проверьте комментарий на площадке. Повторная отправка заблокирована, чтобы не продублировать ответ.</p>'
+            if comment.status == "drafting":
+                reply_html += '<p class="c-meta">Запрос к ИИ уже запущен. Повторная генерация заблокирована. Если задача зависла более 15 минут, проверьте её и явно сбросьте.</p>'
+                reply_html += f'<button class="btn ghost" data-reset-draft="{comment.id}">Сбросить зависшую генерацию</button>'
+            if comment.status == "draft_failed":
+                reply_html += '<p class="c-warning">ИИ не подготовил ответ. Повторить можно только вручную кнопкой «Подготовить ответ».</p>'
             post = f'<details><summary>Контекст публикации</summary><p class="c-comment-text">{esc(comment.post_text)}</p></details>' if comment.post_text else ''
             sent = f'<p>Ответ подтверждён площадкой: {esc(comment.external_reply_id)}</p>' if comment.external_reply_id else ''
             cards.append(f'<article class="panel c-card"><div class="c-card-head"><b>{esc(PLATFORMS[comment.platform]["name"])}</b><span class="chip">{esc(STATUS.get(comment.status, comment.status))}</span></div>{post}<p class="c-comment-text">{esc(comment.text)}</p>{reply_html}{sent}<div class="c-actions">{controls}</div></article>')
@@ -268,6 +274,9 @@ async def comment_action(product_id: UUID, comment_id: UUID, action: str, reques
         if action == "send":
             value = await body(request, ReplyEdit)
             return {"external_reply_id": await svc.send(product_id, comment_id, value.reply)}
+        if action == "reset-draft":
+            svc.recover_stalled_draft(product_id, comment_id)
+            return {"status": "draft_failed"}
         if action in {"skipped", "handled"}:
             svc.close(product_id, comment_id, action)
             return {"status": action}

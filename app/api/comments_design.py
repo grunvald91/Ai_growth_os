@@ -86,7 +86,7 @@ COMMENTS_JS = r"""
     event.preventDefault(); const values=Object.fromEntries(new FormData(form)); const button=form.querySelector('button[type=submit]');
     run(button, async () => {
       if (form.id==='c-settings') {
-        values.max_length=Number(values.max_length); values.emoji=form.elements.emoji.checked; values.enabled=form.elements.enabled.checked; values.auto_import=form.elements.auto_import.checked;
+        values.max_length=Number(values.max_length); values.emoji=form.elements.emoji.checked; values.enabled=form.elements.enabled.checked; values.auto_import=form.elements.auto_import.checked; values.auto_draft=form.elements.auto_draft.checked;
         values.facts=values.facts.split('\n').map(x=>x.trim()).filter(Boolean).map((text,i)=>({id:'owner.'+(i+1),text}));
         const data=await api('/settings',values); say('Настройки сохранены. Версия '+data.version+'.');
       } else if (form.classList.contains('c-connect')) {
@@ -110,6 +110,7 @@ COMMENTS_JS = r"""
     if(button.dataset.copyReply){run(button,async()=>{await navigator.clipboard.writeText(document.getElementById(button.dataset.copyReply).value);say('Ответ скопирован.');});return;}
     if(button.dataset.sync){run(button,async()=>{const data=await api('/channels/'+button.dataset.sync+'/sync');say('Загружено новых комментариев: '+data.imported+'.'); if(data.imported)location.href=location.pathname+'?tab=inbox';});return;}
     if(button.dataset.disconnect){if(!confirm('Отключить площадку? Сохранённый токен будет удалён.'))return;run(button,async()=>{await api('/channels/'+button.dataset.disconnect+'/disconnect');location.reload();});return;}
+    if(button.dataset.resetDraft){if(!confirm('Сбросить зависшую генерацию? Сначала проверьте, не выполняется ли запрос к ИИ. Автоматического повтора не будет.'))return;run(button,async()=>{await api('/items/'+button.dataset.resetDraft+'/reset-draft');location.reload();});return;}
     if(button.dataset.draft){run(button,async()=>{await api('/items/'+button.dataset.draft+'/draft');location.reload();});return;}
     if(button.dataset.closeComment){run(button,async()=>{await api('/items/'+button.dataset.closeComment+'/'+button.dataset.state);location.reload();});return;}
     if(button.dataset.send){
