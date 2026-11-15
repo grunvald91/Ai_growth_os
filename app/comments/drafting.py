@@ -1,13 +1,13 @@
 """Paid background draft preparation, with a durable claim and no automatic retry.
 
-Keyset pagination scans past paused businesses. A fixed LIMIT before checking
+Bounded, ordered pagination scans past paused businesses. A fixed LIMIT before checking
 per-business permissions can starve every opted-in company after row 500.
 Publication is never called from this worker.
 """
 import asyncio
 import logging
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 
 from app.comments.models import BusinessComment, CommentChannel
 from app.comments.service import CommentService, recent_platform_comment
@@ -21,7 +21,7 @@ async def run_comment_draft_once(session_factory, settings, *, llm=None):
     if not settings.comment_background_draft_enabled:
         return 0
 
-    after = None
+    offset = 0
     paused_products = set()
     while True:
         with session_factory() as db:
@@ -38,14 +38,9 @@ async def run_comment_draft_once(session_factory, settings, *, llm=None):
                     CommentChannel.status == "connected",
                 )
                 .order_by(BusinessComment.created_at.asc(), BusinessComment.id.asc())
+                .offset(offset)
                 .limit(PAGE_SIZE)
             )
-            if after is not None:
-                timestamp, comment_id = after
-                query = query.where(or_(
-                    BusinessComment.created_at > timestamp,
-                    and_(BusinessComment.created_at == timestamp, BusinessComment.id > comment_id),
-                ))
             candidates = list(db.execute(query).all())
 
         if not candidates:
@@ -104,6 +99,6 @@ async def run_comment_draft_once(session_factory, settings, *, llm=None):
                     if status in {"draft_failed", "drafting"}:
                         return 0
 
-        after = candidates[-1][0], candidates[-1][1]
+        offset += len(candidates)
         if len(candidates) < PAGE_SIZE:
             return 0
