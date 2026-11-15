@@ -23,6 +23,8 @@ class AgentSettings(Strict):
     examples: str = Field(default="", max_length=6000)
     forbidden_claims: str = Field(default="", max_length=3000)
     enabled: bool = True
+    # Per-company permission to import comments in the background. Never authorizes publication.
+    auto_import: bool = False
 
 
 class CommentInput(Strict):
