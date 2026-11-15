@@ -361,6 +361,11 @@ def test_static_assets_are_served(env):
     js = client.get("/studio/assets/dispatcher.js")
     assert css.status_code == js.status_code == 200
     assert "text/css" in css.headers["content-type"] and "javascript" in js.headers["content-type"]
+    review_css = client.get("/studio/assets/dispatcher-review.css")
+    assert review_css.status_code == 200
+    assert "text/css" in review_css.headers["content-type"]
+    assert ".dp-post-review" in review_css.text
+    assert ".dp-ui-sdk-collapsible" in review_css.text
     # The script must never put model text into markup.
     assert "innerHTML" not in js.text and "insertAdjacentHTML" not in js.text and "document.write" not in js.text
 
