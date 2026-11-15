@@ -17,7 +17,7 @@ jobs:
   build-and-test:
     if: github.repository == 'grunvald91/Ai_growth_os' && github.ref == 'refs/heads/feature/studio-ui-sdk-pilot-20261115'
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,9 +46,9 @@ jobs:
       - name: Browser smoke in headless Chromium
         working-directory: studio_ui_sdk
         run: |
+          command -v google-chrome
           npm install --no-save playwright@1.56.1 --no-audit --no-fund
-          npx playwright install --with-deps chromium
-          node browser-smoke.mjs
+          SERVGO_CHROME_PATH="$(command -v google-chrome)" node browser-smoke.mjs
       - name: Attach pilot browser screenshot
         if: always()
         uses: actions/upload-artifact@v4
