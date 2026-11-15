@@ -408,3 +408,114 @@ def test_home_has_a_microphone_that_only_fills_the_input_field(env):
     js = client.get("/studio/assets/dispatcher.js").text
     # Dictation never sends anything by itself: it talks only to the voice endpoint and writes into the field.
     assert "voiceUrl" in js and "input.value = before + inserted" in js
+
+
+def test_inline_post_review_fragment_rework_and_final_approval_are_separate(env):
+    """One authenticated Studio conversation, same artifact and version across the entire review."""
+    from app.models.domain import Artifact, ArtifactStatus, TaskStatus, Publication
+
+    db, _, servgo, other, _ = env
+    client = TestClient(app)
+    original = "Первый абзац про услугу. Эту фразу нужно исправить. Заключительный совет и призыв записаться."
+    source = Artifact(product_id=servgo.id, kind="channel_text", title="Тестовый пост",
+                      content=json.dumps({"body": original, "title": "Тестовый пост",
+                                          "channel": "telegram", "cta": "Запишитесь."},
+                                         ensure_ascii=False),
+                      status=ArtifactStatus.AWAITING_APPROVAL, version=1)
+    db.add(source)
+    db.commit()
+
+    url = f"/studio/products/{servgo.id}/dispatch/messages"
+    def command(capability, params, key):
+        return client.post(url, json={"mode": "chip", "client_key": key,
+                                      "chip": {"label": capability, "capability": capability,
+                                               "params": params}})
+    def blocks(response, kind):
+        assert response.status_code == 200
+        return [b for message in response.json()["messages"] for b in message["blocks"] if b["type"] == kind]
+
+    preview = blocks(command("show_material", {"material_id": str(source.id)}, "show-post"), "material")
+    assert len(preview) == 1
+    assert preview[0]["body"] == original
+    assert preview[0]["version"] == 1
+    assert preview[0]["reviewable"] is True
+
+    foreign = client.post(f"/studio/products/{other.id}/dispatch/messages", json={
+        "mode": "chip", "client_key": "foreign-post",
+        "chip": {"label": "show", "capability": "show_material",
+                 "params": {"material_id": str(source.id)}}})
+    assert blocks(foreign, "material") == []
+    assert original not in json.dumps(foreign.json(), ensure_ascii=False)
+
+    params = {"material_id": str(source.id), "source_version": "1",
+              "fragment": "Эту фразу нужно исправить", "feedback": "Сделай эту фразу проще"}
+    request = command("revise_material", params, "revision-one")
+    confirmation = blocks(request, "confirm")
+    assert len(confirmation) == 1
+    assert confirmation[0]["state"] == "pending"
+    assert "Эту фразу нужно исправить" in " ".join(confirmation[0]["details"])
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_editor")) is None
+    repeat = command("revise_material", params, "revision-one")
+    assert repeat.json()["replayed"] is True
+
+    queued = client.post(f"/studio/products/{servgo.id}/dispatch/confirm", json={
+        "confirmation_id": confirmation[0]["confirmation_id"], "accept": True, "revision": 0})
+    assert queued.status_code == 200
+    task = db.scalar(select(Task).where(Task.assigned_agent == "content_editor"))
+    assert task is not None and task.status == TaskStatus.QUEUED
+    assert not list(db.scalars(select(Publication).where(Publication.product_id == servgo.id)))
+    assert source.status == ArtifactStatus.AWAITING_APPROVAL
+
+    # Simulate the existing editor worker finishing, rather than spending model credits in CI.
+    updated = "Первый абзац про услугу. Понятная фраза вместо сложной. Заключительный совет и призыв записаться."
+    revised = Artifact(product_id=servgo.id, task_id=task.id, kind="channel_text",
+                       title="Тестовый пост — версия 2",
+                       content=json.dumps({"body": updated, "channel": "telegram", "cta": "Запишитесь.",
+                                           "revision_of": str(source.id)}, ensure_ascii=False),
+                       status=ArtifactStatus.AWAITING_APPROVAL, version=2)
+    db.add(revised)
+    task.status = TaskStatus.COMPLETED
+    source.status = ArtifactStatus.REJECTED
+    db.commit()
+    updates = client.get(f"/studio/products/{servgo.id}/dispatch/updates")
+    newer = blocks(updates, "material")
+    assert len(newer) == 1
+    assert newer[0]["body"] == updated and newer[0]["version"] == 2
+    assert newer[0]["artifact_id"] == str(revised.id)
+    assert blocks(client.get(f"/studio/products/{servgo.id}/dispatch/updates"), "material") == []
+
+    bad_fragment = blocks(command("revise_material", {
+        "material_id": str(revised.id), "source_version": "2",
+        "fragment": "несуществующий фрагмент", "feedback": "Поменяй этот фрагмент"}, "bad-fragment"), "confirm")
+    assert bad_fragment == []
+    stale = blocks(command("revise_material", {
+        "material_id": str(revised.id), "source_version": "1",
+        "feedback": "Сделай фразу короче"}, "stale-review"), "confirm")
+    assert stale == []
+    assert db.scalar(select(Task).where(Task.assigned_agent == "content_editor", Task.id != task.id)) is None
+
+    approve = blocks(command("approve_material", {"material_id": str(revised.id)}, "approve-new"), "confirm")
+    assert len(approve) == 1 and approve[0]["state"] == "pending"
+    assert revised.status == ArtifactStatus.AWAITING_APPROVAL
+    confirmed = client.post(f"/studio/products/{servgo.id}/dispatch/confirm", json={
+        "confirmation_id": approve[0]["confirmation_id"], "accept": True, "revision": 0})
+    assert confirmed.status_code == 200
+    db.refresh(revised)
+    assert revised.status == ArtifactStatus.APPROVED
+    assert not list(db.scalars(select(Publication).where(Publication.product_id == servgo.id)))
+
+
+def test_post_review_block_hides_full_text_when_not_awaiting_approval(env):
+    from app.models.domain import Artifact, ArtifactStatus
+    db, _, company, _, _ = env
+    body = "Приватный текст поста: " * 30
+    row = Artifact(product_id=company.id, kind="channel_text", title="Пост",
+                   content=json.dumps({"channel": "telegram", "body": body}),
+                   status=ArtifactStatus.APPROVED, version=3)
+    db.add(row)
+    db.commit()
+    from app.dispatcher.materials import card
+    from app.dispatcher.outcome import Context
+    result = card(Context(db=db, product=company, settings=None, account="local-owner"), row)
+    assert result["reviewable"] is False and result["body"] == ""
+    assert result["version"] == 3
