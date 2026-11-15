@@ -1,0 +1,45 @@
+name: Studio inline post review browser check
+
+on:
+  push:
+    branches: [feature/studio-inline-post-review-20261115]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: inline-post-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    if: github.repository == 'grunvald91/Ai_growth_os'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate dispatcher and browser test syntax
+        run: |
+          node --check app/api/dispatcher_assets/dispatcher.js
+          node --check studio_ui_sdk/inline-post-review-smoke.mjs
+      - name: Install browser harness
+        working-directory: studio_ui_sdk
+        run: |
+          npm ci --no-audit --no-fund
+          npm install --no-save playwright@1.56.1 --no-audit --no-fund
+      - name: Test actual dispatcher in mobile and desktop Chromium
+        working-directory: studio_ui_sdk
+        run: |
+          SERVGO_CHROME_PATH="$(command -v google-chrome)" node inline-post-review-smoke.mjs
+      - name: Save screenshots for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inline-post-review-browser
+          path: studio-inline-review-*.png
+          if-no-files-found: ignore
+          retention-days: 7

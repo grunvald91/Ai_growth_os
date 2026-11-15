@@ -77,9 +77,21 @@ def find_material(ctx: Context, material_id: str | None, *, kinds=REVIEW_KINDS, 
 
 
 def card(ctx: Context, row: Artifact) -> dict:
-    return {"type": "material", "artifact_id": str(row.id), "kind": KIND_LABELS.get(row.kind, "Материал"),
+    """Expose genuine, company-scoped post text for safe inline review.
+
+    Keep long posts reviewable on their full page instead of showing a partial
+    body as though it were the whole text.
+    """
+    item = {"type": "material", "artifact_id": str(row.id), "kind": KIND_LABELS.get(row.kind, "Материал"),
             "title": row.title[:300], "status": STATUS_LABELS.get(_status(row), _status(row)),
             "excerpt": excerpt(row, EXCERPT_CARD), "href": _page(ctx, row)}
+    if row.kind == "channel_text" and _status(row) == "awaiting_approval":
+        data = material_data(row)
+        body = str(data.get("body") or "").strip()
+        item["body"] = body[:12000]
+        item["truncated"] = len(body) > 12000
+        item["can_revise"] = bool(body) and not item["truncated"]
+    return item
 
 
 def not_found() -> Outcome:
@@ -96,8 +108,9 @@ async def show_material(ctx: Context, params: MaterialParams) -> Outcome:
     blocks: list[dict] = [card(ctx, row)]
     kind = KIND_LABELS.get(row.kind, "Материал")
     if _status(row) == "awaiting_approval":
-        blocks.append({"type": "chips", "items": [
-            {"label": "Утвердить", "capability": "approve_material", "params": {"material_id": str(row.id)}}]})
+        if not blocks[0].get("truncated"):
+            blocks.append({"type": "chips", "items": [
+                {"label": "Утвердить", "capability": "approve_material", "params": {"material_id": str(row.id)}}]})
         hint = " Чтобы доработать пост, напишите, что поправить." if row.kind == "channel_text" else ""
         text = f"{kind} «{row.title[:80]}» ждёт вашего решения.{hint}"
     else:

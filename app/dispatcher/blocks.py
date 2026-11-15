@@ -104,6 +104,10 @@ class MaterialBlock(_Block):
     title: str = Field(max_length=300)
     status: str = Field(max_length=40)
     excerpt: str = Field(default="", max_length=800)
+    # A real stored post body, never model-fabricated preview text.
+    body: str = Field(default="", max_length=12000)
+    truncated: bool = False
+    can_revise: bool = False
     href: str
 
     def model_post_init(self, __context) -> None:

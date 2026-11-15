@@ -90,7 +90,8 @@ def _completed(ctx: Context, task: Task, title: str, href: str) -> tuple[str, li
     if result.kind == "whiteboard_video":
         item = {**item, "kind": "Простое видео", "href": f"{base}/whiteboard/{task.id}"}
     blocks: list[dict] = [item]
-    if result.status == ArtifactStatus.AWAITING_APPROVAL and result.kind in KIND_LABELS:
+    if (result.status == ArtifactStatus.AWAITING_APPROVAL and result.kind in KIND_LABELS
+            and not item.get("truncated")):
         blocks.append({"type": "chips", "items": [{"label": "Утвердить", "capability": "approve_material",
                                                    "params": {"material_id": str(result.id)}}]})
     text = f"Готово: {title}." + (" Чтобы доработать, напишите, что поправить."
