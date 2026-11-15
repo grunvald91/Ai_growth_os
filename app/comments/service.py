@@ -301,6 +301,11 @@ class CommentService:
                     provider=self.settings.llm_provider, amount=0, currency="USD", incurred_at=now(),
                     input_tokens=max(0, response.usage.input_tokens), output_tokens=max(0, response.usage.output_tokens),
                     details={"cost_known": False, "note": "Usage recorded; monetary price unavailable."}))
+            # The owner may have explicitly released a stale claim while the
+            # provider was slow; do not resurrect an obsolete background request.
+            self.db.refresh(comment, with_for_update=True)
+            if comment.status != "drafting":
+                raise ValueError("Генерация была отменена владельцем")
             result = ReplyDraft.model_validate_json(response.content)
             known_ids = {f["id"] for f in facts}
             if set(result.used_fact_ids) - known_ids:
@@ -329,11 +334,45 @@ class CommentService:
         except Exception:
             # No automatic retry: the model may already have charged for this call.
             # A person can explicitly retry from Studio if needed.
-            comment.status = "draft_failed"
+            if comment.status == "drafting":
+                comment.status = "draft_failed"
             task.status, run.status, run.finished_at = TaskStatus.FAILED, "failed", now()
             run.error = "Не удалось подготовить корректный ответ"
             self.db.commit()
             raise ValueError("Не удалось подготовить корректный ответ. Проверьте настройки AI и повторите.") from None
+
+    def recover_stalled_draft(self, product_id, comment_id):
+        """Owner-only explicit recovery after 15 minutes; never automatically re-generates."""
+        from datetime import timedelta
+
+        self.product(product_id, lock=True)
+        comment = self.comment(product_id, comment_id, lock=True)
+        if comment.status != "drafting":
+            raise ValueError("Нет незавершённой генерации")
+        started = comment.updated_at
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        if started > now() - timedelta(minutes=15):
+            raise ValueError("Генерация ещё выполняется; повторная попытка пока заблокирована")
+        comment.status = "draft_failed"
+        # Preserve an audit trail and mark the interrupted run as failed.
+        runs = self.db.scalars(
+            select(AgentRun).join(Task, AgentRun.task_id == Task.id).where(
+                Task.product_id == product_id, Task.assigned_agent == "comment_sales",
+                AgentRun.status == "running",
+            ).order_by(AgentRun.started_at.desc()).limit(100)
+        )
+        for run in runs:
+            if str(comment.id) not in (run.input_references or []):
+                continue
+            run.status, run.finished_at = "failed", now()
+            run.error = "Незавершённая генерация сброшена владельцем после проверки"
+            task = self.db.get(Task, run.task_id)
+            if task and task.status == TaskStatus.RUNNING:
+                task.status = TaskStatus.FAILED
+            break
+        self.db.commit()
+        return comment
 
     def close(self, product_id, comment_id, status):
         self.product(product_id, lock=True)
