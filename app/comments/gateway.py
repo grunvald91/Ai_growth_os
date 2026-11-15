@@ -124,7 +124,7 @@ class CommentGateway:
                     rows.append({"external_id": reply["id"], "text": snippet.get("textOriginal", ""),
                         "post_text": root.get("post_text", ""),
                         "target": {"video_id": root.get("video_id"), "parent_id": root["id"],
-                                   "can_reply": True}})
+                                   "can_reply": True, "published_at": snippet.get("publishedAt")}})
                 next_reply = data.get("nextPageToken")
                 if next_reply:
                     cursor["reply_page"] = next_reply
