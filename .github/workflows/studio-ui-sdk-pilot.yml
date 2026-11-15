@@ -17,7 +17,7 @@ jobs:
   build-and-test:
     if: github.repository == 'grunvald91/Ai_growth_os' && github.ref == 'refs/heads/feature/studio-ui-sdk-pilot-20261115'
     runs-on: ubuntu-24.04
-    timeout-minutes: 18
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,6 +43,20 @@ jobs:
             echo 'Unexpected remote SDK import or CDN reference'
             exit 1
           fi
+      - name: Browser smoke in headless Chromium
+        working-directory: studio_ui_sdk
+        run: |
+          npm install --no-save playwright@1.56.1 --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          node browser-smoke.mjs
+      - name: Attach pilot browser screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-ui-sdk-browser-smoke
+          path: studio-ui-sdk-mobile-smoke.png
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
