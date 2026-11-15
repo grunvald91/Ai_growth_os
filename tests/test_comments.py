@@ -1042,3 +1042,44 @@ async def test_old_or_unknown_age_comments_remain_manual_only(ctx):
         await svc.draft(product.id, expired.id, background=True)
     db.rollback()
     assert db.scalar(select(Task).where(Task.product_id == product.id)) is None
+
+
+@pytest.mark.asyncio
+async def test_auto_draft_does_not_drain_multiple_paid_calls_after_failure(ctx):
+    from app.comments.drafting import run_comment_draft_once
+    db, product, svc, _, _ = ctx
+    channel = await svc.connect(product.id, ConnectInput(
+        platform="youtube", account_id="UCbusiness", token="token"))
+    await svc.sync(product.id, "youtube")
+    db.add(BusinessComment(product_id=product.id, platform="youtube",
+        external_id="next-new", text="Второй вопрос", source="platform", status="new",
+        target={"channel_id": str(channel.id),
+                "published_at": datetime.now(timezone.utc).isoformat()}))
+    db.commit()
+    svc.configure(product.id, AgentSettings(auto_draft=True))
+    svc.settings.comment_background_draft_enabled = True
+    factory = lambda: Session(db.get_bind(), expire_on_commit=False)
+
+    class Broken:
+        calls = 0
+        async def generate(self, request):
+            self.calls += 1
+            raise RuntimeError("provider is temporarily unavailable")
+
+    broken = Broken()
+    assert await run_comment_draft_once(factory, svc.settings, llm=broken) == 0
+    assert broken.calls == 1
+    db.expire_all()
+    assert len(list(db.scalars(select(BusinessComment).where(
+        BusinessComment.status == "draft_failed")))) == 1
+    assert len(list(db.scalars(select(BusinessComment).where(
+        BusinessComment.status == "new")))) == 1
+
+
+@pytest.mark.asyncio
+async def test_platform_reply_approval_keeps_authenticated_actor(ctx):
+    db, product, svc, _, _ = ctx
+    _, comment = await connected(ctx)
+    await svc.send(product.id, comment.id, "Проверенный ответ",
+                   approved_by="servgo:verified-user")
+    assert db.scalar(select(Approval)).decided_by == "servgo:verified-user"
