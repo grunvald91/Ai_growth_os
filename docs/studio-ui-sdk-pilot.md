@@ -49,3 +49,45 @@ Latest earlier verified pilot run:
 25 Python tests and Chromium smoke (toggle, keyboard, values, default-open).
 The live authenticated Studio and production deployment must be verified
 separately from the isolated browser smoke.
+
+
+## End-to-end post review in the chat (15 November 2026)
+
+The Studio dispatcher now enhances **awaiting-approval text posts only** with a
+UI SDK Collapsible showing the full body from the company-scoped artifact.
+The old short excerpt and "Open full view" link still work when the SDK
+is disabled with `?ui_sdk=0`.
+
+To exercise the scenario:
+1. In Studio for a company, ask "Подготовь пост про ...". Confirm preparation.
+2. When the content worker finishes, the conversation shows a material card.
+   Open the full post inline; the copy is taken from the actual saved artifact.
+3. Select a fragment with mouse, keyboard or native mobile text selection.
+   The selection is shown below the body. Enter a concrete correction and
+   press "Предложить правку".
+4. The dispatcher displays its normal confirmation card: inspect the selected
+   fragment and your instructions, then press "Доработать".
+5. The existing `content_editor` queue generates a **new immutable version**.
+   It appears in Studio through the usual dispatcher update polling, with
+   its own full text and approval chip.
+6. Press "Утвердить" on that new version and confirm the decision.
+   This approves the material; it **does not publish it or schedule delivery**.
+
+Safety and data consistency:
+- Neither the preview nor submitting feedback triggers generation/publication.
+- The server checks tenant membership through existing Studio auth/CSRF,
+  artifact company scope, expected artifact version, valid selection in the
+  actual saved post body, feedback length and queue policy.
+- Sending feedback uses a stable client key, so a mobile retry does not
+  create a second command; executing a revision requires separate confirmation.
+- Stale versions and selections are rejected with a readable response.
+- Full text is rendered as `textContent`, never model-provided HTML.
+- Previous post revisions remain immutable; the revised post is a separate artifact.
+- Very long posts (>14,000 characters) retain the original full-detail link
+  rather than appearing as a misleading truncated inline version.
+- The existing UI SDK bundle is self-hosted. No new database migrations.
+
+Rollback: `?ui_sdk=0` disables the new inline preview and review controls
+without changing the server's existing revision/approval APIs. To undo the
+server contract changes, revert the feature merge and redeploy a verified
+previous revision.
