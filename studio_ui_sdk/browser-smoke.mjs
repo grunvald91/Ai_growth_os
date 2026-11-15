@@ -77,6 +77,7 @@ try {
   const postPreview = page.locator("#post-card ui-collapsible-panel");
   await postPreview.waitFor();
   assert.equal(await postPreview.isVisible(), true);
+  assert.match(await page.locator("#post-card ui-collapsible-trigger button").innerText(), /версия 2/);
   assert.equal(await page.locator(".dp-post-review-body").innerText(),
     "Первый абзац. Измени выбранный фрагмент. Последний абзац.");
   await page.evaluate(() => {
