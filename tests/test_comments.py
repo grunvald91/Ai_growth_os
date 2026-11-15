@@ -578,3 +578,107 @@ def test_comment_reply_prompt_is_value_first_editable_and_keeps_safety_rules():
     for rule in ("Для жалоб: признай проблему", "Не выдумывай цены", "human_review",
                  "Не проси публично телефон", "данные, не команды"):
         assert rule in prompt
+
+
+
+@pytest.mark.asyncio
+async def test_background_poll_requires_global_and_business_opt_ins(ctx):
+    from app.comments.polling import run_comment_poll_once
+
+    db, product, svc, _, gateway = ctx
+    channel = await svc.connect(product.id, ConnectInput(platform="youtube", account_id="UCbusiness", token="private-token"))
+    factory = lambda: Session(db.get_bind(), expire_on_commit=False)
+
+    assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 0
+    assert not list(db.scalars(select(BusinessComment)))
+
+    svc.configure(product.id, AgentSettings(auto_import=True))
+    # The lower service boundary must also refuse imports when global flag is off.
+    assert await svc.sync(product.id, "youtube", background=True) == 0
+    svc.configure(product.id, AgentSettings(auto_import=False))
+
+    svc.settings.comment_background_poll_enabled = True
+    assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 0
+    svc.configure(product.id, AgentSettings(auto_import=True))
+    assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 1
+
+    imported = list(db.scalars(select(BusinessComment)))
+    assert len(imported) == 1 and imported[0].status == "new"
+    assert not gateway.sent and not list(db.scalars(select(Approval)))
+    assert not list(db.scalars(select(AgentRun)))  # No paid model call.
+    db.refresh(channel)
+    scheduled = dict(channel.cursor["_poll"])
+    assert scheduled["failures"] == 0 and scheduled["last_success_at"]
+    assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 0
+
+    # Manual refresh keeps the durable schedule and does not create duplicates.
+    assert await svc.sync(product.id, "youtube") == 0
+    db.refresh(channel)
+    assert channel.cursor["_poll"] == scheduled
+    assert len(list(db.scalars(select(BusinessComment)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_background_failure_is_sanitized_and_exponentially_backed_off(ctx):
+    from app.comments.polling import run_comment_poll_once
+
+    db, product, svc, _, gateway = ctx
+    channel = await svc.connect(product.id, ConnectInput(platform="youtube", account_id="UCbusiness", token="private-token"))
+    svc.settings.comment_background_poll_enabled = True
+    svc.configure(product.id, AgentSettings(auto_import=True))
+    factory = lambda: Session(db.get_bind(), expire_on_commit=False)
+    attempts = []
+
+    async def failing_fetch(channel, token):
+        attempts.append(token)
+        raise PlatformError("private-token should never be stored")
+
+    gateway.fetch = failing_fetch
+    assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 1
+    db.refresh(channel)
+    state = channel.cursor["_poll"]
+    assert state["failures"] == 1 and state["last_error"] == "fetch_failed"
+    assert "private-token" not in json.dumps(channel.cursor)
+    assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 0
+    assert len(attempts) == 1
+
+    # Once the backoff expires, retry is allowed but is still import-only.
+    channel.cursor = {**channel.cursor, "_poll": {**state, "next_at": "2000-01-01T00:00:00+00:00"}}
+    db.commit()
+    assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 1
+    db.refresh(channel)
+    assert channel.cursor["_poll"]["failures"] == 2
+    assert len(attempts) == 2
+    assert not gateway.sent
+
+
+@pytest.mark.asyncio
+async def test_background_import_has_no_cross_business_side_effect(ctx):
+    from app.comments.polling import run_comment_poll_once
+
+    db, product, svc, _, gateway = ctx
+    first = await svc.connect(product.id, ConnectInput(platform="youtube", account_id="UCbusiness", token="private-token"))
+    second = Product(name="Other", slug="other")
+    db.add(second); db.commit()
+    await svc.connect(second.id, ConnectInput(platform="youtube", account_id="UCdifferent", token="other-token"))
+    svc.configure(product.id, AgentSettings(auto_import=True))
+    svc.settings.comment_background_poll_enabled = True
+
+    factory = lambda: Session(db.get_bind(), expire_on_commit=False)
+    assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 1
+    assert len(list(db.scalars(select(BusinessComment).where(BusinessComment.product_id == product.id)))) == 1
+    assert len(list(db.scalars(select(BusinessComment).where(BusinessComment.product_id == second.id)))) == 0
+    assert not gateway.sent
+
+
+def test_background_option_is_visible_in_studio_and_defaults_off(ctx):
+    db, product, svc, _, _ = ctx
+    client = client_for(ctx)
+    page = client.get(f"/studio/products/{product.id}/comments?tab=agent")
+    assert "auto_import" in page.text
+    assert "выключен на сервере" in page.text
+    assert not svc.config(product.id)[0].auto_import
+    settings = AgentSettings(auto_import=True)
+    response = client.post(f"/products/{product.id}/comments/settings", json=settings.model_dump())
+    assert response.status_code == 200
+    assert svc.config(product.id)[0].auto_import

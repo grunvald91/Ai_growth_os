@@ -86,7 +86,7 @@ COMMENTS_JS = r"""
     event.preventDefault(); const values=Object.fromEntries(new FormData(form)); const button=form.querySelector('button[type=submit]');
     run(button, async () => {
       if (form.id==='c-settings') {
-        values.max_length=Number(values.max_length); values.emoji=form.elements.emoji.checked; values.enabled=form.elements.enabled.checked;
+        values.max_length=Number(values.max_length); values.emoji=form.elements.emoji.checked; values.enabled=form.elements.enabled.checked; values.auto_import=form.elements.auto_import.checked;
         values.facts=values.facts.split('\n').map(x=>x.trim()).filter(Boolean).map((text,i)=>({id:'owner.'+(i+1),text}));
         const data=await api('/settings',values); say('Настройки сохранены. Версия '+data.version+'.');
       } else if (form.classList.contains('c-connect')) {

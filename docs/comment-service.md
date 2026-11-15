@@ -155,7 +155,30 @@ reconciliation; this version deliberately has no automatic retry or unverified
 "mark as sent" button. A successful response stores the native reply ID. Other
 platform errors are secret-safe and distinguish access and rate-limit failures.
 
-Refreshes currently happen through **Загрузить комментарии / Обновить**; continuous
-polling, inbound webhooks, auto-replies, built-in OAuth applications and automatic
-token refresh are not implemented. A real production verification needs authorized
-platform accounts; automated tests use fake providers and HTTP transport mocks.
+Refreshes can happen manually through **Загрузить комментарии / Обновить**.
+The opt-in **background import** is implemented for YouTube and Instagram only:
+
+1. Set `COMMENT_BACKGROUND_POLL_ENABLED=true` in the API and worker runtime environment;
+   keep `COMMENT_PLATFORM_PROXY_URL` configured for outbound access. The default is
+   **false** and changing Studio settings alone cannot activate polling.
+2. Each business enables **Автоматически загружать комментарии** on its Studio agent tab.
+   Pausing the agent or disconnecting the channel prevents further imports.
+3. The existing worker polls at most one eligible channel per 15-second tick.
+   Each channel has a separate next-due timestamp in its existing JSON cursor.
+   The default minimum interval is `COMMENT_BACKGROUND_POLL_SECONDS=600` (range 60–86400).
+   On failure, attempts back off for 60, 120, 240… up to 3600 seconds.
+4. Imported comments stay **new**; no LLM requests, approval operations, external
+   reply publications or background auto-replies occur. Operators can use the
+   existing manual **Подготовить ответ** and **Одобрить и отправить** workflow.
+5. The cursor is persisted in the same transaction as imported comments. The
+   product/channel lock and unique inbound key prevent duplicates during parallel
+   workers and manual refresh. The persisted schedule survives worker restarts.
+   An unsuccessful external request records only a generic error code, never a
+   raw token/provider message.
+
+The import loop is off in the default production Compose configuration. Do not
+enable it until operators check real proxy connectivity, YouTube API quota and
+Instagram account credentials. Webhooks, auto-replies, built-in OAuth applications,
+automatic token refresh and live account verification are still **not implemented**.
+Real end-to-end testing needs authorized platform accounts; offline tests use fake
+providers and HTTP transport mocks.

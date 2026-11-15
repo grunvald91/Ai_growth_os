@@ -299,9 +299,22 @@ async def _calendar_loop(settings):
         await asyncio.sleep(settings.team_worker_idle_poll_seconds)
 
 
+async def _comments_loop(settings):
+    """Independent intake loop: never runs the publication endpoint."""
+    import logging
+    from app.comments.polling import run_comment_poll_once
+    while True:
+        try:
+            await run_comment_poll_once(SessionLocal, settings)
+        except Exception:
+            logging.getLogger(__name__).warning("comment_poll_tick_failed", exc_info=False)
+        await asyncio.sleep(15)
+
+
 async def main() -> None:
     settings = get_settings()
     calendar_task = asyncio.create_task(_calendar_loop(settings))
+    comments_task = asyncio.create_task(_comments_loop(settings)) if settings.comment_background_poll_enabled else None
     try:
         while True:
             try:
@@ -317,10 +330,15 @@ async def main() -> None:
             )
     finally:
         calendar_task.cancel()
-        try:
-            await calendar_task
-        except asyncio.CancelledError:
-            pass
+        if comments_task is not None:
+            comments_task.cancel()
+        for task in (calendar_task, comments_task):
+            if task is None:
+                continue
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 if __name__ == "__main__":
