@@ -287,6 +287,8 @@ class CommentService:
         self.db.add(run); self.db.flush()
         # Durable claim before the paid model request. Other workers/manual actions
         # see "drafting" and cannot make a second concurrent LLM call.
+        claim_id = str(uuid4())
+        comment.target = {**(comment.target or {}), "_draft_claim": claim_id}
         comment.status = "drafting"
         self.db.commit()
         try:
@@ -304,8 +306,8 @@ class CommentService:
             # The owner may have explicitly released a stale claim while the
             # provider was slow; do not resurrect an obsolete background request.
             self.db.refresh(comment, with_for_update=True)
-            if comment.status != "drafting":
-                raise ValueError("Генерация была отменена владельцем")
+            if comment.status != "drafting" or (comment.target or {}).get("_draft_claim") != claim_id:
+                raise ValueError("Генерация была отменена или заменена владельцем")
             result = ReplyDraft.model_validate_json(response.content)
             known_ids = {f["id"] for f in facts}
             if set(result.used_fact_ids) - known_ids:
