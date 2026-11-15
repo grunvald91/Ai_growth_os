@@ -230,6 +230,8 @@ class CommentGateway:
                                            if batch.get("paging", {}).get("next") else None)
                 if not cursor["comments_after"]:
                     cursor["media"] = cursor["media"][1:]
+                    if not cursor["media"] and not cursor.get("after"):
+                        return rows, {}
             return rows, cursor if cursor.get("media") or cursor.get("after") else {}
         if channel.platform == "telegram":
             data = await self.request("POST", self.tg_url(token, "getUpdates"), token, telegram=True,
