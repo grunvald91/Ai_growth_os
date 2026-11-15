@@ -207,6 +207,7 @@
       /^\/whiteboard\/[0-9a-f-]{36}$/i.test(videoPath);
     var card = el(isVideo ? 'a' : 'div', 'dp-material' + (isVideo ? ' dp-material--video' : ''));
     if (isVideo) card.href = block.href;
+    card.dataset.artifactId = block.artifact_id || '';
     var top = el('div', 'dp-material-top');
     top.appendChild(el('span', 'dp-material-kind', voiceHoldEnabled ? friendlyKind(block.kind) : block.kind));
     var status = el('span', 'dp-material-status',
@@ -502,12 +503,30 @@
     return bubble;
   }
 
+  function markOlderPostVersions(message) {
+    (message.blocks || []).forEach(function (block) {
+      if (block.type !== 'material' || !block.revision_of) return;
+      var oldCard = Array.from(feed.querySelectorAll('.dp-material')).find(function (node) {
+        return node.dataset.artifactId === block.revision_of;
+      });
+      if (!oldCard) return;
+      oldCard.classList.add('dp-material--superseded');
+      var status = oldCard.querySelector('.dp-material-status');
+      if (status) status.textContent = 'Есть новая версия';
+      var help = oldCard.querySelector('.dp-post-review-help');
+      if (help) help.textContent = 'Это предыдущая версия. Откройте новый пост ниже.';
+      var oldForm = oldCard.querySelector('.dp-post-review-form');
+      if (oldForm) oldForm.remove();
+    });
+  }
+
   function upsert(message) {
     var node = renderMessage(message);
     var existing = feed.querySelector('[data-id="' + message.id + '"]');
     if (Number.isInteger(message.seq)) node.setAttribute('data-seq', String(message.seq));
     if (existing) {
       feed.replaceChild(node, existing);
+      markOlderPostVersions(message);
       return;
     }
     if (hydrated && voiceHoldEnabled) node.classList.add('dp-enter');
@@ -519,6 +538,7 @@
     });
     if (following) feed.insertBefore(node, following);
     else feed.appendChild(node);
+    markOlderPostVersions(message);
   }
 
   function renderHints() {
