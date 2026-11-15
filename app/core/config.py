@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     content_vk_autopost_enabled: bool = False
     content_telegram_max_lateness_minutes: int = 30
     comment_platform_proxy_url: str | None = None
+    # Background comment import: operator switch AND per-business opt-in, both off by default.
+    comment_background_poll_enabled: bool = False
+    comment_background_poll_seconds: int = Field(default=600, ge=60, le=86400)
     viral_research_mode: Literal["public_multisource", "youtube_public", "disabled"] = "public_multisource"
     viral_research_max_queries: int = 4
     viral_research_max_candidates: int = 16
