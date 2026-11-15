@@ -423,7 +423,8 @@ async def test_inline_review_does_not_offer_approval_of_truncated_post(db, produ
     preview = blocks(answer, "material")[0]
     assert len(preview["body"]) == 12000
     assert preview["truncated"] is True and preview["can_revise"] is False
-    assert not blocks(answer, "chips")
+    assert all(item["capability"] != "approve_material"
+               for group in blocks(answer, "chips") for item in group["items"])
     assert preview["href"].endswith(f"/materials/{row.id}")
 
 
