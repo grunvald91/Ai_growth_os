@@ -449,6 +449,8 @@ class CommentService:
             raise ValueError("Данные бизнеса или подключение изменились. Подготовьте новый ответ.")
         if not text.strip() or len(text) > reply_limit(comment.platform, config.max_length):
             raise ValueError("Проверьте длину и текст ответа")
+        if comment.platform == "youtube" and comment.target.get("can_reply") is False:
+            raise ValueError("YouTube не разрешает ответить в этом обсуждении")
         if data["action"] == "skip":
             raise ValueError("Для пропуска отправка недоступна")
         policy = PolicyEvaluator().evaluate(ToolOperation.PUBLISH)
