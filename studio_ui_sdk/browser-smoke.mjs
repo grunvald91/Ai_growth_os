@@ -11,7 +11,7 @@ const css = await readFile(resolve("../app/api/dispatcher_assets/dispatcher.css"
 function html(prefilled) {
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1"></head>
-  <body><main class="dp-main"><section class="dp-home">
+  <body><main class="dp-main"><section class="dp-home has-feed">
     <div class="dp-feed"><article class="dp-msg bot">
     <form class="dp-create-editor">
       <label class="dp-create-edit-field"><span>Тема</span>
