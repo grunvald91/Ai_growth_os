@@ -285,11 +285,10 @@ class CommentGateway:
             if not (comment.target or {}).get("media_id"):
                 raise PlatformError("Комментарий не связан с публикацией Instagram")
             if ((channel.cursor or {}).get("_auth") or {}).get("mode") == "unified":
-                authorized = await self.request("GET",
-                    f"{base}/me/assigned_instagram_accounts", token,
-                    params={"fields": "id", "limit": 100})
-                if channel.account_id not in {str(x.get("id")) for x in authorized.get("data", [])}:
-                    raise PlatformError("Instagram больше не предоставлен Meta приложению")
+                # Query the specific granted asset rather than only page 1 of
+                # assigned_instagram_accounts, which can hide other granted assets.
+                await self.request("GET", f"{base}/{channel.account_id}/media", token,
+                                   params={"fields": "id", "limit": 1})
                 native = await self.request("GET", f"{base}/{quote(comment.external_id, safe='')}", token,
                     params={"fields": "id,text,media{id}"})
                 if str((native.get("media") or {}).get("id")) != str(comment.target["media_id"]):
