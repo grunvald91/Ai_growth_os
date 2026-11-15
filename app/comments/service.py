@@ -179,6 +179,8 @@ class CommentService:
         previous = dict(channel.cursor or {})
         poll = dict(previous.get("_poll") or {})
         if background:
+            if not self.settings.comment_background_poll_enabled:
+                return 0
             config, _ = self.config(product_id)
             if not config.enabled or not config.auto_import:
                 return 0
