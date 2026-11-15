@@ -233,7 +233,7 @@ providers and HTTP transport mocks.
 
 - Background poll and paid draft loops run as independent asyncio tasks; slow
   model completion cannot block intake. Neither loop publishes.
-- Candidate selection uses paginated SQL keysets instead of checking just the
+- Candidate selection uses bounded chronological SQL pages instead of checking just the
   earliest 500 records, so opted-in tenants after a long disabled queue are found.
 - Instagram queries recent media on every tick, while walking historic media and
   comment pages in a separate bounded batch (up to five pages/tick).
