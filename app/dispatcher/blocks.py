@@ -104,6 +104,10 @@ class MaterialBlock(_Block):
     title: str = Field(max_length=300)
     status: str = Field(max_length=40)
     excerpt: str = Field(default="", max_length=800)
+    # Only awaiting-approval posts include the reviewable full text.
+    body: str = Field(default="", max_length=14000)
+    version: int = Field(default=1, ge=1)
+    reviewable: bool = False
     href: str
 
     def model_post_init(self, __context) -> None:
