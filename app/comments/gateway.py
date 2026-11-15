@@ -173,7 +173,7 @@ class CommentGateway:
                                    "published_at": reply_snippet.get("publishedAt")}})
                 if thread.get("totalReplyCount", 0) > len(inline_replies):
                     pending.append({"id": parent_id, "video_id": snippet.get("videoId"),
-                                    "post_text": snippet.get("textOriginal", "")[:8000],
+                                    "post_text": (snippet.get("textOriginal") or "")[:8000],
                                     "can_reply": thread.get("canReply", False)})
 
             next_page = data.get("nextPageToken")
@@ -197,7 +197,7 @@ class CommentGateway:
                     f"https://graph.instagram.com/v22.0/{quote(media['id'], safe='')}/comments", token,
                     params={"fields": "id,text,from,timestamp", "limit": 100})
                 rows.extend({"external_id": c["id"], "text": c.get("text", ""),
-                             "post_text": media.get("caption", ""),
+                             "post_text": media.get("caption") or "",
                              "target": {"media_id": media["id"],
                                         "published_at": c.get("timestamp")}}
                             for c in batch.get("data", [])
@@ -223,7 +223,7 @@ class CommentGateway:
                 batch = await self.request("GET",
                     f"https://graph.instagram.com/v22.0/{quote(media['id'], safe='')}/comments", token, params=params)
                 rows.extend({"external_id": c["id"], "text": c.get("text", ""),
-                             "post_text": media.get("caption", ""),
+                             "post_text": media.get("caption") or "",
                              "target": {"media_id": media["id"],
                                         "published_at": c.get("timestamp")}}
                             for c in batch.get("data", [])
