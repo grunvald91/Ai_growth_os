@@ -559,7 +559,8 @@ def test_live_connection_guides_have_action_links_and_manual_token_explanation(c
     from app.comments.platforms import PLATFORMS
     _, product, _, _, _ = ctx
     html = client_for(ctx).get(f'/studio/products/{product.id}/comments?tab=platforms').text
-    assert 'В этой версии токены вводятся вручную' in html
+    assert 'Для Instagram используйте кнопку «Подключить через Meta»' in html
+    assert 'в прежнем Instagram Login пока действует ручная проверка токена' in html
     assert 'https://t.me/BotFather' in html
     assert 'https://developers.google.com/oauthplayground/' in html
     for platform in PLATFORMS.values():

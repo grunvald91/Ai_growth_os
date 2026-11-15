@@ -14,9 +14,11 @@ class GatewayConfigurationTests(unittest.TestCase):
     def test_gateway_is_narrow_and_uses_only_loopback_upstream(self):
         content = GATEWAY.read_text()
         locations = re.findall(r"^location\s+(.+?)\s*\{\s*$", content, re.M)
-        self.assertEqual(len(locations), 7, locations)
+        self.assertEqual(len(locations), 9, locations)
         self.assertIn("= /studio", locations)
         self.assertIn("= /studio/sso", locations)
+        self.assertIn("= /api/integrations/instagram/webhook", locations)
+        self.assertIn("= /studio/integrations/instagram/oauth/callback", locations)
         self.assertIn("access_log off;", content)
         self.assertIn("^~ /studio/", locations)
         # Keep the SSO entry inside the ServGo React app: never redirect
@@ -31,7 +33,7 @@ class GatewayConfigurationTests(unittest.TestCase):
         self.assertNotIn("location / {", content)
         self.assertNotIn("location /api/", content)
         self.assertNotIn("location ^~ /products/", content)
-        self.assertEqual(len(re.findall(r"^\s*proxy_pass\s+", content, re.M)), 7)
+        self.assertEqual(len(re.findall(r"^\s*proxy_pass\s+", content, re.M)), 9)
         self.assertNotIn("proxy_set_header Authorization", content)
         self.assertNotIn("proxy_set_header Origin", content)
         for address in re.findall(r"^\s*proxy_pass\s+([^;]+);", content, re.M):

@@ -18,9 +18,9 @@ PLATFORMS = {
     },
     "instagram": {
         "name": "Instagram", "live": True, "account_label": "ID профессионального аккаунта",
-        "steps": ["Используйте профессиональный аккаунт Business или Creator и приложение Meta с Instagram Login.",
-                  "Получите разрешения instagram_business_basic и instagram_business_manage_comments. Для сторонних аккаунтов может потребоваться App Review.",
-                  "Укажите ID Instagram-аккаунта и токен этого приложения. Этот способ не требует привязки Facebook Page."],
+        "steps": ["Для нового приложения Meta выберите Instagram API с Unified Login и настройте Facebook Login for Business (System-user token) с config_id.",
+                  "Для комментариев настройте права Instagram и доступ к активам Business Portfolio; клиентские аккаунты могут требовать Advanced Access / App Review.",
+                  "Нажмите «Подключить через Meta», авторизуйтесь и выберите аккаунт. Ручной ввод ID и токена оставлен только для ранее созданных Instagram Login приложений."],
         "limits": "Комментарии загружаются с последних публикаций при обновлении. Ответы только под своими публикациями; личные сообщения требуют отдельного разрешения и здесь не отправляются.",
         "docs": "https://www.postman.com/meta/instagram/folder/6raa77c/instagram-api-with-instagram-login",
     },

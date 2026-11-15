@@ -51,6 +51,11 @@ app.include_router(tune_router)
 
 from app.api.comments import router as comments_router
 app.include_router(comments_router, dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
+# Instagram OAuth is protected by the exact same Studio company scope;
+# only Meta's HMAC-verified webhook endpoint is public.
+from app.api.comments_instagram import studio_router as instagram_studio_router, public_router as instagram_webhook_router
+app.include_router(instagram_studio_router, dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
+app.include_router(instagram_webhook_router)
 from app.api.vk_publishing import router as vk_publishing_router
 app.include_router(vk_publishing_router)
 from app.api.team_dashboard import router as team_dashboard_router

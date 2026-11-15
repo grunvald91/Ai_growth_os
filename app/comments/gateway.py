@@ -10,9 +10,16 @@ class PlatformError(ValueError):
 
 
 class CommentGateway:
-    def __init__(self, client=None, *, proxy_url=None):
+    def __init__(self, client=None, *, proxy_url=None, instagram_graph_version="v27.0"):
         self.client = client
         self.proxy_url = proxy_url
+        self.instagram_graph_version = instagram_graph_version
+
+    def instagram_base(self, channel):
+        auth = (channel.cursor or {}).get("_auth") or {}
+        if auth.get("mode") == "unified":
+            return f"https://graph.facebook.com/{auth.get('version') or self.instagram_graph_version}"
+        return "https://graph.instagram.com/v22.0"
 
     async def request(self, method, url, token, *, telegram=False, **kwargs):
         headers = {} if telegram else {"Authorization": f"Bearer {token}"}
@@ -188,13 +195,15 @@ class CommentGateway:
         if channel.platform == "instagram":
             # Always refresh the newest media, even during a large historic scan;
             # otherwise 25 old posts each cost a whole 10-minute poll interval.
-            cursor = {key: value for key, value in (channel.cursor or {}).items() if key != "_poll"}
+            cursor = {key: value for key, value in (channel.cursor or {}).items()
+                      if key not in {"_poll", "_auth"}}
             rows = []
-            recent = await self.request("GET", f"https://graph.instagram.com/v22.0/{channel.account_id}/media", token,
+            base = self.instagram_base(channel)
+            recent = await self.request("GET", f"{base}/{channel.account_id}/media", token,
                                         params={"fields": "id,caption", "limit": 3})
             for media in recent.get("data", [])[:3]:
                 batch = await self.request("GET",
-                    f"https://graph.instagram.com/v22.0/{quote(media['id'], safe='')}/comments", token,
+                    f"{base}/{quote(media['id'], safe='')}/comments", token,
                     params={"fields": "id,text,from,timestamp", "limit": 100})
                 rows.extend({"external_id": c["id"], "text": c.get("text", ""),
                              "post_text": media.get("caption") or "",
@@ -210,7 +219,7 @@ class CommentGateway:
                     if cursor.get("after"):
                         params["after"] = cursor["after"]
                     batch = await self.request("GET",
-                        f"https://graph.instagram.com/v22.0/{channel.account_id}/media", token, params=params)
+                        f"{base}/{channel.account_id}/media", token, params=params)
                     cursor = {"media": batch.get("data", []),
                               "after": batch.get("paging", {}).get("cursors", {}).get("after")
                                        if batch.get("paging", {}).get("next") else None}
@@ -221,7 +230,7 @@ class CommentGateway:
                 if cursor.get("comments_after"):
                     params["after"] = cursor["comments_after"]
                 batch = await self.request("GET",
-                    f"https://graph.instagram.com/v22.0/{quote(media['id'], safe='')}/comments", token, params=params)
+                    f"{base}/{quote(media['id'], safe='')}/comments", token, params=params)
                 rows.extend({"external_id": c["id"], "text": c.get("text", ""),
                              "post_text": media.get("caption") or "",
                              "target": {"media_id": media["id"],
@@ -272,14 +281,28 @@ class CommentGateway:
                 params={"part": "snippet"}, json={"snippet": {"parentId": parent_id, "textOriginal": text}})
             return str(data["id"])
         if channel.platform == "instagram":
-            account = await self.request("GET", "https://graph.instagram.com/v22.0/me", token,
-                params={"fields": "user_id,username"})
-            if str(account.get("user_id") or account.get("id")) != channel.account_id or not comment.target.get("media_id"):
-                raise PlatformError("Комментарий относится к другому аккаунту")
-            # Native comments can only enter from account-scoped media imports.
-            await self.request("GET", f"https://graph.instagram.com/v22.0/{quote(comment.external_id, safe='')}", token,
-                params={"fields": "id,text"})
-            data = await self.request("POST", f"https://graph.instagram.com/v22.0/{quote(comment.external_id, safe='')}/replies", token, data={"message": text})
+            base = self.instagram_base(channel)
+            if not (comment.target or {}).get("media_id"):
+                raise PlatformError("Комментарий не связан с публикацией Instagram")
+            if ((channel.cursor or {}).get("_auth") or {}).get("mode") == "unified":
+                # Query the specific granted asset rather than only page 1 of
+                # assigned_instagram_accounts, which can hide other granted assets.
+                await self.request("GET", f"{base}/{channel.account_id}/media", token,
+                                   params={"fields": "id", "limit": 1})
+                native = await self.request("GET", f"{base}/{quote(comment.external_id, safe='')}", token,
+                    params={"fields": "id,text,media{id}"})
+                if str((native.get("media") or {}).get("id")) != str(comment.target["media_id"]):
+                    raise PlatformError("Комментарий относится к другой публикации")
+            else:
+                account = await self.request("GET", "https://graph.instagram.com/v22.0/me", token,
+                    params={"fields": "user_id,username"})
+                if str(account.get("user_id") or account.get("id")) != channel.account_id:
+                    raise PlatformError("Комментарий относится к другому аккаунту")
+                await self.request("GET", f"{base}/{quote(comment.external_id, safe='')}", token,
+                    params={"fields": "id,text"})
+            data = await self.request("POST",
+                f"{base}/{quote(comment.external_id, safe='')}/replies", token,
+                data={"message": text})
             return str(data["id"])
         if channel.platform == "telegram":
             if comment.target.get("chat_id") != channel.account_id:

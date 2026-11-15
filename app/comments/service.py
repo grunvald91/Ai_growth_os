@@ -86,7 +86,10 @@ def recent_platform_comment(comment, max_age_days: int) -> bool:
 class CommentService:
     def __init__(self, db: Session, settings, *, llm=None, gateway=None):
         self.db, self.settings, self.llm = db, settings, llm
-        self.gateway = gateway or CommentGateway(proxy_url=settings.comment_platform_proxy_url)
+        self.gateway = gateway or CommentGateway(
+            proxy_url=settings.comment_platform_proxy_url,
+            instagram_graph_version=settings.comment_meta_graph_version,
+        )
         self.secrets = CommentSecrets(settings.products_root)
 
     def product(self, product_id, *, lock=False):
@@ -166,10 +169,54 @@ class CommentService:
         else:
             channel.revision += 1
         self.secrets.save_token(channel.id, token)
+        if value.platform == "instagram":
+            # A manual Instagram Login token cannot be treated as Unified Login.
+            channel.cursor = {k: v for k, v in (channel.cursor or {}).items() if k != "_auth"}
         channel.account_name, channel.status = name, "connected"
         self.db.add(ToolCall(product_id=product_id, tool_name="comment_gateway", operation="verify_connection",
             status="executed", request_data={"platform": value.platform, "channel_id": str(channel.id)},
             response_data={"account_id": value.account_id, "revision": channel.revision}, executed_at=now()))
+        self.db.commit()
+        return channel
+
+    async def connect_verified_instagram(self, product_id, account_id, username, token):
+        """Attach one authorized Unified Login asset without a manual token form.
+
+        Caller must verify the asset is in Meta's assigned Instagram accounts.
+        Enforce one tenant for each native IG account to avoid webhook fan-out.
+        """
+        if not account_id.isdigit() or not username or not token:
+            raise ValueError("Некорректные данные Instagram")
+        self.product(product_id, lock=True)
+        other = self.db.scalar(select(CommentChannel).where(
+            CommentChannel.platform == "instagram",
+            CommentChannel.account_id == account_id,
+            CommentChannel.product_id != product_id,
+            CommentChannel.status == "connected",
+        ).limit(1))
+        if other:
+            raise ValueError("Этот Instagram-аккаунт уже подключён к другой компании")
+        if self.busy(product_id, "instagram"):
+            raise ValueError("Дождитесь завершения отправки ответа")
+        channel = self.channel(product_id, "instagram", lock=True)
+        if channel and channel.account_id != account_id:
+            raise ValueError("Сначала отключите прежний Instagram-аккаунт")
+        if not channel:
+            channel = CommentChannel(product_id=product_id, platform="instagram",
+                account_id=account_id, account_name=username[:200], cursor={})
+            self.db.add(channel)
+            self.db.flush()
+        else:
+            channel.revision += 1
+        self.secrets.save_token(channel.id, token)
+        channel.account_name, channel.status = username[:200], "connected"
+        channel.cursor = {**(channel.cursor or {}),
+                          "_auth": {"mode": "unified", "version": self.settings.comment_meta_graph_version}}
+        self.db.add(ToolCall(product_id=product_id, tool_name="comment_meta_oauth",
+            operation="verify_connection", status="executed",
+            request_data={"platform": "instagram", "channel_id": str(channel.id)},
+            response_data={"account_id": account_id, "revision": channel.revision,
+                           "auth_mode": "unified"}, executed_at=now()))
         self.db.commit()
         return channel
 
@@ -242,6 +289,9 @@ class CommentService:
             count += 1
             self.db.flush()
         cursor = dict(cursor)
+        if platform == "instagram" and "_auth" in previous:
+            # The platform pagination cursor is replaceable; OAuth token mode is not.
+            cursor["_auth"] = previous["_auth"]
         if background:
             poll.update({"failures": 0, "last_success_at": now().isoformat(),
                          "next_at": (now() + timedelta(seconds=self.settings.comment_background_poll_seconds)).isoformat(),
