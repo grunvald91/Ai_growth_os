@@ -95,8 +95,6 @@ async def instagram_oauth_callback(request: Request,
     if allowed is not None and str(product_id) not in allowed:
         raise HTTPException(404, "Компания не найдена")
     svc.product(product_id)
-
-        raise HTTPException(403, "Истекла проверка безопасности Meta OAuth")
     if not code:
         raise HTTPException(400, "Meta не выдала разрешение на подключение")
     client = MetaUnifiedClient(svc.settings)
