@@ -916,3 +916,129 @@ async def test_replaced_draft_claim_cannot_be_overwritten_by_late_llm(ctx):
     assert comment.status == "draft" and comment.reply_id == replacement.id
     assert db.get(Artifact, replacement.id).kind == "comment_reply"
     assert not gateway.sent
+
+
+@pytest.mark.asyncio
+async def test_draft_queue_uses_keyset_pages_to_reach_enabled_tenant(ctx, monkeypatch):
+    import app.comments.drafting as drafting
+    monkeypatch.setattr(drafting, "PAGE_SIZE", 2)
+    db, first, svc, _, gateway = ctx
+    await svc.connect(first.id, ConnectInput(platform="youtube", account_id="UCbusiness", token="token-one"))
+    await svc.sync(first.id, "youtube")
+    for index in range(2):
+        item = Product(name="Dormant", slug=f"dormant-{index}")
+        db.add(item); db.commit()
+        await svc.connect(item.id, ConnectInput(platform="youtube",
+                                               account_id=f"UCdormant{index}", token=f"token-{index}"))
+        await svc.sync(item.id, "youtube")
+    enabled = Product(name="Enabled", slug="enabled-comment-queue")
+    db.add(enabled); db.commit()
+    root = svc.settings.products_root / enabled.slug
+    root.mkdir()
+    (root / "company-profile.json").write_text(json.dumps({
+        "schema_version": "1.0", "identity": {"name": "Enabled"}}))
+    await svc.connect(enabled.id, ConnectInput(platform="youtube", account_id="UCenabled", token="token-enabled"))
+    await svc.sync(enabled.id, "youtube")
+    svc.configure(enabled.id, AgentSettings(auto_draft=True))
+    svc.settings.comment_background_draft_enabled = True
+    factory = lambda: Session(db.get_bind(), expire_on_commit=False)
+    assert await drafting.run_comment_draft_once(factory, svc.settings, llm=svc.llm) == 1
+    db.expire_all()
+    assert db.scalar(select(BusinessComment).where(
+        BusinessComment.product_id == enabled.id)).status == "draft"
+    assert not gateway.sent
+
+
+@pytest.mark.asyncio
+async def test_poll_queue_uses_keyset_pages_to_reach_enabled_tenant(ctx, monkeypatch):
+    import app.comments.polling as polling
+    monkeypatch.setattr(polling, "PAGE_SIZE", 2)
+    db, _, svc, _, gateway = ctx
+    companies = []
+    for index in range(4):
+        company = Product(name=f"Tenant {index}", slug=f"poll-tenant-{index}")
+        db.add(company); db.commit()
+        await svc.connect(company.id, ConnectInput(platform="youtube",
+            account_id=f"UCpoll{index}", token=f"token-poll-{index}"))
+        companies.append(company)
+    svc.configure(companies[-1].id, AgentSettings(auto_import=True))
+    svc.settings.comment_background_poll_enabled = True
+    factory = lambda: Session(db.get_bind(), expire_on_commit=False)
+    assert await polling.run_comment_poll_once(factory, svc.settings, gateway=gateway) == 1
+    db.expire_all()
+    assert len(list(db.scalars(select(BusinessComment).where(
+        BusinessComment.product_id == companies[-1].id)))) == 1
+    assert len(list(db.scalars(select(BusinessComment)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_youtube_fetches_incomplete_nested_replies_with_cursor():
+    from types import SimpleNamespace
+    thread = {"snippet": {"topLevelComment": {"id": "root", "snippet": {
+        "textOriginal": "Вопрос", "videoId": "v1", "authorChannelId": {"value": "viewer"},
+        "publishedAt": datetime.now(timezone.utc).isoformat()}},
+        "canReply": True, "totalReplyCount": 3},
+        "replies": {"comments": [{"id": "reply-1", "snippet": {
+            "textOriginal": "Один", "authorChannelId": {"value": "viewer"}}}]}}
+    client, gateway, seen, remaining = mock_gateway([
+        ("/commentThreads", {"items": [thread]}),
+        ("/comments", {"items": [
+            {"id": "reply-1", "snippet": {"textOriginal": "Один",
+                                          "authorChannelId": {"value": "viewer"}}},
+            {"id": "reply-2", "snippet": {"textOriginal": "Два",
+                                          "authorChannelId": {"value": "viewer"}}},
+        ], "nextPageToken": "next"}),
+        ("/comments", {"items": [
+            {"id": "reply-3", "snippet": {"textOriginal": "Три",
+                                          "authorChannelId": {"value": "viewer"}}}]}),
+    ])
+    channel = SimpleNamespace(platform="youtube", account_id="UCbusiness", cursor={})
+    async with client:
+        first, channel.cursor = await gateway.fetch(channel, "secret")
+        second, channel.cursor = await gateway.fetch(channel, "secret")
+        third, channel.cursor = await gateway.fetch(channel, "secret")
+    assert {r["external_id"] for r in first} == {"root", "reply-1"}
+    assert {r["external_id"] for r in second} == {"reply-1", "reply-2"}
+    assert [r["external_id"] for r in third] == ["reply-3"]
+    assert channel.cursor == {}
+    assert seen[0].url.params["part"] == "snippet,replies"
+    assert seen[1].url.params["parentId"] == "root"
+    assert seen[2].url.params["pageToken"] == "next"
+    assert not remaining
+
+
+@pytest.mark.asyncio
+async def test_instagram_checks_recent_media_during_historic_backlog():
+    from types import SimpleNamespace
+    client, gateway, seen, remaining = mock_gateway([
+        ("/42/media", {"data": [{"id": "recent", "caption": "Новое"}]}),
+        ("/recent/comments", {"data": [{"id": "c-fresh", "text": "Цена?"}]}),
+        ("/old/comments", {"data": [{"id": "c-old", "text": "Здравствуйте"}]}),
+    ])
+    channel = SimpleNamespace(platform="instagram", account_id="42",
+        cursor={"media": [{"id": "old", "caption": "Старое"}], "after": None})
+    async with client:
+        rows, cursor = await gateway.fetch(channel, "token")
+    assert {x["external_id"] for x in rows} == {"c-fresh", "c-old"}
+    assert cursor == {}
+    assert seen[0].url.path.endswith("/42/media")
+    assert not remaining
+
+
+@pytest.mark.asyncio
+async def test_old_or_unknown_age_comments_remain_manual_only(ctx):
+    from datetime import timedelta
+    db, product, svc, _, _ = ctx
+    channel = await svc.connect(product.id, ConnectInput(
+        platform="youtube", account_id="UCbusiness", token="token"))
+    expired = BusinessComment(product_id=product.id, platform="youtube",
+        external_id="historical", text="Старый вопрос", source="platform", status="new",
+        target={"channel_id": str(channel.id),
+                "published_at": (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()})
+    db.add(expired); db.commit()
+    svc.configure(product.id, AgentSettings(auto_draft=True))
+    svc.settings.comment_background_draft_enabled = True
+    with pytest.raises(ValueError, match="Старый"):
+        await svc.draft(product.id, expired.id, background=True)
+    db.rollback()
+    assert db.scalar(select(Task).where(Task.product_id == product.id)) is None
