@@ -189,7 +189,8 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
             if comment.status == "delivery_unknown":
                 reply_html += '<p class="c-warning">Проверьте комментарий на площадке. Повторная отправка заблокирована, чтобы не продублировать ответ.</p>'
             if comment.status == "drafting":
-                reply_html += '<p class="c-meta">Запрос к ИИ уже запущен. Повторная генерация заблокирована. Если задача зависла, требуется ручная проверка.</p>'
+                reply_html += '<p class="c-meta">Запрос к ИИ уже запущен. Повторная генерация заблокирована. Если задача зависла более 15 минут, проверьте её и явно сбросьте.</p>'
+                reply_html += f'<button class="btn ghost" data-reset-draft="{comment.id}">Сбросить зависшую генерацию</button>'
             if comment.status == "draft_failed":
                 reply_html += '<p class="c-warning">ИИ не подготовил ответ. Повторить можно только вручную кнопкой «Подготовить ответ».</p>'
             post = f'<details><summary>Контекст публикации</summary><p class="c-comment-text">{esc(comment.post_text)}</p></details>' if comment.post_text else ''
