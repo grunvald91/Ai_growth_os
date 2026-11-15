@@ -39,3 +39,34 @@ document.addEventListener("sg:dispatcher:editor-ready", (event) => {
 });
 // The lazy module can finish loading after the user has already opened an editor.
 document.querySelectorAll(".dp-create-editor").forEach(enhanceCreationEditor);
+
+
+// Use the same UI SDK Collapsible primitive for the generated post itself.
+// The original body, quote selection, revision command and approval controls
+// are kept exactly as implemented by the dispatcher.
+function enhancePostPreview(card) {
+  if (!card?.__sgPostReview || card.dataset.sgPostUiEnhanced === "1") return;
+  const preview = card.querySelector(".dp-post-preview");
+  if (!preview || !preview.querySelector(".dp-post-body")) return;
+  card.dataset.sgPostUiEnhanced = "1";
+
+  const section = document.createElement("ui-collapsible");
+  section.className = "dp-post-review-section";
+  section.setAttribute("default-open", "");
+
+  const trigger = document.createElement("ui-collapsible-trigger");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Полный текст поста · версия " + String(card.__sgPostReview.version);
+  trigger.appendChild(button);
+
+  const panel = document.createElement("ui-collapsible-panel");
+  panel.className = "dp-post-review-panel";
+  while (preview.firstChild) panel.appendChild(preview.firstChild);
+  section.append(trigger, panel);
+  preview.appendChild(section);
+}
+document.addEventListener("sg:dispatcher:post-ready", event => {
+  enhancePostPreview(event.detail?.card);
+});
+document.querySelectorAll(".dp-material").forEach(enhancePostPreview);
