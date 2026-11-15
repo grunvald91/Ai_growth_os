@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.api.content_studio import esc, studio_page_shell
 from app.api.comments_design import COMMENTS_CSS, COMMENTS_JS
 from app.comments.contracts import AgentSettings, CommentInput, ConnectInput, ReplyEdit
+from app.comments.instagram_oauth import configured as instagram_oauth_configured
 from app.comments.models import BusinessComment, CommentChannel
 from app.comments.platforms import PLATFORMS, reply_limit
 from app.comments.service import CommentService
@@ -114,6 +115,18 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
                 controls = (f'<form class="c-connect" data-platform="{key}"><label>{esc(item["account_label"])}<input name="account_id" required value="{esc(channel.account_id if channel else "")}" autocomplete="off"></label>'
                     '<label>Токен доступа<input name="token" type="password" required autocomplete="new-password" placeholder="Хранится зашифрованным на сервере"></label>'
                     f'<span class="c-help">{help_text}</span><button class="btn primary" type="submit">Проверить и подключить</button></form>')
+                if key == "instagram":
+                    if instagram_oauth_configured(svc.settings):
+                        controls = (f'<div class="c-actions"><a class="btn primary" '
+                                    f'href="/products/{product_id}/comments/instagram/oauth/start">'
+                                    'Подключить через Meta</a></div>'
+                                    '<p class="c-meta">Новый безопасный вход через Unified Login. '
+                                    'Форма с ID/токеном ниже — только для прежних приложений Instagram Login.</p>'
+                                    + controls)
+                    else:
+                        controls = ('<p class="c-warning">Для входа Instagram через Meta '
+                                    'администратору нужно настроить Meta App ID, Config ID, App Secret '
+                                    'и публичный HTTPS-адрес.</p>' + controls)
                 if channel:
                     controls += f'<div class="c-actions"><button class="btn ghost" data-sync="{key}">Загрузить комментарии</button><button class="btn ghost" data-disconnect="{key}">Отключить</button></div>'
             else:
@@ -121,7 +134,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
             cards.append(f'<section class="panel c-platform"><div class="c-card-head"><h2>{esc(item["name"])}</h2><span class="chip {"blue" if channel else ""}">{esc(badge)}</span></div><p class="c-meta">{"Доступ напрямую" if key in {"vk", "vk_video"} else "Через зарубежный сервер" if item["live"] else "Ручной режим"}</p><details class="c-guide"><summary>Как получить ID и токен · {len(item["steps"])} шага</summary><ol>{steps}</ol>{docs}</details><p>{esc(item["limits"])}</p>{poll_status}{controls}</section>')
         content = ('<section class="panel c-platform-intro"><h2>Подключите аккаунты бизнеса</h2>'
             '<p>Для каждой площадки нужны два значения: ID аккаунта и токен доступа — ключ, который площадка выдаёт для работы с комментариями. Это не пароль от аккаунта.</p>'
-            '<p>Откройте инструкцию ниже, получите данные по ссылкам, заполните форму и нажмите «Проверить и подключить». Затем загрузите комментарии. В этой версии токены вводятся вручную; при истечении срока действия их нужно заменить.</p>'
+            '<p>Для Instagram используйте кнопку «Подключить через Meta» (Unified Login). На остальных площадках либо в прежнем Instagram Login пока действует ручная проверка токена.</p>'
             '<p>Для Google и Meta потребуется приложение в кабинете разработчика. Если его ещё нет, подготовку доступа выполняет владелец аккаунта или разработчик интеграции. Для ручной работы подключение не требуется: откройте «Проверка ответов».</p></section>'
             '<div class="c-platform-grid">' + ''.join(cards) + '</div>')
     elif tab == "agent":
