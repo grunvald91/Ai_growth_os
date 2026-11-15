@@ -151,7 +151,8 @@ def test_unified_login_full_owner_flow_with_account_picker(ctx, monkeypatch):
     response = client.get(prefix + "/start", follow_redirects=False)
     assert response.status_code == 302
     state = parse_qs(urlsplit(response.headers["location"]).query)["state"][0]
-    callback = client.get(prefix + "/callback", params={"state": state, "code": "valid-code"},
+    callback = client.get("/studio/integrations/instagram/oauth/callback",
+                          params={"state": state, "code": "valid-code"},
                           follow_redirects=False)
     assert callback.status_code == 303
     select_url = callback.headers["location"]
