@@ -39,7 +39,7 @@ const server = createServer((req, res) => {
 await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
 const address = server.address();
 const origin = `http://127.0.0.1:${address.port}`;
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, executablePath: process.env.SERVGO_CHROME_PATH || "/usr/bin/google-chrome" });
 try {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   const errors = [];
