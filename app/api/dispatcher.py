@@ -234,6 +234,13 @@ def dispatcher_css():
                     headers={"Cache-Control": "no-cache"})
 
 
+@router.get("/studio/assets/dispatcher-review.css")
+def dispatcher_review_css():
+    """Scoped UI SDK component CSS for v4, without importing legacy layout."""
+    return Response((ASSETS / "dispatcher-review.css").read_text(encoding="utf-8"), media_type="text/css",
+                    headers={"Cache-Control": "no-cache"})
+
+
 @router.get("/studio/assets/dispatcher.js")
 def dispatcher_js():
     return Response((ASSETS / "dispatcher.js").read_text(encoding="utf-8"), media_type="application/javascript",
