@@ -1,0 +1,61 @@
+name: Studio UI SDK pilot (isolated branch)
+
+on:
+  push:
+    branches:
+      - feature/studio-ui-sdk-pilot-20261115
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: studio-ui-sdk-pilot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    if: github.repository == 'grunvald91/Ai_growth_os' && github.ref == 'refs/heads/feature/studio-ui-sdk-pilot-20261115'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned UI SDK and esbuild
+        working-directory: studio_ui_sdk
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+      - name: Produce same-origin UI SDK module
+        working-directory: studio_ui_sdk
+        run: npm run build
+      - name: Verify bundle syntax and no external SDK imports
+        run: |
+          node --check app/api/dispatcher_assets/ui-sdk-pilot.bundle.js
+          if grep -Eq 'https?://ui-sdk.dev|https?://cdn\.' app/api/dispatcher_assets/ui-sdk-pilot.bundle.js; then
+            echo 'Unexpected remote SDK import or CDN reference'
+            exit 1
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Studio test requirements
+        run: python -m pip install -e . pytest
+      - name: Check pilot and existing dispatcher HTTP contracts
+        run: python -m pytest -q tests/test_studio_ui_sdk_pilot.py tests/test_dispatcher_api.py
+      - name: Save reproducible lockfile and built bundle on pilot branch only
+        run: |
+          git add studio_ui_sdk/package-lock.json app/api/dispatcher_assets/ui-sdk-pilot.bundle.js
+          if ! git diff --cached --quiet; then
+            git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                commit -m 'build(studio): pin and vendor UI SDK pilot bundle'
+            git push origin HEAD:feature/studio-ui-sdk-pilot-20261115
+          fi
