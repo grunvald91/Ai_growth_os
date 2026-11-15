@@ -6,6 +6,7 @@ foreign proxy without an implicit direct fallback.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -52,7 +53,7 @@ def state_product_id(state: str) -> str | None:
         data = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
         candidate = json.loads(data).get("p")
         return candidate if isinstance(candidate, str) and len(candidate) == 36 else None
-    except (ValueError, TypeError, UnicodeDecodeError):
+    except (ValueError, TypeError, UnicodeDecodeError, binascii.Error):
         return None
 
 
