@@ -124,7 +124,8 @@ class CommentGateway:
                     rows.append({"external_id": reply["id"], "text": snippet.get("textOriginal", ""),
                         "post_text": root.get("post_text", ""),
                         "target": {"video_id": root.get("video_id"), "parent_id": root["id"],
-                                   "can_reply": True, "published_at": snippet.get("publishedAt")}})
+                                   "can_reply": root.get("can_reply", False),
+                                   "published_at": snippet.get("publishedAt")}})
                 next_reply = data.get("nextPageToken")
                 if next_reply:
                     cursor["reply_page"] = next_reply
@@ -172,7 +173,8 @@ class CommentGateway:
                                    "published_at": reply_snippet.get("publishedAt")}})
                 if thread.get("totalReplyCount", 0) > len(inline_replies):
                     pending.append({"id": parent_id, "video_id": snippet.get("videoId"),
-                                    "post_text": snippet.get("textOriginal", "")[:8000]})
+                                    "post_text": snippet.get("textOriginal", "")[:8000],
+                                    "can_reply": thread.get("canReply", False)})
 
             next_page = data.get("nextPageToken")
             if not next_page and not pending:
