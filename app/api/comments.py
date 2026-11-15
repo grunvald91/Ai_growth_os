@@ -188,6 +188,10 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
                     reply_html += f'<button class="btn primary" data-send="{comment.id}" data-text-id="{copy_id}">Одобрить и отправить</button>'
             if comment.status == "delivery_unknown":
                 reply_html += '<p class="c-warning">Проверьте комментарий на площадке. Повторная отправка заблокирована, чтобы не продублировать ответ.</p>'
+            if comment.status == "drafting":
+                reply_html += '<p class="c-meta">Запрос к ИИ уже запущен. Повторная генерация заблокирована. Если задача зависла, требуется ручная проверка.</p>'
+            if comment.status == "draft_failed":
+                reply_html += '<p class="c-warning">ИИ не подготовил ответ. Повторить можно только вручную кнопкой «Подготовить ответ».</p>'
             post = f'<details><summary>Контекст публикации</summary><p class="c-comment-text">{esc(comment.post_text)}</p></details>' if comment.post_text else ''
             sent = f'<p>Ответ подтверждён площадкой: {esc(comment.external_reply_id)}</p>' if comment.external_reply_id else ''
             cards.append(f'<article class="panel c-card"><div class="c-card-head"><b>{esc(PLATFORMS[comment.platform]["name"])}</b><span class="chip">{esc(STATUS.get(comment.status, comment.status))}</span></div>{post}<p class="c-comment-text">{esc(comment.text)}</p>{reply_html}{sent}<div class="c-actions">{controls}</div></article>')
