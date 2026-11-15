@@ -4,6 +4,7 @@ Keyset pagination scans past paused businesses. A fixed LIMIT before checking
 per-business permissions can starve every opted-in company after row 500.
 Publication is never called from this worker.
 """
+import asyncio
 import logging
 
 from sqlalchemy import and_, or_, select
@@ -21,6 +22,7 @@ async def run_comment_draft_once(session_factory, settings, *, llm=None):
         return 0
 
     after = None
+    paused_products = set()
     while True:
         with session_factory() as db:
             query = (
@@ -49,7 +51,11 @@ async def run_comment_draft_once(session_factory, settings, *, llm=None):
         if not candidates:
             return 0
 
-        for created_at, comment_id, product_id, target in candidates:
+        for index, (created_at, comment_id, product_id, target) in enumerate(candidates):
+            if index % 50 == 0:
+                await asyncio.sleep(0)
+            if product_id in paused_products:
+                continue
             # Historical imports without an authoritative source timestamp
             # must never burn the auto-draft daily quota.
             from types import SimpleNamespace
@@ -61,6 +67,7 @@ async def run_comment_draft_once(session_factory, settings, *, llm=None):
                     service = CommentService(db, settings, llm=llm)
                     config, _ = service.config(product_id)
                     if not config.enabled or not config.auto_draft:
+                        paused_products.add(product_id)
                         continue
 
                     # Never instantiate a paid provider before the business opts in.
