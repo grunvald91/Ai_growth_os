@@ -592,6 +592,11 @@ async def test_background_poll_requires_global_and_business_opt_ins(ctx):
     assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 0
     assert not list(db.scalars(select(BusinessComment)))
 
+    svc.configure(product.id, AgentSettings(auto_import=True))
+    # The lower service boundary must also refuse imports when global flag is off.
+    assert await svc.sync(product.id, "youtube", background=True) == 0
+    svc.configure(product.id, AgentSettings(auto_import=False))
+
     svc.settings.comment_background_poll_enabled = True
     assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 0
     svc.configure(product.id, AgentSettings(auto_import=True))
