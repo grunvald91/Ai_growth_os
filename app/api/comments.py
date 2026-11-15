@@ -142,8 +142,9 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
         <label>Примеры хороших ответов<textarea name="examples" rows="4" maxlength="6000">{esc(config.examples)}</textarea></label>
         <label>Что нельзя обещать<textarea name="forbidden_claims" rows="3" maxlength="3000">{esc(config.forbidden_claims)}</textarea></label>
         <label class="c-check"><input name="enabled" type="checkbox" {"checked" if config.enabled else ""}> Агент включён</label>
-        <label class="c-check"><input name="auto_import" type="checkbox" {"checked" if config.auto_import else ""}> Автоматически загружать комментарии (без отправки ответов)</label>
-        <p class="c-help">Импорт работает только после включения оператором на сервере. Сейчас: {"разрешён" if svc.settings.comment_background_poll_enabled else "выключен на сервере"}. Публикация ответов всегда требует вашего подтверждения.</p>
+        <label class="c-check"><input name="auto_import" type="checkbox" {"checked" if config.auto_import else ""}> Автоматически загружать комментарии</label>
+        <label class="c-check"><input name="auto_draft" type="checkbox" {"checked" if config.auto_draft else ""}> Автоматически создавать ИИ-черновики (может расходовать лимит API)</label>
+        <p class="c-help">Импорт: {"включён" if svc.settings.comment_background_poll_enabled else "выключен"} на сервере. ИИ-черновики: {"включены" if svc.settings.comment_background_draft_enabled else "выключены"} на сервере. Лимит: {svc.settings.comment_background_draft_daily_limit} автоматических попыток на компанию за сутки (UTC). Ответы публикуются только после вашего подтверждения.</p>
         <button class="btn primary" type="submit">Сохранить настройки</button></form></section>
         <aside class="panel c-card"><h2>Знания о {esc(product.name)}</h2>{readiness}<p>Профиль бизнеса читается перед каждым ответом. Дополнительные факты вводите только после проверки.</p>
         <details><summary>Данные из профиля</summary><ul class="c-knowledge">{business_facts}</ul></details>
