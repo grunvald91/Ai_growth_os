@@ -336,7 +336,7 @@ class CommentService:
         except Exception:
             # No automatic retry: the model may already have charged for this call.
             # A person can explicitly retry from Studio if needed.
-            if comment.status == "drafting":
+            if comment.status == "drafting" and (comment.target or {}).get("_draft_claim") == claim_id:
                 comment.status = "draft_failed"
             task.status, run.status, run.finished_at = TaskStatus.FAILED, "failed", now()
             run.error = "Не удалось подготовить корректный ответ"
