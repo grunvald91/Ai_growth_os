@@ -62,7 +62,7 @@ function enhanceMaterial(card) {
   const toggle = document.createElement("ui-collapsible-trigger");
   const toggleButton = document.createElement("button");
   toggleButton.type = "button";
-  toggleButton.textContent = "Полный текст поста";
+  toggleButton.textContent = "Полный текст поста · версия " + String(block.version || 1);
   toggle.appendChild(toggleButton);
   const panel = document.createElement("ui-collapsible-panel");
   panel.className = "dp-post-review-panel";
@@ -92,6 +92,7 @@ function enhanceMaterial(card) {
       return;
     }
     selectedText = text;
+    requestKey = null;
     chosen.textContent = "Выделено: «" + text + "»";
     chosen.hidden = false;
   }
@@ -105,6 +106,7 @@ function enhanceMaterial(card) {
   clear.textContent = "Сбросить выделение";
   clear.addEventListener("click", () => {
     selectedText = "";
+    requestKey = null;
     chosen.hidden = true;
     window.getSelection?.()?.removeAllRanges();
   });
@@ -129,6 +131,7 @@ function enhanceMaterial(card) {
   status.setAttribute("role", "status");
   status.hidden = true;
   let requestKey = null;
+  feedback.addEventListener("input", () => { requestKey = null; });
   editor.addEventListener("submit", event => {
     event.preventDefault();
     const instruction = feedback.value.trim();
