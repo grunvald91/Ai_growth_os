@@ -126,6 +126,8 @@ class Settings(BaseSettings):
     # Paid generation is independently guarded and limited per company, per UTC day.
     comment_background_draft_enabled: bool = False
     comment_background_draft_daily_limit: int = Field(default=20, ge=1, le=500)
+    # Unknown-age and historical platform comments require explicit manual review.
+    comment_background_draft_max_age_days: int = Field(default=30, ge=1, le=365)
     viral_research_mode: Literal["public_multisource", "youtube_public", "disabled"] = "public_multisource"
     viral_research_max_queries: int = 4
     viral_research_max_candidates: int = 16
