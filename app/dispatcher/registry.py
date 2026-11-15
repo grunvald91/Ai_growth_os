@@ -166,6 +166,8 @@ class MaterialParams(_Params):
 class ReviseParams(_Params):
     material_id: str | None = Field(default=None, max_length=64)
     feedback: str = Field(min_length=8, max_length=1800)
+    source_version: int | None = Field(default=None, ge=1)
+    fragment: str | None = Field(default=None, min_length=2, max_length=380)
 
 
 class SchedulePostParams(_Params):
