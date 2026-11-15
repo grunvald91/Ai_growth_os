@@ -103,42 +103,137 @@ class CommentGateway:
         if adapter := self.adapter(channel.platform):
             return await adapter.fetch(channel, token)
         if channel.platform == "youtube":
-            params = {"part": "snippet", "allThreadsRelatedToChannelId": channel.account_id,
+            # Complete partial YouTube reply threads in bounded batches. The
+            # native commentThreads.replies field is *not* exhaustive; docs
+            # require comments.list(parentId) for the remaining replies.
+            cursor = {key: value for key, value in (channel.cursor or {}).items() if key != "_poll"}
+            pending = list(cursor.get("reply_queue") or [])
+            if pending:
+                root = pending[0]
+                params = {"part": "snippet", "parentId": root["id"], "maxResults": 100,
+                          "textFormat": "plainText"}
+                if cursor.get("reply_page"):
+                    params["pageToken"] = cursor["reply_page"]
+                data = await self.request("GET", "https://www.googleapis.com/youtube/v3/comments", token,
+                                          params=params)
+                rows = []
+                for reply in data.get("items", []):
+                    snippet = reply.get("snippet", {})
+                    if snippet.get("authorChannelId", {}).get("value") == channel.account_id:
+                        continue
+                    rows.append({"external_id": reply["id"], "text": snippet.get("textOriginal", ""),
+                        "post_text": root.get("post_text", ""),
+                        "target": {"video_id": root.get("video_id"), "parent_id": root["id"],
+                                   "can_reply": root.get("can_reply", False),
+                                   "published_at": snippet.get("publishedAt")}})
+                next_reply = data.get("nextPageToken")
+                if next_reply:
+                    cursor["reply_page"] = next_reply
+                else:
+                    pending.pop(0)
+                    cursor.pop("reply_page", None)
+                cursor["reply_queue"] = pending
+                if not pending and cursor.pop("_yt_threads_complete", False):
+                    return rows, {}
+                if not pending:
+                    cursor.pop("reply_queue", None)
+                return rows, cursor
+
+            params = {"part": "snippet,replies", "allThreadsRelatedToChannelId": channel.account_id,
                       "order": "time", "maxResults": 100, "textFormat": "plainText"}
-            if channel.cursor.get("page"):
-                params["pageToken"] = channel.cursor["page"]
-            data = await self.request("GET", "https://www.googleapis.com/youtube/v3/commentThreads", token, params=params)
-            rows = []
+            if cursor.get("page"):
+                params["pageToken"] = cursor["page"]
+            data = await self.request("GET", "https://www.googleapis.com/youtube/v3/commentThreads", token,
+                                      params=params)
+            rows, pending = [], []
             for item in data.get("items", []):
-                comment = item["snippet"]["topLevelComment"]
-                snippet = comment["snippet"]
-                if snippet.get("authorChannelId", {}).get("value") == channel.account_id:
+                thread = item.get("snippet", {})
+                parent = thread.get("topLevelComment", {})
+                snippet = parent.get("snippet", {})
+                parent_id = parent.get("id")
+                if not parent_id:
                     continue
-                rows.append({"external_id": comment["id"], "text": snippet.get("textOriginal", ""),
-                    "post_text": "", "target": {"video_id": snippet.get("videoId"), "can_reply": item["snippet"].get("canReply", False)}})
-            return rows, {"page": data.get("nextPageToken")}
+                post_context = ""
+                if snippet.get("authorChannelId", {}).get("value") != channel.account_id:
+                    rows.append({"external_id": parent_id, "text": snippet.get("textOriginal", ""),
+                        "post_text": post_context,
+                        "target": {"video_id": snippet.get("videoId"),
+                                   "parent_id": parent_id,
+                                   "can_reply": thread.get("canReply", False),
+                                   "published_at": snippet.get("publishedAt")}})
+                inline_replies = item.get("replies", {}).get("comments", [])
+                for reply in inline_replies:
+                    reply_snippet = reply.get("snippet", {})
+                    if reply_snippet.get("authorChannelId", {}).get("value") == channel.account_id:
+                        continue
+                    rows.append({"external_id": reply["id"], "text": reply_snippet.get("textOriginal", ""),
+                        "post_text": snippet.get("textOriginal", ""),
+                        "target": {"video_id": snippet.get("videoId"), "parent_id": parent_id,
+                                   "can_reply": thread.get("canReply", False),
+                                   "published_at": reply_snippet.get("publishedAt")}})
+                if thread.get("totalReplyCount", 0) > len(inline_replies):
+                    pending.append({"id": parent_id, "video_id": snippet.get("videoId"),
+                                    "post_text": (snippet.get("textOriginal") or "")[:8000],
+                                    "can_reply": thread.get("canReply", False)})
+
+            next_page = data.get("nextPageToken")
+            if not next_page and not pending:
+                return rows, {}
+            result = {"page": next_page}
+            if pending:
+                result["reply_queue"] = pending
+                result["_yt_threads_complete"] = not bool(next_page)
+            return rows, result
+
         if channel.platform == "instagram":
-            # Persist pagination within a media and across media without dropping comments.
-            cursor = dict(channel.cursor)
-            if not cursor.get("media"):
-                params = {"fields": "id,caption", "limit": 25}
-                if cursor.get("after"):
-                    params["after"] = cursor["after"]
-                batch = await self.request("GET", f"https://graph.instagram.com/v22.0/{channel.account_id}/media", token, params=params)
-                cursor = {"media": batch.get("data", []), "after": batch.get("paging", {}).get("cursors", {}).get("after") if batch.get("paging", {}).get("next") else None}
-            if not cursor["media"]:
-                return [], {}
-            media = cursor["media"][0]
-            params = {"fields": "id,text,from", "limit": 100}
-            if cursor.get("comments_after"):
-                params["after"] = cursor["comments_after"]
-            batch = await self.request("GET", f"https://graph.instagram.com/v22.0/{quote(media['id'], safe='')}/comments", token, params=params)
-            rows = [{"external_id": c["id"], "text": c.get("text", ""), "post_text": media.get("caption", ""),
-                     "target": {"media_id": media["id"]}} for c in batch.get("data", [])
-                    if str(c.get("from", {}).get("id", "")) != channel.account_id]
-            cursor["comments_after"] = batch.get("paging", {}).get("cursors", {}).get("after") if batch.get("paging", {}).get("next") else None
-            if not cursor["comments_after"]:
-                cursor["media"] = cursor["media"][1:]
+            # Always refresh the newest media, even during a large historic scan;
+            # otherwise 25 old posts each cost a whole 10-minute poll interval.
+            cursor = {key: value for key, value in (channel.cursor or {}).items() if key != "_poll"}
+            rows = []
+            recent = await self.request("GET", f"https://graph.instagram.com/v22.0/{channel.account_id}/media", token,
+                                        params={"fields": "id,caption", "limit": 3})
+            for media in recent.get("data", [])[:3]:
+                batch = await self.request("GET",
+                    f"https://graph.instagram.com/v22.0/{quote(media['id'], safe='')}/comments", token,
+                    params={"fields": "id,text,from,timestamp", "limit": 100})
+                rows.extend({"external_id": c["id"], "text": c.get("text", ""),
+                             "post_text": media.get("caption") or "",
+                             "target": {"media_id": media["id"],
+                                        "published_at": c.get("timestamp")}}
+                            for c in batch.get("data", [])
+                            if str(c.get("from", {}).get("id", "")) != channel.account_id)
+            # Historic pagination progresses through up to five pages per tick.
+            # The freshest first-page scan above is independent of this cursor.
+            for _ in range(5):
+                if not cursor.get("media"):
+                    params = {"fields": "id,caption", "limit": 25}
+                    if cursor.get("after"):
+                        params["after"] = cursor["after"]
+                    batch = await self.request("GET",
+                        f"https://graph.instagram.com/v22.0/{channel.account_id}/media", token, params=params)
+                    cursor = {"media": batch.get("data", []),
+                              "after": batch.get("paging", {}).get("cursors", {}).get("after")
+                                       if batch.get("paging", {}).get("next") else None}
+                    if not cursor["media"]:
+                        return rows, {}
+                media = cursor["media"][0]
+                params = {"fields": "id,text,from,timestamp", "limit": 100}
+                if cursor.get("comments_after"):
+                    params["after"] = cursor["comments_after"]
+                batch = await self.request("GET",
+                    f"https://graph.instagram.com/v22.0/{quote(media['id'], safe='')}/comments", token, params=params)
+                rows.extend({"external_id": c["id"], "text": c.get("text", ""),
+                             "post_text": media.get("caption") or "",
+                             "target": {"media_id": media["id"],
+                                        "published_at": c.get("timestamp")}}
+                            for c in batch.get("data", [])
+                            if str(c.get("from", {}).get("id", "")) != channel.account_id)
+                cursor["comments_after"] = (batch.get("paging", {}).get("cursors", {}).get("after")
+                                           if batch.get("paging", {}).get("next") else None)
+                if not cursor["comments_after"]:
+                    cursor["media"] = cursor["media"][1:]
+                    if not cursor["media"] and not cursor.get("after"):
+                        return rows, {}
             return rows, cursor if cursor.get("media") or cursor.get("after") else {}
         if channel.platform == "telegram":
             data = await self.request("POST", self.tg_url(token, "getUpdates"), token, telegram=True,
@@ -160,13 +255,21 @@ class CommentGateway:
             return await adapter.send(channel, token, comment, text)
         if channel.platform == "youtube":
             # Fetch native parent again and bind it to the owned channel.
+            parent_id = (comment.target or {}).get("parent_id") or comment.external_id
             check = await self.request("GET", "https://www.googleapis.com/youtube/v3/comments", token,
-                params={"part": "snippet", "id": comment.external_id})
+                params={"part": "snippet", "id": parent_id})
             parent = next(iter(check.get("items", [])), None)
             if not parent or parent["snippet"].get("channelId") != channel.account_id:
                 raise PlatformError("Комментарий удалён или относится к другому каналу")
+            if parent_id != comment.external_id:
+                # A reply must still belong to the same verified parent thread.
+                source = await self.request("GET", "https://www.googleapis.com/youtube/v3/comments", token,
+                    params={"part": "snippet", "id": comment.external_id})
+                nested = next(iter(source.get("items", [])), None)
+                if not nested or nested["snippet"].get("parentId") != parent_id:
+                    raise PlatformError("Ответ относится к другому обсуждению")
             data = await self.request("POST", "https://www.googleapis.com/youtube/v3/comments", token,
-                params={"part": "snippet"}, json={"snippet": {"parentId": comment.external_id, "textOriginal": text}})
+                params={"part": "snippet"}, json={"snippet": {"parentId": parent_id, "textOriginal": text}})
             return str(data["id"])
         if channel.platform == "instagram":
             account = await self.request("GET", "https://graph.instagram.com/v22.0/me", token,

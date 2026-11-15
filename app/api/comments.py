@@ -273,7 +273,9 @@ async def comment_action(product_id: UUID, comment_id: UUID, action: str, reques
             return {"id": str(record.id)}
         if action == "send":
             value = await body(request, ReplyEdit)
-            return {"external_reply_id": await svc.send(product_id, comment_id, value.reply)}
+            return {"external_reply_id": await svc.send(
+                product_id, comment_id, value.reply,
+                approved_by=getattr(request.state, "studio_login", None) or "local-owner")}
         if action == "reset-draft":
             svc.recover_stalled_draft(product_id, comment_id)
             return {"status": "draft_failed"}

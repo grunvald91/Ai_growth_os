@@ -64,6 +64,25 @@ def now():
     return datetime.now(timezone.utc)
 
 
+def recent_platform_comment(comment, max_age_days: int) -> bool:
+    """Auto-draft only timestamped, recent platform comments.
+
+    Existing/unknown-age imports stay available for explicit manual review.
+    """
+    from datetime import timedelta
+    raw = (comment.target or {}).get("published_at")
+    if not raw:
+        return False
+    try:
+        published = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if published.tzinfo is None:
+        return False
+    current = now()
+    return current - timedelta(days=max_age_days) <= published <= current + timedelta(hours=1)
+
+
 class CommentService:
     def __init__(self, db: Session, settings, *, llm=None, gateway=None):
         self.db, self.settings, self.llm = db, settings, llm
@@ -261,6 +280,8 @@ class CommentService:
                 raise ValueError("Автоматическая генерация выключена")
             if comment.status != "new" or comment.source != "platform" or comment.reply_id:
                 raise ValueError("Автоматическая генерация разрешена только для новых импортированных комментариев")
+            if not recent_platform_comment(comment, self.settings.comment_background_draft_max_age_days):
+                raise ValueError("Старый или недатированный комментарий требует ручного выбора")
             channel = self.channel(product_id, comment.platform, lock=True)
             if (comment.platform not in {"youtube", "instagram"} or not channel
                     or channel.status != "connected" or comment.target.get("channel_id") != str(channel.id)):
@@ -273,6 +294,23 @@ class CommentService:
                 Task.created_at >= today)) or 0
             if attempts >= self.settings.comment_background_draft_daily_limit:
                 raise ValueError("Дневной лимит автоматических черновиков исчерпан")
+            usage = self.db.execute(
+                select(
+                    func.coalesce(func.sum(func.coalesce(CostRecord.input_tokens, 0)
+                                           + func.coalesce(CostRecord.output_tokens, 0)), 0),
+                    func.count(CostRecord.id).filter(CostRecord.input_tokens.is_(None)),
+                )
+                .join(AgentRun, AgentRun.id == CostRecord.agent_run_id)
+                .join(Task, Task.id == AgentRun.task_id)
+                .where(Task.product_id == product_id,
+                       Task.title == "Авто-черновик комментария",
+                       Task.created_at >= today)
+            ).one()
+            if usage[1]:
+                # Missing provider usage cannot safely be interpreted as 0 cost.
+                raise ValueError("Провайдер не сообщил расход токенов. Продолжите вручную после проверки")
+            if usage[0] >= self.settings.comment_background_draft_daily_token_limit:
+                raise ValueError("Достигнут дневной лимит токенов автоматических черновиков")
         if not config.enabled:
             raise ValueError("Агент на паузе")
         if self.llm is None:
@@ -298,11 +336,12 @@ class CommentService:
                     "settings": {**config.model_dump(exclude={"facts"}), "max_length": reply_limit(comment.platform, config.max_length)},
                     "platform": comment.platform, "untrusted_comment": comment.text,
                     "untrusted_post_context": comment.post_text}, ensure_ascii=False))]))
-            if response.usage:
-                self.db.add(CostRecord(product_id=product_id, agent_run_id=run.id, category="llm",
-                    provider=self.settings.llm_provider, amount=0, currency="USD", incurred_at=now(),
-                    input_tokens=max(0, response.usage.input_tokens), output_tokens=max(0, response.usage.output_tokens),
-                    details={"cost_known": False, "note": "Usage recorded; monetary price unavailable."}))
+            self.db.add(CostRecord(product_id=product_id, agent_run_id=run.id, category="llm",
+                provider=self.settings.llm_provider, amount=0, currency="USD", incurred_at=now(),
+                input_tokens=max(0, response.usage.input_tokens) if response.usage else None,
+                output_tokens=max(0, response.usage.output_tokens) if response.usage else None,
+                details={"cost_known": False, "usage_known": bool(response.usage),
+                         "note": "Monetary cost unknown; zero amount must not be treated as free."}))
             # The owner may have explicitly released a stale claim while the
             # provider was slow; do not resurrect an obsolete background request.
             self.db.refresh(comment, with_for_update=True)
@@ -391,7 +430,7 @@ class CommentService:
                 task.status = TaskStatus.CANCELLED if status == "skipped" else TaskStatus.COMPLETED
         self.db.commit()
 
-    async def send(self, product_id, comment_id, text):
+    async def send(self, product_id, comment_id, text, *, approved_by="studio_owner"):
         self.product(product_id, lock=True)
         comment = self.comment(product_id, comment_id, lock=True)
         if comment.status not in {"draft", "review"} or not comment.reply_id:
@@ -410,6 +449,8 @@ class CommentService:
             raise ValueError("Данные бизнеса или подключение изменились. Подготовьте новый ответ.")
         if not text.strip() or len(text) > reply_limit(comment.platform, config.max_length):
             raise ValueError("Проверьте длину и текст ответа")
+        if comment.platform == "youtube" and comment.target.get("can_reply") is False:
+            raise ValueError("YouTube не разрешает ответить в этом обсуждении")
         if data["action"] == "skip":
             raise ValueError("Для пропуска отправка недоступна")
         policy = PolicyEvaluator().evaluate(ToolOperation.PUBLISH)
@@ -418,7 +459,7 @@ class CommentService:
             title="Одобренный ответ", content=text, status=ArtifactStatus.APPROVED)
         self.db.add(approved); self.db.flush()
         approval = Approval(product_id=product_id, artifact_id=approved.id, action_type="comment_reply",
-            risk_level=policy.risk_level.value, status="approved", decided_by="studio_owner",
+            risk_level=policy.risk_level.value, status="approved", decided_by=approved_by,
             requested_by="comment_sales", decided_at=now(), reason="Владелец одобрил окончательный текст")
         self.db.add(approval); self.db.flush()
         call = ToolCall(product_id=product_id, task_id=original.task_id, approval_id=approval.id,
