@@ -56,8 +56,8 @@ try {
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin, { waitUntil: "networkidle" });
-  const trigger = page.locator("ui-collapsible-trigger button");
-  const panel = page.locator("ui-collapsible-panel");
+  const trigger = page.locator(".dp-create-editor ui-collapsible-trigger button");
+  const panel = page.locator(".dp-create-editor ui-collapsible-panel");
   await trigger.waitFor();
   assert.equal(await panel.isVisible(), false, "optional fields must start closed");
   assert.equal(await trigger.getAttribute("aria-expanded"), "false");
@@ -86,8 +86,8 @@ try {
   assert.equal(await post.locator(".dp-post-actions button").isVisible(), true);
   await page.screenshot({ path: "../studio-ui-sdk-mobile-smoke.png", fullPage: true });
   await page.goto(origin + "/?prefilled=1", { waitUntil: "networkidle" });
-  await page.locator("ui-collapsible-trigger button").waitFor();
-  assert.equal(await page.locator("ui-collapsible-panel").isVisible(), true,
+  await page.locator(".dp-create-editor ui-collapsible-trigger button").waitFor();
+  assert.equal(await page.locator(".dp-create-editor ui-collapsible-panel").isVisible(), true,
     "previously populated fields must be visible by default");
   assert.deepEqual(errors, [], "browser must not have JS errors");
   console.log("UI SDK Collapsible browser smoke passed: mouse, keyboard, data persistence, prefilled state");
