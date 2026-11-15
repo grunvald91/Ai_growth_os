@@ -86,6 +86,8 @@ def card(ctx: Context, row: Artifact) -> dict:
             "title": row.title[:300], "status": STATUS_LABELS.get(_status(row), _status(row)),
             "excerpt": excerpt(row, EXCERPT_CARD), "body": body,
             "version": row.version, "reviewable": reviewable and bool(body),
+            "revision_of": (str(material_data(row).get("revision_of") or "")[:64] or None)
+                if row.kind == "channel_text" else None,
             "href": _page(ctx, row)}
 
 
