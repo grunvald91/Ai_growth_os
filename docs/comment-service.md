@@ -195,6 +195,17 @@ still required for every outbound message.
   company per UTC day. It counts attempted calls, including failed generations;
   only one new comment per worker tick is prepared. This is an operator cap,
   not a claim about the LLM provider's own billing or limits.
+- `COMMENT_BACKGROUND_DRAFT_MAX_AGE_DAYS=30`: auto-draft only imported comments
+  containing a valid authoritative `published_at` from the platform no older
+  than 30 days. Unknown-age and older comments remain available for manual review.
+- `COMMENT_BACKGROUND_DRAFT_DAILY_TOKEN_LIMIT=100000`: separate per-company
+  limit on *observed* input+output tokens for automatic drafts in UTC day.
+  An automatic reply provider is configured without model fallback fan-out.
+  When provider usage is absent, stop subsequent automatic calls for the day
+  until inspected. Monetary cost remains **unknown**, not USD 0: the database
+  records a 0 placeholder together with `cost_known=false`. These gates are
+  not a guaranteed monetary ceiling; unsuccessful upstream requests may have
+  costs that were not reported.
 - Before the model is called, the agent locks the business/comment, creates
   `Task` and `AgentRun`, sets the comment status to `drafting`, and commits.
   Other worker instances and manual actions cannot start a second simultaneous
@@ -217,3 +228,20 @@ without human approval**, built-in OAuth applications, automatic token refresh
 and live account verification are still **not implemented**.
 Real end-to-end testing needs authorized platform accounts; offline tests use fake
 providers and HTTP transport mocks.
+
+## Review hardening (2026-11-15)
+
+- Background poll and paid draft loops run as independent asyncio tasks; slow
+  model completion cannot block intake. Neither loop publishes.
+- Candidate selection uses paginated SQL keysets instead of checking just the
+  earliest 500 records, so opted-in tenants after a long disabled queue are found.
+- Instagram queries recent media on every tick, while walking historic media and
+  comment pages in a separate bounded batch (up to five pages/tick).
+- YouTube imports top-level comments and inline replies, then persists a
+  `reply_queue` and pages through `comments.list(parentId)` to retrieve
+  reply threads that were truncated in the initial API response.
+- Publish approval records the authenticated Studio login rather than a constant.
+- GitHub Actions includes a dedicated disposable PostgreSQL workflow to test
+  real comment claim and daily-budget row locks; ordinary SQLite tests do not
+  establish multi-process PostgreSQL guarantees.
+- Live API auth/quota and production delivery are NOT verified by offline tests.
