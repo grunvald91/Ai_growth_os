@@ -260,7 +260,7 @@ async def instagram_webhook_receive(request: Request, settings=Depends(get_setti
             comment = value.get("text") or ""
             if (not comment_id.isdigit() or not media_id.isdigit()
                     or not isinstance(comment, str) or not comment.strip()
-                    or creator_id == account_id):
+                    or not creator_id or creator_id == account_id):
                 continue
             existing = db.scalar(select(BusinessComment.id).where(
                 BusinessComment.product_id == channel.product_id,
