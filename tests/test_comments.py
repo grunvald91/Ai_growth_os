@@ -936,7 +936,8 @@ async def test_draft_queue_uses_keyset_pages_to_reach_enabled_tenant(ctx, monkey
     root = svc.settings.products_root / enabled.slug
     root.mkdir()
     (root / "company-profile.json").write_text(json.dumps({
-        "schema_version": "1.0", "identity": {"name": "Enabled"}}))
+        "schema_version": "1.0", "identity": {"name": "Enabled"},
+        "proof": {"approved_facts": [{"statement": "Тариф стоит 1000 рублей"}]}}))
     await svc.connect(enabled.id, ConnectInput(platform="youtube", account_id="UCenabled", token="token-enabled"))
     await svc.sync(enabled.id, "youtube")
     svc.configure(enabled.id, AgentSettings(auto_draft=True))
