@@ -21,7 +21,18 @@ function html(prefilled) {
       <label class="dp-create-edit-field" data-ui-sdk-advanced>
         <span>Дополнительные требования</span><textarea name="brief"></textarea></label>
       <button type="submit">Сохранить</button>
-    </form></article></div></section></main>
+    </form>
+    <div class="dp-material" id="post-card">
+      <section class="dp-post-preview">
+        <span class="dp-post-preview-label">Текст поста · можно выделить фрагмент</span>
+        <div class="dp-post-body" tabindex="0">Проверенный текст поста для редактора.</div>
+        <div class="dp-post-actions"><button type="button">Изменить фрагмент</button></div>
+      </section>
+    </div>
+    </article></div></section></main>
+    <script>
+      document.getElementById("post-card").__sgPostReview = {version: 2};
+    </script>
     <script type="module" src="/ui-sdk-pilot.bundle.js"></script>
   </body></html>`;
 }
@@ -60,6 +71,19 @@ try {
   assert.equal(await panel.isVisible(), true, "Space should reopen panel");
   assert.equal(await page.locator('input[name="audience"]').inputValue(), "Новые клиенты",
     "collapse must not discard form values");
+  const post = page.locator("#post-card");
+  const postTrigger = post.locator("ui-collapsible-trigger button");
+  const postPanel = post.locator("ui-collapsible-panel");
+  await postTrigger.waitFor();
+  assert.match(await postTrigger.innerText(), /версия 2/);
+  assert.equal(await postPanel.isVisible(), true);
+  await postTrigger.click();
+  assert.equal(await postPanel.isVisible(), false);
+  await postTrigger.press("Enter");
+  assert.equal(await postPanel.isVisible(), true);
+  assert.equal(await post.locator(".dp-post-body").innerText(),
+    "Проверенный текст поста для редактора.");
+  assert.equal(await post.locator(".dp-post-actions button").isVisible(), true);
   await page.screenshot({ path: "../studio-ui-sdk-mobile-smoke.png", fullPage: true });
   await page.goto(origin + "/?prefilled=1", { waitUntil: "networkidle" });
   await page.locator("ui-collapsible-trigger button").waitFor();
