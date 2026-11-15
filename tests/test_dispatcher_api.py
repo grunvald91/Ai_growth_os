@@ -482,6 +482,7 @@ def test_inline_post_review_fragment_rework_and_final_approval_are_separate(env)
     assert len(newer) == 1
     assert newer[0]["body"] == updated and newer[0]["version"] == 2
     assert newer[0]["artifact_id"] == str(revised.id)
+    assert newer[0]["revision_of"] == str(source.id)
     assert blocks(client.get(f"/studio/products/{servgo.id}/dispatch/updates"), "material") == []
 
     bad_fragment = blocks(command("revise_material", {
