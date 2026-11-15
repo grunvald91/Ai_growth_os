@@ -5,6 +5,36 @@
     <meta name="yandex-verification" content="24c86f64d4a09338" />
     <meta name="description" content="ServGo — ИИ-платформа роста для бизнеса услуг: онлайн-запись, пустые окна, смены и зарплата сотрудников, контент, ответы клиентам и разведка конкурентов." />
     <meta name="robots" content="index, follow" />
+    <!-- Route canonical is published before the React bundle and API requests.
+         This generic SPA shell is shared by all routes, so a fixed root canonical
+         would incorrectly merge business pages into the homepage. -->
+    <script id="seo-route-bootstrap">
+      (function () {
+        var pathname = window.location.pathname;
+        var business = /^\/business\/(0*[1-9][0-9]*)\/?$/.exec(pathname);
+        var businessId = business ? Number(business[1]) : null;
+        var canonicalPath = pathname === '/'
+          ? '/'
+          : (business && Number.isSafeInteger(businessId))
+            ? '/business/' + businessId
+            : null;
+        var robots = document.head.querySelector('meta[name="robots"]');
+        // Other SPA routes are private/utility. Server-rendered blogs supply
+        // their own canonical and are not served from this template.
+        if (!canonicalPath) {
+          if (robots) robots.setAttribute('content', 'noindex, follow');
+          return;
+        }
+        var canonical = document.createElement('link');
+        canonical.rel = 'canonical';
+        canonical.href = 'https://servgo.ru' + canonicalPath;
+        document.head.appendChild(canonical);
+        var ogUrl = document.createElement('meta');
+        ogUrl.setAttribute('property', 'og:url');
+        ogUrl.setAttribute('content', canonical.href);
+        document.head.appendChild(ogUrl);
+      })();
+    </script>
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="ServGo" />
     <meta property="og:locale" content="ru_RU" />
