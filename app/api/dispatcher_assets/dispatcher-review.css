@@ -1,0 +1,46 @@
+/* Only the new post review and UI SDK form primitives.
+ * V4 intentionally excludes the classic dispatcher layout stylesheet. */
+/* Inline content review: real material text is selectable, never treated as HTML. */
+.dp-post-preview{display:grid;gap:9px;min-width:0;padding:12px 0 4px}
+.dp-post-preview-label{font-size:12px;font-weight:700;letter-spacing:.01em;color:var(--dp-text2)}
+.dp-post-body{max-height:520px;overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap;
+  line-height:1.65;font-size:14px;padding:14px;border:1px solid var(--dp-line);
+  border-radius:13px;background:var(--dp-soft);color:var(--dp-text);
+  -webkit-user-select:text;user-select:text}
+.dp-post-body:focus-visible,.dp-post-revise-form textarea:focus-visible{
+  outline:2px solid var(--dp-accent);outline-offset:2px
+}
+.dp-post-preview-hint{font-size:12px;color:var(--dp-text2);margin:0}
+.dp-post-actions{display:grid;gap:10px;min-width:0}
+.dp-post-revise-button{width:100%;font-size:13px;min-height:42px}
+.dp-post-revise-form{display:grid;gap:10px;min-width:0}
+.dp-post-revise-form[hidden],.dp-post-quote[hidden]{display:none!important}
+.dp-post-feedback-label{display:grid;gap:6px;font-size:13px;font-weight:600;color:var(--dp-text)}
+.dp-post-feedback-label textarea{font:inherit;font-weight:400;box-sizing:border-box;width:100%;
+  min-height:100px;resize:vertical;padding:11px;border:1px solid var(--dp-line);
+  border-radius:11px;background:var(--dp-surface,#fff);color:var(--dp-text)}
+.dp-post-quote{margin:0;padding:9px 12px;border-left:3px solid var(--dp-accent);
+  border-radius:4px;background:var(--dp-soft);color:var(--dp-text2);
+  white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
+.dp-post-revise-actions{display:flex;gap:8px}
+.dp-post-revise-actions .dp-btn{min-height:42px;font-size:13px}
+@media(max-width:500px){.dp-post-body{max-height:58vh;padding:11px}
+  .dp-post-preview{padding:9px 0 3px}}
+
+
+/* Experimental UI SDK Web Component: created only in ?ui_sdk=1 mode. */
+.dp-create-editor .dp-ui-sdk-collapsible{display:block;min-width:0}
+.dp-create-editor .dp-ui-sdk-trigger{display:block}
+.dp-create-editor .dp-ui-sdk-trigger>button{
+  width:100%;min-height:44px;padding:9px 13px;border:1px solid var(--dp-line,#d8e4f0);
+  border-radius:11px;background:var(--dp-soft,#f6f9fd);color:var(--dp-text2,#3d536b);
+  font:inherit;font-size:13px;font-weight:650;text-align:left;cursor:pointer;
+}
+.dp-create-editor .dp-ui-sdk-trigger>button::after{content:"⌄";float:right;font-size:18px;line-height:1}
+.dp-create-editor .dp-ui-sdk-collapsible[data-open] .dp-ui-sdk-trigger>button::after{content:"⌃"}
+.dp-create-editor .dp-ui-sdk-trigger>button:focus-visible{
+  outline:2px solid var(--dp-accent,#3478d6);outline-offset:2px
+}
+.dp-create-editor .dp-ui-sdk-advanced{display:grid;gap:9px;min-width:0;padding-top:9px}
+.dp-create-editor .dp-ui-sdk-advanced[hidden]{display:none!important}
+
