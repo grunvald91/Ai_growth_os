@@ -3,6 +3,7 @@
 Keyset pagination scans beyond paused channels without loading the entire
 table or starving a later opted-in business.
 """
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -31,6 +32,7 @@ async def run_comment_poll_once(session_factory, settings, *, gateway=None):
     if not settings.comment_background_poll_enabled:
         return 0
     after = None
+    paused_products = set()
     while True:
         with session_factory() as db:
             query = (
@@ -50,7 +52,11 @@ async def run_comment_poll_once(session_factory, settings, *, gateway=None):
 
         if not candidates:
             return 0
-        for product_id, platform, cursor, _, _ in candidates:
+        for index, (product_id, platform, cursor, _, _) in enumerate(candidates):
+            if index % 50 == 0:
+                await asyncio.sleep(0)
+            if product_id in paused_products:
+                continue
             if not poll_due(cursor):
                 continue
             with session_factory() as db:
@@ -58,6 +64,7 @@ async def run_comment_poll_once(session_factory, settings, *, gateway=None):
                     service = CommentService(db, settings, gateway=gateway)
                     config, _ = service.config(product_id)
                     if not config.enabled or not config.auto_import:
+                        paused_products.add(product_id)
                         continue
                     await service.sync(product_id, platform, background=True)
                     return 1
