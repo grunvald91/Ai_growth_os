@@ -274,6 +274,9 @@ async def comment_action(product_id: UUID, comment_id: UUID, action: str, reques
         if action == "send":
             value = await body(request, ReplyEdit)
             return {"external_reply_id": await svc.send(product_id, comment_id, value.reply)}
+        if action == "reset-draft":
+            svc.recover_stalled_draft(product_id, comment_id)
+            return {"status": "draft_failed"}
         if action in {"skipped", "handled"}:
             svc.close(product_id, comment_id, action)
             return {"status": action}
