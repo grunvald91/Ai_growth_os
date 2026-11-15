@@ -20,7 +20,7 @@ from app.api.comments import service
 from app.api.content_studio import esc, studio_page_shell
 from app.comments.instagram_oauth import (
     MAX_STATE_AGE_SECONDS, MetaUnifiedClient, configured, new_state,
-    redirect_uri, verify_state,
+    redirect_uri, state_product_id, verify_state,
 )
 from app.comments.models import BusinessComment, CommentChannel
 from app.core.config import get_settings
@@ -34,7 +34,8 @@ MAX_WEBHOOK_BYTES = 256 * 1024
 
 
 def cookie_path(product_id):
-    return f"/products/{product_id}/comments/instagram/oauth"
+    # One common callback for all companies; never send the nonce to unrelated paths.
+    return "/studio/integrations/instagram/oauth"
 
 
 def owner(request: Request):
@@ -77,13 +78,24 @@ async def instagram_oauth_start(product_id: UUID, request: Request, svc=Depends(
     return response
 
 
-@studio_router.get("/products/{product_id}/comments/instagram/oauth/callback")
-async def instagram_oauth_callback(product_id: UUID, request: Request,
+@studio_router.get("/studio/integrations/instagram/oauth/callback")
+async def instagram_oauth_callback(request: Request,
                                    code: str = "", state: str = "",
                                    svc=Depends(service)):
+    hinted = state_product_id(state)
+    try:
+        product_id = UUID(hinted) if hinted else None
+    except ValueError:
+        product_id = None
+    if product_id is None or not verify_state(
+            svc.settings, state, request.cookies.get(COOKIE_NAME),
+            product_id, owner(request)):
+        raise HTTPException(403, "Истекла проверка безопасности Meta OAuth")
+    allowed = getattr(request.state, "studio_product_ids", None)
+    if allowed is not None and str(product_id) not in allowed:
+        raise HTTPException(404, "Компания не найдена")
     svc.product(product_id)
-    if not verify_state(svc.settings, state, request.cookies.get(COOKIE_NAME),
-                        product_id, owner(request)):
+
         raise HTTPException(403, "Истекла проверка безопасности Meta OAuth")
     if not code:
         raise HTTPException(400, "Meta не выдала разрешение на подключение")
