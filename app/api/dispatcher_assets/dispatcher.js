@@ -19,7 +19,7 @@
   if (new URLSearchParams(window.location.search).get('ui_sdk') !== '0') {
     var pilotScript = document.createElement('script');
     pilotScript.type = 'module';
-    pilotScript.src = '/studio/assets/ui-sdk-pilot.bundle.js?v=1';
+    pilotScript.src = '/studio/assets/ui-sdk-pilot.bundle.js?v=2';
     document.head.appendChild(pilotScript);
   }
 
