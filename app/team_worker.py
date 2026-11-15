@@ -299,27 +299,38 @@ async def _calendar_loop(settings):
         await asyncio.sleep(settings.team_worker_idle_poll_seconds)
 
 
-async def _comments_loop(settings):
-    """Independent intake loop: never runs the publication endpoint."""
+async def _comment_poll_loop(settings):
+    """Import never waits for a paid LLM call in a separate worker task."""
     import logging
     from app.comments.polling import run_comment_poll_once
+    while True:
+        try:
+            await run_comment_poll_once(SessionLocal, settings)
+        except Exception:
+            logging.getLogger(__name__).warning("comment_poll_tick_failed", exc_info=False)
+        await asyncio.sleep(15)
+
+
+async def _comment_draft_loop(settings):
+    """Independent draft loop: no calls to publication endpoints."""
+    import logging
     from app.comments.drafting import run_comment_draft_once
     while True:
         try:
-            if settings.comment_background_poll_enabled:
-                await run_comment_poll_once(SessionLocal, settings)
-            if settings.comment_background_draft_enabled:
-                await run_comment_draft_once(SessionLocal, settings)
+            await run_comment_draft_once(SessionLocal, settings)
         except Exception:
-            logging.getLogger(__name__).warning("comment_tick_failed", exc_info=False)
+            logging.getLogger(__name__).warning("comment_draft_tick_failed", exc_info=False)
         await asyncio.sleep(15)
 
 
 async def main() -> None:
     settings = get_settings()
     calendar_task = asyncio.create_task(_calendar_loop(settings))
-    comments_task = (asyncio.create_task(_comments_loop(settings))
-                     if settings.comment_background_poll_enabled or settings.comment_background_draft_enabled else None)
+    comment_tasks = []
+    if settings.comment_background_poll_enabled:
+        comment_tasks.append(asyncio.create_task(_comment_poll_loop(settings)))
+    if settings.comment_background_draft_enabled:
+        comment_tasks.append(asyncio.create_task(_comment_draft_loop(settings)))
     try:
         while True:
             try:
@@ -335,11 +346,9 @@ async def main() -> None:
             )
     finally:
         calendar_task.cancel()
-        if comments_task is not None:
-            comments_task.cancel()
-        for task in (calendar_task, comments_task):
-            if task is None:
-                continue
+        for task in comment_tasks:
+            task.cancel()
+        for task in (calendar_task, *comment_tasks):
             try:
                 await task
             except asyncio.CancelledError:
