@@ -70,7 +70,11 @@ async def run_comment_draft_once(session_factory, settings, *, llm=None):
                         from app.privacy import PrivacyGateway
                         service.llm = LLMService(
                             privacy_gateway=PrivacyGateway(),
-                            provider=build_llm_provider(settings),
+                            # A single paid claim must not silently fan out
+                            # to fallback models on 429/network errors.
+                            provider=build_llm_provider(settings.model_copy(update={
+                                "llm_fallback_models": "", "model_router_enabled": False,
+                            })),
                         )
                     await service.draft(product_id, comment_id, background=True)
                     return 1
