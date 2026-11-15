@@ -16,7 +16,7 @@ from app.comments.models import BusinessComment, CommentChannel
 from app.core.config import get_settings
 from app.main import app
 from app.models.domain import Artifact, Approval, Publication
-from tests.test_comments import ctx, client_for
+from test_comments import ctx, client_for
 
 
 def meta_config(settings):
