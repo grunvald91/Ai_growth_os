@@ -12,15 +12,18 @@
       (function () {
         var pathname = window.location.pathname;
         var business = /^\/business\/(0*[1-9][0-9]*)\/?$/.exec(pathname);
-        var businessId = business ? Number(business[1]) : null;
+        var blog = /^\/business\/(0*[1-9][0-9]*)\/blog(?:\/([a-z0-9]+(?:-[a-z0-9]+)*))?\/?$/.exec(pathname);
+        var idPart = business ? business[1] : blog ? blog[1] : null;
+        var businessId = idPart ? Number(idPart) : null;
         var canonicalPath = pathname === '/'
           ? '/'
-          : (business && Number.isSafeInteger(businessId))
-            ? '/business/' + businessId
+          : (idPart && Number.isSafeInteger(businessId))
+            ? '/business/' + businessId + (blog ? '/blog' + (blog[2] ? '/' + blog[2] : '') : '')
             : null;
         var robots = document.head.querySelector('meta[name="robots"]');
-        // Other SPA routes are private/utility. Server-rendered blogs supply
-        // their own canonical and are not served from this template.
+        // Keep business blogs indexable even when the server-rendered route
+        // falls back to the SPA: Google may skip rendering pages with noindex.
+        // Other SPA routes are private/utility.
         if (!canonicalPath) {
           if (robots) robots.setAttribute('content', 'noindex, follow');
           return;
