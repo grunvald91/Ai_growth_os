@@ -245,3 +245,74 @@ providers and HTTP transport mocks.
   real comment claim and daily-budget row locks; ordinary SQLite tests do not
   establish multi-process PostgreSQL guarantees.
 - Live API auth/quota and production delivery are NOT verified by offline tests.
+
+
+## Instagram Unified Login + signed Webhook integration (2026-11)
+
+New Meta apps may require the Unified Login flow via **Facebook Login for Business
+configuration ID** instead of the old Instagram App ID + scope form. For this
+flow, ServGo uses the Meta App ID, App Secret and `config_id`; after consent it
+selects a granted professional account from
+`GET /me/assigned_instagram_accounts` and uses `graph.facebook.com`.
+Existing manual Instagram Login connections remain supported with
+`graph.instagram.com`. Never reuse credentials between these two modes.
+
+Required SERVER environment (no real values in Git):
+- `COMMENT_META_APP_ID` — Meta application ID.
+- `COMMENT_META_APP_SECRET` — secret for code exchange, OAuth HMAC and webhooks.
+- `COMMENT_META_LOGIN_CONFIG_ID` — system-user token configuration under
+  Facebook Login for Business. Permissions must include Instagram comment
+  management, and business assets must be granted during consent.
+- `COMMENT_META_PUBLIC_BASE=https://servgo.ru` — the exact external host
+  reachable by both Studio and Meta. Register the **single** redirect URI
+  `https://servgo.ru/studio/integrations/instagram/oauth/callback` in Meta.
+- `COMMENT_META_WEBHOOK_VERIFY_TOKEN` — long random verification token entered
+  in the Meta Dashboard (not the app secret).
+- `COMMENT_META_GRAPH_VERSION=v27.0` — explicit Graph version; align with the
+  current Meta app permissions, API availability and reviewed API methods.
+- `COMMENT_PLATFORM_PROXY_URL` — required reachable foreign HTTP(S) proxy;
+  API fails closed without it, never uses environment proxy fallback.
+
+**Owner UX:** Growth Studio → Комментарии → Подключения → Instagram →
+**Подключить через Meta**. Browser authorization uses short-lived signed HMAC
+state bound to current Studio login, product ID and an HttpOnly, SameSite=Lax
+nonce cookie. The callback is globally fixed; the selected business comes only
+from a verified state and its active Studio permissions. Credentials are stored
+in the encrypted persistent integration store. Before account selection, a
+short-lived encrypted pending token is stored outside the SQL database; its
+pending Artifact has a 10-minute expiry and never contains the token. Selecting
+an authorized account reconfirms its Meta access and binds its native ID to just
+one product. Reconnect or revoke access if permissions change.
+
+**Webhook setup:** configure Instagram `comments` field in the Meta Dashboard
+and set:
+- Callback `https://servgo.ru/api/integrations/instagram/webhook` (public).
+- Verify token exactly `COMMENT_META_WEBHOOK_VERIFY_TOKEN`.
+
+GET performs Meta's verification handshake. POST enforces a 256 KiB body cap,
+checks `X-Hub-Signature-256` against the **original raw bytes**, validates
+Instagram comment fields, binds events to an active Instagram account and one
+specific product, then stores the comment under the existing unique
+(product, platform, comment ID) key. Multiple webhook deliveries do not create
+duplicate comments. No LLM or outbound Meta publish call runs in a webhook.
+If the app lacks the required Live mode / Advanced Access / App Review or Meta
+does not send events, the existing opt-in polling remains an independent
+reconciliation path.
+
+**Important operating limits:**
+- Official Meta approvals, application Live mode, user/business grants, network
+  proxy and real callback delivery are **not verified** by mock unit tests.
+- Some Webhook events do not carry a source comment timestamp or media caption.
+  They are imported and visible in Studio; auto-drafts require an authoritative
+  `published_at`, so such events may need polling enrichment or manual drafting.
+- Unknown or revoked tokens do not trigger blind retries of public replies.
+  Existing durable `sending`/`delivery_unknown` protections still apply.
+- Automated publishing is **not enabled** by OAuth/Webhooks, nor by polling or
+  draft opt-in. Each public response still requires human approval.
+- Jev is not activated for small comment volumes; a future adaptive bulk triage
+  must be enabled only after a real threshold/cost/quality comparison. It is
+  not required for the initial Instagram E2E.
+
+References: [Meta comments webhooks](https://developers.facebook.com/docs/graph-api/webhooks/reference/instagram),
+[Meta assigned Instagram assets](https://developers.facebook.com/docs/graph-api/reference/user/assigned_instagram_accounts/),
+[Postiz Unified Login compatibility reports](https://github.com/gitroomhq/postiz-app/issues/2350).
