@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.comments.platforms import reply_limit
@@ -250,23 +250,45 @@ class CommentService:
             raise LookupError("Комментарий не найден")
         return row
 
-    async def draft(self, product_id, comment_id):
+    async def draft(self, product_id, comment_id, *, background=False):
         self.product(product_id, lock=True)
         comment = self.comment(product_id, comment_id, lock=True)
-        if comment.status in {"sending", "sent", "delivery_unknown", "skipped", "handled"}:
-            raise ValueError("Этот комментарий уже обработан или ожидает проверки доставки")
+        if comment.status in {"drafting", "sending", "sent", "delivery_unknown", "skipped", "handled"}:
+            raise ValueError("Этот комментарий уже обрабатывается или завершён")
         facts, profile_digest, config, settings_record = self.knowledge(product_id)
+        if background:
+            if not self.settings.comment_background_draft_enabled or not config.auto_draft:
+                raise ValueError("Автоматическая генерация выключена")
+            if comment.status != "new" or comment.source != "platform" or comment.reply_id:
+                raise ValueError("Автоматическая генерация разрешена только для новых импортированных комментариев")
+            channel = self.channel(product_id, comment.platform, lock=True)
+            if (comment.platform not in {"youtube", "instagram"} or not channel
+                    or channel.status != "connected" or comment.target.get("channel_id") != str(channel.id)):
+                raise ValueError("Исходная площадка не подключена")
+            # Count claims, not only completed LLM calls; failed attempts consume budget too.
+            from datetime import timedelta
+            today = now().replace(hour=0, minute=0, second=0, microsecond=0)
+            attempts = self.db.scalar(select(func.count(Task.id)).where(
+                Task.product_id == product_id, Task.title == "Авто-черновик комментария",
+                Task.created_at >= today)) or 0
+            if attempts >= self.settings.comment_background_draft_daily_limit:
+                raise ValueError("Дневной лимит автоматических черновиков исчерпан")
         if not config.enabled:
             raise ValueError("Агент на паузе")
         if self.llm is None:
             raise ValueError("AI-провайдер не настроен")
-        task = Task(product_id=product_id, title="Ответ на комментарий", assigned_agent="comment_sales",
-                    status=TaskStatus.RUNNING)
+        task = Task(product_id=product_id,
+                    title="Авто-черновик комментария" if background else "Ответ на комментарий",
+                    assigned_agent="comment_sales", status=TaskStatus.RUNNING)
         self.db.add(task); self.db.flush()
         run = AgentRun(task_id=task.id, agent_name="comment_sales", provider=self.settings.llm_provider,
             model=self.settings.llm_model, status="running", started_at=now(),
             input_references=[str(comment.id), "profile:" + profile_digest] + ([str(settings_record.id)] if settings_record else []))
         self.db.add(run); self.db.flush()
+        # Durable claim before the paid model request. Other workers/manual actions
+        # see "drafting" and cannot make a second concurrent LLM call.
+        comment.status = "drafting"
+        self.db.commit()
         try:
             response = await self.llm.generate(LLMRequest(system_prompt=prompt_text("comments.reply"), model=self.settings.llm_model,
                 max_tokens=1800, response_schema=ReplyDraft.model_json_schema(),
@@ -305,6 +327,9 @@ class CommentService:
             self.db.commit()
             return artifact
         except Exception:
+            # No automatic retry: the model may already have charged for this call.
+            # A person can explicitly retry from Studio if needed.
+            comment.status = "draft_failed"
             task.status, run.status, run.finished_at = TaskStatus.FAILED, "failed", now()
             run.error = "Не удалось подготовить корректный ответ"
             self.db.commit()
@@ -313,6 +338,8 @@ class CommentService:
     def close(self, product_id, comment_id, status):
         self.product(product_id, lock=True)
         comment = self.comment(product_id, comment_id, lock=True)
+        if comment.status == "drafting":
+            raise ValueError("Сначала дождитесь окончания генерации")
         if comment.status in {"sending", "sent", "delivery_unknown"}:
             raise ValueError("Проверьте доставку на площадке; этот ответ нельзя отправлять повторно")
         comment.status = status
