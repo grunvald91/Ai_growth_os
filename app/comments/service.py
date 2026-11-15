@@ -64,6 +64,25 @@ def now():
     return datetime.now(timezone.utc)
 
 
+def recent_platform_comment(comment, max_age_days: int) -> bool:
+    """Auto-draft only timestamped, recent platform comments.
+
+    Existing/unknown-age imports stay available for explicit manual review.
+    """
+    from datetime import timedelta
+    raw = (comment.target or {}).get("published_at")
+    if not raw:
+        return False
+    try:
+        published = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if published.tzinfo is None:
+        return False
+    current = now()
+    return current - timedelta(days=max_age_days) <= published <= current + timedelta(hours=1)
+
+
 class CommentService:
     def __init__(self, db: Session, settings, *, llm=None, gateway=None):
         self.db, self.settings, self.llm = db, settings, llm
@@ -261,6 +280,8 @@ class CommentService:
                 raise ValueError("Автоматическая генерация выключена")
             if comment.status != "new" or comment.source != "platform" or comment.reply_id:
                 raise ValueError("Автоматическая генерация разрешена только для новых импортированных комментариев")
+            if not recent_platform_comment(comment, self.settings.comment_background_draft_max_age_days):
+                raise ValueError("Старый или недатированный комментарий требует ручного выбора")
             channel = self.channel(product_id, comment.platform, lock=True)
             if (comment.platform not in {"youtube", "instagram"} or not channel
                     or channel.status != "connected" or comment.target.get("channel_id") != str(channel.id)):
@@ -391,7 +412,7 @@ class CommentService:
                 task.status = TaskStatus.CANCELLED if status == "skipped" else TaskStatus.COMPLETED
         self.db.commit()
 
-    async def send(self, product_id, comment_id, text):
+    async def send(self, product_id, comment_id, text, *, approved_by="studio_owner"):
         self.product(product_id, lock=True)
         comment = self.comment(product_id, comment_id, lock=True)
         if comment.status not in {"draft", "review"} or not comment.reply_id:
@@ -418,7 +439,7 @@ class CommentService:
             title="Одобренный ответ", content=text, status=ArtifactStatus.APPROVED)
         self.db.add(approved); self.db.flush()
         approval = Approval(product_id=product_id, artifact_id=approved.id, action_type="comment_reply",
-            risk_level=policy.risk_level.value, status="approved", decided_by="studio_owner",
+            risk_level=policy.risk_level.value, status="approved", decided_by=approved_by,
             requested_by="comment_sales", decided_at=now(), reason="Владелец одобрил окончательный текст")
         self.db.add(approval); self.db.flush()
         call = ToolCall(product_id=product_id, task_id=original.task_id, approval_id=approval.id,
