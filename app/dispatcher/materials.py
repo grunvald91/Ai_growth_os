@@ -171,8 +171,11 @@ async def describe_revise_material(ctx: Context, params: ReviseParams) -> Outcom
     if row is None:
         return Outcome("Не нашёл пост на проверке, который можно доработать.",
                        "Не нашёл пост для доработки.", [links_block(ctx, "review")], ok=False)
-    if _status(row) != "awaiting_approval":
-        return Outcome("Эта версия поста уже не ожидает проверки. Откройте актуальную версию.",
+    # Preserve the existing ability to revise an already approved (not yet
+    # scheduled) post via dispatcher text. Only superseded/rejected versions
+    # must be refused. The inline editor itself is shown for awaiting drafts.
+    if _status(row) not in {"awaiting_approval", "approved"}:
+        return Outcome("Эта версия поста уже недоступна для правки. Откройте актуальную версию.",
                        "Пост изменился. Откройте актуальную версию.", [card(ctx, row)], ok=False)
     if params.source_version is not None and params.source_version != row.version:
         return Outcome("Выбранная версия поста устарела. Откройте актуальную версию.",
