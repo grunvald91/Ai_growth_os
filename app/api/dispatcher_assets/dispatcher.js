@@ -13,9 +13,10 @@
   var busy = false;
   var hydrated = false;
 
-  // Opt-in preview only. The regular Studio page never loads the SDK bundle.
-  // The bundle is self-hosted and contains no alternative dispatcher executor.
-  if (new URLSearchParams(window.location.search).get('ui_sdk') === '1') {
+  // Enabled by default for the current owner-led Studio pilot.
+  // ?ui_sdk=0 restores the legacy form on this page, without any server changes.
+  // The bundle is self-hosted and introduces no alternate dispatcher executor.
+  if (new URLSearchParams(window.location.search).get('ui_sdk') !== '0') {
     var pilotScript = document.createElement('script');
     pilotScript.type = 'module';
     pilotScript.src = '/studio/assets/ui-sdk-pilot.bundle.js?v=1';
