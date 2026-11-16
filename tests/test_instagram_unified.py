@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.comments.contracts import ConnectInput
+from app.comments.contracts import AgentSettings, ConnectInput
 from app.comments.gateway import CommentGateway, PlatformError
 from app.comments.instagram_oauth import MetaUnifiedClient, new_state, verify_state
 from app.comments.models import BusinessComment, CommentChannel
@@ -24,6 +24,7 @@ def meta_config(settings):
     settings.comment_meta_app_secret = "only-for-test-meta-secret"
     settings.comment_meta_login_config_id = "998877"
     settings.comment_meta_webhook_verify_token = "test-verification-token"
+    settings.comment_meta_webhook_enabled = True
     settings.comment_meta_public_base = "http://localhost"
     settings.comment_platform_proxy_url = "http://test-proxy:8891"
     settings.comment_meta_graph_version = "v27.0"
@@ -84,6 +85,7 @@ def test_public_webhook_signature_scoped_duplicated_and_no_publication(ctx):
     import asyncio
     asyncio.run(svc.connect(product.id, ConnectInput(
         platform="instagram", account_id="100", token="token-100")))
+    svc.configure(product.id, AgentSettings(auto_import=True))
     path = "/api/integrations/instagram/webhook"
     assert client.get(path, params={"hub.mode": "subscribe", "hub.verify_token": "wrong",
                                     "hub.challenge": "1234"}).status_code == 403
@@ -354,6 +356,7 @@ def test_album_comment_without_media_id_is_retained_but_not_publishable(ctx):
     app.dependency_overrides[get_settings] = lambda: svc.settings
     asyncio.run(svc.connect(product.id, ConnectInput(
         platform="instagram", account_id="100", token="owner-token")))
+    svc.configure(product.id, AgentSettings(auto_import=True))
     raw, signature = signed({"object": "instagram", "entry": [
         {"id": "100", "changes": [{"field": "comments", "value": {
             "id": "99000", "text": "Вопрос к публикации-альбому",
@@ -387,6 +390,7 @@ def test_webhook_batch_deduplicates_ids_inside_one_delivery(ctx):
     app.dependency_overrides[get_settings] = lambda: svc.settings
     asyncio.run(svc.connect(product.id, ConnectInput(
         platform="instagram", account_id="100", token="owner-token")))
+    svc.configure(product.id, AgentSettings(auto_import=True))
     changes = []
     for comment_id in ["55001", "55002", "55001", "55003"]:
         changes.append({"field": "comments", "value": {
