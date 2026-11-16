@@ -130,6 +130,7 @@ class ConfirmBlock(_Block):
     state: Literal["pending", "confirmed", "declined"] = "pending"
     revision: int = Field(default=0, ge=0)
     editable: dict | None = None
+    change_preview: dict | None = None
 
 
 Block = Annotated[

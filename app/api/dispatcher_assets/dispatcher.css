@@ -265,3 +265,24 @@
 .dp-post-review-section ui-collapsible-panel{display:block;padding-top:9px}
 .dp-post-review-section ui-collapsible-panel[hidden]{display:none!important}
 .dp-material--superseded .dp-material-status{color:var(--dp-muted,#62778b)}
+
+
+/* Inline editorial plan change preview; readable even without UI SDK. */
+.dp-plan-change-preview{margin-top:10px;min-width:0}
+.dp-plan-change-row{display:grid;gap:5px;padding:10px 0;border-bottom:1px solid var(--dp-line,#d8e4f0)}
+.dp-plan-change-row:last-child{border-bottom:0}
+.dp-plan-change-label{font-size:13px;color:var(--dp-text,#1b2d42)}
+.dp-plan-change-before,.dp-plan-change-after{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.dp-plan-change-before{color:var(--dp-text2,#586b7e)}
+.dp-plan-change-after{font-weight:650;color:var(--dp-text,#1b2d42)}
+.dp-plan-change-collapsible{display:block}
+.dp-plan-change-collapsible ui-collapsible-trigger{display:block}
+.dp-plan-change-collapsible ui-collapsible-trigger>button{
+  width:100%;min-height:44px;padding:9px 12px;text-align:left;cursor:pointer;
+  border:1px solid var(--dp-line,#d8e4f0);border-radius:11px;
+  font:inherit;font-size:13px;font-weight:650;
+  background:var(--dp-soft,#f6f9fd);color:var(--dp-text,#1b2d42)}
+.dp-plan-change-collapsible ui-collapsible-trigger>button:focus-visible{
+  outline:2px solid var(--dp-accent,#3478d6);outline-offset:2px}
+.dp-plan-change-collapsible ui-collapsible-panel{display:block}
+.dp-plan-change-collapsible ui-collapsible-panel[hidden]{display:none!important}

@@ -27,6 +27,7 @@ class Confirmation:
     params: dict
     paid: bool = False
     confirm_label: str = "Подтвердить"
+    change_preview: dict | None = None
 
 
 @dataclass

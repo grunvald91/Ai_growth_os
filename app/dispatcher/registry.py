@@ -186,6 +186,30 @@ class SeoFactoryParams(_Params):
                     "Не назвал — не указывай: запросы строятся по профилю компании.")
 
 
+class PlanPackageEditParams(_Params):
+    package_key: str = Field(min_length=1, max_length=80,
+                             description="Точный package_key из editable_plan.draft_packages в контексте. Не выдумывай.")
+    topic: str | None = Field(default=None, min_length=3, max_length=300,
+                              description="Новая тема пакета; не указывай, если менять её не просили.")
+    objective: str | None = Field(default=None, min_length=3, max_length=600,
+                                  description="Новая цель материала, только по просьбе владельца.")
+    audience: str | None = Field(default=None, min_length=3, max_length=300,
+                                 description="Новая аудитория, только по просьбе владельца.")
+
+    @model_validator(mode="after")
+    def has_changes(self):
+        if all(value is None for value in (self.topic, self.objective, self.audience)):
+            raise ValueError("Укажите хотя бы одно изменение пакета")
+        return self
+
+
+class PlanSlotMoveParams(_Params):
+    slot_id: str = Field(min_length=1, max_length=100,
+                         description="Точный slot_id из editable_plan.calendar_slots. Не выдумывай.")
+    when: str = Field(pattern=r"^\d{4}-\d{2}-\d{2} [0-2]\d:[0-5]\d$",
+                      description="Новая местная дата и время в часовом поясе плана: YYYY-MM-DD HH:MM.")
+
+
 class RestrictedParams(_Params):
     kind: Literal["budget", "pricing", "access", "delete", "credentials", "billing"]
 
@@ -312,6 +336,18 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                "«подготовь SEO на месяц». Период — 7 или 30 дней; если месяц не указан, 7. "
                "Тратит много запросов к ИИ, поэтому всегда сначала просит подтверждение.",
                ToolOperation.GENERATE_DRAFT, Cost.PAID, SeoFactoryParams, always_confirm=True),
+    Capability("edit_plan_package", "Изменить тему чернового контент-плана",
+               "Редактировать существующий пакет в НЕУТВЕРЖДЁННОМ контент-плане: тему, цель или аудиторию. "
+               "Используй package_key только из editable_plan.draft_packages контекста. "
+               "При неизвестном пакете сначала попроси уточнить и покажи план. "
+               "Перед сохранением покажи сравнение и запроси подтверждение.",
+               ToolOperation.GENERATE_DRAFT, Cost.NONE, PlanPackageEditParams, always_confirm=True),
+    Capability("move_plan_slot", "Перенести публикацию в календаре",
+               "Изменить время ОДНОГО слота плана без регенерации и публикации. "
+               "Используй slot_id только из editable_plan.calendar_slots контекста, "
+               "а when — точную локальную дату YYYY-MM-DD HH:MM в часовом поясе плана. "
+               "Не угадывай номер слота и дату. Покажи старую и новую дату до подтверждения.",
+               ToolOperation.PUBLISH, Cost.NONE, PlanSlotMoveParams, always_confirm=True),
     Capability("approve_plan", "Утвердить контент-план",
                "Утвердить готовый черновик плана, чтобы команда начала готовить материалы по нему.",
                ToolOperation.PUBLISH, Cost.NONE, NoParams,

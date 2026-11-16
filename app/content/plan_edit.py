@@ -14,7 +14,7 @@ from app.models.domain import Artifact, Product
 
 def update_draft_package(db, *, product_id: UUID, plan_id: UUID,
                          package_key: str, topic: str, objective: str,
-                         audience: str) -> bool:
+                         audience: str, expected_values: dict | None = None) -> bool:
     """Update all channel adaptations of one draft package atomically.
 
     Returns False when nothing changed; raises on unknown plan/package or
@@ -24,7 +24,7 @@ def update_draft_package(db, *, product_id: UUID, plan_id: UUID,
     row = db.scalar(select(Artifact).where(
         Artifact.id == plan_id, Artifact.product_id == product_id,
         Artifact.kind == "editorial_plan",
-    ).with_for_update())
+    ).with_for_update().execution_options(populate_existing=True))
     if row is None:
         raise LookupError("Контент-план не найден")
     try:
@@ -45,6 +45,12 @@ def update_draft_package(db, *, product_id: UUID, plan_id: UUID,
              if s.get("package_key") == package_key]
     if not slots:
         raise LookupError("Контент-пакет не найден")
+    # Compare after acquiring both locks; older confirmation cards never overwrite an edit.
+    if expected_values is not None and any(
+        any(s.get(key) != value for key, value in expected_values.items())
+        for s in slots
+    ):
+        raise ValueError("Контент-пакет изменился. Откройте обновлённый план")
     if any(s.get("task_id") or s.get("state") not in (None, "planned", "missed") or
            s.get("publication_url") or s.get("telegram_publication_id")
            for s in slots):
