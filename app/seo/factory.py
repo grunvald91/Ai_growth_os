@@ -245,7 +245,6 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client, h
                             "articles_queued": len(queued), "articles_deferred": len(all_items) - len(queued),
                             "planning_horizon_days": horizon_days,
                             "landing_pages_proposed": landing_count,
-                            "landing_pages_published": 0,
                             "sources": [s.model_dump() for s in core.sources]}))
     TaskService(db).update(task_id, status=TaskStatus.COMPLETED)
     record_stage(db, product_id, task_id, "completed")
