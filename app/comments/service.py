@@ -176,7 +176,11 @@ class CommentService:
             channel = CommentChannel(product_id=product_id, platform=value.platform,
                 account_id=value.account_id, account_name=name, cursor={})
             self.db.add(channel)
-            self.db.flush()
+            try:
+                self.db.flush()
+            except IntegrityError:
+                self.db.rollback()
+                raise ValueError("Instagram-аккаунт уже подключён к другой компании") from None
         else:
             channel.revision += 1
         self.secrets.save_token(channel.id, token)
