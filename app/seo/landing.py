@@ -36,13 +36,15 @@ _DEVICES = (
 _NON_GEOGRAPHIC = frozenset(
     "салоне салонах студии студиях приложении приложениях программе программах "
     "системе системах браузере браузерах бизнесе бизнесах интернете сети "
-    "кабинете кабинeтах магазине магазинах каталоге таблице crm".split()
+    "кабинете кабинетах магазине магазинах каталоге таблице crm "
+    "настройке работе использовании подключении продаже доставке аренде наличии "
+    "комплекте рассрочку кредит акции цене запросу телефону процессах".split()
 )
 # Recognize common unlabelled cities even without a preposition. For other
 # places, explicit "в/из/город ..." cues fail closed rather than proving scope.
 _CITY_STEMS = frozenset(
-    "моск казан сочи крас ново екат самар рост волг перм омск уфим тюме "
-    "воро кали питер петер калуг ижев томск влад сург челя".split()
+    "москв казан сочи красн новос екате самар росто волго перм омск уфим тюме "
+    "ворон калин питер петер калуг ижев томск влади сург челяб".split()
 )
 _STOPWORDS = frozenset(
     "для при как что где цена цены стоимость отзывы купить заказать сервис услуга услуги "
@@ -170,7 +172,7 @@ def _geo_hint(query: str, profile: CompanyProfile | None) -> tuple[bool, str | N
                         if _stem(canonical_query(area).split()[0])[:4] == _stem(next_word)[:4]:
                             return True, area
                 return True, None
-    if any(_stem(word)[:4] in {city[:4] for city in _CITY_STEMS}
+    if any(_stem(word).startswith(city) for city in _CITY_STEMS
            for word in words if len(word) >= 4):
         return True, None
     return False, None
