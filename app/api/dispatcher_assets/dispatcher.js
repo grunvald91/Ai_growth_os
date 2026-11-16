@@ -548,6 +548,20 @@
       (block.details || []).forEach(function (line) {list.appendChild(el('li','',line));});
       details.appendChild(list);
     }
+    if (block.change_preview && Array.isArray(block.change_preview.rows)) {
+      var preview = el('div', 'dp-plan-change-preview');
+      preview.setAttribute('aria-label', 'Предпросмотр изменений');
+      block.change_preview.rows.forEach(function (entry) {
+        var row = el('div', 'dp-plan-change-row');
+        row.appendChild(el('strong', 'dp-plan-change-label', String(entry.label || 'Поле')));
+        row.appendChild(el('div', 'dp-plan-change-before', 'Было: ' + String(entry.before || '—')));
+        row.appendChild(el('div', 'dp-plan-change-after', 'Станет: ' + String(entry.after || '—')));
+        preview.appendChild(row);
+      });
+      details.appendChild(preview);
+      card.__sgPlanChange = true;
+      document.dispatchEvent(new CustomEvent('sg:dispatcher:plan-change-ready', {detail: {card: card}}));
+    }
     card.appendChild(details);
     if (block.state === 'pending') {
       var actions = el('div', 'dp-confirm-actions');
