@@ -130,6 +130,10 @@ class Settings(BaseSettings):
     # Both operator and company must opt in before signed webhooks import data.
     comment_meta_webhook_enabled: bool = False
     comment_meta_graph_version: str = "v27.0"
+    # Optional bounded native nested-reply scan. Off until real Meta permission
+    # compatibility is checked; never enables background imports on its own.
+    comment_instagram_reply_scan_enabled: bool = False
+    comment_instagram_reply_scan_calls: int = Field(default=2, ge=1, le=5)
 
     # Background comment import: operator switch AND per-business opt-in, both off by default.
     comment_background_poll_enabled: bool = False
