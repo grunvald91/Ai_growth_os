@@ -78,6 +78,11 @@ class RevisedPost(StrictRecord):
         return append_missing_cta(data)
 
 
+class TargetedRevisedPost(RevisedPost):
+    # For a fragment rewrite even a short existing post must remain editable.
+    body: str = Field(min_length=1, max_length=14000)
+
+
 def validate_targeted_revision(original_body: str, fragment: str, revised_body: str) -> None:
     """A targeted edit must leave text outside the selected, unique span untouched.
 
@@ -160,6 +165,8 @@ def queue_post_edit(db: Session, post_id: UUID, feedback: str, *, fragment: str 
     if not value.get("body") or value.get("channel") not in CHANNEL_GUIDANCE:
         raise ValueError("Материал не поддерживает редактуру поста")
     if fragment is not None:
+        if len(str(value["body"])) > 12000:
+            raise ValueError("Для длинного поста используйте полную страницу материала")
         if not 2 <= len(fragment) <= 380:
             raise ValueError("Выделение должно содержать от 2 до 380 символов")
         if str(value["body"]).count(fragment) != 1:
@@ -239,7 +246,7 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
         payload = {
             "company_name": privacy.sanitize_text(product.name),
             "original_title": privacy.sanitize_text(old.get("title", source.title)),
-            "original_body": privacy.sanitize_text(old["body"][:11900]),
+            "original_body": privacy.sanitize_text(old["body"] if request.fragment else old["body"][:11900]),
             "original_cta": privacy.sanitize_text(old.get("cta") or ""),
             "owner_feedback": privacy.sanitize_text(request.feedback),
             "selected_fragment": privacy.sanitize_text(request.fragment) if request.fragment else None,
@@ -262,8 +269,10 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
             "reasoning_effort": "low", "provider_timeout_seconds": PROVIDER_TIMEOUT_SECONDS,
         }
 
+        response_model = TargetedRevisedPost if request.fragment else RevisedPost
+
         def validate_candidate(data):
-            parsed = RevisedPost.model_validate(data)
+            parsed = response_model.model_validate(data)
             if request.fragment:
                 validate_targeted_revision(old["body"], request.fragment, parsed.body)
                 if parsed.title != str(old.get("title") or source.title):
@@ -298,7 +307,7 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
             llm.generate(LLMRequest(
                 system_prompt=system,
                 messages=[LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False))],
-                response_schema=RevisedPost.model_json_schema(),
+                response_schema=response_model.model_json_schema(),
                 model=settings.llm_model, max_tokens=7500, metadata=metadata,
             ), validate_revision=validate_candidate,
                 on_observed=record_model_call, on_review_progress=record_review_progress),
@@ -309,7 +318,7 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
         try:
             if reply.stop_reason not in (None, "end_turn", "stop_sequence"):
                 raise ValueError("Incomplete revision output")
-            draft = validate_candidate(_decode(RevisedPost, reply.content).model_dump(mode="json"))
+            draft = validate_candidate(_decode(response_model, reply.content).model_dump(mode="json"))
         except (ValueError, TypeError) as exc:
             # One repair attempt with the exact problem; no second critic round.
             problem = _validation_summary(exc)
@@ -318,12 +327,12 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
                 system_prompt=system + " Your previous answer was rejected by validation: " + problem
                 + ". Fix exactly this and return the complete JSON again.",
                 messages=[LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False))],
-                response_schema=RevisedPost.model_json_schema(),
+                response_schema=response_model.model_json_schema(),
                 model=settings.llm_model, max_tokens=7500, metadata=metadata,
             ), on_observed=record_model_call), timeout=CALL_WAIT_SECONDS)
             if reply.stop_reason not in (None, "end_turn", "stop_sequence"):
                 raise ValueError("Incomplete revision output") from exc
-            draft = validate_candidate(_decode(RevisedPost, reply.content).model_dump(mode="json"))
+            draft = validate_candidate(_decode(response_model, reply.content).model_dump(mode="json"))
         db.scalar(select(Product).where(Product.id == product.id).with_for_update())
         source = db.scalar(
             select(Artifact).where(
