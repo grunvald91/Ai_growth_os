@@ -179,9 +179,11 @@ class MetaUnifiedClient:
                      if item["id"] == str(account_id)), None)
         if name is None:
             raise PlatformError("Этот Instagram-аккаунт не предоставлен приложению")
-        # Explicitly verify the granted token can access the business's media.
+        # Verify Meta permits reading media and its comments, not just the
+        # basic profile. Actual public REPLY permission still needs live E2E.
         await self._request("GET", f"{account_id}/media",
-                            params={"fields": "id", "limit": 1}, token=token)
+                            params={"fields": "id,comments.limit(1){id,text}",
+                                    "limit": 1}, token=token)
         return name
 
 
