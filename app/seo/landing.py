@@ -155,9 +155,16 @@ def _offer_for(query: str, profile: CompanyProfile | None) -> ServiceOffer | Non
 
 
 def _find_device(query: str) -> str | None:
-    text = f" {canonical_query(query)} "
+    text = canonical_query(query)
+    words = text.split()
+    inflection_endings = frozenset({"а", "е", "у", "ом", "ы", "ов", "ах", "ами", "ой", "ам", "ами"})
     for alias, device in _DEVICE_ALIASES:
-        if f" {canonical_query(alias)} " in text:
+        label = canonical_query(alias)
+        if " " in label:
+            if f" {label} " in f" {text} ":
+                return device
+        elif any(word == label or (word.startswith(label)
+                 and word[len(label):] in inflection_endings) for word in words):
             return device
     return None
 
