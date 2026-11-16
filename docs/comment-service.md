@@ -357,15 +357,18 @@ References: [Meta comments webhooks](https://developers.facebook.com/docs/graph-
   regardless of the comment polling/drafting flags. A completed authorization
   deletes its temporary token immediately. A persistent connected account
   token remains encrypted until disconnection.
-- **Meta App setup:** the Meta Dashboard must have the correct Instagram
-  `comments` webhook field subscribed to the public callback. For Facebook
-  Login for Business, verify the professional Instagram account is attached
-  to a Page, required permissions including `instagram_basic`,
-  `instagram_manage_comments`, `pages_read_engagement`, and (where required
-  for Page subscription) `pages_manage_metadata` and a Page token.
-  Meta documents App Review / Advanced Access and linked Page subscription
-  requirements for Instagram comment Webhooks. These are **external account
-  configuration steps**, not automatically completed by the OAuth code.
+- **Meta App setup:** subscribe to the Instagram `comments` webhook
+  field in the Meta Dashboard. Confirm which Meta login/API path is active:
+  **new Unified Login** uses `config_id` and can grant Instagram business
+  assets directly (developers reported that a Facebook Page is not always
+  required); **legacy Facebook Login for Business** generally requires a
+  linked Page. Current Meta Webhook documentation describes Page subscription,
+  `instagram_manage_comments`, `pages_manage_metadata`, and Page access
+  in the Facebook-linked path; ensure that the requirements shown for your
+  actual app/configuration are fulfilled instead of assuming all accounts
+  need a Page. Meta also documents App Review / Advanced Access for serving
+  other businesses. These are **external account configuration steps** and
+  are not automatically completed by OAuth.
 - **Gateway:** activate the exact HTTPS Nginx routes for the OAuth callback
   and Instagram Webhook; keep BookingBot's generic `/api/` route unchanged.
   Confirm public reachability through the actual production host and ensure
