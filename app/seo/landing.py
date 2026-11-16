@@ -110,6 +110,8 @@ def make_landing_opportunities(
     """
     if not 0 <= limit <= MAX_PAGES:
         raise ValueError("Invalid landing opportunity limit")
+    if limit == 0:
+        return LandingOpportunities()
     covered = already_covered or set()
     candidates: list[LandingCandidate] = []
     seen_queries: set[str] = set()
