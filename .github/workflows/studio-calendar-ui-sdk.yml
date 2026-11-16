@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: studio-calendar-sdk-${{ github.ref }}
@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: ${{ github.event_name == 'push' }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -65,16 +65,5 @@ jobs:
         run: python -m pip install -e '.[test]'
       - name: Calendar backend and Studio route tests
         run: python -m pytest -q tests/test_content_calendar.py tests/test_content_studio.py tests/test_studio_ui_sdk_pilot.py
-      - name: Vendor generated UI SDK bundle (feature branch only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/studio-calendar-ui-sdk-20261116'
-        run: |
-          git add app/api/dispatcher_assets/ui-sdk-pilot.bundle.js
-          if ! git diff --cached --quiet; then
-            git -c user.name='github-actions[bot]' \
-                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-                commit -m 'build(studio): vendor calendar UI SDK bundle'
-            git push origin HEAD:feature/studio-calendar-ui-sdk-20261116
-          fi
-      - name: Verify bundle is committed on PR
-        if: github.event_name == 'pull_request'
+      - name: Verify committed UI SDK bundle is reproducible
         run: git diff --exit-code -- app/api/dispatcher_assets/ui-sdk-pilot.bundle.js
