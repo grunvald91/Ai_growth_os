@@ -78,8 +78,36 @@ preview/confirmation, preserved original value and legacy fallback. The
 `studio-calendar-ui-sdk.yml` workflow recompiles the pinned bundle and
 runs the server calendar and page tests.
 
-Next planned slices: editor for plan topics and schedule changes in the
-dispatcher chat with explicit confirmation; reusable task/material widgets
-in Studio; only then multi-action orchestration with per-step approval,
-idempotency and rollback. No unreviewed model output can call the calendar
-write endpoint directly.
+## Phase 5 — editing a plan from the dispatcher chat (PR pending)
+
+The next slice adds two explicit, single-action capabilities:
+
+- `edit_plan_package`: change a topic, objective or audience on one *draft* package.
+  The dispatcher model receives only bounded, company-specific package keys.
+  It previews **Было → Станет** for changed fields and asks for confirmation.
+  The existing `update_draft_package` service updates all adaptations only when
+  the package is still a draft and no affected material has started. Expected
+  original values are compared under the product and plan row locks so stale
+  cards cannot overwrite another edit.
+- `move_plan_slot`: move one existing slot on the current active plan or,
+  if no active plan exists, the latest draft. The model receives bounded
+  current slot IDs and schedule. The date is interpreted in the plan timezone;
+  the existing `reschedule_slot` service enforces horizon, collisions,
+  published/scheduled restrictions, and the original `expected_publish_at`
+  under its plan lock.
+
+Both cards render a structured before/after preview in the existing dispatcher.
+The already self-hosted UI SDK Collapsible is used when SDK is enabled and
+native readable rows remain when `?ui_sdk=0`. The JavaScript does not call a
+write endpoint until the user confirms the server-generated card. Company and
+SSO role scopes are checked again at confirmation time. No extra LLM call,
+publication, regeneration, migration or new workflow executor is introduced.
+
+Test with: `pytest -q tests/test_dispatcher_plan_changes.py tests/test_dispatcher.py tests/test_content_calendar.py`
+plus `node studio_ui_sdk/plan-change-smoke.mjs` after installing the pinned
+browser-test dependencies. Workflow: `studio-plan-chat-ui-sdk.yml`.
+
+This remains one change per turn. Bulk plan edits, delete/add-package,
+reusable task/material widgets and multi-action orchestration with individual
+approvals are subsequent slices. No unreviewed model output is authorized to
+write to a plan.
