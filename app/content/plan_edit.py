@@ -24,7 +24,7 @@ def update_draft_package(db, *, product_id: UUID, plan_id: UUID,
     row = db.scalar(select(Artifact).where(
         Artifact.id == plan_id, Artifact.product_id == product_id,
         Artifact.kind == "editorial_plan",
-    ).with_for_update())
+    ).with_for_update().execution_options(populate_existing=True))
     if row is None:
         raise LookupError("Контент-план не найден")
     try:
