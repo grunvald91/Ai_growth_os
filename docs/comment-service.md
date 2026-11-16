@@ -390,3 +390,35 @@ Official Meta sources:
 https://developers.facebook.com/docs/graph-api/webhooks/getting-started/webhooks-for-instagram/
 https://developers.facebook.com/docs/graph-api/webhooks/reference/instagram
 https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login/comment-moderation/
+
+
+### Nested Instagram replies and connection diagnostics — code-ready (2026-11-16)
+
+- `GET /products/{product_id}/comments/instagram/health` is Studio-authenticated
+  and tenant-scoped. It shows secret-free OAuth, webhook, manual/background
+  reconciliation and nested scan status. Studio's Instagram connection card
+  displays last signed event and last native sync, without suggesting that
+  missing production Meta approval is already verified.
+- `COMMENT_INSTAGRAM_REPLY_SCAN_ENABLED=false` is an independent native
+  nested-reply scan switch, **OFF until its Meta permissions are verified**.
+  `COMMENT_INSTAGRAM_REPLY_SCAN_CALLS=2` (1–5) bounds additional Graph
+  requests per account-scope sync. It does not start automatic polling or
+  publishing. Existing per-company/remote poll gates still control ingestion.
+- When enabled, a per-tenant SQL keyset traversal scans known top-level
+  comments, pages authenticated `GET /{ig-comment-id}/replies`, stores a
+  resumable `active` parent + opaque `after` cursor in channel
+  `_ig_replies` and revisits older threads after a completed cycle.
+  `paging.next` URLs are never followed. Nested comments are linked to
+  verified parent/media and de-duplicated by the pre-existing unique key.
+- If a nested API request fails, top-level import continues and a
+  sanitized diagnostic error is retained, without advancing the nested
+  cursor. Manual native sync now records success/failure timestamps and
+  preserves webhook/auth state; a channel refresh never resets the recorded
+  last verified signed event.
+- Still requires a real professional Instagram account with corresponding
+  Meta permission for native reply edges and sample nested/reel/album
+  comments. Without measured large-scale triage workload, Jev remains
+  unused. There is no automatic publication.
+
+References: https://developers.facebook.com/docs/graph-api/webhooks/reference/instagram
+and https://developers.facebook.com/docs/graph-api/webhooks/getting-started/webhooks-for-instagram/

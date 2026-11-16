@@ -247,14 +247,19 @@ async def instagram_webhook_receive(request: Request, settings=Depends(get_setti
         if len(matches) != 1:
             continue  # Unknown or ambiguous ownership must never fan out.
         channel = matches[0]
+        # Lock in the same order as sync/configure/disconnect: Product, Channel.
+        # The pre-lock query only locates a candidate; a concurrent disconnect
+        # or cursor update must be rechecked after acquiring both locks.
+        db.scalar(select(Product).where(Product.id == channel.product_id).with_for_update())
+        db.refresh(channel, with_for_update=True)
+        if channel.status != "connected" or channel.account_id != account_id:
+            continue
         if channel.product_id not in business_opts:
             from app.comments.service import CommentService
             config, _ = CommentService(db, settings).config(channel.product_id)
             business_opts[channel.product_id] = config.enabled and config.auto_import
         if not business_opts[channel.product_id]:
             continue
-        # Serialize webhook with manual refresh and parallel delivery for tenant.
-        db.scalar(select(Product).where(Product.id == channel.product_id).with_for_update())
         changes = entry.get("changes")
         if not isinstance(changes, list) or len(changes) > 100:
             continue
@@ -298,6 +303,7 @@ async def instagram_webhook_receive(request: Request, settings=Depends(get_setti
                 external_id=comment_id, text=comment[:8000],
                 post_text="", source="platform", status="new", target=target,
             )
+        entry_imported = 0
         if incoming:
             # Query once per Meta entry instead of SELECT+flush for every
             # comment; the product row lock serializes this with syncs.
@@ -310,7 +316,19 @@ async def instagram_webhook_receive(request: Request, settings=Depends(get_setti
             if fresh:
                 db.add_all(fresh)
                 db.flush()
-                imported += len(fresh)
+                entry_imported = len(fresh)
+                imported += entry_imported
+        if incoming:
+            from datetime import datetime, timezone
+            moment = datetime.now(timezone.utc).isoformat()
+            previous = (channel.cursor or {}).get("_webhook") or {}
+            channel.cursor = {**(channel.cursor or {}), "_webhook": {
+                "last_received_at": moment,
+                "last_imported_at": moment if entry_imported else previous.get("last_imported_at"),
+                "last_batch_imported": entry_imported,
+                "imported_total": min(2_147_483_647,
+                                      int(previous.get("imported_total") or 0) + entry_imported),
+            }}
         db.commit()
     return JSONResponse({"accepted": True, "imported": imported},
                         headers={"Cache-Control": "no-store"})
