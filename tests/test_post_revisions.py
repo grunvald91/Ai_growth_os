@@ -5,7 +5,8 @@ from contextlib import contextmanager
 import pytest
 from sqlalchemy import select
 
-from app.content.revisions import EditRequest, queue_post_edit, run_post_edit, post_history, validate_targeted_revision
+from app.content.revisions import (EditRequest, RevisedPost, TargetedRevisedPost,
+                                   queue_post_edit, run_post_edit, post_history, validate_targeted_revision)
 from app.content.telegram import TelegramContent
 from app.content.worker import run_content_once
 from app.core.config import Settings
@@ -407,3 +408,10 @@ def test_queue_post_edit_requires_unique_fragment(db):
     with pytest.raises(ValueError, match="несколько раз"):
         queue_post_edit(db, post.id, "Сократи повтор", fragment="Один и тот же текст")
     assert not list(db.scalars(select(Task).where(Task.assigned_agent == "content_editor")))
+
+
+def test_scoped_revision_never_appends_a_legacy_separate_cta_outside_selection():
+    data = {"title": "Проверка поста", "body": "Сохранить начало. Исправить предложение. Сохранить конец.",
+            "cta": "Запишитесь на услугу", "evidence_ids": [], "editor_notes": []}
+    assert TargetedRevisedPost.model_validate(dict(data)).body == data["body"]
+    assert RevisedPost.model_validate({**data, "body": "Сделайте текст полезным и понятным, добавьте пример и конкретный совет. Сохраняйте человеческий тон. Читайте дальше."}).body.endswith(data["cta"])
