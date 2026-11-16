@@ -268,6 +268,8 @@ Required SERVER environment (no real values in Git):
   `https://servgo.ru/studio/integrations/instagram/oauth/callback` in Meta.
 - `COMMENT_META_WEBHOOK_VERIFY_TOKEN` — long random verification token entered
   in the Meta Dashboard (not the app secret).
+- `COMMENT_META_WEBHOOK_ENABLED=false` — independent operator kill switch for
+  webhook **ingestion**, with a second per-company `auto_import` opt-in.
 - `COMMENT_META_GRAPH_VERSION=v27.0` — explicit Graph version; align with the
   current Meta app permissions, API availability and reviewed API methods.
 - `COMMENT_PLATFORM_PROXY_URL` — required reachable foreign HTTP(S) proxy;
@@ -331,6 +333,14 @@ References: [Meta comments webhooks](https://developers.facebook.com/docs/graph-
   inspect and disconnect the duplicate manually; it intentionally never
   chooses a customer account to revoke. Both the old manual token connection
   and Unified Login are subject to this rule.
+- **Webhook activation (double opt-in):** set
+  `COMMENT_META_WEBHOOK_ENABLED=true` in the API runtime only after the
+  public callback and Meta App grants are checked. The default is **false**.
+  Each business also enables its Studio **Автоматически загружать комментарии**
+  toggle (`auto_import=true`) while its agent is enabled. The webhook endpoint
+  remains reachable for GET verification even if ingestion is disabled.
+  Verified notifications received with either switch OFF are ACKed without
+  saving new comments. Independent manual sync is always available.
 - **Webhook enrichment:** a signed notification has no authoritative creation
   timestamp or original caption. The next account-scoped native import fills
   those fields on the *existing* inbound row; it does not spend LLM tokens or
