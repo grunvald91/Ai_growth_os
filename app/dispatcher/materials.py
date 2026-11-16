@@ -117,7 +117,9 @@ async def show_material(ctx: Context, params: MaterialParams) -> Outcome:
         text = f"{kind} «{row.title[:80]}» ждёт вашего решения.{hint}"
     else:
         text = f"{kind} «{row.title[:80]}»: {STATUS_LABELS.get(_status(row), _status(row)).lower()}."
-    blocks.append({"type": "links", "items": [{"label": "Открыть полностью", "href": _page(ctx, row)}]})
+    long_post = bool(blocks[0].get("truncated"))
+    label = "Проверить полный текст и утвердить на странице" if long_post else "Открыть полностью"
+    blocks.append({"type": "links", "items": [{"label": label, "href": _page(ctx, row)}]})
     return Outcome(text, "Готовый материал ждёт вашего решения, он на экране." if _status(row) == "awaiting_approval" else text,
                    blocks)
 
@@ -131,6 +133,14 @@ async def describe_approve_material(ctx: Context, params: MaterialParams) -> Out
         return Outcome("Этот материал уже утверждён.", "Этот материал уже утверждён.", [card(ctx, row)])
     if _status(row) != "awaiting_approval":
         return Outcome("Эту версию утвердить уже нельзя.", "Эту версию утвердить уже нельзя.", ok=False)
+    # A chat card displays at most 12,000 characters. Long posts must be
+    # reviewed on the complete material page, not approved from a truncated card.
+    if row.kind == "channel_text" and len(str(material_data(row).get("body") or "").strip()) > 12000:
+        return Outcome("Пост длиннее предпросмотра. Откройте весь текст на странице материала и утвердите там.",
+                       "Проверьте полный текст на странице материала.",
+                       [card(ctx, row), {"type": "links", "items": [
+                           {"label": "Проверить полный текст и утвердить", "href": _page(ctx, row)}
+                       ]}], ok=False)
     if needs_fact_check(row):
         # Numbers, prices and results must be checked by eye. A button here would skip that, so the page does it.
         text = "В материале есть числа, цены или результаты, их нужно проверить глазами. Откройте полный просмотр."
