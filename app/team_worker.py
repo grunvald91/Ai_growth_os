@@ -289,6 +289,10 @@ async def run_once() -> int:
 
 async def _calendar_loop(settings):
     from app.content.calendar import tick_calendar
+    from app.comments.instagram_oauth import prune_expired_pending_oauth
+    from time import monotonic
+
+    last_oauth_prune = 0.0
     while True:
         try:
             with SessionLocal() as db:
@@ -296,6 +300,17 @@ async def _calendar_loop(settings):
         except Exception:
             import logging
             logging.getLogger(__name__).warning('calendar_tick_failed')
+        # This protection runs independently of the opt-in comment poller and
+        # draft worker: expired encrypted OAuth tokens should not remain on disk
+        # merely because the owner did not enable comment automation.
+        current = monotonic()
+        if not last_oauth_prune or current - last_oauth_prune >= 3600:
+            try:
+                prune_expired_pending_oauth(SessionLocal, settings)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning('instagram_pending_oauth_prune_failed')
+            last_oauth_prune = current
         await asyncio.sleep(settings.team_worker_idle_poll_seconds)
 
 
