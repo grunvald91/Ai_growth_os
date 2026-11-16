@@ -551,19 +551,33 @@
     if (block.change_preview && Array.isArray(block.change_preview.rows)) {
       var preview = el('div', 'dp-plan-change-preview');
       preview.setAttribute('aria-label', 'Предпросмотр изменений');
+      var previewBody = preview;
+      if (new URLSearchParams(window.location.search).get('ui_sdk') !== '0') {
+        // SDK registers this custom element from the already pinned self-hosted bundle.
+        // Native preview rows remain visible before/without the bundle.
+        var section = document.createElement('ui-collapsible');
+        section.className = 'dp-plan-change-collapsible';
+        section.setAttribute('default-open', '');
+        var trigger = document.createElement('ui-collapsible-trigger');
+        var triggerButton = el('button', '', 'Изменения · было → станет');
+        triggerButton.type = 'button';
+        trigger.appendChild(triggerButton);
+        var panel = document.createElement('ui-collapsible-panel');
+        panel.className = 'dp-plan-change-panel';
+        section.append(trigger, panel);
+        preview.appendChild(section);
+        previewBody = panel;
+      }
       block.change_preview.rows.forEach(function (entry) {
         var row = el('div', 'dp-plan-change-row');
         row.appendChild(el('strong', 'dp-plan-change-label', String(entry.label || 'Поле')));
         row.appendChild(el('div', 'dp-plan-change-before', 'Было: ' + String(entry.before || '—')));
         row.appendChild(el('div', 'dp-plan-change-after', 'Станет: ' + String(entry.after || '—')));
-        preview.appendChild(row);
+        previewBody.appendChild(row);
       });
       details.appendChild(preview);
-      card.__sgPlanChange = true;
     }
     card.appendChild(details);
-    if (card.__sgPlanChange)
-      document.dispatchEvent(new CustomEvent('sg:dispatcher:plan-change-ready', {detail: {card: card}}));
     if (block.state === 'pending') {
       var actions = el('div', 'dp-confirm-actions');
       var no = el('button', 'dp-btn ghost', block.editable ? 'Отменить задание' : block.cancel_label); no.type='button';
