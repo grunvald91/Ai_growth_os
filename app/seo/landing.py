@@ -159,7 +159,8 @@ def _geo_hint(query: str, profile: CompanyProfile | None) -> tuple[bool, str | N
                         if _stem(canonical_query(area).split()[0])[:4] == _stem(next_word)[:4]:
                             return True, area
                 return True, None
-    if any(_stem(word)[:4] in _CITY_STEMS for word in words if len(word) >= 4):
+    if any(_stem(word)[:4] in {city[:4] for city in _CITY_STEMS}
+           for word in words if len(word) >= 4):
         return True, None
     return False, None
 
@@ -202,9 +203,9 @@ def make_landing_opportunities(
         key=lambda c: (c.intent != "transactional", -len(c.engines), c.id),
     )
     for cluster in ordered:
-        # Try all real collected phrases: some cluster heads were already
-        # proposed previously; a different query in it may still be valuable.
-        for query in [cluster.head_query, *cluster.queries]:
+        # One landing opportunity per search-intent cluster; creating a page
+        # for every autocomplete variant would generate doorway-like copies.
+        for query in (cluster.head_query,):
             key = canonical_query(query)
             if key in seen_queries or not key:
                 continue
@@ -300,6 +301,7 @@ def store_landing_opportunities(
     if db.scalar(select(Product.id).where(
         Product.id == product_id).with_for_update()) is None:
         raise LookupError("Company not found")
+    require_enabled(db, product_id)  # Re-check after the owner opt-out lock.
     previous = db.scalar(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.task_id == task_id,
         Artifact.kind == KIND,
