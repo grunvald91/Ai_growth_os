@@ -112,8 +112,12 @@ def test_run_status_and_board_do_not_claim_drafts_were_published():
     pid, tid = uuid4(), uuid4()
     task = Task(id=tid, product_id=pid, title="SEO завод", assigned_agent="seo_factory",
                 status=TaskStatus.COMPLETED)
+    device_profile = _profile().model_copy(deep=True)
+    device_profile.offer.products_services[1].supported_devices_evidence = {
+        "iphone": "confirmed-ios-guide",
+    }
     draft = make_landing_opportunities(
-        _core(_cluster(1, "smart dns для iphone цена", "commercial")), _profile())
+        _core(_cluster(1, "smart dns для iphone цена", "commercial")), device_profile)
     artifact = Artifact(product_id=pid, task_id=tid, kind=KIND, title="Candidates",
                         content=draft.model_dump_json())
     summary = seo_run_summary(task, [artifact])
