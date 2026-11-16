@@ -426,6 +426,12 @@ async def test_inline_review_does_not_offer_approval_of_truncated_post(db, produ
     assert all(item["capability"] != "approve_material"
                for group in blocks(answer, "chips") for item in group["items"])
     assert preview["href"].endswith(f"/materials/{row.id}")
+    # Even a direct chat command must not approve a preview missing the ending.
+    approval = await chip(db, product, "approve_material", {"material_id": str(row.id)},
+                          key="approve-truncated")
+    assert not blocks(approval, "confirm")
+    links = blocks(approval, "links")
+    assert links and any(str(row.id) in item["href"] for item in links[0]["items"])
 
 
 @pytest.mark.asyncio
