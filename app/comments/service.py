@@ -557,6 +557,11 @@ class CommentService:
             raise ValueError("Проверьте длину и текст ответа")
         if comment.platform == "youtube" and comment.target.get("can_reply") is False:
             raise ValueError("YouTube не разрешает ответить в этом обсуждении")
+        if comment.platform == "instagram" and not (comment.target or {}).get("media_id"):
+            # Block the HTTP API as well as the Studio button. A native media
+            # ID may be missing from a signed album webhook until sync resolves
+            # it; no approval/claim must be created before that resolution.
+            raise ValueError("Сначала подтвердите публикацию Instagram повторной загрузкой комментариев")
         if data["action"] == "skip":
             raise ValueError("Для пропуска отправка недоступна")
         policy = PolicyEvaluator().evaluate(ToolOperation.PUBLISH)
