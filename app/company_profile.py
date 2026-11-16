@@ -56,6 +56,9 @@ class ServiceOffer(_Strict):
     release_status: Literal["live", "limited", "in_development", "unverified"] | None = None
     product_family: str | None = None
     evidence_refs: list[str] = Field(default_factory=list)
+    # Optional per-device compatibility evidence. General offer evidence does
+    # not prove that an individual operating system or device is supported.
+    supported_devices_evidence: dict[str, str] = Field(default_factory=dict)
     buyer_segment: str | None = None
     conversion_action: str | None = None
     landing_page: str | None = None
