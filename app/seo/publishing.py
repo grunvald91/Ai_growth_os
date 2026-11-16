@@ -32,6 +32,15 @@ _TRANSLIT = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъы
                      ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r", "s", "t",
                       "u", "f", "h", "ts", "ch", "sh", "sch", "", "y", "", "e", "yu", "ya"]))
 _LEAKS = re.compile(r"\[REDACTED|\{[a-z_]+\}|TODO|lorem ipsum|proof_needed|schema:", re.IGNORECASE)
+# A narrow last-resort guard. The model critic handles substantive quality.
+_EDITORIAL_LEAK = re.compile(
+    r"^\s*(?:#{1,4}\s*)?(?:проверенные возможности|проверенные факты|"
+    r"verified capabilities|verified facts)\s*(?::|$)"
+    r"|\b(?:verified_product_facts|fact_renderings|source_id|proof_needed_notes)\b"
+    r"|\b(?:связка|интеграция|автоматическая рассылка)\b[^\n.!?]{0,130}"
+    r"\bне подтвержден[аоы]\b",
+    re.IGNORECASE | re.MULTILINE,
+)
 # The verified ServGo company profile explicitly has no approved subscription
 # prices. Avoid fabricating a commercial offer even if a critic misses the claim.
 _SERVGO_PRICE = re.compile(r"(?<!\w)\d[\d\s\u00a0]{0,12}\s*(?:₽|руб(?:\.|ля|лей)?|RUB)(?!\w)", re.IGNORECASE)
@@ -143,6 +152,15 @@ def static_problems(article: ArticleArtifact) -> list[str]:
         problems.append("no meta description")
     if _LEAKS.search(article.full_article):
         problems.append("service text leaked into the article")
+    # Check actual rendered fields too: full_article can be stale after editing.
+    visible = "\n".join(filter(None, [
+        reader.title, reader.lead, reader.direct_answer or "",
+        reader.meta_description or "", reader.closing, article.conversion.cta,
+        *(part for section in reader.sections for part in (section.heading, section.body)),
+        *(part for faq in reader.faq for part in (faq.question, faq.answer)),
+    ]))
+    if _EDITORIAL_LEAK.search(visible) or _EDITORIAL_LEAK.search(article.full_article):
+        problems.append("internal editorial verification leaked into reader copy")
     return problems
 
 

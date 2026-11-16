@@ -424,7 +424,7 @@ async def test_auto_publication_can_retry_after_transient_failure(env, tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_public_article_shows_fact_renderings_as_reader_prose(env, tmp_path):
+async def test_public_article_keeps_fact_renderings_internal_even_for_legacy_rows(env, tmp_path):
     from app.api.public_blog import _article
     db, product = env
     article_id = await make_article(db, product, tmp_path)
@@ -438,8 +438,31 @@ async def test_public_article_shows_fact_renderings_as_reader_prose(env, tmp_pat
     db.commit()
     publication = db.scalar(select(Publication).where(Publication.artifact_id == article_id))
     public = _article(row, publication)
-    assert public["company_facts"] == ["В этой мастерской собирают букеты на заказ."]
-    assert "source_id" not in str(public["company_facts"])
+    assert public["company_facts"] == []
+    assert "fact_renderings" not in public
+    assert "В этой мастерской собирают букеты" not in str(public)
+
+
+@pytest.mark.asyncio
+async def test_seo_publication_holds_internal_editorial_report(env, tmp_path):
+    db, product = env
+    article_id = await make_article(db, product, tmp_path)
+    row = db.get(Artifact, article_id)
+    article = ArticleArtifact.model_validate_json(row.content)
+    article.reader_article.sections[0].heading = "Проверенные возможности: ServGo"
+    article.reader_article.sections[0].body += (
+        " Связка CRM и Mail не подтверждена."
+    )
+    article.full_article += (
+        "\n\n## Проверенные возможности: ServGo\n\n"
+        "- Связка CRM и Mail не подтверждена."
+    )
+    row.content = article.model_dump_json()
+    db.commit()
+    outcome = publish_if_clear(db, article_id)
+    assert not outcome.published
+    assert "internal editorial verification" in outcome.reason
+    assert not list(db.scalars(select(Publication)))
 
 
 @pytest.mark.asyncio

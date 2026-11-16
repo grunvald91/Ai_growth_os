@@ -126,7 +126,7 @@ class RenderedFact(Contract):
 
 
 class HumanEditedArticle(Contract):
-    """Reader-facing copy. Verified product facts are injected separately by application code."""
+    """Reader-facing copy; fact_renderings are internal evidence, not public sections."""
     language: Literal['ru', 'en']
     title: ShortText
     lead: Text

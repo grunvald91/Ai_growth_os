@@ -107,12 +107,6 @@ export function BusinessBlogPage() {
                         </>}
                   </section>
                 ))}
-                {(article.company_facts?.length ?? 0) > 0 && (
-                  <section className="bf-block" aria-label="О компании">
-                    <h2 className="bf-h2">О {business.name}</h2>
-                    {article.company_facts!.map((fact, i) => <p key={i}>{fact}</p>)}
-                  </section>
-                )}
                 {article.faq.length > 0 && <section className="bf-block" aria-label="Частые вопросы">
                   <h2 className="bf-h2">Частые вопросы</h2>
                   {article.faq.map((item, i) => <div key={i}><h3>{item.question}</h3><p>{item.answer}</p></div>)}

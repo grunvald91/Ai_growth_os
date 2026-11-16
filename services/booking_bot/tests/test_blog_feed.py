@@ -115,7 +115,7 @@ class BlogFeedPagesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(types, ["BlogPosting", "FAQPage"])
         self.assertIn('rel="canonical" href="https://servgo.ru/blog/kak-vybrat-crm"', html)
 
-    async def test_live_article_renders_verified_facts_as_escaped_text(self):
+    async def test_live_article_does_not_render_internal_verified_facts(self):
         raw = {**RAW, "company_facts": [
             "Подтверждённая возможность", "<script>alert(1)</script>"]}
         async def with_facts(*a, **kw):
@@ -123,8 +123,9 @@ class BlogFeedPagesTest(unittest.IsolatedAsyncioTestCase):
         with patch("webapp.blog_feed.feed_articles", with_facts):
             async with TestClient(TestServer(create_webapp())) as c:
                 html = await (await c.get("/blog/kak-vybrat-crm")).text()
-        self.assertIn("Подтверждённая возможность", html)
-        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+        self.assertNotIn("Подтверждённая возможность", html)
+        self.assertNotIn("Проверенные возможности", html)
+        self.assertNotIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
         self.assertNotIn("<script>alert(1)</script>", html)
 
     async def test_rendered_seo_list_stays_between_paragraphs(self):
