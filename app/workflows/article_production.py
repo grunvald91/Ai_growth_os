@@ -150,7 +150,10 @@ ARTICLE_COMMON = ('Return ONLY JSON matching the schema. '
     'Write for the actual reader, not a universal marketing formula: a story, thoughtful explanation, '
     'warm conversation or practical guide can all be effective. Preserve meaningful caveats. '
     'Do not fabricate factual metrics, testimonials, prices, integrations, '
-    'product features or achieved customer outcomes. Numbers already present in supplied research MAY be '
+    'product features or achieved customer outcomes. Verified facts are evidence for editors, not ' 
+    'an obligatory public appendix. Relevant product capabilities belong naturally in reader prose, ' 
+    'never as fact inventories, source IDs or internal verification notes. ' 
+    'Numbers already present in supplied research MAY be '
     'used as attributed/contextual evidence, including third-party cases; do not silently generalize them '
     'into a guaranteed result for the company. Clearly signposted illustrative numbers are allowed as examples. '
     'For Russian advertising compliance, never state a knowingly false product characteristic, guarantee, '
@@ -231,7 +234,13 @@ GEO_RULES = (
     'Никаких выдуманных статистики, цен, исследований и отзывов. '
     'Из verified_product_facts выбирай ТОЛЬКО прямо относящиеся к теме сведения; '
     'не заставляй читателя просматривать весь профиль компании. '
-    'Если подходящих подтверждённых фактов нет, оставь fact_renderings пустым. '
+    'Если подходящих подтверждённых фактов нет, оставь fact_renderings пустым. ' 
+    'fact_renderings — внутренние ссылки на подтверждённые факты для контроля, ' 
+    'а не раздел статьи. Не пиши «Проверенные возможности», «Проверенные факты» ' 
+    'или рекламные списки характеристик. Если факт помогает ответить на запрос, ' 
+    'упомяни его органично в соответствующем абзаце. Не рассказывай читателю, ' 
+    'что функция «не подтверждена»: просто не приписывай её продукту; при этом ' 
+    'сохраняй существенные для выбора ограничения понятным языком. '
     'Каждый использованный source_id должен существовать в verified_product_facts. '
     'Переводи интерес к услугам компании ненавязчиво; не называй несуществующие услуги. '
     'РЕДАКТУРА В ДУХЕ «ПИШИ, СОКРАЩАЙ»: убирай повторные объяснения, общие фразы, '
@@ -344,17 +353,25 @@ def _default_stage_rule(name: str) -> str:
             'fact_renderings: ровно по одному на каждый source_id из '
             'verified_product_facts, точно пересказывая исходный факт. '
             'Не добавляй неподтверждённые возможности в обычные разделы '
-            'и не показывай читателю внутренние метки и заметки агентов.'
+            'и не показывай читателю внутренние метки и заметки агентов. ' 
+            'Проверенные факты используй в полезном тексте по необходимости, ' 
+            'но не делай отдельный каталог функций.'
         )
     elif name == 'marketing_editor':
         stage_rule = (
             ' Ты — финальный редактор. Сохрани все конкретные советы, примеры и '
-            'расчёты, а также ровно один fact_rendering на каждый source из '
-            'verified_product_facts. Сделай текст выразительным и убедительным '
+            'расчёты. В fact_renderings оставь только факты, нужные теме: '
+            'не нужно копировать весь verified_product_facts. Это внутренние ссылки, ' 
+            'не создавай из них раздел статьи. Сделай текст выразительным и убедительным '
             'без навязчивой рекламы. Сцена, история, сравнение, объяснение '
             'или уместный юмор — выбирай композицию по теме, не по жёсткой формуле. '
             'Компания и понятный следующий шаг должны естественно вытекать из '
-            'содержания, без рекламного абзаца в каждом разделе. '
+            'содержания, без рекламного абзаца в каждом разделе. ' 
+            'Прочти готовый текст как независимый читатель: должна остаться ' 
+            'практическая польза без рекламы. Убирай служебные отчёты, статусы ' 
+            'проверки, перечисления функций вместо ответа, навязчивые повторы ' 
+            'и упоминания неподтверждённого функционала. Существенные ограничения ' 
+            'и условия продукта сохраняй в понятной читателю форме. '
             'Отличай перспективные идеи от уже работающих функций. '
             'В финальной SEO-статье сначала проверь точность фактов и ответ на '
             'исходный запрос, затем убери дубли и проверь читаемость всех списков. '
@@ -1455,14 +1472,8 @@ class ArticleProduction:
             conversion = assemble_conversion(conversion_core, derivative_drafts)
 
             def build_package(current_conversion):
-                rendered_facts = ''
-                if reader_article.fact_renderings:
-                    fact_heading = f'Проверенные возможности: {product.name}' if request.language == 'ru' else f'Verified capabilities: {product.name}'
-                    rendered_facts = (
-                        f'## {fact_heading}\n\n'
-                        + '\n'.join(f'- {item.text}' for item in reader_article.fact_renderings)
-                        + '\n\n'
-                    )
+                # Verified fact references remain in the audit payload only.
+                # Public copy must never contain an automatically injected feature list.
                 reader_body = '\n\n'.join(
                     f'## {section.heading}\n\n{section.body}'
                     for section in reader_article.sections
@@ -1476,7 +1487,6 @@ class ArticleProduction:
                     f'# {reader_article.title}\n\n'
                     f'{reader_article.lead}\n\n'
                     f'{answer}'
-                    f'{rendered_facts}'
                     f'{reader_body}\n\n'
                     f'{reader_article.closing}\n\n'
                     f'{faq_text}'
