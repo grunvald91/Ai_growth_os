@@ -238,6 +238,16 @@ def test_device_inflections_remain_gated_by_evidence():
     assert candidate.reason_code == "device_evidence_required"
 
 
+def test_device_in_locative_phrase_is_not_treated_as_a_city():
+    candidate = make_landing_opportunities(
+        _core(_cluster(1, "smart dns в смартфоне цена", "commercial")),
+        _profile(),
+    ).candidates[0]
+    assert candidate.page_type == "device"
+    assert candidate.device == "smartphone"
+    assert candidate.reason_code == "device_evidence_required"
+
+
 def test_ambiguous_common_words_are_not_evidence_for_wrong_offer():
     from app.company_profile import CompanyProfile
     profile = CompanyProfile.model_validate({
