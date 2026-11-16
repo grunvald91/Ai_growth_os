@@ -1416,7 +1416,8 @@ def plan_page(db: Session, product: Product, status: str = "all", view: str = "c
     )
 
 
-def calendar_page(db: Session, product: Product, selected_date: str | None = None) -> str:
+def calendar_page(db: Session, product: Product, selected_date: str | None = None,
+                  *, ui_sdk_enabled: bool = True) -> str:
     state = studio_state(db, product)
     slots = sorted(state["slots"], key=lambda slot: slot.get("publish_at") or "")
     linked = {str(slot.get("telegram_publication_id")) for slot in slots}
@@ -1481,8 +1482,10 @@ def calendar_page(db: Session, product: Product, selected_date: str | None = Non
                 f"{quote(str(slot['slot_id']), safe='')}/move"
             )
             row_content += (
-                '<details class="sg-calendar-move"><summary>🕒 Перенести публикацию</summary>'
+                f'<details class="sg-calendar-move" data-plan-timezone="{esc(str(state["plan"].get("timezone") or "Europe/Moscow"))}">'
+                '<summary>🕒 Перенести публикацию</summary>'
                 f'<form class="sg-calendar-form" method="post" action="{move_url}">'
+                f'<input type="hidden" name="expected_publish_at" value="{esc(str(slot["publish_at"]))}">'
                 '<label class="sg-field"><span>Новое время · часовой пояс плана</span>'
                 f'<input type="datetime-local" name="when" value="{slot_value}" required></label>'
                 '<button class="btn secondary" type="submit">Сохранить дату</button>'
@@ -1500,11 +1503,19 @@ def calendar_page(db: Session, product: Product, selected_date: str | None = Non
       <div class="calendar-list">{"".join(rows) or '<div class="empty">На выбранную дату публикаций нет.</div>'}</div>
     </section>
     """
-    return studio_page_shell(
+    page = studio_page_shell(
         product, active="calendar", title="Календарь",
         subtitle="Дата, время, площадка, подготовка и состояние каждой публикации.",
         body=body,
     )
+    # Self-hosted Web Components, enhanced only where an editable slot exists.
+    # ?ui_sdk=0 retains the original native <details> and POST form.
+    if ui_sdk_enabled and 'class="sg-calendar-move"' in page:
+        page = page.replace("</head>",
+            '<link rel="stylesheet" href="/studio/assets/calendar-ui-sdk.css?v=1"></head>', 1)
+        page = page.replace("</body>",
+            '<script type="module" src="/studio/assets/ui-sdk-pilot.bundle.js?v=4"></script></body>', 1)
+    return page
 
 
 def materials_page(db: Session, product: Product, kind: str = "all", q: str = "", page: int = 1) -> str:
@@ -2056,11 +2067,13 @@ def studio_plan(product_id: UUID, status: str = "all", view: str = "current", db
 
 
 @router.get("/studio/products/{product_id}/calendar", response_class=HTMLResponse)
-def studio_calendar(product_id: UUID, date: str | None = None, db: Session = Depends(get_db)):
+def studio_calendar(product_id: UUID, request: Request, date: str | None = None,
+                    db: Session = Depends(get_db)):
     product = db.get(Product, product_id)
     if product is None:
         raise HTTPException(404, "Product not found")
-    response = HTMLResponse(calendar_page(db, product, selected_date=date))
+    response = HTMLResponse(calendar_page(db, product, selected_date=date,
+                                              ui_sdk_enabled=request.query_params.get("ui_sdk") != "0"))
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -2798,7 +2811,8 @@ async def studio_slot_move(product_id: UUID, plan_id: UUID, slot_id: str,
             raise ValueError("Выберите дату в часовом поясе плана")
         current = parse_json(plan)
         when = local.replace(tzinfo=ZoneInfo(current.get("timezone") or "Europe/Moscow"))
-        reschedule_slot(db, plan_id, slot_id, when)
+        reschedule_slot(db, plan_id, slot_id, when,
+                        expected_publish_at=fields.get("expected_publish_at") or None)
     except (ValueError, LookupError) as exc:
         raise HTTPException(409, str(exc)) from None
     return RedirectResponse(f"/studio/products/{product_id}/calendar", status_code=303)
