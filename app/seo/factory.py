@@ -213,6 +213,17 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client, h
         record_stage(db, product_id, task_id, "collect_suggestions")
         core_artifact = await build_semantic_core(db, product_id, seeds, client=client, task_id=task_id)
     core = SemanticCore.model_validate_json(core_artifact.content)
+    # A separate review-only sitemap of commercial landing opportunities.
+    # It never adds article tasks or publishes new website paths.
+    from app.seo.landing import KIND as LANDING_KIND, LandingOpportunities, store_landing_opportunities
+    landing_artifact = db.scalar(select(Artifact).where(
+        Artifact.product_id == product_id, Artifact.task_id == task_id,
+        Artifact.kind == LANDING_KIND))
+    if landing_artifact is None:
+        record_stage(db, product_id, task_id, "landing_opportunities")
+        landing_artifact = store_landing_opportunities(
+            db, product_id, task_id, core, products_root=settings.products_root)
+    landing_count = len(LandingOpportunities.model_validate_json(landing_artifact.content).candidates)
     plan = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == PLAN_KIND))
     if plan is None:
         record_stage(db, product_id, task_id, "build_plan")
@@ -233,6 +244,8 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client, h
         content=json.dumps({"seeds": len(core.seeds), "clusters": len(core.clusters),
                             "articles_queued": len(queued), "articles_deferred": len(all_items) - len(queued),
                             "planning_horizon_days": horizon_days,
+                            "landing_pages_proposed": landing_count,
+                            "landing_pages_published": 0,
                             "sources": [s.model_dump() for s in core.sources]}))
     TaskService(db).update(task_id, status=TaskStatus.COMPLETED)
     record_stage(db, product_id, task_id, "completed")
