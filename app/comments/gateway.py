@@ -105,6 +105,23 @@ class CommentGateway:
             return chat.get("title", account_id)
         raise PlatformError("Для этой площадки доступен ручной режим")
 
+    async def fetch_instagram_replies(self, channel, token, parent_id, *, after=None):
+        """Page native replies of one already imported, account-scoped parent.
+
+        The caller owns the media/parent mapping and persists the opaque
+        pagination cursor. Never follow Meta's absolute paging.next URL.
+        """
+        if channel.platform != "instagram" or not str(parent_id).isdigit():
+            raise PlatformError("Некорректный комментарий Instagram")
+        params = {"fields": "id,text,from,timestamp", "limit": 100}
+        if after:
+            if not isinstance(after, str) or len(after) > 2048:
+                raise PlatformError("Некорректный курсор Instagram")
+            params["after"] = after
+        return await self.request(
+            "GET", f"{self.instagram_base(channel)}/{quote(str(parent_id), safe='')}/replies",
+            token, params=params)
+
     async def fetch(self, channel, token):
         """Bounded, cursor-aware batches; caller persists cursor with imported rows."""
         if adapter := self.adapter(channel.platform):
