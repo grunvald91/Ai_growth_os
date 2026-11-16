@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
@@ -8,7 +8,14 @@ from app.db.base import Base, TimestampMixin, UUIDMixin
 
 class CommentChannel(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "comment_channels"
-    __table_args__ = (UniqueConstraint("product_id", "platform", name="uq_comment_channel"),)
+    __table_args__ = (
+        UniqueConstraint("product_id", "platform", name="uq_comment_channel"),
+        # Different businesses must never own the same connected IG account.
+        # A database constraint also closes the concurrent-connect race.
+        Index("uq_comment_ig_connected_account", "account_id", unique=True,
+              postgresql_where=text("platform = 'instagram' AND status = 'connected'"),
+              sqlite_where=text("platform = 'instagram' AND status = 'connected'")),
+    )
 
     product_id: Mapped[UUID] = mapped_column(ForeignKey("products.id"), index=True)
     platform: Mapped[str] = mapped_column(String(30))
