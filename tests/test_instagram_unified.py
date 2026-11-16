@@ -378,3 +378,28 @@ def test_album_comment_without_media_id_is_retained_but_not_publishable(ctx):
     assert "needs_media_resolution" not in row.target
     assert recent_platform_comment(row, 30)
     assert row.post_text == "Карточки с информацией"
+
+
+def test_webhook_batch_deduplicates_ids_inside_one_delivery(ctx):
+    import asyncio
+    db, product, svc, _, _ = ctx
+    meta_config(svc.settings)
+    app.dependency_overrides[get_settings] = lambda: svc.settings
+    asyncio.run(svc.connect(product.id, ConnectInput(
+        platform="instagram", account_id="100", token="owner-token")))
+    changes = []
+    for comment_id in ["55001", "55002", "55001", "55003"]:
+        changes.append({"field": "comments", "value": {
+            "id": comment_id, "text": f"Вопрос {comment_id}",
+            "media": {"id": "123456"}, "from": {"id": "800"}}})
+    raw, sig = signed({"object": "instagram", "entry": [
+        {"id": "100", "changes": changes}]}, svc.settings.comment_meta_app_secret)
+    client = client_for(ctx)
+    response = client.post("/api/integrations/instagram/webhook",
+                           content=raw, headers={"x-hub-signature-256": sig})
+    assert response.status_code == 200
+    assert response.json()["imported"] == 3
+    assert len(list(db.scalars(select(BusinessComment)))) == 3
+    again = client.post("/api/integrations/instagram/webhook",
+                        content=raw, headers={"x-hub-signature-256": sig})
+    assert again.status_code == 200 and again.json()["imported"] == 0
