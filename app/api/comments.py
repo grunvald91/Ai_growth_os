@@ -157,7 +157,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
         <label class="c-check"><input name="enabled" type="checkbox" {"checked" if config.enabled else ""}> Агент включён</label>
         <label class="c-check"><input name="auto_import" type="checkbox" {"checked" if config.auto_import else ""}> Автоматически загружать комментарии</label>
         <label class="c-check"><input name="auto_draft" type="checkbox" {"checked" if config.auto_draft else ""}> Автоматически создавать ИИ-черновики (может расходовать лимит API)</label>
-        <p class="c-help">Импорт: {"включён" if svc.settings.comment_background_poll_enabled else "выключен"} на сервере. ИИ-черновики: {"включены" if svc.settings.comment_background_draft_enabled else "выключены"} на сервере. Лимит: {svc.settings.comment_background_draft_daily_limit} автоматических попыток на компанию за сутки (UTC). Ответы публикуются только после вашего подтверждения.</p>
+        <p class="c-help">Периодический импорт: {"включён" if svc.settings.comment_background_poll_enabled else "выключен"} на сервере. Instagram Webhook: {"включён" if svc.settings.comment_meta_webhook_enabled else "выключен"} на сервере (также требуется галочка «Автоматически загружать комментарии»). ИИ-черновики: {"включены" if svc.settings.comment_background_draft_enabled else "выключены"} на сервере. Лимит: {svc.settings.comment_background_draft_daily_limit} автоматических попыток на компанию за сутки (UTC). Ответы публикуются только после вашего подтверждения.</p>
         <button class="btn primary" type="submit">Сохранить настройки</button></form></section>
         <aside class="panel c-card"><h2>Знания о {esc(product.name)}</h2>{readiness}<p>Профиль бизнеса читается перед каждым ответом. Дополнительные факты вводите только после проверки.</p>
         <details><summary>Данные из профиля</summary><ul class="c-knowledge">{business_facts}</ul></details>
@@ -198,7 +198,10 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
                     reply_html += f'<p class="c-meta">Источники: {esc(", ".join(reply["used_fact_ids"]))}</p>'
                 reply_html += f'<button class="btn ghost" data-copy-reply="{copy_id}">Копировать ответ</button>'
                 if comment.status in {"draft", "review"} and comment.source == "platform" and comment.platform in live and reply.get("action") != "skip":
-                    reply_html += f'<button class="btn primary" data-send="{comment.id}" data-text-id="{copy_id}">Одобрить и отправить</button>'
+                    if comment.platform == "instagram" and not (comment.target or {}).get("media_id"):
+                        reply_html += '<p class="c-warning">Instagram ещё не подтвердил публикацию для этого комментария. Загрузите комментарии повторно перед отправкой.</p>'
+                    else:
+                        reply_html += f'<button class="btn primary" data-send="{comment.id}" data-text-id="{copy_id}">Одобрить и отправить</button>'
             if comment.status == "delivery_unknown":
                 reply_html += '<p class="c-warning">Проверьте комментарий на площадке. Повторная отправка заблокирована, чтобы не продублировать ответ.</p>'
             if comment.status == "drafting":

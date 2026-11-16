@@ -268,6 +268,8 @@ Required SERVER environment (no real values in Git):
   `https://servgo.ru/studio/integrations/instagram/oauth/callback` in Meta.
 - `COMMENT_META_WEBHOOK_VERIFY_TOKEN` — long random verification token entered
   in the Meta Dashboard (not the app secret).
+- `COMMENT_META_WEBHOOK_ENABLED=false` — independent operator kill switch for
+  webhook **ingestion**, with a second per-company `auto_import` opt-in.
 - `COMMENT_META_GRAPH_VERSION=v27.0` — explicit Graph version; align with the
   current Meta app permissions, API availability and reviewed API methods.
 - `COMMENT_PLATFORM_PROXY_URL` — required reachable foreign HTTP(S) proxy;
@@ -321,3 +323,70 @@ reconciliation path.
 References: [Meta comments webhooks](https://developers.facebook.com/docs/graph-api/webhooks/reference/instagram),
 [Meta assigned Instagram assets](https://developers.facebook.com/docs/graph-api/reference/user/assigned_instagram_accounts/),
 [Postiz Unified Login compatibility reports](https://github.com/gitroomhq/postiz-app/issues/2350).
+
+
+### Instagram post-merge hardening and real launch checklist (2026-11-16)
+
+- **Database migration 0016:** only one *connected* Instagram account can be
+  assigned across the entire multi-tenant database. A duplicate check runs
+  before the partial unique index is installed. If the migration refuses,
+  inspect and disconnect the duplicate manually; it intentionally never
+  chooses a customer account to revoke. Both the old manual token connection
+  and Unified Login are subject to this rule.
+- **Webhook activation (double opt-in):** set
+  `COMMENT_META_WEBHOOK_ENABLED=true` in the API runtime only after the
+  public callback and Meta App grants are checked. The default is **false**.
+  Each business also enables its Studio **Автоматически загружать комментарии**
+  toggle (`auto_import=true`) while its agent is enabled. The webhook endpoint
+  remains reachable for GET verification even if ingestion is disabled.
+  Verified notifications received with either switch OFF are ACKed without
+  saving new comments. Independent manual sync is always available.
+- **Webhook enrichment:** a signed notification has no authoritative creation
+  timestamp or original caption. The next account-scoped native import fills
+  those fields on the *existing* inbound row; it does not spend LLM tokens or
+  create a duplicate. Meta may omit the media ID for album comments. Such
+  events are preserved with `needs_media_resolution` and cannot be sent until
+  a subsequent native import resolves their ownership and media ID. Owners can
+  use **Загрузить комментарии** to trigger a reconciliation; enable both
+  `COMMENT_BACKGROUND_POLL_ENABLED` and company `auto_import` only after
+  verified connectivity for unattended reconciliation. This polling setting is
+  **independent** from the paid AI-draft opt-in. No invented publication time
+  is assigned based on webhook arrival.
+- **OAuth retention:** the worker periodically rejects abandoned pending
+  authorizations after expiry and deletes their encrypted temporary token,
+  regardless of the comment polling/drafting flags. A completed authorization
+  deletes its temporary token immediately. A persistent connected account
+  token remains encrypted until disconnection.
+- **Meta App setup:** subscribe to the Instagram `comments` webhook
+  field in the Meta Dashboard. Confirm which Meta login/API path is active:
+  **new Unified Login** uses `config_id` and can grant Instagram business
+  assets directly (developers reported that a Facebook Page is not always
+  required); **legacy Facebook Login for Business** generally requires a
+  linked Page. Current Meta Webhook documentation describes Page subscription,
+  `instagram_manage_comments`, `pages_manage_metadata`, and Page access
+  in the Facebook-linked path; ensure that the requirements shown for your
+  actual app/configuration are fulfilled instead of assuming all accounts
+  need a Page. Meta also documents App Review / Advanced Access for serving
+  other businesses. These are **external account configuration steps** and
+  are not automatically completed by OAuth.
+- **Gateway:** activate the exact HTTPS Nginx routes for the OAuth callback
+  and Instagram Webhook; keep BookingBot's generic `/api/` route unchanged.
+  Confirm public reachability through the actual production host and ensure
+  Growth Studio login can be maintained on the same canonical host used for
+  OAuth. The templates in GitHub do **not** imply production deployment.
+- **Real acceptance test:** create a new comment on a *test professional*
+  Instagram account under an owned post, verify signature and import to the
+  correct company, run native reconciliation for timestamp/context, generate
+  one draft, approve and verify precisely one actual public reply. Repeat with
+  an album post, a nested reply, and a second independent tenant, observing
+  API calls/permissions. No such production test has yet been confirmed.
+- **Remaining future work:** robust nested replies pagination in native
+  reconciliation, better last-webhook/permission health indicators, real
+  client-account Meta App Review, adaptive Jev only when batch-size tests
+  justify it, and gated hybrid automated publishing. None is enabled by
+  merging the current hardening change.
+
+Official Meta sources:
+https://developers.facebook.com/docs/graph-api/webhooks/getting-started/webhooks-for-instagram/
+https://developers.facebook.com/docs/graph-api/webhooks/reference/instagram
+https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login/comment-moderation/

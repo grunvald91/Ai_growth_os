@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.comments.platforms import reply_limit
@@ -147,6 +148,15 @@ class CommentService:
         token = value.token.get_secret_value()
         if not token or len(token) > 8000 or any(c in token for c in "\r\n"):
             raise ValueError("Некорректный токен")
+        if value.platform == "instagram":
+            other = self.db.scalar(select(CommentChannel).where(
+                CommentChannel.platform == "instagram",
+                CommentChannel.account_id == value.account_id,
+                CommentChannel.product_id != product_id,
+                CommentChannel.status == "connected",
+            ).limit(1))
+            if other:
+                raise ValueError("Instagram-аккаунт уже подключён к другой компании")
         if value.platform == "telegram":
             if token == self.settings.telegram_bot_token:
                 raise ValueError("Создайте отдельного бота: бот управления уже используется")
@@ -157,6 +167,7 @@ class CommentService:
         if self.busy(product_id, value.platform):
             raise ValueError("Дождитесь завершения отправки")
         channel = self.channel(product_id, value.platform, lock=True)
+        newly_created_channel = channel is None
         if channel and channel.account_id != value.account_id:
             # Native IDs can collide in Telegram; keep one stable account per product/platform.
             raise ValueError("Для другого аккаунта создайте отдельный бизнес")
@@ -165,7 +176,11 @@ class CommentService:
             channel = CommentChannel(product_id=product_id, platform=value.platform,
                 account_id=value.account_id, account_name=name, cursor={})
             self.db.add(channel)
-            self.db.flush()
+            try:
+                self.db.flush()
+            except IntegrityError:
+                self.db.rollback()
+                raise ValueError("Instagram-аккаунт уже подключён к другой компании") from None
         else:
             channel.revision += 1
         self.secrets.save_token(channel.id, token)
@@ -176,7 +191,13 @@ class CommentService:
         self.db.add(ToolCall(product_id=product_id, tool_name="comment_gateway", operation="verify_connection",
             status="executed", request_data={"platform": value.platform, "channel_id": str(channel.id)},
             response_data={"account_id": value.account_id, "revision": channel.revision}, executed_at=now()))
-        self.db.commit()
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
+            if newly_created_channel:
+                self.secrets.delete(channel.id)
+            raise ValueError("Instagram-аккаунт уже подключён к другой компании") from None
         return channel
 
     async def connect_verified_instagram(self, product_id, account_id, username, token):
@@ -199,6 +220,7 @@ class CommentService:
         if self.busy(product_id, "instagram"):
             raise ValueError("Дождитесь завершения отправки ответа")
         channel = self.channel(product_id, "instagram", lock=True)
+        newly_created_channel = channel is None
         if channel and channel.account_id != account_id:
             raise ValueError("Сначала отключите прежний Instagram-аккаунт")
         if not channel:
@@ -217,7 +239,11 @@ class CommentService:
             request_data={"platform": "instagram", "channel_id": str(channel.id)},
             response_data={"account_id": account_id, "revision": channel.revision,
                            "auth_mode": "unified"}, executed_at=now()))
-        self.db.commit()
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
+            raise ValueError("Instagram-аккаунт уже подключён к другой компании") from None
         return channel
 
     def disconnect(self, product_id, platform):
@@ -282,6 +308,36 @@ class CommentService:
             existing = self.db.scalar(select(BusinessComment).where(BusinessComment.product_id == product_id,
                 BusinessComment.platform == platform, BusinessComment.external_id == item["external_id"]))
             if existing:
+                # Webhook events do not contain an authoritative comment time or
+                # post caption. Reconcile existing inbound rows from the real
+                # platform response without restarting a draft or changing an
+                # already handled reply.
+                existing_target = existing.target or {}
+                native_target = item.get("target") or {}
+                stored_media = existing_target.get("media_id")
+                native_media = native_target.get("media_id")
+                if (platform == "instagram" and existing.source == "platform"
+                        and existing_target.get("channel_id") == str(channel.id)
+                        and native_media and (not stored_media or
+                                              str(stored_media) == str(native_media))):
+                    if not stored_media:
+                        # Album comment webhooks may omit media.id. Only the
+                        # account-scoped Graph import may resolve that media.
+                        existing.target = {**existing_target, "media_id": native_media}
+                        existing_target = existing.target
+                    if existing_target.get("needs_media_resolution"):
+                        existing.target = {k: v for k, v in existing_target.items()
+                                           if k != "needs_media_resolution"}
+                    native_time = native_target.get("published_at")
+                    try:
+                        parsed = datetime.fromisoformat(str(native_time).replace("Z", "+00:00"))
+                        valid_time = parsed.tzinfo is not None
+                    except (TypeError, ValueError):
+                        valid_time = False
+                    if valid_time and not (existing.target or {}).get("published_at"):
+                        existing.target = {**existing.target, "published_at": native_time}
+                    if not existing.post_text and item.get("post_text"):
+                        existing.post_text = item["post_text"][:8000]
                 continue
             self.db.add(BusinessComment(product_id=product_id, platform=platform, external_id=item["external_id"],
                 text=item["text"][:8000], post_text=item.get("post_text", "")[:8000],
@@ -501,6 +557,11 @@ class CommentService:
             raise ValueError("Проверьте длину и текст ответа")
         if comment.platform == "youtube" and comment.target.get("can_reply") is False:
             raise ValueError("YouTube не разрешает ответить в этом обсуждении")
+        if comment.platform == "instagram" and not (comment.target or {}).get("media_id"):
+            # Block the HTTP API as well as the Studio button. A native media
+            # ID may be missing from a signed album webhook until sync resolves
+            # it; no approval/claim must be created before that resolution.
+            raise ValueError("Сначала подтвердите публикацию Instagram повторной загрузкой комментариев")
         if data["action"] == "skip":
             raise ValueError("Для пропуска отправка недоступна")
         policy = PolicyEvaluator().evaluate(ToolOperation.PUBLISH)

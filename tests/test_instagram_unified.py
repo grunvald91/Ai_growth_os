@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.comments.contracts import ConnectInput
+from app.comments.contracts import AgentSettings, ConnectInput
 from app.comments.gateway import CommentGateway, PlatformError
 from app.comments.instagram_oauth import MetaUnifiedClient, new_state, verify_state
 from app.comments.models import BusinessComment, CommentChannel
@@ -24,6 +24,7 @@ def meta_config(settings):
     settings.comment_meta_app_secret = "only-for-test-meta-secret"
     settings.comment_meta_login_config_id = "998877"
     settings.comment_meta_webhook_verify_token = "test-verification-token"
+    settings.comment_meta_webhook_enabled = True
     settings.comment_meta_public_base = "http://localhost"
     settings.comment_platform_proxy_url = "http://test-proxy:8891"
     settings.comment_meta_graph_version = "v27.0"
@@ -84,6 +85,7 @@ def test_public_webhook_signature_scoped_duplicated_and_no_publication(ctx):
     import asyncio
     asyncio.run(svc.connect(product.id, ConnectInput(
         platform="instagram", account_id="100", token="token-100")))
+    svc.configure(product.id, AgentSettings(auto_import=True))
     path = "/api/integrations/instagram/webhook"
     assert client.get(path, params={"hub.mode": "subscribe", "hub.verify_token": "wrong",
                                     "hub.challenge": "1234"}).status_code == 403
@@ -209,3 +211,250 @@ async def test_unified_gateway_uses_facebook_graph_and_preserves_native_parent()
         comment = SimpleNamespace(external_id="999", target={"media_id": "456"})
         assert await gateway.send(channel, "token", comment, "Ответ") == "published-reply"
     assert all(r.url.host == "graph.facebook.com" for r in seen)
+
+
+@pytest.mark.asyncio
+async def test_webhook_comment_gets_authoritative_time_and_caption_on_sync(ctx):
+    from datetime import datetime, timezone
+    from app.comments.service import recent_platform_comment
+
+    db, product, svc, _, gateway = ctx
+    channel = await svc.connect(product.id, ConnectInput(
+        platform="instagram", account_id="100", token="owner-token"))
+    record = BusinessComment(
+        product_id=product.id, platform="instagram", external_id="987654321",
+        text="Сколько стоит?", post_text="", source="platform", status="new",
+        target={"channel_id": str(channel.id), "media_id": "555333",
+                "ingest": "meta_webhook"},
+    )
+    db.add(record)
+    db.commit()
+    assert not recent_platform_comment(record, 30)
+
+    published = datetime.now(timezone.utc).isoformat()
+
+    async def fetch(connected, token):
+        return [{
+            "external_id": "987654321", "text": "Сколько стоит?",
+            "post_text": "Публикация со всеми условиями",
+            "target": {"media_id": "555333", "published_at": published},
+        }], {}
+
+    gateway.fetch = fetch
+    assert await svc.sync(product.id, "instagram") == 0
+    db.refresh(record)
+    assert record.status == "new"
+    assert record.post_text == "Публикация со всеми условиями"
+    assert record.target["ingest"] == "meta_webhook"
+    assert record.target["published_at"] == published
+    assert recent_platform_comment(record, 30)
+    assert await svc.sync(product.id, "instagram") == 0
+    assert len(list(db.scalars(select(BusinessComment)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_instagram_native_account_exclusive_to_one_company(ctx):
+    from app.models.domain import Product
+    from sqlalchemy.exc import IntegrityError
+
+    db, first, svc, _, _ = ctx
+    second = Product(name="Другая компания", slug="second-instagram-review")
+    db.add(second)
+    db.commit()
+    await svc.connect(first.id, ConnectInput(
+        platform="instagram", account_id="123456", token="token-A"))
+    with pytest.raises(ValueError, match="другой компании"):
+        await svc.connect(second.id, ConnectInput(
+            platform="instagram", account_id="123456", token="token-B"))
+    db.rollback()
+    rows = list(db.scalars(select(CommentChannel).where(
+        CommentChannel.platform == "instagram", CommentChannel.status == "connected")))
+    assert len(rows) == 1 and rows[0].product_id == first.id
+    # The partial UNIQUE index must also reject a concurrent/direct DB writer.
+    db.add(CommentChannel(product_id=second.id, platform="instagram",
+                          account_id="123456", account_name="clone", cursor={},
+                          status="connected", revision=1))
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+    # The same native account may reconnect later after the old owner disconnects.
+    svc.disconnect(first.id, "instagram")
+    second_channel = await svc.connect(second.id, ConnectInput(
+        platform="instagram", account_id="123456", token="token-B"))
+    assert second_channel.product_id == second.id
+
+
+def test_abandoned_oauth_pending_tokens_are_pruned(ctx):
+    from time import time
+    from sqlalchemy.orm import Session
+    from app.comments.instagram_oauth import prune_expired_pending_oauth
+    from app.models.domain import ArtifactStatus
+
+    db, product, svc, _, _ = ctx
+    old = Artifact(
+        product_id=product.id, kind="comment_instagram_oauth_pending",
+        title="Expired", content=json.dumps({"expires_at": time() - 100}),
+        status=ArtifactStatus.DRAFT,
+    )
+    fresh = Artifact(
+        product_id=product.id, kind="comment_instagram_oauth_pending",
+        title="Still valid", content=json.dumps({"expires_at": time() + 500}),
+        status=ArtifactStatus.DRAFT,
+    )
+    db.add_all([old, fresh]); db.flush()
+    svc.secrets.save_token(old.id, "expired-token")
+    svc.secrets.save_token(fresh.id, "valid-token")
+    db.commit()
+
+    session_factory = lambda: Session(db.get_bind(), expire_on_commit=False)
+    assert prune_expired_pending_oauth(session_factory, svc.settings) == 1
+    db.expire_all()
+    assert db.get(Artifact, old.id).status == ArtifactStatus.REJECTED
+    assert not svc.secrets.path(old.id).exists()
+    assert db.get(Artifact, fresh.id).status == ArtifactStatus.DRAFT
+    assert svc.secrets.load_token(fresh.id) == "valid-token"
+
+
+def test_instagram_tenant_unique_migration_is_partial_and_compatible():
+    from pathlib import Path
+    import importlib.util
+    from sqlalchemy import create_engine, inspect, text
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE comment_channels ("
+                                    "id VARCHAR(36) PRIMARY KEY, "
+                                    "platform VARCHAR(30) NOT NULL, "
+                                    "status VARCHAR(30) NOT NULL, "
+                                    "account_id VARCHAR(200) NOT NULL)"))
+            path = Path(__file__).parents[1] / "alembic/versions/0016_comment_instagram_unique.py"
+            spec = importlib.util.spec_from_file_location("migration_0016_instagram", path)
+            migration = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(migration)
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.upgrade()
+            assert any(idx["name"] == "uq_comment_ig_connected_account"
+                       for idx in inspect(connection).get_indexes("comment_channels"))
+            connection.execute(text("INSERT INTO comment_channels VALUES "
+                                    "('a','instagram','connected','123'),"
+                                    "('b','instagram','disconnected','123')"))
+            with pytest.raises(Exception):
+                connection.execute(text(
+                    "INSERT INTO comment_channels VALUES ('c','instagram','connected','123')"))
+    finally:
+        engine.dispose()
+
+
+def test_album_comment_without_media_id_is_retained_but_not_publishable(ctx):
+    import asyncio
+    from app.comments.service import recent_platform_comment
+    db, product, svc, _, gateway = ctx
+    meta_config(svc.settings)
+    app.dependency_overrides[get_settings] = lambda: svc.settings
+    asyncio.run(svc.connect(product.id, ConnectInput(
+        platform="instagram", account_id="100", token="owner-token")))
+    svc.configure(product.id, AgentSettings(auto_import=True))
+    raw, signature = signed({"object": "instagram", "entry": [
+        {"id": "100", "changes": [{"field": "comments", "value": {
+            "id": "99000", "text": "Вопрос к публикации-альбому",
+            "from": {"id": "98765"}}}]}]}, svc.settings.comment_meta_app_secret)
+    response = client_for(ctx).post("/api/integrations/instagram/webhook",
+                                  content=raw, headers={"x-hub-signature-256": signature})
+    assert response.status_code == 200 and response.json()["imported"] == 1
+    row = db.scalar(select(BusinessComment).where(BusinessComment.external_id == "99000"))
+    assert row.target.get("needs_media_resolution") is True
+    assert "media_id" not in row.target
+    assert not recent_platform_comment(row, 30)
+
+    from datetime import datetime, timezone
+    async def fetch(channel, token):
+        return [{"external_id": "99000", "text": row.text,
+                 "post_text": "Карточки с информацией",
+                 "target": {"media_id": "999888", "published_at": datetime.now(timezone.utc).isoformat()}}], {}
+    gateway.fetch = fetch
+    asyncio.run(svc.sync(product.id, "instagram"))
+    db.refresh(row)
+    assert row.target["media_id"] == "999888"
+    assert "needs_media_resolution" not in row.target
+    assert recent_platform_comment(row, 30)
+    assert row.post_text == "Карточки с информацией"
+
+
+def test_webhook_batch_deduplicates_ids_inside_one_delivery(ctx):
+    import asyncio
+    db, product, svc, _, _ = ctx
+    meta_config(svc.settings)
+    app.dependency_overrides[get_settings] = lambda: svc.settings
+    asyncio.run(svc.connect(product.id, ConnectInput(
+        platform="instagram", account_id="100", token="owner-token")))
+    svc.configure(product.id, AgentSettings(auto_import=True))
+    changes = []
+    for comment_id in ["55001", "55002", "55001", "55003"]:
+        changes.append({"field": "comments", "value": {
+            "id": comment_id, "text": f"Вопрос {comment_id}",
+            "media": {"id": "123456"}, "from": {"id": "800"}}})
+    raw, sig = signed({"object": "instagram", "entry": [
+        {"id": "100", "changes": changes}]}, svc.settings.comment_meta_app_secret)
+    client = client_for(ctx)
+    response = client.post("/api/integrations/instagram/webhook",
+                           content=raw, headers={"x-hub-signature-256": sig})
+    assert response.status_code == 200
+    assert response.json()["imported"] == 3
+    assert len(list(db.scalars(select(BusinessComment)))) == 3
+    again = client.post("/api/integrations/instagram/webhook",
+                        content=raw, headers={"x-hub-signature-256": sig})
+    assert again.status_code == 200 and again.json()["imported"] == 0
+
+
+@pytest.mark.asyncio
+async def test_unresolved_album_cannot_create_approval_or_send_claim(ctx):
+    db, product, svc, _, gateway = ctx
+    channel = await svc.connect(product.id, ConnectInput(
+        platform="instagram", account_id="100", token="owner-token"))
+    row = BusinessComment(product_id=product.id, platform="instagram",
+                          external_id="112233", text="Как заказать?",
+                          post_text="", source="platform", status="new",
+                          target={"channel_id": str(channel.id), "ingest": "meta_webhook",
+                                  "needs_media_resolution": True})
+    db.add(row); db.commit()
+    await svc.draft(product.id, row.id)
+    with pytest.raises(ValueError, match="подтвердите публикацию Instagram"):
+        await svc.send(product.id, row.id, "Ответ с подтверждением")
+    db.refresh(row)
+    assert row.status in {"draft", "review"}
+    assert not list(db.scalars(select(Approval)))
+    assert not list(db.scalars(select(Publication)))
+    assert not gateway.sent
+
+
+def test_webhook_import_requires_both_operator_and_company_opt_in(ctx):
+    import asyncio
+    db, product, svc, _, _ = ctx
+    meta_config(svc.settings)
+    app.dependency_overrides[get_settings] = lambda: svc.settings
+    asyncio.run(svc.connect(product.id, ConnectInput(
+        platform="instagram", account_id="100", token="owner-token")))
+    raw, sig = signed({"object": "instagram", "entry": [
+        {"id": "100", "changes": [{"field": "comments", "value": {
+            "id": "73001", "text": "Нужна консультация",
+            "media": {"id": "97001"}, "from": {"id": "81001"}}}]}]},
+        svc.settings.comment_meta_app_secret)
+    client = client_for(ctx)
+    url = "/api/integrations/instagram/webhook"
+    headers = {"x-hub-signature-256": sig}
+
+    svc.settings.comment_meta_webhook_enabled = False
+    assert client.post(url, content=raw, headers=headers).json()["imported"] == 0
+
+    svc.settings.comment_meta_webhook_enabled = True
+    assert client.post(url, content=raw, headers=headers).json()["imported"] == 0
+
+    svc.configure(product.id, AgentSettings(enabled=False, auto_import=True))
+    assert client.post(url, content=raw, headers=headers).json()["imported"] == 0
+
+    svc.configure(product.id, AgentSettings(enabled=True, auto_import=True))
+    assert client.post(url, content=raw, headers=headers).json()["imported"] == 1
+    assert len(list(db.scalars(select(BusinessComment)))) == 1
