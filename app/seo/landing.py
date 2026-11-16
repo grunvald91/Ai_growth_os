@@ -185,7 +185,7 @@ def _geo_hint(query: str, profile: CompanyProfile | None) -> tuple[bool, str | N
             next_word = words[index + 1]
             if next_word == "городе":
                 return True, None
-            if next_word not in _NON_GEOGRAPHIC:
+            if next_word not in _NON_GEOGRAPHIC and _find_device(next_word) is None:
                 # Common locative phrases that are not place names are
                 # deliberately blocked for review when ambiguous.
                 if profile is not None:
