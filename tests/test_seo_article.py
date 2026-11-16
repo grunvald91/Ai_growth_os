@@ -92,6 +92,9 @@ async def test_seo_article_keeps_only_topic_relevant_verified_facts(db, product,
     assert [claim.source_id for claim in article.draft.claims] == [selected]
     assert len(article.reader_article.fact_renderings) == 1
     assert "Для другой темы" not in article.full_article
+    # Facts are retained as audit evidence, not printed as a branded appendix.
+    assert "Проверенные возможности" not in article.full_article
+    assert "Verified capabilities" not in article.full_article
 
 
 @pytest.mark.asyncio
