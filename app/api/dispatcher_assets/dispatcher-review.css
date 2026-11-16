@@ -15,6 +15,10 @@
 .dp-post-revise-button{width:100%;font-size:13px;min-height:42px}
 .dp-post-revise-form{display:grid;gap:10px;min-width:0}
 .dp-post-revise-form[hidden],.dp-post-quote[hidden]{display:none!important}
+.dp-post-selection-warning{font-size:12px;line-height:1.4;color:#b44336;
+  padding:6px 9px;border-radius:8px;background:var(--dp-soft,#f6f9fd);margin:0}
+.dp-post-selection-warning[hidden]{display:none!important}
+.dp-msg .dp-chip:disabled{opacity:.6;cursor:not-allowed}
 .dp-post-feedback-label{display:grid;gap:6px;font-size:13px;font-weight:600;color:var(--dp-text)}
 .dp-post-feedback-label textarea{font:inherit;font-weight:400;box-sizing:border-box;width:100%;
   min-height:100px;resize:vertical;padding:11px;border:1px solid var(--dp-line);

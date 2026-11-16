@@ -117,7 +117,9 @@ async def show_material(ctx: Context, params: MaterialParams) -> Outcome:
         text = f"{kind} «{row.title[:80]}» ждёт вашего решения.{hint}"
     else:
         text = f"{kind} «{row.title[:80]}»: {STATUS_LABELS.get(_status(row), _status(row)).lower()}."
-    blocks.append({"type": "links", "items": [{"label": "Открыть полностью", "href": _page(ctx, row)}]})
+    long_post = bool(blocks[0].get("truncated"))
+    label = "Проверить полный текст и утвердить на странице" if long_post else "Открыть полностью"
+    blocks.append({"type": "links", "items": [{"label": label, "href": _page(ctx, row)}]})
     return Outcome(text, "Готовый материал ждёт вашего решения, он на экране." if _status(row) == "awaiting_approval" else text,
                    blocks)
 
@@ -131,6 +133,14 @@ async def describe_approve_material(ctx: Context, params: MaterialParams) -> Out
         return Outcome("Этот материал уже утверждён.", "Этот материал уже утверждён.", [card(ctx, row)])
     if _status(row) != "awaiting_approval":
         return Outcome("Эту версию утвердить уже нельзя.", "Эту версию утвердить уже нельзя.", ok=False)
+    # A chat card displays at most 12,000 characters. Long posts must be
+    # reviewed on the complete material page, not approved from a truncated card.
+    if row.kind == "channel_text" and len(str(material_data(row).get("body") or "").strip()) > 12000:
+        return Outcome("Пост длиннее предпросмотра. Откройте весь текст на странице материала и утвердите там.",
+                       "Проверьте полный текст на странице материала.",
+                       [card(ctx, row), {"type": "links", "items": [
+                           {"label": "Проверить полный текст и утвердить", "href": _page(ctx, row)}
+                       ]}], ok=False)
     if needs_fact_check(row):
         # Numbers, prices and results must be checked by eye. A button here would skip that, so the page does it.
         text = "В материале есть числа, цены или результаты, их нужно проверить глазами. Откройте полный просмотр."
@@ -186,18 +196,17 @@ async def describe_revise_material(ctx: Context, params: ReviseParams) -> Outcom
     feedback = params.feedback
     if params.fragment:
         source = str(material_data(row).get("body") or "")
-        if params.fragment not in source:
-            return Outcome("Выделенный фрагмент больше не найден. Выделите текст заново.",
-                           "Фрагмент изменился.", [card(ctx, row)], ok=False)
-        feedback = ("Измени только выделенный фрагмент: «" + params.fragment +
-                    "». Остальное сохрани. Указание владельца: " + feedback)
-        if len(feedback) > 1800:
-            return Outcome("Замечание вместе с выделенным текстом слишком длинное.",
-                           "Сократите выделение.", ok=False)
+        if source.count(params.fragment) != 1:
+            return Outcome("Фрагмент изменился или повторяется в тексте. Выделите точнее.",
+                           "Выделите точнее.", [card(ctx, row)], ok=False)
+    details = [row.title[:120], f"Что поправить: {feedback}"]
+    if params.fragment:
+        details.append("Выделено: «" + params.fragment + "». Остальной текст должен остаться без изменений.")
+    details.append("Команда исправит пост. Новая версия снова придёт вам на проверку.")
     return Confirmation(title="Доработать пост?",
-                        details=[row.title[:120], f"Что поправить: {feedback}",
-                                 "Команда перепишет пост по вашей правке. Новая версия снова придёт вам на проверку."],
-                        params={"material_id": str(row.id), "version": row.version, "feedback": feedback},
+                        details=details,
+                        params={"material_id": str(row.id), "version": row.version, "feedback": feedback,
+                                "fragment": params.fragment},
                         confirm_label="Доработать")
 
 
@@ -210,7 +219,8 @@ async def confirm_revise_material(ctx: Context, stored: dict, via: str) -> Outco
         return Outcome("Пост изменился, пока вы думали. Откройте его и проверьте новую версию.",
                        "Пост изменился. Проверьте его.", [card(ctx, row)], ok=False)
     try:
-        task = queue_post_edit(ctx.db, row.id, str(stored.get("feedback") or ""))
+        task = queue_post_edit(ctx.db, row.id, str(stored.get("feedback") or ""),
+                               fragment=stored.get("fragment"))
     except (ValueError, LookupError) as exc:
         ctx.db.rollback()
         return Outcome(str(exc), str(exc), ok=False)

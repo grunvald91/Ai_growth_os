@@ -426,6 +426,12 @@ async def test_inline_review_does_not_offer_approval_of_truncated_post(db, produ
     assert all(item["capability"] != "approve_material"
                for group in blocks(answer, "chips") for item in group["items"])
     assert preview["href"].endswith(f"/materials/{row.id}")
+    # Even a direct chat command must not approve a preview missing the ending.
+    approval = await chip(db, product, "approve_material", {"material_id": str(row.id)},
+                          key="approve-truncated")
+    assert not blocks(approval, "confirm")
+    links = blocks(approval, "links")
+    assert links and any(str(row.id) in item["href"] for item in links[0]["items"])
 
 
 @pytest.mark.asyncio
@@ -514,6 +520,18 @@ async def test_inline_fragment_is_scoped_to_current_version_and_exact_saved_text
         key="selected-outdated-fragment")
     assert not blocks(invalid, "confirm")
     assert db.scalar(select(Task).where(Task.assigned_agent == "content_editor")) is None
+
+    # The confirmation carries the structured fragment all the way to
+    # content_edit_request; the worker can now enforce unchanged surroundings.
+    accepted = await service.confirm(db, ctx(db, product), request["confirmation_id"], accept=True)
+    assert accepted["replayed"] is False
+    task = db.scalar(select(Task).where(Task.assigned_agent == "content_editor"))
+    pending = db.scalar(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "content_edit_request"))
+    from app.content.revisions import EditRequest
+    stored = EditRequest.model_validate_json(pending.content)
+    assert stored.fragment == "Сложный фрагмент"
+    assert stored.feedback == "Замени понятными словами"
 
 
 @pytest.mark.asyncio

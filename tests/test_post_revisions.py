@@ -5,7 +5,8 @@ from contextlib import contextmanager
 import pytest
 from sqlalchemy import select
 
-from app.content.revisions import EditRequest, queue_post_edit, run_post_edit, post_history
+from app.content.revisions import (EditRequest, RevisedPost, TargetedRevisedPost,
+                                   queue_post_edit, run_post_edit, post_history, validate_targeted_revision)
 from app.content.telegram import TelegramContent
 from app.content.worker import run_content_once
 from app.core.config import Settings
@@ -309,3 +310,108 @@ async def test_revision_with_enabled_critic_records_review_and_every_call(db, tm
     stages = [c.details["llm_stage"] for c in db.scalars(
         select(CostRecord).where(CostRecord.product_id == company.id))]
     assert sorted(stages) == ["author", "critic"]
+
+
+def test_targeted_revision_rejects_changes_outside_unique_span():
+    original = "Сохрани первый абзац. Выделенная фраза. И последний абзац."
+    validate_targeted_revision(original, "Выделенная фраза", "Сохрани первый абзац. Новая фраза. И последний абзац.")
+    with pytest.raises(ValueError, match="вне выделенного"):
+        validate_targeted_revision(original, "Выделенная фраза",
+                                   "Переписал первый абзац. Новая фраза. И последний абзац.")
+    with pytest.raises(ValueError, match="вне выделенного"):
+        validate_targeted_revision(original, "Выделенная фраза",
+                                   "Сохрани первый абзац. Новая фраза. Изменил последний абзац.")
+    with pytest.raises(ValueError, match="не был исправлен"):
+        validate_targeted_revision(original, "Выделенная фраза", original)
+    with pytest.raises(ValueError, match="неоднозначен"):
+        validate_targeted_revision("Повторяется. Повторяется.", "Повторяется", "Другой. Повторяется.")
+
+
+@pytest.mark.asyncio
+async def test_targeted_post_edit_preserves_other_text_and_supports_short_posts(db, tmp_path):
+    _, post = setup_post(db)
+    fragment = "Смотрите на состав"
+    original = "Как выбрать хлеб? Смотрите на состав. Напишите нам, чтобы уточнить состав."
+    post.content = json.dumps({
+        "channel": "telegram", "title": "Про хлеб", "body": original,
+        "cta": "Напишите нам, чтобы уточнить состав.",
+    }, ensure_ascii=False)
+    db.commit()
+    queued = queue_post_edit(db, post.id, "Сделай понятнее и короче", fragment=fragment)
+    pending = db.scalar(select(Artifact).where(
+        Artifact.task_id == queued.id, Artifact.kind == "content_edit_request"))
+    request = EditRequest.model_validate_json(pending.content)
+    assert request.fragment == fragment
+    expected = original.replace(fragment, "Проверьте список ингредиентов")
+
+    class ExactProvider(FakeRewriteProvider):
+        async def generate(self, call):
+            reply = await super().generate(call)
+            data = {
+                "title": "Про хлеб", "body": expected,
+                "cta": "Напишите нам, чтобы уточнить состав.",
+                "evidence_ids": [], "editor_notes": ["Упростил выделенный фрагмент."],
+            }
+            return reply.model_copy(update={"content": json.dumps(data, ensure_ascii=False)})
+
+    provider = ExactProvider()
+    assert await run_post_edit(db, Settings(_env_file=None, products_root=tmp_path),
+                               request, task_id=queued.id, provider=provider)
+    new = db.scalar(select(Artifact).where(
+        Artifact.task_id == queued.id, Artifact.kind == "channel_text"))
+    assert json.loads(new.content)["body"] == expected
+    assert provider.requests[0].response_schema["properties"]["body"]["minLength"] == 1
+    assert request.fragment in provider.requests[0].messages[0].content
+    assert new.status == ArtifactStatus.AWAITING_APPROVAL
+
+
+@pytest.mark.asyncio
+async def test_targeted_post_edit_refuses_model_that_rewrites_unselected_paragraphs(db, tmp_path):
+    _, post = setup_post(db)
+    original = "Сохрани это начало. Поправь только фразу. Сохрани конец и призыв к действию."
+    post.content = json.dumps({
+        "channel": "telegram", "title": "Про хлеб", "body": original,
+        "cta": "Сохрани конец и призыв к действию.",
+    }, ensure_ascii=False)
+    db.commit()
+    queued = queue_post_edit(db, post.id, "Замени фразу на более ясную", fragment="Поправь только фразу")
+    pending = db.scalar(select(Artifact).where(
+        Artifact.task_id == queued.id, Artifact.kind == "content_edit_request"))
+    request = EditRequest.model_validate_json(pending.content)
+
+    class UncontrolledProvider(FakeRewriteProvider):
+        async def generate(self, call):
+            reply = await super().generate(call)
+            data = {
+                "title": "Про хлеб",
+                "body": "Другое вступление. Фраза стала новой. Сохрани конец и призыв к действию.",
+                "cta": "Сохрани конец и призыв к действию.",
+                "evidence_ids": [], "editor_notes": [],
+            }
+            return reply.model_copy(update={"content": json.dumps(data, ensure_ascii=False)})
+
+    result = await run_post_edit(db, Settings(_env_file=None, products_root=tmp_path),
+                                 request, task_id=queued.id, provider=UncontrolledProvider())
+    assert result is False
+    assert db.get(Task, queued.id).status == TaskStatus.FAILED
+    assert db.get(Artifact, post.id).status == ArtifactStatus.AWAITING_APPROVAL
+    assert not list(db.scalars(select(Artifact).where(
+        Artifact.task_id == queued.id, Artifact.kind == "channel_text")))
+
+
+def test_queue_post_edit_requires_unique_fragment(db):
+    _, post = setup_post(db)
+    value = json.loads(post.content)
+    value["body"] = "Один и тот же текст. Один и тот же текст."
+    post.content = json.dumps(value, ensure_ascii=False)
+    db.commit()
+    with pytest.raises(ValueError, match="несколько раз"):
+        queue_post_edit(db, post.id, "Сократи повтор", fragment="Один и тот же текст")
+    assert not list(db.scalars(select(Task).where(Task.assigned_agent == "content_editor")))
+
+
+def test_scoped_revision_never_appends_a_legacy_separate_cta_outside_selection():
+    data = {"title": "Проверка поста", "body": "Сохранить начало. Исправить предложение. Сохранить конец.",
+            "cta": "Запишитесь на услугу", "evidence_ids": [], "editor_notes": []}
+    assert TargetedRevisedPost.model_validate(dict(data)).body == data["body"]
+    assert RevisedPost.model_validate({**data, "body": "Сделайте текст полезным и понятным, добавьте пример и конкретный совет. Сохраняйте человеческий тон. Читайте дальше."}).body.endswith(data["cta"])

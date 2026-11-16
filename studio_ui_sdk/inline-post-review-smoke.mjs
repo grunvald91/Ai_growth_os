@@ -13,15 +13,16 @@ const postId = "11111111-1111-4111-8111-111111111111";
 const revisedId = "22222222-2222-4222-8222-222222222222";
 const oldBody = "Первый абзац. Текст для исправления. <img src=x onerror=alert(1)>";
 const newBody = "Первый абзац. Исправленная формулировка без обещаний.";
-let revisionStarted = false, updateSent = false;
+let revisionStarted = false, updateSent = false, failNextRevision = false;
 const calls = [];
-function materialMessage(id, seq, materialId, body) {
+function materialMessage(id, seq, materialId, body, revisionOf = null) {
   return { id, seq, role: "assistant", text: "Пост готов для проверки",
     blocks: [
       { type: "text", text: "Пост готов для проверки" },
       { type: "material", artifact_id: materialId, kind: "Пост",
         title: "Пост для клиента", status: "Ждёт вашего решения",
         excerpt: body.slice(0, 60), body, truncated: false, can_revise: true,
+        version: revisionOf ? 2 : 1, revision_of: revisionOf,
         href: "/studio/products/test/materials/" + materialId },
       { type: "chips", items: [{ label: "Утвердить", capability: "approve_material",
         params: { material_id: materialId } }] }
@@ -54,7 +55,7 @@ const server = createServer(async (req, res) => {
     return send(200, "application/javascript", sdk);
   if (req.url.endsWith("/updates")) {
     const messages = revisionStarted && !updateSent ?
-      [materialMessage("message-revised", 6, revisedId, newBody)] : [];
+      [materialMessage("message-revised", 6, revisedId, newBody, postId)] : [];
     if (messages.length) updateSent = true;
     return send(200, "application/json", JSON.stringify({messages}));
   }
@@ -62,6 +63,10 @@ const server = createServer(async (req, res) => {
     let raw = ""; for await (const chunk of req) raw += chunk;
     const body = JSON.parse(raw || "{}"); calls.push({path:req.url, body});
     if (req.url.endsWith("/messages")) {
+      if (failNextRevision && body.chip?.capability === "revise_material") {
+        failNextRevision = false;
+        return send(503, "application/json", JSON.stringify({detail:"Повторите отправку"}));
+      }
       const approve = body.chip?.capability === "approve_material";
       const id = approve ? "approve-confirmation" : "revision-confirmation";
       const name = approve ? "Утвердить" : "Доработать";
@@ -73,7 +78,7 @@ const server = createServer(async (req, res) => {
       return send(200, "application/json", JSON.stringify({messages:[answer]}));
     }
     if (req.url.endsWith("/confirm")) {
-      if (body.confirmation_id === "revision-confirmation") revisionStarted = true;
+      if (body.confirmation_id === "revision-confirmation" && body.accept) revisionStarted = true;
       const answer = {id:body.confirmation_id + "-ok", role:"assistant", seq:body.confirmation_id==="revision-confirmation"?4:9,
         text:"Принято", blocks:[{type:"text",text:"Принято"}]};
       return send(200, "application/json", JSON.stringify({messages:[answer]}));
@@ -97,6 +102,24 @@ try {
     await body.waitFor();
     assert.equal(await body.textContent(), oldBody);
     assert.equal(await page.locator(".dp-post-body img").count(), 0, "text must not execute HTML");
+    // Long selections must be rejected, not silently clipped and submitted.
+    await page.evaluate(() => {
+      const element = document.querySelector(".dp-post-body");
+      element.textContent = "А".repeat(400);
+      const node = element.firstChild;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const selection = window.getSelection();
+      selection.removeAllRanges(); selection.addRange(range);
+      element.dispatchEvent(new PointerEvent("pointerup", {bubbles:true}));
+    });
+    await page.locator(".dp-post-revise-button").first().click();
+    assert.match(await page.locator(".dp-post-selection-warning").first().innerText(), /380 символов/);
+    assert.equal(await page.locator(".dp-post-revise-form").first().isVisible(), false);
+    await page.evaluate(oldBody => {
+      document.querySelector(".dp-post-body").textContent = oldBody;
+      window.getSelection().removeAllRanges();
+    }, oldBody);
     // Simulate the user selecting exactly one phrase in the first preview.
     await page.evaluate(() => {
       const element = document.querySelector(".dp-post-body");
@@ -113,20 +136,46 @@ try {
       /Текст для исправления/);
     await page.locator(".dp-post-feedback-label textarea").first()
       .fill("Перепиши это предложение без обещаний.");
+    failNextRevision = true; // Simulate an ambiguous transport error.
+    await page.getByRole("button", {name:"Отправить правку"}).first().click();
+    await page.locator(".dp-error").first().waitFor();
+    const failedRequest = calls.filter(c=>c.body.chip?.capability==="revise_material").at(-1);
     await page.getByRole("button", {name:"Отправить правку"}).first().click();
     await page.locator(".dp-confirm-actions .primary").first().waitFor();
-    const requested = calls.filter(c=>c.body.chip?.capability==="revise_material").at(-1);
+    let requested = calls.filter(c=>c.body.chip?.capability==="revise_material").at(-1);
+    assert.equal(requested.body.client_key, failedRequest.body.client_key,
+      "ambiguous network failures must retry with the same key");
     assert.equal(requested.body.chip.params.material_id, postId);
-    assert.match(requested.body.chip.params.feedback, /Текст для исправления/);
+    assert.equal(requested.body.chip.params.source_version, "1");
+    assert.equal(requested.body.chip.params.fragment, "Текст для исправления");
     assert.match(requested.body.chip.params.feedback, /без обещаний/);
-    assert.equal(revisionStarted, false, "revision must wait for the confirmation");
-    await page.locator(".dp-confirm-actions .primary").first().click();
+    assert.equal(requested.body.chip.params.feedback.includes("Текст для исправления"), false,
+      "feedback and selected fragment travel as separate structured fields");
+    assert.equal(revisionStarted, false, "revision must wait for confirmation");
+
+    // Declining the confirmation must not poison the next identical request.
+    await page.locator(".dp-confirm-actions .ghost").first().click();
+    await page.locator('[data-id="revision-confirmation-ok"]').waitFor();
+    const originalKey = requested.body.client_key;
+    const nextRequest = page.waitForResponse(response =>
+      response.url().endsWith("/messages") && response.request().method() === "POST");
+    await page.getByRole("button", {name:"Отправить правку"}).first().click();
+    await nextRequest;
+    requested = calls.filter(c=>c.body.chip?.capability==="revise_material").at(-1);
+    assert.notEqual(requested.body.client_key, originalKey,
+      "an explicitly declined review followed by a new submission needs a fresh key");
+    assert.equal(revisionStarted, false);
+    // The pending card is replaced on each review request.
+    await page.locator('[data-id="revision-prompt"] .dp-confirm-actions .primary').click();
     await page.locator('[data-id="revision-confirmation-ok"]').waitFor();
     assert.equal(revisionStarted, true);
     await page.evaluate(()=>document.dispatchEvent(new Event("visibilitychange")));
     await page.waitForFunction(
       ()=>document.querySelectorAll(".dp-post-body").length===2);
     assert.equal(await page.locator(".dp-post-body").last().textContent(), newBody);
+    const oldApprove = page.locator('[data-id="message-original"] .dp-chip');
+    assert.equal(await oldApprove.isDisabled(), true,
+      "approval chip for old draft must be disabled as soon as the new version appears");
     const approveButtons = page.getByRole("button", {name:"Утвердить", exact:true});
     await approveButtons.last().click();
     const approval = calls.filter(c=>c.body.chip?.capability==="approve_material").at(-1);

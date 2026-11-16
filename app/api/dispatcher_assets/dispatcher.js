@@ -73,6 +73,8 @@
       var button = el('button', 'dp-chip', chip.label);
       button.type = 'button';
       button.title = chip.label;
+      button.dataset.capability = chip.capability || '';
+      button.dataset.materialId = chip.params && chip.params.material_id || '';
       button.addEventListener('click', function () { onPick(chip); });
       row.appendChild(button);
     });
@@ -256,21 +258,44 @@
         row.appendChild(submit); row.appendChild(cancel);
         reviseForm.appendChild(quote); reviseForm.appendChild(label); reviseForm.appendChild(row);
         var selectedFragment = '';
+        var selectionTooLong = false;
         var lastRequestSignature = '';
         var lastRequestKey = '';
-        function selectedText() {
+        var selectionWarning = el('p', 'dp-post-selection-warning');
+        selectionWarning.setAttribute('role', 'status');
+        selectionWarning.hidden = true;
+        // A selection can disappear when the edit button receives focus,
+        // especially after long-press on Android. Remember it on the body.
+        function rememberSelection() {
           var selection = window.getSelection && window.getSelection();
-          if (!selection || !selection.rangeCount || selection.isCollapsed) return '';
-          // Reject selections outside this exact material. No cross-card text leakage.
+          if (!selection || !selection.rangeCount || selection.isCollapsed) return;
           var range = selection.getRangeAt(0);
-          if (!bodyText.contains(range.commonAncestorContainer)) return '';
-          return selection.toString().trim().slice(0, 380);
+          if (!bodyText.contains(range.commonAncestorContainer)) return;
+          var text = selection.toString().trim();
+          if (!text) return;
+          if (text.length > 380) {
+            selectedFragment = '';
+            selectionTooLong = true;
+            selectionWarning.textContent = 'Выделено больше 380 символов. Выберите фрагмент покороче.';
+            selectionWarning.hidden = false;
+            return;
+          }
+          selectedFragment = text;
+          selectionTooLong = false;
+          selectionWarning.hidden = true;
         }
-        reviseButton.addEventListener('pointerdown', function () {
-          selectedFragment = selectedText();
+        bodyText.addEventListener('pointerup', rememberSelection);
+        bodyText.addEventListener('keyup', rememberSelection);
+        bodyText.addEventListener('touchend', function () {
+          setTimeout(rememberSelection, 100);
         });
+        reviseButton.addEventListener('pointerdown', rememberSelection);
         reviseButton.addEventListener('click', function () {
-          selectedFragment = selectedFragment || selectedText();
+          rememberSelection();
+          if (selectionTooLong) {
+            selectionWarning.hidden = false;
+            return;
+          }
           quote.textContent = selectedFragment ? 'Выделенный фрагмент: «' + selectedFragment + '»' : '';
           quote.hidden = !selectedFragment;
           reviseForm.hidden = false;
@@ -279,14 +304,20 @@
         cancel.addEventListener('click', function () {
           reviseForm.hidden = true;
           selectedFragment = '';
+          selectionTooLong = false;
+          selectionWarning.hidden = true;
+          lastRequestSignature = '';
+          lastRequestKey = '';
         });
         reviseForm.addEventListener('submit', function (event) {
           event.preventDefault();
           if (busy || !reviseForm.reportValidity()) return;
+          if (selectionTooLong) {
+            selectionWarning.hidden = false;
+            return;
+          }
           var instruction = feedback.value.trim();
           if (instruction.length < 8) return;
-          // Send the fragment separately so the server verifies that it still
-          // belongs to this exact company-owned post and version.
           var params = { material_id: block.artifact_id, feedback: instruction,
             source_version: String(block.version || 1) };
           if (selectedFragment) params.fragment = selectedFragment;
@@ -295,12 +326,19 @@
             lastRequestSignature = signature;
             lastRequestKey = newKey();
           }
-          // Explicit confirmation is still required before the editor queues
-          // generation; retrying a mobile request reuses the same client key.
+          // Preserve the idempotency key only for ambiguous transport failures.
+          // Once the server responds, even with a declined confirmation later,
+          // this is a new user action and must use a new key.
           sendChip({ label: 'Доработать этот пост', capability: 'revise_material',
-            params: params }, lastRequestKey);
+            params: params }, lastRequestKey, function (receivedResponse) {
+              if (receivedResponse) {
+                lastRequestSignature = '';
+                lastRequestKey = '';
+              }
+            });
         });
         controls.appendChild(reviseButton);
+        controls.appendChild(selectionWarning);
         controls.appendChild(reviseForm);
         preview.appendChild(controls);
       }
@@ -321,7 +359,8 @@
       play.setAttribute('aria-hidden','true'); play.appendChild(el('span', '', '▶'));
       preview.appendChild(image); preview.appendChild(play); card.appendChild(preview);
     }
-    var open = el(isVideo ? 'span' : 'a', 'dp-link', isVideo ? 'Посмотреть видео →' : 'Открыть полностью');
+    var open = el(isVideo ? 'span' : 'a', 'dp-link', isVideo ? 'Посмотреть видео →' :
+      block.truncated ? 'Проверить полный текст на странице материала' : 'Открыть полностью');
     if (!isVideo) open.href = block.href;
     card.appendChild(open);
     if (block.body && !block.truncated && !isVideo) {
@@ -585,15 +624,23 @@
   function markSupersededPost(message) {
     (message.blocks || []).forEach(function (block) {
       if (block.type !== 'material' || !block.revision_of) return;
-      var old = Array.from(feed.querySelectorAll('.dp-material')).find(function (node) {
-        return node.dataset.artifactId === block.revision_of;
+      Array.from(feed.querySelectorAll('.dp-material')).forEach(function (old) {
+        if (old.dataset.artifactId !== block.revision_of) return;
+        old.classList.add('dp-material--superseded');
+        var status = old.querySelector('.dp-material-status');
+        if (status) status.textContent = 'Есть новая версия';
+        var oldEdit = old.querySelector('.dp-post-actions');
+        if (oldEdit) oldEdit.remove();
+        // Do not leave a live "Утвердить" chip for a rejected draft.
+        var bubble = old.closest('.dp-msg');
+        if (bubble) Array.from(bubble.querySelectorAll('.dp-chip')).forEach(function (button) {
+          if (button.dataset.capability !== 'approve_material' ||
+              button.dataset.materialId !== block.revision_of) return;
+          button.disabled = true;
+          button.title = 'Эта версия устарела. Утвердите новую версию ниже.';
+          button.textContent = 'Есть новая версия';
+        });
       });
-      if (!old) return;
-      old.classList.add('dp-material--superseded');
-      var status = old.querySelector('.dp-material-status');
-      if (status) status.textContent = 'Есть новая версия';
-      var oldEdit = old.querySelector('.dp-post-actions');
-      if (oldEdit) oldEdit.remove();
     });
   }
 
@@ -669,7 +716,7 @@
 
   // ---- sending ----------------------------------------------------------------------------
 
-  function send(body, echo, voiceRequest) {
+  function send(body, echo, voiceRequest, onSettled) {
     if (busy) return false;
     // Never send a request into an invisible Create conversation panel.
     if (root.classList.contains('sg-create-dispatch')) {
@@ -688,9 +735,11 @@
     post('/messages', body, 55000).then(function (data) {
       if (echoNode) echoNode.remove();
       applyResult(data);
+      if (onSettled) onSettled(true);
       if (voiceRequest) showNote('');
     }).catch(function (error) {
       if (echoNode) echoNode.remove();
+      if (onSettled) onSettled(false);
       notify(error.message);
       if (voiceRequest) {
         var retry = el('button', 'dp-voice-undo', 'Отправить ещё раз');
@@ -714,9 +763,10 @@
     return true;
   }
 
-  function sendChip(chip, clientKey) {
+  function sendChip(chip, clientKey, onSettled) {
     return send({ mode: 'chip', client_key: clientKey,
-      chip: { label: chip.label, capability: chip.capability, params: chip.params || {} } }, chip.label);
+      chip: { label: chip.label, capability: chip.capability, params: chip.params || {} } }, chip.label,
+      false, onSettled);
   }
 
   function createCommand(text) {

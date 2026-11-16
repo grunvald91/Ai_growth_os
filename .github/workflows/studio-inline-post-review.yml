@@ -2,7 +2,20 @@ name: Studio inline post review browser check
 
 on:
   push:
-    branches: [feature/studio-inline-post-review-20261115]
+    branches: [main]
+    paths:
+      - 'studio_ui_sdk/**'
+      - 'app/api/dispatcher_assets/**'
+      - 'app/dispatcher/**'
+      - 'app/content/revisions.py'
+      - '.github/workflows/studio-inline-post-review.yml'
+  pull_request:
+    paths:
+      - 'studio_ui_sdk/**'
+      - 'app/api/dispatcher_assets/**'
+      - 'app/dispatcher/**'
+      - 'app/content/revisions.py'
+      - '.github/workflows/studio-inline-post-review.yml'
   workflow_dispatch:
 
 permissions:
