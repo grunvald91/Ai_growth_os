@@ -69,6 +69,20 @@ def test_commercial_search_opportunities_are_drafts_not_live_pages():
     assert by_query["купить брус"].reason_code == "offer_evidence_required"
 
 
+def test_short_verified_product_names_match_the_actual_query():
+    profile = CompanyProfile.model_validate({
+        "schema_version": "1.0",
+        "offer": {"products_services": [
+            {"name": "Брус", "description": "Товар из подтверждённого каталога",
+             "release_status": "live", "evidence_refs": ["product-card"]},
+        ]},
+    })
+    plan = make_landing_opportunities(
+        _core(_cluster(1, "купить брус", "transactional")), profile)
+    assert plan.candidates[0].verified_offer
+    assert plan.candidates[0].status == "review"
+
+
 def test_unverified_profile_never_becomes_published_or_local_claim():
     plan = make_landing_opportunities(
         _core(_cluster(1, "vpn в Москве цена", "commercial")), None)
