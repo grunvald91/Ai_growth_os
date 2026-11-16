@@ -60,7 +60,29 @@ def snapshot(db: Session, product: Product) -> dict:
     rows = work_rows(db, product.id)
     notes = attention(db, product.id)
     active, draft = plans(db, product.id)
+    # Bounded, company-scoped identifiers prevent hallucinated plan targets.
+    editable: dict = {"draft_packages": [], "calendar_slots": []}
+    if draft is not None:
+        _, draft_data = draft
+        unique = {}
+        for slot in draft_data.get("slots") or []:
+            key = slot.get("package_key")
+            if key and key not in unique:
+                unique[key] = {"package_key": str(key), "topic": str(slot.get("topic") or "")[:180]}
+        editable["draft_packages"] = list(unique.values())[:30]
+    calendar_source = active or draft
+    if calendar_source is not None:
+        _, data = calendar_source
+        editable["timezone"] = str(data.get("timezone") or "Europe/Moscow")
+        editable["calendar_plan_state"] = str(data.get("approval_state") or "")
+        editable["calendar_slots"] = [
+            {"slot_id": str(s["slot_id"]), "platform": str(s.get("platform") or ""),
+             "topic": str(s.get("topic") or "")[:100],
+             "publish_at": str(s.get("publish_at") or "")}
+            for s in upcoming_slots(data) if s.get("slot_id")
+        ][:20]
     return {
+        "editable_plan": editable,
         "company": product.name,
         "today": datetime.now(ZoneInfo("Europe/Moscow")).strftime("%Y-%m-%d, %A, %H:%M (Москва)"),
         "in_work": sum(1 for row in rows if row["state"] in ACTIVE),
