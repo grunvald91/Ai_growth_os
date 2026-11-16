@@ -183,3 +183,38 @@ class MetaUnifiedClient:
         await self._request("GET", f"{account_id}/media",
                             params={"fields": "id", "limit": 1}, token=token)
         return name
+
+
+def prune_expired_pending_oauth(session_factory, settings, *, current=None, limit=100):
+    """Remove encrypted tokens of abandoned Meta authorizations.
+
+    No LLM, external Meta call, or user-visible side effects. A background
+    worker calls this periodically even when comment polling is disabled.
+    """
+    from sqlalchemy import select
+    from app.comments.secrets import CommentSecrets
+    from app.models.domain import Artifact, ArtifactStatus
+
+    current = time.time() if current is None else current
+    secrets_store = CommentSecrets(settings.products_root)
+    removed = 0
+    with session_factory() as db:
+        pending = list(db.scalars(
+            select(Artifact).where(
+                Artifact.kind == "comment_instagram_oauth_pending",
+                Artifact.status == ArtifactStatus.DRAFT,
+            ).order_by(Artifact.created_at.asc(), Artifact.id.asc()).limit(limit)
+        ))
+        for artifact in pending:
+            try:
+                expires_at = float(json.loads(artifact.content)["expires_at"])
+            except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+                expires_at = 0
+            if expires_at >= current:
+                continue
+            secrets_store.delete(artifact.id)
+            artifact.status = ArtifactStatus.REJECTED
+            removed += 1
+        if removed:
+            db.commit()
+    return removed
