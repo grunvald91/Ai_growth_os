@@ -403,3 +403,24 @@ def test_webhook_batch_deduplicates_ids_inside_one_delivery(ctx):
     again = client.post("/api/integrations/instagram/webhook",
                         content=raw, headers={"x-hub-signature-256": sig})
     assert again.status_code == 200 and again.json()["imported"] == 0
+
+
+@pytest.mark.asyncio
+async def test_unresolved_album_cannot_create_approval_or_send_claim(ctx):
+    db, product, svc, _, gateway = ctx
+    channel = await svc.connect(product.id, ConnectInput(
+        platform="instagram", account_id="100", token="owner-token"))
+    row = BusinessComment(product_id=product.id, platform="instagram",
+                          external_id="112233", text="Как заказать?",
+                          post_text="", source="platform", status="new",
+                          target={"channel_id": str(channel.id), "ingest": "meta_webhook",
+                                  "needs_media_resolution": True})
+    db.add(row); db.commit()
+    await svc.draft(product.id, row.id)
+    with pytest.raises(ValueError, match="подтвердите публикацию Instagram"):
+        await svc.send(product.id, row.id, "Ответ с подтверждением")
+    db.refresh(row)
+    assert row.status in {"draft", "review"}
+    assert not list(db.scalars(select(Approval)))
+    assert not list(db.scalars(select(Publication)))
+    assert not gateway.sent
