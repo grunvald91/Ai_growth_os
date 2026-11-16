@@ -34,7 +34,10 @@ def _next_parent(db, channel, seek):
     rows = list(db.scalars(query))
     for row in rows:
         target = row.target or {}
-        if target.get("media_id") and not target.get("parent_id"):
+        if (target.get("channel_id") == str(channel.id)
+                and str(target.get("media_id") or "").isdigit()
+                and str(row.external_id).isdigit()
+                and not target.get("parent_id")):
             return row, rows[-1].id, bool(len(rows) == MAX_ROW_SCAN)
     return None, (rows[-1].id if rows else None), bool(len(rows) == MAX_ROW_SCAN)
 
@@ -59,7 +62,9 @@ async def fetch_nested_replies(db, gateway, channel, token, progress=None, *, ma
         if parent and (parent.product_id != channel.product_id
                        or parent.platform != "instagram"
                        or parent.source != "platform"
-                       or not (parent.target or {}).get("media_id")
+                       or (parent.target or {}).get("channel_id") != str(channel.id)
+                       or not str((parent.target or {}).get("media_id") or "").isdigit()
+                       or not str(parent.external_id).isdigit()
                        or (parent.target or {}).get("parent_id")):
             parent = None
 
