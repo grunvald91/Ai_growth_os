@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.content_studio import esc, studio_page_shell
@@ -246,6 +246,14 @@ def instagram_health(product_id: UUID, svc=Depends(service)):
     sync = cursor.get("_sync") or {}
     webhook = cursor.get("_webhook") or {}
     reply_health = cursor.get("_ig_reply_health") or {}
+    unprocessed = svc.db.scalar(
+        select(func.count()).select_from(BusinessComment).where(
+            BusinessComment.product_id == product_id,
+            BusinessComment.platform == "instagram",
+            BusinessComment.source == "platform",
+            BusinessComment.status.in_(("new", "draft_failed")),
+        )
+    ) or 0
     return {
         "account_status": channel.status if channel else "not_connected",
         "account_name": channel.account_name if channel else None,
@@ -268,6 +276,10 @@ def instagram_health(product_id: UUID, svc=Depends(service)):
         "nested_reply_scan_enabled": svc.settings.comment_instagram_reply_scan_enabled,
         "nested_reply_scan_error": bool(reply_health.get("last_error")),
         "nested_reply_scan_last_attempt_at": reply_health.get("last_attempt_at"),
+        # This count enables evidence-based Jev batch sizing later.
+        # It is deliberately informational and NEVER calls a classifier.
+        "unprocessed_comment_count": unprocessed,
+        "jev_classification_active": False,
     }
 
 
