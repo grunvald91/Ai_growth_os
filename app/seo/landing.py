@@ -290,7 +290,10 @@ def _latest_prior_candidates(db: Session, product_id: UUID, task_id: UUID) -> di
         except ValueError:
             continue
         for candidate in plan.candidates:
-            result.setdefault(intent_key(candidate.primary_query), candidate)
+            key = intent_key(candidate.primary_query)
+            existing = result.get(key)
+            if existing is None or candidate.revision > existing.revision:
+                result[key] = candidate
     return result
 
 
