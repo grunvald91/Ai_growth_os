@@ -66,7 +66,7 @@ class LandingOpportunities(BaseModel):
 def _tokens(value: str) -> set[str]:
     # Prefixes bridge simple inflections (including short names like DNS, брус).
     # They do not invent query synonyms.
-    return {w[:5] for w in normalize(value).split()
+    return {w[:5] for w in normalize(value).replace("-", " ").split()
             if len(w) >= 3 and w not in _STOPWORDS}
 
 
