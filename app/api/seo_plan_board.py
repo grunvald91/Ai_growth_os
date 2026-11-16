@@ -183,13 +183,17 @@ def seo_plan_board(run: dict | None, product_id: UUID, *, autorun: bool,
             "unique_content_required": "Нужны уникальное содержание и редакторская проверка",
             "offer_evidence_required": "Не подтверждено подходящее действующее предложение",
             "local_value_required": "Необходимо доказать реальную ценность для этого региона",
+            "unverified_geography": "Регион не подтверждён в профиле компании",
+            "device_evidence_required": "Совместимость с устройством не подтверждена",
             "already_covered": "Запрос уже охвачен статьёй; требуется оценка необходимости отдельной страницы",
         }
         candidate_items = "".join(
             '<li class="seo-board-item"><div class="seo-board-copy">'
             '<strong>' + _esc(candidate.get("primary_query")) + '</strong>'
             '<small>' + _esc(type_labels.get(candidate.get("page_type"), "Посадочная страница"))
-            + ' · Предлагаемый адрес: ' + _esc(candidate.get("proposed_path")) + '</small>'
+            + ' · Предлагаемый адрес: ' + _esc(candidate.get("proposed_path"))
+            + (' · Версия: ' + _esc(candidate.get("revision")) if candidate.get("revision", 1) > 1 else '')
+            + '</small>'
             '<span>' + _esc(reason_labels.get(candidate.get("reason_code"), "Нужна проверка"))
             + '</span></div><span class="seo-board-state state-'
             + ("review" if candidate.get("status") == "review" else "queued") + '">'
@@ -203,7 +207,7 @@ def seo_plan_board(run: dict | None, product_id: UUID, *, autorun: bool,
             'предложение, уникальную пользу, canonical и маршрут публикации. '
             'Региональные дубли без собственных данных не публикуются.</p>'
             + ('<ol class="seo-board-list">' + candidate_items + '</ol>' if candidate_pages
-               else '<p>Подходящих коммерческих поисковых запросов в текущем ядре не найдено.</p>')
+               else '<p>Новых или изменённых предложений нет. Черновики предыдущих запусков сохраняются.</p>')
         )
     run_status = "Создание плана: " + str(run.get("status_label") or run.get("status") or "неизвестно")
     updated_at = _when(run.get("updated_at"), tz)
