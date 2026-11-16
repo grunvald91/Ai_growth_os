@@ -167,6 +167,7 @@ class CommentService:
         if self.busy(product_id, value.platform):
             raise ValueError("Дождитесь завершения отправки")
         channel = self.channel(product_id, value.platform, lock=True)
+        newly_created_channel = channel is None
         if channel and channel.account_id != value.account_id:
             # Native IDs can collide in Telegram; keep one stable account per product/platform.
             raise ValueError("Для другого аккаунта создайте отдельный бизнес")
@@ -190,6 +191,8 @@ class CommentService:
             self.db.commit()
         except IntegrityError:
             self.db.rollback()
+            if newly_created_channel:
+                self.secrets.delete(channel.id)
             raise ValueError("Instagram-аккаунт уже подключён к другой компании") from None
         return channel
 
@@ -213,6 +216,7 @@ class CommentService:
         if self.busy(product_id, "instagram"):
             raise ValueError("Дождитесь завершения отправки ответа")
         channel = self.channel(product_id, "instagram", lock=True)
+        newly_created_channel = channel is None
         if channel and channel.account_id != account_id:
             raise ValueError("Сначала отключите прежний Instagram-аккаунт")
         if not channel:
