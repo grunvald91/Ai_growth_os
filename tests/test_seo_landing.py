@@ -149,6 +149,7 @@ def test_store_is_tenant_scoped_and_idempotent(db, tmp_path):
     db.add_all([first, other])
     db.commit()
     set_enabled(db, first.id, enabled=True, actor="owner")
+    set_enabled(db, other.id, enabled=True, actor="other-owner")
     task = Task(product_id=first.id, title="Factory", assigned_agent="seo_factory",
                 status=TaskStatus.RUNNING)
     db.add(task)
@@ -163,8 +164,20 @@ def test_store_is_tenant_scoped_and_idempotent(db, tmp_path):
         products_root=tmp_path)
     assert first_artifact.id == repeated.id
     assert len(LandingOpportunities.model_validate_json(first_artifact.content).candidates) == 1
-    with pytest.raises(ValueError, match="выключен"):
+    # Both companies explicitly enabled SEO; a foreign run must still be
+    # invisible. FKs alone cannot enforce tenant ownership for task_id.
+    with pytest.raises(LookupError, match="not found for company"):
         store_landing_opportunities(
             db, other.id, task.id,
             _core(_cluster(1, "купить брус", "transactional")),
             products_root=tmp_path)
+    unrelated = Task(product_id=first.id, title="Unrelated",
+                     assigned_agent="content_factory", status=TaskStatus.RUNNING)
+    db.add(unrelated)
+    db.commit()
+    with pytest.raises(LookupError, match="not found for company"):
+        store_landing_opportunities(
+            db, first.id, unrelated.id,
+            _core(_cluster(1, "купить брус", "transactional")),
+            products_root=tmp_path)
+    assert len(list(db.query(Artifact).filter(Artifact.kind == KIND))) == 1
