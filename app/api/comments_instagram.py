@@ -228,7 +228,13 @@ async def instagram_webhook_receive(request: Request, settings=Depends(get_setti
     entries = payload.get("entry")
     if not isinstance(entries, list) or len(entries) > 100:
         raise HTTPException(422, "Invalid webhook batch")
+    if not settings.comment_meta_webhook_enabled:
+        # A signed delivery cannot bypass the operator switch. ACK and rely
+        # on later account-scoped reconciliation if enabled.
+        return JSONResponse({"accepted": True, "imported": 0},
+                            headers={"Cache-Control": "no-store"})
     imported = 0
+    business_opts = {}
     for entry in entries:
         if not isinstance(entry, dict) or not str(entry.get("id", "")).isdigit():
             continue
@@ -241,6 +247,12 @@ async def instagram_webhook_receive(request: Request, settings=Depends(get_setti
         if len(matches) != 1:
             continue  # Unknown or ambiguous ownership must never fan out.
         channel = matches[0]
+        if channel.product_id not in business_opts:
+            from app.comments.service import CommentService
+            config, _ = CommentService(db, settings).config(channel.product_id)
+            business_opts[channel.product_id] = config.enabled and config.auto_import
+        if not business_opts[channel.product_id]:
+            continue
         # Serialize webhook with manual refresh and parallel delivery for tenant.
         db.scalar(select(Product).where(Product.id == channel.product_id).with_for_update())
         changes = entry.get("changes")
