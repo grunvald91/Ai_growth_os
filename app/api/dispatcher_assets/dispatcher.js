@@ -560,9 +560,10 @@
       });
       details.appendChild(preview);
       card.__sgPlanChange = true;
-      document.dispatchEvent(new CustomEvent('sg:dispatcher:plan-change-ready', {detail: {card: card}}));
     }
     card.appendChild(details);
+    if (card.__sgPlanChange)
+      document.dispatchEvent(new CustomEvent('sg:dispatcher:plan-change-ready', {detail: {card: card}}));
     if (block.state === 'pending') {
       var actions = el('div', 'dp-confirm-actions');
       var no = el('button', 'dp-btn ghost', block.editable ? 'Отменить задание' : block.cancel_label); no.type='button';
