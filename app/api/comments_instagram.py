@@ -246,6 +246,7 @@ async def instagram_webhook_receive(request: Request, settings=Depends(get_setti
         changes = entry.get("changes")
         if not isinstance(changes, list) or len(changes) > 100:
             continue
+        incoming = {}
         for change in changes:
             if not isinstance(change, dict) or change.get("field") != "comments":
                 continue
@@ -263,11 +264,7 @@ async def instagram_webhook_receive(request: Request, settings=Depends(get_setti
                     or not isinstance(comment, str) or not comment.strip()
                     or not creator_id or creator_id == account_id):
                 continue
-            existing = db.scalar(select(BusinessComment.id).where(
-                BusinessComment.product_id == channel.product_id,
-                BusinessComment.platform == "instagram",
-                BusinessComment.external_id == comment_id))
-            if existing:
+            if comment_id in incoming:
                 continue
             target = {"channel_id": str(channel.id), "ingest": "meta_webhook"}
             if media_id:
@@ -284,13 +281,24 @@ async def instagram_webhook_receive(request: Request, settings=Depends(get_setti
                 target["published_at"] = value["timestamp"]
             if value.get("parent_id") and str(value["parent_id"]).isdigit():
                 target["parent_id"] = str(value["parent_id"])
-            db.add(BusinessComment(
+            incoming[comment_id] = BusinessComment(
                 product_id=channel.product_id, platform="instagram",
                 external_id=comment_id, text=comment[:8000],
                 post_text="", source="platform", status="new", target=target,
-            ))
-            db.flush()
-            imported += 1
+            )
+        if incoming:
+            # Query once per Meta entry instead of SELECT+flush for every
+            # comment; the product row lock serializes this with syncs.
+            already = set(db.scalars(select(BusinessComment.external_id).where(
+                BusinessComment.product_id == channel.product_id,
+                BusinessComment.platform == "instagram",
+                BusinessComment.external_id.in_(incoming.keys()))))
+            fresh = [comment for identifier, comment in incoming.items()
+                     if identifier not in already]
+            if fresh:
+                db.add_all(fresh)
+                db.flush()
+                imported += len(fresh)
         db.commit()
     return JSONResponse({"accepted": True, "imported": imported},
                         headers={"Cache-Control": "no-store"})
