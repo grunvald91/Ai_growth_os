@@ -160,37 +160,3 @@ function enhanceCalendarMove(details) {
 if (new URLSearchParams(window.location.search).get("ui_sdk") !== "0") {
   document.querySelectorAll(".sg-calendar-move").forEach(enhanceCalendarMove);
 }
-
-
-// Phase 5: enhance confirmed plan-change previews; with the SDK disabled,
-// the native before/after rows stay visible, with no dependence on JavaScript.
-function enhancePlanChange(card) {
-  if (!card?.__sgPlanChange || card.dataset.sgPlanChangeEnhanced === "1") return;
-  const host = card.querySelector(".dp-plan-change-preview");
-  if (!host) return;
-  card.dataset.sgPlanChangeEnhanced = "1";
-  const section = document.createElement("ui-collapsible");
-  section.className = "dp-plan-change-collapsible";
-  section.setAttribute("default-open", "");
-  const trigger = document.createElement("ui-collapsible-trigger");
-  const button = document.createElement("button");
-  button.type = "button";
-  button.textContent = "Изменения · было → станет";
-  trigger.appendChild(button);
-  const panel = document.createElement("ui-collapsible-panel");
-  panel.className = "dp-plan-change-panel";
-  while (host.firstChild) panel.appendChild(host.firstChild);
-  section.append(trigger, panel);
-  host.appendChild(section);
-}
-if (new URLSearchParams(window.location.search).get("ui_sdk") !== "0") {
-  document.addEventListener("sg:dispatcher:plan-change-ready", event => {
-    enhancePlanChange(event.detail?.card);
-  });
-  document.querySelectorAll(".dp-confirm").forEach(card => {
-    if (card.querySelector(".dp-plan-change-preview")) {
-      card.__sgPlanChange = true;
-      enhancePlanChange(card);
-    }
-  });
-}
