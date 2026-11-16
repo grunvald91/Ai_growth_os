@@ -37,7 +37,7 @@ def test_pilot_is_default_on_with_legacy_query_override_and_only_changes_existin
     assert "/studio/assets/ui-sdk-pilot.bundle.js?v=3" in js
     assert "?ui_sdk=0" in js
     growth = (ROOT / "app/api/growth_v4.py").read_text(encoding="utf-8")
-    assert "dispatcher.js?v=inline-post-review-v2-20261115" in growth
+    assert "dispatcher.js?v=inline-post-review-v3-20261116" in growth
     assert "sg:dispatcher:editor-ready" in js
     assert "sg:dispatcher:editor-ready" in pilot
     assert "data-ui-sdk-advanced" in js
