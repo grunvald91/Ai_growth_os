@@ -62,6 +62,7 @@ class EditRequest(StrictRecord):
     source_version: int = Field(ge=1)
     source_digest: str = Field(min_length=64, max_length=64)
     feedback: str = Field(min_length=8, max_length=1800)
+    fragment: str | None = Field(default=None, min_length=2, max_length=380)
 
 
 class RevisedPost(StrictRecord):
@@ -75,6 +76,24 @@ class RevisedPost(StrictRecord):
     @classmethod
     def cta_in_body(cls, data):
         return append_missing_cta(data)
+
+
+def validate_targeted_revision(original_body: str, fragment: str, revised_body: str) -> None:
+    """A targeted edit must leave text outside the selected, unique span untouched.
+
+    The check is intentionally strict: if the model wants to reformat other
+    paragraphs, ask the owner for a whole-post revision instead.
+    """
+    original = original_body.strip()
+    if not fragment or original.count(fragment) != 1:
+        raise ValueError("Выделенный фрагмент неоднозначен или изменился")
+    before, after = original.split(fragment, 1)
+    if not revised_body.startswith(before) or not revised_body.endswith(after):
+        raise ValueError("При адресной правке изменён текст вне выделенного фрагмента")
+    end = len(revised_body) - len(after) if after else len(revised_body)
+    replacement = revised_body[len(before):end]
+    if replacement == fragment or not replacement.strip():
+        raise ValueError("Выделенный фрагмент не был исправлен")
 
 
 def source_fingerprint(source: Artifact) -> str:
@@ -109,7 +128,7 @@ def post_history(db: Session, post_id: UUID) -> list[Artifact]:
     return [root, *[row for row in revisions if row.id != root.id]]
 
 
-def queue_post_edit(db: Session, post_id: UUID, feedback: str):
+def queue_post_edit(db: Session, post_id: UUID, feedback: str, *, fragment: str | None = None):
     """Lock owner company, then source post. Reject stale and duplicate requests."""
     feedback = (feedback or "").strip()
     if not 8 <= len(feedback) <= 1800:
@@ -140,6 +159,11 @@ def queue_post_edit(db: Session, post_id: UUID, feedback: str):
         raise ValueError("Исходный материал повреждён") from None
     if not value.get("body") or value.get("channel") not in CHANNEL_GUIDANCE:
         raise ValueError("Материал не поддерживает редактуру поста")
+    if fragment is not None:
+        if not 2 <= len(fragment) <= 380:
+            raise ValueError("Выделение должно содержать от 2 до 380 символов")
+        if str(value["body"]).count(fragment) != 1:
+            raise ValueError("Выделенный фрагмент изменился или встречается несколько раз. Выделите точнее")
     key = "EDIT: " + str(source.id)
     duplicate = TaskService(db).find_active_duplicate(
         product_id=company.id, title=key, assigned_agent="content_editor"
@@ -148,7 +172,7 @@ def queue_post_edit(db: Session, post_id: UUID, feedback: str):
         raise ValueError("Этот пост уже отправлен на доработку")
     request = EditRequest(
         product_id=company.id, source_id=source.id, source_version=source.version,
-        source_digest=source_fingerprint(source), feedback=feedback,
+        source_digest=source_fingerprint(source), feedback=feedback, fragment=fragment,
     )
     task = TaskService(db).create(
         product_id=company.id, title=key, assigned_agent="content_editor",
@@ -218,12 +242,21 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
             "original_body": privacy.sanitize_text(old["body"][:11900]),
             "original_cta": privacy.sanitize_text(old.get("cta") or ""),
             "owner_feedback": privacy.sanitize_text(request.feedback),
+            "selected_fragment": privacy.sanitize_text(request.fragment) if request.fragment else None,
+            "edit_scope": "selected_fragment" if request.fragment else "full_post",
             "channel": channel,
             "channel_guidance": CHANNEL_GUIDANCE[channel],
             "company_context": stable[:10500],
             "verified_facts": facts,
         }
         system = prompt_text("quick_post.common") + prompt_text("revision.post")
+        if request.fragment:
+            system += (
+                " При адресной правке замени только selected_fragment, оставив ВСЕ символы "
+                "до и после него без изменений, включая абзацы, заголовок и призыв к действию "
+                "(если они не выделены). Верни полный body. Любая правка вне выделения "
+                "будет отклонена автоматически."
+            )
         metadata = {
             "team_role": "post_rewriter", "task_type": "quick_post",
             "reasoning_effort": "low", "provider_timeout_seconds": PROVIDER_TIMEOUT_SECONDS,
@@ -231,6 +264,13 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
 
         def validate_candidate(data):
             parsed = RevisedPost.model_validate(data)
+            if request.fragment:
+                validate_targeted_revision(old["body"], request.fragment, parsed.body)
+                if parsed.title != str(old.get("title") or source.title):
+                    raise ValueError("Заголовок вне выделенного фрагмента должен остаться прежним")
+                existing_cta = str(old.get("cta") or "")
+                if existing_cta and request.fragment not in existing_cta and parsed.cta != existing_cta:
+                    raise ValueError("Призыв к действию вне выделения должен остаться прежним")
             if channel == "telegram":
                 from app.content.telegram_publishing import validate_telegram_text
                 validate_telegram_text(parsed.body)
