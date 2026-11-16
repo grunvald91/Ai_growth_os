@@ -269,14 +269,47 @@ def test_long_queries_do_not_collide_after_slug_truncation():
 
 
 def test_hyphen_and_space_queries_do_not_create_duplicate_drafts():
-    from app.seo.landing import canonical_query
+    from app.seo.landing import intent_key
     old = make_landing_opportunities(
         _core(_cluster(1, "онлайн-запись цена", "commercial")), _profile())
-    previous = {canonical_query(old.candidates[0].primary_query): old.candidates[0]}
+    previous = {intent_key(old.candidates[0].primary_query): old.candidates[0]}
     current = make_landing_opportunities(
         _core(_cluster(2, "онлайн запись цена", "commercial")),
         _profile(), prior_candidates=previous)
     assert current.candidates == []
+
+
+
+
+def test_equivalent_price_wording_in_different_runs_is_a_single_search_intent():
+    from app.seo.landing import intent_key
+    old = make_landing_opportunities(
+        _core(_cluster(1, "онлайн запись цена", "commercial")), _profile())
+    new = make_landing_opportunities(
+        _core(_cluster(2, "стоимость онлайн записи", "commercial")),
+        _profile(), prior_candidates={
+            intent_key(old.candidates[0].primary_query): old.candidates[0],
+        })
+    assert len(old.candidates) == 1
+    assert new.candidates == []
+
+
+def test_different_product_sizes_remain_distinct_query_intents():
+    plan = make_landing_opportunities(_core(
+        _cluster(1, "купить брус 50х50", "transactional"),
+        _cluster(2, "купить брус 100х100", "transactional"),
+    ), _profile())
+    assert len(plan.candidates) == 2
+    assert plan.candidates[0].proposed_path != plan.candidates[1].proposed_path
+
+
+def test_common_commercial_preposition_is_not_mistaken_for_location():
+    page = make_landing_opportunities(
+        _core(_cluster(1, "онлайн запись по цене", "commercial")),
+        _profile(),
+    ).candidates[0]
+    assert page.page_type == "offer"
+    assert page.reason_code == "unique_content_required"
 
 
 def test_two_factory_runs_deduplicate_and_recheck_blocked_offer_when_profile_changes(db, tmp_path):
