@@ -258,7 +258,8 @@ async def instagram_webhook_receive(request: Request, settings=Depends(get_setti
             creator = value.get("from") or {}
             creator_id = str(creator.get("id") or "") if isinstance(creator, dict) else ""
             comment = value.get("text") or ""
-            if (not comment_id.isdigit() or not media_id.isdigit()
+            if (not comment_id.isdigit()
+                    or (media_id and not media_id.isdigit())
                     or not isinstance(comment, str) or not comment.strip()
                     or not creator_id or creator_id == account_id):
                 continue
@@ -268,8 +269,17 @@ async def instagram_webhook_receive(request: Request, settings=Depends(get_setti
                 BusinessComment.external_id == comment_id))
             if existing:
                 continue
-            target = {"channel_id": str(channel.id), "media_id": media_id,
-                      "ingest": "meta_webhook"}
+            target = {"channel_id": str(channel.id), "ingest": "meta_webhook"}
+            if media_id:
+                target["media_id"] = media_id
+            else:
+                # Meta can omit the album media ID. Keep the comment safely
+                # queued for account-scoped reconciliation; sending will stay
+                # blocked until native media ownership is resolved.
+                target["needs_media_resolution"] = True
+            original_id = media.get("original_media_id") if isinstance(media, dict) else None
+            if original_id and str(original_id).isdigit():
+                target["original_media_id"] = str(original_id)
             if value.get("timestamp") and isinstance(value["timestamp"], str):
                 target["published_at"] = value["timestamp"]
             if value.get("parent_id") and str(value["parent_id"]).isdigit():
