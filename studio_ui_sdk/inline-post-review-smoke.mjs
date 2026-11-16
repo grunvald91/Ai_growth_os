@@ -157,8 +157,10 @@ try {
     await page.locator(".dp-confirm-actions .ghost").first().click();
     await page.locator('[data-id="revision-confirmation-ok"]').waitFor();
     const originalKey = requested.body.client_key;
+    const nextRequest = page.waitForResponse(response =>
+      response.url().endsWith("/messages") && response.request().method() === "POST");
     await page.getByRole("button", {name:"Отправить правку"}).first().click();
-    await page.waitForFunction(() => document.querySelectorAll('.dp-confirm').length >= 1);
+    await nextRequest;
     requested = calls.filter(c=>c.body.chip?.capability==="revise_material").at(-1);
     assert.notEqual(requested.body.client_key, originalKey,
       "an explicitly declined review followed by a new submission needs a fresh key");
