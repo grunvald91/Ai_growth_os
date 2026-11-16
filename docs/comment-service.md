@@ -321,3 +321,59 @@ reconciliation path.
 References: [Meta comments webhooks](https://developers.facebook.com/docs/graph-api/webhooks/reference/instagram),
 [Meta assigned Instagram assets](https://developers.facebook.com/docs/graph-api/reference/user/assigned_instagram_accounts/),
 [Postiz Unified Login compatibility reports](https://github.com/gitroomhq/postiz-app/issues/2350).
+
+
+### Instagram post-merge hardening and real launch checklist (2026-11-16)
+
+- **Database migration 0016:** only one *connected* Instagram account can be
+  assigned across the entire multi-tenant database. A duplicate check runs
+  before the partial unique index is installed. If the migration refuses,
+  inspect and disconnect the duplicate manually; it intentionally never
+  chooses a customer account to revoke. Both the old manual token connection
+  and Unified Login are subject to this rule.
+- **Webhook enrichment:** a signed notification has no authoritative creation
+  timestamp or original caption. The next account-scoped native import fills
+  those fields on the *existing* inbound row; it does not spend LLM tokens or
+  create a duplicate. Meta may omit the media ID for album comments. Such
+  events are preserved with `needs_media_resolution` and cannot be sent until
+  a subsequent native import resolves their ownership and media ID. Owners can
+  use **Загрузить комментарии** to trigger a reconciliation; enable both
+  `COMMENT_BACKGROUND_POLL_ENABLED` and company `auto_import` only after
+  verified connectivity for unattended reconciliation. This polling setting is
+  **independent** from the paid AI-draft opt-in. No invented publication time
+  is assigned based on webhook arrival.
+- **OAuth retention:** the worker periodically rejects abandoned pending
+  authorizations after expiry and deletes their encrypted temporary token,
+  regardless of the comment polling/drafting flags. A completed authorization
+  deletes its temporary token immediately. A persistent connected account
+  token remains encrypted until disconnection.
+- **Meta App setup:** the Meta Dashboard must have the correct Instagram
+  `comments` webhook field subscribed to the public callback. For Facebook
+  Login for Business, verify the professional Instagram account is attached
+  to a Page, required permissions including `instagram_basic`,
+  `instagram_manage_comments`, `pages_read_engagement`, and (where required
+  for Page subscription) `pages_manage_metadata` and a Page token.
+  Meta documents App Review / Advanced Access and linked Page subscription
+  requirements for Instagram comment Webhooks. These are **external account
+  configuration steps**, not automatically completed by the OAuth code.
+- **Gateway:** activate the exact HTTPS Nginx routes for the OAuth callback
+  and Instagram Webhook; keep BookingBot's generic `/api/` route unchanged.
+  Confirm public reachability through the actual production host and ensure
+  Growth Studio login can be maintained on the same canonical host used for
+  OAuth. The templates in GitHub do **not** imply production deployment.
+- **Real acceptance test:** create a new comment on a *test professional*
+  Instagram account under an owned post, verify signature and import to the
+  correct company, run native reconciliation for timestamp/context, generate
+  one draft, approve and verify precisely one actual public reply. Repeat with
+  an album post, a nested reply, and a second independent tenant, observing
+  API calls/permissions. No such production test has yet been confirmed.
+- **Remaining future work:** robust nested replies pagination in native
+  reconciliation, better last-webhook/permission health indicators, real
+  client-account Meta App Review, adaptive Jev only when batch-size tests
+  justify it, and gated hybrid automated publishing. None is enabled by
+  merging the current hardening change.
+
+Official Meta sources:
+https://developers.facebook.com/docs/graph-api/webhooks/getting-started/webhooks-for-instagram/
+https://developers.facebook.com/docs/graph-api/webhooks/reference/instagram
+https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login/comment-moderation/
