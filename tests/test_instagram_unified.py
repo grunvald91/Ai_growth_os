@@ -344,3 +344,37 @@ def test_instagram_tenant_unique_migration_is_partial_and_compatible():
                     "INSERT INTO comment_channels VALUES ('c','instagram','connected','123')"))
     finally:
         engine.dispose()
+
+
+def test_album_comment_without_media_id_is_retained_but_not_publishable(ctx):
+    import asyncio
+    from app.comments.service import recent_platform_comment
+    db, product, svc, _, gateway = ctx
+    meta_config(svc.settings)
+    app.dependency_overrides[get_settings] = lambda: svc.settings
+    asyncio.run(svc.connect(product.id, ConnectInput(
+        platform="instagram", account_id="100", token="owner-token")))
+    raw, signature = signed({"object": "instagram", "entry": [
+        {"id": "100", "changes": [{"field": "comments", "value": {
+            "id": "99000", "text": "Вопрос к публикации-альбому",
+            "from": {"id": "98765"}}}]}]}, svc.settings.comment_meta_app_secret)
+    response = client_for(ctx).post("/api/integrations/instagram/webhook",
+                                  content=raw, headers={"x-hub-signature-256": signature})
+    assert response.status_code == 200 and response.json()["imported"] == 1
+    row = db.scalar(select(BusinessComment).where(BusinessComment.external_id == "99000"))
+    assert row.target.get("needs_media_resolution") is True
+    assert "media_id" not in row.target
+    assert not recent_platform_comment(row, 30)
+
+    from datetime import datetime, timezone
+    async def fetch(channel, token):
+        return [{"external_id": "99000", "text": row.text,
+                 "post_text": "Карточки с информацией",
+                 "target": {"media_id": "999888", "published_at": datetime.now(timezone.utc).isoformat()}}], {}
+    gateway.fetch = fetch
+    asyncio.run(svc.sync(product.id, "instagram"))
+    db.refresh(row)
+    assert row.target["media_id"] == "999888"
+    assert "needs_media_resolution" not in row.target
+    assert recent_platform_comment(row, 30)
+    assert row.post_text == "Карточки с информацией"
