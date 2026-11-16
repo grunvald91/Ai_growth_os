@@ -28,9 +28,22 @@ from app.services.artifacts import ArtifactService
 KIND = "seo_landing_opportunities"
 MAX_PAGES = 24
 
-_DEVICES = (
-    "iphone", "ipad", "android", "ios", "macos", "macbook", "windows",
-    "linux", "smart tv", "smart-tv", "смарт тв", "телевизор", "роутер",
+# Alias matching identifies a DEVICE request, never implies compatibility.
+_DEVICE_ALIASES = (
+    ("iphone", "iphone"), ("айфон", "iphone"), ("айфона", "iphone"),
+    ("айфоне", "iphone"), ("ipad", "ipad"), ("айпад", "ipad"),
+    ("айпаде", "ipad"), ("android", "android"), ("андроид", "android"),
+    ("андроиде", "android"), ("ios", "ios"), ("macos", "macos"),
+    ("macbook", "macbook"), ("макбук", "macbook"),
+    ("windows", "windows"), ("виндовс", "windows"), ("виндоус", "windows"),
+    ("linux", "linux"), ("smart tv", "smart tv"),
+    ("smart-tv", "smart tv"), ("смарт тв", "smart tv"),
+    ("телевизор", "телевизор"), ("телевизоре", "телевизор"),
+    ("роутер", "router"), ("роутере", "router"),
+    ("маршрутизатор", "router"), ("router", "router"),
+    ("смартфон", "smartphone"), ("телефон", "phone"),
+    ("телефоне", "phone"), ("планшет", "tablet"),
+    ("компьютер", "computer"),
 )
 # Never turn an arbitrary query about "в приложении" or "в салоне" into a city.
 _NON_GEOGRAPHIC = frozenset(
@@ -38,7 +51,8 @@ _NON_GEOGRAPHIC = frozenset(
     "системе системах браузере браузерах бизнесе бизнесах интернете сети "
     "кабинете кабинетах магазине магазинах каталоге таблице crm "
     "настройке работе использовании подключении продаже доставке аренде наличии "
-    "комплекте рассрочку кредит акции цене запросу телефону процессах".split()
+    "комплекте рассрочку кредит акции цене запросу телефону процессах "
+    "телефоне айфоне айпаде андроиде роутере телевизоре компьютере".split()
 )
 # Recognize common unlabelled cities even without a preposition. For other
 # places, explicit "в/из/город ..." cues fail closed rather than proving scope.
@@ -142,9 +156,9 @@ def _offer_for(query: str, profile: CompanyProfile | None) -> ServiceOffer | Non
 
 def _find_device(query: str) -> str | None:
     text = f" {canonical_query(query)} "
-    for device in _DEVICES:
-        if f" {canonical_query(device)} " in text:
-            return canonical_query(device)
+    for alias, device in _DEVICE_ALIASES:
+        if f" {canonical_query(alias)} " in text:
+            return device
     return None
 
 
