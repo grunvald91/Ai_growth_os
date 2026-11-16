@@ -454,7 +454,7 @@ async def test_seo_publication_holds_internal_editorial_report(env, tmp_path):
         " Связка CRM и Mail не подтверждена."
     )
     article.full_article += (
-        "\\n\\n## Проверенные возможности: ServGo\\n\\n"
+        "\n\n## Проверенные возможности: ServGo\n\n"
         "- Связка CRM и Mail не подтверждена."
     )
     row.content = article.model_dump_json()
