@@ -1,0 +1,80 @@
+name: Studio calendar UI SDK pilot
+
+on:
+  push:
+    branches: [feature/studio-calendar-ui-sdk-20261116]
+  pull_request:
+    paths:
+      - "app/api/content_studio.py"
+      - "app/api/dispatcher.py"
+      - "app/api/dispatcher_assets/**"
+      - "app/content/calendar.py"
+      - "studio_ui_sdk/**"
+      - "tests/test_content_calendar.py"
+      - "tests/test_content_studio.py"
+      - ".github/workflows/studio-calendar-ui-sdk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: studio-calendar-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-and-api:
+    if: github.repository == 'grunvald91/Ai_growth_os'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: ${{ github.event_name == 'push' }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned UI SDK
+        working-directory: studio_ui_sdk
+        run: npm ci --no-audit --no-fund
+      - name: Rebuild self-hosted module
+        working-directory: studio_ui_sdk
+        run: npm run build
+      - name: Check compiled JS
+        run: node --check app/api/dispatcher_assets/ui-sdk-pilot.bundle.js
+      - name: Browser smoke - calendar SDK, desktop and phone
+        working-directory: studio_ui_sdk
+        run: |
+          npm install --no-save playwright@1.56.1 --no-audit --no-fund
+          SERVGO_CHROME_PATH="$(command -v google-chrome)" node calendar-smoke.mjs
+          SERVGO_CHROME_PATH="$(command -v google-chrome)" node browser-smoke.mjs
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-calendar-sdk
+          path: |
+            studio-calendar-sdk-*.png
+            studio-ui-sdk-mobile-smoke.png
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Calendar backend and Studio route tests
+        run: python -m pytest -q tests/test_content_calendar.py tests/test_content_studio.py tests/test_studio_ui_sdk_pilot.py
+      - name: Vendor generated UI SDK bundle (feature branch only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/studio-calendar-ui-sdk-20261116'
+        run: |
+          git add app/api/dispatcher_assets/ui-sdk-pilot.bundle.js
+          if ! git diff --cached --quiet; then
+            git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                commit -m 'build(studio): vendor calendar UI SDK bundle'
+            git push origin HEAD:feature/studio-calendar-ui-sdk-20261116
+          fi
+      - name: Verify bundle is committed on PR
+        if: github.event_name == 'pull_request'
+        run: git diff --exit-code -- app/api/dispatcher_assets/ui-sdk-pilot.bundle.js
