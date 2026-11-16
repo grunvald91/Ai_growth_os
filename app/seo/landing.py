@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.company_profile import CompanyProfile, load_company_profile
-from app.models.domain import Artifact, Product
+from app.models.domain import Artifact, Product, Task
 from app.seo.activation import require_enabled
 from app.seo.clustering import normalize
 from app.seo.contracts import SemanticCore
@@ -176,6 +176,16 @@ def store_landing_opportunities(
 ) -> Artifact:
     """Persist per-tenant drafts idempotently without new LLM calls or tasks."""
     require_enabled(db, product_id)
+    # Artifact.task_id has only a foreign key to Task.id; the database does not
+    # enforce equal tenant IDs. Check ownership before reading or writing any
+    # run-linked artifact, including on idempotent retries.
+    factory_task = db.scalar(select(Task.id).where(
+        Task.id == task_id,
+        Task.product_id == product_id,
+        Task.assigned_agent == "seo_factory",
+    ).limit(1))
+    if factory_task is None:
+        raise LookupError("SEO factory run not found for company")
     previous = db.scalar(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.task_id == task_id,
         Artifact.kind == KIND,
