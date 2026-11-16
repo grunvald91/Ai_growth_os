@@ -238,8 +238,11 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
 @router.get("/products/{product_id}/comments/instagram/health")
 def instagram_health(product_id: UUID, svc=Depends(service)):
     """Tenant-scoped, secret-free diagnostics; never polls or invokes a model."""
-    svc.product(product_id)
-    config, _ = svc.config(product_id)
+    try:
+        svc.product(product_id)
+        config, _ = svc.config(product_id)
+    except (ValueError, LookupError) as exc:
+        raise error(exc) from None
     channel = svc.channel(product_id, "instagram")
     cursor = (channel.cursor or {}) if channel else {}
     poll = cursor.get("_poll") or {}
