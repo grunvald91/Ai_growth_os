@@ -20,7 +20,7 @@ from app.seo.activation import editorial_preferences
 SEO_AGENT = "seo_factory"
 SEO_KINDS = (
     "seo_factory_report", "seo_factory_request", "seo_factory_attempt",
-    "semantic_core", "seo_content_plan",
+    "semantic_core", "seo_content_plan", "seo_landing_opportunities",
     "seo_factory_stage", "seo_suggest_checkpoint",
     "seo_local_market", "seo_local_market_status",
 )
@@ -107,6 +107,18 @@ def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
     local_status = _report_data(local_rows[0].content) if local_rows else {}
     if "seo_local_market" in kinds and not local_status:
         local_status = {"provider": "yandex_organizations", "status": "collected"}
+    from app.seo.landing import LandingOpportunities
+    landing_artifacts = sorted(
+        (a for a in artifacts if a.kind == "seo_landing_opportunities"),
+        key=lambda a: (a.created_at, a.id), reverse=True)
+    landing_pages, landing_ready = [], False
+    if landing_artifacts:
+        try:
+            landing_plan = LandingOpportunities.model_validate_json(landing_artifacts[0].content)
+            landing_pages = [candidate.model_dump(mode="json") for candidate in landing_plan.candidates]
+            landing_ready = True
+        except ValueError:
+            pass  # Invalid/legacy artifacts are not represented as completed work.
     return {
         "id": str(task.id),
         "title": task.title,
@@ -118,6 +130,10 @@ def seo_run_summary(task: Task, artifacts: list[Artifact]) -> dict:
         "horizon_days": horizon,
         "semantic_ready": "semantic_core" in kinds,
         "plan_ready": "seo_content_plan" in kinds,
+        "landing_ready": landing_ready,
+        "landing_candidates_total": len(landing_pages) if landing_ready else None,
+        "landing_review_ready": sum(page["status"] == "review" for page in landing_pages),
+        "landing_pages": landing_pages,
         "articles_queued": success["articles_queued"] if success is not None else None,
         "articles_deferred": (success.get("articles_deferred") if success is not None else None),
         "sources_confirmed": (len(success["sources"])
