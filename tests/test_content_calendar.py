@@ -445,7 +445,8 @@ def test_reschedule_one_slot_preserves_package_and_rejects_collisions(db):
     db.commit()
     fixed_now = datetime(2026, 10, 11, 8, tzinfo=timezone.utc)
     dest = datetime(2026, 10, 16, 15, tzinfo=timezone(timedelta(hours=3)))
-    moved = reschedule_slot(db, row.id, '1', dest, now=fixed_now)
+    moved = reschedule_slot(db, row.id, '1', dest, now=fixed_now,
+                            expected_publish_at=original.isoformat())
     assert moved['publish_at'] == dest.isoformat()
     assert moved['day_offset'] == 4
     assert moved['hour'] == 15
@@ -453,6 +454,10 @@ def test_reschedule_one_slot_preserves_package_and_rejects_collisions(db):
     assert moved['topic'] == 'Сезонное меню'
     assert moved['state'] == 'ready_for_review'
     assert json.loads(row.content)['slots'][1]['topic'] == 'Кофе'
+    with pytest.raises(ValueError, match='уже изменилась'):
+        reschedule_slot(db, row.id, '1', dest + timedelta(hours=1), now=fixed_now,
+                        expected_publish_at=original.isoformat())
+    assert json.loads(row.content)['slots'][0]['publish_at'] == dest.isoformat()
     with pytest.raises(ValueError, match='уже есть материал'):
         reschedule_slot(
             db, row.id, '1', original+timedelta(days=2), now=fixed_now,
