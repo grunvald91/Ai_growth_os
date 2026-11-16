@@ -82,6 +82,13 @@ class TargetedRevisedPost(RevisedPost):
     # For a fragment rewrite even a short existing post must remain editable.
     body: str = Field(min_length=1, max_length=14000)
 
+    @model_validator(mode="before")
+    @classmethod
+    def cta_in_body(cls, data):
+        # A legacy source may store CTA separately instead of inside body.
+        # Appending it during a scoped edit would silently change protected text.
+        return data
+
 
 def validate_targeted_revision(original_body: str, fragment: str, revised_body: str) -> None:
     """A targeted edit must leave text outside the selected, unique span untouched.
