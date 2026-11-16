@@ -308,11 +308,23 @@ class CommentService:
                 # post caption. Reconcile existing inbound rows from the real
                 # platform response without restarting a draft or changing an
                 # already handled reply.
+                existing_target = existing.target or {}
+                native_target = item.get("target") or {}
+                stored_media = existing_target.get("media_id")
+                native_media = native_target.get("media_id")
                 if (platform == "instagram" and existing.source == "platform"
-                        and (existing.target or {}).get("channel_id") == str(channel.id)
-                        and str((existing.target or {}).get("media_id")) ==
-                            str((item.get("target") or {}).get("media_id"))):
-                    native_time = (item.get("target") or {}).get("published_at")
+                        and existing_target.get("channel_id") == str(channel.id)
+                        and native_media and (not stored_media or
+                                              str(stored_media) == str(native_media))):
+                    if not stored_media:
+                        # Album comment webhooks may omit media.id. Only the
+                        # account-scoped Graph import may resolve that media.
+                        existing.target = {**existing_target, "media_id": native_media}
+                        existing_target = existing.target
+                    if existing_target.get("needs_media_resolution"):
+                        existing.target = {k: v for k, v in existing_target.items()
+                                           if k != "needs_media_resolution"}
+                    native_time = native_target.get("published_at")
                     try:
                         parsed = datetime.fromisoformat(str(native_time).replace("Z", "+00:00"))
                         valid_time = parsed.tzinfo is not None
