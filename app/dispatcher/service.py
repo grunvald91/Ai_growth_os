@@ -204,7 +204,8 @@ def _confirm_block(confirmation: Confirmation, confirmation_id: str, capability_
     return {"type": "confirm", "confirmation_id": confirmation_id, "title": confirmation.title,
             "details": confirmation.details, "confirm_label": confirmation.confirm_label,
             "cancel_label": "Отмена", "paid": confirmation.paid, "state": "pending",
-            "revision": 0, "editable": draft_view(capability_id, confirmation.params)}
+            "revision": 0, "editable": draft_view(capability_id, confirmation.params),
+            "change_preview": confirmation.change_preview}
 
 
 async def act(ctx: Context, capability_id: str, raw_params: dict) -> tuple[Outcome, Confirmation | None, str]:
