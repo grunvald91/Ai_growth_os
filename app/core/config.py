@@ -127,6 +127,8 @@ class Settings(BaseSettings):
     comment_meta_login_config_id: str | None = None
     comment_meta_public_base: str | None = None
     comment_meta_webhook_verify_token: str | None = None
+    # Both operator and company must opt in before signed webhooks import data.
+    comment_meta_webhook_enabled: bool = False
     comment_meta_graph_version: str = "v27.0"
 
     # Background comment import: operator switch AND per-business opt-in, both off by default.
