@@ -919,7 +919,8 @@ def tick_calendar(db, settings, now=None):
 
 
 
-def reschedule_slot(db, plan_id: UUID, slot_id: str, publish_at: datetime, *, now=None):
+def reschedule_slot(db, plan_id: UUID, slot_id: str, publish_at: datetime, *, now=None,
+                    expected_publish_at: str | None = None):
     """Move one publication slot without rewriting its topic or requeueing the package.
 
     A publication date must be future, inside the original plan horizon, and
@@ -937,6 +938,9 @@ def reschedule_slot(db, plan_id: UUID, slot_id: str, publish_at: datetime, *, no
     if len(matches) != 1:
         raise LookupError('Публикационный слот не найден')
     slot = matches[0]
+    # A date selected from an older calendar tab must never overwrite a newer move.
+    if expected_publish_at is not None and str(slot.get('publish_at') or '') != expected_publish_at:
+        raise ValueError('Дата публикации уже изменилась. Обновите календарь и выберите время заново')
     if slot.get('telegram_publication_id') or slot.get('publication_url') or slot.get('state') in {'scheduled', 'published', 'delivery_unknown'}:
         raise ValueError('Сначала отмени назначенную Telegram-публикацию; отправленный материал переносить нельзя')
     destination = publish_at.astimezone(ZoneInfo(plan['timezone']))

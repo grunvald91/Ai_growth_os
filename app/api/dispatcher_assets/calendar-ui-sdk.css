@@ -1,0 +1,19 @@
+/* Calendar UI SDK: scoped, progressive enhancement of the native move form. */
+.sg-calendar-sdk-move{display:block;margin-top:8px;min-width:0;border:1px solid var(--sg-border,#d9e5f0);border-radius:12px;overflow:hidden}
+.sg-calendar-sdk-move ui-collapsible-trigger{display:block}
+.sg-calendar-sdk-trigger{display:block;width:100%;padding:11px 13px;text-align:left;font:inherit;font-size:13px;font-weight:650;
+  color:inherit;background:var(--sg-card-soft,#f6f9fc);border:0;cursor:pointer;min-height:44px}
+.sg-calendar-sdk-trigger::after{content:"⌄";float:right;font-size:16px}
+.sg-calendar-sdk-move[data-open] .sg-calendar-sdk-trigger::after{content:"⌃"}
+.sg-calendar-sdk-trigger:focus-visible{outline:2px solid #3989da;outline-offset:-2px}
+.sg-calendar-sdk-panel{display:block;padding:11px 13px 13px}
+.sg-calendar-sdk-panel[hidden],.sg-calendar-sdk-preview[hidden],.sg-calendar-sdk-confirm[hidden],
+.sg-calendar-sdk-warning[hidden]{display:none!important}
+.sg-calendar-sdk-panel form{display:grid;gap:10px;min-width:0}
+.sg-calendar-sdk-caption{font-size:12px;opacity:.7;margin:0}
+.sg-calendar-sdk-preview{display:block;font-size:13px;line-height:1.55;white-space:pre-line;overflow-wrap:anywhere;
+  background:var(--sg-card-soft,#f6f9fc);border-radius:9px;padding:10px}
+.sg-calendar-sdk-warning{font-size:12px;color:#b64532;margin:0}
+.sg-calendar-sdk-panel input[type=datetime-local]{max-width:100%;width:100%;box-sizing:border-box}
+.sg-calendar-sdk-panel .btn{min-height:44px;white-space:normal}
+@media(max-width:540px){.sg-calendar-sdk-panel{padding:10px}.sg-calendar-sdk-trigger{padding:11px}}

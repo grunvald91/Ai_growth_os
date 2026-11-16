@@ -580,3 +580,51 @@ def test_completed_proresultat_plan_is_visible_as_draft_and_needs_approval(studi
         assert f"/plans/{plan.id}/approve" not in page.text
     finally:
         app.dependency_overrides.clear()
+
+
+def test_calendar_ui_sdk_preview_uses_existing_scoped_move_form_and_can_be_disabled(studio_db):
+    db = studio_db
+    company = Product(name="Календарь SDK", slug="calendar-ui-sdk-demo")
+    db.add(company)
+    db.flush()
+    plan_data = make_plan(approval_state="active")
+    plan_data["timezone"] = "Europe/Moscow"
+    plan_data["slots"][0].update({
+        "slot_id": "slot-1", "day_offset": 2, "hour": 12, "minute": 0,
+        "prepare_lead_hours": 24,
+    })
+    plan = Artifact(product_id=company.id, kind="editorial_plan", title="Контент-план",
+                    content=json.dumps(plan_data, ensure_ascii=False))
+    db.add(plan)
+    db.commit()
+    client = client_for(db)
+    try:
+        route = f"/studio/products/{company.id}/calendar"
+        page = client.get(route)
+        assert page.status_code == 200
+        assert "/studio/assets/ui-sdk-pilot.bundle.js?v=4" in page.text
+        assert "/studio/assets/calendar-ui-sdk.css?v=1" in page.text
+        assert 'class="sg-calendar-move"' in page.text
+        assert 'name="expected_publish_at" value="2026-10-06T12:00:00+03:00"' in page.text
+        assert f'/plans/{plan.id}/slots/slot-1/move' in page.text
+        assert "Europe/Moscow" in page.text
+        old = client.get(route + "?ui_sdk=0")
+        assert old.status_code == 200
+        assert "sg-calendar-move" in old.text
+        assert 'ui-sdk-pilot.bundle.js?v=4' not in old.text
+        assert "calendar-ui-sdk.css?v=1" not in old.text
+        css = client.get("/studio/assets/calendar-ui-sdk.css")
+        assert css.status_code == 200 and ".sg-calendar-sdk-move" in css.text
+
+        # The route rejects stale client state before changing a slot.
+        response = client.post(
+            f"/studio/products/{company.id}/plans/{plan.id}/slots/slot-1/move",
+            data={"when": "2026-10-07T13:00",
+                  "expected_publish_at": "2026-10-06T11:00:00+03:00"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 409
+        db.refresh(plan)
+        assert json.loads(plan.content)["slots"][0]["publish_at"] == "2026-10-06T12:00:00+03:00"
+    finally:
+        app.dependency_overrides.clear()
