@@ -284,9 +284,18 @@ class CommentService:
                 pass
 
         try:
-            rows, cursor = await self.gateway.fetch(channel, self.secrets.load_token(channel.id))
+            token = self.secrets.load_token(channel.id)
+            rows, cursor = await self.gateway.fetch(channel, token)
         except Exception as exc:
             if not background:
+                # Never expose raw provider exception bodies (some contain
+                # credentials). Keep last failed reconciliation time visible.
+                channel.cursor = {**previous, "_sync": {
+                    **(previous.get("_sync") or {}),
+                    "last_failure_at": now().isoformat(),
+                    "last_error": "fetch_failed",
+                }}
+                self.db.commit()
                 raise
             # Record bounded backoff without storing access tokens or raw error messages.
             attempts = min(10, int(poll.get("failures", 0)) + 1)
@@ -301,6 +310,26 @@ class CommentService:
                 product_id, platform, type(exc).__name__)
             return 0
 
+        reply_result = None
+        reply_error = False
+        if (platform == "instagram"
+                and self.settings.comment_instagram_reply_scan_enabled
+                and hasattr(self.gateway, "fetch_instagram_replies")):
+            from app.comments.instagram_replies import fetch_nested_replies
+            try:
+                reply_rows, reply_result = await fetch_nested_replies(
+                    self.db, self.gateway, channel, token,
+                    progress=previous.get("_ig_replies"),
+                    max_calls=self.settings.comment_instagram_reply_scan_calls,
+                )
+                rows.extend(reply_rows)
+            except Exception as exc:
+                # A missing nested-replies API permission must not prevent
+                # incoming top-level comments from being imported.
+                reply_error = True
+                logging.getLogger(__name__).warning(
+                    "instagram_nested_replies_failed product=%s type=%s",
+                    product_id, type(exc).__name__)
         count = 0
         for item in rows:
             if not item.get("text"):
@@ -345,9 +374,24 @@ class CommentService:
             count += 1
             self.db.flush()
         cursor = dict(cursor)
-        if platform == "instagram" and "_auth" in previous:
-            # The platform pagination cursor is replaceable; OAuth token mode is not.
-            cursor["_auth"] = previous["_auth"]
+        # Gateway pagination may finish and return {}, but durable metadata
+        # belongs to the channel, not to an individual media scan.
+        cursor.update({key: value for key, value in previous.items()
+                       if key.startswith("_")})
+        if platform == "instagram" and self.settings.comment_instagram_reply_scan_enabled:
+            if reply_result is not None:
+                cursor["_ig_replies"] = reply_result
+            cursor["_ig_reply_health"] = {
+                "last_attempt_at": now().isoformat(),
+                "last_error": "fetch_failed" if reply_error else None,
+            }
+        cursor["_sync"] = {
+            **(previous.get("_sync") or {}),
+            "last_success_at": now().isoformat(),
+            "last_imported": count,
+            "mode": "background" if background else "manual",
+            "last_error": None,
+        }
         if background:
             poll.update({"failures": 0, "last_success_at": now().isoformat(),
                          "next_at": (now() + timedelta(seconds=self.settings.comment_background_poll_seconds)).isoformat(),
