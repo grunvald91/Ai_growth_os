@@ -95,6 +95,8 @@ def _local_time(value: str, zone: ZoneInfo) -> datetime:
     # Reject missing hours at DST transitions instead of silently moving them.
     if target.astimezone(timezone.utc).astimezone(zone).replace(tzinfo=None) != local:
         raise ValueError("В указанном часовом поясе такого местного времени нет")
+    if target.utcoffset() != target.replace(fold=1).utcoffset():
+        raise ValueError("Укажите однозначное местное время вне перехода часов")
     return target
 
 
