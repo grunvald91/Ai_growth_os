@@ -111,6 +111,22 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
                 next_at = esc(str(poll_state.get("next_at") or "после включения"))
                 failure = ' · <strong>Предыдущая проверка завершилась ошибкой</strong>' if poll_state.get("last_error") else ""
                 poll_status = f'<p class="c-meta">Автоматическая проверка: {last}. Следующая: {next_at}{failure}</p>'
+            if key == "instagram":
+                webhook = (channel.cursor or {}).get("_webhook", {}) if channel else {}
+                native = (channel.cursor or {}).get("_sync", {}) if channel else {}
+                last_webhook = esc(str(webhook.get("last_received_at") or "не было подтверждённых событий"))
+                last_native = esc(str(native.get("last_success_at") or "ещё не выполнялась"))
+                scan = "включён" if svc.settings.comment_instagram_reply_scan_enabled else "ожидает проверки Meta API"
+                if channel:
+                    poll_status += (f'<p class="c-meta">Подписанный Instagram Webhook: {last_webhook}. '
+                                    f'Последняя сверка через API: {last_native}. '
+                                    f'Вложенные ответы: {scan}.</p>')
+                else:
+                    poll_status += '<p class="c-meta">Webhook-события появятся здесь после подключения Meta и включения импорта.</p>'
+                poll_status += (f'<p class="c-help">Webhook на сервере: '
+                                f'{"включён" if svc.settings.comment_meta_webhook_enabled else "выключен"}; '
+                                f'импорт компании: {"разрешён" if config.enabled and config.auto_import else "выключен"}; '
+                                'автоматических публикаций нет.</p>')
             if item["live"]:
                 controls = (f'<form class="c-connect" data-platform="{key}"><label>{esc(item["account_label"])}<input name="account_id" required value="{esc(channel.account_id if channel else "")}" autocomplete="off"></label>'
                     '<label>Токен доступа<input name="token" type="password" required autocomplete="new-password" placeholder="Хранится зашифрованным на сервере"></label>'
@@ -217,6 +233,42 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
         <div class="c-inbox-grid"><div class="c-list">{''.join(cards) or empty}</div><aside class="panel c-card"><h2>Добавить комментарий</h2><p>Для ручного ответа и площадок без подключения.</p><form id="c-manual"><label>Площадка<select name="platform">{options}</select></label><label>Контекст поста<textarea name="post_text" rows="3" maxlength="8000"></textarea></label><label>Комментарий<textarea name="text" rows="4" maxlength="8000" required></textarea></label><button class="btn primary" type="submit">Добавить</button></form><p>Ручные ответы размещаются копированием.</p></aside></div>'''
     body_html = f'<link rel="stylesheet" href="/studio/assets/comments.css?v=2"><div id="comments-app" data-api="/products/{product_id}/comments"><nav class="c-tabs">{tabs}</nav><p id="c-feedback" role="status" aria-live="polite"></p>{notice}{content}</div><script src="/studio/assets/comments.js" defer></script>'
     return HTMLResponse(studio_page_shell(product, active="comments", title="Комментарии", subtitle="AI-консультант вашего бизнеса", body=body_html), headers={"Cache-Control": "no-store"})
+
+
+@router.get("/products/{product_id}/comments/instagram/health")
+def instagram_health(product_id: UUID, svc=Depends(service)):
+    """Tenant-scoped, secret-free diagnostics; never polls or invokes a model."""
+    svc.product(product_id)
+    config, _ = svc.config(product_id)
+    channel = svc.channel(product_id, "instagram")
+    cursor = (channel.cursor or {}) if channel else {}
+    poll = cursor.get("_poll") or {}
+    sync = cursor.get("_sync") or {}
+    webhook = cursor.get("_webhook") or {}
+    reply_health = cursor.get("_ig_reply_health") or {}
+    return {
+        "account_status": channel.status if channel else "not_connected",
+        "account_name": channel.account_name if channel else None,
+        "auth_mode": (cursor.get("_auth") or {}).get("mode", "manual") if channel else None,
+        "oauth_ready": instagram_oauth_configured(svc.settings),
+        "webhook_callback_configured": bool(
+            svc.settings.comment_meta_app_secret and svc.settings.comment_meta_webhook_verify_token),
+        "webhook_global_enabled": svc.settings.comment_meta_webhook_enabled,
+        "company_import_enabled": config.enabled and config.auto_import,
+        "last_signed_webhook_at": webhook.get("last_received_at"),
+        "last_webhook_import_at": webhook.get("last_imported_at"),
+        "last_webhook_batch_imported": webhook.get("last_batch_imported", 0),
+        "webhook_total_imported": webhook.get("imported_total", 0),
+        "background_poll_enabled": svc.settings.comment_background_poll_enabled,
+        "last_poll_success_at": poll.get("last_success_at"),
+        "next_poll_at": poll.get("next_at"),
+        "poll_error": bool(poll.get("last_error")),
+        "last_native_sync_at": sync.get("last_success_at"),
+        "last_native_sync_error_at": sync.get("last_failure_at") if sync.get("last_error") else None,
+        "nested_reply_scan_enabled": svc.settings.comment_instagram_reply_scan_enabled,
+        "nested_reply_scan_error": bool(reply_health.get("last_error")),
+        "nested_reply_scan_last_attempt_at": reply_health.get("last_attempt_at"),
+    }
 
 
 @router.post("/products/{product_id}/comments/settings", dependencies=[Depends(same_origin)])
