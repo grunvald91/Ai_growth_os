@@ -63,6 +63,7 @@ const browser = await chromium.launch({
 });
 try {
   for (const width of [390, 1280]) {
+    const callsBefore = calls.length;
     const url = `http://127.0.0.1:${server.address().port}/`;
     const page = await browser.newPage({viewport: {width, height: 820}});
     const errors = [];
@@ -74,14 +75,14 @@ try {
     const preview = page.locator(".dp-plan-change-after");
     assert.match(await preview.innerText(), /Как клиенту записаться/);
     assert.equal(await page.locator(".dp-plan-change-preview script").count(), 0);
-    assert.equal(calls.length, 0, "rendering a card must never submit");
+    assert.equal(calls.length, callsBefore, "rendering a card must never submit");
     const trigger = section.locator("ui-collapsible-trigger button");
     await trigger.click();
     assert.equal(await section.locator("ui-collapsible-panel").isVisible(), false);
     await trigger.click();
     assert.equal(await preview.isVisible(), true);
     await page.getByRole("button", {name:"Сохранить изменения"}).click();
-    assert.equal(calls.length, (width === 390 ? 1 : 2));
+    assert.equal(calls.length, callsBefore + 1);
     assert.equal(calls.at(-1).confirmation_id, "preview-1");
     assert.equal(calls.at(-1).accept, true);
     assert.deepEqual(errors, []);
