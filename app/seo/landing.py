@@ -96,8 +96,19 @@ def _stem(word: str) -> str:
 def _tokens(value: str, *, exclude: frozenset[str] = frozenset()) -> frozenset[str]:
     return frozenset(
         _stem(word) for word in canonical_query(value).split()
-        if len(word) >= 3 and word not in _STOPWORDS and _stem(word) not in exclude
+        if (len(word) >= 3 or word.isdigit())
+        and word not in _STOPWORDS and _stem(word) not in exclude
     )
+
+
+def intent_key(query: str) -> str:
+    """Stable lexical search intent without inventing semantic synonyms.
+
+    Word order and commercial fillers are ignored, while SKU numbers, product
+    modifiers, devices, and city tokens remain. No fuzzy semantic guessing.
+    """
+    tokens = _tokens(query)
+    return " ".join(sorted(tokens)) if tokens else canonical_query(query)
 
 
 def _offer_for(query: str, profile: CompanyProfile | None) -> ServiceOffer | None:
@@ -175,7 +186,7 @@ def _path_for(query: str) -> str:
 
 def _candidate_fingerprint(item: LandingCandidate) -> tuple:
     # Search engine source differences / cluster ID changes are not new pages.
-    return (canonical_query(item.primary_query), item.intent, item.page_type,
+    return (intent_key(item.primary_query), item.page_type,
             item.proposed_path, item.offer_name, item.verified_offer,
             item.geography, item.device, item.status, item.reason_code)
 
@@ -193,10 +204,10 @@ def make_landing_opportunities(
         raise ValueError("Invalid landing opportunity limit")
     if limit == 0:
         return LandingOpportunities()
-    covered = {canonical_query(q) for q in (already_covered or ())}
+    covered = {intent_key(q) for q in (already_covered or ())}
     previous = prior_candidates or {}
     candidates: list[LandingCandidate] = []
-    seen_queries: set[str] = set()
+    seen_intents: set[str] = set()
     seen_paths: set[str] = set()
     ordered = sorted(
         (c for c in core.clusters if c.intent in ("commercial", "transactional")),
@@ -206,10 +217,10 @@ def make_landing_opportunities(
         # One landing opportunity per search-intent cluster; creating a page
         # for every autocomplete variant would generate doorway-like copies.
         for query in (cluster.head_query,):
-            key = canonical_query(query)
-            if key in seen_queries or not key:
+            key = intent_key(query)
+            if key in seen_intents or not key:
                 continue
-            seen_queries.add(key)
+            seen_intents.add(key)
             offer = _offer_for(query, profile)
             verified = bool(
                 offer and offer.release_status in {"live", "limited"}
@@ -218,7 +229,8 @@ def make_landing_opportunities(
             is_geo, area = _geo_hint(query, profile)
             device = _find_device(query)
             page_type = "location" if is_geo else "device" if device else "offer"
-            path = _path_for(query)
+            prior = previous.get(key)
+            path = prior.proposed_path if prior is not None else _path_for(query)
             if path in seen_paths:
                 # A true SHA collision must not silently omit an opportunity.
                 # Full canonical input remains in the hash, not a truncated slug.
@@ -253,7 +265,6 @@ def make_landing_opportunities(
                 status=status,
                 reason_code=reason,
             )
-            prior = previous.get(key)
             if prior is not None:
                 if _candidate_fingerprint(candidate) == _candidate_fingerprint(prior):
                     continue
@@ -277,7 +288,7 @@ def _latest_prior_candidates(db: Session, product_id: UUID, task_id: UUID) -> di
         except ValueError:
             continue
         for candidate in plan.candidates:
-            result.setdefault(canonical_query(candidate.primary_query), candidate)
+            result.setdefault(intent_key(candidate.primary_query), candidate)
     return result
 
 
