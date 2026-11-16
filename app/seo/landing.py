@@ -60,13 +60,14 @@ class LandingOpportunities(BaseModel):
 
     mode: Literal["draft_only"] = "draft_only"
     demand_data: Literal["none"] = "none"
-    candidates: list[LandingCandidate] = Field(default_factory=list)
+    candidates: list[LandingCandidate] = Field(default_factory=list, max_length=MAX_PAGES)
 
 
 def _tokens(value: str) -> set[str]:
-    # Prefixes bridge simple inflections, without inventing query synonyms.
+    # Prefixes bridge simple inflections (including short names like DNS, брус).
+    # They do not invent query synonyms.
     return {w[:5] for w in normalize(value).split()
-            if len(w) >= 5 and w not in _STOPWORDS}
+            if len(w) >= 3 and w not in _STOPWORDS}
 
 
 def _offer_for(query: str, profile: CompanyProfile | None):
