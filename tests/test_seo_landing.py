@@ -207,6 +207,26 @@ def test_device_requires_per_device_evidence_even_with_live_offer():
     assert unsupported.candidates[0].reason_code == "device_evidence_required"
 
 
+def test_russian_device_alias_never_bypasses_evidence_gate():
+    profile = _profile()
+    page = make_landing_opportunities(
+        _core(_cluster(1, "smart dns для айфона цена", "commercial")),
+        profile,
+    ).candidates[0]
+    assert page.page_type == "device"
+    assert page.device == "iphone"
+    assert page.reason_code == "device_evidence_required"
+    profile.offer.products_services[1].supported_devices_evidence = {
+        "iphone": "verified-apple-profile-guide",
+    }
+    reviewed = make_landing_opportunities(
+        _core(_cluster(1, "smart dns в айфоне цена", "commercial")),
+        profile,
+    ).candidates[0]
+    assert reviewed.page_type == "device"
+    assert reviewed.reason_code == "unique_content_required"
+
+
 def test_ambiguous_common_words_are_not_evidence_for_wrong_offer():
     from app.company_profile import CompanyProfile
     profile = CompanyProfile.model_validate({
