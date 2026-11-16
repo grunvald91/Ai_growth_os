@@ -734,3 +734,9 @@ from app.dispatcher.owner_views import recommend_today, show_recent_videos  # no
 EXECUTORS.update({"recommend_today": recommend_today, "show_recent_videos": show_recent_videos})
 DESCRIBERS.update(materials.DESCRIBERS)
 CONFIRMERS.update(materials.CONFIRMERS)
+
+# Editorial changes reuse the existing scoped calendar and package editing services.
+from app.dispatcher import plan_changes  # noqa: E402
+
+DESCRIBERS.update(plan_changes.DESCRIBERS)
+CONFIRMERS.update(plan_changes.CONFIRMERS)
