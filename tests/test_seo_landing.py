@@ -228,6 +228,16 @@ def test_russian_device_alias_never_bypasses_evidence_gate():
     assert reviewed.reason_code == "unique_content_required"
 
 
+def test_device_inflections_remain_gated_by_evidence():
+    candidate = make_landing_opportunities(
+        _core(_cluster(1, "smart dns для андроида цена", "commercial")),
+        _profile(),
+    ).candidates[0]
+    assert candidate.page_type == "device"
+    assert candidate.device == "android"
+    assert candidate.reason_code == "device_evidence_required"
+
+
 def test_ambiguous_common_words_are_not_evidence_for_wrong_offer():
     from app.company_profile import CompanyProfile
     profile = CompanyProfile.model_validate({
