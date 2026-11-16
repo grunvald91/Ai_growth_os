@@ -89,6 +89,8 @@
 
         <div class="ai-topbar-right">
           <div id="chat-title" class="ai-chat-title">Новый диалог</div>
+          <span id="company-badge" class="ai-company-badge" hidden></span>
+          <select id="company-select" class="ai-company-select" hidden aria-label="Компания для контекста"></select>
           <span id="mode-pill" class="ai-mode-pill">Режим: Текст</span>
         </div>
       </header>
@@ -100,12 +102,7 @@
         <div id="empty-state" class="ai-empty-state">
           <div class="ai-empty-badge">ServGo AI Chat</div>
           <h1>Чем помочь сегодня?</h1>
-          <p>Задайте вопрос, прикрепите документ или переключите режим на генерацию изображений. Любой фрагмент ответа ИИ можно выделить, чтобы скопировать или спросить подробнее.</p>
-          <div class="ai-suggestions" id="quick-suggestions">
-            <button type="button" class="ai-suggestion-chip" data-prompt="Составь краткий план запуска акции для автосервиса на 2 недели">План акции для сервиса</button>
-            <button type="button" class="ai-suggestion-chip" data-prompt="Помоги проанализировать прикреплённый файл и выделить 5 главных выводов">Разобрать документ</button>
-            <button type="button" class="ai-suggestion-chip" data-prompt="Напиши вежливый шаблон ответа клиенту на отзыв с задержкой записи">Шаблон ответа клиенту</button>
-          </div>
+          <p id="empty-state-desc">Задайте вопрос, прикрепите документ или переключите режим на генерацию изображений. Любой фрагмент ответа ИИ можно выделить, чтобы скопировать или спросить подробнее.</p>
         </div>
 
         <div id="message-list" class="ai-message-list" aria-live="polite"></div>
@@ -152,6 +149,8 @@
           <p class="dp-voice-note" id="dp-voice-note" role="status" aria-live="polite" hidden></p>
 
           <div id="composer-warning" class="ai-inline-alert" hidden role="alert"></div>
+
+          <div id="context-chips" class="ai-context-chips" role="group" aria-label="Контекстные подсказки по компании"></div>
 
           <div id="quote-preview" class="ai-quote-banner" hidden>
             <div class="ai-quote-body">

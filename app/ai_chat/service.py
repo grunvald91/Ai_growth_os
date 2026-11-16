@@ -827,10 +827,15 @@ def _sse(event: str, payload: dict) -> str:
 
 
 def build_default_ai_chat_client(settings: Settings) -> AiChatClient:
+    from app.llm.model_catalog import _load_catalog_cache
+
+    cached_ids, _ = _load_catalog_cache(settings.products_root)
     return ClaudeHubAiChatClient(
         api_key=settings.xai_api_key or "",
         base_url=settings.xai_base_url,
         timeout_seconds=settings.xai_timeout_seconds,
+        openai_api_key=getattr(settings, "openai_api_key", None),
+        claudehub_model_ids=set(cached_ids),
     )
 
 
@@ -918,6 +923,12 @@ async def stream_request_events(
 
         user_msg = db.get(AiChatMessage, req.user_message_id) if req.user_message_id else None
         cap = resolve_model_capabilities(req.model_id)
+        company_note: str | None = None
+        if req.product_id is not None:
+            prod = db.get(Product, req.product_id)
+            if prod is not None:
+                desc = (prod.description or "").strip()[:240]
+                company_note = f"«{prod.name}»" + (f" — {desc}" if desc else "")
         db.commit()
 
         conv_id = req.conversation_id
@@ -996,6 +1007,7 @@ async def stream_request_events(
             capabilities=cap,
             products_root=settings.products_root,
             current_user_message_id=user_msg.id if user_msg else None,
+            company_note=company_note,
         )
         with session_factory() as db:
             msg = db.get(AiChatMessage, assistant_msg_id)

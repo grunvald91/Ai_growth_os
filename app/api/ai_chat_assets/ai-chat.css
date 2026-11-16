@@ -397,7 +397,9 @@ textarea {
   text-overflow: ellipsis;
 }
 
-.ai-mode-pill {
+.ai-mode-pill,
+.ai-company-badge,
+.ai-company-select {
   font-size: 12px;
   font-weight: 600;
   padding: 4px 10px;
@@ -406,6 +408,22 @@ textarea {
   border: 1px solid var(--s-line);
   color: var(--s-text-2);
   white-space: nowrap;
+}
+
+.ai-company-badge,
+.ai-company-select {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-company-select {
+  cursor: pointer;
+  outline: none;
+}
+
+.ai-company-select:focus {
+  border-color: var(--s-accent);
 }
 
 /* ---------- Model Picker ---------- */
@@ -454,8 +472,8 @@ textarea {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  width: min(410px, calc(100vw - 28px));
-  max-height: min(480px, 72dvh);
+  width: min(640px, calc(100vw - 24px));
+  max-height: min(520px, 76dvh);
   display: flex;
   flex-direction: column;
   background: var(--s-surface);
@@ -495,18 +513,20 @@ textarea {
 .ai-model-list {
   overflow-y: auto;
   padding: 8px;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
+  align-content: start;
 }
 
 .ai-model-option {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   width: 100%;
+  min-width: 0;
   text-align: left;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-radius: var(--r-md);
   border: 1px solid var(--s-line);
   background: var(--s-surface);
@@ -533,16 +553,22 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
 }
 
 .ai-model-opt-title {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ai-model-opt-provider {
-  font-size: 11.5px;
+  flex-shrink: 0;
+  font-size: 11px;
   color: var(--s-muted);
 }
 
@@ -1149,6 +1175,47 @@ textarea {
   color: var(--s-warning);
   font-size: 12px;
   line-height: 1.35;
+}
+
+.ai-context-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 1px 0;
+}
+
+.ai-context-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.ai-context-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--s-line);
+  background: var(--s-surface);
+  color: var(--s-text-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.ai-context-chip:hover {
+  background: var(--s-accent-soft);
+  border-color: rgba(37, 99, 235, 0.3);
+  color: var(--s-accent);
+}
+
+.ai-context-chip:active {
+  transform: scale(0.98);
 }
 
 .ai-quote-banner {
@@ -1858,7 +1925,9 @@ textarea {
     display: none;
   }
 
-  .ai-mode-pill {
+  .ai-mode-pill,
+  .ai-company-badge,
+  .ai-company-select {
     display: none;
   }
 
@@ -1930,6 +1999,12 @@ textarea {
 
   .ai-conv-actions {
     opacity: 1;
+  }
+}
+
+@media (max-width: 560px) {
+  .ai-model-list {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

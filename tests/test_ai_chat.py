@@ -8,6 +8,7 @@ import json
 from uuid import UUID
 
 import httpx
+from fastapi import Request
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 from PIL import Image
@@ -24,6 +25,7 @@ from app.ai_chat.client import (
 )
 from app.ai_chat.models import AiChatAttachment, AiChatConversation, AiChatMessage, AiChatRequest
 from app.api.ai_chat import get_ai_chat_client, get_catalog_transport
+from app.api.content_studio_auth import require_studio_auth
 from app.core.studio_accounts import create_account
 from app.core.config import Settings, get_settings
 from app.db.models import Base
@@ -681,3 +683,119 @@ def test_context_window_truncation_preserves_full_db_history(chat_env):
         # Full history stays intact in DB
         detail = client.get(f"/studio/api/ai-chat/conversations/{conv_id}").json()
         assert len(detail["messages"]) == 14
+
+
+def test_chatgpt_image_models_and_payloads(chat_env):
+    _, settings, _, _, _ = chat_env
+    # When ClaudeHub lists gpt-image-1 / dall-e-3 alongside gemini-3.1-flash-image, all confirmed image models appear
+    app.dependency_overrides[get_catalog_transport] = lambda: httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "claude-opus-4-6"},
+                    {"id": "gemini-3.1-flash-image"},
+                    {"id": "gpt-image-1"},
+                    {"id": "gpt-image-1.5"},
+                    {"id": "dall-e-3"},
+                ]
+            },
+        )
+    )
+    with TestClient(app) as client:
+        res = client.get("/studio/api/ai-chat/models")
+        assert res.status_code == 200
+        by_id = {m["id"]: m for m in res.json()["models"]}
+        for mid in ("gemini-3.1-flash-image", "gpt-image-1", "gpt-image-1.5", "dall-e-3"):
+            assert by_id[mid]["supports_image_generation"] is True
+            assert by_id[mid]["provider"] in {"Google Gemini", "OpenAI ChatGPT"}
+
+    # When only openai_api_key exposes ChatGPT image models while ClaudeHub lacks them, catalog includes them too
+    app.dependency_overrides[get_catalog_transport] = lambda: httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"data": [{"id": "claude-opus-4-6"}, {"id": "gemini-3.1-flash-image"}]})
+    )
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(update={"openai_api_key": "sk-openai-test"})
+    with TestClient(app) as client:
+        res2 = client.get("/studio/api/ai-chat/models")
+        assert res2.status_code == 200
+        ids2 = {m["id"] for m in res2.json()["models"]}
+        assert "gpt-image-1" in ids2
+        assert "gpt-image-2.5-sunburst" in ids2
+
+    # Direct client payload check for gpt-image-1 (no response_format) vs dall-e-3 (response_format=b64_json)
+    import asyncio
+    import base64
+    from io import BytesIO
+    from PIL import Image
+    from app.ai_chat.client import ClaudeHubAiChatClient
+    from app.llm.model_catalog import resolve_model_capabilities
+
+    buf = BytesIO()
+    Image.new("RGB", (64, 64), (20, 90, 200)).save(buf, format="PNG")
+    b64_png = base64.b64encode(buf.getvalue()).decode("ascii")
+    seen_calls: list[tuple[str, dict]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen_calls.append((str(req.url), json.loads(req.content.decode("utf-8"))))
+        return httpx.Response(200, json={"data": [{"b64_json": b64_png}]})
+
+    client_obj = ClaudeHubAiChatClient(
+        api_key="hub-key",
+        openai_api_key="openai-key",
+        claudehub_model_ids={"dall-e-3"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    async def _run():
+        await client_obj.generate_image(
+            model="gpt-image-1",
+            prompt="Автосервис",
+            capabilities=resolve_model_capabilities("gpt-image-1"),
+        )
+        await client_obj.generate_image(
+            model="dall-e-3",
+            prompt="Автосервис",
+            capabilities=resolve_model_capabilities("dall-e-3"),
+        )
+
+    asyncio.run(_run())
+    assert seen_calls[0][0].startswith("https://api.openai.com/v1/")
+    assert "response_format" not in seen_calls[0][1]
+    assert seen_calls[1][0].startswith("https://api.claudehub.fun/v1/")
+    assert seen_calls[1][1]["response_format"] == "b64_json"
+
+
+def test_chat_navigation_links_company_context_and_ui_layout(chat_env):
+    db, _, company_a, company_b, _ = chat_env
+
+    def scoped(request: Request):
+        request.state.studio_login = "owner-a"
+        request.state.studio_product_ids = [str(company_a.id)]
+
+    app.dependency_overrides[require_studio_auth] = scoped
+    with TestClient(app) as client:
+        page = client.get(f"/studio/chat?product_id={company_a.id}")
+        assert page.status_code == 200
+        assert 'id="context-chips"' in page.text
+        # Contextual company chips sit in the composer, never duplicate inside empty-state
+        assert 'id="quick-suggestions"' not in page.text
+
+        boot_raw = page.text.split('<script id="ai-chat-boot" type="application/json">', 1)[1].split("</script>", 1)[0]
+        boot = json.loads(boot_raw)
+        assert boot["companyContext"]["name"] == company_a.name
+        assert [c["id"] for c in boot["companies"]] == [str(company_a.id)]
+        assert str(company_b.id) not in boot_raw
+
+        css = client.get("/studio/assets/ai-chat.css").text
+        assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in css
+        assert ".ai-context-chips" in css
+
+        # Check Studio entry points expose link to /studio/chat
+        studio_home = client.get(f"/studio/products/{company_a.id}")
+        assert studio_home.status_code == 200
+        assert f"/studio/chat?product_id={company_a.id}" in studio_home.text
+        assert "ИИ-чат" in studio_home.text
+
+        team_page = client.get("/studio/team")
+        assert team_page.status_code == 200
+        assert "/studio/chat" in team_page.text

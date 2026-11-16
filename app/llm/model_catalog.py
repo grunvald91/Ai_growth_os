@@ -355,6 +355,117 @@ CONFIRMED_MODEL_CAPABILITIES: dict[str, ConfirmedModelCapabilities] = {
         max_output_tokens=1024,
         image_sizes=("1024x1024", "1024x1792"),
     ),
+    "gpt-image-1": ConfirmedModelCapabilities(
+        id="gpt-image-1",
+        name="ChatGPT Image 1",
+        provider="OpenAI ChatGPT",
+        supports_text=False,
+        supports_streaming=False,
+        supports_image_generation=True,
+        supports_vision=False,
+        supports_files=False,
+        context_window_chars=16_000,
+        max_output_tokens=1024,
+        image_sizes=("1024x1024", "1024x1536", "1536x1024"),
+    ),
+    "gpt-image-1.5": ConfirmedModelCapabilities(
+        id="gpt-image-1.5",
+        name="ChatGPT Image 1.5",
+        provider="OpenAI ChatGPT",
+        supports_text=False,
+        supports_streaming=False,
+        supports_image_generation=True,
+        supports_vision=False,
+        supports_files=False,
+        context_window_chars=16_000,
+        max_output_tokens=1024,
+        image_sizes=("1024x1024", "1024x1536", "1536x1024"),
+    ),
+    "gpt-image-1-mini": ConfirmedModelCapabilities(
+        id="gpt-image-1-mini",
+        name="ChatGPT Image 1 Mini",
+        provider="OpenAI ChatGPT",
+        supports_text=False,
+        supports_streaming=False,
+        supports_image_generation=True,
+        supports_vision=False,
+        supports_files=False,
+        context_window_chars=16_000,
+        max_output_tokens=1024,
+        image_sizes=("1024x1024", "1024x1536", "1536x1024"),
+    ),
+    "gpt-image-2.5-sunburst": ConfirmedModelCapabilities(
+        id="gpt-image-2.5-sunburst",
+        name="ChatGPT Image 2.5",
+        provider="OpenAI ChatGPT",
+        supports_text=False,
+        supports_streaming=False,
+        supports_image_generation=True,
+        supports_vision=False,
+        supports_files=False,
+        context_window_chars=16_000,
+        max_output_tokens=1024,
+        image_sizes=("1024x1024", "1024x1280", "1792x1008", "1008x1792"),
+    ),
+    "chatgpt-image-latest": ConfirmedModelCapabilities(
+        id="chatgpt-image-latest",
+        name="ChatGPT Image Latest",
+        provider="OpenAI ChatGPT",
+        supports_text=False,
+        supports_streaming=False,
+        supports_image_generation=True,
+        supports_vision=False,
+        supports_files=False,
+        context_window_chars=16_000,
+        max_output_tokens=1024,
+        image_sizes=("1024x1024", "1024x1536", "1536x1024"),
+    ),
+    "dall-e-3": ConfirmedModelCapabilities(
+        id="dall-e-3",
+        name="DALL-E 3",
+        provider="OpenAI ChatGPT",
+        supports_text=False,
+        supports_streaming=False,
+        supports_image_generation=True,
+        supports_vision=False,
+        supports_files=False,
+        context_window_chars=16_000,
+        max_output_tokens=1024,
+        image_sizes=("1024x1024", "1024x1792", "1792x1024"),
+    ),
+    "gpt-4o": ConfirmedModelCapabilities(
+        id="gpt-4o",
+        name="GPT-4o",
+        provider="OpenAI ChatGPT",
+        supports_text=True,
+        supports_streaming=True,
+        supports_vision=True,
+        supports_files=True,
+        context_window_chars=160_000,
+        max_output_tokens=8192,
+    ),
+    "gpt-4.1": ConfirmedModelCapabilities(
+        id="gpt-4.1",
+        name="GPT-4.1",
+        provider="OpenAI ChatGPT",
+        supports_text=True,
+        supports_streaming=True,
+        supports_vision=True,
+        supports_files=True,
+        context_window_chars=240_000,
+        max_output_tokens=8192,
+    ),
+    "gpt-5": ConfirmedModelCapabilities(
+        id="gpt-5",
+        name="GPT-5",
+        provider="OpenAI ChatGPT",
+        supports_text=True,
+        supports_streaming=True,
+        supports_vision=True,
+        supports_files=True,
+        context_window_chars=240_000,
+        max_output_tokens=8192,
+    ),
 }
 
 
@@ -370,8 +481,8 @@ def _family_label(model_id: str) -> str:
         return "xAI Grok"
     if lower.startswith("gemini"):
         return "Google Gemini"
-    if lower.startswith(("gpt-", "o1", "o3", "o4")):
-        return "OpenAI"
+    if lower.startswith(("gpt-", "chatgpt-", "dall-e", "o1", "o3", "o4")):
+        return "OpenAI ChatGPT"
     if lower.startswith("qwen"):
         return "Qwen"
     return "ClaudeHub"
@@ -529,7 +640,7 @@ async def ai_chat_catalog(
                 ]
             except (RouterStoreError, ValueError, OSError):
                 configured_ids = [settings.llm_model] if settings.llm_model else []
-            live_ids = tuple(dict.fromkeys([*configured_ids, "gemini-3.1-flash-image"]))
+            live_ids = tuple(dict.fromkeys([*configured_ids, "gemini-3.1-flash-image", "gpt-image-1"]))
             warning = "Не удалось получить актуальный каталог моделей ClaudeHub; показан локально настроенный список без подтверждения доступности."
 
     # Also ensure confirmed router-configured models are discoverable, preserving order.
@@ -539,6 +650,16 @@ async def ai_chat_catalog(
         if mid not in seen:
             seen.add(mid)
             ordered_ids.append(mid)
+
+    # When OPENAI_API_KEY is configured separately and ClaudeHub /models didn't list ChatGPT image models,
+    # also expose the platform's verified ChatGPT image models.
+    if getattr(settings, "openai_api_key", None) and not any(
+        mid.startswith(("gpt-image-", "chatgpt-image-", "dall-e-")) for mid in seen
+    ):
+        for fallback_img in ("gpt-image-1", "gpt-image-2.5-sunburst"):
+            if fallback_img not in seen:
+                seen.add(fallback_img)
+                ordered_ids.append(fallback_img)
 
     models: list[dict] = []
     for mid in ordered_ids:

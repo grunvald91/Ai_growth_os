@@ -15,6 +15,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.ai_chat.client import AiChatClient, AiChatProviderError
@@ -53,7 +54,7 @@ from app.models.domain import Product
 from app.voice.dictionary import SLUG as VOICE_PROJECT_SLUG
 
 ASSETS = Path(__file__).parent / "ai_chat_assets"
-ASSET_VERSION = "2"
+ASSET_VERSION = "3"
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 
@@ -99,12 +100,79 @@ def _initial_product_id(request: Request, db: Session, principal: ChatPrincipal,
             return resolve_authorized_product_id(db, principal, parsed)
         except (ValueError, ChatError):
             pass
-    if principal.allowed_product_ids:
+    if principal.allowed_product_ids is not None:
+        if not principal.allowed_product_ids:
+            return None
         try:
             return resolve_authorized_product_id(db, principal, UUID(principal.allowed_product_ids[0]))
         except (ValueError, ChatError):
             return None
-    return None
+    return db.scalar(select(Product.id).order_by(Product.created_at.asc()).limit(1))
+
+
+def _authorized_products(db: Session, principal: ChatPrincipal) -> list[dict]:
+    query = select(Product).order_by(Product.created_at.asc()).limit(25)
+    if principal.allowed_product_ids is not None:
+        ids = []
+        for raw in principal.allowed_product_ids:
+            try:
+                ids.append(UUID(raw))
+            except ValueError:
+                continue
+        if not ids:
+            return []
+        query = select(Product).where(Product.id.in_(ids)).order_by(Product.created_at.asc()).limit(25)
+    return [{"id": str(row.id), "name": row.name} for row in db.scalars(query)]
+
+
+def _company_context_payload(db: Session, settings: Settings, product_id: UUID | None) -> dict | None:
+    if product_id is None:
+        return None
+    prod = db.get(Product, product_id)
+    if prod is None:
+        return None
+    name = prod.name
+    category = ""
+    one_liner = (prod.description or "").strip()[:160]
+    services: list[str] = []
+    topics: list[dict] = []
+
+    try:
+        from app.company_profile import load_company_profile
+
+        loaded = load_company_profile(settings.products_root, prod.slug)
+        if loaded.profile is not None:
+            ident = loaded.profile.identity
+            name = (ident.display_name or ident.name or name).strip()[:120]
+            category = (ident.industry or ident.category or "").strip()[:100]
+            if ident.one_liner:
+                one_liner = ident.one_liner.strip()[:160]
+            services = [
+                srv.name.strip()[:80]
+                for srv in (loaded.profile.offer.products_services or [])[:3]
+                if getattr(srv, "name", None) and srv.name.strip()
+            ]
+    except Exception:
+        pass
+
+    try:
+        from app.dispatcher.hints import topic_ideas
+
+        for chip in topic_ideas(settings.products_root, prod.slug)[:4]:
+            topic_text = str(chip.params.get("topic") or "").strip()
+            if topic_text:
+                topics.append({"label": chip.label[:64], "topic": topic_text[:160]})
+    except Exception:
+        pass
+
+    return {
+        "id": str(prod.id),
+        "name": name,
+        "category": category,
+        "oneLiner": one_liner,
+        "services": services,
+        "topics": topics,
+    }
 
 
 @router.get("/studio/chat", response_class=HTMLResponse)
@@ -121,9 +189,12 @@ def ai_chat_page(
         prod = db.get(Product, resolved_pid)
         if prod is not None and VOICE_PROJECT_SLUG.match(prod.slug or ""):
             voice_project = prod.slug
+    company_context = _company_context_payload(db, settings, resolved_pid)
     boot_config = {
         "apiBase": "/studio/api/ai-chat",
         "productId": str(resolved_pid) if resolved_pid else None,
+        "companyContext": company_context,
+        "companies": _authorized_products(db, principal),
         "studioHome": f"/studio/products/{resolved_pid}" if resolved_pid else "/studio",
         "voiceUrl": "/studio/voice/dictate",
         "voicePreviewUrl": "/studio/voice/preview",

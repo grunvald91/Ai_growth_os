@@ -106,13 +106,20 @@ def build_chat_context(
     capabilities: ConfirmedModelCapabilities,
     products_root: Path,
     current_user_message_id,
+    company_note: str | None = None,
 ) -> ContextBuildResult:
     """Assemble chronological context within the model's char budget.
 
     Older turns are dropped cleanly when the budget is full while full history
     remains preserved in PostgreSQL.
     """
-    budget = max(4_000, capabilities.context_window_chars - len(DEFAULT_SYSTEM_PROMPT) - 2_000)
+    system_prompt = DEFAULT_SYSTEM_PROMPT
+    if company_note and company_note.strip():
+        clean_note = _PRIVACY.sanitize_text(company_note).strip()[:500]
+        if clean_note:
+            system_prompt = f"{DEFAULT_SYSTEM_PROMPT}\n\nКонтекст активной компании: {clean_note}"
+
+    budget = max(4_000, capabilities.context_window_chars - len(system_prompt) - 2_000)
 
     eligible: list[AiChatMessage] = []
     for msg in history:
@@ -132,7 +139,7 @@ def build_chat_context(
 
     if not eligible:
         return ContextBuildResult(
-            system_prompt=DEFAULT_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             messages=[],
             context_truncated=False,
             context_omitted_count=0,
@@ -188,7 +195,7 @@ def build_chat_context(
         include_images=capabilities.supports_vision,
     )
     return ContextBuildResult(
-        system_prompt=DEFAULT_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         messages=[*selected_prior, current_api_msg],
         context_truncated=omitted > 0,
         context_omitted_count=omitted,

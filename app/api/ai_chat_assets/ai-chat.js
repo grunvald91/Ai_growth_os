@@ -5,6 +5,8 @@
   const boot = bootEl ? JSON.parse(bootEl.textContent || "{}") : {};
   const API_BASE = boot.apiBase || "/studio/api/ai-chat";
   const PRODUCT_ID = boot.productId || null;
+  const COMPANY_CTX = boot.companyContext || null;
+  const COMPANIES = Array.isArray(boot.companies) ? boot.companies : [];
   const VOICE_URL = boot.voiceUrl || "/studio/voice/dictate";
   const VOICE_PREVIEW_URL = boot.voicePreviewUrl || "/studio/voice/preview";
   const VOICE_PROJECT = boot.voiceProject || "";
@@ -64,6 +66,8 @@
     modelTabs: document.getElementById("model-tabs"),
     modelList: document.getElementById("model-list"),
     chatTitle: document.getElementById("chat-title"),
+    companyBadge: document.getElementById("company-badge"),
+    companySelect: document.getElementById("company-select"),
     modePill: document.getElementById("mode-pill"),
     catalogWarning: document.getElementById("catalog-warning"),
     contextBanner: document.getElementById("context-banner"),
@@ -77,6 +81,7 @@
     composerDropzone: document.getElementById("composer-dropzone"),
     dropOverlay: document.getElementById("drop-overlay"),
     composerWarning: document.getElementById("composer-warning"),
+    contextChips: document.getElementById("context-chips"),
     quotePreview: document.getElementById("quote-preview"),
     quotePreviewText: document.getElementById("quote-preview-text"),
     quoteClearBtn: document.getElementById("quote-clear-btn"),
@@ -693,6 +698,140 @@
       }
     }
     renderCatalog();
+    renderContextChips();
+  }
+
+  // ---------- Contextual Company Chips Always Above Input ----------
+  function setupCompanyContextUI() {
+    if (COMPANIES.length > 1 && el.companySelect) {
+      el.companySelect.textContent = "";
+      COMPANIES.forEach((c) => {
+        const opt = document.createElement("option");
+        opt.value = c.id;
+        opt.textContent = c.name;
+        if (PRODUCT_ID && c.id === PRODUCT_ID) opt.selected = true;
+        el.companySelect.appendChild(opt);
+      });
+      el.companySelect.hidden = false;
+      if (el.companyBadge) el.companyBadge.hidden = true;
+      el.companySelect.addEventListener("change", () => {
+        const nextPid = el.companySelect.value;
+        if (!nextPid) return;
+        window.location.href = `/studio/chat?product_id=${encodeURIComponent(nextPid)}`;
+      });
+    } else if (COMPANY_CTX && COMPANY_CTX.name && el.companyBadge) {
+      el.companyBadge.textContent = COMPANY_CTX.name;
+      el.companyBadge.hidden = false;
+      if (el.companySelect) el.companySelect.hidden = true;
+    }
+  }
+
+  function buildContextChips() {
+    const companyName = (COMPANY_CTX && COMPANY_CTX.name) || "";
+    const hasCompany = Boolean(companyName);
+    const labelRef = hasCompany ? `«${companyName}»` : "нашего бизнеса";
+    const categoryNote = COMPANY_CTX && COMPANY_CTX.category ? ` (${COMPANY_CTX.category})` : "";
+    const services = (COMPANY_CTX && Array.isArray(COMPANY_CTX.services)) ? COMPANY_CTX.services : [];
+    const topics = (COMPANY_CTX && Array.isArray(COMPANY_CTX.topics)) ? COMPANY_CTX.topics : [];
+    const primaryService = services[0] || "";
+    const servicePhrase = primaryService ? ` с фокусом на услугу «${primaryService}»` : "";
+
+    if (state.quote && state.quote.text) {
+      return [
+        { label: "Объясни проще", prompt: "Объясни выделенный фрагмент проще и с конкретным примером." },
+        { label: `Примени к ${labelRef}`, prompt: `Как лучше применить это на практике для ${labelRef}${categoryNote}?` },
+        { label: "План по шагам", prompt: `Разбей эту идею на пошаговый план внедрения для ${labelRef}.` },
+      ];
+    }
+
+    if (state.pendingAttachments.length > 0) {
+      return [
+        { label: "5 главных выводов", prompt: "Разбери прикреплённые материалы и выдели 5 главных выводов." },
+        { label: `Внедрить в ${labelRef}`, prompt: `Какие шаги из прикреплённого файла стоит внедрить в ${labelRef}${categoryNote}?` },
+        { label: "Таблица задач и рисков", prompt: "Сформируй по прикреплённому материалу таблицу: задача, срок, ожидаемый эффект." },
+      ];
+    }
+
+    if (state.mode === "image") {
+      const chips = [
+        {
+          label: `Баннер акции ${hasCompany ? `«${companyName}»` : ""}`.trim(),
+          prompt: `Создай современный рекламный баннер для ${labelRef}${categoryNote}${servicePhrase}: чистая композиция, выразительный свет, без мелкого текста на изображении.`,
+        },
+        {
+          label: "Обложка для соцсетей",
+          prompt: `Сгенерируй стильную минималистичную обложку для канала ${labelRef}${categoryNote}, гармоничные цвета, без текста.`,
+        },
+        {
+          label: "Сцена для Stories 9:16",
+          prompt: `Вертикальный визуал 9:16 для сторис ${labelRef}${categoryNote}: чистый верхний край под будущий заголовок, фотореализм, без надписей.`,
+        },
+      ];
+      if (primaryService) {
+        chips.push({
+          label: `Визуал: ${primaryService}`,
+          prompt: `Рекламное изображение по услуге «${primaryService}» для ${labelRef}${categoryNote}, современный премиальный стиль, без текста.`,
+        });
+      }
+      return chips;
+    }
+
+    const hasAssistantMessages = state.messages.some((m) => m.role === "assistant" && (m.content || "").trim());
+    if (hasAssistantMessages) {
+      return [
+        { label: "Сократи и конкретизируй", prompt: `Сократи последний ответ для ${labelRef} вдвое — оставь только ключевые шаги и цифры.` },
+        { label: `Пост для ${labelRef}`, prompt: `Преврати эти идеи в готовый пост для Telegram-канала ${labelRef}${servicePhrase}.` },
+        { label: "Уточни под клиентов", prompt: `Адаптируй эти рекомендации под целевых клиентов ${labelRef}${categoryNote} и оформи в таблицу.` },
+        { label: "3 заголовка и оффера", prompt: `Предложи 3 сильных заголовка и оффера для ${labelRef} по итогам обсуждения.` },
+      ];
+    }
+
+    const starter = [];
+    topics.slice(0, 2).forEach((t) => {
+      starter.push({
+        label: t.label,
+        prompt: `Подготовь материал для ${labelRef}${categoryNote} по теме «${t.topic}»: тезисы, структура и готовый текст без штампов.`,
+      });
+    });
+    starter.push(
+      {
+        label: `План акции ${hasCompany ? `«${companyName}»` : "бизнеса"}`,
+        prompt: `Составь краткий план запуска акции для ${labelRef}${categoryNote}${servicePhrase} на 2 недели с таблицей KPI.`,
+      },
+      {
+        label: primaryService ? `Пост про «${primaryService}»` : `Пост в Telegram`,
+        prompt: `Напиши сильный пост для Telegram от имени ${labelRef}${categoryNote}${servicePhrase}: заголовок, польза клиенту и мягкий призыв к записи.`,
+      },
+      {
+        label: "Ответ клиенту на отзыв",
+        prompt: `Напиши вежливый и уверенный шаблон ответа клиенту ${labelRef} на критический отзыв с предложением решить вопрос.`,
+      },
+      {
+        label: "Идеи привлечения клиентов",
+        prompt: `Предложи 5 практических гипотез привлечения новых и возврата постоянных клиентов для ${labelRef}${categoryNote}.`,
+      },
+    );
+    return starter.slice(0, 5);
+  }
+
+  function renderContextChips() {
+    if (!el.contextChips) return;
+    const chips = buildContextChips();
+    el.contextChips.textContent = "";
+    chips.forEach((chip) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ai-context-chip";
+      btn.textContent = chip.label;
+      btn.title = chip.prompt;
+      btn.addEventListener("click", () => {
+        el.composerInput.value = chip.prompt;
+        localStorage.setItem(draftKey(state.activeConversationId), el.composerInput.value);
+        autoResizeTextarea();
+        el.composerInput.focus();
+      });
+      el.contextChips.appendChild(btn);
+    });
   }
 
   // ---------- Conversations Sidebar ----------
@@ -798,6 +937,7 @@
     state.messages.forEach((msg) => {
       el.messageList.appendChild(buildMessageElement(msg));
     });
+    renderContextChips();
     if (state.autoScrollPinned) {
       scrollToBottom(false);
     }
@@ -1072,6 +1212,7 @@
     state.quote = { messageId, text: text.slice(0, 4000) };
     el.quotePreviewText.textContent = state.quote.text;
     el.quotePreview.hidden = false;
+    renderContextChips();
     el.composerInput.focus();
   }
 
@@ -1079,12 +1220,14 @@
     state.quote = null;
     el.quotePreview.hidden = true;
     el.quotePreviewText.textContent = "";
+    renderContextChips();
   }
 
   // ---------- Attachments ----------
   function renderPendingAttachments() {
     el.attachmentsStrip.textContent = "";
     el.attachmentsStrip.hidden = state.pendingAttachments.length === 0;
+    renderContextChips();
     state.pendingAttachments.forEach((att) => {
       const chip = document.createElement("div");
       chip.className = "ai-draft-att";
@@ -1270,6 +1413,7 @@
       }
       updateMessageInPlace(assistantMessageId);
       setSendingUI(false, null);
+      renderContextChips();
     } else if (eventName === "error") {
       msg.status = payload.status || "error";
       msg.error_message = payload.error || payload.message || "Не удалось получить ответ";
@@ -1589,14 +1733,6 @@
 
     document.querySelectorAll(".ai-mode-btn").forEach((btn) => {
       btn.addEventListener("click", () => setMode(btn.dataset.mode));
-    });
-
-    document.querySelectorAll(".ai-suggestion-chip").forEach((chip) => {
-      chip.addEventListener("click", () => {
-        el.composerInput.value = chip.dataset.prompt || "";
-        autoResizeTextarea();
-        el.composerInput.focus();
-      });
     });
 
     el.composerInput.addEventListener("input", () => {
@@ -2207,6 +2343,8 @@
 
   async function init() {
     syncThemeButtons();
+    setupCompanyContextUI();
+    renderContextChips();
     bindEvents();
     setupVoiceInput();
 

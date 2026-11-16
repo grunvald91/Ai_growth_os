@@ -369,6 +369,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
       <nav class="nav" aria-label="Основная навигация">
         {item("overview", base, "⌂", "Главная")}
         {item("create", base + "/create", "＋", "Создать материал")}
+        {item("chat", f"/studio/chat?product_id={product_id}", "✦", "ИИ-чат")}
         {item("work", base + "/work", "◴", "В работе")}
         {item("materials", base + "/materials", "▤", "Мои материалы")}
         {item("channels", base + "/channels", "↗", "Публикации")}
@@ -401,6 +402,7 @@ def more_links(product_id: UUID) -> list[tuple[str, str, str, str]]:
         ("profile", base + "/profile", "▣", "Профиль компании"),
         ("brand", base + "/brand-kit", "◈", "Фирменный стиль"),
         ("speed", base + "/speed", "⏱", "Скорость ИИ-моделей"),
+        ("chat", f"/studio/chat?product_id={product_id}", "✦", "ИИ-чат"),
         ("team", "/studio/team", "♧", "ИИ-команда"),
         ("tune", "/studio/tune", "⚙", "Настройка агентов"),
         ("accounts", base + "/accounts", "☺", "Аккаунты"),

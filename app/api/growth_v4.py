@@ -268,12 +268,14 @@ def render_v4(page, request, pid, switch):
     from app.api.content_studio import more_links
     if pid:
         seen = {link[2] for link in links}
-        glyphs = {'whiteboard':'video','mail':'mail','team':'user','intelligence':'search','analytics':'chart','profile':'settings'}
+        glyphs = {'chat':'message','whiteboard':'video','mail':'mail','team':'user','intelligence':'search','analytics':'chart','profile':'settings'}
         links += [(key, label, href, glyphs.get(key,'layers'))
                   for key,href,_,label in more_links(pid)
                   if href not in seen and key not in {'whiteboard', 'switch'}]
     else:
-        links = [('companies','Компании','/studio?choose=1','layers'),('team','ИИ-команда','/studio/team','user')]
+        links = [('companies','Компании','/studio?choose=1','layers'),
+                 ('chat','ИИ-чат','/studio/chat','message'),
+                 ('team','ИИ-команда','/studio/team','user')]
 
     def link(row, mobile=False):
         key,label,href,glyph = row
@@ -394,7 +396,9 @@ def render_v4(page, request, pid, switch):
                     (doc.find(ident='rail'), '<div class="rail-head"><h2>Ваш помощник</h2><span>ServGo AI</span></div>'
                      '<div class="assistant-box"><div class="assistant-avatar">'+icon('spark')+'</div><h3>Что нужно сделать?</h3>'
                      '<p>Опишите задачу обычными словами. Команда предложит следующий шаг.</p>'
-                     f'<a class="btn blue" href="{base}">Открыть помощника</a></div>'+''.join('<div class="rail-card">'+link(r)+'</div>' for r in links[:4]))]
+                     f'<a class="btn blue" href="{base}">Открыть помощника</a>'
+                     + (f'<a class="btn" style="margin-top:8px" href="/studio/chat?product_id={pid}">Открыть ИИ-чат</a>' if pid else '<a class="btn" style="margin-top:8px" href="/studio/chat">Открыть ИИ-чат</a>')
+                     + '</div>'+''.join('<div class="rail-card">'+link(r)+'</div>' for r in links[:4]))]
     # Offsets belong to the pristine document: apply before title/styles edits.
     pristine = template
     for e,value in sorted(replacements,key=lambda x:x[0][3],reverse=True):
@@ -410,7 +414,7 @@ def render_v4(page, request, pid, switch):
     more_groups = [
         ('Контент и продвижение', ('seo','plan','materials','channels','campaigns','comments')),
         ('Аналитика и исследования', ('analytics','intelligence')),
-        ('ИИ-команда', ('team','tune','speed')),
+        ('ИИ-инструменты', ('chat','team','tune','speed')),
         ('Компания и управление', ('profile','accounts','servgo','logout')),
     ]
     more_html = ''.join(

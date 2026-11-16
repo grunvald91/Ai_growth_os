@@ -109,7 +109,7 @@ ul.v{margin:4px 0;padding-left:18px}.finding{border-left:3px solid var(--line);p
 def page(title: str, active: str, body: str) -> HTMLResponse:
     tabs = "".join(f'<a class="{"on" if key == active else ""}" href="{href}">{label}</a>' for key, href, label in (
         ("prompts", "/studio/tune", "Промпты агентов"), ("work", "/studio/tune/work", "Ход работы"),
-        ("models", "/studio/team", "Модели и критик"), ("studio", "/studio", "← В Studio")))
+        ("chat", "/studio/chat", "ИИ-чат"), ("models", "/studio/team", "Модели и критик"), ("studio", "/studio", "← В Studio")))
     return HTMLResponse(f"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)} · Настройка агентов</title>
 <style>{CSS}</style></head><body><header><b>Настройка агентов</b><nav>{tabs}</nav></header>

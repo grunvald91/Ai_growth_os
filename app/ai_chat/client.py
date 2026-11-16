@@ -116,11 +116,15 @@ class ClaudeHubAiChatClient:
         base_url: str = "https://api.claudehub.fun/v1",
         timeout_seconds: float = 300.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        openai_api_key: str | None = None,
+        claudehub_model_ids: set[str] | frozenset[str] | None = None,
     ) -> None:
-        if not api_key or not api_key.strip():
+        if (not api_key or not api_key.strip()) and not (openai_api_key and openai_api_key.strip()):
             raise AiChatProviderError("Ключ ClaudeHub (XAI_API_KEY) не настроен на сервере")
-        self._api_key = api_key.strip()
+        self._api_key = (api_key or "").strip()
         self._base_url = _validate_base_url(base_url)
+        self._openai_api_key = openai_api_key.strip() if openai_api_key and openai_api_key.strip() else None
+        self._claudehub_model_ids = frozenset(claudehub_model_ids or ())
         self._timeout = httpx.Timeout(max(30.0, timeout_seconds), connect=15.0)
         self._transport = transport
 
@@ -134,6 +138,8 @@ class ClaudeHubAiChatClient:
         conversation_id: str,
         cancel_event: asyncio.Event | None = None,
     ) -> AsyncIterator[ChatStreamChunk]:
+        if not self._api_key:
+            raise AiChatProviderError("Ключ ClaudeHub (XAI_API_KEY) не настроен на сервере")
         api_messages: list[dict] = [{"role": "system", "content": system_prompt}, *messages]
         want_stream = bool(capabilities.supports_streaming)
         payload: dict[str, object] = {
@@ -281,13 +287,28 @@ class ClaudeHubAiChatClient:
         if capabilities.image_sizes:
             chosen_size = size if size in capabilities.image_sizes else capabilities.image_sizes[0]
             body["size"] = chosen_size
+        lower_model = model.lower()
+        if lower_model.startswith("dall-e"):
+            body["response_format"] = "b64_json"
+        elif lower_model.startswith(("gpt-image-", "chatgpt-image-")):
+            body["n"] = 1
+
+        use_openai_direct = (
+            self._openai_api_key is not None
+            and lower_model.startswith(("gpt-image-", "chatgpt-image-", "dall-e"))
+            and (not self._claudehub_model_ids or model not in self._claudehub_model_ids)
+        )
+        req_base_url = "https://api.openai.com/v1/" if use_openai_direct else self._base_url
+        req_api_key = self._openai_api_key if use_openai_direct else self._api_key
+        if not req_api_key:
+            raise AiChatProviderError("Ключ ClaudeHub (XAI_API_KEY) не настроен на сервере")
 
         headers = {
-            "Authorization": f"Bearer {self._api_key}",
+            "Authorization": f"Bearer {req_api_key}",
             "Content-Type": "application/json",
         }
         async with httpx.AsyncClient(
-            base_url=self._base_url,
+            base_url=req_base_url,
             timeout=httpx.Timeout(600.0, connect=15.0),
             transport=self._transport,
             follow_redirects=False,
