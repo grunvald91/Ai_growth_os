@@ -175,6 +175,36 @@ def seo_plan_board(run: dict | None, product_id: UUID, *, autorun: bool,
             if run.get("status") in ("queued", "running")
             else "Статьи пока не поставлены в очередь. Откройте последний запуск для подробностей."
         )
+    landing_html = ""
+    if run.get("landing_ready"):
+        candidate_pages = run.get("landing_pages") or []
+        type_labels = {"offer": "Товар или услуга", "device": "Устройство", "location": "Регион"}
+        reason_labels = {
+            "unique_content_required": "Нужны уникальное содержание и редакторская проверка",
+            "offer_evidence_required": "Не подтверждено подходящее действующее предложение",
+            "local_value_required": "Необходимо доказать реальную ценность для этого региона",
+            "already_covered": "Запрос уже охвачен статьёй; требуется оценка необходимости отдельной страницы",
+        }
+        candidate_items = "".join(
+            '<li class="seo-board-item"><div class="seo-board-copy">'
+            '<strong>' + _esc(candidate.get("primary_query")) + '</strong>'
+            '<small>' + _esc(type_labels.get(candidate.get("page_type"), "Посадочная страница"))
+            + ' · Предлагаемый адрес: ' + _esc(candidate.get("proposed_path")) + '</small>'
+            '<span>' + _esc(reason_labels.get(candidate.get("reason_code"), "Нужна проверка"))
+            + '</span></div><span class="seo-board-state state-'
+            + ("review" if candidate.get("status") == "review" else "queued") + '">'
+            + ("На проверку" if candidate.get("status") == "review" else "Заблокирована")
+            + '</span></li>' for candidate in candidate_pages
+        )
+        landing_html = (
+            '<h3>Programmatic SEO: посадочные страницы</h3>'
+            '<p>Это предложения по реальным поисковым подсказкам, а не опубликованные URL. '
+            'Частотность неизвестна. Для каждой страницы необходимо подтвердить '
+            'предложение, уникальную пользу, canonical и маршрут публикации. '
+            'Региональные дубли без собственных данных не публикуются.</p>'
+            + ('<ol class="seo-board-list">' + candidate_items + '</ol>' if candidate_pages
+               else '<p>Подходящих коммерческих поисковых запросов в текущем ядре не найдено.</p>')
+        )
     run_status = "Создание плана: " + str(run.get("status_label") or run.get("status") or "неизвестно")
     updated_at = _when(run.get("updated_at"), tz)
     return (
@@ -194,5 +224,6 @@ def seo_plan_board(run: dict | None, product_id: UUID, *, autorun: bool,
         + ('<h3>Статьи по плану</h3><ol class="seo-board-list">' + visible
            + '</ol>' + remainder if total else
            '<p class="seo-board-empty">Статьи пока не сформированы.</p>')
+        + landing_html
         + '</section>'
     )

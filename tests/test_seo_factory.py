@@ -91,7 +91,13 @@ async def test_factory_turns_company_profile_into_queued_search_articles(env):
         factory_task = db.scalar(select(Task).where(Task.assigned_agent == "seo_factory"))
         assert factory_task.status == TaskStatus.COMPLETED
         kinds = {a.kind for a in db.scalars(select(Artifact))}
-        assert {"semantic_core", "seo_content_plan", "seo_factory_report", "content_request"} <= kinds
+        assert {"semantic_core", "seo_content_plan", "seo_landing_opportunities",
+                "seo_factory_report", "content_request"} <= kinds
+        landing = db.scalar(select(Artifact).where(Artifact.kind == "seo_landing_opportunities"))
+        assert landing.product_id == product_id
+        assert json.loads(landing.content)["mode"] == "draft_only"
+        report = db.scalar(select(Artifact).where(Artifact.kind == "seo_factory_report"))
+        assert "landing_pages_proposed" in json.loads(report.content)
         article_task = db.scalar(select(Task).where(Task.assigned_agent == "content_factory"))
         assert article_task.status == TaskStatus.QUEUED
         request = ArticleProductionInput.model_validate_json(
