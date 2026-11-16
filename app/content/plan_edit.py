@@ -14,7 +14,7 @@ from app.models.domain import Artifact, Product
 
 def update_draft_package(db, *, product_id: UUID, plan_id: UUID,
                          package_key: str, topic: str, objective: str,
-                         audience: str) -> bool:
+                         audience: str, expected_values: dict | None = None) -> bool:
     """Update all channel adaptations of one draft package atomically.
 
     Returns False when nothing changed; raises on unknown plan/package or
