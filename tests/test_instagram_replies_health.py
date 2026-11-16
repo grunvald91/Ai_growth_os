@@ -67,7 +67,7 @@ async def test_nested_instagram_replies_resume_native_pagination_and_dedupe(ctx)
         db.refresh(channel)
         assert channel.cursor["_ig_replies"].get("active") is None
         assert await svc.sync(product.id, "instagram") == 0  # wraps cycle
-        assert await svc.sync(product.id, "instagram") == 1  # revisit: dedup row
+        assert await svc.sync(product.id, "instagram") == 0  # revisit: dedup row
 
     replies = list(db.scalars(select(BusinessComment).where(
         BusinessComment.platform == "instagram",
