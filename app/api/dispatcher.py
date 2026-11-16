@@ -234,6 +234,13 @@ def dispatcher_css():
                     headers={"Cache-Control": "no-cache"})
 
 
+@router.get("/studio/assets/calendar-ui-sdk.css")
+def calendar_ui_sdk_css():
+    """Same-origin CSS used only by the Studio calendar's UI SDK pilot."""
+    return Response((ASSETS / "calendar-ui-sdk.css").read_text(encoding="utf-8"),
+                    media_type="text/css", headers={"Cache-Control": "no-cache"})
+
+
 @router.get("/studio/assets/dispatcher-review.css")
 def dispatcher_review_css():
     return Response((ASSETS / "dispatcher-review.css").read_text(encoding="utf-8"),
