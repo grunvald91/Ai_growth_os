@@ -89,7 +89,8 @@ def test_unverified_profile_never_becomes_published_or_local_claim():
         _core(_cluster(1, "vpn в Москве цена", "commercial")), None)
     page = plan.candidates[0]
     assert page.status == "blocked" and page.geography is None
-    assert page.offer_name is None and page.reason_code == "offer_evidence_required"
+    assert page.offer_name is None and page.reason_code == "unverified_geography"
+    assert page.page_type == "location"
     assert "Моск" in page.primary_query
 
 
