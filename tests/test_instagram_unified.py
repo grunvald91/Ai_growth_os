@@ -428,3 +428,33 @@ async def test_unresolved_album_cannot_create_approval_or_send_claim(ctx):
     assert not list(db.scalars(select(Approval)))
     assert not list(db.scalars(select(Publication)))
     assert not gateway.sent
+
+
+def test_webhook_import_requires_both_operator_and_company_opt_in(ctx):
+    import asyncio
+    db, product, svc, _, _ = ctx
+    meta_config(svc.settings)
+    app.dependency_overrides[get_settings] = lambda: svc.settings
+    asyncio.run(svc.connect(product.id, ConnectInput(
+        platform="instagram", account_id="100", token="owner-token")))
+    raw, sig = signed({"object": "instagram", "entry": [
+        {"id": "100", "changes": [{"field": "comments", "value": {
+            "id": "73001", "text": "Нужна консультация",
+            "media": {"id": "97001"}, "from": {"id": "81001"}}}]}]},
+        svc.settings.comment_meta_app_secret)
+    client = client_for(ctx)
+    url = "/api/integrations/instagram/webhook"
+    headers = {"x-hub-signature-256": sig}
+
+    svc.settings.comment_meta_webhook_enabled = False
+    assert client.post(url, content=raw, headers=headers).json()["imported"] == 0
+
+    svc.settings.comment_meta_webhook_enabled = True
+    assert client.post(url, content=raw, headers=headers).json()["imported"] == 0
+
+    svc.configure(product.id, AgentSettings(enabled=False, auto_import=True))
+    assert client.post(url, content=raw, headers=headers).json()["imported"] == 0
+
+    svc.configure(product.id, AgentSettings(enabled=True, auto_import=True))
+    assert client.post(url, content=raw, headers=headers).json()["imported"] == 1
+    assert len(list(db.scalars(select(BusinessComment)))) == 1
