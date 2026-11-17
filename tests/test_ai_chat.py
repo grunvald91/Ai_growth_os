@@ -799,3 +799,66 @@ def test_chat_navigation_links_company_context_and_ui_layout(chat_env):
         team_page = client.get("/studio/team")
         assert team_page.status_code == 200
         assert "/studio/chat" in team_page.text
+
+
+def test_specialist_catalog_validation_and_role_persists_in_chat(chat_env):
+    """Role is server-owned, scoped to a conversation and independent of the selected model."""
+    _, _, company_a, _, fake_client = chat_env
+    with TestClient(app) as client:
+        catalog_response = client.get("/studio/api/ai-chat/specialists")
+        assert catalog_response.status_code == 200
+        catalog = catalog_response.json()["specialists"]
+        assert {item["id"] for item in catalog} == {"business_consultant", "marketer", "smm_specialist"}
+        assert all("filename" not in item and "system_prompt" not in item for item in catalog)
+        invalid = client.post(
+            "/studio/api/ai-chat/conversations",
+            json={"product_id": str(company_a.id), "specialist_id": "user-supplied-prompt"},
+        )
+        assert invalid.status_code == 422
+
+        expected = {
+            "business_consultant": "Бизнес-консультант",
+            "marketer": "Маркетолог",
+            "smm_specialist": "SMM-специалист",
+        }
+        for specialist_id, label in expected.items():
+            created = client.post(
+                "/studio/api/ai-chat/conversations",
+                json={"product_id": str(company_a.id), "specialist_id": specialist_id},
+            )
+            assert created.status_code == 201
+            conv = created.json()
+            assert conv["specialist_id"] == specialist_id
+            conv_id = conv["id"]
+            msg = client.post(
+                f"/studio/api/ai-chat/conversations/{conv_id}/messages",
+                json={"content": "Дай один практический совет", "mode": "text", "model_id": "claude-opus-4-6"},
+            )
+            assert msg.status_code == 201
+            response = client.get(f"/studio/api/ai-chat/requests/{msg.json()['request']['id']}/events")
+            assert response.status_code == 200
+            system_prompt = fake_client.chat_calls[-1]["system_prompt"]
+            assert label in system_prompt
+            assert "ServGo" in system_prompt
+            assert "Company A" in system_prompt
+            stored = client.get(f"/studio/api/ai-chat/conversations/{conv_id}").json()["conversation"]
+            assert stored["specialist_id"] == specialist_id
+            changed = client.patch(
+                f"/studio/api/ai-chat/conversations/{conv_id}",
+                json={"selected_model": "gemini-3.1-flash"},
+            )
+            assert changed.status_code == 200
+            assert changed.json()["specialist_id"] == specialist_id
+            no_role_change = client.patch(
+                f"/studio/api/ai-chat/conversations/{conv_id}", json={"specialist_id": "marketer"},
+            )
+            assert no_role_change.status_code == 422
+
+        ordinary = client.post("/studio/api/ai-chat/conversations", json={}).json()
+        assert ordinary["specialist_id"] is None
+        message = client.post(
+            f"/studio/api/ai-chat/conversations/{ordinary['id']}/messages",
+            json={"content": "Привет", "mode": "text", "model_id": "claude-opus-4-6"},
+        )
+        client.get(f"/studio/api/ai-chat/requests/{message.json()['request']['id']}/events")
+        assert "ПРОФИЛЬ ВЫБРАННОГО СПЕЦИАЛИСТА" not in fake_client.chat_calls[-1]["system_prompt"]

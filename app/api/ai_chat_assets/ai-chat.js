@@ -31,6 +31,8 @@
       warning: null,
     },
     conversations: [],
+    specialists: [],
+    specialistId: null,
     activeConversationId: null,
     messages: [],
     selectedModelId: "",
@@ -66,6 +68,11 @@
     modelTabs: document.getElementById("model-tabs"),
     modelList: document.getElementById("model-list"),
     chatTitle: document.getElementById("chat-title"),
+    specialistBadge: document.getElementById("specialist-badge"),
+    specialistPicker: document.getElementById("specialist-picker"),
+    specialistStarters: document.getElementById("specialist-starters"),
+    emptyTitle: document.getElementById("empty-state-title"),
+    emptyDescription: document.getElementById("empty-state-desc"),
     companyBadge: document.getElementById("company-badge"),
     companySelect: document.getElementById("company-select"),
     modePill: document.getElementById("mode-pill"),
@@ -834,6 +841,74 @@
     });
   }
 
+  // ---------- Specialist picker (the role is persisted per conversation) ----------
+  function getSpecialist(specialistId) {
+    return state.specialists.find((item) => item.id === specialistId) || null;
+  }
+
+  function renderSpecialistPicker() {
+    if (!el.specialistPicker) return;
+    const chosen = getSpecialist(state.specialistId);
+    el.specialistBadge.hidden = !chosen;
+    if (chosen) el.specialistBadge.textContent = chosen.name;
+    if (el.emptyTitle) el.emptyTitle.textContent = chosen ? chosen.name : "Чем помочь сегодня?";
+    if (el.emptyDescription) {
+      el.emptyDescription.textContent = chosen
+        ? chosen.description + ". Начните с готового вопроса или напишите свой."
+        : "Выберите специалиста или задайте вопрос обычному ИИ. Модель можно поменять независимо от роли.";
+    }
+
+    const options = [
+      { id: null, name: "Обычный чат", description: "Любые вопросы без специализации" },
+      ...state.specialists,
+    ];
+    el.specialistPicker.textContent = "";
+    options.forEach((item) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ai-specialist-choice";
+      if (item.id === state.specialistId) btn.classList.add("is-selected");
+      btn.setAttribute("aria-pressed", String(item.id === state.specialistId));
+      const glyph = document.createElement("span");
+      glyph.className = "ai-specialist-choice-icon";
+      glyph.textContent = ({ business_consultant: "▦", marketer: "◎", smm_specialist: "✦" })[item.id] || "◌";
+      const content = document.createElement("span");
+      content.className = "ai-specialist-choice-text";
+      const name = document.createElement("strong");
+      name.textContent = item.name;
+      const description = document.createElement("small");
+      description.textContent = item.description;
+      content.append(name, description);
+      btn.append(glyph, content);
+      btn.addEventListener("click", async () => {
+        if (state.isSending || item.id === state.specialistId) return;
+        // Never silently change the role of a saved conversation.
+        if (state.activeConversationId) await startNewChat();
+        state.specialistId = item.id;
+        if (state.mode !== "text") setMode("text");
+        renderSpecialistPicker();
+        el.composerInput.focus();
+      });
+      el.specialistPicker.appendChild(btn);
+    });
+    if (el.specialistStarters) {
+      el.specialistStarters.textContent = "";
+      (chosen ? chosen.starter_prompts : []).forEach((prompt) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ai-suggestion-chip";
+        btn.textContent = prompt;
+        btn.addEventListener("click", () => {
+          el.composerInput.value = prompt;
+          localStorage.setItem(draftKey(state.activeConversationId), prompt);
+          autoResizeTextarea();
+          el.composerInput.focus();
+        });
+        el.specialistStarters.appendChild(btn);
+      });
+    }
+  }
+
   // ---------- Conversations Sidebar ----------
   function renderConversations() {
     el.convList.textContent = "";
@@ -858,7 +933,8 @@
       title.textContent = conv.title;
       const meta = document.createElement("span");
       meta.className = "ai-conv-meta";
-      meta.textContent = conv.last_message_preview || "Пустой диалог";
+      const specialist = getSpecialist(conv.specialist_id);
+      meta.textContent = (specialist ? specialist.name + " · " : "") + (conv.last_message_preview || "Пустой диалог");
       mainBtn.append(title, meta);
       mainBtn.addEventListener("click", () => {
         closeMobileDrawer();
@@ -938,6 +1014,7 @@
       el.messageList.appendChild(buildMessageElement(msg));
     });
     renderContextChips();
+    renderSpecialistPicker();
     if (state.autoScrollPinned) {
       scrollToBottom(false);
     }
@@ -1431,10 +1508,13 @@
       body: JSON.stringify({
         model_id: state.selectedModelId || null,
         product_id: PRODUCT_ID,
+        specialist_id: state.specialistId,
       }),
     });
     state.activeConversationId = conv.id;
+    state.specialistId = conv.specialist_id || null;
     localStorage.setItem(activeConvStorageKey(), conv.id);
+    renderSpecialistPicker();
     await loadConversations();
     return conv.id;
   }
@@ -1537,6 +1617,7 @@
     const detail = await apiFetch(`/conversations/${convId}`);
     el.chatTitle.textContent = detail.conversation.title;
     state.messages = detail.messages || [];
+    state.specialistId = detail.conversation.specialist_id || null;
     if (detail.conversation.selected_model && getModel(detail.conversation.selected_model)) {
       state.selectedModelId = detail.conversation.selected_model;
     }
@@ -1566,6 +1647,7 @@
     }
     setSendingUI(false, null);
     state.activeConversationId = null;
+    state.specialistId = null;
     localStorage.removeItem(activeConvStorageKey());
     state.messages = [];
     el.chatTitle.textContent = "Новый диалог";
@@ -1574,6 +1656,7 @@
     renderPendingAttachments();
     renderConversations();
     renderMessages();
+    renderSpecialistPicker();
     el.composerInput.value = localStorage.getItem(draftKey(null)) || "";
     autoResizeTextarea();
     el.composerInput.focus();
@@ -2345,6 +2428,13 @@
     syncThemeButtons();
     setupCompanyContextUI();
     renderContextChips();
+    try {
+      const specialistData = await apiFetch("/specialists");
+      state.specialists = Array.isArray(specialistData.specialists) ? specialistData.specialists : [];
+    } catch (_err) {
+      state.specialists = [];
+    }
+    renderSpecialistPicker();
     bindEvents();
     setupVoiceInput();
 
