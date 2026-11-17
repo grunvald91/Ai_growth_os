@@ -23,6 +23,7 @@ from app.ai_chat.client import (
     ClaudeHubAiChatClient,
 )
 from app.ai_chat.context import build_chat_context
+from app.ai_chat.specialists import get_specialist_prompt
 from app.ai_chat.files import (
     MAX_ATTACHMENT_BYTES,
     MAX_FILES_PER_MESSAGE,
@@ -165,6 +166,7 @@ def serialize_conversation(conv: AiChatConversation) -> ConversationSummaryOut:
         product_id=conv.product_id,
         title=conv.title,
         selected_model=conv.selected_model,
+        specialist_id=conv.specialist_id,
         last_message_at=conv.last_message_at,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
@@ -239,6 +241,7 @@ def create_conversation(
         product_id=pid,
         title=title,
         selected_model=body.model_id,
+        specialist_id=body.specialist_id,
         last_message_at=None,
     )
     db.add(conv)
@@ -922,6 +925,8 @@ async def stream_request_events(
                 att_by_msg.setdefault(att.message_id, []).append(att)
 
         user_msg = db.get(AiChatMessage, req.user_message_id) if req.user_message_id else None
+        conversation = db.get(AiChatConversation, req.conversation_id)
+        specialist_prompt = get_specialist_prompt(conversation.specialist_id) if conversation else None
         cap = resolve_model_capabilities(req.model_id)
         company_note: str | None = None
         if req.product_id is not None:
@@ -1008,6 +1013,7 @@ async def stream_request_events(
             products_root=settings.products_root,
             current_user_message_id=user_msg.id if user_msg else None,
             company_note=company_note,
+            specialist_prompt=specialist_prompt,
         )
         with session_factory() as db:
             msg = db.get(AiChatMessage, assistant_msg_id)

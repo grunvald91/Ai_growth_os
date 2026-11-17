@@ -27,6 +27,7 @@ from app.ai_chat.schemas import (
     ConversationUpdateIn,
     MessageCreateIn,
 )
+from app.ai_chat.specialists import specialist_catalog
 from app.ai_chat.service import (
     ChatError,
     ChatPrincipal,
@@ -54,7 +55,7 @@ from app.models.domain import Product
 from app.voice.dictionary import SLUG as VOICE_PROJECT_SLUG
 
 ASSETS = Path(__file__).parent / "ai_chat_assets"
-ASSET_VERSION = "3"
+ASSET_VERSION = "4"
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 
@@ -241,6 +242,12 @@ async def get_models(
 ):
     data = await ai_chat_catalog(settings, transport=transport)
     return JSONResponse(data, headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/studio/api/ai-chat/specialists")
+@router.get("/api/ai-chat/specialists")
+def get_specialists():
+    return JSONResponse({"specialists": specialist_catalog()}, headers={"Cache-Control": "private, no-store"})
 
 
 @router.get("/studio/api/ai-chat/conversations", response_model=list[ConversationSummaryOut])

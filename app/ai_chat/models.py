@@ -36,6 +36,7 @@ class AiChatConversation(UUIDMixin, TimestampMixin, Base):
     product_id: Mapped[UUID | None] = mapped_column(ForeignKey("products.id"), index=True, nullable=True)
     title: Mapped[str] = mapped_column(String(200), default="Новый чат", nullable=False)
     selected_model: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    specialist_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True, nullable=True)
 
 
