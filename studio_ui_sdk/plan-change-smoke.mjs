@@ -11,8 +11,21 @@ const sdk = await readFile(resolve("../app/api/dispatcher_assets/ui-sdk-pilot.bu
 const css = await readFile(resolve("../app/api/dispatcher_assets/dispatcher.css"));
 const calls = [];
 const state = {
-  messages: [{
-    id: "assistant-1", seq: 1, role: "assistant", text: "Подтвердите изменения.",
+  messages: [
+    {id:"task-created", seq:1, role:"assistant", text:"Запустил задание.",
+     blocks:[{type:"task", task_id:"task-1", title:"Подготовить статью",
+       status:"queued", href:"/studio/products/demo/tasks/task-1"}]},
+    {id:"task-outcome", seq:2, role:"assistant", text:"Задание завершено.",
+     task_result:{task_id:"task-1", status:"completed"},
+     blocks:[{type:"text",text:"Задание завершено."}]},
+    {id:"failure-outcome", seq:4, role:"assistant", text:"Ошибка генерации.",
+     task_result:{task_id:"task-2", status:"failed"},
+     blocks:[{type:"text",text:"Ошибка генерации."}]},
+    {id:"task-2-created", seq:3, role:"assistant", text:"Запустил задание.",
+     blocks:[{type:"task", task_id:"task-2", title:"Подготовить видео",
+       status:"running", href:"/studio/products/demo/tasks/task-2"}]},
+    {
+    id: "assistant-1", seq: 5, role: "assistant", text: "Подтвердите изменения.",
     blocks: [
       {type: "text", text: "Подтвердите изменения."},
       {type: "confirm", confirmation_id: "preview-1", title: "Изменить пакет?",
@@ -70,6 +83,10 @@ try {
     page.on("pageerror", e => errors.push(e.message));
     await page.goto(url, {waitUntil: "networkidle"});
     await page.waitForFunction(() => customElements.get("ui-collapsible") !== undefined);
+    assert.equal(await page.locator('[data-task-id="task-1"] .dp-task-status').innerText(), "Готово");
+    assert.equal(await page.locator('[data-task-id="task-2"] .dp-task-status').innerText(), "Ошибка");
+    assert.match(await page.locator('[data-task-id="task-1"] .sg-resource-description').innerText(), /Последний результат: Готово/);
+    assert.match(await page.locator('[data-task-id="task-2"] .sg-resource-description').innerText(), /Последний результат: Ошибка/);
     const section = page.locator(".dp-plan-change-collapsible");
     assert.equal(await section.count(), 1);
     const preview = page.locator(".dp-plan-change-after");
