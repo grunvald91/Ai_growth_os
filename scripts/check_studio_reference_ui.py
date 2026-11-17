@@ -203,14 +203,31 @@ def main():
                     cdp.send('Input.dispatchTouchEvent', {'type':kind,'touchPoints':[] if x is None else [
                         {'x':x,'y':y,'id':1}], 'modifiers':0})
                 page.locator('#dp-feed').evaluate('(el)=>el.scrollTop=0')
-                touch('touchStart',100,400)
-                touch('touchMove',160,400)
+                # An earlier widget may now occupy the old fixed (100,400) test
+                # point. The real touch gesture intentionally ignores buttons
+                # and links, so choose a noninteractive area inside #main rather
+                # than assuming arbitrary pixel coordinates stay empty.
+                start = page.evaluate("""() => {
+                  const forbidden = 'a,button,input,textarea,select,summary,video,' +
+                    '[contenteditable],.command-dock,.dp-tablewrap,.command-hints,' +
+                    '.v4-more,[role="dialog"]:not(.sg-daily-drawer)';
+                  for (const y of [400,375,425,350,450,325,475,300,500]) {
+                    for (const x of [90,100,110,120]) {
+                      const target = document.elementFromPoint(x,y);
+                      if (target?.closest('#main') && !target.closest(forbidden))
+                        return {x,y};
+                    }
+                  }
+                  throw Error('No unobstructed swipe start in the content area');
+                }""")
+                touch('touchStart',start['x'],start['y'])
+                touch('touchMove',start['x']+60,start['y'])
                 expect(page.locator('body')).to_have_class(__import__('re').compile('sg-daily-dragging'))
                 first = page.locator('#sgDailyDrawer').bounding_box()['x']
-                touch('touchMove',230,400)
+                touch('touchMove',start['x']+130,start['y'])
                 second = page.locator('#sgDailyDrawer').bounding_box()['x']
                 assert 65 < second-first < 75, ('finger synchronization', first, second)
-                touch('touchMove',300,400)
+                touch('touchMove',start['x']+200,start['y'])
                 touch('touchEnd')
                 expect(page.locator('#sgDailyDrawer')).to_have_attribute('aria-hidden','false')
                 assert page.locator('.shell').evaluate('(el)=>el.inert')
