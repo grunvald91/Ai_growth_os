@@ -189,3 +189,69 @@ async def test_instagram_health_is_tenant_filtered_by_studio_access(ctx):
     client = client_for(ctx)
     result = client.get("/products/00000000-0000-0000-0000-000000000001/comments/instagram/health")
     assert result.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_native_sync_marks_webhook_reply_as_nested_and_never_scans_it_as_parent(ctx):
+    from app.comments.instagram_replies import fetch_nested_replies
+
+    db, product, svc, _, gateway = ctx
+    channel = await svc.connect(product.id, ConnectInput(
+        platform="instagram", account_id="100", token="owner-token"))
+    root = BusinessComment(
+        product_id=product.id, platform="instagram", external_id="1001",
+        text="Вопрос клиента", post_text="Контекст публикации", source="platform",
+        target={"channel_id": str(channel.id), "media_id": "5001"})
+    nested = BusinessComment(
+        product_id=product.id, platform="instagram", external_id="3001",
+        text="Ответ клиента", post_text="", source="platform",
+        target={"channel_id": str(channel.id), "media_id": "5001", "ingest": "meta_webhook"})
+    db.add_all([root, nested])
+    db.commit()
+    async def fetch(channel, token):
+        return [{"external_id": "3001", "text": "Ответ клиента",
+                 "post_text": "Контекст публикации",
+                 "target": {"media_id": "5001", "parent_id": "1001",
+                            "published_at": datetime.now(timezone.utc).isoformat()}}], {}
+    gateway.fetch = fetch
+
+    assert await svc.sync(product.id, "instagram") == 0
+    db.refresh(nested)
+    assert nested.target["parent_id"] == "1001"
+    assert nested.status == "new"
+    assert len(list(db.scalars(select(BusinessComment)))) == 2
+
+    scanned = []
+    class CaptureGateway:
+        async def fetch_instagram_replies(self, channel, token, parent_id, *, after=None):
+            scanned.append(parent_id)
+            return {"data": []}
+    await fetch_nested_replies(db, CaptureGateway(), channel, "owner-token", max_calls=5)
+    assert scanned == ["1001"]
+
+
+@pytest.mark.asyncio
+async def test_nested_scan_skips_own_and_unknown_authors_and_invalid_ids(ctx):
+    from app.comments.instagram_replies import fetch_nested_replies
+
+    db, product, svc, _, _ = ctx
+    channel = await svc.connect(product.id, ConnectInput(
+        platform="instagram", account_id="100", token="owner-token"))
+    db.add(BusinessComment(
+        product_id=product.id, platform="instagram", external_id="1001",
+        source="platform", text="Первый комментарий", post_text="Пост",
+        target={"channel_id": str(channel.id), "media_id": "5001"}))
+    db.commit()
+    class Native:
+        async def fetch_instagram_replies(self, channel, token, parent_id, *, after=None):
+            return {"data": [
+                {"id": "7001", "text": "Наш собственный ответ", "from": {"id": "100"}},
+                {"id": "7002", "text": "Автор неизвестен"},
+                {"id": "7003", "text": "Пустой ID автора", "from": {"id": ""}},
+                {"id": "not-a-native-id", "text": "Невалидный ID", "from": {"id": "500"}},
+                {"id": "7004", "text": "Реальный ответ", "from": {"id": "500"},
+                 "timestamp": datetime.now(timezone.utc).isoformat()},
+            ]}
+    rows, _ = await fetch_nested_replies(db, Native(), channel, "owner-token", max_calls=2)
+    assert [row["external_id"] for row in rows] == ["7004"]
+    assert rows[0]["target"]["parent_id"] == "1001"
