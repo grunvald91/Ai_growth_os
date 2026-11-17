@@ -193,12 +193,34 @@
     return list;
   }
 
+  function resourceDetails(label, description, note) {
+    var details = el('details', 'sg-resource-details');
+    details.setAttribute('data-sg-resource-details', '');
+    var summary = el('summary', '', label);
+    var body = el('div', 'sg-resource-details-body');
+    body.appendChild(el('p', 'sg-resource-description', description));
+    if (note) body.appendChild(el('p', 'sg-resource-note', note));
+    details.appendChild(summary);
+    details.appendChild(body);
+    return details;
+  }
+
+  function wrapResourceCard(kind, primary, label, description, note) {
+    var wrapper = el('article', 'sg-resource-widget');
+    wrapper.setAttribute('data-sg-resource-widget', kind);
+    wrapper.appendChild(primary);
+    wrapper.appendChild(resourceDetails(label, description, note));
+    return wrapper;
+  }
+
   function renderTask(block) {
     var card = el('a', 'dp-task');
     card.href = block.href;
     card.appendChild(el('span', 'dp-task-title', voiceHoldEnabled ? friendlyTitle(block.title) : block.title));
     card.appendChild(el('span', 'dp-task-status', statusWord(block.status)));
-    return card;
+    return wrapResourceCard('task', card, 'Сведения о задании',
+      'Текущее состояние: ' + statusWord(block.status) + '.',
+      'Откройте задание, чтобы проверить реальные этапы работы и результаты.');
   }
 
   // A ready material: kind and status on top, a short text, a link to the full view. Its buttons come as chips.
@@ -367,7 +389,12 @@
       card.__sgPostReview = { version: block.version || 1 };
       document.dispatchEvent(new CustomEvent('sg:dispatcher:post-ready', { detail: { card: card } }));
     }
-    return card;
+    return wrapResourceCard('material', card, 'Сведения о материале',
+      'Тип: ' + (voiceHoldEnabled ? friendlyKind(block.kind) : block.kind) +
+        '. Состояние: ' + block.status + '.',
+      'Версия ' + String(block.version || 1) +
+        (block.truncated ? '. Перед утверждением проверьте полный текст на странице.' :
+          '. Окончательное решение принимается отдельно.'));
   }
 
   function statusWord(status) {
