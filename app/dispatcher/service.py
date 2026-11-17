@@ -70,9 +70,15 @@ def messages(db: Session, conversation: DispatcherConversation) -> list[Dispatch
 
 
 def to_dict(message: DispatcherMessage) -> dict:
-    return {"id": str(message.id), "seq": message.seq, "role": message.role, "mode": message.input_mode,
-            "text": message.text, "spoken": message.spoken, "blocks": message.blocks, "intent": message.intent,
-            "created_at": message.created_at.isoformat() if message.created_at else None}
+    response = {"id": str(message.id), "seq": message.seq, "role": message.role, "mode": message.input_mode,
+                "text": message.text, "spoken": message.spoken, "blocks": message.blocks, "intent": message.intent,
+                "created_at": message.created_at.isoformat() if message.created_at else None}
+    # A task-result message can reconcile the original task card in a saved
+    # conversation. Expose only the known status, never the other task params.
+    status = (message.params or {}).get("status") if message.capability == "task_result" else None
+    if message.task_id and status in {"completed", "failed"}:
+        response["task_result"] = {"task_id": str(message.task_id), "status": status}
+    return response
 
 
 def _next_seq(db: Session, conversation: DispatcherConversation) -> int:

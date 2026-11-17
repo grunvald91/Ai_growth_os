@@ -6,6 +6,20 @@
   "use strict";
   if (new URLSearchParams(window.location.search).get("ui_sdk") === "0") return;
   if (!window.customElements || !window.MutationObserver) return;
+  // A rewritten Growth v4 page may include an older asset as well; install
+  // exactly one observer even if the script appears twice.
+  if (window.__servgoResourceWidgetsInitialized) return;
+  window.__servgoResourceWidgetsInitialized = true;
+
+  // Pages without a dispatcher must not load the SDK before this guard:
+  // ?ui_sdk=0 means a real opt-out, not merely a visual HTML fallback.
+  // On dispatcher pages, reuse the module already requested by dispatcher.js.
+  if (!customElements.get("ui-collapsible") &&
+      !document.querySelector('script[src*="/studio/assets/ui-sdk-pilot.bundle.js"]')) {
+    import("/studio/assets/ui-sdk-pilot.bundle.js?v=4").catch(function () {
+      // Keep the original native <details> when the optional bundle is unavailable.
+    });
+  }
 
   function enhance(widget) {
     if (!(widget instanceof HTMLElement) || widget.dataset.sgResourceEnhanced === "1") return;

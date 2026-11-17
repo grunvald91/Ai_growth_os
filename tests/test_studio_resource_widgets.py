@@ -7,6 +7,8 @@ from app.api.studio_resource_widgets import resource_widget
 from app.api.content_studio import material_card
 from app.api.content_studio_activity import activity_html, activity_overview
 from app.models.domain import Artifact, ArtifactStatus
+from app.dispatcher.models import DispatcherMessage
+from app.dispatcher.service import to_dict
 
 
 def test_shared_widget_preserves_server_owned_link_and_escapes_text():
@@ -76,6 +78,24 @@ def test_task_widgets_share_contract_on_work_and_overview():
         assert f'href="/studio/products/{product_id}/tasks/{item["id"]}"' in markup
         assert "Работа идёт, результат ещё не готов." in markup
         assert '<button type="submit"' not in markup
+
+
+def test_task_result_status_is_safe_and_scoped_to_matching_id():
+    task_id = uuid4()
+    message = DispatcherMessage(
+        id=uuid4(), seq=3, role="assistant", input_mode="text",
+        text="Работа завершена", blocks=[],
+        capability="task_result", task_id=task_id,
+        params={"status": "completed", "secret": "never-expose-this"},
+    )
+    result = to_dict(message)
+    assert result["task_result"] == {"task_id": str(task_id), "status": "completed"}
+    assert "secret" not in str(result)
+    message.capability = "other"
+    assert "task_result" not in to_dict(message)
+    message.capability = "task_result"
+    message.params = {"status": "running"}
+    assert "task_result" not in to_dict(message)
 
 
 def test_legacy_fallback_is_plain_details_with_link_outside():

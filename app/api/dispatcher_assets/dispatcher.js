@@ -12,6 +12,9 @@
   var state = JSON.parse(document.getElementById('dp-state').textContent);
   var busy = false;
   var hydrated = false;
+  // A result may arrive after the original task message, or before it during
+  // a reordered update. Keep only confirmed completion/failure events.
+  var taskResults = Object.create(null);
 
   // Enabled by default for the current owner-led Studio pilot.
   // ?ui_sdk=0 restores the legacy form on this page, without any server changes.
@@ -214,13 +217,18 @@
   }
 
   function renderTask(block) {
+    var taskId = String(block.task_id || '');
+    var result = taskResults[taskId];
+    var status = result ? result.status : block.status;
     var card = el('a', 'dp-task');
     card.href = block.href;
     card.appendChild(el('span', 'dp-task-title', voiceHoldEnabled ? friendlyTitle(block.title) : block.title));
-    card.appendChild(el('span', 'dp-task-status', statusWord(block.status)));
-    return wrapResourceCard('task', card, 'Сведения о задании',
-      'Текущее состояние: ' + statusWord(block.status) + '.',
-      'Откройте задание, чтобы проверить реальные этапы работы и результаты.');
+    card.appendChild(el('span', 'dp-task-status', statusWord(status)));
+    var wrapper = wrapResourceCard('task', card, 'Сведения о задании',
+      (result ? 'Последний результат: ' : 'Статус при создании: ') + statusWord(status) + '.',
+      'Актуальный ход работы и повторные запуски проверяйте на странице задания.');
+    wrapper.dataset.taskId = taskId;
+    return wrapper;
   }
 
   // A ready material: kind and status on top, a short text, a link to the full view. Its buttons come as chips.
@@ -700,6 +708,24 @@
     });
   }
 
+  function reconcileTaskResult(message) {
+    var result = message.task_result;
+    if (!result || !result.task_id ||
+        (result.status !== 'completed' && result.status !== 'failed')) return;
+    var id = String(result.task_id);
+    var seq = Number(message.seq);
+    var previous = taskResults[id];
+    if (previous && Number.isFinite(seq) && seq < previous.seq) return;
+    taskResults[id] = { status: result.status, seq: Number.isFinite(seq) ? seq : 0 };
+    Array.from(feed.querySelectorAll('[data-sg-resource-widget="task"]')).forEach(function (card) {
+      if (card.dataset.taskId !== id) return;
+      var status = card.querySelector('.dp-task-status');
+      if (status) status.textContent = statusWord(result.status);
+      var description = card.querySelector('.sg-resource-description');
+      if (description) description.textContent = 'Последний результат: ' + statusWord(result.status) + '.';
+    });
+  }
+
   function upsert(message) {
     var node = renderMessage(message);
     var existing = feed.querySelector('[data-id="' + message.id + '"]');
@@ -707,6 +733,7 @@
     if (existing) {
       feed.replaceChild(node, existing);
       markSupersededPost(message);
+      reconcileTaskResult(message);
       return;
     }
     if (hydrated && voiceHoldEnabled) node.classList.add('dp-enter');
@@ -719,6 +746,7 @@
     if (following) feed.insertBefore(node, following);
     else feed.appendChild(node);
     markSupersededPost(message);
+    reconcileTaskResult(message);
   }
 
   function renderHints() {

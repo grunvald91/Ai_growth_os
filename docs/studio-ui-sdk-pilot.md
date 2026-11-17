@@ -146,3 +146,26 @@ reproducibility of the pinned SDK bundle.
 Next planned slice: multi-action orchestration with an independent approval,
 idempotency key and rollback strategy for each step. No unreviewed model
 output may directly call a write endpoint.
+
+
+### Post-review fixes (resource widgets)
+
+- Growth v4 uses the `body.dark` variables `--card`, `--tint`, `--text`,
+  `--muted`, and `--line`. Shared widget colors now inherit these tokens on
+  both themes; the classic Studio design continues to use its own palette.
+- On Growth v4 routes, do not append resource widget JS/CSS if the original
+  server-rendered page already provides the same assets. The widget enhancer
+  also guarantees at most one live observer per document.
+- Standalone Studio pages load `resource-widgets.js`, which loads the pinned
+  SDK *only if enabled and not already present*. `?ui_sdk=0` performs no SDK
+  request and keeps native `<details>` usable. The existing dispatcher loads
+  its own same-origin SDK bundle and is not duplicated.
+- Historic task cards show their status **at creation time** until an associated
+  `task_result` message is received. Completion/failure events then reconcile
+  the old card, including reloaded conversations and reordered arrival. Only
+  the task ID and terminal status are exposed, never internal task parameters.
+  For a retry or live progress, the existing authenticated task page remains
+  authoritative.
+- Browser regression checks now cover dark/light CSS token changes, one SDK
+  request, enabled/disabled SDK, native operation without JS, and both arrival
+  orders of task completion messages.

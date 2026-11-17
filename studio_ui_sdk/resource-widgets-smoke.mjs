@@ -14,7 +14,10 @@ const [sdk, shared, css] = await Promise.all([
 function html() {
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <link rel="stylesheet" href="/resource-widgets.css"></head><body>
+  <link rel="stylesheet" href="/resource-widgets.css">
+  <style>body{--card:#fff;--text:#14263e;--muted:#52647c;--line:#e5ecf4;--tint:#f3f7fc}
+  body.dark{--card:#17253a;--text:#edf3fb;--muted:#a4b6cd;--line:#304158;--tint:#1b2b43}</style>
+  </head><body data-growth-design="v4">
   <main>
     <article class="sg-resource-widget" data-sg-resource-widget="task" id="task">
       <a class="sg-work-item" href="/studio/products/demo/tasks/task1">Задача · подготовка</a>
@@ -32,16 +35,20 @@ function html() {
     </article>
   </main>
   <script src="/resource-widgets.js"></script>
-  <script type="module" src="/ui-sdk-pilot.bundle.js"></script>
+  <script src="/resource-widgets.js"></script>
   </body></html>`;
 }
+const sdkRequests = [];
 const server = createServer((req, res) => {
   const response = (type, content) => {
     res.writeHead(200, {"Content-Type":type, "Cache-Control":"no-store"}); res.end(content);
   };
   if (req.url.startsWith("/resource-widgets.js")) return response("application/javascript", shared);
   if (req.url.startsWith("/resource-widgets.css")) return response("text/css", css);
-  if (req.url.startsWith("/ui-sdk-pilot.bundle.js")) return response("application/javascript", sdk);
+  if (req.url.startsWith("/studio/assets/ui-sdk-pilot.bundle.js")) {
+    sdkRequests.push(req.url);
+    return response("application/javascript", sdk);
+  }
   return response("text/html", html());
 });
 await new Promise((ok, fail) => {server.once("error",fail);server.listen(0,"127.0.0.1",ok);});
@@ -54,8 +61,11 @@ try {
     const page = await browser.newPage({viewport: {width, height: 820}});
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
+    const startRequests = sdkRequests.length;
     await page.goto(url, {waitUntil:"networkidle"});
     await page.waitForFunction(() => document.querySelectorAll("ui-collapsible.sg-resource-sdk").length === 2);
+    assert.equal(sdkRequests.length, startRequests + 1, "one SDK load per page");
+    assert.equal(await page.evaluate(() => window.__servgoResourceWidgetsInitialized), true);
     assert.equal(await page.locator("[data-sg-resource-widget]").count(), 2);
     assert.equal(await page.locator("#task > .sg-work-item").getAttribute("href"), "/studio/products/demo/tasks/task1");
     assert.equal(await page.locator("#material").getAttribute("data-search"), "тест пост");
@@ -73,6 +83,17 @@ try {
     await page.keyboard.press("Enter");
     assert.equal(await material.locator("ui-collapsible-panel").isVisible(), true);
     assert.equal(page.url(), url);
+    await page.evaluate(() => document.body.classList.add("dark"));
+    const darkBg = await page.locator("#task .sg-resource-trigger").evaluate(el =>
+      getComputedStyle(el).backgroundColor);
+    const darkText = await page.locator("#task .sg-resource-trigger").evaluate(el =>
+      getComputedStyle(el).color);
+    assert.equal(darkBg, "rgb(27, 43, 67)", "dark trigger uses Growth v4 --tint");
+    assert.equal(darkText, "rgb(237, 243, 251)", "dark trigger uses Growth v4 --text");
+    await page.evaluate(() => document.body.classList.remove("dark"));
+    const lightBg = await page.locator("#task .sg-resource-trigger").evaluate(el =>
+      getComputedStyle(el).backgroundColor);
+    assert.equal(lightBg, "rgb(243, 247, 252)", "theme switches without a reload");
     await page.evaluate(() => {
       const item = document.createElement("article");
       item.className = "sg-resource-widget";
@@ -101,7 +122,9 @@ try {
     await page.close();
 
     const legacy = await browser.newPage({viewport: {width,height: 820}});
+    const beforeLegacy = sdkRequests.length;
     await legacy.goto(url + "?ui_sdk=0", {waitUntil:"networkidle"});
+    assert.equal(sdkRequests.length, beforeLegacy, "SDK bundle must not load on opt-out");
     assert.equal(await legacy.locator("ui-collapsible").count(), 0);
     await legacy.locator("#task details summary").click();
     assert.equal(await legacy.locator("#task details .sg-resource-description").isVisible(), true);
@@ -110,6 +133,13 @@ try {
     assert.equal(await legacy.locator("#material > .material-card").getAttribute("href"),
       "/studio/products/demo/materials/abc");
     await legacy.close();
+    if (width === 390) {
+      const noJs = await browser.newPage({viewport: {width, height: 820}, javaScriptEnabled:false});
+      await noJs.goto(url, {waitUntil:"load"});
+      await noJs.locator("#task details summary").click();
+      assert.equal(await noJs.locator("#task details .sg-resource-description").isVisible(), true);
+      await noJs.close();
+    }
   }
   console.log("Resource widget smoke: shared SDK, mobile/desktop, keyboard, dynamic, escaped text, native fallback OK");
 } finally {

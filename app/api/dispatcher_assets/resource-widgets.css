@@ -1,6 +1,22 @@
 /* Reusable task/material disclosure across chat and standalone Studio pages.
  * Card navigation remains a distinct anchor, not a nested clickable control. */
-.sg-resource-widget{display:flex;flex-direction:column;min-width:0;max-width:100%}
+.sg-resource-widget{
+  display:flex;flex-direction:column;min-width:0;max-width:100%;
+  --sg-widget-surface:var(--sg-card,var(--dp-surface,#fff));
+  --sg-widget-soft:var(--sg-bg,var(--dp-soft,#f6f9fd));
+  --sg-widget-text:var(--sg-text,var(--dp-text,#243952));
+  --sg-widget-muted:var(--sg-muted,var(--dp-text2,#536c83));
+  --sg-widget-line:var(--sg-line,var(--dp-line,#dce6f1));
+}
+/* Growth v4 defines theme tokens on body.dark; Studio uses its own --sg-* palette.
+   Resolve once per widget so switching the theme updates the details and trigger. */
+body[data-growth-design="v4"] .sg-resource-widget{
+  --sg-widget-surface:var(--card,#fff);
+  --sg-widget-soft:var(--tint,#f6f9fd);
+  --sg-widget-text:var(--text,#243952);
+  --sg-widget-muted:var(--muted,#536c83);
+  --sg-widget-line:var(--line,#dce6f1);
+}
 .sg-resource-widget>.material-card{display:block;min-width:0;flex:1}
 .sg-resource-widget>.dp-material{min-width:0}
 .sg-resource-widget>.dp-task{min-width:0}
@@ -8,21 +24,21 @@
 .sg-resource-details{margin:0;min-width:0}
 .sg-resource-details>summary,.sg-resource-trigger{
   display:block;width:100%;min-height:42px;box-sizing:border-box;
-  padding:10px 12px;border:1px solid var(--sg-line,var(--dp-line,#dce6f1));
-  border-radius:11px;background:var(--sg-card,var(--dp-soft,#f6f9fd));
-  color:var(--sg-text,var(--dp-text,#243952));font:inherit;font-size:13px;font-weight:650;
+  padding:10px 12px;border:1px solid var(--sg-widget-line);
+  border-radius:11px;background:var(--sg-widget-soft);
+  color:var(--sg-widget-text);font:inherit;font-size:13px;font-weight:650;
   text-align:left;cursor:pointer;list-style:none}
 .sg-resource-details>summary::-webkit-details-marker{display:none}
 .sg-resource-details>summary::after,.sg-resource-trigger::after{content:"⌄";float:right}
 .sg-resource-details[open]>summary::after,.sg-resource-sdk[data-open] .sg-resource-trigger::after{content:"⌃"}
 .sg-resource-details>summary:focus-visible,.sg-resource-trigger:focus-visible{
-  outline:2px solid var(--sg-blue,var(--dp-accent,#3478d6));outline-offset:2px}
+  outline:2px solid var(--blue,var(--sg-blue,var(--dp-accent,#3478d6)));outline-offset:2px}
 .sg-resource-details-body{display:grid;gap:7px;padding:10px 12px 12px;min-width:0;
-  border:1px solid var(--sg-line,var(--dp-line,#dce6f1));border-top:0;
-  border-radius:0 0 11px 11px;background:var(--sg-card,var(--dp-surface,#fff))}
+  border:1px solid var(--sg-widget-line);border-top:0;
+  border-radius:0 0 11px 11px;background:var(--sg-widget-surface)}
 .sg-resource-description,.sg-resource-note{font-size:12px;line-height:1.5;
-  color:var(--sg-text,var(--dp-text2,#536c83));white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
-.sg-resource-note{color:var(--sg-muted,var(--dp-text2,#536c83))}
+  color:var(--sg-widget-text);white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+.sg-resource-note{color:var(--sg-widget-muted)}
 .sg-resource-sdk{display:block;min-width:0}
 .sg-resource-sdk ui-collapsible-trigger{display:block}
 .sg-resource-sdk ui-collapsible-panel{display:block}
@@ -30,15 +46,15 @@
 .sg-resource-sdk .sg-resource-panel{padding:0}
 .sg-resource-widget[data-sg-resource-widget="task"]>.dp-task{
   display:flex;flex-direction:column;gap:2px;padding:10px 14px;
-  border-radius:14px;background:var(--dp-surface,#fff);color:var(--dp-text,#243952);
+  border-radius:14px;background:var(--sg-widget-surface);color:var(--sg-widget-text);
   text-decoration:none}
 .sg-resource-widget[data-sg-resource-widget="task"]>.dp-task:focus-visible{
   outline:2px solid var(--dp-accent,#3478d6);outline-offset:2px}
 .sg-resource-widget[data-sg-resource-widget="task"]>.sg-work-item{
   border-bottom:0}
-.sg-work-list>.sg-resource-widget{border-bottom:1px solid var(--sg-line,#e8edf2)}
+.sg-work-list>.sg-resource-widget{border-bottom:1px solid var(--sg-widget-line)}
 .sg-work-list>.sg-resource-widget:last-child{border-bottom:0}
-.sg-overview-work>.sg-resource-widget{border-bottom:1px solid var(--sg-line,#e8edf2)}
+.sg-overview-work>.sg-resource-widget{border-bottom:1px solid var(--sg-widget-line)}
 .material-grid>.sg-resource-widget{min-width:0}
 .material-grid>.sg-resource-widget .sg-resource-details{margin-top:5px}
 .material-grid>.sg-resource-widget .sg-resource-sdk{margin-top:5px}

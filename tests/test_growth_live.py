@@ -204,7 +204,9 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="sg-create-form"' not in page.text
     assert '/studio/assets/create-studio.js?v=history-20261104' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=resource-widgets-v1-20261117' in page.text
+    assert '/studio/assets/dispatcher.js?v=resource-widgets-v2-20261117' in page.text
+    assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
+    assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert page.text.count('id="dp-input"') == 1
     assert page.text.index('Что создаём?') < page.text.index('id="dp-input"')
     js = client.get('/studio/assets/dispatcher.js')
@@ -273,7 +275,9 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
     assert '/studio/assets/growth-live.css?v=21' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=resource-widgets-v1-20261117' in page.text
+    assert '/studio/assets/dispatcher.js?v=resource-widgets-v2-20261117' in page.text
+    assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
+    assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert '/studio/assets/growth-live.js?v=14' in page.text
     # A video is a creation format, not a standalone main-menu section.
     nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
@@ -285,6 +289,19 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert 'Демо · API не подключены' not in page.text
     assert 'https://servgo.ru/mail' not in page.text
     assert 'Кампании' in page.text
+
+
+def test_growth_v4_resource_assets_load_once_and_optout_stays_native(live):
+    client, _, product = live
+    base = f"/studio/products/{product.id}"
+    for route in ("", "/create", "/materials", "/work"):
+        page = client.get(base + route + "?design=v4&ui_sdk=0")
+        assert page.status_code == 200, route
+        assert page.text.count('href="/studio/assets/resource-widgets.css') == 1, route
+        assert page.text.count('src="/studio/assets/resource-widgets.js') == 1, route
+        # The shared resource script evaluates ui_sdk=0 before loading the
+        # optional SDK module. No shell route may include an eager module tag.
+        assert 'src="/studio/assets/ui-sdk-pilot.bundle.js' not in page.text, route
 
 
 def test_live_screens_read_company_records_only(live):

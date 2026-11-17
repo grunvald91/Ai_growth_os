@@ -30,7 +30,7 @@ from app.voice.dictionary import SLUG
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ASSETS = Path(__file__).parent / "dispatcher_assets"
-ASSET_VERSION = "17"
+ASSET_VERSION = "18"
 MAX_BODY_BYTES = 1_000_000  # same guard as the Studio forms
 
 
@@ -128,7 +128,7 @@ def home_html(db: Session, product: Product, settings: Settings, request: Reques
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="/studio/assets/studio.css?v=14">
   <link rel="stylesheet" href="/studio/assets/dispatcher.css?v={ASSET_VERSION}">
-  <link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=1">
+  <link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=2">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
@@ -167,7 +167,7 @@ def home_html(db: Session, product: Product, settings: Settings, request: Reques
 </div></div>
 <script type="application/json" id="dp-state">{state}</script>
 <script src="/studio/assets/dispatcher.js?v={ASSET_VERSION}"></script>
-<script src="/studio/assets/resource-widgets.js?v=1"></script>
+<script src="/studio/assets/resource-widgets.js?v=2"></script>
 </body></html>"""
 
 

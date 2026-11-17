@@ -389,7 +389,8 @@ def render_v4(page, request, pid, switch):
     # V4 keeps its own layout. Import only the post preview / UI SDK controls.
     if pid and (home or current == base + '/create'):
         styles += '<link rel="stylesheet" href="/studio/assets/dispatcher-review.css?v=2">'
-        styles += '<link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=1">'
+        if '/studio/assets/resource-widgets.css' not in styles:
+            styles += '<link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=2">'
     # Page-specific form styles and scripts belong to their original modules.
     styles += ''.join(original.outer(e) for e in original.elements if e[0]=='style')
     replacements = [(doc.find(ident='main'), content), (doc.find(ident='leftNav'), ''.join(link(r) for r in links)),
@@ -471,12 +472,13 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>resource-widgets-v1-20261117', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>resource-widgets-v2-20261117', extras)
     if pid and current == base+'/create':
         extras += '<script src="/studio/assets/create-studio.js?v=history-20261104"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=resource-widgets-v1-20261117"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=resource-widgets-v2-20261117"></script>'
     if pid and (home or current == base+'/create'):
-        extras += '<script src="/studio/assets/resource-widgets.js?v=1"></script>'
+        if '/studio/assets/resource-widgets.js' not in extras:
+            extras += '<script src="/studio/assets/resource-widgets.js?v=2"></script>'
         # The glow measures the existing recorder stream; load before dispatcher.js.
         extras = '<script src="/studio/assets/voice-glow.js?v=2"></script>' + extras
     if pid:
