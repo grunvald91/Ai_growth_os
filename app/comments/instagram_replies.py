@@ -91,11 +91,19 @@ async def fetch_nested_replies(db, gateway, channel, token, progress=None, *, ma
         )
         calls += 1
         for reply in batch.get("data", []):
+            if not isinstance(reply, dict):
+                continue
             creator = reply.get("from") or {}
-            if not isinstance(creator, dict) or str(creator.get("id", "")) == channel.account_id:
+            if not isinstance(creator, dict):
+                continue
+            author_id = str(creator.get("id") or "")
+            # Without a native author ID, we cannot distinguish the business's
+            # own replies from customers. Never feed unknown authors to the
+            # AI draft queue; they can be reviewed via a manual workflow.
+            if not author_id or author_id == str(channel.account_id):
                 continue
             identifier = str(reply.get("id") or "")
-            if not identifier or not reply.get("text"):
+            if not identifier.isdigit() or not isinstance(reply.get("text"), str) or not reply["text"].strip():
                 continue
             all_rows.append({
                 "external_id": identifier,

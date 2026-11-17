@@ -234,7 +234,6 @@ async def instagram_webhook_receive(request: Request, settings=Depends(get_setti
         return JSONResponse({"accepted": True, "imported": 0},
                             headers={"Cache-Control": "no-store"})
     imported = 0
-    business_opts = {}
     for entry in entries:
         if not isinstance(entry, dict) or not str(entry.get("id", "")).isdigit():
             continue
@@ -254,11 +253,12 @@ async def instagram_webhook_receive(request: Request, settings=Depends(get_setti
         db.refresh(channel, with_for_update=True)
         if channel.status != "connected" or channel.account_id != account_id:
             continue
-        if channel.product_id not in business_opts:
-            from app.comments.service import CommentService
-            config, _ = CommentService(db, settings).config(channel.product_id)
-            business_opts[channel.product_id] = config.enabled and config.auto_import
-        if not business_opts[channel.product_id]:
+        # Each entry commits independently. Re-read opt-in *after* the
+        # tenant lock on every entry, even when the same account appears twice
+        # in a single signed delivery: owners can revoke consent in between.
+        from app.comments.service import CommentService
+        config, _ = CommentService(db, settings).config(channel.product_id)
+        if not (config.enabled and config.auto_import):
             continue
         changes = entry.get("changes")
         if not isinstance(changes, list) or len(changes) > 100:
