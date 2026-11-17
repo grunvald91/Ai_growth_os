@@ -111,3 +111,38 @@ This remains one change per turn. Bulk plan edits, delete/add-package,
 reusable task/material widgets and multi-action orchestration with individual
 approvals are subsequent slices. No unreviewed model output is authorized to
 write to a plan.
+
+
+## Phase 5 — reusable task and material cards
+
+A single read-only disclosure contract now appears in the dispatcher conversation,
+the Studio work list/overview and material library/dashboard. The primary
+navigation link remains separate from the details control, with no nested links
+or implicit approval. The shared server helper in
+`app/api/studio_resource_widgets.py` escapes descriptions, labels and
+library filter attributes. Existing Studio renderers provide real, scoped task
+and artifact URLs; no model-created links or fabricated progress metrics.
+
+Each card has a native `<details>` fallback. The shared
+`resource-widgets.js` enhancer upgrades it to the pinned, self-hosted UI SDK
+`ui-collapsible` after that custom element becomes available. If scripts fail
+or the URL includes `?ui_sdk=0`, disclosure remains functional as native HTML.
+New conversation cards are upgraded dynamically. The SDK does not introduce a
+new persistence or permissions path: content approval, retry and task execution
+remain on their existing authorized endpoints, outside the disclosure widget.
+
+The existing `/activity.json` polling continues to be authoritative for task
+state; this change adds no competing status/publish/approval handler.
+Search/filter attributes move with the material card to the outer wrapper so
+library filters still hide a complete item, including its details panel.
+
+Verification: `tests/test_studio_resource_widgets.py`,
+`tests/test_content_studio.py`, `tests/test_dispatcher.py` and
+`studio_ui_sdk/resource-widgets-smoke.mjs`. The workflow
+`studio-resource-widgets-ui-sdk.yml` checks mobile/desktop, keyboard
+interaction, dynamically added cards, escaped text, native fallback and
+reproducibility of the pinned SDK bundle.
+
+Next planned slice: multi-action orchestration with an independent approval,
+idempotency key and rollback strategy for each step. No unreviewed model
+output may directly call a write endpoint.
