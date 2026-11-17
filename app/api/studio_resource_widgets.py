@@ -9,7 +9,8 @@ from html import escape
 
 
 def resource_widget(*, kind: str, primary_html: str, description: str,
-                    detail_label: str = "Подробнее", note: str = "") -> str:
+                    detail_label: str = "Подробнее", note: str = "",
+                    filter_kind: str | None = None, search_text: str = "") -> str:
     """Wrap existing server-rendered card markup; text from records is escaped.
 
     The <details> is a fully functional fallback until/without UI SDK.
@@ -20,8 +21,13 @@ def resource_widget(*, kind: str, primary_html: str, description: str,
     details = f'<p class="sg-resource-description">{escape(description)}</p>'
     if note:
         details += f'<p class="sg-resource-note">{escape(note)}</p>'
+    filter_data = (
+        f' data-material data-kind="{escape(filter_kind, quote=True)}"'
+        f' data-search="{escape(search_text, quote=True)}"'
+        if filter_kind is not None else ""
+    )
     return (
-        f'<article class="sg-resource-widget" data-sg-resource-widget="{kind}">'
+        f'<article class="sg-resource-widget" data-sg-resource-widget="{kind}"{filter_data}>'
         + primary_html
         + '<details class="sg-resource-details" data-sg-resource-details>'
         + f'<summary>{escape(detail_label)}</summary>'
