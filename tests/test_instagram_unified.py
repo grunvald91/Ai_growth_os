@@ -458,3 +458,41 @@ def test_webhook_import_requires_both_operator_and_company_opt_in(ctx):
     svc.configure(product.id, AgentSettings(enabled=True, auto_import=True))
     assert client.post(url, content=raw, headers=headers).json()["imported"] == 1
     assert len(list(db.scalars(select(BusinessComment)))) == 1
+
+
+def test_meta_webhook_revalidates_tenant_consent_between_entries(ctx, monkeypatch):
+    """A later event in a signed batch must not bypass a mid-batch pause."""
+    import asyncio
+    from app.comments.contracts import AgentSettings
+    from app.comments.service import CommentService
+
+    db, product, svc, _, _ = ctx
+    meta_config(svc.settings)
+    app.dependency_overrides[get_settings] = lambda: svc.settings
+    asyncio.run(svc.connect(product.id, ConnectInput(
+        platform="instagram", account_id="100", token="owner-token")))
+
+    checked = []
+    def consent_that_is_revoked(self, product_id):
+        checked.append(str(product_id))
+        return (AgentSettings(enabled=True, auto_import=len(checked) == 1), None)
+    monkeypatch.setattr(CommentService, "config", consent_that_is_revoked)
+
+    payload = {"object": "instagram", "entry": [
+        {"id": "100", "changes": [{"field": "comments", "value": {
+            "id": "721001", "text": "Вопрос 1", "from": {"id": "800"},
+            "media": {"id": "900"}}}]},
+        {"id": "100", "changes": [{"field": "comments", "value": {
+            "id": "721002", "text": "Вопрос 2", "from": {"id": "801"},
+            "media": {"id": "900"}}}]},
+    ]}
+    raw, sig = signed(payload, svc.settings.comment_meta_app_secret)
+    response = client_for(ctx).post(
+        "/api/integrations/instagram/webhook",
+        content=raw, headers={"x-hub-signature-256": sig},
+    )
+    assert response.status_code == 200
+    assert response.json()["imported"] == 1
+    assert len(checked) == 2
+    assert [item.external_id for item in db.scalars(
+        select(BusinessComment).order_by(BusinessComment.external_id)).all()] == ["721001"]
