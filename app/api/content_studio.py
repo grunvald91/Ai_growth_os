@@ -39,6 +39,7 @@ from app.content.calendar import (PLATFORMS, approve_plan, pause_plan,
     reschedule_slot, queue_plan, save_preferences)
 from app.content.service import queue_content
 from app.content.plan_edit import update_draft_package
+from app.api.studio_resource_widgets import resource_widget
 from app.content.revisions import post_history, queue_post_edit
 from app.content.revisions import source_fingerprint
 from app.content.manual_edits import editable_fields, save_manual_edit
@@ -517,15 +518,21 @@ def material_card(product_id: UUID, record: Artifact) -> str:
     text = artifact_text(record, value)
     meta = excerpt(text, 90)
     created = record.created_at.strftime("%d.%m") if record.created_at else ""
-    return (
-        f'<a class="material-card" data-material data-kind="{kind}" '
-        f'data-search="{esc(record.title + " " + label + " " + meta)}" '
-        f'href="/studio/products/{product_id}/materials/{record.id}">'
+    primary = (
+        f'<a class="material-card" href="/studio/products/{product_id}/materials/{record.id}">'
         f'<div class="material-cover {esc(record.kind)}"><span class="material-kind">{label}</span></div>'
         '<div class="material-body">'
         f'<h4>{title}</h4><p>{esc(meta)}</p>'
         f'<div class="package-foot"><span>{esc(created)}</span><span>Открыть →</span></div>'
         '</div></a>'
+    )
+    return resource_widget(
+        kind="material", primary_html=primary,
+        description=excerpt(text, 240) or "Описание пока отсутствует.",
+        note=f"Тип: {artifact_kind_label(record, value)}. Состояние: {status_label(getattr(record.status, 'value', str(record.status)))}.",
+        detail_label="Сведения о материале",
+        filter_kind=kind,
+        search_text=record.title + " " + artifact_kind_label(record, value) + " " + meta,
     )
 
 
@@ -1189,6 +1196,14 @@ def studio_page_shell(
     dialogs: str = "",
     actions: str = "",
 ) -> str:
+    resource_assets = active in {"overview", "work", "materials", "plan"}
+    resource_css = ('<link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=1">'
+                    if resource_assets else "")
+    resource_js = (
+        '<script type="module" src="/studio/assets/ui-sdk-pilot.bundle.js?v=4"></script>'
+        '<script src="/studio/assets/resource-widgets.js?v=1"></script>'
+        if resource_assets else ""
+    )
     return f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -1203,6 +1218,7 @@ def studio_page_shell(
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="ServGo">
   <link rel="stylesheet" href="/studio/assets/studio.css?v=14">
+  {resource_css}
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1245,6 +1261,7 @@ def studio_page_shell(
 </div></div>
 {dialogs}
 <script src="/studio/assets/studio.js?v=13"></script>
+{resource_js}
 </body></html>"""
 
 

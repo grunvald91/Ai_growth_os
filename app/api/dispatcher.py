@@ -30,7 +30,7 @@ from app.voice.dictionary import SLUG
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ASSETS = Path(__file__).parent / "dispatcher_assets"
-ASSET_VERSION = "16"
+ASSET_VERSION = "17"
 MAX_BODY_BYTES = 1_000_000  # same guard as the Studio forms
 
 
@@ -128,6 +128,7 @@ def home_html(db: Session, product: Product, settings: Settings, request: Reques
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="/studio/assets/studio.css?v=14">
   <link rel="stylesheet" href="/studio/assets/dispatcher.css?v={ASSET_VERSION}">
+  <link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=1">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
@@ -166,6 +167,7 @@ def home_html(db: Session, product: Product, settings: Settings, request: Reques
 </div></div>
 <script type="application/json" id="dp-state">{state}</script>
 <script src="/studio/assets/dispatcher.js?v={ASSET_VERSION}"></script>
+<script src="/studio/assets/resource-widgets.js?v=1"></script>
 </body></html>"""
 
 
@@ -232,6 +234,18 @@ def organization_choices(request: Request, db: Session, settings: Settings, prod
 def dispatcher_css():
     return Response((ASSETS / "dispatcher.css").read_text(encoding="utf-8"), media_type="text/css",
                     headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/studio/assets/resource-widgets.css")
+def studio_resource_widgets_css():
+    return Response((ASSETS / "resource-widgets.css").read_text(encoding="utf-8"),
+                    media_type="text/css", headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/studio/assets/resource-widgets.js")
+def studio_resource_widgets_js():
+    return Response((ASSETS / "resource-widgets.js").read_text(encoding="utf-8"),
+                    media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/studio/assets/calendar-ui-sdk.css")
