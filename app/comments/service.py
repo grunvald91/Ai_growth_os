@@ -357,6 +357,15 @@ class CommentService:
                     if existing_target.get("needs_media_resolution"):
                         existing.target = {k: v for k, v in existing_target.items()
                                            if k != "needs_media_resolution"}
+                    # Signed webhook payloads may omit parent_id. Only native
+                    # account-scoped Graph retrieval can resolve it; otherwise
+                    # a nested reply is incorrectly scanned as a top-level
+                    # parent on every future reconciliation.
+                    native_parent = native_target.get("parent_id")
+                    if (str(native_parent or "").isdigit()
+                            and str(native_parent) != str(existing.external_id)
+                            and not (existing.target or {}).get("parent_id")):
+                        existing.target = {**existing.target, "parent_id": str(native_parent)}
                     native_time = native_target.get("published_at")
                     try:
                         parsed = datetime.fromisoformat(str(native_time).replace("Z", "+00:00"))
