@@ -1196,6 +1196,14 @@ def studio_page_shell(
     dialogs: str = "",
     actions: str = "",
 ) -> str:
+    resource_assets = active in {"overview", "work", "materials", "plan"}
+    resource_css = ('<link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=1">'
+                    if resource_assets else "")
+    resource_js = (
+        '<script type="module" src="/studio/assets/ui-sdk-pilot.bundle.js?v=4"></script>'
+        '<script src="/studio/assets/resource-widgets.js?v=1"></script>'
+        if resource_assets else ""
+    )
     return f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -1210,6 +1218,7 @@ def studio_page_shell(
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="ServGo">
   <link rel="stylesheet" href="/studio/assets/studio.css?v=14">
+  {resource_css}
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1252,6 +1261,7 @@ def studio_page_shell(
 </div></div>
 {dialogs}
 <script src="/studio/assets/studio.js?v=13"></script>
+{resource_js}
 </body></html>"""
 
 
