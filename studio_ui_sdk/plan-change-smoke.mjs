@@ -85,8 +85,8 @@ try {
     await page.waitForFunction(() => customElements.get("ui-collapsible") !== undefined);
     assert.equal(await page.locator('[data-task-id="task-1"] .dp-task-status').innerText(), "Готово");
     assert.equal(await page.locator('[data-task-id="task-2"] .dp-task-status').innerText(), "Ошибка");
-    assert.match(await page.locator('[data-task-id="task-1"] .sg-resource-description').innerText(), /Последний результат: Готово/);
-    assert.match(await page.locator('[data-task-id="task-2"] .sg-resource-description').innerText(), /Последний результат: Ошибка/);
+    assert.match(await page.locator('[data-task-id="task-1"] .sg-resource-description').textContent(), /Последний результат: Готово/);
+    assert.match(await page.locator('[data-task-id="task-2"] .sg-resource-description').textContent(), /Последний результат: Ошибка/);
     const section = page.locator(".dp-plan-change-collapsible");
     assert.equal(await section.count(), 1);
     const preview = page.locator(".dp-plan-change-after");
