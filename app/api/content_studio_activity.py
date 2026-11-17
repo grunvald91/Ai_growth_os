@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, Task, TaskStatus
+from app.api.studio_resource_widgets import resource_widget
 
 WORK_AGENTS = ("content_factory", "content_creative", "content_editor", "content_renderer", "editorial_planner", "whiteboard_renderer")
 
@@ -418,13 +419,20 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
                 f'{artifact_count} материалов. Откройте результат и проверьте перед публикацией.'
                 if artifact_count else item["description"]
             )
-        cards.append(
+        primary = (
             f'<a class="sg-work-item sg-work-{item["tone"]}" href="{work_url(product_id, item)}">'
             f'<div class="sg-work-item-main"><b>{safe(item["title"])}</b>'
             f'<p>{safe(summary)}</p></div>'
             f'<span class="sg-work-status sg-work-{item["tone"]}">{safe(label)}</span>'
             '<span class="sg-work-arrow" aria-hidden="true">→</span></a>'
         )
+        cards.append(resource_widget(
+            kind="task", primary_html=primary,
+            description=item["description"],
+            note=(f"Результатов: {artifact_count}. Каждый материал проверяется отдельно."
+                  if artifact_count else "Подробные этапы и действия доступны на странице задания."),
+            detail_label="Сведения о задании",
+        ))
     empty = ('<section class="sg-work-empty"><h3>Пока здесь пусто</h3>'
              '<p>Все созданные задания будут отображаться здесь, даже если вы закроете страницу.</p>'
              f'<a class="btn primary" href="{base}/create">Создать материал →</a></section>')
@@ -450,13 +458,18 @@ def activity_overview(product_id: UUID, items: list[dict]) -> str:
         )
     cards = []
     for item in (working[:4] or recent[:4]):
-        cards.append(
+        primary = (
             f'<a class="sg-work-item sg-work-{item["tone"]}" href="{work_url(product_id, item)}">'
             f'<div class="sg-work-item-main"><b>{safe(item["title"])}</b>'
             f'<p>{safe(ANIMATOR_PHASES.get(str(item.get("animator_stage")), item["description"]) if item.get("agent") == "whiteboard_renderer" else item["description"])}</p></div>'
             f'<span class="sg-work-status sg-work-{item["tone"]}">{safe(item["label"])}</span>'
             '<span class="sg-work-arrow" aria-hidden="true">→</span></a>'
         )
+        cards.append(resource_widget(
+            kind="task", primary_html=primary,
+            description=item["description"],
+            detail_label="Сведения о задании",
+        ))
     return (
         '<section class="sg-surface sg-overview-work" data-sg-work-overview>'
         '<div class="sg-section-head"><div><h2>' +
