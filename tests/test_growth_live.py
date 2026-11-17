@@ -291,6 +291,19 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert 'Кампании' in page.text
 
 
+def test_growth_v4_resource_assets_load_once_and_optout_stays_native(live):
+    client, _, product = live
+    base = f"/studio/products/{product.id}"
+    for route in ("", "/create", "/materials", "/work"):
+        page = client.get(base + route + "?design=v4&ui_sdk=0")
+        assert page.status_code == 200, route
+        assert page.text.count('href="/studio/assets/resource-widgets.css') == 1, route
+        assert page.text.count('src="/studio/assets/resource-widgets.js') == 1, route
+        # The shared resource script evaluates ui_sdk=0 before loading the
+        # optional SDK module. No shell route may include an eager module tag.
+        assert 'src="/studio/assets/ui-sdk-pilot.bundle.js' not in page.text, route
+
+
 def test_live_screens_read_company_records_only(live):
     client, db, product = live
     other = Product(name='Other', slug='other')
