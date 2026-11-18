@@ -172,6 +172,7 @@ async def resume(ctx: Context, workflow_id: UUID) -> dict:
             return snapshot(ctx, workflow.id)
         if active.capability not in READ_ONLY_PLAN_CAPABILITIES:
             raise RuntimeError("Workflow capability not permitted")
+        position = active.position  # Preserve across Session.rollback() expiry.
         try:
             # Reads use the same authorized, company-scoped executors as the
             # single-action dispatcher. No model-supplied text is persisted.
@@ -185,7 +186,7 @@ async def resume(ctx: Context, workflow_id: UUID) -> dict:
             db.rollback()
             workflow = _scoped(db, ctx, workflow_id, lock=True)
             steps = _steps(db, workflow.id)
-            active = next(s for s in steps if s.position == active.position)
+            active = next(s for s in steps if s.position == position)
             active.status = "failed"
             active.result_text = "Не удалось прочитать данные. Шаг можно повторить вручную."
             _logger.exception("workflow_read_failed")
@@ -202,6 +203,8 @@ async def resume(ctx: Context, workflow_id: UUID) -> dict:
 async def create(ctx: Context, conversation: DispatcherConversation,
                  steps: list[PlannedStep], client_key: str | None) -> dict:
     """Store the whole validated plan; a retry returns its existing receipt."""
+    if conversation.product_id != ctx.product.id or conversation.account != ctx.account:
+        raise PermissionError("Нельзя создать поручение в чужом диалоге.")
     parsed = preflight(steps, ctx)
     db = ctx.db
     if client_key:
