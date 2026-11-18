@@ -42,7 +42,7 @@ jobs:
           import json
           from sqlalchemy import select, func, or_
           from app.db.session import SessionLocal
-          from app.models.domain import Product, Task, AgentRun, Artifact, TaskStatus
+          from app.models.domain import Product, Task, AgentRun, Artifact, TaskStatus, Publication, ArtifactStatus
           
           TARGET_HASH = 'cacb3ec7f0e8edfbf9f73c3040498872391547147f2545cd0d82fb183e04263b'
           try:
@@ -95,6 +95,18 @@ jobs:
                           print('plan', 'from_target', row.task_id == task.id, 'state', state,
                                 'slots', slots, 'artifact_status', row.status.value,
                                 'created', str(row.created_at)[:19])
+                  # GEO P0: aggregate public-publishing eligibility without tenant payloads.
+                  from app.sso.models import StudioBusinessLink
+                  public_products = set(db.scalars(
+                      select(Publication.product_id).join(Artifact, Artifact.id == Publication.artifact_id)
+                      .where(Publication.channel == 'own_site', Publication.status == 'published',
+                             Artifact.status == ArtifactStatus.PUBLISHED, Artifact.kind == 'article')
+                      .distinct()))
+                  linked_products = set(db.scalars(select(StudioBusinessLink.product_id).distinct()))
+                  linked_public = public_products & linked_products
+                  print('geo_public_article_product_count', len(public_products),
+                        'geo_linked_public_business_count', len(linked_public),
+                        'geo_studio_business_links_count', len(linked_products))
                   servgo = db.scalar(select(Product).where(Product.slug == 'servgo').limit(1))
                   print('servgo_seo_company_exists', bool(servgo))
                   if servgo:
