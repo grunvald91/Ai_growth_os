@@ -56,13 +56,21 @@ jobs:
                   Task.assigned_agent == "content_factory",
                   Task.title.like(f"{SEO_TASK_PREFIX}%"),
                   Task.status == TaskStatus.FAILED,
-              ).order_by(Task.created_at.asc(), Task.id.asc()).limit(4)))
+              ).order_by(Task.created_at.asc(), Task.id.asc()).limit(12)))
               print("eligible_failed_seo_article_tasks", len(failed))
               if len(failed) == 0:
                   print("No failed SEO articles remain; no action")
                   raise SystemExit(0)
-              if len(failed) != 2:
-                  raise SystemExit("Unexpected number of failed tasks: refuse broad retries")
+              import hashlib
+              authorized_hashes = {
+                  "5f16eee43a1332d769f788eb",
+                  "ce8f480399403e85d0eea05c",
+              }
+              chosen = [row for row in failed if
+                        hashlib.sha256(str(row.id).encode()).hexdigest()[:24] in authorized_hashes]
+              if len(chosen) != 2 or len(failed) != 4:
+                  raise SystemExit("Expected four historical failed tasks and exactly two selected")
+              failed = chosen
               for row in failed:
                   retry_failed_article(db, product_id=product.id, task_id=row.id,
                                        actor="owner_authorized_20261119")
