@@ -277,7 +277,7 @@ def review_html(product_id, records, *, filter_name="all", counts=None,
         )
         warning_note = ("Числа, цены и результаты нужно проверить по источникам до утверждения."
                         if fact_check else
-                        "Подтверждение доступно в полном просмотре конкретной версии.")
+                        "Утвердить можно только после проверки полной версии материала.")
         cards.append(resource_widget(
             kind="material", primary_html=primary,
             description=f"{kind} · {channel}. Предпросмотр сокращён; полную версию проверьте перед решением.",
@@ -301,8 +301,8 @@ def review_html(product_id, records, *, filter_name="all", counts=None,
         paging = '<nav class="sg-review-pagination" aria-label="Страницы согласования">' + "".join(links) + '</nav>'
     return (
         '<section class="sg-surface sg-review-page">'
-        '<div class="sg-section-head"><div><span class="sg-overline">ВАШЕ ВНИМАНИЕ</span>'
-        '<h2>Единый центр согласования</h2>'
+        '<div class="sg-section-head"><div><span class="sg-overline">ЕДИНЫЙ ЦЕНТР СОГЛАСОВАНИЯ</span>'
+        '<h2>Очередь согласования</h2>'
         '<p>Посты, статьи, креативы и видео. Проверка материала — до утверждения.</p>'
         '</div>'
         f'<span class="sg-count">{total} на проверке</span></div>'
