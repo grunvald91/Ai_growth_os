@@ -250,7 +250,7 @@
     block.steps.forEach(function (step, index) {
       var group = el('section', 'sg-workflow-result');
       group.appendChild(el('h4', 'sg-workflow-result-title',
-        String(index + 1) + '. ' + step.title + ' — ' + (statuses[step.status] || 'Неизвестно')));
+        String(index + 1) + '. ' + step.title + ' — ' + statusLabel(step)));
       group.appendChild(el('p', 'sg-workflow-result-detail', step.detail));
       (step.blocks || []).forEach(function (item) {
         if (item.type === 'text') group.appendChild(el('p', 'dp-text', item.text));
