@@ -169,3 +169,43 @@ output may directly call a write endpoint.
 - Browser regression checks now cover dark/light CSS token changes, one SDK
   request, enabled/disabled SDK, native operation without JS, and both arrival
   orders of task completion messages.
+
+
+## Phase 6 — bounded read-only multi-step dispatcher (first orchestration slice)
+
+The dispatcher now accepts `intent=plan` with **2 or 3 serial actions**.
+This is deliberately a small, safe vertical slice: only
+`show_work`, `show_review`, `show_plan`, `show_recent_videos`,
+`show_material`, and `go_to` are enabled. This allowlist is independent
+from the model-selected capability and checked before **any** step runs.
+Each entry is also validated against the existing strict parameter schema and
+the registry's analytics/no-cost/no-confirmation policy. Unknown, repeated,
+invalid, mutating or paid steps cause a **whole-plan preflight refusal**.
+
+The dispatcher executes validated reads sequentially via the existing
+capability executors. A failed step stops later reads, and the resulting
+`workflow` block records which steps finished, failed or were skipped.
+The server generates the status and text, rather than accepting a model's
+claims about progress. Existing company/account scope, saved conversation,
+retry client keys and server-owned resource links are preserved. An identical
+retry replays the stored result; it never re-executes the plan. No new
+database tables, external posting, payment, publishing or agent calls.
+
+Both JS-rendered workflows and server-rendered task/material cards share
+the `sg-resource-widget` disclosure contract and pinned local UI SDK
+enhancer, including native `<details>` fallback and `?ui_sdk=0`.
+A workflow step can display validated read-only result tables, links and
+review cards; the workflow itself provides no mutation endpoint.
+The desktop/mobile browser check is `studio_ui_sdk/workflow-smoke.mjs`.
+
+**Not implemented in this slice:** chains containing draft generation,
+publication, edit, email or any other write. They still follow the existing
+single-action confirmation flow, with remaining actions offered as individual
+chips. Before allowing mutating multi-action plans, implement a durable
+step-state store, per-step confirmation/idempotency, concurrency protection,
+worker recovery and explicit partial-failure/compensation semantics. Avoid
+claiming atomic rollback for delivered messages or published content.
+
+Next UI consumers: unified content review, SEO factory phase progress,
+AI Chat specialists, Instagram comment replies, then campaign/BookingBot/Mail
+components using each product's frontend adapter.
