@@ -51,6 +51,7 @@ async def test_durable_workflow_separate_confirmations_and_decline(db, company):
     assert first["status"] == "waiting_approval"
     assert first["approval"]["position"] == 1
     assert first["steps"][0]["status"] == "completed"
+    assert first["steps"][0]["kind"] == "queued_post"
     assert first["steps"][1]["status"] == "waiting_approval"
     tasks = list(db.scalars(select(Task)))
     assert len(tasks) == 1
@@ -89,6 +90,7 @@ async def test_durable_workflow_two_confirmations_then_read_and_resume(db, compa
     assert done["status"] == "completed"
     assert [s["status"] for s in done["steps"]] == [
         "completed", "completed", "completed"]
+    assert [s["kind"] for s in done["steps"]] == ["queued_post", "queued_post", "read"]
     assert len(list(db.scalars(select(Task)))) == 2
     resumed = await workflows.resume(ctx, wid)
     assert resumed["steps"] == done["steps"]
