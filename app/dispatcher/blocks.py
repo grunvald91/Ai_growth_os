@@ -160,6 +160,7 @@ class WorkflowBlock(_Block):
     status: Literal["running", "waiting_approval", "completed", "failed", "cancelled"] | None = None
     revision: int = Field(default=0, ge=0)
     approval: WorkflowApproval | None = None
+    can_retry_read: bool = False
     steps: list[PlanResultStep] = Field(min_length=2, max_length=3)
 
 
