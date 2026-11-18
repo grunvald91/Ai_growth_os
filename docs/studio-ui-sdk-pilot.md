@@ -268,3 +268,30 @@ atomic durable receipts or external provider idempotency and compensating
 behavior; otherwise the orchestrator must reject it. The next UI consumers
 remain unified content review and SEO progress; external dispatch belongs to
 a later release after verifying actual provider idempotency.
+
+
+## Phase 7b — live task lifecycle after durable dispatch
+
+A workflow `completed` status means **every orchestration step was dispatched**,
+not that the resulting post has been generated. `GET .../workflows/{id}` now
+refreshes a separate, company-scoped view of the linked `Task` rows and
+returns `steps[].task_status` and `task_summary`. The post task may be
+`queued`, `running`, `waiting_approval`, `completed`, `failed`,
+`cancelled`, or `unavailable` when its receipt cannot be resolved in the
+same company. Existing task links are only returned when their referenced
+task belongs to the authorized company.
+
+The overview `GET .../dispatch/state` and the unfinished-workflows endpoint
+continue to include dispatch-completed workflows **while their linked tasks
+are queued, running, waiting for review or failed**. They leave the active
+overview after the linked tasks reach completed/cancelled (the explicit
+workflow GET still returns the receipt). Task status changes require no
+workflow mutation/revision increment and cannot trigger any new generation.
+
+The dispatcher card displays current task status separately from the
+workflow step status and offers an explicit **«Обновить статус материалов»**
+read-only button. On opening saved chat cards, it already reconciles against
+the authorized status endpoint. No background paid request, publication,
+retry of a failed write, or schema migration is introduced. Browser smoke
+covers both the existing two separate confirmations and live status
+refresh without replaying either confirmation.
