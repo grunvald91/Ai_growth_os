@@ -98,6 +98,50 @@ def test_task_result_status_is_safe_and_scoped_to_matching_id():
     assert "task_result" not in to_dict(message)
 
 
+def test_workflow_block_validates_nested_safe_links_and_never_embeds_confirmations():
+    from app.dispatcher.blocks import clean_blocks
+    from pydantic import ValidationError
+
+    result = clean_blocks([{
+        "type": "workflow", "title": "Результаты",
+        "steps": [
+            {"title": "Работа", "status": "completed", "detail": "Проверено",
+             "blocks": [{"type": "links", "items": [
+                 {"label": "Задачи", "href": "/studio/products/abc/work"}]}]},
+            {"title": "План", "status": "skipped", "detail": "Пропущено", "blocks": []},
+        ],
+    }])
+    assert len(result) == 1 and result[0]["type"] == "workflow"
+    assert len(result[0]["steps"]) == 2
+    blocked = clean_blocks([{
+        "type": "workflow", "title": "Чужие данные",
+        "steps": [
+            {"title": "Работа", "status": "completed", "detail": "Ок",
+             "blocks": [{"type": "links", "items": [
+                 {"label": "Опасно", "href": "https://evil.example/steal"}]}]},
+            {"title": "План", "status": "completed", "detail": "Ок", "blocks": []},
+        ],
+    }])
+    assert blocked == []
+    write = clean_blocks([{
+        "type": "workflow", "title": "Подтверждение",
+        "steps": [
+            {"title": "1", "status": "completed", "detail": "Ок",
+             "blocks": [{"type": "confirm", "confirmation_id": "forged", "title": "Оплатить"}]},
+            {"title": "2", "status": "completed", "detail": "Ок", "blocks": []},
+        ],
+    }])
+    assert write == []
+
+
+def test_shared_resource_wrapper_accepts_workflow_kind_with_native_fallback():
+    markup = resource_widget(kind="workflow", primary_html="<strong>Шаги</strong>",
+                             description="Результат без JavaScript")
+    assert 'data-sg-resource-widget="workflow"' in markup
+    assert "<details" in markup
+    assert "<strong>Шаги</strong>" in markup
+
+
 def test_legacy_fallback_is_plain_details_with_link_outside():
     html = resource_widget(kind="material", primary_html='<a href="/studio">Просмотр</a>',
                            description="Без JavaScript карточка работает", detail_label="Подробности")
