@@ -15,6 +15,7 @@ from app.models.domain import (
     Approval, Artifact, ArtifactStatus, Publication, Task, TaskStatus,
 )
 from app.seo.queue import SEO_TASK_PREFIX
+from app.content.review import REVIEW_KINDS
 
 
 PAGE_SIZE = 30
@@ -44,6 +45,8 @@ def history(db: Session, product_id: UUID, *, page: int = 1) -> Page:
     where = (
         Approval.product_id == product_id,
         Artifact.product_id == product_id,
+        Artifact.kind.in_(REVIEW_KINDS),
+        Approval.decided_at.is_not(None),
         Approval.status.in_(("approved", "rejected")),
         (
             Approval.action_type.in_(REVIEW_ACTIONS)
@@ -114,6 +117,8 @@ def seo_progress(db: Session, product_id: UUID, *, page: int = 1) -> Page:
             label = "Ждёт решения владельца"
         elif row and row.status == ArtifactStatus.APPROVED:
             label = "Согласовано, не опубликовано"
+        elif row and row.status == ArtifactStatus.PUBLISHED:
+            label = "Сведения о публикации расходятся"
         elif task.status == TaskStatus.FAILED:
             label = "Ошибка подготовки"
         elif task.status == TaskStatus.CANCELLED:
