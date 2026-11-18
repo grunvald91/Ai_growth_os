@@ -36,6 +36,16 @@ class NormalizeTest(unittest.TestCase):
         self.assertEqual(a["updated"], "2026-10-28")
         self.assertEqual(a["date_label"], "28 октября 2026")
         self.assertTrue(a["from_feed"])
+        self.assertEqual(a["published_timestamp"], RAW["published_at"])
+        self.assertEqual(a["updated_timestamp"], RAW["updated_at"])
+        self.assertTrue(a["modified_since_published"])
+        self.assertEqual(a["published_label"], "28 октября 2026")
+
+    def test_unchanged_publication_keeps_original_date(self):
+        raw = {**RAW, "updated_at": RAW["published_at"]}
+        result = blog_feed.normalize(raw)
+        self.assertFalse(result["modified_since_published"])
+        self.assertEqual(result["updated_timestamp"], result["published_timestamp"])
 
     def test_verified_company_facts_pass_through_without_html(self):
         raw = {**RAW, "company_facts": [
@@ -114,6 +124,32 @@ class BlogFeedPagesTest(unittest.IsolatedAsyncioTestCase):
         types = [json.loads(m)["@type"] for m in re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.S)]
         self.assertEqual(types, ["BlogPosting", "FAQPage"])
         self.assertIn('rel="canonical" href="https://servgo.ru/blog/kak-vybrat-crm"', html)
+
+    async def test_structured_and_visible_dates_agree_for_published_revision(self):
+        async with TestClient(TestServer(create_webapp())) as c:
+            res = await c.get('/blog/kak-vybrat-crm')
+            body = await res.text()
+        self.assertEqual(res.status, 200)
+        parsed = [json.loads(x) for x in re.findall(
+            r'<script type="application/ld\+json">(.*?)</script>', body, re.S)]
+        article = next(x for x in parsed if x["@type"] == "BlogPosting")
+        self.assertEqual(article["datePublished"], RAW["published_at"])
+        self.assertEqual(article["dateModified"], RAW["updated_at"])
+        self.assertIn('Опубликовано 28 октября 2026', body)
+        self.assertIn('Обновлено 28 октября 2026', body)
+        self.assertIn('>ServGo</span>', body)
+
+    async def test_new_article_without_editorial_change_has_only_publication_date(self):
+        raw = {**RAW, "updated_at": RAW["published_at"]}
+        async def feed(*args, **kwargs):
+            return [blog_feed.normalize(raw)]
+        with patch("webapp.blog_feed.feed_articles", feed):
+            async with TestClient(TestServer(create_webapp())) as c:
+                res = await c.get('/blog/kak-vybrat-crm')
+                body = await res.text()
+        self.assertEqual(res.status, 200)
+        self.assertIn('Опубликовано 28 октября 2026', body)
+        self.assertNotIn('>Обновлено ', body)
 
     async def test_live_article_does_not_render_internal_verified_facts(self):
         raw = {**RAW, "company_facts": [

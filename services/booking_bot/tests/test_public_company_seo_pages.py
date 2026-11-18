@@ -101,8 +101,26 @@ class PublicSEOHTMLTests(unittest.TestCase):
         self.assertEqual(article["about"]["name"], ARTICLE["primary_query"])
         self.assertEqual(article["publisher"]["name"], "Салон <Мария>")
         self.assertEqual(article["inLanguage"], "ru")
+        self.assertEqual(article["datePublished"], ARTICLE["published_at"])
+        self.assertEqual(article["dateModified"], ARTICLE["updated_at"])
+        self.assertIn('Опубликовано: <time datetime="' + ARTICLE["published_at"] + '">', body)
+        self.assertIn('Обновлено: <time datetime="' + ARTICLE["updated_at"] + '">', body)
         self.assertTrue(article["isAccessibleForFree"])
         self.assertEqual(article["isPartOf"]["url"], "https://servgo.ru/business/64/blog")
+
+    def test_unmodified_business_article_has_consistent_single_publication_date(self):
+        article = {**ARTICLE, "updated_at": ARTICLE["published_at"]}
+        async def fake_data(business_id, db, slug=None):
+            return article if slug else {"articles": [article]}
+        with patch.object(seo_pages, "_company_blog_data", fake_data):
+            response = self.client.get("/seo-pages/business/64/blog/" + ARTICLE["slug"])
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Опубликовано:', response.text)
+        self.assertNotIn('Обновлено:', response.text)
+        schema = json.loads(re.search(
+            r'<script type="application/ld\+json">(.+?)</script>',
+            response.text).group(1))
+        self.assertEqual(schema["datePublished"], schema["dateModified"])
 
     def test_search_and_ai_crawlers_can_reach_public_blog_without_indexing_private_app(self):
         robots = (Path(__file__).resolve().parents[1] / "web" / "frontend" / "public" / "robots.txt").read_text(encoding="utf-8")
