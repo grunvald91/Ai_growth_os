@@ -319,3 +319,43 @@ of user-initiated status refreshes. Read-only refresh does not start an LLM
 job or retry any write. Regression tests cover the real
 `completed Task + awaiting_approval Artifact` contract, reviewed transition,
 foreign artifacts, invalid review links and the mobile/desktop workflow card.
+
+
+## Phase 8a — unified owner review inbox on the existing Studio route
+
+The existing **`/studio/products/{id}/review`** is the single owner
+review inbox; there is deliberately no duplicate approval backend or second
+review database. Only `Artifact.status=awaiting_approval` for the
+company-scoped review kinds `channel_text`, `article`, `creative_brief`,
+`video_script` and `video_render` appears here. This includes SEO articles
+once they actually enter owner review; automatically published articles are
+not falsely represented as pending.
+
+The inbox now exposes counts for all materials and category filters for
+posts, articles (marking SEO articles only when the saved SEO brief is
+present), creative briefs plus video, and video alone. The previous
+`?kind=text` link is preserved as the text-only union. Both counts and
+paginated rows are selected **server-side**, limited to 30 per page (not
+a silent truncation of the first 250). The current category, page and
+company remain within the same route.
+
+Each item uses the shared `resource_widget(kind="material")` contract
+and self-hosted, pinned UI SDK collapsible enhancement. The description
+and warnings are generated from real stored metadata. Navigation to the
+complete version is a distinct link outside its disclosure control.
+With `?ui_sdk=0`, JavaScript disabled, or SDK load failure, native
+`<details>` still works. The review page reuses the same resource
+CSS/JS as work and the material library.
+
+**Safety invariant:** an inbox excerpt is not a full editorial review, so
+the inline one-click approval shortcut was removed from this listing.
+Click **«Открыть и проверить»** and use the existing material-detail
+approval form, which calls the unchanged `app.content.review.approve_material`
+with company scope, fact-check confirmation, validation and version guards.
+This does not change publication policy or bypass any approval checks.
+
+Tests cover cross-company isolation, exact counts by kind, paging beyond
+30 records, legacy filters, HTML escaping, fact-check refusal, current
+navigation, keyboard review disclosure, and UI SDK opt-out. The next
+slice is a review-specific approval history and progress summary, without
+adding automatic publication or bulk approvals.
