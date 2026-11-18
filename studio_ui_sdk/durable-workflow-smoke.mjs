@@ -15,19 +15,27 @@ const [dispatcher, widgets, sdk, css, widgetCss] = await Promise.all([
 ]);
 const id = "a5286c0b-d887-43f6-a903-2f7a00d8d321";
 const approvals = [];
+let taskStates = ["queued", "queued"];
 function block(position = 0, revision = 1, done = false) {
+  const active = done ? 2 : position > 0 ? 1 : 0;
+  const counts = {queued:0,running:0,waiting_approval:0,completed:0,
+                  failed:0,cancelled:0,unavailable:0};
+  taskStates.slice(0,active).forEach(status => counts[status]++);
   return {type:"workflow",workflow_id:id,title:"Поручение из нескольких шагов",
     revision,status:done?"completed":"waiting_approval",
     can_retry_read:false,
+    task_summary:active ? {total:active,...counts} : null,
     approval:done?null:{
       title:"Подготовить пост?",position,paid:false,confirm_label:"Создать",
       details:["Тема: Пример "+(position+1),"<img src=x onerror=alert(1)>"]
     },
     steps:[
       {kind:"queued_post",title:"Создать пост",status:done||position>0?"completed":"waiting_approval",
+        task_status:position>0||done?taskStates[0]:null,
         detail:position>0||done?"Задание поставлено в очередь.":"Нужно подтверждение",
         blocks:[]},
       {kind:"queued_post",title:"Создать пост",status:done?"completed":position===1?"waiting_approval":"pending",
+        task_status:done?taskStates[1]:null,
         detail:done?"Задание в очереди.":"",blocks:[]},
       {kind:"read",title:"Что в работе",status:done?"completed":"pending",
         detail:done?"В работе: 2.":"",blocks:[]}
@@ -85,7 +93,7 @@ const browser=await chromium.launch({headless:true,
   executablePath:process.env.SERVGO_CHROME_PATH||"/usr/bin/google-chrome"});
 try{
  for(const width of [390,1280]) {
-  live=block();approvals.length=0;
+  taskStates=["queued","queued"];live=block();approvals.length=0;
   const url=`http://127.0.0.1:${server.address().port}/`;
   const page=await browser.newPage({viewport:{width,height:820}});
   const errors=[];page.on("pageerror",e=>errors.push(e.message));
@@ -109,7 +117,16 @@ try{
   await page.waitForFunction(() => document.querySelectorAll(".sg-workflow-completed").length===3);
   assert.equal(approvals.length,2);
   assert.deepEqual(await page.locator(".sg-workflow-state").allTextContents(),
-    ["Пост в очереди","Пост в очереди","Проверено"]);
+    ["В очереди","В очереди","Проверено"]);
+  assert.match(await page.locator(".sg-workflow-activity").innerText(),/2 в очереди/);
+  assert.equal(await page.getByRole("button",{name:"Обновить статус материалов"}).count(),1);
+  taskStates=["waiting_approval","failed"];
+  live=block(2,3,true);
+  await page.getByRole("button",{name:"Обновить статус материалов"}).click();
+  await page.waitForFunction(() => document.querySelector(".sg-workflow-activity")?.textContent?.includes("с ошибкой"));
+  assert.deepEqual(await page.locator(".sg-workflow-state").allTextContents(),
+    ["Ждёт проверки","Ошибка создания","Проверено"]);
+  assert.equal(approvals.length,2); // Refresh never creates another task.
   assert.equal(approvals[1].position,1);
   assert.equal(approvals[1].revision,2);
   assert.equal(await page.getByRole("button",{name:"Создать"}).count(),0);
