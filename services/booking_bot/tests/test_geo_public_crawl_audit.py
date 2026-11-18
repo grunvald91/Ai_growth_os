@@ -1,5 +1,6 @@
 """Offline contract tests for GEO P0 public crawler probe."""
 import unittest
+from unittest.mock import patch
 
 from scripts.geo_public_crawl_audit import (
     AGENTS, ORIGIN, PublicResult, allowed_public_path, audit,
@@ -50,6 +51,20 @@ def sample_responses():
 
 
 class GeoPublicCrawlAuditTests(unittest.TestCase):
+    def test_network_probe_explicitly_bypasses_host_proxy_variables(self):
+        from scripts import geo_public_crawl_audit as probe
+        from urllib.request import ProxyHandler
+        with patch.object(probe, "build_opener") as opener:
+            response = opener.return_value.open.return_value.__enter__.return_value
+            response.status = 200
+            response.headers.get.return_value = "text/html"
+            response.read.return_value = b"<html><main>Public blog</main></html>"
+            result = probe.get_public("/blog", "Googlebot")
+            self.assertEqual(result.status, 200)
+            handlers = opener.call_args.args
+            self.assertTrue(any(isinstance(x, ProxyHandler) and x.proxies == {}
+                                for x in handlers))
+
     def test_baseline_all_crawlers_get_indexable_ssr_with_distinct_sites(self):
         data = sample_responses()
         calls = []
