@@ -213,15 +213,15 @@ async def create(ctx: Context, conversation: DispatcherConversation,
     workflow = DispatcherWorkflow(conversation_id=conversation.id,
                                   product_id=ctx.product.id, account=ctx.account,
                                   client_key=client_key, status="running", revision=0)
-    db.add(workflow)
-    db.flush()
-    for position, (capability, params) in enumerate(parsed):
-        db.add(DispatcherWorkflowStep(
-            workflow_id=workflow.id, position=position, capability=capability,
-            params=params, status="pending", preview={}, result_text="",
-            result_blocks=[],
-        ))
     try:
+        db.add(workflow)
+        db.flush()
+        for position, (capability, params) in enumerate(parsed):
+            db.add(DispatcherWorkflowStep(
+                workflow_id=workflow.id, position=position, capability=capability,
+                params=params, status="pending", preview={}, result_text="",
+                result_blocks=[],
+            ))
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -259,6 +259,16 @@ def snapshot(ctx: Context, workflow_id: UUID) -> dict:
         "approval": approval,
         "steps": payload_steps,
     }
+
+
+def recent(ctx: Context, *, limit: int = 8) -> list[dict]:
+    """Unfinished plans also survive a new chat topic or lost HTTP response."""
+    rows = list(ctx.db.scalars(select(DispatcherWorkflow).where(
+        DispatcherWorkflow.product_id == ctx.product.id,
+        DispatcherWorkflow.account == ctx.account,
+        DispatcherWorkflow.status.in_(("running", "waiting_approval", "failed")),
+    ).order_by(DispatcherWorkflow.created_at.desc(), DispatcherWorkflow.id.desc()).limit(limit)))
+    return [snapshot(ctx, row.id) for row in rows]
 
 
 async def decide(ctx: Context, workflow_id: UUID, *, position: int, revision: int,
