@@ -10,7 +10,7 @@ from app.dispatcher.decision import PlannedStep
 from app.dispatcher.models import DispatcherWorkflow, DispatcherWorkflowStep
 from app.dispatcher.outcome import Context
 from app.dispatcher.service import open_conversation
-from app.models.domain import Artifact, Product, Task
+from app.models.domain import Artifact, Product, Task, TaskStatus
 
 
 @pytest.fixture
@@ -229,3 +229,95 @@ async def test_internal_create_must_match_conversation_owner(db, company):
         await workflows.create(ctx, foreign_account, chain(FIRST, READ), "forged-account")
     assert not list(db.scalars(select(DispatcherWorkflow)))
     assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.asyncio
+async def test_completed_dispatch_keeps_live_queued_post_visible_until_task_finishes(db, company):
+    """A workflow receipt does not falsely claim that generated content is ready."""
+    ctx = context(db, company)
+    conversation = open_conversation(db, company.id, ctx.account)
+    initial = await workflows.create(ctx, conversation, chain(FIRST, READ), "live-tasks")
+    wid = UUID(initial["workflow_id"])
+    sent = await workflows.decide(ctx, wid, position=0, revision=initial["revision"], accept=True)
+    assert sent["status"] == "completed"  # Dispatch finished, not generation.
+    assert sent["task_summary"]["queued"] == 1
+    assert sent["task_summary"]["total"] == 1
+    assert sent["steps"][0]["task_status"] == "queued"
+    assert sent["steps"][0]["blocks"][0]["status"] == "queued"
+    assert any(row["workflow_id"] == str(wid) for row in workflows.recent(ctx))
+
+    task = db.scalar(select(Task).where(Task.product_id == company.id))
+    for new_status, exposed in (
+        (TaskStatus.RUNNING, "running"),
+        (TaskStatus.WAITING_APPROVAL, "waiting_approval"),
+        (TaskStatus.FAILED, "failed"),
+    ):
+        task.status = new_status
+        db.commit()
+        refreshed = workflows.snapshot(ctx, wid)
+        assert refreshed["status"] == "completed"
+        assert refreshed["steps"][0]["task_status"] == exposed
+        assert refreshed["steps"][0]["blocks"][0]["status"] == exposed
+        assert refreshed["task_summary"][exposed] == 1
+        assert any(row["workflow_id"] == str(wid) for row in workflows.recent(ctx))
+        assert len(list(db.scalars(select(Task)))) == 1
+
+    task.status = TaskStatus.COMPLETED
+    db.commit()
+    done = workflows.snapshot(ctx, wid)
+    assert done["steps"][0]["task_status"] == "completed"
+    assert done["task_summary"]["completed"] == 1
+    assert all(row["workflow_id"] != str(wid) for row in workflows.recent(ctx))
+    # Refreshing task state is a read, never a retry of the already approved action.
+    assert len(list(db.scalars(select(Task)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_workflow_does_not_expose_foreign_or_missing_task_receipts(db, company):
+    other = Product(name="Other", slug="other")
+    db.add(other)
+    db.commit()
+    ctx = context(db, company)
+    started = await workflows.create(
+        ctx, open_conversation(db, company.id, ctx.account),
+        chain(FIRST, READ), "foreign-receipt")
+    wid = UUID(started["workflow_id"])
+    sent = await workflows.decide(ctx, wid, position=0,
+                                  revision=started["revision"], accept=True)
+    original = db.scalar(select(Task).where(Task.product_id == company.id))
+    foreign = Task(product_id=other.id, title="FOREIGN SECRET POST",
+                   assigned_agent="content_factory", status=TaskStatus.RUNNING)
+    db.add(foreign)
+    db.flush()
+    step = db.scalar(select(DispatcherWorkflowStep).where(
+        DispatcherWorkflowStep.workflow_id == wid,
+        DispatcherWorkflowStep.position == 0))
+    step.task_id = foreign.id
+    db.commit()
+    snapshot = workflows.snapshot(ctx, wid)
+    assert snapshot["steps"][0]["task_status"] == "unavailable"
+    assert snapshot["steps"][0]["blocks"] == []
+    assert "FOREIGN SECRET POST" not in str(snapshot)
+    assert snapshot["task_summary"]["unavailable"] == 1
+    assert all(row["workflow_id"] != str(wid) for row in workflows.recent(ctx))
+    assert original.id != foreign.id
+
+
+@pytest.mark.asyncio
+async def test_waiting_confirmations_are_recovered_while_prior_post_runs(db, company):
+    ctx = context(db, company)
+    started = await workflows.create(
+        ctx, open_conversation(db, company.id, ctx.account),
+        chain(FIRST, SECOND, READ), "two-live-posts")
+    wid = UUID(started["workflow_id"])
+    one = await workflows.decide(ctx, wid, position=0,
+                                 revision=started["revision"], accept=True)
+    assert one["status"] == "waiting_approval"
+    assert one["task_summary"]["total"] == 1
+    assert one["task_summary"]["queued"] == 1
+    assert one["steps"][1]["task_status"] is None
+    recovered = workflows.recent(ctx)
+    assert len(recovered) == 1
+    assert recovered[0]["approval"]["position"] == 1
+    assert recovered[0]["steps"][0]["task_status"] == "queued"
+    assert len(list(db.scalars(select(Task)))) == 1
