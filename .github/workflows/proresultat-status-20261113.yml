@@ -110,6 +110,23 @@ jobs:
                       from collections import Counter
                       print('seo_articles_status_counts', dict(Counter(t.status.value for t in article_tasks)))
 
+                      all_failed_seo = list(db.scalars(select(Task).where(
+                          Task.product_id == servgo.id, Task.assigned_agent == 'content_factory',
+                          Task.title.like('SEO-ARTICLE:%'), Task.status == TaskStatus.FAILED,
+                      ).order_by(Task.created_at.desc(), Task.id.desc())))
+                      print('seo_failed_all_count', len(all_failed_seo))
+                      recent_set = {t.id for t in article_tasks}
+                      for row in all_failed_seo[:20]:
+                          last_run = db.scalar(select(AgentRun).where(
+                              AgentRun.task_id == row.id,
+                          ).order_by(AgentRun.started_at.desc(), AgentRun.id.desc()).limit(1))
+                          phase = (last_run.error or 'none').split(':')[0] if last_run else 'no_run'
+                          print('seo_failed_record', hashlib.sha256(str(row.id).encode()).hexdigest()[:24],
+                                'recent12', row.id in recent_set,
+                                'created', str(row.created_at)[:19], 'updated', str(row.updated_at)[:19],
+                                'error_phase', ''.join(c for c in phase if c.isascii() and
+                                                    (c.isalnum() or c in '_-'))[:65])
+
                       from app.seo.activation import editorial_preferences
                       from app.seo.queue import articles_started_today
                       p = editorial_preferences(db, servgo.id)
