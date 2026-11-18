@@ -64,7 +64,15 @@ def normalize(raw: dict) -> dict | None:
         if not _SLUG.match(slug):
             return None
         title, lead = str(raw["title"]).strip(), str(raw["lead"]).strip()
-        updated, label = _date(str(raw.get("updated_at") or raw["published_at"]))
+        published_stamp = str(raw["published_at"])
+        updated_stamp = str(raw.get("updated_at") or published_stamp)
+        updated, label = _date(updated_stamp)
+        published, published_label = _date(published_stamp)
+        from datetime import timezone
+        def utc_value(stamp):
+            value = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        is_modified = utc_value(updated_stamp) > utc_value(published_stamp)
         sections = []
         for section in raw.get("sections", []):
             blocks = []
@@ -113,7 +121,11 @@ def normalize(raw: dict) -> dict | None:
             "category": category,
             "topic": _TOPIC.get(category, "growth"),
             "updated": updated,
-            "published": _date(str(raw.get("published_at") or updated))[0],
+            "published": published,
+            "published_label": published_label,
+            "published_timestamp": published_stamp,
+            "updated_timestamp": updated_stamp,
+            "modified_since_published": is_modified,
             "date_label": label,
             "direct_answer": str(raw.get("direct_answer") or "").strip(),
             "company_facts": company_facts,
