@@ -1127,6 +1127,13 @@ class ArticleProduction:
                 self.db.scalar(select(Product.id).where(Product.id == product.id).with_for_update())
                 from app.seo.activation import require_enabled
                 require_enabled(self.db, product.id)
+                from app.seo.failure_guard import automatic_generation_paused
+                from app.seo.queue import SeoQuotaDeferred
+                if automatic_generation_paused(
+                    self.db, product_id=product.id, task_id=request.task_id,
+                ):
+                    self.db.rollback()
+                    raise SeoQuotaDeferred("Company SEO generator paused after repeated technical failures")
                 if self.seo_default_articles_per_day > 0:
                     from app.seo.queue import quota_exhausted, SeoQuotaDeferred
                     if quota_exhausted(self.db, self.seo_default_articles_per_day,
