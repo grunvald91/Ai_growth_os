@@ -33,6 +33,20 @@ function html() {
         <div class="sg-resource-details-body"><p class="sg-resource-description">Проверенный текст.</p></div>
       </details>
     </article>
+    <section class="sg-review-page"><div class="sg-review-list">
+      <article class="sg-resource-widget" data-sg-resource-widget="material" id="review">
+        <div class="sg-review-item"><h3>SEO-статья ждёт согласования</h3>
+          <p>Предпросмотр сокращён, проверка по полной версии.</p>
+          <a class="btn secondary" href="/studio/products/demo/materials/review1">Открыть и проверить</a>
+        </div>
+        <details class="sg-resource-details" data-sg-resource-details>
+          <summary>Что проверить</summary>
+          <div class="sg-resource-details-body">
+            <p class="sg-resource-description">Проверьте факты перед решением.</p>
+          </div>
+        </details>
+      </article>
+    </div></section>
   </main>
   <script src="/resource-widgets.js"></script>
   <script src="/resource-widgets.js"></script>
@@ -63,10 +77,10 @@ try {
     page.on("pageerror", error => errors.push(error.message));
     const startRequests = sdkRequests.length;
     await page.goto(url, {waitUntil:"networkidle"});
-    await page.waitForFunction(() => document.querySelectorAll("ui-collapsible.sg-resource-sdk").length === 2);
+    await page.waitForFunction(() => document.querySelectorAll("ui-collapsible.sg-resource-sdk").length === 3);
     assert.equal(sdkRequests.length, startRequests + 1, "one SDK load per page");
     assert.equal(await page.evaluate(() => window.__servgoResourceWidgetsInitialized), true);
-    assert.equal(await page.locator("[data-sg-resource-widget]").count(), 2);
+    assert.equal(await page.locator("[data-sg-resource-widget]").count(), 3);
     assert.equal(await page.locator("#task > .sg-work-item").getAttribute("href"), "/studio/products/demo/tasks/task1");
     assert.equal(await page.locator("#material").getAttribute("data-search"), "тест пост");
     assert.equal(await page.locator("#task > details").count(), 0);
@@ -83,6 +97,15 @@ try {
     await page.keyboard.press("Enter");
     assert.equal(await material.locator("ui-collapsible-panel").isVisible(), true);
     assert.equal(page.url(), url);
+    const review = page.locator("#review");
+    assert.equal(await review.getAttribute("data-sg-resource-widget"), "material");
+    assert.equal(await review.locator('a.btn').getAttribute("href"),
+      "/studio/products/demo/materials/review1");
+    assert.equal(await review.locator("form").count(), 0, "no inline approval bypass");
+    await review.locator("ui-collapsible-trigger button").focus();
+    await page.keyboard.press("Enter");
+    assert.equal(await review.locator("ui-collapsible-panel").isVisible(), true);
+    assert.match(await review.locator("ui-collapsible-panel").innerText(), /Проверьте факты/);
     await page.evaluate(() => document.body.classList.add("dark"));
     const darkBg = await page.locator("#task .sg-resource-trigger").evaluate(el =>
       getComputedStyle(el).backgroundColor);
@@ -130,6 +153,8 @@ try {
     assert.equal(await legacy.locator("#task details .sg-resource-description").isVisible(), true);
     await legacy.locator("#material details summary").click();
     assert.equal(await legacy.locator("#material details .sg-resource-description").isVisible(), true);
+    await legacy.locator("#review details summary").click();
+    assert.equal(await legacy.locator("#review details .sg-resource-description").isVisible(), true);
     assert.equal(await legacy.locator("#material > .material-card").getAttribute("href"),
       "/studio/products/demo/materials/abc");
     await legacy.close();
