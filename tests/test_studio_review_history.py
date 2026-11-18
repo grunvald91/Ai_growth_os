@@ -163,7 +163,7 @@ def test_history_paginates_and_shows_only_recorded_seo_release_decisions(review_
     second = client.get(base + "?section=history&page=2")
     assert first.text.count('data-sg-resource-widget="material"') == 30
     assert second.text.count('data-sg-resource-widget="material"') == 5
-    assert "SEO: публикация подтверждена" in first.text
+    assert "SEO: публикация разрешена" in first.text
     assert 'href="' + base + '?section=history&page=2"' in first.text
 
 
