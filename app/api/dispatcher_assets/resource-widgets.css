@@ -129,3 +129,15 @@ body[data-growth-design="v4"] .sg-resource-widget{
   .sg-review-page .sg-review-footer .sg-inline-actions,
   .sg-review-page .sg-review-footer .btn{width:100%}
 }
+
+/* Review center: same accessible tabs and read-only cards in the new sections. */
+.sg-review-sections{display:flex;align-items:center;flex-wrap:wrap;gap:7px;
+  margin:0 0 20px;padding:0 0 16px;border-bottom:1px solid var(--sg-widget-line,var(--sg-line,#dce6f1))}
+.sg-review-sections .sg-filter{min-height:42px;border:1px solid var(--sg-widget-line,var(--sg-line,#dce6f1))}
+.sg-review-sections .sg-filter.is-active{font-weight:750}
+.sg-review-empty{margin:16px 0!important;font-size:13px;line-height:1.6;
+  color:var(--sg-widget-muted,var(--sg-muted,#526176))}
+@media(max-width:640px){
+  .sg-review-sections{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}
+  .sg-review-sections .sg-filter{white-space:nowrap}
+}
