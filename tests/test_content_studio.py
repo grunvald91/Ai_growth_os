@@ -765,7 +765,8 @@ def test_unified_review_escapes_markup_and_fact_checks_require_detail(studio_db)
         assert "Проверьте факты" in response.text
         assert "Некорректный ответ" in response.text
         # No shortcut around the existing owner fact-check safeguard.
-        post = client.post(base + f"/review/{malicious.id}/approve", follow_redirects=False)
+        post = client.post(base + f"/review/{malicious.id}/approve",
+                           data={"facts_confirmed": "no"}, follow_redirects=False)
         assert post.status_code == 422
         studio_db.refresh(malicious)
         assert malicious.status == ArtifactStatus.AWAITING_APPROVAL
