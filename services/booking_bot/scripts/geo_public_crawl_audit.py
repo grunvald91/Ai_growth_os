@@ -17,7 +17,7 @@ import json
 import re
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from urllib.robotparser import RobotFileParser
 from xml.etree import ElementTree
 
@@ -47,7 +47,9 @@ def get_public(path: str, agent: str) -> PublicResult:
     if not allowed_public_path(path):
         raise ValueError("Refusing nonpublic or noncanonical path")
     req = Request(ORIGIN + path, headers={"User-Agent": agent, "Accept": "text/html,*/*"})
-    opener = build_opener(NoRedirect())
+    # Explicitly bypass environment HTTP(S)_PROXY: network-origin GEO checks
+    # must not inherit a foreign relay from the deployment host.
+    opener = build_opener(ProxyHandler({}), NoRedirect())
     try:
         with opener.open(req, timeout=12) as res:
             return PublicResult(res.status, res.headers.get("Content-Type", ""),
