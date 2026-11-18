@@ -232,10 +232,10 @@ def review_html(product_id, records, *, filter_name="all", counts=None,
     tabs = []
     for value, label in types:
         count = count_for(value)
+        current = 'aria-current="page"' if value == filter_name else ""
         tabs.append(
             f'<a class="sg-filter {"is-active" if value == filter_name else ""}" '
-            f'href="{base}/review?kind={value}" '
-            f'{"aria-current=\"page\"" if value == filter_name else ""}>'
+            f'href="{base}/review?kind={value}" {current}>'
             f'{esc(label)} <span class="sg-review-filter-count">{count}</span></a>'
         )
     cards = []
