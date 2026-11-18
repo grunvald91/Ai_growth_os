@@ -418,6 +418,99 @@ async def test_chip_with_invalid_parameters_asks_instead_of_acting(db, product):
     assert tasks(db, "content_factory") == []
 
 
+
+# ---- bounded multi-step dispatcher: safe read-only batch --------------------------------
+
+@pytest.mark.asyncio
+async def test_readonly_plan_is_sequential_persisted_and_replay_safe(db, product):
+    model, provider = llm({
+        "intent": "plan", "confidence": 0.97, "reply_text": "Уже всё сделал",
+        "steps": [
+            {"capability": "show_work", "params": {}},
+            {"capability": "show_plan", "params": {}},
+        ],
+    })
+    result = await send(db, product, text="Покажи задания и контент-план", model=model, key="plan-1")
+    answer = result["messages"][1]
+    assert answer["intent"] == "plan"
+    assert "Уже всё сделал" not in answer["text"]  # server owns truthful status
+    workflow = next(b for b in answer["blocks"] if b["type"] == "workflow")
+    assert len(workflow["steps"]) == 2
+    assert [s["status"] for s in workflow["steps"]] == ["completed", "completed"]
+    assert [s["title"] for s in workflow["steps"]] == ["Что в работе", "Показать контент-план"]
+    assert len(list(db.scalars(select(ToolCall)))) == 0
+    assert len(list(db.scalars(select(Task)))) == 0
+    replay = await send(db, product, text="Покажи задания и контент-план", model=model, key="plan-1")
+    assert replay["replayed"] is True
+    assert replay["messages"][1]["blocks"] == answer["blocks"]
+    assert len(list(db.scalars(select(DispatcherMessage)))) == 2
+    assert "plan" in provider.last_request.messages[-1].content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("steps", [
+    [{"capability": "show_work"}, {"capability": "create_post", "params": {"topic": "Салон"}}],
+    [{"capability": "show_work"}, {"capability": "set_insights_depth", "params": {"days": "30"}}],
+    [{"capability": "show_work"}, {"capability": "erase_database"}],
+    [{"capability": "show_work"}, {"capability": "show_work"}],
+    [{"capability": "show_work"}],
+    [{"capability": "go_to", "params": {"target": "nonexistent"}}, {"capability": "show_work"}],
+])
+async def test_readonly_plan_preflight_rejects_every_unsafe_or_incomplete_batch(db, product, steps):
+    model, _ = llm({"intent": "plan", "confidence": 0.99, "steps": steps})
+    response = await send(db, product, text="Сделай несколько действий", model=model, key="unsafe-" + str(len(steps)))
+    assistant = response["messages"][1]
+    assert assistant["intent"] == "clarify"
+    assert not any(b["type"] == "workflow" for b in assistant["blocks"])
+    assert not list(db.scalars(select(Task)))
+    assert not list(db.scalars(select(ToolCall)))
+
+
+@pytest.mark.asyncio
+async def test_readonly_plan_stops_after_failed_step_without_running_rest(db, product, monkeypatch):
+    from app.dispatcher.outcome import Outcome
+    seen = []
+    async def first(ctx, params):
+        seen.append("first")
+        return Outcome("Недоступно.", ok=False)
+    async def second(ctx, params):
+        seen.append("second")
+        return Outcome("Никогда.")
+    monkeypatch.setitem(executors.EXECUTORS, "show_work", first)
+    monkeypatch.setitem(executors.EXECUTORS, "show_plan", second)
+    model, _ = llm({"intent": "plan", "confidence": 0.9, "steps": [
+        {"capability": "show_work"}, {"capability": "show_plan"}]})
+    result = await send(db, product, text="Что в работе и как план?", model=model)
+    assert seen == ["first"]
+    workflow = next(b for b in result["messages"][1]["blocks"] if b["type"] == "workflow")
+    assert [s["status"] for s in workflow["steps"]] == ["failed", "skipped"]
+    assert "Остальные остановлены" in result["messages"][1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_readonly_plan_keeps_company_data_scoped(db, product):
+    other = Product(name="Другая компания", slug="other-business")
+    db.add(other)
+    db.flush()
+    db.add(Task(product_id=other.id, title="ЧУЖОЙ СЕКРЕТ", assigned_agent="content_factory",
+                status=TaskStatus.PENDING))
+    db.commit()
+    model, _ = llm({"intent": "plan", "confidence": 0.9, "steps": [
+        {"capability": "show_work"}, {"capability": "show_review"}]})
+    response = await send(db, product, text="Задания и материалы", model=model)
+    assert "ЧУЖОЙ СЕКРЕТ" not in json.dumps(response, ensure_ascii=False)
+    assert "workflow" in json.dumps(response, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_readonly_plan_rejects_low_confidence_before_any_execution(db, product):
+    model, _ = llm({"intent": "plan", "confidence": 0.2, "reply_text": "Что смотреть?", "steps": [
+        {"capability": "show_work"}, {"capability": "show_review"}]})
+    response = await send(db, product, text="Сделай", model=model)
+    assert response["messages"][1]["intent"] == "clarify"
+    assert not any(b["type"] == "workflow" for b in response["messages"][1]["blocks"])
+
+
 # ---- free text: the model decides, the server checks ------------------------------------
 
 @pytest.mark.asyncio
