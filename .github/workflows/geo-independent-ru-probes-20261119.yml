@@ -1,0 +1,40 @@
+name: GEO P0 — independent Russian public HTTP probes (one-time)
+
+on:
+  push:
+    branches: [ops/geo-independent-ru-probes-20261119]
+    paths: [.github/workflows/geo-independent-ru-probes-20261119.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servgo-geo-ru-independent-20261119
+  cancel-in-progress: false
+
+jobs:
+  one-time-ru:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Request public HEAD measurements from independently located RU probes
+        id: measure
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          python3 services/booking_bot/scripts/geo_independent_ru_probe.py > ru_geo_measurements.json
+          cat ru_geo_measurements.json
+      - name: Upload independent vantage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geo-ru-independent-probes
+          path: ru_geo_measurements.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Require region-supported positive check
+        if: steps.measure.outcome != 'success'
+        run: |
+          echo "::error::Independent RU HTTP coverage was not confirmed. See report artifact."
+          exit 1
