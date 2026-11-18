@@ -17,7 +17,7 @@ from app.llm.fake import FakeLLMProvider
 from app.llm.schemas import LLMResponse
 from app.llm.service import LLMService
 from app.main import app
-from app.models.domain import Product, Task
+from app.models.domain import Product, Task, TaskStatus
 from app.privacy import PrivacyGateway
 
 
@@ -400,6 +400,15 @@ def test_durable_workflow_api_confirmation_replay_and_reload(env):
     assert resume.status_code == 200
     assert resume.json()["workflow"]["status"] == "completed"
     assert len(list(db.scalars(select(Task)))) == 1
+    # The dispatch is finished but generation is still queued: keep it recoverable.
+    active = client.get(base + "/state").json()["workflows"]
+    assert any(item["workflow_id"] == wid and item["task_summary"]["queued"] == 1
+               for item in active)
+    db.scalar(select(Task)).status = TaskStatus.COMPLETED
+    db.commit()
+    final = client.get(base + "/workflows/" + wid).json()["workflow"]
+    assert final["task_summary"]["completed"] == 1
+    assert final["steps"][0]["task_status"] == "completed"
     assert not any(item["workflow_id"] == wid for item in client.get(base + "/state").json()["workflows"])
 
 

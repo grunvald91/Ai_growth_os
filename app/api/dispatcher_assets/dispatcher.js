@@ -229,6 +229,14 @@
       declined: 'Отклонено', skipped: 'Пропущено'
     };
     function statusLabel(step) {
+      if (step.status === 'completed' && step.kind === 'queued_post' && step.task_status) {
+        return ({
+          queued: 'В очереди', running: 'Создаётся',
+          waiting_approval: 'Ждёт проверки', completed: 'Задание выполнено',
+          failed: 'Ошибка создания', cancelled: 'Отменено',
+          unavailable: 'Задание недоступно'
+        })[step.task_status] || 'Статус неизвестен';
+      }
       if (step.status === 'completed' && block.workflow_id)
         return step.kind === 'queued_post' ? 'Пост в очереди' : 'Проверено';
       return statuses[step.status] || 'Неизвестно';
@@ -241,6 +249,22 @@
       list.appendChild(item);
     });
     main.appendChild(list);
+    // Workflow dispatch and content generation are distinct states. Only
+    // verified Task records supplied by the owner-scoped server are counted.
+    if (block.task_summary && block.task_summary.total) {
+      var counts = block.task_summary;
+      var parts = [];
+      [
+        ['queued', 'в очереди'], ['running', 'создаются'],
+        ['waiting_approval', 'ждут проверки'], ['completed', 'завершены'],
+        ['failed', 'с ошибкой'], ['cancelled', 'отменены'],
+        ['unavailable', 'недоступны']
+      ].forEach(function (entry) {
+        if (counts[entry[0]]) parts.push(counts[entry[0]] + ' ' + entry[1]);
+      });
+      main.appendChild(el('p', 'sg-workflow-activity',
+        'Задания на материалы (' + counts.total + '): ' + parts.join(' · ')));
+    }
     var note = block.workflow_id
       ? 'Создание черновиков запускается только после отдельного подтверждения. Публикации не выполняются.'
       : 'Каждое действие выполнено последовательно и только на чтение.';
@@ -325,6 +349,17 @@
           doAction('/retry-read',{revision:block.revision},[retry]);
         });
         actions.appendChild(retry);
+      }
+      if (block.task_summary && block.task_summary.total) {
+        var refresh = el('button', 'dp-btn ghost sg-workflow-refresh', 'Обновить статус материалов');
+        refresh.type = 'button';
+        refresh.addEventListener('click', function () {
+          refresh.disabled = true;
+          reload().finally(function () {
+            if (refresh.isConnected) refresh.disabled = false;
+          });
+        });
+        actions.appendChild(refresh);
       }
       if (actions.childNodes.length) widget.appendChild(actions);
       // Persisted chat blocks are snapshots, not a source of truth after

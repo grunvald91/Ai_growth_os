@@ -100,3 +100,8 @@ body[data-growth-design="v4"] .sg-resource-widget{
 .sg-workflow-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-top:12px}
 .sg-workflow-waiting_approval .sg-workflow-state{color:var(--sg-accent,var(--blue,#3478d6))}
 .sg-workflow-declined .sg-workflow-state{color:var(--sg-widget-muted)}
+
+/* Workflow receipt is not the AI generation result: surface live Task state. */
+.sg-workflow-activity{margin:11px 0 0;font-size:12px;line-height:1.5;
+  color:var(--sg-widget-muted);overflow-wrap:anywhere}
+.sg-workflow-refresh{justify-self:start;max-width:100%;white-space:normal;text-align:center}

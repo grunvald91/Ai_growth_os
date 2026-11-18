@@ -134,10 +134,12 @@ class ConfirmBlock(_Block):
 
 
 class PlanResultStep(_Block):
-    """One executed step; the server owns whether it was a read or queued draft."""
+    """Distinguish workflow dispatch state from a queued task's live state."""
     kind: Literal["read", "queued_post"] = "read"
     title: str = Field(min_length=1, max_length=100)
     status: Literal["pending", "waiting_approval", "completed", "no_data", "failed", "declined", "skipped"]
+    task_status: Literal["queued", "running", "waiting_approval", "completed", "failed",
+                         "cancelled", "unavailable"] | None = None
     detail: str = Field(max_length=600)
     blocks: list[Annotated[
         TextBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock,
@@ -154,6 +156,18 @@ class WorkflowApproval(_Block):
     position: int = Field(ge=0, le=2)
 
 
+class WorkflowTaskSummary(_Block):
+    """Live status counters: dispatch completion is not content completion."""
+    total: int = Field(ge=0, le=3)
+    queued: int = Field(default=0, ge=0, le=3)
+    running: int = Field(default=0, ge=0, le=3)
+    waiting_approval: int = Field(default=0, ge=0, le=3)
+    completed: int = Field(default=0, ge=0, le=3)
+    failed: int = Field(default=0, ge=0, le=3)
+    cancelled: int = Field(default=0, ge=0, le=3)
+    unavailable: int = Field(default=0, ge=0, le=3)
+
+
 class WorkflowBlock(_Block):
     type: Literal["workflow"] = "workflow"
     workflow_id: str | None = Field(default=None, max_length=36)
@@ -161,6 +175,7 @@ class WorkflowBlock(_Block):
     status: Literal["running", "waiting_approval", "completed", "failed", "cancelled"] | None = None
     revision: int = Field(default=0, ge=0)
     approval: WorkflowApproval | None = None
+    task_summary: WorkflowTaskSummary | None = None
     can_retry_read: bool = False
     steps: list[PlanResultStep] = Field(min_length=2, max_length=3)
 
