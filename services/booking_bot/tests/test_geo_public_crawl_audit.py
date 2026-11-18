@@ -66,6 +66,19 @@ class GeoPublicCrawlAuditTests(unittest.TestCase):
         self.assertEqual(report["ai_citations"], "not_measured")
         self.assertNotIn("/account", [path for path, _ in calls])
 
+    def test_no_published_business_sitemaps_is_coverage_gap_not_http_failure(self):
+        data = sample_responses()
+        data["/business-blog-sitemap.xml"] = PublicResult(
+            200, "application/xml",
+            '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"/>')
+        report = audit(lambda path, agent: data[path])
+        self.assertEqual(report["errors"], [])
+        self.assertEqual(report["coverage"]["business_article"],
+                         "not_sampled_no_published_businesses")
+        self.assertEqual(report["coverage"]["main_article"], "sampled")
+        self.assertEqual(len(report["checks"]), 2 * len(AGENTS))
+        self.assertTrue(all(x["result"] == "pass" for x in report["checks"]))
+
     def test_robots_denial_and_specific_search_user_agent_http_403(self):
         data = sample_responses()
         data["/robots.txt"] = PublicResult(200, "text/plain",
