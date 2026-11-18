@@ -1029,6 +1029,74 @@ def validate_grounding(draft: ArticleDraft, facts: dict[str, str]) -> None:
         raise ValueError('Claims must be used by factual sections')
 
 
+def assemble_verified_draft(*, product_name: str, language: str,
+                            body_draft: ArticleBodyDraft,
+                            facts: dict[str, str],
+                            selected_source_ids: list[str]) -> ArticleDraft:
+    """Build strictly sourced audit sections without exceeding section limits.
+
+    In particular, ArticleSection.claim_ids holds at most 10 sources. The
+    previous implementation put up to 30 facts in ONE section and rejected
+    otherwise valid articles after all six paid AI stages had finished.
+    """
+    from app.workflows.article_contracts import GroundedClaim, ArticleSection
+    if len(selected_source_ids) != len(set(selected_source_ids)):
+        raise ValueError("Duplicate verified source identifiers")
+    if not set(selected_source_ids) <= set(facts):
+        raise ValueError("Unverified source identifiers")
+    claims = [
+        GroundedClaim(claim=facts[source_id], source_id=source_id, quote=facts[source_id])
+        for source_id in selected_source_ids
+    ]
+    sections = []
+    group = []
+    def append_group():
+        if not group:
+            return
+        section_body = "\n".join(f"- {claim.quote}" for claim in group)
+        sections.append(ArticleSection(
+            heading=(f"Проверенные факты: {product_name}" if language == "ru"
+                     else f"Verified facts: {product_name}"),
+            body=section_body, kind="fact",
+            claim_ids=[claim.source_id for claim in group],
+        ))
+    for claim in claims:
+        proposal = "\n".join(f"- {c.quote}" for c in (*group, claim))
+        if group and (len(group) == 10 or len(proposal) > 16000):
+            append_group()
+            group = []
+        if len(claim.quote) + 2 > 16000:
+            raise ValueError("Verified fact exceeds audit section text limit")
+        group.append(claim)
+    append_group()
+    sections += [
+        ArticleSection(heading=x.heading, body=x.body, kind=x.kind, claim_ids=[])
+        for x in body_draft.sections
+    ]
+    draft = ArticleDraft(
+        sections=sections, claims=claims,
+        proof_needed_notes=body_draft.proof_needed_notes,
+    )
+    validate_grounding(draft, facts)
+    return draft
+
+
+def validation_issue_signature(exc: Exception) -> str:
+    """Log only schema location and error code, never user or company content."""
+    if not isinstance(exc, ValidationError):
+        return ""
+    errors = exc.errors(include_url=False, include_context=False)
+    items = []
+    for issue in errors[:10]:
+        raw_loc = issue.get("loc", ())
+        loc = ".".join(str(x)[:60] for x in raw_loc
+                       if isinstance(x, (str, int)))
+        code = str(issue.get("type", "invalid"))[:70]
+        items.append(f"{loc}:{code}")
+    return ";".join(items)[:800]
+
+
+
 class ArticleProduction:
     def __init__(self, *, db: Session, llm: LLMService, privacy: PrivacyGateway,
                  products_root: Path, provider_name: str, model: str,
@@ -1429,36 +1497,15 @@ class ArticleProduction:
                 if item.source_id not in facts:
                     raise ValueError('Human editor referenced an unknown verified fact')
 
-            grounded_claims = [
-                GroundedClaim(claim=quote, source_id=source_id, quote=quote)
-                for source_id, quote in facts.items()
+            selected_source_ids = [
+                source_id for source_id in facts
                 if not safe_request.seo_brief or source_id in reader_fact_ids
             ]
-            fact_sections = []
-            if grounded_claims:
-                fact_sections.append(ArticleSection(
-                    heading=f'Проверенные факты: {product.name}' if request.language == 'ru' else f'Verified facts: {product.name}',
-                    body='\n'.join(f'- {claim.quote}' for claim in grounded_claims),
-                    kind='fact',
-                    claim_ids=[claim.source_id for claim in grounded_claims],
-                ))
-            draft = ArticleDraft(
-                sections=[
-                    *fact_sections,
-                    *[
-                        ArticleSection(
-                            heading=section.heading,
-                            body=section.body,
-                            kind=section.kind,
-                            claim_ids=[],
-                        )
-                        for section in body_draft.sections
-                    ],
-                ],
-                claims=grounded_claims,
-                proof_needed_notes=body_draft.proof_needed_notes,
+            draft = assemble_verified_draft(
+                product_name=product.name, language=request.language,
+                body_draft=body_draft, facts=facts,
+                selected_source_ids=selected_source_ids,
             )
-            validate_grounding(draft, facts)
 
             def assemble_conversion(core, derivatives):
                 return ConversionPackage(
@@ -1568,12 +1615,15 @@ class ArticleProduction:
             self.db.rollback()
             if error == 'context_preparation_failed' and not isinstance(exc, asyncio.CancelledError):
                 error = f'context_preparation_failed:{type(exc).__name__}'
-            logger.warning('Article production failed for task %s: %s (%s)', task_id, error, type(exc).__name__)
+            signature = validation_issue_signature(exc)
+            logger.warning('Article production failed for task %s: %s (%s) schema=%s',
+                           task_id, error, type(exc).__name__, signature)
             if run_ids and all(self.db.get(AgentRun, run_id).status == 'completed' for run_id in run_ids):
                 # Every stage succeeded and the package assembly failed: keep the
                 # reason on the last run instead of losing it.
                 last = self.db.get(AgentRun, run_ids[-1])
-                last.error = f'assembly_failed:{error}:{type(exc).__name__}'[:1000]
+                last.error = (f'assembly_failed:{error}:{type(exc).__name__}'
+                              + (f':{signature}' if signature else ''))[:1000]
             for run_id in run_ids:
                 run = self.db.get(AgentRun, run_id)
                 if run.status == 'completed':
