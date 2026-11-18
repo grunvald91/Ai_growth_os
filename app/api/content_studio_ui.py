@@ -451,7 +451,7 @@ def review_history_html(product_id, result) -> str:
     cards = []
     for approval, artifact in result.records:
         if approval.action_type == "publish":
-            label = ("SEO: публикация подтверждена" if approval.status == "approved"
+            label = ("SEO: публикация разрешена" if approval.status == "approved"
                      else "SEO: публикация отклонена")
         else:
             label = "Материал утверждён" if approval.status == "approved" else "Материал отклонён"
