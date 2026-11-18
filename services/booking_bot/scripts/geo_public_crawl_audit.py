@@ -174,7 +174,8 @@ def audit(get=get_public, *, region: str = "unknown") -> dict:
               "origin": ORIGIN, "probe_region": region,
               "region_verified": False, "bot_identity_verified": False,
               "search_indexing": "not_measured", "ai_citations": "not_measured",
-              "checks": [], "samples": [], "errors": []}
+              "checks": [], "samples": [], "errors": [],
+              "coverage": {"main_article": "not_sampled", "business_article": "not_sampled"}}
     def check(path, agent):
         try:
             return get(path, agent)
@@ -199,8 +200,9 @@ def audit(get=get_public, *, region: str = "unknown") -> dict:
             articles = [p for v in urls if (p := own_path(v, MAIN_ARTICLE))]
             if articles:
                 paths.append(articles[0])
+                report["coverage"]["main_article"] = "sampled"
             else:
-                report["errors"].append({"path": "/blog/sitemap.xml", "code": "no_article_url"})
+                report["coverage"]["main_article"] = "not_sampled_no_published_articles"
         except (ValueError, ElementTree.ParseError):
             report["errors"].append({"path": "/blog/sitemap.xml", "code": "invalid_sitemap"})
     else:
@@ -211,6 +213,9 @@ def audit(get=get_public, *, region: str = "unknown") -> dict:
         try:
             links = sitemap_locs(index.body, "sitemapindex")
             maps = [p for v in links if (p := own_path(v, BUSINESS_SITEMAP))]
+            if links and len(maps) != len(links):
+                report["errors"].append({"path": "/business-blog-sitemap.xml",
+                                         "code": "invalid_or_foreign_sitemap_url"})
             if maps:
                 business_map = check(maps[0], AGENTS[0])
                 if business_map and business_map.status == 200:
@@ -218,13 +223,13 @@ def audit(get=get_public, *, region: str = "unknown") -> dict:
                     articles = [p for v in urls if (p := own_path(v, BUSINESS_ARTICLE))]
                     if articles:
                         paths.append(articles[0])
+                        report["coverage"]["business_article"] = "sampled"
                     else:
-                        report["errors"].append({"path": maps[0], "code": "no_article_url"})
+                        report["coverage"]["business_article"] = "not_sampled_no_published_articles"
                 else:
                     report["errors"].append({"path": maps[0], "code": "sitemap_unavailable"})
             else:
-                report["errors"].append({"path": "/business-blog-sitemap.xml",
-                                         "code": "no_published_business_sitemaps"})
+                report["coverage"]["business_article"] = "not_sampled_no_published_businesses"
         except (ValueError, ElementTree.ParseError):
             report["errors"].append({"path": "/business-blog-sitemap.xml",
                                      "code": "invalid_sitemap"})
@@ -261,7 +266,8 @@ def main():
     if args.out:
         from pathlib import Path
         Path(args.out).write_text(output + "\n", encoding="utf-8")
-    print(json.dumps({"samples": report["samples"], "checks": len(report["checks"]),
+    print(json.dumps({"samples": report["samples"], "coverage": report["coverage"],
+                      "checks": len(report["checks"]),
                       "failed": sum(row["result"] == "fail" for row in report["checks"]),
                       "unknown": sum(row["result"] == "unknown" for row in report["checks"]),
                       "error_codes": [x["code"] for x in report["errors"]]},
