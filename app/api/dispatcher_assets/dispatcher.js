@@ -228,6 +228,11 @@
       no_data: 'Данных нет', failed: 'Ошибка',
       declined: 'Отклонено', skipped: 'Пропущено'
     };
+    function statusLabel(step) {
+      if (step.status === 'completed' && block.workflow_id)
+        return step.kind === 'queued_post' ? 'Пост в очереди' : 'Проверено';
+      return statuses[step.status] || 'Неизвестно';
+    }
     block.steps.forEach(function (step, index) {
       var item = el('li', 'sg-workflow-step sg-workflow-' + step.status);
       item.appendChild(el('span', 'sg-workflow-index', String(index + 1)));
