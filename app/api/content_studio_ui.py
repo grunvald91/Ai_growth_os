@@ -301,7 +301,8 @@ def review_html(product_id, records, *, filter_name="all", counts=None,
         paging = '<nav class="sg-review-pagination" aria-label="Страницы согласования">' + "".join(links) + '</nav>'
     return (
         '<section class="sg-surface sg-review-page">'
-        '<div class="sg-section-head"><div><span class="sg-overline">ЕДИНЫЙ ЦЕНТР СОГЛАСОВАНИЯ</span>'
+        + review_section_nav(product_id, "pending")
+        + '<div class="sg-section-head"><div><span class="sg-overline">ЕДИНЫЙ ЦЕНТР СОГЛАСОВАНИЯ</span>'
         '<h2>Очередь согласования</h2>'
         '<p>Посты, статьи, креативы и видео. Проверка материала — до утверждения.</p>'
         '</div>'
@@ -405,3 +406,158 @@ def channels_html(product_id, connections, publications, approved_posts, *, adde
         </section>
       </aside>
     </div>"""
+
+
+# Pages stay on the same authenticated /review route. Section navigation never
+# performs approval, requeue, publication or another paid operation.
+def review_section_nav(product_id, selected="pending") -> str:
+    base = f"/studio/products/{product_id}/review"
+    sections = [
+        ("pending", "Ожидают решения", base),
+        ("history", "История решений", base + "?section=history"),
+        ("seo", "Статусы SEO", base + "?section=seo"),
+    ]
+    return (
+        '<nav class="sg-review-sections" aria-label="Разделы центра согласования">'
+        + "".join(
+            f'<a class="sg-filter {"is-active" if name == selected else ""}" '
+            f'{"aria-current=page" if name == selected else ""} '
+            f'href="{url}">{esc(label)}</a>'
+            for name, label, url in sections
+        ) + '</nav>'
+    )
+
+
+def _review_paging(product_id, section: str, page: int, page_count: int) -> str:
+    if page_count <= 1:
+        return ""
+    base = f"/studio/products/{product_id}/review?section={section}&page="
+    previous = (f'<a class="btn secondary" href="{base}{page-1}">← Назад</a>'
+                if page > 1 else "")
+    following = (f'<a class="btn secondary" href="{base}{page+1}">Дальше →</a>'
+                 if page < page_count else "")
+    return (
+        '<nav class="sg-review-pagination" aria-label="Страницы раздела">'
+        + previous + f'<span aria-current="page">Страница {page} из {page_count}</span>'
+        + following + '</nav>'
+    )
+
+
+def review_history_html(product_id, result) -> str:
+    """Render persisted audit events; never infer a decision from a status."""
+    from app.api.studio_resource_widgets import resource_widget
+
+    base = f"/studio/products/{product_id}"
+    cards = []
+    for approval, artifact in result.records:
+        if approval.action_type == "publish":
+            label = ("SEO: публикация подтверждена" if approval.status == "approved"
+                     else "SEO: публикация отклонена")
+        else:
+            label = "Материал утверждён" if approval.status == "approved" else "Материал отклонён"
+        origin = ("ИИ / политика SEO" if approval.requested_by == "seo_factory"
+                  else "Диспетчер" if approval.action_type.startswith("dispatcher:")
+                  else "Studio")
+        time = (approval.decided_at.strftime("%d.%m.%Y %H:%M")
+                if approval.decided_at else "Время решения не записано")
+        href = f"{base}/materials/{artifact.id}"
+        primary = (
+            '<div class="sg-review-item">'
+            f'<div class="sg-review-top"><span class="sg-tag">{esc(label)}</span>'
+            f'<span class="sg-channel">{esc(origin)}</span></div>'
+            f'<h3>{esc(artifact.title)}</h3>'
+            f'<p>{esc(time)} · {esc(approval.decided_by or "Решение без указанного автора")}</p>'
+            '<div class="sg-review-footer"><span>Запись журнала</span>'
+            f'<a class="btn secondary" href="{href}">Открыть материал</a>'
+            '</div></div>'
+        )
+        cards.append(resource_widget(
+            kind="material", primary_html=primary,
+            description="Запись о решении из журнала согласований.",
+            note="История показывает зафиксированное решение, а не текущую готовность к публикации.",
+            detail_label="Что означает запись",
+        ))
+    empty = ('<p class="sg-review-empty">Решений в журнале пока нет. '
+             'Ранее утверждённые материалы без записи не выдаются за проверенные события.</p>')
+    return (
+        '<section class="sg-surface sg-review-page">'
+        + review_section_nav(product_id, "history")
+        + '<div class="sg-section-head"><div>'
+        '<span class="sg-overline">ПОДТВЕРЖДЁННЫЕ СОБЫТИЯ</span>'
+        '<h2>История решений</h2>'
+        '<p>Зафиксированные утверждения и решения о SEO-публикации. '
+        'Дата и автор берутся из журнала, публикация отслеживается отдельно.</p>'
+        '</div>'
+        f'<span class="sg-count">Всего записей: {result.total}</span></div>'
+        f'<div class="sg-review-list">{"".join(cards) or empty}</div>'
+        + _review_paging(product_id, "history", result.page, result.page_count)
+        + '</section>'
+    )
+
+
+def seo_progress_html(product_id, result) -> str:
+    """Per-step observations: no invented score or automatic publish claim."""
+    from app.api.studio_resource_widgets import resource_widget
+
+    base = f"/studio/products/{product_id}"
+    stage_labels = {
+        "queued": "В очереди",
+        "running": "Создание",
+        "waiting_approval": "Ожидает разрешения",
+        "completed": "Задание завершено",
+        "failed": "Ошибка",
+        "cancelled": "Отменено",
+    }
+    cards = []
+    for entry in result.records:
+        task, article = entry["task"], entry["article"]
+        title = article.title if article else "SEO-статья — материал пока не готов"
+        task_state = stage_labels.get(getattr(task.status, "value", task.status), "Неизвестно")
+        artifact_state = (
+            "На согласовании" if article and article.status.value == "awaiting_approval"
+            else "Согласовано" if article and article.status.value == "approved"
+            else "Опубликовано" if entry["published"] else
+            "Черновик" if article and article.status.value == "draft" else
+            "Текст найден, статус требует проверки" if article else "Ещё нет результата"
+        )
+        critic = ("Есть запись проверки (не означает допуск)"
+                  if entry["critic_recorded"] else "Результат проверки не найден")
+        release = ("Публикация подтверждена" if entry["published"] else
+                   "Публикация не подтверждена")
+        href = (f"{base}/materials/{article.id}" if article
+                else f"{base}/tasks/{task.id}")
+        primary = (
+            '<div class="sg-review-item">'
+            '<div class="sg-review-top"><span class="sg-tag">SEO-статья</span>'
+            f'<span class="sg-channel">{esc(entry["status"])}</span></div>'
+            f'<h3>{esc(title)}</h3>'
+            f'<div class="sg-review-footer"><span>{esc(task_state)}</span>'
+            f'<a class="btn secondary" href="{href}">Открыть {("статью" if article else "задачу")}</a>'
+            '</div></div>'
+        )
+        stages = (
+            "Задание: " + task_state + ". "
+            "Материал: " + artifact_state + ". "
+            "ИИ-проверка: " + critic + ". "
+            "Публикация: " + release + "."
+        )
+        cards.append(resource_widget(
+            kind="material", primary_html=primary,
+            description=stages, note="Согласование статьи не равно её публикации.",
+            detail_label="Этапы подготовки",
+        ))
+    empty = ('<p class="sg-review-empty">Задач SEO-завода по производству статей '
+             'для этой компании пока не найдено.</p>')
+    return (
+        '<section class="sg-surface sg-review-page">'
+        + review_section_nav(product_id, "seo")
+        + '<div class="sg-section-head"><div>'
+        '<span class="sg-overline">SEO-ЗАВОД</span>'
+        '<h2>Статусы SEO-статей</h2>'
+        '<p>Задание, материал, проверка и публикация — отдельные подтверждаемые этапы.</p>'
+        '</div>'
+        f'<span class="sg-count">Заданий: {result.total}</span></div>'
+        f'<div class="sg-review-list">{"".join(cards) or empty}</div>'
+        + _review_paging(product_id, "seo", result.page, result.page_count)
+        + '</section>'
+    )
