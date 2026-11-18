@@ -7,6 +7,9 @@ on:
       - "app/dispatcher/decision.py"
       - "app/dispatcher/service.py"
       - "app/dispatcher/blocks.py"
+      - "app/dispatcher/workflows.py"
+      - "app/dispatcher/models.py"
+      - "alembic/versions/0017_dispatcher_durable_workflows.py"
       - "app/api/content_studio.py"
       - "app/api/content_studio_activity.py"
       - "app/api/growth_v4.py"
@@ -14,6 +17,9 @@ on:
       - "app/api/dispatcher_assets/**"
       - "studio_ui_sdk/resource-widgets-smoke.mjs"
       - "studio_ui_sdk/workflow-smoke.mjs"
+      - "studio_ui_sdk/durable-workflow-smoke.mjs"
+      - "tests/test_dispatcher_workflows.py"
+      - "tests/test_dispatcher_api.py"
       - "tests/test_dispatcher.py"
       - "tests/test_studio_resource_widgets.py"
       - ".github/workflows/studio-resource-widgets-ui-sdk.yml"
@@ -45,7 +51,7 @@ jobs:
       - name: Compile and test Studio resources and dispatcher
         run: |
           python -m compileall -q app/api/studio_resource_widgets.py app/api/content_studio.py app/api/content_studio_activity.py app/api/growth_v4.py app/api/dispatcher.py
-          python -m pytest -q tests/test_studio_resource_widgets.py tests/test_content_studio.py tests/test_studio_ui_sdk_pilot.py tests/test_dispatcher.py
+          python -m pytest -q tests/test_studio_resource_widgets.py tests/test_content_studio.py tests/test_studio_ui_sdk_pilot.py tests/test_dispatcher.py tests/test_dispatcher_workflows.py tests/test_dispatcher_api.py
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -55,6 +61,7 @@ jobs:
           node --check app/api/dispatcher_assets/resource-widgets.js
           node --check studio_ui_sdk/resource-widgets-smoke.mjs
           node --check studio_ui_sdk/workflow-smoke.mjs
+          node --check studio_ui_sdk/durable-workflow-smoke.mjs
       - name: Install pinned UI SDK
         working-directory: studio_ui_sdk
         run: npm ci --no-audit --no-fund
@@ -68,6 +75,7 @@ jobs:
           npm install --no-save playwright@1.56.1 --no-audit --no-fund
           SERVGO_CHROME_PATH="$(command -v google-chrome)" node resource-widgets-smoke.mjs
           SERVGO_CHROME_PATH="$(command -v google-chrome)" node workflow-smoke.mjs
+          SERVGO_CHROME_PATH="$(command -v google-chrome)" node durable-workflow-smoke.mjs
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
