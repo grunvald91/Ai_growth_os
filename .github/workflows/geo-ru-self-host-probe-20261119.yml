@@ -44,11 +44,12 @@ jobs:
           set -euo pipefail
           sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" "python3 -" <<'PY'
           import json
-          from urllib.request import urlopen, Request
+          from urllib.request import build_opener, ProxyHandler, Request
+          direct = build_opener(ProxyHandler({}))
 
           def fetch(url):
               try:
-                  with urlopen(Request(url, headers={"User-Agent": "ServGoGEOAudit/1.0"}), timeout=9) as resp:
+                  with direct.open(Request(url, headers={"User-Agent": "ServGoGEOAudit/1.0"}), timeout=9) as resp:
                       return resp.read(15000).decode("utf-8", "replace")
               except Exception:
                   return None
