@@ -175,3 +175,5 @@ jobs:
 # Read-only status refresh after active writer verification, attempt 2
 
 # Read-only post-deploy SEO daily generation quota verification after PR 313
+
+# Read-only SEO production post-fix check 2026-11-18
