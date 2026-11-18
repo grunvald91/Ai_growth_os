@@ -33,6 +33,7 @@ from app.api.content_studio_activity import (work_items, notice_items, notice_ht
     activity_html, activity_overview, task_detail_html, RESULT_KINDS)
 from app.api.content_studio_ui import (
     create_content_html, review_html, channels_html, speed_html, REVIEW_KINDS_BY_FILTER,
+    review_history_html, seo_progress_html,
 )
 from app.content.durations import call_speed, duration_notice, task_durations
 from app.content.notice_reads import mark_read, read_ids
@@ -2663,9 +2664,25 @@ def studio_retry_task(product_id: UUID, task_id: UUID, request: Request,
 
 @router.get("/studio/products/{product_id}/review", response_class=HTMLResponse)
 def studio_review_page(product_id: UUID, kind: str = "all", page: int = 1,
-                       db: Session = Depends(get_db)):
-    """One authoritative company-scoped, paginated review inbox."""
+                       section: str = "pending", db: Session = Depends(get_db)):
+    """One company-scoped inbox and verified read-only review/SEO history."""
     product = _owner_product(db, product_id)
+    if section in ("history", "seo"):
+        from app.content.review_dashboard import history, seo_progress
+        result = (history(db, product.id, page=page) if section == "history"
+                  else seo_progress(db, product.id, page=page))
+        body = (review_history_html(product.id, result) if section == "history"
+                else seo_progress_html(product.id, result))
+        response = HTMLResponse(studio_page_shell(
+            product, active="review",
+            title="История решений" if section == "history" else "Статусы SEO-статей",
+            subtitle=("Только зафиксированные решения без догадок."
+                      if section == "history" else
+                      "Реальные состояния задач, материалов, проверок и публикаций."),
+            body=body,
+        ))
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
     if kind not in REVIEW_KINDS_BY_FILTER:
         kind = "all"
     # Count all reviews before pagination, so the category counters and
