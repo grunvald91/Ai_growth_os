@@ -49,6 +49,9 @@ jobs:
       - name: Tests
         if: steps.scope.outputs.growth_changed == 'true'
         run: python -m pytest -q
+      - name: Check AI Chat JavaScript syntax
+        if: steps.scope.outputs.growth_changed == 'true'
+        run: node --check app/api/ai_chat_assets/ai-chat.js
       - name: Whitespace check
         run: |
           if git rev-parse HEAD^ >/dev/null 2>&1; then

@@ -862,3 +862,42 @@ def test_specialist_catalog_validation_and_role_persists_in_chat(chat_env):
         )
         client.get(f"/studio/api/ai-chat/requests/{message.json()['request']['id']}/events")
         assert "ПРОФИЛЬ ВЫБРАННОГО СПЕЦИАЛИСТА" not in fake_client.chat_calls[-1]["system_prompt"]
+
+def test_retired_specialist_does_not_strand_streaming_request(chat_env):
+    """A removed role fails before calling the provider and persists an error."""
+    db, _, company_a, _, fake_client = chat_env
+    with TestClient(app) as client:
+        created = client.post(
+            "/studio/api/ai-chat/conversations",
+            json={"product_id": str(company_a.id), "specialist_id": "marketer"},
+        )
+        assert created.status_code == 201
+        conv_id = created.json()["id"]
+        conv = db.get(AiChatConversation, UUID(conv_id))
+        conv.specialist_id = "retired_specialist"
+        db.commit()
+
+        turn = client.post(
+            f"/studio/api/ai-chat/conversations/{conv_id}/messages",
+            json={"content": "Составь план", "mode": "text", "model_id": "claude-opus-4-6"},
+        )
+        assert turn.status_code == 201
+        request_id = turn.json()["request"]["id"]
+        response = client.get(f"/studio/api/ai-chat/requests/{request_id}/events")
+        assert response.status_code == 200
+        assert any(name == "error" and "специалиста" in payload.get("error", "")
+                   for name, payload in _parse_sse(response.text))
+        assert fake_client.chat_calls == []
+        db.expire_all()
+        detail = client.get(f"/studio/api/ai-chat/conversations/{conv_id}").json()
+        assert detail["messages"][-1]["status"] == "error"
+        assert detail["messages"][-1]["error_message"]
+
+
+def test_specialist_frontend_has_text_mode_notice_and_isolated_drafts(chat_env):
+    with TestClient(app) as client:
+        res = client.get("/studio/assets/ai-chat.js")
+        assert res.status_code == 200
+        assert "specialistId ? " in res.text
+        assert "pendingSpecialistKey()" in res.text
+        assert "Инструкции специалиста действуют только для текста." in res.text

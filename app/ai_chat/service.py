@@ -892,6 +892,25 @@ async def stream_request_events(
             )
             return
 
+        # Resolve the stored role before claiming a paid request.
+        # A missing/retired role must not strand a request in streaming.
+        conversation = db.get(AiChatConversation, req.conversation_id)
+        try:
+            if conversation is None:
+                raise ValueError("Conversation missing")
+            specialist_prompt = get_specialist_prompt(conversation.specialist_id)
+        except (ValueError, OSError):
+            msg = "Настройки выбранного специалиста недоступны. Создайте новый диалог."
+            assistant_msg.status = "error"
+            assistant_msg.error_message = msg
+            req.status = "error"
+            req.error_code = "specialist_unavailable"
+            req.error_detail = "specialist_unavailable"
+            req.finished_at = _utcnow()
+            db.commit()
+            yield _sse("error", {"status": "error", "error": msg, "outcome_unknown": False})
+            return
+
         # Claim queued request for execution.
         req.status = "streaming"
         req.started_at = _utcnow()
@@ -925,8 +944,6 @@ async def stream_request_events(
                 att_by_msg.setdefault(att.message_id, []).append(att)
 
         user_msg = db.get(AiChatMessage, req.user_message_id) if req.user_message_id else None
-        conversation = db.get(AiChatConversation, req.conversation_id)
-        specialist_prompt = get_specialist_prompt(conversation.specialist_id) if conversation else None
         cap = resolve_model_capabilities(req.model_id)
         company_note: str | None = None
         if req.product_id is not None:

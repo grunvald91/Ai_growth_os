@@ -126,8 +126,14 @@
   };
 
   // ---------- Helpers ----------
-  function draftKey(convId) {
-    return `servgo_ai_chat_draft_${PRODUCT_ID || "global"}_${convId || "new"}`;
+  function draftKey(convId, specialistId = state.specialistId) {
+    // Isolate unsent drafts by role rather than sharing a global new-chat draft.
+    const draftId = convId || (specialistId ? `new_${specialistId}` : "new");
+    return `servgo_ai_chat_draft_${PRODUCT_ID || "global"}_${draftId}`;
+  }
+
+  function pendingSpecialistKey() {
+    return `servgo_ai_chat_pending_specialist_${PRODUCT_ID || "global"}`;
   }
 
   function activeConvStorageKey() {
@@ -654,6 +660,10 @@
       }
     }
 
+    if (warnings.length === 0 && state.mode === "image" && state.specialistId) {
+      warnings.push("Инструкции специалиста действуют только для текста. Изображение создаётся по вашему описанию.");
+    }
+
     if (warnings.length > 0) {
       el.composerWarning.textContent = warnings[0];
       el.composerWarning.hidden = false;
@@ -849,8 +859,10 @@
   function renderSpecialistPicker() {
     if (!el.specialistPicker) return;
     const chosen = getSpecialist(state.specialistId);
-    el.specialistBadge.hidden = !chosen;
-    if (chosen) el.specialistBadge.textContent = chosen.name;
+    el.specialistBadge.hidden = !state.specialistId;
+    if (state.specialistId) {
+      el.specialistBadge.textContent = chosen ? chosen.name : "Специалист недоступен";
+    }
     if (el.emptyTitle) el.emptyTitle.textContent = chosen ? chosen.name : "Чем помочь сегодня?";
     if (el.emptyDescription) {
       el.emptyDescription.textContent = chosen
@@ -882,11 +894,20 @@
       btn.append(glyph, content);
       btn.addEventListener("click", async () => {
         if (state.isSending || item.id === state.specialistId) return;
-        // Never silently change the role of a saved conversation.
-        if (state.activeConversationId) await startNewChat();
+        // Changing a role starts a new conversation and never borrows its draft.
+        if (!state.activeConversationId) {
+          localStorage.setItem(draftKey(null), el.composerInput.value);
+        } else {
+          await startNewChat();
+        }
         state.specialistId = item.id;
+        if (item.id) localStorage.setItem(pendingSpecialistKey(), item.id);
+        else localStorage.removeItem(pendingSpecialistKey());
+        el.composerInput.value = localStorage.getItem(draftKey(null)) || "";
+        autoResizeTextarea();
         if (state.mode !== "text") setMode("text");
         renderSpecialistPicker();
+        validateComposerCapabilities();
         el.composerInput.focus();
       });
       el.specialistPicker.appendChild(btn);
@@ -1513,6 +1534,7 @@
     });
     state.activeConversationId = conv.id;
     state.specialistId = conv.specialist_id || null;
+    localStorage.removeItem(pendingSpecialistKey());
     localStorage.setItem(activeConvStorageKey(), conv.id);
     renderSpecialistPicker();
     await loadConversations();
@@ -1611,6 +1633,7 @@
     }
     setSendingUI(false, null);
     state.activeConversationId = convId;
+    localStorage.removeItem(pendingSpecialistKey());
     localStorage.setItem(activeConvStorageKey(), convId);
     renderConversations();
 
@@ -1649,6 +1672,7 @@
     state.activeConversationId = null;
     state.specialistId = null;
     localStorage.removeItem(activeConvStorageKey());
+    localStorage.removeItem(pendingSpecialistKey());
     state.messages = [];
     el.chatTitle.textContent = "Новый диалог";
     clearQuote();
@@ -2453,8 +2477,13 @@
       if (lastId && state.conversations.some((c) => c.id === lastId)) {
         await selectConversation(lastId);
       } else {
+        const remembered = localStorage.getItem(pendingSpecialistKey());
+        state.specialistId = getSpecialist(remembered) ? remembered : null;
+        if (!state.specialistId) localStorage.removeItem(pendingSpecialistKey());
+        renderSpecialistPicker();
         el.composerInput.value = localStorage.getItem(draftKey(null)) || "";
         autoResizeTextarea();
+        validateComposerCapabilities();
       }
     } catch (err) {
       showToast(err.message || "Не удалось загрузить историю диалогов");
