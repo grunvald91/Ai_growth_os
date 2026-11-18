@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,7 @@ from app.dispatcher.outcome import Context
 from app.dispatcher.policy import Cost, Verdict, verdict
 from app.dispatcher.registry import CAPABILITIES, PostParams
 from app.dispatcher.service import READ_ONLY_PLAN_CAPABILITIES
+from app.models.domain import Task, TaskStatus
 from app.tools import ToolOperation
 
 _logger = logging.getLogger(__name__)
@@ -238,22 +239,58 @@ async def create(ctx: Context, conversation: DispatcherConversation,
     return await resume(ctx, workflow.id)
 
 
+def _task_states(ctx: Context, steps: list[DispatcherWorkflowStep]) -> dict[UUID, Task]:
+    """Read actual task states; never expose a receipt belonging to another company."""
+    ids = {step.task_id for step in steps if step.capability == "create_post" and step.task_id}
+    if not ids:
+        return {}
+    return {task.id: task for task in ctx.db.scalars(
+        select(Task).where(Task.product_id == ctx.product.id, Task.id.in_(ids))
+    )}
+
+
 def snapshot(ctx: Context, workflow_id: UUID) -> dict:
-    """The only client-visible workflow shape; never return internal params."""
+    """Return the scoped dispatch receipt AND current generation status separately.
+
+    A completed workflow means its actions were dispatched, NOT that generated
+    content is ready or published. Task states are read live from the database.
+    """
     workflow = _scoped(ctx.db, ctx, workflow_id)
     steps = _steps(ctx.db, workflow.id)
+    tasks = _task_states(ctx, steps)
     running = next((s for s in steps if s.status == "waiting_approval"), None)
-    payload_steps = [{
-        "kind": "queued_post" if step.capability == "create_post" else "read",
-        "title": CAPABILITIES[step.capability].title,
-        "status": step.status,
-        "detail": step.result_text[:600] if step.result_text else
-                  ("Ожидает предыдущих шагов." if step.status == "pending"
-                   else "Не выполнялось." if step.status == "skipped" else ""),
-        "blocks": _completed_step(step.result_blocks or []),
-    } for step in steps]
+    counts = {status.value: 0 for status in TaskStatus}
+    counts["unavailable"] = 0
+    payload_steps = []
+    for step in steps:
+        linked = tasks.get(step.task_id) if step.capability == "create_post" else None
+        task_status = None
+        blocks = _completed_step(step.result_blocks or [])
+        if step.capability == "create_post" and step.task_id:
+            task_status = linked.status.value if linked is not None else "unavailable"
+            counts[task_status] += 1
+            # A receipt is not a grant to inspect another company's task.
+            # Refresh only the verified task; drop a dangling/foreign receipt.
+            blocks = [
+                {**block, "status": task_status}
+                if block["type"] == "task" and linked is not None
+                   and block.get("task_id") == str(linked.id) else block
+                for block in blocks if block["type"] != "task"
+                or (linked is not None and block.get("task_id") == str(linked.id))
+            ]
+        payload_steps.append({
+            "kind": "queued_post" if step.capability == "create_post" else "read",
+            "title": CAPABILITIES[step.capability].title,
+            "status": step.status,
+            "task_status": task_status,
+            "detail": step.result_text[:600] if step.result_text else
+                      ("Ожидает предыдущих шагов." if step.status == "pending"
+                       else "Не выполнялось." if step.status == "skipped" else ""),
+            "blocks": blocks,
+        })
     approval = ({**running.preview, "position": running.position}
                 if running is not None else None)
+    total = sum(counts.values())
     return {
         "type": "workflow",
         "workflow_id": str(workflow.id),
@@ -261,6 +298,7 @@ def snapshot(ctx: Context, workflow_id: UUID) -> dict:
         "status": workflow.status,
         "revision": workflow.revision,
         "approval": approval,
+        "task_summary": {"total": total, **counts} if total else None,
         "can_retry_read": (workflow.status == "failed"
                            and any(step.status == "failed" and
                                    step.capability in READ_ONLY_PLAN_CAPABILITIES
@@ -270,11 +308,24 @@ def snapshot(ctx: Context, workflow_id: UUID) -> dict:
 
 
 def recent(ctx: Context, *, limit: int = 8) -> list[dict]:
-    """Unfinished plans also survive a new chat topic or lost HTTP response."""
+    """Recover unfinished plans AND dispatched posts still needing attention.
+
+    Do not hide the workflow simply because its task was queued successfully.
+    The EXISTS is company-scoped and uses live task state, never a stale card.
+    """
+    active_task = select(DispatcherWorkflowStep.id).join(
+        Task, Task.id == DispatcherWorkflowStep.task_id,
+    ).where(
+        DispatcherWorkflowStep.workflow_id == DispatcherWorkflow.id,
+        Task.product_id == ctx.product.id,
+        Task.status.in_((TaskStatus.QUEUED, TaskStatus.RUNNING,
+                         TaskStatus.WAITING_APPROVAL, TaskStatus.FAILED)),
+    ).exists()
     rows = list(ctx.db.scalars(select(DispatcherWorkflow).where(
         DispatcherWorkflow.product_id == ctx.product.id,
         DispatcherWorkflow.account == ctx.account,
-        DispatcherWorkflow.status.in_(("running", "waiting_approval", "failed")),
+        or_(DispatcherWorkflow.status.in_(("running", "waiting_approval", "failed")),
+            active_task),
     ).order_by(DispatcherWorkflow.created_at.desc(), DispatcherWorkflow.id.desc()).limit(limit)))
     return [snapshot(ctx, row.id) for row in rows]
 
