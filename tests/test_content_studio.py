@@ -628,3 +628,146 @@ def test_calendar_ui_sdk_preview_uses_existing_scoped_move_form_and_can_be_disab
         assert json.loads(plan.content)["slots"][0]["publish_at"] == "2026-10-06T12:00:00+03:00"
     finally:
         app.dependency_overrides.clear()
+
+
+def test_unified_review_queue_filters_all_reviewable_types_and_scopes_company(studio_db):
+    own = Product(name="Review company", slug="review-queue-own")
+    foreign = Product(name="Foreign", slug="review-queue-foreign")
+    studio_db.add_all([own, foreign])
+    studio_db.flush()
+    kinds = [
+        ("channel_text", "Пост компании", {"channel": "telegram", "body": "Текст поста"}),
+        ("article", "SEO-статья компании", {"seo_brief": {"primary_query": "пример"}, "full_article": "Текст статьи"}),
+        ("creative_brief", "Креатив компании", {"preview_text": "Описание изображения"}),
+        ("video_script", "Сценарий компании", {"preview_text": "Сценарий короткого видео"}),
+        ("video_render", "Готовое видео компании", {"preview_text": "Сценарий и монтаж"}),
+    ]
+    for kind, title, data in kinds:
+        studio_db.add(Artifact(
+            product_id=own.id, kind=kind, title=title,
+            status=ArtifactStatus.AWAITING_APPROVAL,
+            content=json.dumps(data, ensure_ascii=False),
+        ))
+    studio_db.add_all([
+        Artifact(product_id=foreign.id, kind="channel_text",
+                 title="ЧУЖОЙ СЕКРЕТ", content='{"body":"Другой аккаунт"}',
+                 status=ArtifactStatus.AWAITING_APPROVAL),
+        Artifact(product_id=own.id, kind="channel_text",
+                 title="Уже утверждённый пост", content='{"body":"Не в очереди"}',
+                 status=ArtifactStatus.APPROVED),
+    ])
+    studio_db.commit()
+    client = client_for(studio_db)
+    base = f"/studio/products/{own.id}"
+    try:
+        all_reviews = client.get(base + "/review")
+        assert all_reviews.status_code == 200
+        assert "Очередь согласования" in all_reviews.text
+        assert "ЕДИНЫЙ ЦЕНТР СОГЛАСОВАНИЯ" in all_reviews.text
+        assert "5 на проверке" in all_reviews.text
+        assert "ЧУЖОЙ СЕКРЕТ" not in all_reviews.text
+        assert "Уже утверждённый пост" not in all_reviews.text
+        assert all(title in all_reviews.text for _, title, _ in kinds)
+        assert all_reviews.text.count('data-sg-resource-widget="material"') == 5
+        assert 'src="/studio/assets/resource-widgets.js?v=2"' in all_reviews.text
+        assert 'href="/studio/assets/resource-widgets.css?v=6"' in all_reviews.text
+        assert 'href="' + base + '/review?kind=posts"' in all_reviews.text
+        # A truncated preview never contains a direct unsafe approval form.
+        assert f'action="{base}/review/' not in all_reviews.text
+        assert 'Утвердить можно только после проверки полной версии' in all_reviews.text
+
+        for category, visible, hidden in (
+            ("posts", "Пост компании", "SEO-статья компании"),
+            ("articles", "SEO-статья компании", "Пост компании"),
+            ("creative", "Креатив компании", "Пост компании"),
+            ("video", "Сценарий компании", "SEO-статья компании"),
+            ("text", "Пост компании", "Креатив компании"),
+        ):
+            response = client.get(base + "/review?kind=" + category)
+            assert response.status_code == 200
+            assert visible in response.text
+            assert hidden not in response.text
+
+        unknown = client.get(base + "/review?kind=unexpected")
+        assert unknown.status_code == 200 and "5 на проверке" in unknown.text
+        sidebar = all_reviews.text.split('<aside class="sidebar">', 1)[1].split('</aside>', 1)[0]
+        assert 'href="' + base + '/review"' in sidebar.split('<details class="sg-side-extras">', 1)[0]
+        assert 'aria-current="page"' in sidebar
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_unified_review_queue_paginates_without_losing_cards_or_leaking_other_tenant(studio_db):
+    own = Product(name="Paged review", slug="paged-review-own")
+    foreign = Product(name="Other review", slug="paged-review-foreign")
+    studio_db.add_all([own, foreign])
+    studio_db.flush()
+    own_rows = [Artifact(
+        product_id=own.id, kind="channel_text",
+        title=f"Пост согласования {index:02d}",
+        content=json.dumps({"body": f"Текст {index}"}),
+        status=ArtifactStatus.AWAITING_APPROVAL,
+    ) for index in range(37)]
+    studio_db.add_all(own_rows + [Artifact(
+        product_id=foreign.id, kind="channel_text", title="Пост другой компании",
+        content='{"body":"Секрет"}', status=ArtifactStatus.AWAITING_APPROVAL,
+    )])
+    studio_db.commit()
+    client = client_for(studio_db)
+    base = f"/studio/products/{own.id}"
+    try:
+        first = client.get(base + "/review?kind=posts")
+        second = client.get(base + "/review?kind=posts&page=2")
+        high = client.get(base + "/review?kind=posts&page=999999")
+        low = client.get(base + "/review?kind=posts&page=-50")
+        assert all(r.status_code == 200 for r in (first, second, high, low))
+        assert "37 на проверке" in first.text
+        assert "В категории: 37. Показано: 30." in first.text
+        assert "В категории: 37. Показано: 7." in second.text
+        assert first.text.count('data-sg-resource-widget="material"') == 30
+        assert second.text.count('data-sg-resource-widget="material"') == 7
+        assert 'href="' + base + '/review?kind=posts&page=2"' in first.text
+        assert 'href="' + base + '/review?kind=posts&page=1"' in second.text
+        assert 'aria-label="Страницы согласования"' in second.text
+        assert high.text.count('data-sg-resource-widget="material"') == 7
+        assert low.text.count('data-sg-resource-widget="material"') == 30
+        assert "Пост другой компании" not in first.text + second.text
+        # No post is approved simply by browsing or filtering the queue.
+        assert all(row.status == ArtifactStatus.AWAITING_APPROVAL for row in own_rows)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_unified_review_escapes_markup_and_fact_checks_require_detail(studio_db):
+    own = Product(name="Safe review", slug="safe-review-own")
+    studio_db.add(own)
+    studio_db.flush()
+    malicious = Artifact(product_id=own.id, kind="article",
+                         title='<img src=x onerror="alert(1)">',
+                         content=json.dumps({
+                             "full_article": '<script>alert("bad")</script>',
+                             "fact_check_required": True,
+                             "quality_warnings": ["Проверить источник"],
+                         }), status=ArtifactStatus.AWAITING_APPROVAL)
+    malformed = Artifact(product_id=own.id, kind="creative_brief",
+                         title="Некорректный ответ", content='["unexpected", "list"]',
+                         status=ArtifactStatus.AWAITING_APPROVAL)
+    studio_db.add_all([malicious, malformed])
+    studio_db.commit()
+    client = client_for(studio_db)
+    base = f"/studio/products/{own.id}"
+    try:
+        response = client.get(base + "/review")
+        assert response.status_code == 200
+        assert '<img src=x onerror="alert(1)">' not in response.text
+        assert '<script>alert("bad")</script>' not in response.text
+        assert "&lt;img" in response.text
+        assert "Проверьте факты" in response.text
+        assert "Некорректный ответ" in response.text
+        # No shortcut around the existing owner fact-check safeguard.
+        post = client.post(base + f"/review/{malicious.id}/approve", follow_redirects=False)
+        assert post.status_code == 422
+        studio_db.refresh(malicious)
+        assert malicious.status == ArtifactStatus.AWAITING_APPROVAL
+    finally:
+        app.dependency_overrides.clear()
