@@ -2,7 +2,7 @@
 
 Дата анализа: 2026-11-18. Статус: **план работ, а не утверждение о состоянии production**.
 
-Основа: [Иван Юницкий, «GEO простыми словами, как сайту попасть в ответы нейросетей», vc.ru, 16.11.2026](https://vc.ru/ai/3259633-geo-dlya-sayta-kak-popast-v-otvety-nevrossetey). Опыт автора с одним сайтом не является доказательством универсального эффекта. Проверка рекомендаций: [Google Search Central AI features](https://developers.google.com/search/docs/appearance/ai-features), [Яндекс: Видимость в Алисе AI](https://yandex.ru/support/webmaster/ru/service/alice-answers), [Bing IndexNow](https://www.bing.com/indexnow/getstarted), [OpenAI Publishers FAQ](https://help.openai.com/en/articles/12627856-publishers-and-developers-faq).
+Основа: [Иван Юницкий, «GEO простыми словами, как сайту попасть в ответы нейросетей», vc.ru, 16.11.2026](https://vc.ru/ai/3259633-geo-dlya-sayta-kak-popast-v-otvety-nevrossetey). Опыт автора с одним сайтом не является доказательством универсального эффекта. Проверка рекомендаций: [Google Search Central AI features](https://developers.google.com/search/docs/appearance/ai-features), [Яндекс: Видимость в Алисе AI](https://yandex.ru/support/webmaster/ru/service/alice-answers), [Bing IndexNow](https://www.bing.com/indexnow/getstarted), [OpenAI: Overview of Crawlers](https://developers.openai.com/api/docs/bots).
 
 ## Цель и область
 - Два публичных режима: блог ServGo на \`servgo.ru/blog/...\` и блоги подключённых организаций на \`servgo.ru/business/{id}/blog/...\`.
@@ -25,7 +25,7 @@
 
 **Задача.** Режим «Проверка GEO-доступности» для двух типов URL (главный блог и каждый публичный блог компании).
 
-Проверять \`robots.txt\`, \`sitemap.xml\`, HTTP, цепочки редиректов, сертификат, canonical, \`noindex\`, действительность HTML и полноту текста; с User-Agent \`Googlebot\`, \`YandexBot\`, \`OAI-SearchBot\`, \`ChatGPT-User\`, \`PerplexityBot\`, \`Claude-User\` и обычным браузером. Проверять с целевой географии читателя; не делать геоблокировки частью обхода. **User-Agent легко подделать:** такой curl — тест реакции сайта на заголовок, а не доказательство личности настоящего бота. Для логов верифицировать IP по официальным диапазонам и политике соответствующего поисковика, где возможно.
+Проверять \`robots.txt\`, \`sitemap.xml\`, HTTP, цепочки редиректов, сертификат, canonical, \`noindex\`, действительность HTML и полноту текста; с User-Agent \`Googlebot\`, \`YandexBot\`, \`OAI-SearchBot\`, \`ChatGPT-User\`, \`PerplexityBot\`, \`Claude-User\` и обычным браузером. Проверять с целевой географии читателя; не делать геоблокировки частью обхода. **Для OpenAI важно разделять OAI-SearchBot (поиск) и GPTBot (обучение): разрешение поиска не требует разрешения на обучение.** Согласно документации ChatGPT-User — пользовательский fetch, он не определяет попадание в ChatGPT Search. **User-Agent легко подделать:** такой curl — тест реакции сайта на заголовок, а не доказательство личности настоящего бота. Для логов верифицировать IP по официальным диапазонам и политике соответствующего поисковика, где возможно.
 
 **Критерий готовности.** HTTP 200 с реальным индексируемым HTML на публичных канонических страницах, без дискриминационного 403/429 и ненужных JS-заглушек; устойчивые sitemap/canonical; отдельные подтверждённые результаты с датой, URL, регионом, статусом.
 
