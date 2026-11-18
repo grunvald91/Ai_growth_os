@@ -49,3 +49,37 @@ class DispatcherMessage(UUIDMixin, TimestampMixin, Base):
     confirmation_id: Mapped[str | None] = mapped_column(String(64), index=True)
     confirmation_state: Mapped[str | None] = mapped_column(String(20))  # pending | confirmed | declined
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DispatcherWorkflow(UUIDMixin, TimestampMixin, Base):
+    """Durable per-account workflow. A model never controls confirmation state."""
+    __tablename__ = "dispatcher_workflows"
+    __table_args__ = (UniqueConstraint("conversation_id", "client_key",
+                                      name="uq_dispatcher_workflow_client_key"),)
+
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("dispatcher_conversations.id"), nullable=False, index=True)
+    product_id: Mapped[UUID] = mapped_column(ForeignKey("products.id"), nullable=False, index=True)
+    account: Mapped[str] = mapped_column(String(200), nullable=False)
+    client_key: Mapped[str | None] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class DispatcherWorkflowStep(UUIDMixin, TimestampMixin, Base):
+    """Each task receipt and approval is committed with its own step state."""
+    __tablename__ = "dispatcher_workflow_steps"
+    __table_args__ = (UniqueConstraint("workflow_id", "position",
+                                      name="uq_dispatcher_workflow_step_position"),)
+
+    workflow_id: Mapped[UUID] = mapped_column(
+        ForeignKey("dispatcher_workflows.id"), nullable=False, index=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    capability: Mapped[str] = mapped_column(String(60), nullable=False)
+    params: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    preview: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    result_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    result_blocks: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    task_id: Mapped[UUID | None] = mapped_column(ForeignKey("tasks.id"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
