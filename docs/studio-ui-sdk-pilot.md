@@ -359,3 +359,38 @@ Tests cover cross-company isolation, exact counts by kind, paging beyond
 navigation, keyboard review disclosure, and UI SDK opt-out. The next
 slice is a review-specific approval history and progress summary, without
 adding automatic publication or bulk approvals.
+
+
+## Phase 8b — recorded owner decisions and evidence-based SEO status
+
+The existing authenticated `/studio/products/{id}/review` center gains two
+read-only sections, `?section=history` and `?section=seo`. Each section
+uses the same owner-scoped product and progressively enhanced shared material
+widgets; the native `<details>` fallback remains available.
+
+**Decisions:** The existing `Approval` table is the sole journal. Browser
+and dispatcher material approval now write *one* `Approval` event in the
+same database transaction as the material status/version change. A repeated
+approved request never emits a second event. Browser events are attributed to
+the Studio session login; dispatcher events preserve the existing actor,
+`dispatcher:approve_material` action and `via` audit field. The history
+contains only timestamped, actual decisions with a reviewed company's
+matching `Artifact.product_id`, plus decided SEO publishing approvals.
+The history explicitly does not backfill historical decisions from a
+material's current status, because this would invent a reviewer or date.
+No extra approval/decline buttons or release endpoints are added.
+
+**SEO progress:** Items are company-scoped `content_factory` tasks with
+`SEO-ARTICLE:` prefixes. The view reads the task status, latest `article`
+artifact, whether an `seo_final_review` record exists, and the matching
+`Publication(channel=own_site, status=published)` of the *same* article.
+A critic record means only that an audit exists, **not** that the current
+article version passed; only `Artifact.status=published` together with a
+matching confirmed publication counts as published. Conflicting records
+are explicitly shown as requiring reconciliation. Task creation and article
+approval are never confused with successful publication. Both pages use
+server-side pagination (30) and no external calls.
+
+The next production step is to reconcile any stale SEO publication records
+using trusted server evidence; never repair by fabricating success status
+or automatically republishing from the UI.

@@ -670,7 +670,7 @@ def test_unified_review_queue_filters_all_reviewable_types_and_scopes_company(st
         assert all(title in all_reviews.text for _, title, _ in kinds)
         assert all_reviews.text.count('data-sg-resource-widget="material"') == 5
         assert 'src="/studio/assets/resource-widgets.js?v=2"' in all_reviews.text
-        assert 'href="/studio/assets/resource-widgets.css?v=6"' in all_reviews.text
+        assert 'href="/studio/assets/resource-widgets.css?v=7"' in all_reviews.text
         assert 'href="' + base + '/review?kind=posts"' in all_reviews.text
         # A truncated preview never contains a direct unsafe approval form.
         assert f'action="{base}/review/' not in all_reviews.text

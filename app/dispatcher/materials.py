@@ -166,13 +166,15 @@ async def confirm_approve_material(ctx: Context, stored: dict, via: str) -> Outc
                        "Материал изменился. Откройте его и проверьте.", [card(ctx, row)], ok=False)
     already = _status(row) == "approved"
     try:
-        row = approve_material(ctx.db, ctx.settings.products_root, ctx.product.id, row.id)
+        row = approve_material(
+            ctx.db, ctx.settings.products_root, ctx.product.id, row.id,
+            actor=ctx.account, action_type="dispatcher:approve_material", via=via,
+        )
     except ReviewError as exc:
         ctx.db.rollback()
         return Outcome(exc.message, exc.message, ok=False)
     if already:  # approved elsewhere in the meantime: nothing was decided here
         return Outcome("Этот материал уже утверждён.", "Этот материал уже утверждён.", [card(ctx, row)])
-    _record_approval(ctx, row, "dispatcher:approve_material", via)
     blocks: list[dict] = [card(ctx, row)]
     text = "Утвердил."
     if row.kind == "channel_text" and material_data(row).get("channel") == "telegram":
