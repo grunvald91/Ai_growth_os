@@ -24,12 +24,12 @@ function block(position = 0, revision = 1, done = false) {
       details:["Тема: Пример "+(position+1),"<img src=x onerror=alert(1)>"]
     },
     steps:[
-      {title:"Создать пост",status:done||position>0?"completed":"waiting_approval",
+      {kind:"queued_post",title:"Создать пост",status:done||position>0?"completed":"waiting_approval",
         detail:position>0||done?"Задание поставлено в очередь.":"Нужно подтверждение",
         blocks:[]},
-      {title:"Создать пост",status:done?"completed":position===1?"waiting_approval":"pending",
+      {kind:"queued_post",title:"Создать пост",status:done?"completed":position===1?"waiting_approval":"pending",
         detail:done?"Задание в очереди.":"",blocks:[]},
-      {title:"Что в работе",status:done?"completed":"pending",
+      {kind:"read",title:"Что в работе",status:done?"completed":"pending",
         detail:done?"В работе: 2.":"",blocks:[]}
     ]
   };
@@ -108,6 +108,8 @@ try{
   await page.waitForFunction(() => document.querySelector(".sg-workflow-state:last-child")!==null);
   await page.waitForFunction(() => document.querySelectorAll(".sg-workflow-completed").length===3);
   assert.equal(approvals.length,2);
+  assert.deepEqual(await page.locator(".sg-workflow-state").allTextContents(),
+    ["Пост в очереди","Пост в очереди","Проверено"]);
   assert.equal(approvals[1].position,1);
   assert.equal(approvals[1].revision,2);
   assert.equal(await page.getByRole("button",{name:"Создать"}).count(),0);
