@@ -4,12 +4,17 @@ on:
   pull_request:
     paths:
       - "app/api/studio_resource_widgets.py"
+      - "app/dispatcher/decision.py"
+      - "app/dispatcher/service.py"
+      - "app/dispatcher/blocks.py"
       - "app/api/content_studio.py"
       - "app/api/content_studio_activity.py"
       - "app/api/growth_v4.py"
       - "app/api/dispatcher.py"
       - "app/api/dispatcher_assets/**"
       - "studio_ui_sdk/resource-widgets-smoke.mjs"
+      - "studio_ui_sdk/workflow-smoke.mjs"
+      - "tests/test_dispatcher.py"
       - "tests/test_studio_resource_widgets.py"
       - ".github/workflows/studio-resource-widgets-ui-sdk.yml"
   push:
@@ -49,6 +54,7 @@ jobs:
           node --check app/api/dispatcher_assets/dispatcher.js
           node --check app/api/dispatcher_assets/resource-widgets.js
           node --check studio_ui_sdk/resource-widgets-smoke.mjs
+          node --check studio_ui_sdk/workflow-smoke.mjs
       - name: Install pinned UI SDK
         working-directory: studio_ui_sdk
         run: npm ci --no-audit --no-fund
@@ -61,6 +67,7 @@ jobs:
         run: |
           npm install --no-save playwright@1.56.1 --no-audit --no-fund
           SERVGO_CHROME_PATH="$(command -v google-chrome)" node resource-widgets-smoke.mjs
+          SERVGO_CHROME_PATH="$(command -v google-chrome)" node workflow-smoke.mjs
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
