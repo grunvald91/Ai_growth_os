@@ -1197,7 +1197,7 @@ def studio_page_shell(
     actions: str = "",
 ) -> str:
     resource_assets = active in {"overview", "work", "materials", "plan"}
-    resource_css = ('<link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=3">'
+    resource_css = ('<link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=4">'
                     if resource_assets else "")
     resource_js = (
         '<script src="/studio/assets/resource-widgets.js?v=2"></script>'

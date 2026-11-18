@@ -449,7 +449,7 @@ async def test_readonly_plan_is_sequential_persisted_and_replay_safe(db, product
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("steps", [
-    [{"capability": "show_work"}, {"capability": "create_post", "params": {"topic": "Салон"}}],
+    [{"capability": "show_work"}, {"capability": "create_creative", "params": {"topic": "Салон", "format": "story"}}],
     [{"capability": "show_work"}, {"capability": "set_insights_depth", "params": {"days": "30"}}],
     [{"capability": "show_work"}, {"capability": "erase_database"}],
     [{"capability": "show_work"}, {"capability": "show_work"}],

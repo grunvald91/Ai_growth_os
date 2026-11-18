@@ -482,6 +482,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             if count is not None:
                 decision.params["frame_count"] = count
     outcome: Outcome | None = None
+    workflow_id: str | None = None
     confirmation: Confirmation | None = None
     capability_id: str | None = None
     intent = decision.intent if decision else "failed"
@@ -510,6 +511,24 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 intent = "clarify"
                 reply_text = decision.reply_text or "Уточните, пожалуйста, какие данные проверить."
                 spoken = reply_text
+            elif any(step.capability not in READ_ONLY_PLAN_CAPABILITIES for step in decision.steps):
+                # Persist mixed workflows; mutating steps *never* execute here.
+                # Every draft-post step requires its own explicit approval.
+                from app.dispatcher import workflows
+                try:
+                    workflow = await workflows.create(ctx, conversation, decision.steps, client_key)
+                except (ValueError, PermissionError) as exc:
+                    intent = "clarify"
+                    reply_text = str(exc)
+                    spoken = reply_text
+                    chips = []
+                else:
+                    workflow_id = workflow["workflow_id"]
+                    reply_text = ("Поручение сохранено. Для каждого поста потребуется "
+                                  "отдельное подтверждение; публикация не запускается.")
+                    spoken = reply_text
+                    blocks = [workflow]
+                    chips = []
             else:
                 outcome = await run_readonly_plan(ctx, decision.steps)
                 reply_text, spoken = outcome.text, outcome.spoken or outcome.text
@@ -528,6 +547,8 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         blocks.append({"type": "chips", "items": chips})
     params = {**confirmation.params, "_capability": capability_id} if confirmation is not None else \
         (decision.params if decision else {})
+    if workflow_id:
+        params = {**params, "_workflow_id": workflow_id}
     answer = _add_committed(db, conversation, role="assistant", input_mode="text", text=reply_text, spoken=spoken,
                             blocks=clean_blocks(blocks),
                             intent=intent, capability=capability_id or (decision.capability if decision else None),

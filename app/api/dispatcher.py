@@ -19,7 +19,8 @@ from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.core.composition import SAFE_LLM_METADATA_FIELDS, build_dispatcher_provider
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
-from app.dispatcher import service
+from app.dispatcher import service, workflows
+from app.dispatcher.decision import PlannedStep
 from app.dispatcher.blocks import Chip
 from app.dispatcher.executors import Context
 from app.dispatcher.hints import compute_hints
@@ -30,7 +31,7 @@ from app.voice.dictionary import SLUG
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ASSETS = Path(__file__).parent / "dispatcher_assets"
-ASSET_VERSION = "19"
+ASSET_VERSION = "20"
 MAX_BODY_BYTES = 1_000_000  # same guard as the Studio forms
 
 
@@ -77,6 +78,24 @@ class MessageIn(BaseModel):
     creation: CreateHints | None = None
 
 
+class WorkflowCreateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    steps: list[PlannedStep] = Field(min_length=2, max_length=3)
+    client_key: str = Field(min_length=1, max_length=100)
+
+
+class WorkflowDecisionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    position: int = Field(ge=0, le=2)
+    revision: int = Field(ge=0)
+    accept: bool
+
+
+class WorkflowRetryIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=0)
+
+
 class ConfirmIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     confirmation_id: str = Field(min_length=1, max_length=64)
@@ -106,8 +125,10 @@ def _hints(db: Session, product: Product, settings: Settings) -> list[dict]:
 
 def _state(db: Session, product: Product, settings: Settings, request: Request) -> dict:
     conversation = service.open_conversation(db, product.id, _account(request))
+    ctx = _context(db, product, settings, request)
     return {"messages": [service.to_dict(m) for m in service.messages(db, conversation)],
-            "hints": _hints(db, product, settings)}
+            "hints": _hints(db, product, settings),
+            "workflows": workflows.recent(ctx)}
 
 
 def home_html(db: Session, product: Product, settings: Settings, request: Request) -> str:
@@ -128,7 +149,7 @@ def home_html(db: Session, product: Product, settings: Settings, request: Reques
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="/studio/assets/studio.css?v=14">
   <link rel="stylesheet" href="/studio/assets/dispatcher.css?v={ASSET_VERSION}">
-  <link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=3">
+  <link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=4">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
@@ -347,6 +368,88 @@ def dispatch_updates(product_id: UUID, request: Request, db: Session = Depends(g
     if added:
         body["hints"] = _hints(db, product, settings)
     return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/studio/products/{product_id}/dispatch/workflows")
+async def dispatch_create_workflow(product_id: UUID, request: Request, db: Session = Depends(get_db),
+                                   settings: Settings = Depends(get_settings)):
+    """Explicit API for a bounded multi-action plan; never begins a write."""
+    product = _owner_product(db, product_id)
+    body = await _json(request, WorkflowCreateIn)
+    ctx = _context(db, product, settings, request)
+    conversation = service.open_conversation(db, product.id, ctx.account)
+    try:
+        block = await workflows.create(ctx, conversation, body.steps, body.client_key)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return JSONResponse({"workflow": block}, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/studio/products/{product_id}/dispatch/workflows")
+def dispatch_recent_workflows(product_id: UUID, request: Request, db: Session = Depends(get_db),
+                               settings: Settings = Depends(get_settings)):
+    product = _owner_product(db, product_id)
+    return JSONResponse({"workflows": workflows.recent(_context(db, product, settings, request))},
+                        headers={"Cache-Control": "no-store"})
+
+
+@router.get("/studio/products/{product_id}/dispatch/workflows/{workflow_id}")
+def dispatch_workflow_state(product_id: UUID, workflow_id: UUID, request: Request,
+                            db: Session = Depends(get_db),
+                            settings: Settings = Depends(get_settings)):
+    product = _owner_product(db, product_id)
+    try:
+        block = workflows.snapshot(_context(db, product, settings, request), workflow_id)
+    except LookupError:
+        raise HTTPException(404, "Поручение не найдено") from None
+    return JSONResponse({"workflow": block}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/studio/products/{product_id}/dispatch/workflows/{workflow_id}/decision")
+async def dispatch_workflow_decision(product_id: UUID, workflow_id: UUID, request: Request,
+                                     db: Session = Depends(get_db),
+                                     settings: Settings = Depends(get_settings)):
+    product = _owner_product(db, product_id)
+    body = await _json(request, WorkflowDecisionIn)
+    try:
+        block = await workflows.decide(_context(db, product, settings, request), workflow_id,
+                                        position=body.position, revision=body.revision,
+                                        accept=body.accept)
+    except LookupError:
+        raise HTTPException(404, "Поручение не найдено") from None
+    except PermissionError as exc:
+        raise HTTPException(409, str(exc)) from None
+    return JSONResponse({"workflow": block}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/studio/products/{product_id}/dispatch/workflows/{workflow_id}/resume")
+async def dispatch_workflow_resume(product_id: UUID, workflow_id: UUID, request: Request,
+                                   db: Session = Depends(get_db),
+                                   settings: Settings = Depends(get_settings)):
+    product = _owner_product(db, product_id)
+    try:
+        block = await workflows.resume(_context(db, product, settings, request), workflow_id)
+    except LookupError:
+        raise HTTPException(404, "Поручение не найдено") from None
+    return JSONResponse({"workflow": block}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/studio/products/{product_id}/dispatch/workflows/{workflow_id}/retry-read")
+async def dispatch_workflow_retry_read(product_id: UUID, workflow_id: UUID, request: Request,
+                                        db: Session = Depends(get_db),
+                                        settings: Settings = Depends(get_settings)):
+    product = _owner_product(db, product_id)
+    body = await _json(request, WorkflowRetryIn)
+    try:
+        block = await workflows.retry_read(_context(db, product, settings, request),
+                                           workflow_id, body.revision)
+    except LookupError:
+        raise HTTPException(404, "Поручение не найдено") from None
+    except PermissionError as exc:
+        raise HTTPException(409, str(exc)) from None
+    return JSONResponse({"workflow": block}, headers={"Cache-Control": "no-store"})
 
 
 @router.post("/studio/products/{product_id}/dispatch/new")

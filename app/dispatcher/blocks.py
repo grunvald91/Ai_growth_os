@@ -134,9 +134,10 @@ class ConfirmBlock(_Block):
 
 
 class PlanResultStep(_Block):
-    """One executed read-only capability. No model-authored links or confirmations."""
+    """One executed step; the server owns whether it was a read or queued draft."""
+    kind: Literal["read", "queued_post"] = "read"
     title: str = Field(min_length=1, max_length=100)
-    status: Literal["completed", "no_data", "failed", "skipped"]
+    status: Literal["pending", "waiting_approval", "completed", "no_data", "failed", "declined", "skipped"]
     detail: str = Field(max_length=600)
     blocks: list[Annotated[
         TextBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock,
@@ -144,9 +145,23 @@ class PlanResultStep(_Block):
     ]] = Field(default_factory=list, max_length=8)
 
 
+class WorkflowApproval(_Block):
+    """Visual proposal only; only the authenticated workflow API executes it."""
+    title: str = Field(min_length=1, max_length=100)
+    details: list[str] = Field(default_factory=list, max_length=8)
+    confirm_label: str = Field(default="Подтвердить", max_length=60)
+    paid: bool = False
+    position: int = Field(ge=0, le=2)
+
+
 class WorkflowBlock(_Block):
     type: Literal["workflow"] = "workflow"
+    workflow_id: str | None = Field(default=None, max_length=36)
     title: str = Field(min_length=1, max_length=100)
+    status: Literal["running", "waiting_approval", "completed", "failed", "cancelled"] | None = None
+    revision: int = Field(default=0, ge=0)
+    approval: WorkflowApproval | None = None
+    can_retry_read: bool = False
     steps: list[PlanResultStep] = Field(min_length=2, max_length=3)
 
 

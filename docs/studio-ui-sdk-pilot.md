@@ -209,3 +209,62 @@ claiming atomic rollback for delivered messages or published content.
 Next UI consumers: unified content review, SEO factory phase progress,
 AI Chat specialists, Instagram comment replies, then campaign/BookingBot/Mail
 components using each product's frontend adapter.
+
+
+## Phase 7 — durable multi-step draft workflows (bounded rollout)
+
+The first write-capable orchestration slice accepts **2–3 sequential steps**,
+with the explicitly reviewed allowlist:
+
+- Safe reads: `show_work`, `show_review`, `show_plan`,
+  `show_recent_videos`, `show_material`, `go_to`.
+- Local write: **`create_post` only** — queues a draft for owner review.
+  Each such step requires a separate button confirmation; it never publishes.
+- No email, external API write, payments, public publication, deletion,
+  SEO-factory activation or other side effect is allowed in a chain.
+
+All proposed steps are validated *before* creating the workflow. Two tables
+introduced by Alembic revision `0017` persist account/company-scoped
+workflow identity, step index, typed parameters, individual approval preview,
+step status, task receipt and revision. The model cannot grant approval.
+
+The explicit endpoints are scoped to the authenticated Studio company:
+
+- `POST /studio/products/{id}/dispatch/workflows` — submit a validated plan
+  with a client idempotency key. **No task is queued by this request.**
+- `GET /studio/products/{id}/dispatch/workflows/{workflow_id}` — get the
+  authoritative current status. `GET .../workflows` lists recoverable
+  unfinished workflows for the same authenticated account.
+- `POST .../workflows/{workflow_id}/decision` — approve/decline **one**
+  pending step using its index and current revision. A stale revision returns
+  HTTP 409; duplicate approval cannot create a second task.
+- `POST .../workflows/{workflow_id}/resume` — run only pending safe reads,
+  never auto-confirm a draft. Safe to use after a process restart.
+- `POST .../workflows/{workflow_id}/retry-read` — explicitly retry a failed
+  read (current revision required). **Failed writes are never retried
+  automatically.**
+
+On confirmed `create_post`, the existing `queue_content(commit=False)`
+creates the task and its `content_request` artifact in the **same database
+transaction** that marks the step completed and stores its task ID. If this
+transaction rolls back, neither the task nor the receipt survives. The
+workflow row is locked before checking its revision and executing a confirmed
+write (PostgreSQL `SELECT ... FOR UPDATE`); the task uses a stable workflow
+step identity. No client-supplied task ID, URL or internal tool call is trusted.
+
+The reusable `sg-resource-widget` workflow card renders the explicit
+approval outside the disclosure trigger, updates via the owner-scoped status
+endpoint, and includes native `details` fallback with `?ui_sdk=0`.
+Unfinished workflows are recovered from `/dispatch/state` on a new tab or
+topic, even when a chat reply was interrupted after the workflow was stored.
+
+This implements durable *dispatch/queue acknowledgement*, **not** end-to-end
+completion of AI-generated content. Completion, approval and publication are
+still tracked by existing Task/Artifact systems. These workflows do not claim
+rollback of already executed actions.
+
+Before extending the allowlist, each additional write executor must prove
+atomic durable receipts or external provider idempotency and compensating
+behavior; otherwise the orchestrator must reject it. The next UI consumers
+remain unified content review and SEO progress; external dispatch belongs to
+a later release after verifying actual provider idempotency.
