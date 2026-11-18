@@ -32,6 +32,53 @@ def request_for(product):
     return ArticleProductionInput(product_id=product.id, topic="Как вести запись клиентов", seo_brief=BRIEF)
 
 
+def test_grounded_article_assembly_splits_more_than_ten_sources_without_rewriting():
+    from app.workflows.article_contracts import ArticleBodyDraft
+    from app.workflows.article_production import assemble_verified_draft, validate_grounding
+    facts = {f"product:test:L{i}": f"Подтверждённый текст источника {i}."
+             for i in range(1, 13)}
+    body = ArticleBodyDraft.model_validate({
+        "sections": [{"heading": "Полезный совет", "body": "Действуйте по инструкции.",
+                      "kind": "advice"}]
+    })
+    draft = assemble_verified_draft(
+        product_name="Тестовая компания", language="ru", body_draft=body,
+        facts=facts, selected_source_ids=list(facts),
+    )
+    assert [len(s.claim_ids) for s in draft.sections] == [10, 2, 0]
+    assert len(draft.claims) == len(facts) == 12
+    assert all(claim.claim == facts[claim.source_id] for claim in draft.claims)
+    assert draft.sections[-1].body == "Действуйте по инструкции."
+    validate_grounding(draft, facts)
+
+
+def test_grounded_article_assembly_refuses_unknown_sources():
+    from app.workflows.article_contracts import ArticleBodyDraft
+    from app.workflows.article_production import assemble_verified_draft
+    body = ArticleBodyDraft.model_validate({
+        "sections": [{"heading": "Совет", "body": "Текст", "kind": "advice"}]
+    })
+    with pytest.raises(ValueError, match="Unverified source"):
+        assemble_verified_draft(
+            product_name="Тест", language="ru", body_draft=body,
+            facts={"verified": "Подтверждённое"}, selected_source_ids=["injected"],
+        )
+
+
+def test_assembly_error_diagnostics_show_only_schema_paths_not_source_text():
+    from app.workflows.article_production import validation_issue_signature
+    from app.workflows.article_contracts import ArticleSection
+    try:
+        ArticleSection(heading="private example", body="secret content",
+                       kind="not-allowed", claim_ids=[])
+    except ValueError as exc:
+        signature = validation_issue_signature(exc)
+        assert signature.startswith("kind:literal_error")
+        assert "private" not in signature
+        assert "secret" not in signature
+        assert "not-allowed" not in signature
+
+
 @pytest.mark.asyncio
 async def test_article_serves_plan_query_and_carries_answer_and_faq(db, product, tmp_path):
     provider = SequenceProvider(outputs_with_geo())
