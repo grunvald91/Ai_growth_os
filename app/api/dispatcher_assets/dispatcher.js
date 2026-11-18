@@ -237,7 +237,7 @@
       var item = el('li', 'sg-workflow-step sg-workflow-' + step.status);
       item.appendChild(el('span', 'sg-workflow-index', String(index + 1)));
       item.appendChild(el('span', 'sg-workflow-step-title', step.title));
-      item.appendChild(el('span', 'sg-workflow-state', statuses[step.status] || 'Неизвестно'));
+      item.appendChild(el('span', 'sg-workflow-state', statusLabel(step)));
       list.appendChild(item);
     });
     main.appendChild(list);
