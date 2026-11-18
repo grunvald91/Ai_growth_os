@@ -16,11 +16,14 @@ const [dispatcher, widgets, sdk, css, widgetCss] = await Promise.all([
 const id = "a5286c0b-d887-43f6-a903-2f7a00d8d321";
 const approvals = [];
 let taskStates = ["queued", "queued"];
+let reviewHref = null;
+let failNextRefresh = false;
 function block(position = 0, revision = 1, done = false) {
   const active = done ? 2 : position > 0 ? 1 : 0;
   const counts = {queued:0,running:0,waiting_approval:0,completed:0,
                   failed:0,cancelled:0,unavailable:0};
   taskStates.slice(0,active).forEach(status => counts[status]++);
+  counts.review_pending = active && reviewHref ? 1 : 0;
   return {type:"workflow",workflow_id:id,title:"Поручение из нескольких шагов",
     revision,status:done?"completed":"waiting_approval",
     can_retry_read:false,
@@ -32,6 +35,7 @@ function block(position = 0, revision = 1, done = false) {
     steps:[
       {kind:"queued_post",title:"Создать пост",status:done||position>0?"completed":"waiting_approval",
         task_status:position>0||done?taskStates[0]:null,
+        review_href:done?reviewHref:null,
         detail:position>0||done?"Задание поставлено в очередь.":"Нужно подтверждение",
         blocks:[]},
       {kind:"queued_post",title:"Создать пост",status:done?"completed":position===1?"waiting_approval":"pending",
@@ -69,7 +73,9 @@ const server=createServer(async (req,res)=>{
   const url=new URL(req.url,"http://localhost");
   let type="text/html", body=html(), status=200;
   if(url.pathname==="/fake/workflows/"+id) {
-    type="application/json";body=JSON.stringify({workflow:live});
+    type="application/json";
+    if(failNextRefresh){status=503;failNextRefresh=false;body=JSON.stringify({detail:"Service unavailable"});}
+    else body=JSON.stringify({workflow:live});
   } else if(url.pathname==="/fake/workflows/"+id+"/decision") {
     let raw="";for await(const chunk of req)raw+=chunk;
     let data=JSON.parse(raw);approvals.push(data);
@@ -93,7 +99,8 @@ const browser=await chromium.launch({headless:true,
   executablePath:process.env.SERVGO_CHROME_PATH||"/usr/bin/google-chrome"});
 try{
  for(const width of [390,1280]) {
-  taskStates=["queued","queued"];live=block();approvals.length=0;
+  taskStates=["queued","queued"];reviewHref=null;failNextRefresh=false;
+  live=block();approvals.length=0;
   const url=`http://127.0.0.1:${server.address().port}/`;
   const page=await browser.newPage({viewport:{width,height:820}});
   const errors=[];page.on("pageerror",e=>errors.push(e.message));
@@ -127,6 +134,20 @@ try{
   assert.deepEqual(await page.locator(".sg-workflow-state").allTextContents(),
     ["Ждёт проверки","Ошибка создания","Проверено"]);
   assert.equal(approvals.length,2); // Refresh never creates another task.
+  taskStates=["completed","completed"];
+  reviewHref="/studio/products/demo/materials/post-review-1";
+  live=block(2,3,true);
+  await page.getByRole("button",{name:"Обновить статус материалов"}).click();
+  await page.waitForFunction(() => document.querySelector(".sg-workflow-activity")?.textContent?.includes("согласования"));
+  assert.deepEqual(await page.locator(".sg-workflow-state").allTextContents(),
+    ["Ждёт проверки","Задание выполнено","Проверено"]);
+  assert.match(await page.locator(".sg-workflow-activity").innerText(),/из них 1 ждут согласования/);
+  assert.equal(await page.getByRole("link",{name:"Проверить готовый пост №1"}).getAttribute("href"),reviewHref);
+  assert.equal(approvals.length,2); // Review link is not approval.
+  failNextRefresh=true;
+  await page.getByRole("button",{name:"Обновить статус материалов"}).click();
+  await page.getByText("Не удалось обновить статус. Проверьте подключение и попробуйте ещё раз.").waitFor();
+  assert.equal(approvals.length,2);
   assert.equal(approvals[1].position,1);
   assert.equal(approvals[1].revision,2);
   assert.equal(await page.getByRole("button",{name:"Создать"}).count(),0);

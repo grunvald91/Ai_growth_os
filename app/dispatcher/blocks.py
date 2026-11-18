@@ -140,11 +140,17 @@ class PlanResultStep(_Block):
     status: Literal["pending", "waiting_approval", "completed", "no_data", "failed", "declined", "skipped"]
     task_status: Literal["queued", "running", "waiting_approval", "completed", "failed",
                          "cancelled", "unavailable"] | None = None
+    # Only the server constructs this path from a product-scoped, awaiting-approval Artifact.
+    review_href: str | None = None
     detail: str = Field(max_length=600)
     blocks: list[Annotated[
         TextBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock,
         Field(discriminator="type"),
     ]] = Field(default_factory=list, max_length=8)
+
+    def model_post_init(self, __context) -> None:
+        if self.review_href is not None and not safe_href(self.review_href):
+            raise ValueError("Review material link target is not allowed")
 
 
 class WorkflowApproval(_Block):
@@ -166,6 +172,8 @@ class WorkflowTaskSummary(_Block):
     failed: int = Field(default=0, ge=0, le=3)
     cancelled: int = Field(default=0, ge=0, le=3)
     unavailable: int = Field(default=0, ge=0, le=3)
+    # Generated content may need review even after Task.status == completed.
+    review_pending: int = Field(default=0, ge=0, le=3)
 
 
 class WorkflowBlock(_Block):

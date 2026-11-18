@@ -295,3 +295,27 @@ the authorized status endpoint. No background paid request, publication,
 retry of a failed write, or schema migration is introduced. Browser smoke
 covers both the existing two separate confirmations and live status
 refresh without replaying either confirmation.
+
+
+## Phase 7b review fix — distinguish completed generation from owner approval
+
+Quick-post generation saves a `channel_text` Artifact with
+`status=awaiting_approval` **then** sets the generating Task to
+`completed`. Therefore `Task.status=completed` is not sufficient to mark a
+workflow as resolved for its owner.
+
+Workflow snapshots and the active-workflow selector now check both the
+company-scoped Task state **and** pending `channel_text` Artifacts for
+the confirmed `create_post` step. A completed dispatch stays visible while
+its generated post awaits editorial approval, even when the Task is complete;
+it leaves the active list after that material is approved. The client gets a
+validated, scoped `review_href` to the actual material plus a separate
+`task_summary.review_pending` count, without exposing post body, foreign
+artifacts, extra write endpoints, or granting approval through the workflow.
+
+The UI distinguishes `"Ждёт проверки"` from `"Задание выполнено"`,
+offers a direct link to review (no automatic approval), and reports failures
+of user-initiated status refreshes. Read-only refresh does not start an LLM
+job or retry any write. Regression tests cover the real
+`completed Task + awaiting_approval Artifact` contract, reviewed transition,
+foreign artifacts, invalid review links and the mobile/desktop workflow card.

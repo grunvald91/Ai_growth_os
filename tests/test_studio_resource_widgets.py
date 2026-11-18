@@ -134,6 +134,25 @@ def test_workflow_block_validates_nested_safe_links_and_never_embeds_confirmatio
     assert write == []
 
 
+def test_workflow_review_link_is_validated_and_cannot_embed_foreign_site():
+    from app.dispatcher.blocks import clean_blocks
+
+    def workflow(href):
+        return {"type": "workflow", "title": "Post reviews", "steps": [
+            {"kind": "queued_post", "title": "Post", "status": "completed",
+             "task_status": "completed", "review_href": href,
+             "detail": "Queued", "blocks": []},
+            {"kind": "read", "title": "Read", "status": "completed",
+             "detail": "Done", "blocks": []},
+        ]}
+    allowed = clean_blocks([workflow("/studio/products/demo/materials/a")])
+    assert len(allowed) == 1
+    assert allowed[0]["steps"][0]["review_href"] == "/studio/products/demo/materials/a"
+    assert clean_blocks([workflow("https://evil.example/approval")]) == []
+    assert clean_blocks([workflow("//evil.example/approval")]) == []
+    assert clean_blocks([workflow("/studio\\\\evil.example/approval")]) == []
+
+
 def test_shared_resource_wrapper_accepts_workflow_kind_with_native_fallback():
     markup = resource_widget(kind="workflow", primary_html="<strong>Шаги</strong>",
                              description="Результат без JavaScript")

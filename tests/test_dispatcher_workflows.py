@@ -10,7 +10,7 @@ from app.dispatcher.decision import PlannedStep
 from app.dispatcher.models import DispatcherWorkflow, DispatcherWorkflowStep
 from app.dispatcher.outcome import Context
 from app.dispatcher.service import open_conversation
-from app.models.domain import Artifact, Product, Task, TaskStatus
+from app.models.domain import Artifact, ArtifactStatus, Product, Task, TaskStatus
 
 
 @pytest.fixture
@@ -321,3 +321,95 @@ async def test_waiting_confirmations_are_recovered_while_prior_post_runs(db, com
     assert recovered[0]["approval"]["position"] == 1
     assert recovered[0]["steps"][0]["task_status"] == "queued"
     assert len(list(db.scalars(select(Task)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_generated_post_stays_recoverable_until_owner_reviews_artifact(db, company):
+    """Quick post marks Task completed before its channel_text is approved."""
+    ctx = context(db, company)
+    initial = await workflows.create(
+        ctx, open_conversation(db, company.id, ctx.account),
+        chain(FIRST, READ), "pending-post-review",
+    )
+    wid = UUID(initial["workflow_id"])
+    sent = await workflows.decide(
+        ctx, wid, position=0, revision=initial["revision"], accept=True,
+    )
+    assert sent["status"] == "completed"
+    task = db.scalar(select(Task).where(Task.product_id == company.id))
+    task.status = TaskStatus.COMPLETED
+    material = Artifact(
+        product_id=company.id, task_id=task.id, kind="channel_text",
+        title="Пост на согласовании", content='{"body":"Проверяемый материал"}',
+        status=ArtifactStatus.AWAITING_APPROVAL,
+    )
+    db.add(material)
+    db.commit()
+
+    actual = workflows.snapshot(ctx, wid)
+    assert actual["status"] == "completed"  # The orchestration receipt is immutable.
+    assert actual["steps"][0]["task_status"] == "completed"
+    assert actual["task_summary"]["completed"] == 1
+    assert actual["task_summary"]["review_pending"] == 1
+    assert actual["steps"][0]["review_href"] == (
+        f"/studio/products/{company.id}/materials/{material.id}"
+    )
+    assert any(row["workflow_id"] == str(wid) for row in workflows.recent(ctx))
+    assert len(list(db.scalars(select(Task)))) == 1
+
+    material.status = ArtifactStatus.APPROVED
+    db.commit()
+    reviewed = workflows.snapshot(ctx, wid)
+    assert reviewed["task_summary"]["review_pending"] == 0
+    assert reviewed["steps"][0]["review_href"] is None
+    assert all(row["workflow_id"] != str(wid) for row in workflows.recent(ctx))
+    assert len(list(db.scalars(select(Task)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_pending_review_does_not_link_foreign_company_material(db, company):
+    """A forged cross-tenant artifact cannot resurrect or decorate a workflow."""
+    other = Product(name="Foreign organization", slug="foreign-org")
+    db.add(other)
+    db.commit()
+    ctx = context(db, company)
+    started = await workflows.create(
+        ctx, open_conversation(db, company.id, ctx.account),
+        chain(FIRST, READ), "foreign-material-review",
+    )
+    wid = UUID(started["workflow_id"])
+    await workflows.decide(ctx, wid, position=0, revision=started["revision"], accept=True)
+    task = db.scalar(select(Task).where(Task.product_id == company.id))
+    task.status = TaskStatus.COMPLETED
+    foreign = Artifact(
+        product_id=other.id, task_id=task.id, kind="channel_text",
+        title="SECRET FOREIGN MATERIAL", content="SECRET FOREIGN BODY",
+        status=ArtifactStatus.AWAITING_APPROVAL,
+    )
+    db.add(foreign)
+    db.commit()
+    payload = workflows.snapshot(ctx, wid)
+    assert payload["task_summary"]["review_pending"] == 0
+    assert payload["steps"][0]["review_href"] is None
+    assert "SECRET FOREIGN" not in str(payload)
+    assert all(item["workflow_id"] != str(wid) for item in workflows.recent(ctx))
+
+
+@pytest.mark.asyncio
+async def test_nonreview_artifact_never_reopens_a_completed_post(db, company):
+    ctx = context(db, company)
+    initial = await workflows.create(
+        ctx, open_conversation(db, company.id, ctx.account),
+        chain(FIRST, READ), "not-a-reviewable-post",
+    )
+    wid = UUID(initial["workflow_id"])
+    await workflows.decide(ctx, wid, position=0, revision=initial["revision"], accept=True)
+    task = db.scalar(select(Task).where(Task.product_id == company.id))
+    task.status = TaskStatus.COMPLETED
+    db.add(Artifact(
+        product_id=company.id, task_id=task.id, kind="content_request",
+        title="Raw prompt", content="NOT A REVIEW", status=ArtifactStatus.AWAITING_APPROVAL,
+    ))
+    db.commit()
+    assert workflows.snapshot(ctx, wid)["task_summary"]["review_pending"] == 0
+    assert all(item["workflow_id"] != str(wid) for item in workflows.recent(ctx))

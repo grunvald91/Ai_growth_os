@@ -25,7 +25,7 @@ from app.dispatcher.outcome import Context
 from app.dispatcher.policy import Cost, Verdict, verdict
 from app.dispatcher.registry import CAPABILITIES, PostParams
 from app.dispatcher.service import READ_ONLY_PLAN_CAPABILITIES
-from app.models.domain import Task, TaskStatus
+from app.models.domain import Artifact, ArtifactStatus, Task, TaskStatus
 from app.tools import ToolOperation
 
 _logger = logging.getLogger(__name__)
@@ -249,6 +249,25 @@ def _task_states(ctx: Context, steps: list[DispatcherWorkflowStep]) -> dict[UUID
     )}
 
 
+def _pending_reviews(ctx: Context, task_ids: set[UUID]) -> dict[UUID, Artifact]:
+    """Return only currently reviewable posts from this company and these tasks.
+
+    A quick-post Task is COMPLETED as soon as an awaiting_approval channel_text
+    exists, so Task.status alone cannot tell the owner review is outstanding.
+    """
+    if not task_ids:
+        return {}
+    result: dict[UUID, Artifact] = {}
+    for artifact in ctx.db.scalars(select(Artifact).where(
+        Artifact.product_id == ctx.product.id,
+        Artifact.task_id.in_(task_ids),
+        Artifact.kind == "channel_text",
+        Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
+    ).order_by(Artifact.created_at.desc(), Artifact.id.desc())):
+        result.setdefault(artifact.task_id, artifact)
+    return result
+
+
 def snapshot(ctx: Context, workflow_id: UUID) -> dict:
     """Return the scoped dispatch receipt AND current generation status separately.
 
@@ -258,17 +277,24 @@ def snapshot(ctx: Context, workflow_id: UUID) -> dict:
     workflow = _scoped(ctx.db, ctx, workflow_id)
     steps = _steps(ctx.db, workflow.id)
     tasks = _task_states(ctx, steps)
+    pending_reviews = _pending_reviews(ctx, set(tasks))
     running = next((s for s in steps if s.status == "waiting_approval"), None)
     counts = {status.value: 0 for status in TaskStatus}
     counts["unavailable"] = 0
+    review_pending = 0
     payload_steps = []
     for step in steps:
         linked = tasks.get(step.task_id) if step.capability == "create_post" else None
         task_status = None
+        review_href = None
         blocks = _completed_step(step.result_blocks or [])
         if step.capability == "create_post" and step.task_id:
             task_status = linked.status.value if linked is not None else "unavailable"
             counts[task_status] += 1
+            review = pending_reviews.get(step.task_id) if linked is not None else None
+            if step.status == "completed" and review is not None:
+                review_pending += 1
+                review_href = f"/studio/products/{ctx.product.id}/materials/{review.id}"
             # A receipt is not a grant to inspect another company's task.
             # Refresh only the verified task; drop a dangling/foreign receipt.
             blocks = [
@@ -283,6 +309,7 @@ def snapshot(ctx: Context, workflow_id: UUID) -> dict:
             "title": CAPABILITIES[step.capability].title,
             "status": step.status,
             "task_status": task_status,
+            "review_href": review_href,
             "detail": step.result_text[:600] if step.result_text else
                       ("Ожидает предыдущих шагов." if step.status == "pending"
                        else "Не выполнялось." if step.status == "skipped" else ""),
@@ -298,7 +325,8 @@ def snapshot(ctx: Context, workflow_id: UUID) -> dict:
         "status": workflow.status,
         "revision": workflow.revision,
         "approval": approval,
-        "task_summary": {"total": total, **counts} if total else None,
+        "task_summary": {"total": total, "review_pending": review_pending,
+                         **counts} if total else None,
         "can_retry_read": (workflow.status == "failed"
                            and any(step.status == "failed" and
                                    step.capability in READ_ONLY_PLAN_CAPABILITIES
@@ -317,15 +345,26 @@ def recent(ctx: Context, *, limit: int = 8) -> list[dict]:
         Task, Task.id == DispatcherWorkflowStep.task_id,
     ).where(
         DispatcherWorkflowStep.workflow_id == DispatcherWorkflow.id,
+        DispatcherWorkflowStep.capability == "create_post",
         Task.product_id == ctx.product.id,
         Task.status.in_((TaskStatus.QUEUED, TaskStatus.RUNNING,
                          TaskStatus.WAITING_APPROVAL, TaskStatus.FAILED)),
-    ).exists()
+    ).correlate(DispatcherWorkflow).exists()
+    pending_review = select(Artifact.id).join(
+        DispatcherWorkflowStep, Artifact.task_id == DispatcherWorkflowStep.task_id,
+    ).where(
+        DispatcherWorkflowStep.workflow_id == DispatcherWorkflow.id,
+        DispatcherWorkflowStep.capability == "create_post",
+        DispatcherWorkflowStep.status == "completed",
+        Artifact.product_id == ctx.product.id,
+        Artifact.kind == "channel_text",
+        Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
+    ).correlate(DispatcherWorkflow).exists()
     rows = list(ctx.db.scalars(select(DispatcherWorkflow).where(
         DispatcherWorkflow.product_id == ctx.product.id,
         DispatcherWorkflow.account == ctx.account,
         or_(DispatcherWorkflow.status.in_(("running", "waiting_approval", "failed")),
-            active_task),
+            active_task, pending_review),
     ).order_by(DispatcherWorkflow.created_at.desc(), DispatcherWorkflow.id.desc()).limit(limit)))
     return [snapshot(ctx, row.id) for row in rows]
 
