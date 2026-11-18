@@ -244,6 +244,7 @@ def snapshot(ctx: Context, workflow_id: UUID) -> dict:
     steps = _steps(ctx.db, workflow.id)
     running = next((s for s in steps if s.status == "waiting_approval"), None)
     payload_steps = [{
+        "kind": "queued_post" if step.capability == "create_post" else "read",
         "title": CAPABILITIES[step.capability].title,
         "status": step.status,
         "detail": step.result_text[:600] if step.result_text else
