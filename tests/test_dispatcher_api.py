@@ -17,7 +17,7 @@ from app.llm.fake import FakeLLMProvider
 from app.llm.schemas import LLMResponse
 from app.llm.service import LLMService
 from app.main import app
-from app.models.domain import Product, Task, TaskStatus
+from app.models.domain import Artifact, ArtifactStatus, Product, Task, TaskStatus
 from app.privacy import PrivacyGateway
 
 
@@ -406,9 +406,29 @@ def test_durable_workflow_api_confirmation_replay_and_reload(env):
                for item in active)
     db.scalar(select(Task)).status = TaskStatus.COMPLETED
     db.commit()
+    # The worker marks its task completed even while the generated artifact
+    # awaits the owner's editorial decision.
+    task = db.scalar(select(Task))
+    post = Artifact(
+        product_id=servgo.id, task_id=task.id,
+        kind="channel_text", title="Пост на проверке",
+        content='{"body":"Черновик"}', status=ArtifactStatus.AWAITING_APPROVAL,
+    )
+    db.add(post)
+    db.commit()
     final = client.get(base + "/workflows/" + wid).json()["workflow"]
     assert final["task_summary"]["completed"] == 1
+    assert final["task_summary"]["review_pending"] == 1
     assert final["steps"][0]["task_status"] == "completed"
+    assert final["steps"][0]["review_href"] == (
+        f"/studio/products/{servgo.id}/materials/{post.id}"
+    )
+    assert any(item["workflow_id"] == wid for item in client.get(base + "/state").json()["workflows"])
+    post.status = ArtifactStatus.APPROVED
+    db.commit()
+    reviewed = client.get(base + "/workflows/" + wid).json()["workflow"]
+    assert reviewed["task_summary"]["review_pending"] == 0
+    assert reviewed["steps"][0]["review_href"] is None
     assert not any(item["workflow_id"] == wid for item in client.get(base + "/state").json()["workflows"])
 
 
