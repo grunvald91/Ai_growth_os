@@ -257,6 +257,10 @@ def snapshot(ctx: Context, workflow_id: UUID) -> dict:
         "status": workflow.status,
         "revision": workflow.revision,
         "approval": approval,
+        "can_retry_read": (workflow.status == "failed"
+                           and any(step.status == "failed" and
+                                   step.capability in READ_ONLY_PLAN_CAPABILITIES
+                                   for step in steps)),
         "steps": payload_steps,
     }
 
