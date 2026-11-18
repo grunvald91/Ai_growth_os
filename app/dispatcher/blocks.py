@@ -133,8 +133,25 @@ class ConfirmBlock(_Block):
     change_preview: dict | None = None
 
 
+class PlanResultStep(_Block):
+    """One executed read-only capability. No model-authored links or confirmations."""
+    title: str = Field(min_length=1, max_length=100)
+    status: Literal["completed", "no_data", "failed", "skipped"]
+    detail: str = Field(max_length=600)
+    blocks: list[Annotated[
+        TextBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock,
+        Field(discriminator="type"),
+    ]] = Field(default_factory=list, max_length=8)
+
+
+class WorkflowBlock(_Block):
+    type: Literal["workflow"] = "workflow"
+    title: str = Field(min_length=1, max_length=100)
+    steps: list[PlanResultStep] = Field(min_length=2, max_length=3)
+
+
 Block = Annotated[
-    TextBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock,
+    TextBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock | WorkflowBlock,
     Field(discriminator="type"),
 ]
 _adapter: TypeAdapter[Block] = TypeAdapter(Block)

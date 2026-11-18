@@ -216,6 +216,47 @@
     return wrapper;
   }
 
+  // Shared read-only workflow card: every result belongs to a persisted,
+  // independently checked server step. This widget does not submit mutations.
+  function renderWorkflow(block) {
+    var main = el('section', 'sg-workflow-main');
+    main.appendChild(el('strong', 'sg-workflow-title', block.title));
+    var list = el('ol', 'sg-workflow-list');
+    var statuses = {
+      completed: 'Проверено', no_data: 'Данных нет',
+      failed: 'Ошибка', skipped: 'Пропущено'
+    };
+    block.steps.forEach(function (step, index) {
+      var item = el('li', 'sg-workflow-step sg-workflow-' + step.status);
+      item.appendChild(el('span', 'sg-workflow-index', String(index + 1)));
+      item.appendChild(el('span', 'sg-workflow-step-title', step.title));
+      item.appendChild(el('span', 'sg-workflow-state', statuses[step.status] || 'Неизвестно'));
+      list.appendChild(item);
+    });
+    main.appendChild(list);
+    var widget = wrapResourceCard('workflow', main, 'Результаты по шагам',
+      'Данные получены из подключённых разделов ServGo.',
+      'Каждое действие выполнено последовательно и только на чтение.');
+    var body = widget.querySelector('.sg-resource-details-body');
+    block.steps.forEach(function (step, index) {
+      var group = el('section', 'sg-workflow-result');
+      group.appendChild(el('h4', 'sg-workflow-result-title',
+        String(index + 1) + '. ' + step.title + ' — ' + (statuses[step.status] || 'Неизвестно')));
+      group.appendChild(el('p', 'sg-workflow-result-detail', step.detail));
+      (step.blocks || []).forEach(function (item) {
+        if (item.type === 'text') group.appendChild(el('p', 'dp-text', item.text));
+        else if (item.type === 'links') group.appendChild(renderLinks(item.items));
+        else if (item.type === 'table') group.appendChild(renderTable(item));
+        else if (item.type === 'resource_list') group.appendChild(renderResourceList(item));
+        else if (item.type === 'task') group.appendChild(renderTask(item));
+        else if (item.type === 'material') group.appendChild(renderMaterial(item));
+        else if (item.type === 'chips') group.appendChild(renderChips(item.items, sendChip));
+      });
+      body.appendChild(group);
+    });
+    return widget;
+  }
+
   function renderTask(block) {
     var taskId = String(block.task_id || '');
     var result = taskResults[taskId];
@@ -678,6 +719,7 @@
       }
       else if (block.type === 'table') bubble.appendChild(renderTable(block));
       else if (block.type === 'resource_list') bubble.appendChild(renderResourceList(block));
+      else if (block.type === 'workflow') bubble.appendChild(renderWorkflow(block));
       else if (block.type === 'task') bubble.appendChild(renderTask(block));
       else if (block.type === 'material') bubble.appendChild(renderMaterial(block));
       else if (block.type === 'confirm') bubble.appendChild(renderConfirm(block));

@@ -16,7 +16,7 @@ def resource_widget(*, kind: str, primary_html: str, description: str,
     The <details> is a fully functional fallback until/without UI SDK.
     Primary markup must be created by the trusted Studio renderer, not an LLM.
     """
-    if kind not in {"task", "material"}:
+    if kind not in {"task", "material", "workflow"}:
         raise ValueError("Unsupported resource kind")
     details = f'<p class="sg-resource-description">{escape(description)}</p>'
     if note:

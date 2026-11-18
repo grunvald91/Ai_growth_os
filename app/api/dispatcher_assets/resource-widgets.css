@@ -62,3 +62,30 @@ body[data-growth-design="v4"] .sg-resource-widget{
   .material-grid:not(.route-material-grid)>.sg-resource-widget{min-width:155px;scroll-snap-align:start}
   .sg-resource-widget>.dp-task{padding:10px 12px}
 }
+
+/* Shared multi-step result: the same native disclosure/SDK upgrade as task cards. */
+.sg-workflow-main{min-width:0;border:1px solid var(--sg-widget-line);border-radius:13px;
+  background:var(--sg-widget-surface);padding:12px 14px;color:var(--sg-widget-text)}
+.sg-workflow-title{display:block;font-size:14px;line-height:1.4;margin-bottom:9px}
+.sg-workflow-list{list-style:none;margin:0;padding:0;display:grid;gap:7px}
+.sg-workflow-step{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:8px;
+  align-items:center;min-width:0;font-size:12px;line-height:1.4}
+.sg-workflow-index{border:1px solid var(--sg-widget-line);background:var(--sg-widget-soft);
+  border-radius:8px;width:24px;height:24px;display:grid;place-items:center;font-variant-numeric:tabular-nums}
+.sg-workflow-step-title{min-width:0;overflow-wrap:anywhere}
+.sg-workflow-state{font-size:11px;font-weight:700;white-space:nowrap;color:var(--sg-widget-muted)}
+.sg-workflow-completed .sg-workflow-state{color:var(--sg-green,var(--green,#218270))}
+.sg-workflow-failed .sg-workflow-state{color:var(--sg-red,var(--red,#be5557))}
+.sg-workflow-result{display:grid;gap:9px;padding:12px 0;border-top:1px solid var(--sg-widget-line);min-width:0}
+.sg-workflow-result:first-of-type{border-top:0}
+.sg-workflow-result-title{margin:0;font-size:12px;color:var(--sg-widget-text);overflow-wrap:anywhere}
+.sg-workflow-result-detail{margin:0;font-size:12px;line-height:1.5;white-space:pre-wrap;
+  color:var(--sg-widget-muted);overflow-wrap:anywhere}
+.sg-workflow-result .dp-tablewrap,.sg-workflow-result .dp-resource-list,
+.sg-workflow-result .dp-links{max-width:100%;min-width:0;overflow-x:auto}
+.sg-workflow-result .dp-material,.sg-workflow-result .dp-task{margin-top:0}
+@media(max-width:440px){
+ .sg-workflow-step{grid-template-columns:24px minmax(0,1fr);row-gap:2px}
+ .sg-workflow-state{grid-column:2;white-space:normal}
+ .sg-workflow-main{padding:11px}
+}
