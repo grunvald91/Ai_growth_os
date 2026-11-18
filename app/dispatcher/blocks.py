@@ -134,7 +134,8 @@ class ConfirmBlock(_Block):
 
 
 class PlanResultStep(_Block):
-    """One executed read-only capability. No model-authored links or confirmations."""
+    """One executed step; the server owns whether it was a read or queued draft."""
+    kind: Literal["read", "queued_post"] = "read"
     title: str = Field(min_length=1, max_length=100)
     status: Literal["pending", "waiting_approval", "completed", "no_data", "failed", "declined", "skipped"]
     detail: str = Field(max_length=600)
