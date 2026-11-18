@@ -229,6 +229,9 @@
       declined: 'Отклонено', skipped: 'Пропущено'
     };
     function statusLabel(step) {
+      // Generation may finish before the owner has approved the material.
+      if (step.status === 'completed' && step.kind === 'queued_post' &&
+          step.review_href && step.task_status === 'completed') return 'Ждёт проверки';
       if (step.status === 'completed' && step.kind === 'queued_post' && step.task_status) {
         return ({
           queued: 'В очереди', running: 'Создаётся',
@@ -262,6 +265,7 @@
       ].forEach(function (entry) {
         if (counts[entry[0]]) parts.push(counts[entry[0]] + ' ' + entry[1]);
       });
+      if (counts.review_pending) parts.push('из них ' + counts.review_pending + ' ждут согласования');
       main.appendChild(el('p', 'sg-workflow-activity',
         'Задания на материалы (' + counts.total + '): ' + parts.join(' · ')));
     }
@@ -295,11 +299,18 @@
         if (data && data.workflow && widget.isConnected)
           widget.replaceWith(renderWorkflow(data.workflow, true));
       }
-      function reload() {
+      function reload(showError) {
         return fetch(api + path, {credentials:'same-origin',
           headers:{Accept:'application/json'},cache:'no-store'})
-          .then(function (res) { return res.ok ? res.json() : null; })
-          .then(replaceFromServer).catch(function () {});
+          .then(function (res) {
+            if (!res.ok) throw new Error('Ошибка HTTP ' + res.status);
+            return res.json();
+          })
+          .then(replaceFromServer)
+          .catch(function () {
+            // Hydration is silent; a user-initiated refresh must report failure.
+            if (showError) notify('Не удалось обновить статус. Проверьте подключение и попробуйте ещё раз.');
+          });
       }
       function doAction(route, payload, buttons) {
         buttons.forEach(function (button) { button.disabled = true; });
@@ -350,12 +361,21 @@
         });
         actions.appendChild(retry);
       }
+      // Review navigation is a server-validated link, never an action that
+      // automatically approves or publishes content.
+      block.steps.forEach(function (step, index) {
+        if (!step.review_href || step.status !== 'completed') return;
+        var reviewLink = el('a', 'dp-btn ghost sg-workflow-review-link',
+          'Проверить готовый пост №' + String(index + 1));
+        reviewLink.href = step.review_href;
+        actions.appendChild(reviewLink);
+      });
       if (block.task_summary && block.task_summary.total) {
         var refresh = el('button', 'dp-btn ghost sg-workflow-refresh', 'Обновить статус материалов');
         refresh.type = 'button';
         refresh.addEventListener('click', function () {
           refresh.disabled = true;
-          reload().finally(function () {
+          reload(true).finally(function () {
             if (refresh.isConnected) refresh.disabled = false;
           });
         });
