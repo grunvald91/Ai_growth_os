@@ -812,6 +812,15 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
     else:
         destination = ('Место публикации: персональный блог компании на ServGo. '
                        'Ссылка появится после привязки бизнеса.')
+    from app.seo.failure_guard import paused_products
+    technical_pause = product_id in paused_products(db) if enabled else False
+    safety_notice = (
+        '<p class="seo-autorun-note" role="alert">Автоматическая генерация временно '
+        'приостановлена: несколько SEO-статей подряд завершились одинаковой технической '
+        'ошибкой. Проверьте задания. Владелец может вручную повторить конкретную статью; '
+        'другие компании не затронуты.</p>'
+        if technical_pause else ''
+    )
     autorun_enabled = (
         platform.seo_autorun_enabled or
         (product.slug == "servgo" and platform.seo_servgo_autorun_enabled)
@@ -831,6 +840,7 @@ def seo_page(product_id: UUID, db: Session = Depends(get_db)):
         + ('<p>SEO-завод подключён. Запустите подготовку плана.</p>' if enabled
            else '<p>Для этой компании генерация статей отключена.</p>')
         + '<p class="seo-autorun-note">' + html.escape(autorun_note) + '</p>'
+        + safety_notice
         + (f'<form method="post" action="{base}/seo/activation">'
            f'<input type="hidden" name="action" value="{"disable" if enabled else "enable"}">'
            f'<button class="btn {"danger" if enabled else "primary"}" type="submit">'
