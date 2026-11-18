@@ -2707,7 +2707,12 @@ async def studio_material_approve(product_id: UUID, artifact_id: UUID, request: 
     if current is not None and current.product_id == product_id and needs_fact_check(current):
         facts_confirmed = (await _studio_form(request)).get("facts_confirmed") == "yes"
     try:
-        approve_material(db, get_settings().products_root, product_id, artifact_id, facts_confirmed=facts_confirmed)
+        approve_material(
+            db, get_settings().products_root, product_id, artifact_id,
+            facts_confirmed=facts_confirmed,
+            actor=getattr(request.state, "studio_login", None) or "local-owner",
+            action_type="studio:approve_material", via="studio",
+        )
     except ReviewError as exc:
         raise HTTPException(exc.status, exc.message) from None
     return RedirectResponse(f"/studio/products/{product_id}/materials/{artifact_id}", status_code=303)
