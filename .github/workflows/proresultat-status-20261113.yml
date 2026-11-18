@@ -40,6 +40,7 @@ jobs:
           cat > /tmp/inspect.py <<'PY'
           import hashlib
           import json
+          from collections import Counter
           from sqlalchemy import select, func, or_
           from app.db.session import SessionLocal
           from app.models.domain import Product, Task, AgentRun, Artifact, TaskStatus, Publication, ArtifactStatus
@@ -62,6 +63,26 @@ jobs:
                       print('task', 'status', task.status.value, 'agent', task.assigned_agent,
                             'created', str(task.created_at)[:19], 'updated', str(task.updated_at)[:19])
                       print('target_company_exists', bool(company))
+                      from app.sso.models import StudioBusinessLink
+                      from app.models.domain import Publication, ArtifactStatus
+                      scoped_publications = list(db.scalars(select(Publication).join(
+                          Artifact, Artifact.id == Publication.artifact_id
+                      ).where(Publication.product_id == task.product_id,
+                              Publication.channel == 'own_site',
+                              Artifact.kind == 'article')))
+                      valid_published = sum(1 for p in scoped_publications
+                          if p.status == 'published' and db.get(Artifact, p.artifact_id).status == ArtifactStatus.PUBLISHED)
+                      business_link = db.scalar(select(StudioBusinessLink).where(
+                          StudioBusinessLink.product_id == task.product_id).limit(1))
+                      all_articles = list(db.scalars(select(Artifact).where(
+                          Artifact.product_id == task.product_id,
+                          Artifact.kind == 'article')))
+                      print('proresultat_geo_business_link_exists', bool(business_link))
+                      print('proresultat_geo_article_artifact_count', len(all_articles))
+                      print('proresultat_geo_published_article_count', valid_published)
+                      print('proresultat_geo_own_site_publication_status_counts',
+                            dict(Counter(pub.status for pub in scoped_publications)))
+
                       tasks = list(db.scalars(select(Task).where(
                           Task.product_id == task.product_id, Task.assigned_agent == 'editorial_planner'
                       ).order_by(Task.created_at.desc(), Task.id.desc()).limit(8)))
