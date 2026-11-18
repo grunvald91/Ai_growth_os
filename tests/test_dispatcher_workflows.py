@@ -10,7 +10,7 @@ from app.dispatcher.decision import PlannedStep
 from app.dispatcher.models import DispatcherWorkflow, DispatcherWorkflowStep
 from app.dispatcher.outcome import Context
 from app.dispatcher.service import open_conversation
-from app.models.domain import Product, Task
+from app.models.domain import Artifact, Product, Task
 
 
 @pytest.fixture
@@ -176,8 +176,15 @@ async def test_write_failure_is_terminal_and_never_auto_retried(db, company, mon
     started = await workflows.create(ctx, conv, chain(FIRST, READ), "failure")
     from app.content import service as content_service
 
+    original_queue = content_service.queue_content
+
     def unavailable(*args, **kwargs):
-        raise RuntimeError("Injected pre-commit failure")
+        created = original_queue(*args, **kwargs)
+        assert created.id is not None
+        # The Task and its content_request exist only in this open transaction.
+        assert len(list(db.scalars(select(Task)))) == 1
+        assert len(list(db.scalars(select(Artifact)))) == 1
+        raise RuntimeError("Injected failure AFTER inserts, BEFORE workflow commit")
 
     monkeypatch.setattr(content_service, "queue_content", unavailable)
     failed = await workflows.decide(ctx, UUID(started["workflow_id"]), position=0,
@@ -186,6 +193,7 @@ async def test_write_failure_is_terminal_and_never_auto_retried(db, company, mon
     assert failed["can_retry_read"] is False
     assert [s["status"] for s in failed["steps"]] == ["failed", "skipped"]
     assert not list(db.scalars(select(Task)))
+    assert not list(db.scalars(select(Artifact)))
     with pytest.raises(PermissionError):
         await workflows.retry_read(ctx, UUID(started["workflow_id"]), failed["revision"])
     with pytest.raises(PermissionError):
@@ -202,4 +210,20 @@ async def test_read_before_write_runs_first_without_starting_generation(db, comp
     assert start["status"] == "waiting_approval"
     assert start["approval"]["position"] == 1
     assert [s["status"] for s in start["steps"]] == ["completed", "waiting_approval"]
+    assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.asyncio
+async def test_internal_create_must_match_conversation_owner(db, company):
+    other = Product(name="Other company", slug="other")
+    db.add(other)
+    db.commit()
+    ctx = context(db, company)
+    foreign = open_conversation(db, other.id, "owner")
+    with pytest.raises(PermissionError):
+        await workflows.create(ctx, foreign, chain(FIRST, READ), "forged-conversation")
+    foreign_account = open_conversation(db, company.id, "colleague")
+    with pytest.raises(PermissionError):
+        await workflows.create(ctx, foreign_account, chain(FIRST, READ), "forged-account")
+    assert not list(db.scalars(select(DispatcherWorkflow)))
     assert not list(db.scalars(select(Task)))
