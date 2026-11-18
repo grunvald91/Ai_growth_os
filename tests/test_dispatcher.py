@@ -493,7 +493,7 @@ async def test_readonly_plan_keeps_company_data_scoped(db, product):
     db.add(other)
     db.flush()
     db.add(Task(product_id=other.id, title="ЧУЖОЙ СЕКРЕТ", assigned_agent="content_factory",
-                status=TaskStatus.PENDING))
+                status=TaskStatus.QUEUED))
     db.commit()
     model, _ = llm({"intent": "plan", "confidence": 0.9, "steps": [
         {"capability": "show_work"}, {"capability": "show_review"}]})
