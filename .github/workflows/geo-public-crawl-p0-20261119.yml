@@ -26,6 +26,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "::notice::User-Agent test only; runner region and true bot identity are unverified"
           python3 services/booking_bot/scripts/geo_public_crawl_audit.py \
             --region "github-hosted-runner-region-unverified" \
             --out geo_public_crawl_report.json
