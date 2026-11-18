@@ -5,6 +5,7 @@ One implementation means the dispatcher cannot approve anything the page would r
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.content.render import asset_path
 from app.content.telegram_publishing import validate_telegram_text
-from app.models.domain import Artifact, ArtifactStatus, Product, Task, TaskStatus
+from app.models.domain import Approval, Artifact, ArtifactStatus, Product, Task, TaskStatus
 
 REVIEW_KINDS = ("channel_text", "creative_brief", "article", "video_script", "video_render")
 
@@ -40,8 +41,14 @@ def needs_fact_check(row: Artifact) -> bool:
 
 
 def approve_material(db: Session, products_root: Path, product_id: UUID, artifact_id: UUID, *,
-                     facts_confirmed: bool = False) -> Artifact:
-    """Approve a material that awaits the owner. Already approved is returned unchanged."""
+                     facts_confirmed: bool = False, actor: str = "local-owner",
+                     action_type: str = "studio:approve_material",
+                     via: str = "studio") -> Artifact:
+    """Approve once and record the owner's decision in the same transaction.
+
+    A repeated approval is a read, never another history event. Publication
+    approvals are separate records with separate rules and statuses.
+    """
     db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     row = db.scalar(select(Artifact).where(
         Artifact.id == artifact_id, Artifact.product_id == product_id, Artifact.kind.in_(REVIEW_KINDS),
@@ -80,6 +87,12 @@ def approve_material(db: Session, products_root: Path, product_id: UUID, artifac
             raise ReviewError(409, "Доработка ещё выполняется — подтвердите новую версию")
     row.status = ArtifactStatus.APPROVED
     row.version += 1
+    db.add(Approval(
+        product_id=product_id, artifact_id=row.id,
+        action_type=action_type[:100], risk_level="YELLOW",
+        status="approved", requested_by=actor[:200], decided_by=actor[:200],
+        decided_at=datetime.now(timezone.utc), reason=f"via={via}"[:400],
+    ))
     db.commit()
     return row
 
