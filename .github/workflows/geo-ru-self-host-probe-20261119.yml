@@ -1,0 +1,78 @@
+name: GEO P0 — RU server egress crawl (read only, not independent vantage)
+
+on:
+  push:
+    branches: [ops/geo-ru-self-host-probe-20261119]
+    paths: [.github/workflows/geo-ru-self-host-probe-20261119.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: geo-ru-self-host-20261119
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: production
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pinned, password-authenticated read-only SSH session
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$SSHPASS" ] || { echo "::error::SSH credential absent"; exit 1; }
+          sudo apt-get install -qq -y sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/scanned
+          while read -r line; do
+            printf '%s\n' "$line" > /tmp/one
+            ssh-keygen -lf /tmp/one 2>/dev/null | grep -q "SHA256:$HOST_FP " && printf '%s\n' "$line" >> ~/.ssh/known_hosts
+          done < /tmp/scanned
+          [ -s ~/.ssh/known_hosts ] || exit 1
+      - name: Label egress IP via two public GeoIP providers (not physical proof)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" "python3 -" <<'PY'
+          import json
+          from urllib.request import urlopen, Request
+
+          def fetch(url):
+              try:
+                  with urlopen(Request(url, headers={"User-Agent": "ServGoGEOAudit/1.0"}), timeout=9) as resp:
+                      return resp.read(15000).decode("utf-8", "replace")
+              except Exception:
+                  return None
+          ip = fetch("https://api.ipify.org")
+          a, b = "unknown", "unknown"
+          if ip and ip.count(".") == 3:
+              try:
+                  from ipaddress import ip_address
+                  ip = str(ip_address(ip.strip()))
+                  one = fetch("https://ipwho.is/" + ip)
+                  two = fetch("https://ipapi.co/" + ip + "/json/")
+                  a = str(json.loads(one).get("country_code", "unknown")) if one else "unknown"
+                  b = str(json.loads(two).get("country_code", "unknown")) if two else "unknown"
+              except Exception:
+                  pass
+          print("vantage_type=self_host", "geoip_source1=", a, "geoip_source2=", b,
+                "geoip_agreement=", a == b and a == "RU")
+          print("vantage_limit=Same-server egress is NOT independent client or external ingress verification")
+          PY
+      - name: Scan public ServGo blog from the same server's outbound network
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::notice::Read only; no model calls. Same-host probe cannot prove Russian user reachability."
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            "python3 - --region ru-host-network-geoip-unverified" \
+            < services/booking_bot/scripts/geo_public_crawl_audit.py
