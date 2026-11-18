@@ -40,8 +40,8 @@
         "description": {{ article.description | tojson }},
         {% if not article.from_feed %}"image": {{ (origin + "/static/blog/" + article.slug + ".svg") | tojson }},{% endif %}
         "mainEntityOfPage": {"@type":"WebPage","@id":{{ canonical | tojson }}},
-        {% if article.published %}"datePublished": {{ article.published | tojson }},{% endif %}
-        "dateModified": {{ article.updated | tojson }},
+        {% if article.published %}"datePublished": {{ (article.published_timestamp if article.from_feed else article.published) | tojson }},{% endif %}
+        "dateModified": {{ (article.updated_timestamp if article.from_feed else article.updated) | tojson }},
         "author": {"@type":"Organization","name":"ServGo","url":{{ origin | tojson }}},
         "publisher": {"@type":"Organization","name":"ServGo","url":{{ origin | tojson }}},
         "inLanguage": "ru-RU"
@@ -193,8 +193,16 @@
                 <h1>{{ article.title }}</h1>
                 <p class="blog-intro">{{ article.lead }}</p>
                 <div class="blog-article-meta">
-                    <span>Редакция ServGo</span><span class="blog-meta-dot" aria-hidden="true"></span>
+                    <span>ServGo</span><span class="blog-meta-dot" aria-hidden="true"></span>
+                    {% if article.from_feed %}
+                    <time datetime="{{ article.published_timestamp }}">Опубликовано {{ article.published_label }}</time>
+                    {% if article.modified_since_published %}
+                    <span class="blog-meta-dot" aria-hidden="true"></span>
+                    <time datetime="{{ article.updated_timestamp }}">Обновлено {{ article.date_label }}</time>
+                    {% endif %}
+                    {% else %}
                     <time datetime="{{ article.updated }}">Обновлено {{ article.date_label }}</time>
+                    {% endif %}
                 </div>
             </div>
         </header>
