@@ -12,6 +12,7 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 import httpx
 from sqlalchemy import select
@@ -55,6 +56,7 @@ def enqueue_published_article(db: Session, article: Artifact, slug: str) -> bool
         title=title,
         content=json.dumps({
             "url": f"{_ORIGIN}/blog/{slug}",
+            "article_id": str(article.id),
             "version": version,
             "state": "pending",
             "attempts": 0,
@@ -108,6 +110,14 @@ def deliver_one(db: Session, *, key: str | None = None,
             break
     if row is None:
         return 0
+    # An additional worker cannot claim the same event concurrently.
+    row = db.scalar(select(Artifact).where(Artifact.id == row.id)
+                    .with_for_update(skip_locked=True))
+    if row is None:
+        return 0
+    state = json.loads(row.content)
+    if not _ready(state, now):
+        return 0
     if (not isinstance(state.get("url"), str) or
             not re.fullmatch(r"https://servgo\.ru/blog/[a-z0-9]+(?:-[a-z0-9]+)*", state["url"])):
         state["state"] = "rejected"
@@ -115,14 +125,21 @@ def deliver_one(db: Session, *, key: str | None = None,
         db.commit()
         return 1
     # Do not submit a page later hidden/unpublished by the owner.
-    published = db.scalar(select(Publication.id).where(
+    try:
+        source_id = UUID(state["article_id"])
+    except (ValueError, TypeError, KeyError):
+        state["state"] = "rejected"
+        row.content = json.dumps(state)
+        db.commit()
+        return 1
+    published = db.scalar(select(Publication.id).join(
+        Artifact, Publication.artifact_id == Artifact.id,
+    ).where(
         Publication.product_id == row.product_id,
-        Publication.artifact_id.in_(select(Artifact.id).where(
-            Artifact.product_id == row.product_id,
-            Artifact.task_id == row.task_id,
-            Artifact.kind == "article",
-            Artifact.status == ArtifactStatus.PUBLISHED,
-        )),
+        Publication.artifact_id == source_id,
+        Artifact.product_id == row.product_id,
+        Artifact.kind == "article",
+        Artifact.status == ArtifactStatus.PUBLISHED,
         Publication.channel == "own_site",
         Publication.status == "published",
         Publication.external_reference == state["url"].removeprefix(_ORIGIN),
