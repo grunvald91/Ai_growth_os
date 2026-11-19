@@ -90,6 +90,8 @@ class BusinessAiBriefApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["read_only"])
         self.assertEqual(result["metrics"]["bookings"]["current"], 1)
         self.assertEqual(result["metrics"]["booked_value_estimate_rub"]["current"], 1550)
+        self.assertEqual(sum(s["line_items"] for s in result["top_services"]), 2)
+        self.assertTrue(all("bookings" not in s for s in result["top_services"]))
         self.assertEqual(result["data_source"], f"/admin/analytics/{self.business_id}/overview")
         self.assertIn("НЕ фактическая оплата", result["data_limits"][0])
 
