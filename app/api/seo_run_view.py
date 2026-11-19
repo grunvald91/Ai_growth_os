@@ -267,6 +267,9 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
         }
         approval = approval_by_article.get(article.id) if article else None
         publish_record = published.get(article.id) if article else None
+        article_marked_published = bool(article and article.status == ArtifactStatus.PUBLISHED)
+        published_confirmed = bool(publish_record and article_marked_published)
+        publication_mismatch = bool(publish_record) != article_marked_published
         failed_run = failed_by_task.get(task.id)
         failure_code = None
         if state == "failed" and failed_run is not None:
@@ -298,13 +301,14 @@ def seo_runs(db: Session, product_id: UUID, *, limit: int = 20) -> list[dict]:
             ),
             "article_id": str(article.id) if article else None,
             "article_status": article.status.value if article else None,
-            "published_confirmed": publish_record is not None,
-            "publication_path": publish_record.external_reference if publish_record else None,
+            "published_confirmed": published_confirmed,
+            "publication_mismatch": publication_mismatch,
+            "publication_path": publish_record.external_reference if published_confirmed else None,
             "published_at": (
                 (publish_record.published_at.replace(tzinfo=timezone.utc)
                  if publish_record.published_at.tzinfo is None
                  else publish_record.published_at).astimezone(company_timezone).strftime("%d.%m.%Y %H:%M")
-                if publish_record and publish_record.published_at else None
+                if published_confirmed and publish_record.published_at else None
             ),
         })
     for row, task in zip(rows, tasks):
