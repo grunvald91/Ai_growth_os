@@ -115,6 +115,7 @@ def test_simple_video_creation_uses_servgo_ui_without_changing_payload_contract(
     assert 'id="wb-topic-dialog"' in html
     assert 'Продолжить к подтверждению' in html
     assert 'Без платного запуска до вашего согласия.' in html
+    assert 'value="robust"' in html and 'Автозавершение' in html
 
 
 def test_simple_video_result_prioritizes_player_and_preserves_downloads():
@@ -725,3 +726,31 @@ async def test_permanent_claudehub_access_failure_is_not_retried(environment):
     status, state = _state(factory, product_id, task_id)
     assert status == TaskStatus.FAILED and state['error'] == 'claudehub_rejected'
     assert state['calls'] == 0 and not state.get('retry_at')
+
+
+
+def test_unattended_headroom_is_explicitly_approved_at_creation(environment):
+    factory, settings, product_id, _ = environment
+    with factory() as db:
+        product = db.get(Product, product_id)
+        minimum = api._queue(db, product, api.CreateJob(
+            topic='Как работает онлайн-запись', visual_review=False), settings)
+        robust = api._queue(db, product, api.CreateJob(
+            topic='Как работает онлайн-запись', visual_review=False,
+            recovery_budget=True), settings)
+        assert minimum.id != robust.id
+        _, _, approval_min, request_min = records(db, minimum)
+        _, _, approval_robust, request_robust = records(db, robust)
+        assert request_min.max_api_calls == 14
+        assert request_robust.max_api_calls == 19
+        assert minimum.status == TaskStatus.WAITING_APPROVAL
+        assert robust.status == TaskStatus.WAITING_APPROVAL
+        assert approval_min.status == approval_robust.status == 'pending'
+    with client() as browser:
+        params = {'topic': 'Как работает онлайн-запись', 'duration_seconds': '30',
+                  'visual_review': 'off', 'max_api_calls': 'robust'}
+        quote = browser.get(f'/studio/products/{product_id}/whiteboard/quote.json',
+                            params=params)
+        assert quote.status_code == 200
+        assert quote.json()['required_calls'] == 14
+        assert quote.json()['limit'] == 19
