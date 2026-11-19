@@ -65,7 +65,7 @@ def recover(*, apply: bool) -> dict:
             raise RuntimeError("Critic report changed; manual review required")
         for index in range(6):
             data = store.load(f"scene-{index:02}-image")
-            if not data.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+            if not data.startswith(bytes.fromhex("89504e470d0a1a0a")):
                 raise RuntimeError(f"Scene {index} has invalid PNG bytes")
 
         decision = VisualDecision(decisions=[
