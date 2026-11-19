@@ -223,6 +223,16 @@ async def run_once() -> int:
         publish_pending(db, daily_limit=settings.seo_publications_per_day)
         if publish_owner_approved(db, daily_limit=settings.seo_publications_per_day):
             return 1
+    # Durable, opt-in IndexNow notices for committed ServGo public articles.
+    # When no public verification key is configured, this does no network IO.
+    if settings.geo_indexnow_key:
+        from app.seo.indexnow_outbox import deliver_one
+        with SessionLocal() as db:
+            try:
+                deliver_one(db, key=settings.geo_indexnow_key)
+            except Exception:
+                db.rollback()
+                logging.getLogger(__name__).exception("IndexNow delivery failed")
     # Only explicitly scheduled, owner-approved posts can leave the system.
     # The dispatcher is a durable at-most-once sender and is OFF by default.
     if settings.content_telegram_autopost_enabled:
