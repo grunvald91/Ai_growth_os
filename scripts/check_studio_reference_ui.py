@@ -203,28 +203,14 @@ def main():
                     cdp.send('Input.dispatchTouchEvent', {'type':kind,'touchPoints':[] if x is None else [
                         {'x':x,'y':y,'id':1}], 'modifiers':0})
                 page.locator('#dp-feed').evaluate('(el)=>el.scrollTop=0')
-                # An earlier widget may now occupy the old fixed (100,400) test
-                # point. The real touch gesture intentionally ignores buttons
-                # and links, so choose a noninteractive area inside #main rather
-                # than assuming arbitrary pixel coordinates stay empty.
-                start = page.evaluate("""() => {
-                  const forbidden = 'a,button,input,textarea,select,summary,video,' +
-                    '[contenteditable],.command-dock,.dp-tablewrap,.command-hints,' +
-                    '.v4-more,[role="dialog"]:not(.sg-daily-drawer)';
-                  const viewportHeight = window.visualViewport?.height || innerHeight;
-                  const viewportWidth = document.documentElement.clientWidth;
-                  for (const y of [400,375,425,350,450,325,475,300,500,250,220,180]) {
-                    // Match the gesture controller's own permitted center range.
-                    if (!(y > viewportHeight * .22 && y < viewportHeight * .78)) continue;
-                    for (const x of [90,100,110,120]) {
-                      if (!(x > viewportWidth * .18 && x < viewportWidth * .82)) continue;
-                      const target = document.elementFromPoint(x,y);
-                      if (target?.closest('#main') && !target.closest(forbidden))
-                        return {x,y};
-                    }
-                  }
-                  throw Error('No eligible swipe start in the controller center region');
-                }""")
+                # Start at the actual daily-drawer handle: it is an explicit
+                # swipe target and is not affected by content cards, keyboard
+                # viewport changes, or hit-testing a random free pixel.
+                expect(page.locator('#sgDailyDrawer')).to_have_attribute('aria-hidden','true')
+                handle_box = page.locator('#sgDailyHandle').bounding_box()
+                assert handle_box is not None
+                start = {'x': handle_box['x'] + handle_box['width']/2,
+                         'y': handle_box['y'] + handle_box['height']/2}
                 touch('touchStart',start['x'],start['y'])
                 touch('touchMove',start['x']+60,start['y'])
                 expect(page.locator('body')).to_have_class(__import__('re').compile('sg-daily-dragging'))
