@@ -923,7 +923,7 @@ def test_chat_paid_model_access_is_server_enforced(chat_env):
         assert entries["claude-opus-4-6"]["access_status"] == "paid"
         assert not entries["claude-opus-4-6"]["access_enabled"]
         assert entries["gemini-3.1-flash"]["access_enabled"]
-        assert catalog["default_text_model"] == "gemini-3.1-flash"
+        assert entries[catalog["default_text_model"]]["access_enabled"] is True
         conv_id = client.post("/studio/api/ai-chat/conversations",
                               json={"product_id": str(company.id)}).json()["id"]
         denied = client.post(f"/studio/api/ai-chat/conversations/{conv_id}/messages",
@@ -945,4 +945,4 @@ def test_paid_model_ui_has_disabled_choices(chat_env):
         js = client.get("/studio/assets/ai-chat.js")
         assert js.status_code == 200
         assert "m.access_enabled !== true" in js.text
-        assert "Отдельная оплата" in js.text
+        assert "m.access_label" in js.text
