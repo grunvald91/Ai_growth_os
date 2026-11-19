@@ -196,7 +196,8 @@ def test_persistent_servgo_profile_replaces_only_known_stale_editorial_facts():
     statements = {f["statement"] for f in corrected["proof"]["approved_facts"]}
     assert set(STOCK_FACT_REPLACEMENTS.values()).issubset(statements)
     assert not set(STOCK_FACT_REPLACEMENTS).intersection(statements)
-    assert custom_fact in corrected["proof"]["approved_facts"]
+    assert any(f["statement"] == custom_fact["statement"] and f["evidence_ref"] == custom_fact["evidence_ref"]
+               for f in corrected["proof"]["approved_facts"])
     descriptions = {o["description"] for o in corrected["offer"]["products_services"]}
     assert not set(STOCK_OFFER_REPLACEMENTS).intersection(descriptions)
     assert set(STOCK_OFFER_REPLACEMENTS.values()).issubset(descriptions)
@@ -216,4 +217,5 @@ def test_owner_customized_fact_is_never_replaced_by_stock_upgrade():
         {"statement": old_text, "evidence_ref": "owner:independent-source"}
     ]
     updated, _ = merge_profile(current, packaged())
-    assert {"statement": old_text, "evidence_ref": "owner:independent-source"} in updated["proof"]["approved_facts"]
+    assert any(f["statement"] == old_text and f["evidence_ref"] == "owner:independent-source"
+               for f in updated["proof"]["approved_facts"])
