@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 from app.api.content_studio import _owner_product, _studio_form, studio_page_shell
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.comments.service import CommentService
-from app.comments.contracts import ConnectInput
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import Artifact, Publication
@@ -40,8 +39,7 @@ def feedback(key):
             "cancelled": "Запланированная публикация отменена.",
             "checked": "Результат ручной проверки сохранён.",
             "disconnected": "VK отключён, будущие публикации отменены.",
-            "connected_key": "Ключ проверен. Подключены публикации и комментарии; отправку проверьте отдельным тестом.",
-            "connected_partial": "Ключ для публикаций сохранён. Комментарии пока не подключились — проверьте права ключа и повторите.",
+            "connected_key": "Ключ сообщества проверен и сохранён. Для чтения комментариев и публикации постов необходим подходящий пользовательский доступ через VK ID.",
             }.get(key, "")
 
 
@@ -50,7 +48,7 @@ def connection_error(key):
         "bad_link": "Не удалось распознать ссылку. Скопируйте адрес страницы сообщества из ВКонтакте.",
         "bad_key": "ВКонтакте не подтвердил ключ или его права. Проверьте ссылку и создайте ключ сообщества с правами управления и работы со стеной.",
         "save_failed": "Не удалось сохранить подключение. Проверьте настройки и повторите.",
-        "vk_id_input": "Для VK ID пока требуется ссылка вида vk.com/club123. Для обычной ссылки используйте подключение по ключу.",
+        "vk_id_input": "Проверьте ссылку на сообщество и настройки VK ID. Адрес вида vk.com/название подходит.",
     }.get(key, "")
 
 
@@ -95,49 +93,45 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
     if channel:
         current = (f'<div class="sg-channel-line"><span class="sg-link-dot">✓</span><div>'
                    f'<b>{esc(channel.account_name)}</b><small>Сообщество VK · ID {esc(channel.account_id)}</small></div>' +
-                   ('<span class="sg-channel-status">Ключ проверен · отправка не проверена</span></div>'
+                   ('<span class="sg-channel-status">Ключ сообщества · публикация недоступна</span></div>'
                     if channel.is_community_token else
                     '<span class="sg-channel-status">VK ID · права отправки не подтверждены</span></div>') +
                    f'<form method="post" action="/studio/products/{product_id}/vk/disconnect">'
                    '<button type="submit" class="btn secondary small">Отключить VK</button></form>')
         reply_channel = CommentService(db, settings).channel(product_id, "vk")
-        replies_ready = bool(reply_channel and reply_channel.status == "connected"
+        replies_ready = bool(not channel.is_community_token and reply_channel
+                             and reply_channel.status == "connected"
                              and reply_channel.account_id == channel.account_id)
         current += ('<p class="sg-footnote">Комментарии: подключены, отправка ответов не проверена.</p>'
                     if replies_ready else '<p class="sg-footnote">Комментарии: не подключены.</p>')
     else:
         current = '<p class="sg-muted">Сообщество ещё не подключено.</p>'
     enabled = bool(settings.content_vk_autopost_enabled)
+    can_schedule = bool(channel and not channel.is_community_token and posts)
     status = ("Отправка по расписанию включена на сервере."
               if enabled else "Отправка на сервере выключена. Планирование сохраняется, но публикации не уходят.")
     body = f"""
 <section class="sg-surface">
  <div class="sg-section-head"><div><span class="sg-overline">КАНАЛЫ</span><h2>ВКонтакте</h2>
- <p>Для публикаций и ответов на комментарии укажите обычную ссылку на ваше сообщество. Числовой ID искать не требуется.</p></div></div>
+ <p>Скопируйте ссылку на ваше сообщество из ВКонтакте. Числовой ID искать не нужно.</p></div></div>
  {alert}{current}
- <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
+ <form method="post" action="/studio/products/{product_id}/vk/connect" class="sg-fields sg-compact-form">
   <label class="sg-field"><span>Ссылка на сообщество</span>
    <input name="community_link" type="text" maxlength="255" autocomplete="off"
       placeholder="https://vk.com/my_community" required></label>
-  <label class="sg-field"><span>Ключ доступа сообщества</span>
-   <input name="access_token" type="password" autocomplete="off" maxlength="8000"
-      placeholder="Вставьте ключ из настроек сообщества" required></label>
-  <button class="btn primary" type="submit">Проверить и подключить</button>
+  <button class="btn primary" type="submit">Подключить через ВКонтакте</button>
  </form>
- <details><summary>Где получить ключ доступа?</summary>
-  <p class="sg-footnote">Откройте ваше сообщество ВКонтакте → Управление → Работа с API → Ключи доступа.
-  Создайте ключ с правами управления сообществом и работы со стеной. Скопируйте его сюда.
-  ServGo проверит доступ, определит название и ID сообщества и сохранит ключ зашифрованным.
-  Ключ не нужно отправлять в чат или поддержку.</p>
- </details>
- <details><summary>Другой способ: VK ID (права публикации могут быть ограничены)</summary>
-  <p class="sg-footnote">Этот способ поддерживает только числовую ссылку формата vk.com/club123456.
-  Для обычной короткой ссылки используйте ключ сообщества выше.
-  Авторизация VK ID сама по себе не подтверждает право публиковать посты.</p>
-  <form method="post" action="/studio/products/{product_id}/vk/connect" class="sg-fields sg-compact-form">
-   <label class="sg-field">Ссылка вида vk.com/club123456
-    <input name="community_link" type="text" maxlength="255" placeholder="https://vk.com/club123456" required></label>
-   <button class="btn secondary" type="submit">Подключить через VK ID</button>
+ <p class="sg-footnote">Войдите в свой VK-аккаунт с правами на сообщество. ServGo определит его числовой ID и проверит возможность читать публикации и комментарии. Право отправлять новые посты проверяется только реальной публикацией.</p>
+ <details><summary>Дополнительно: ключ доступа сообщества (ограниченные возможности)</summary>
+  <p class="sg-footnote">ВКонтакте → Управление сообществом → Работа с API → Ключи доступа.
+  Ключ сообщества можно сохранить зашифрованным, но он не заменяет пользовательский доступ для wall.post, wall.get и wall.getComments.
+  Для полноценного подключения используйте вход через ВКонтакте выше. Ключ не отправляйте в чат.</p>
+  <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
+   <label class="sg-field">Ссылка на сообщество
+    <input name="community_link" type="text" maxlength="255" placeholder="https://vk.com/my_community" required></label>
+   <label class="sg-field">Ключ сообщества
+    <input name="access_token" type="password" maxlength="8000" autocomplete="off" required></label>
+   <button class="btn secondary" type="submit">Проверить и сохранить ключ</button>
   </form>
  </details>
 </section>
@@ -152,11 +146,11 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
   <label><input type="checkbox" name="confirmed" value="yes" required>
    Я проверил материал и разрешаю публикацию в подключённом сообществе</label>
   <button name="mode" value="scheduled" class="btn secondary" type="submit"
-   {"disabled" if not channel or not posts else ""}>Запланировать</button>
+   {"disabled" if not can_schedule else ""}>Запланировать</button>
   <button name="mode" value="now" class="btn primary" type="submit"
-   {"disabled" if not channel or not posts else ""}>Опубликовать сейчас</button>
+   {"disabled" if not can_schedule else ""}>Опубликовать сейчас</button>
  </form>
- <p class="sg-footnote">Пока поддерживается публикация текста. Неудачная или неизвестная отправка не запускается повторно автоматически.</p>
+ <p class="sg-footnote">Пока поддерживается публикация текста. Для ключа сообщества публикация недоступна: VK API требует пользовательский токен. Неудачная или неизвестная отправка не запускается повторно автоматически.</p>
 </section>
 <section class="sg-surface">
  <h2>История VK</h2><ul class="sg-publication-list">
@@ -212,13 +206,6 @@ async def vk_community_key(product_id: UUID, request: Request,
     except (LookupError, ValueError):
         db.rollback()
         return RedirectResponse(f"/studio/products/{product_id}/vk?error=save_failed", status_code=303)
-    try:
-        await CommentService(db, settings).connect(
-            product_id, ConnectInput(platform="vk", account_id=account_id, token=token))
-    except (LookupError, ValueError):
-        db.rollback()
-        return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_partial",
-                                status_code=303)
     return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_key",
                             status_code=303)
 
