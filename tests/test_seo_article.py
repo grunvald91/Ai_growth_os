@@ -372,3 +372,24 @@ async def test_invalid_seo_strategist_does_not_silently_recover_truncated_repair
     assert result.status == "failed"
     assert result.error.startswith("invalid_article_output:content_strategist")
     assert not list(db.scalars(select(Artifact).where(Artifact.kind == "article")))
+
+
+def test_seo_marketing_copy_has_buyer_value_and_real_next_step_without_feature_catalog():
+    from app.workflows.article_production import ARTICLE_COMMON, GEO_RULES, SERVGO_EDITORIAL_RULES
+    assert "Organic acquisition: write truthful promotional editorial copy" in ARTICLE_COMMON
+    assert "ПРОДАЮЩАЯ ЛОГИКА" in GEO_RULES
+    assert "seo_brief.next_step" in GEO_RULES
+    assert "не заменяй маркетинг таблицей требований" in GEO_RULES
+    assert "маркетинговая статья, а не инструкция" in SERVGO_EDITORIAL_RULES
+    assert "реально работающими функциями ServGo" in SERVGO_EDITORIAL_RULES
+    assert "не выдумывай измеренные результаты" in SERVGO_EDITORIAL_RULES
+
+
+def test_seo_critic_requires_marketing_value_without_invented_sales_claims():
+    from app.llm.critic import SEO_CRITIC_RULES, SERVGO_CRITIC_RULES
+    assert "МАРКЕТИНГОВАЯ ЦЕЛЬ" in SEO_CRITIC_RULES
+    assert "общей энциклопедической справкой" in SEO_CRITIC_RULES
+    assert "без объяснения выгоды" in SEO_CRITIC_RULES
+    assert "не требуй искусственной продающей воронки" in SEO_CRITIC_RULES.casefold()
+    assert "маркетинговую подачу" in SERVGO_CRITIC_RULES
+    assert "Нельзя выдавать предполагаемую выгоду за измеренный рост бизнеса" in SERVGO_CRITIC_RULES
