@@ -416,10 +416,14 @@ async def test_threads_wrong_root_owner_never_creates_container():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("platform", ["vk", "vk_video"])
 async def test_vk_connections_require_manager(platform):
-    client, gateway, _, _ = mock_gateway([("groups.getById", {"response": {"groups": [{"id": 42, "is_admin": 0}]}})])
+    client, gateway, _, pending = mock_gateway([
+        ("groups.getById", {"response": {"groups": [{"id": 42, "is_admin": 0}]}}),
+        ("groups.getTokenPermissions", {"error": {"error_code": 27, "error_msg": "Not a group token"}}),
+    ])
     async with client:
-        with pytest.raises(PlatformError, match="пользовательский токен"):
+        with pytest.raises(PlatformError, match="Нужен ключ"):
             await gateway.check(platform, "42", "secret")
+    assert not pending
 
 
 @pytest.mark.asyncio
