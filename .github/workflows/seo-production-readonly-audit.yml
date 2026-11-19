@@ -134,6 +134,43 @@ jobs:
                   except Exception as exc:
                       print(json.dumps({"slug": pub.external_reference, "article_parse_error": type(exc).__name__}))
           PY
+          echo "== Reader-vs-stored-text leak diagnostics (metadata only)"
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          import hashlib, json
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Artifact, Product
+          from app.seo.publishing import _EDITORIAL_LEAK, _LEAKS, critic_verdict, static_problems
+          from app.workflows.article_contracts import ArticleArtifact
+          with SessionLocal() as db:
+              p = db.scalar(select(Product).where(Product.slug == "servgo"))
+              for row in db.scalars(select(Artifact).where(
+                      Artifact.product_id == p.id, Artifact.kind == "article")):
+                  try:
+                      a = ArticleArtifact.model_validate_json(row.content)
+                      r = a.reader_article
+                      visible = "\n".join(filter(None, [
+                          r.title, r.lead, r.direct_answer or "", r.meta_description or "",
+                          r.closing, a.conversion.cta,
+                          *(part for sec in r.sections for part in (sec.heading, sec.body)),
+                          *(part for faq in r.faq for part in (faq.question, faq.answer)),
+                      ]))
+                      issues = static_problems(a)
+                      if "internal editorial verification leaked into reader copy" not in issues:
+                          continue
+                      v = _EDITORIAL_LEAK.search(visible)
+                      f = _EDITORIAL_LEAK.search(a.full_article)
+                      print("SEO_LEAK_CLASS=", json.dumps({
+                          "id_hash": hashlib.sha256(str(row.id).encode()).hexdigest()[:10],
+                          "status": row.status.value if hasattr(row.status, "value") else str(row.status),
+                          "reader_match": bool(v), "full_match": bool(f),
+                          "reader_match_term": v.group(0)[:100] if v else None,
+                          "critic": critic_verdict(db, row.task_id, r),
+                          "full_sections": len(r.sections)
+                      }, ensure_ascii=False))
+                  except (ValueError, TypeError, AttributeError) as exc:
+                      print("SEO_LEAK_CLASS_ERROR=", type(exc).__name__)
+          PY
           echo "== Public ServGo article editorial excerpt"
           docker exec -i ai-growth-os-api-1 python - <<'PY'
           import json
