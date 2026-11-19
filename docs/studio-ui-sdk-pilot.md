@@ -394,3 +394,50 @@ server-side pagination (30) and no external calls.
 The next production step is to reconcile any stale SEO publication records
 using trusted server evidence; never repair by fabricating success status
 or automatically republishing from the UI.
+
+
+## Phase 8c — read-only SEO publication reconciliation and owner attention
+
+The company-scoped `app.seo.diagnostics.audit_seo` reads actual
+`content_factory / SEO-ARTICLE:` tasks, current `article` artifacts,
+`seo_final_review` records and matching `own_site` publications. It does
+not call an external blog, infer indexed search visibility, run the model,
+change any database status or attempt a retry.
+
+Issues are separately identified and prioritized:
+- Published Article without a matching published Publication receipt, or a
+  published receipt while Article is not marked published; contradictory
+  publication receipts are treated as needing investigation.
+- Failed generation; a running task unchanged for more than **2 hours**.
+- A queued SEO job whose planned time and last update are more than **24h**
+  in the past; a completed task missing its article for more than **24h**.
+- A completed draft or approved article more than **24h** past its due time,
+  with no confirmed publication.
+
+These are *diagnostic thresholds*, not proof that a worker is stopped or
+that the public page is inaccessible. A future scheduled article is not an
+issue, and a post waiting for the owner to approve is not falsely labeled
+an error. Reconciliation checks matching company IDs for every related
+database query and selects the newest article for a task. It loads IDs in
+small batches to avoid oversized `IN` clauses and counts all company tasks
+before applying page limits.
+
+`/studio/products/{id}/review?section=seo&view=issues` shows a paginated
+list of only the detected issues with exact total and original task/material
+links. `?section=seo` still shows all observed stages. Both use the shared
+accessible material cards and a native no-JS fallback.
+
+The existing `home-summary.json` adds `seo_issues`,
+`seo_issues_scanned` and up to three evidence-backed SEO alerts; the
+Growth v4 daily drawer shows a **Проверить SEO** counter only when issues
+are present. No unrelated company's task title, receipt or link is emitted.
+
+The older SEO run view, SEO plan calendar and Growth run card can no longer
+claim a published article based solely on a saved `/blog/` link. Both
+`Artifact.status=published` and a matching `Publication(status=published)`
+must agree. A mismatch has a separate, non-retryable label; it never
+unlocks a paid "repeat generation" button.
+
+This is a **database-led audit**, not a verified live URL/HTTP probe.
+Reconciliation, repair, reindexing and external availability checks remain
+separate future tasks, with explicit authorization and controlled execution.
