@@ -48,6 +48,7 @@ def connection_error(key):
         "bad_link": "Не удалось распознать ссылку. Скопируйте адрес страницы сообщества из ВКонтакте.",
         "bad_key": "ВКонтакте не подтвердил ключ или его права. Проверьте ссылку и создайте ключ сообщества с правами управления и работы со стеной.",
         "save_failed": "Не удалось сохранить подключение. Проверьте настройки и повторите.",
+        "already_connected": "Сообщество уже подключено через VK ID. Ограниченный ключ не заменит действующее подключение.",
         "vk_id_input": "Проверьте ссылку на сообщество и настройки VK ID. Адрес вида vk.com/название подходит.",
     }.get(key, "")
 
@@ -201,6 +202,10 @@ async def vk_community_key(product_id: UUID, request: Request,
         await verify_community_key(token, account_id)
     except ValueError:
         return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_key", status_code=303)
+    existing = connected(db, product_id)
+    if existing is not None and not existing.is_community_token:
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=already_connected",
+                                status_code=303)
     try:
         connect_community(db, settings, product_id, account_id, token, name=name)
     except (LookupError, ValueError):
