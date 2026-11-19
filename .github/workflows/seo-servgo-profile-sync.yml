@@ -1,0 +1,73 @@
+name: ServGo SEO guarded runtime profile sync
+
+# Only after the application release is healthy. Synchronize exact previous
+# stock facts on ServGo's persistent volume; never overwrite owner edits.
+# Dry-run, SHA guard and byte-for-byte backup are provided by the CLI.
+on:
+  workflow_run:
+    workflows: ["Deploy Growth (production)"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: seo-servgo-profile-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+      EXPECTED_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
+    steps:
+      - name: Verify remote identity and update only stock ServGo profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS" || { echo "::error::SERVER_SSH_PASSWORD is not configured"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/seo-sync-host-keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/seo-sync-key
+            if ssh-keygen -lf /tmp/seo-sync-key 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/seo-sync-host-keys
+          test -s ~/.ssh/known_hosts || { echo "::error::Server host key mismatch"; exit 1; }
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            "bash -s -- '$EXPECTED_SHA'" <<'REMOTE'
+          set -euo pipefail
+          expected_sha="${1:-}"
+          deployed_sha="$(docker exec ai-growth-os-api-1 python -c 'import os;print(os.getenv("RELEASE_SHA", ""))')"
+          if [ -n "$expected_sha" ] && [ "$deployed_sha" != "$expected_sha" ]; then
+            echo "SEO_PROFILE_SYNC_SKIP: deployed SHA does not match this completed release"
+            exit 0
+          fi
+          test -n "$deployed_sha" || { echo "::error::Deployed commit SHA unavailable"; exit 1; }
+          echo "SEO_PROFILE_SYNC_RELEASE_SHA=$deployed_sha"
+          # Idempotent dry run: no paid API calls, changes or credential logging.
+          dry="$(docker exec ai-growth-os-api-1 python -m app.seo.upgrade_servgo_profile)"
+          echo "$dry"
+          current_sha="$(printf '%s\n' "$dry" | python3 -c 'import json,sys;print(json.loads(sys.stdin.read().split("SERVGO_PROFILE_UPGRADE=",1)[1])["previous_sha256"])')"
+          test "${#current_sha}" -eq 64 || { echo "::error::Invalid profile hash"; exit 1; }
+          docker exec ai-growth-os-api-1 python -m app.seo.upgrade_servgo_profile \
+            --apply --expected-sha256 "$current_sha"
+          # Validate final state with the same parser: no more known stock diffs.
+          final="$(docker exec ai-growth-os-api-1 python -m app.seo.upgrade_servgo_profile)"
+          echo "$final"
+          printf '%s\n' "$final" | python3 -c '
+          import json, sys
+          data=json.loads(sys.stdin.read().split("SERVGO_PROFILE_UPGRADE=",1)[1])
+          assert data["changed"] is False, "Persistent profile update is not idempotent"
+          print("SEO_PROFILE_SYNC_VERIFIED")
+          '
+          REMOTE

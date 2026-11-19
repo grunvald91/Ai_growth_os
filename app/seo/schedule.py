@@ -1,6 +1,7 @@
 """Durable per-company editorial calendar, using the existing Task.due_at column.
 
-The calendar assigns up to three publishing slots per Moscow date. It neither
+The calendar assigns up to three publishing slots per Moscow date. A 7/30-day SEO
+plan can spread one article to each free day before filling extra slots. It neither
 drops topics nor relies on repeated GitHub Actions. A PostgreSQL product lock
 serializes reservations and actual publication; SQLite remains for tests.
 """
@@ -53,7 +54,8 @@ def published_today(db, product_id, *, now: datetime | None = None,
 
 
 def available_slots(db, product_id, count: int, *, limit: int = PUBLICATIONS_PER_DAY,
-                    now: datetime | None = None, tz: ZoneInfo = OWNER_TZ) -> list[datetime]:
+                    now: datetime | None = None, tz: ZoneInfo = OWNER_TZ,
+                    spread_days: int | None = None) -> list[datetime]:
     """Reserve full calendar capacity across plans and already-published pages.
 
     Must be invoked while holding a row-level lock on this company's Product.
@@ -62,6 +64,8 @@ def available_slots(db, product_id, count: int, *, limit: int = PUBLICATIONS_PER
     """
     if count < 0 or limit < 1:
         raise ValueError("Invalid SEO scheduling capacity")
+    if spread_days is not None and (isinstance(spread_days, bool) or not 1 <= spread_days <= 90):
+        raise ValueError("Invalid SEO planning horizon")
     now = utc(now or datetime.now(timezone.utc))
     today = day(now, tz=tz)
     occupied: dict[date, set[str]] = defaultdict(set)
@@ -93,13 +97,37 @@ def available_slots(db, product_id, count: int, *, limit: int = PUBLICATIONS_PER
             occupied[published_date].add(token)
 
     due = []
-    date_cursor = today
+
+    def reserve(date_cursor: date) -> bool:
+        if len(occupied[date_cursor]) >= limit:
+            return False
+        morning = datetime.combine(date_cursor, time(hour=PUBLICATION_HOUR), tzinfo=tz)
+        planned = max(now, morning.astimezone(timezone.utc)) if date_cursor == today else morning.astimezone(timezone.utc)
+        due.append(planned)
+        occupied[date_cursor].add(f"new:{len(due)}")
+        return True
+
+    if spread_days is not None:
+        # The SEO plan should feed the blog each day of its 7/30-day horizon,
+        # rather than spend three slots today and leave the rest of the week
+        # empty. Prefer days with no already scheduled article, then fill
+        # spare daily capacity only when the plan has more topics than days.
+        horizon = [today + timedelta(days=offset) for offset in range(spread_days)]
+        for scheduled_day in horizon:
+            if len(due) == count:
+                break
+            if not occupied[scheduled_day]:
+                reserve(scheduled_day)
+        for scheduled_day in horizon:
+            while len(due) < count and reserve(scheduled_day):
+                pass
+        date_cursor = today + timedelta(days=spread_days)
+    else:
+        date_cursor = today
+
+    # More topics than horizon capacity are never lost: spill into future days.
     while len(due) < count:
-        available = max(0, limit - len(occupied[date_cursor]))
-        for _ in range(min(available, count - len(due))):
-            morning = datetime.combine(date_cursor, time(hour=PUBLICATION_HOUR), tzinfo=tz)
-            planned = max(now, morning.astimezone(timezone.utc)) if date_cursor == today else morning.astimezone(timezone.utc)
-            due.append(planned)
-            occupied[date_cursor].add(f"new:{len(due)}")
+        while len(due) < count and reserve(date_cursor):
+            pass
         date_cursor += timedelta(days=1)
-    return due
+    return sorted(due)

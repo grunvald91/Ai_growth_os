@@ -22,6 +22,7 @@ def test_editorial_rewrite_is_readable_search_article_not_fake_client_booking(sl
     assert isinstance(reader, HumanEditedArticle)
     assert reader.language == "ru"
     assert REVISION_NOTE in reader.editorial_notes
+    assert "Проверенные функции ServGo" not in reader.lead
     assert reader.direct_answer and reader.meta_description
     assert len(reader.sections) >= 3
     assert any(any(line.startswith("1. ") for line in section.body.splitlines()) for section in reader.sections)

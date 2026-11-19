@@ -282,3 +282,9 @@ def test_b2b_online_booking_for_consumer_is_not_buyer_intent():
     with pytest.raises(PlanError, match="Consumer appointment query"):
         validate_plan(candidate, consumer_core, b2b_provider=True)
     validate_plan(candidate, consumer_core, b2b_provider=False)
+
+
+def test_seo_planner_prefers_daily_useful_topics_without_padding():
+    from app.seo.planner import PLAN_PROMPT
+    assert "one distinct, useful and source-backed article per day" in PLAN_PROMPT
+    assert "never invent or duplicate topics just to fill a day" in PLAN_PROMPT

@@ -159,3 +159,63 @@ def test_live_shifts_uses_owner_confirmation_not_unverified_repository():
     assert shift["release_status"] == "live"
     assert shift["evidence_refs"] == ["owner-confirmation:servgo:2026-11-03:shifts-operational"]
     assert "не подтверждены текущим аудитом" not in shift["description"]
+
+
+def test_persistent_servgo_profile_replaces_only_known_stale_editorial_facts():
+    from app.seo.upgrade_servgo_profile import (
+        STOCK_FACT_REPLACEMENTS, STOCK_OFFER_REPLACEMENTS,
+        LEGACY_POSITIONING_TAIL, NEW_POSITIONING_TAIL,
+        LEGACY_POSITIONING_ADDENDUM, POSITIONING_ADDENDUM,
+    )
+    current = copy.deepcopy(packaged())
+    custom_fact = {"statement": "Custom CRM claim from owner", "evidence_ref": "owner:proof"}
+    current["proof"]["approved_facts"].append(custom_fact)
+    for item in current["proof"]["approved_facts"]:
+        for old, new in STOCK_FACT_REPLACEMENTS.items():
+            if item["statement"] == new:
+                item["statement"] = old
+    for offer in current["offer"]["products_services"]:
+        for old, new in STOCK_OFFER_REPLACEMENTS.items():
+            if offer.get("description") == new:
+                offer["description"] = old
+    assert NEW_POSITIONING_TAIL in current["brand"]["positioning"]
+    current["brand"]["positioning"] = (
+        current["brand"]["positioning"].replace(
+            NEW_POSITIONING_TAIL, LEGACY_POSITIONING_TAIL
+        ) + LEGACY_POSITIONING_ADDENDUM
+    )
+    current["constraints"]["operational"] = [
+        rule for rule in current["constraints"]["operational"]
+        if not rule.startswith("Не ")
+    ]
+    current["unknowns"] = [
+        q for q in current["unknowns"]
+        if "автоматическая отправка сообщения из CRM" not in q["question"]
+    ]
+    corrected, stats = merge_profile(current, packaged())
+    statements = {f["statement"] for f in corrected["proof"]["approved_facts"]}
+    assert set(STOCK_FACT_REPLACEMENTS.values()).issubset(statements)
+    assert not set(STOCK_FACT_REPLACEMENTS).intersection(statements)
+    assert any(f["statement"] == custom_fact["statement"] and f["evidence_ref"] == custom_fact["evidence_ref"]
+               for f in corrected["proof"]["approved_facts"])
+    descriptions = {o["description"] for o in corrected["offer"]["products_services"]}
+    assert not set(STOCK_OFFER_REPLACEMENTS).intersection(descriptions)
+    assert set(STOCK_OFFER_REPLACEMENTS.values()).issubset(descriptions)
+    assert LEGACY_POSITIONING_TAIL not in corrected["brand"]["positioning"]
+    assert LEGACY_POSITIONING_ADDENDUM.strip() not in corrected["brand"]["positioning"]
+    assert POSITIONING_ADDENDUM.strip() in corrected["brand"]["positioning"]
+    assert any("автоматические рассылки" in r for r in corrected["constraints"]["operational"])
+    assert stats["stock_corrections"] >= 8
+    assert merge_profile(corrected, packaged())[0] == corrected
+
+
+def test_owner_customized_fact_is_never_replaced_by_stock_upgrade():
+    from app.seo.upgrade_servgo_profile import STOCK_FACT_REPLACEMENTS
+    current = copy.deepcopy(packaged())
+    old_text = next(iter(STOCK_FACT_REPLACEMENTS))
+    current["proof"]["approved_facts"] = [
+        {"statement": old_text, "evidence_ref": "owner:independent-source"}
+    ]
+    updated, _ = merge_profile(current, packaged())
+    assert any(f["statement"] == old_text and f["evidence_ref"] == "owner:independent-source"
+               for f in updated["proof"]["approved_facts"])

@@ -34,14 +34,30 @@ jobs:
           cache: pip
       - name: Install media tools
         if: steps.scope.outputs.growth_changed == 'true'
-        # The GitHub mirror sometimes stalls for the whole job; give each try 4 minutes and retry.
+        # Runner images may already have these. Avoid the unreliable apt
+        # mirror unless a required package is genuinely absent; bounded retries
+        # fail closed if dependencies cannot be installed.
+        shell: bash
         run: |
-          for attempt in 1 2 3; do
-            sudo timeout 240 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -qq \
-              && sudo timeout 240 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y -qq \
-                ffmpeg fonts-dejavu-core poppler-utils tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng && exit 0
-            echo "apt attempt $attempt failed"
+          set -euo pipefail
+          missing=()
+          for package in ffmpeg fonts-dejavu-core poppler-utils tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng; do
+            if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -qx 'install ok installed'; then
+              missing+=("$package")
+            fi
           done
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "Required media packages already installed"
+            exit 0
+          fi
+          for attempt in 1 2; do
+            if sudo timeout 120 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 install -y -qq "${missing[@]}"; then
+              exit 0
+            fi
+            echo "Media package install attempt $attempt failed; refresh package indexes"
+            sudo timeout 90 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 update -qq || true
+          done
+          echo "::error::Media dependencies are unavailable after bounded attempts"
           exit 1
       - name: Install
         if: steps.scope.outputs.growth_changed == 'true'

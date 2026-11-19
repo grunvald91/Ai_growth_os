@@ -166,3 +166,45 @@ def test_company_publication_count_uses_local_timezone(env):
     # different days at the two local midnight boundaries.
     assert published_today(db, first.id, now=now, tz=ZoneInfo("Europe/Moscow")) == 0
     assert published_today(db, first.id, now=now, tz=ZoneInfo("America/Los_Angeles")) == 1
+
+
+def test_seo_factory_spreads_one_article_each_day_before_filling_capacity(env):
+    db, company, _ = env
+    row, clusters = plan(db, company, 120, 8)
+    tasks = queue_plan(db, row, clusters, now=NOW, spread_days=7)
+    days = [day(task.due_at) for task in tasks]
+    assert len(tasks) == 8
+    assert len(set(days)) == 7
+    assert sorted(days.count(date) for date in set(days)) == [1] * 6 + [2]
+    assert min(task.due_at for task in tasks) >= NOW
+    assert [task.id for task in queue_plan(db, row, clusters, now=NOW, spread_days=7)] == [
+        task.id for task in tasks
+    ]
+
+
+def test_new_seo_plan_fills_empty_days_not_existing_full_daily_slots(env):
+    db, company, _ = env
+    first, first_clusters = plan(db, company, 140, 2)
+    initial = queue_plan(db, first, first_clusters, now=NOW, spread_days=7)
+    later, later_clusters = plan(db, company, 150, 5)
+    following = queue_plan(db, later, later_clusters, now=NOW, spread_days=7)
+    all_days = [day(t.due_at) for t in initial + following]
+    assert len(set(all_days)) == 7
+    assert max(all_days) - min(all_days) == timedelta(days=6)
+
+
+def test_seo_horizon_overflow_respects_daily_cap_and_spills_forward(env):
+    db, company, _ = env
+    row, clusters = plan(db, company, 160, 8)
+    tasks = queue_plan(db, row, clusters, now=NOW, per_day=1, spread_days=7)
+    days = [day(t.due_at) for t in tasks]
+    assert len(set(days)) == 8
+    assert max(days) - min(days) == timedelta(days=7)
+
+
+def test_seo_horizon_rejects_invalid_spread_days(env):
+    db, company, _ = env
+    with pytest.raises(ValueError, match="Invalid SEO planning horizon"):
+        available_slots(db, company.id, 1, now=NOW, spread_days=0)
+    with pytest.raises(ValueError, match="Invalid SEO planning horizon"):
+        available_slots(db, company.id, 1, now=NOW, spread_days=True)

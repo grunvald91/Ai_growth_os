@@ -1,0 +1,140 @@
+name: SEO production read-only audit
+
+# Runs only after a successful production workflow, so inspection sees
+# deployed code rather than racing its rollout. No writes or paid LLM calls.
+on:
+  workflow_run:
+    workflows: ["Deploy Growth (production)"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: seo-prod-readonly-audit
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Validate pinned remote identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS" || { echo "::error::SERVER_SSH_PASSWORD is not configured"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/seo-audit-host-keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/seo-audit-key
+            if ssh-keygen -lf /tmp/seo-audit-key 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/seo-audit-host-keys
+          test -s ~/.ssh/known_hosts || { echo "::error::Server key does not match pinned fingerprint"; exit 1; }
+      - name: Check deployed worker, SEO flags, published articles and blog URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "== Runtime containers"
+          docker ps --format '{{.Names}} {{.Status}}' | grep -E 'ai-growth-os-(api|worker)' || true
+          echo "== Database / article inspection (read-only)"
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timedelta, timezone
+          from sqlalchemy import select
+          from app.core.config import get_settings
+          from app.db.session import SessionLocal
+          from app.models.domain import Artifact, Product, Publication, Task, TaskStatus
+          from app.seo.activation import SeoFactoryActivation, is_enabled, editorial_preferences
+          from app.seo.publishing import static_problems, critic_verdict
+          from app.workflows.article_contracts import ArticleArtifact
+
+          settings = get_settings()
+          print("deployed_release_sha=", os.environ.get("RELEASE_SHA", "unknown"))
+          print("seo_global_autorun=", settings.seo_autorun_enabled)
+          print("seo_servgo_autorun=", settings.seo_servgo_autorun_enabled)
+          with SessionLocal() as db:
+              p = db.scalar(select(Product).where(Product.slug == "servgo"))
+              if p is None:
+                  raise RuntimeError("ServGo product not found")
+              act = db.get(SeoFactoryActivation, p.id)
+              prefs = editorial_preferences(db, p.id)
+              print("servgo_seo_opt_in=", is_enabled(db, p.id))
+              print("servgo_seo_timezone=", prefs.timezone_name)
+              print("servgo_publish_limit=", prefs.publications_per_day)
+              print("servgo_autorun_interval_days=", prefs.autorun_interval_days)
+              print("servgo_autorun_horizon_days=", prefs.autorun_horizon_days)
+              tasks = list(db.scalars(select(Task).where(
+                  Task.product_id == p.id, Task.title.like("SEO-ARTICLE:%"))))
+              for status in TaskStatus:
+                  count = sum(t.status == status for t in tasks)
+                  if count:
+                      print("seo_tasks_", status.value, "=", count, sep="")
+              # Include saved drafts and held articles too: those are not
+              # repaired by a deploy and cannot be inferred from the public feed.
+              all_articles = list(db.scalars(select(Artifact).where(
+                  Artifact.product_id == p.id, Artifact.kind == "article")))
+              print("article_artifacts_total=", len(all_articles))
+              from collections import Counter
+              print("article_states=", json.dumps(dict(Counter(
+                  str(a.status.value if hasattr(a.status, "value") else a.status)
+                  for a in all_articles)), ensure_ascii=False))
+              for art in all_articles:
+                  try:
+                      parsed = ArticleArtifact.model_validate_json(art.content)
+                      issues = static_problems(parsed)
+                      if issues:
+                          print("article_review_needed=", json.dumps({
+                              "status": str(art.status.value if hasattr(art.status, "value") else art.status),
+                              "issues": issues[:5],
+                              "task_state": str(db.get(Task, art.task_id).status.value)
+                                  if art.task_id and db.get(Task, art.task_id) else None,
+                          }, ensure_ascii=False))
+                  except Exception:
+                      print("article_parse_problem_state=",
+                            str(art.status.value if hasattr(art.status, "value") else art.status))
+              pubs = db.execute(select(Artifact, Publication)
+                  .join(Publication, Publication.artifact_id == Artifact.id)
+                  .where(Publication.product_id == p.id,
+                         Publication.channel == "own_site",
+                         Publication.status == "published")
+                  .order_by(Publication.published_at.desc())).all()
+              print("published_articles=", len(pubs))
+              for art, pub in pubs[:100]:
+                  try:
+                      parsed = ArticleArtifact.model_validate_json(art.content)
+                      issues = static_problems(parsed)
+                      critic = critic_verdict(db, art.task_id, parsed.reader_article)
+                      visible = parsed.full_article
+                      leaked = ("не подтвержден" in visible.casefold()
+                          or "проверенные возможности" in visible.casefold()
+                          or "проверенные факты" in visible.casefold())
+                      print(json.dumps({
+                          "slug": pub.external_reference,
+                          "published_at": pub.published_at.isoformat() if pub.published_at else None,
+                          "reader_sections": len(parsed.reader_article.sections) if parsed.reader_article else 0,
+                          "critic": critic, "static_issues": issues[:6], "old_internal_copy": leaked,
+                      }, ensure_ascii=False))
+                  except Exception as exc:
+                      print(json.dumps({"slug": pub.external_reference, "article_parse_error": type(exc).__name__}))
+          PY
+          echo "== Public routes (status only)"
+          for entry in 'servgo.ru /blog' 'servgo.ru /blog/sitemap.xml' 'servgo.ru /robots.txt' 'growth.servgo.ru /public/blog/servgo/articles'; do
+            set -- $entry
+            printf "%s%s => " "$1" "$2"
+            curl -sS --max-time 12 --resolve "$1:443:127.0.0.1" -o /dev/null -w '%{http_code} %{content_type}\n' "https://$1$2" || echo 'network_error'
+          done
+          REMOTE

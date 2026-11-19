@@ -201,9 +201,8 @@ def checked_article(original: ArticleArtifact, slug: str, reader: HumanEditedArt
     parts = ["# " + reader.title, reader.lead,
              "**Коротко:** " + reader.direct_answer]
     parts.extend("## " + item.heading + "\n\n" + item.body for item in reader.sections)
-    if reader.fact_renderings:
-        parts.append("## Проверенные функции ServGo\n\n" +
-                     "\n".join("- " + fact.text for fact in reader.fact_renderings))
+    # Verified facts remain available to the critic as evidence; they are not
+    # reader-facing copy. Never reintroduce the old internal fact-check appendix.
     parts.append(reader.closing)
     if reader.faq:
         parts.append("## Частые вопросы\n\n" + "\n\n".join(
