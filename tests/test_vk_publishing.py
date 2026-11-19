@@ -12,6 +12,7 @@ from app.models.domain import Artifact, Product, Publication
 from app.social_vk import (
     VKStore, begin_oauth, read_oauth_cookie, approved_posts,
     cancel, schedule, deliver_once, redirect_uri, connect_community, connected,
+    community_reference, resolve_community, verify_community_key,
 )
 
 
@@ -66,7 +67,7 @@ def test_vk_oauth_pkce_and_company_binding(tmp_path):
 
 def test_vk_oauth_rejects_bad_group_or_missing_app(tmp_path):
     settings = Settings(products_root=tmp_path, social_vk_client_id="12345678")
-    for value in ("-1234", "club12", "0", "abc"):
+    for value in ("-1234", "id12", "0", "not-a-url"):
         with pytest.raises(ValueError):
             begin_oauth(settings, "3ecb2135-1077-428e-9a65-ea1d895a8432", value)
     with pytest.raises(ValueError):
@@ -203,3 +204,66 @@ def test_vk_publisher_key_rotation_invalidates_previous_scheduled_post(db, tmp_p
     assert connected(db, product.id).account_id == "654321"
     assert not VKStore(tmp_path).path(old.id).exists()
     assert pub.status == "scheduled"  # Worker must reject the old destination at claim.
+
+
+@pytest.mark.parametrize(("value", "expected"), [
+    ("123456", "123456"),
+    ("club123456", "123456"),
+    ("https://vk.com/public123456", "123456"),
+    ("https://m.vk.com/club123456?from=share", "123456"),
+    ("https://vk.ru/my_company", "my_company"),
+    ("vk.com/my_company", "my_company"),
+])
+def test_vk_community_reference_accepts_links(value, expected):
+    assert community_reference(value) == expected
+
+
+@pytest.mark.parametrize("value", [
+    "https://evil.example/club123456", "http://vk.com/club123456",
+    "https://vk.com@evil.example/club123456", "https://vk.com/wall-1_2",
+    "https://vk.com/id123456", "https://vk.com/club123456/anything",
+    "javascript:alert(1)", "", "vk.com/club0",
+])
+def test_vk_community_reference_rejects_invalid(value):
+    with pytest.raises(ValueError):
+        community_reference(value)
+
+
+@pytest.mark.asyncio
+async def test_vk_resolve_link_and_verify_key(monkeypatch):
+    calls = []
+
+    async def call(self, method, token, **params):
+        assert token == "test-group-key"
+        calls.append((method, params))
+        if method == "groups.getById":
+            return {"groups": [{"id": 123456, "name": "Моя компания"}]}
+        return {"mask": 8192}
+
+    monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
+    account_id, name = await resolve_community("test-group-key", "https://vk.com/my_company")
+    assert (account_id, name) == ("123456", "Моя компания")
+    await verify_community_key("test-group-key", account_id)
+    assert [name for name, _ in calls] == [
+        "groups.getById", "groups.getTokenPermissions", "groups.getCallbackSettings"]
+    assert calls[-1][1] == {"group_id": "123456"}
+
+
+@pytest.mark.asyncio
+async def test_vk_resolve_rejects_different_numeric_id(monkeypatch):
+    async def call(self, method, token, **params):
+        return {"groups": [{"id": 654321, "name": "Чужое сообщество"}]}
+    monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
+    with pytest.raises(ValueError, match="другое сообщество"):
+        await resolve_community("test-group-key", "https://vk.com/club123456")
+
+
+@pytest.mark.asyncio
+async def test_vk_key_verification_rejects_missing_group_access(monkeypatch):
+    async def call(self, method, token, **params):
+        if method == "groups.getCallbackSettings":
+            raise ValueError("VK rejected")
+        return {}
+    monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
+    with pytest.raises(ValueError, match="Ключ не даёт доступ"):
+        await verify_community_key("test-group-key", "123456")
