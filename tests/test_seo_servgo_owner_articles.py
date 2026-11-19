@@ -169,6 +169,8 @@ def test_owner_review_prompt_has_verified_evidence_from_current_profile():
     from inspect import getsource
     from app.seo.revise_servgo_owner_articles import _review
     source = getsource(_review)
+    assert "truthful marketing piece" in source
+    assert "without a persuasive buyer benefit" in source
     assert "approved_company_claims(settings.products_root)" in source
     assert '"approved_company_facts": verified_facts' in source
     assert '"verified_company_features"' not in source
