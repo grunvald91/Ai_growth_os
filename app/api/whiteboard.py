@@ -352,6 +352,10 @@ def job_html(state, product_id, *, error=None):
                  f'На визуальную правку осталось не более {state["max_api_calls"] - state["inherited_calls"]} вызовов в общем лимите.</p>')
     review = state.get('visual_review_result')
     if isinstance(review, dict):
+        if review.get('author_decision_fallback'):
+            body += ('<p class="sg-warning" role="status">ИИ-автор не смог выдать корректное решение '
+                     'по замечаниям критика. Исходные рисунки сохранены без перерисовки; '
+                     'проверьте их перед публикацией. Повторные платные вызовы для этого решения не нужны.</p>')
         body += '<details><summary>Замечания критика и решение автора</summary>'
         decisions = {d['issue_id']: d for d in review.get('author_decision', {}).get('decisions', [])}
         issues = review.get('review', {}).get('issues', [])

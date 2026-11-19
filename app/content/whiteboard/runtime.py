@@ -175,7 +175,11 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
                     raise ReadinessError('model_unavailable')
         return {'ready': True, 'code': 'ready'}
     async def check_claudehub(connection):
-        response = await connection.get('models', headers={'Authorization':'Bearer '+settings.xai_api_key})
+        try:
+            response = await connection.get('models', headers={'Authorization':'Bearer '+settings.xai_api_key})
+        except httpx.HTTPError:
+            # An outage of ClaudeHub must not be mislabeled as OpenRouter.
+            raise ReadinessError('claudehub_unavailable') from None
         if response.status_code in (401, 403):
             raise ReadinessError('claudehub_rejected')
         if response.status_code != 200:

@@ -16,7 +16,7 @@ permissions:
   contents: read
 jobs:
   voice-ui:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pinned: ubuntu-latest moved to 26.04 and broke media/browser CI
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

@@ -327,3 +327,52 @@ async def test_adversarial_author_cannot_expand_scope_into_stylistic_redraws(env
     with factory() as db:
         t=db.get(Task,task);assert t.status==TaskStatus.FAILED
         assert json.loads(records(db,t)[1].content)['calls']==6
+
+
+@pytest.mark.asyncio
+async def test_malformed_author_decision_falls_back_without_repeating_paid_calls(environment):
+    factory, settings, product_id, _ = environment
+    task_id = reviewed_job(environment)
+    approve(environment, task_id)
+    attempts = []
+    def build(settings, payload, store):
+        pipeline = pipeline_factory([], review(issue()))(settings, payload, store)
+        class MalformedAuthor:
+            async def decide(self, storyboard, advice):
+                attempts.append(1)
+                # Reproduces the production Pydantic ValidationError after a
+                # paid author decision response, not a transport outage.
+                return VisualDecision.model_validate({
+                    'decisions': [{'issue_id': 's0-hook', 'accept': 'not-a-boolean',
+                                   'reason': 'This value cannot be validated'}]})
+        pipeline.visual_author = MalformedAuthor()
+        return pipeline
+    assert await run_whiteboard_once(factory, settings, factory=build, readiness=ready) == 1
+    with factory() as db:
+        task = db.get(Task, task_id)
+        assert task.status == TaskStatus.COMPLETED
+        state = json.loads(records(db, task)[1].content)
+        assert state['calls'] == 15  # base 13 + critic + one failed author call
+        assert state['visual_review_result']['author_decision_fallback'] is True
+        assert state['visual_review_result']['redrawn_scenes'] == []
+        assert not state.get('errors')
+        assert len(attempts) == 1
+        assert sum(run.agent_name == 'whiteboard_visual_decision' for run in db.scalars(
+            select(AgentRun).where(AgentRun.task_id == task_id))) == 1
+    with client() as browser:
+        html = browser.get(f'/studio/products/{product_id}/whiteboard/{task_id}').text
+        assert 'Исходные рисунки сохранены без перерисовки' in html
+    manifest = json.loads((store_path(settings, product_id, task_id) / 'manifest.json').read_text())
+    assert manifest['stages']['visual-decision']['status'] == 'complete'
+
+
+@pytest.mark.asyncio
+async def test_invalid_visual_author_json_has_specific_non_transient_error():
+    from types import SimpleNamespace
+    from app.content.whiteboard.review import InvalidAuthorDecision
+    class Service:
+        async def generate(self, request):
+            return SimpleNamespace(content='invalid JSON')
+    author = LLMVisualAuthor(Service(), model='test')
+    with pytest.raises(InvalidAuthorDecision):
+        await author.decide(storyboard(), review(issue()))

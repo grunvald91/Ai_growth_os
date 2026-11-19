@@ -8,6 +8,7 @@ import argparse
 from pathlib import Path
 import socket
 import sys
+import tempfile
 import threading
 import time
 
@@ -17,7 +18,6 @@ import uvicorn
 from playwright.sync_api import sync_playwright, expect
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
-from sqlalchemy.pool import StaticPool
 
 from app.main import app
 from app.core.config import Settings, get_settings
@@ -30,7 +30,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--browser')
     args = parser.parse_args()
-    engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+    database_dir = tempfile.TemporaryDirectory(prefix='servgo-growth-live-smoke-')
+    database_path = Path(database_dir.name) / 'growth.sqlite3'
+    engine = create_engine('sqlite+pysqlite:///' + str(database_path),
+                           connect_args={'check_same_thread': False})
     Base.metadata.create_all(engine)
     sock = socket.socket()
     sock.bind(('127.0.0.1', 0))
@@ -42,7 +45,10 @@ def main():
         db.add(product)
         db.commit()
         def session():
-            yield db
+            # Never share one SQLAlchemy Session/SQLite connection across the
+            # fixture thread, AnyIO request workers and the background poller.
+            with Session(engine) as request_db:
+                yield request_db
         app.dependency_overrides[get_db] = session
         app.dependency_overrides[get_settings] = lambda: Settings(app_env='development', _env_file=None)
         server = uvicorn.Server(uvicorn.Config(app, log_level='error'))
@@ -371,6 +377,7 @@ def main():
             app.dependency_overrides.clear()
             app.dependency_overrides.update(original)
     engine.dispose()
+    database_dir.cleanup()
 
 
 if __name__ == '__main__':
