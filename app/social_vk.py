@@ -156,8 +156,6 @@ class VKStore(CommentSecrets):
 
 def begin_oauth(settings, product_id, account_id, *, owner_login=None):
     account_id = community_reference(account_id)
-    if not account_id.isdigit():
-        raise ValueError("Для подключения через VK ID укажите ссылку вида vk.com/club123; обычные адреса используйте с ключом сообщества")
     app_id = client_id(settings)
     verifier = secrets.token_urlsafe(48)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
@@ -193,7 +191,7 @@ def read_oauth_cookie(settings, cookie, state):
             or not secrets.compare_digest(data.get("state", ""), state)
             or data.get("redirect_uri") != redirect_uri(settings)):
         raise ValueError("Состояние OAuth не совпало")
-    group_id(data.get("account_id"))
+    community_reference(data.get("account_id"))
     UUID(data["product_id"])
     if not re.fullmatch(r"[A-Za-z0-9_-]{40,150}", data.get("verifier", "")):
         raise ValueError("Неверный PKCE-параметр")
@@ -236,8 +234,9 @@ async def finish_oauth(db, settings, payload, state, code, device_id):
     }, data={"code": code})
     if result.get("state") != state or not result.get("access_token"):
         raise ValueError("VK ID не подтвердил параметры подключения")
+    account_id, _ = await resolve_community(result["access_token"], payload["account_id"])
     connection = await CommentService(db, settings).connect(product_id, ConnectInput(
-        platform="vk", account_id=payload["account_id"], token=result["access_token"]))
+        platform="vk", account_id=account_id, token=result["access_token"]))
     # OAuth success supersedes any previous community-token publishing connection.
     for old in db.scalars(select(Artifact).where(Artifact.product_id == product_id,
             Artifact.kind == "vk_publish_connection", Artifact.status == ArtifactStatus.APPROVED)):
@@ -362,6 +361,8 @@ def schedule(db, product_id, post_id, when):
     channel = connected(db, product_id)
     if channel is None:
         raise ValueError("Подключите сообщество VK")
+    if channel.is_community_token:
+        raise ValueError("Ключ сообщества VK не подходит для wall.post. Подключите VK ID с доступом к публикациям")
     post = db.scalar(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.id == post_id,
         Artifact.kind == "channel_text",
@@ -448,6 +449,7 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
         try:
             data = json.loads(intent.content) if intent else {}
             if (intent is None or intent.status != ArtifactStatus.APPROVED
+                    or (channel is not None and channel.is_community_token)
                     or post is None or post.status != ArtifactStatus.APPROVED
                     or channel is None or str(channel.id) != data.get("channel_id")
                     or channel.account_id != data.get("group_id")
