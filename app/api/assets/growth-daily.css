@@ -1,4 +1,7 @@
 /* Owner daily brief: ServGo Air surfaces with an optional central-screen drag. */
+/* Horizontal centre swipe belongs to the daily drawer. Allow vertical page scrolling
+   and pinch zoom, but do not let Chromium consume the horizontal touch gesture. */
+body[data-growth-design="v4"] #main{touch-action:pan-y pinch-zoom}
 body[data-growth-design="v4"] .sg-daily-handle {
  position:fixed;left:0;top:44%;z-index:91;width:44px;min-height:112px;
  border:0;padding:0;border-radius:0 16px 16px 0;
