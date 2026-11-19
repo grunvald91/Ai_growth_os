@@ -82,7 +82,9 @@ def community_reference(value):
         return match.group(1)
     if re.fullmatch(r"[1-9]\d{0,14}", raw):
         return raw
-    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.]{2,99}", raw) and not raw.startswith(("id", "app")):
+    if re.fullmatch(r"(?:club|public|event|id|app)\d+", raw, re.IGNORECASE):
+        raise ValueError("Некорректная ссылка на сообщество ВКонтакте")
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.]{2,99}", raw):
         return raw
     raise ValueError("Укажите ссылку на сообщество VK, например https://vk.com/my_group")
 
