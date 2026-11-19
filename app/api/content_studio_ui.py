@@ -205,9 +205,9 @@ def _review_preview(row, data: dict) -> str:
     if not isinstance(raw, str):
         raw = ""
     lines = raw.strip().splitlines()
-    if lines and re.sub(r'^#+\\s*', '', lines[0]).strip().casefold() == (row.title or '').strip().casefold():
+    if lines and re.sub(r'^#+\s*', '', lines[0]).strip().casefold() == (row.title or '').strip().casefold():
         lines = lines[1:]
-    preview = re.sub(r'\\s+', ' ', '\\n'.join(lines)).strip()
+    preview = re.sub(r'\s+', ' ', '\n'.join(lines)).strip()
     return (preview[:220].rsplit(" ", 1)[0] or preview[:220]) + "…" if len(preview) > 220 else preview
 
 
