@@ -1,0 +1,37 @@
+name: VK onboarding regression
+
+on:
+  pull_request:
+    paths:
+      - 'app/social_vk.py'
+      - 'app/api/vk_publishing.py'
+      - 'app/comments/vk.py'
+      - 'app/comments/service.py'
+      - 'tests/test_vk_publishing.py'
+      - 'tests/test_comments.py'
+      - '.github/workflows/vk-onboarding-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vk-onboarding-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vk-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e '.[test]'
+      - name: VK onboarding and comment regression
+        run: python -m pytest -q tests/test_vk_publishing.py tests/test_comments.py
+      - name: Compile changed Python modules
+        run: python -m compileall -q app/social_vk.py app/api/vk_publishing.py app/comments/vk.py app/comments/service.py
