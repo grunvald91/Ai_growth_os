@@ -22,11 +22,11 @@ jobs:
         run: python -m pip install -e '.[test]'
       - name: Run full Python regression without apt-installed media extras
         run: |
-          python -m pytest -q \\
-            --deselect=tests/test_content_factory.py::test_actual_renderer_outputs_mp4_cover_and_cyrillic_subtitles \\
-            --deselect=tests/test_intake_files.py::test_ocr_image_and_scanned_pdf \\
-            --deselect=tests/test_whiteboard_jobs.py::test_full_owner_interface_worker_and_real_mp4 \\
-            --deselect=tests/test_whiteboard_length_and_cta.py::test_renderer_makes_a_minute_video_with_a_three_beat_last_scene \\
+          python -m pytest -q \
+            --deselect=tests/test_content_factory.py::test_actual_renderer_outputs_mp4_cover_and_cyrillic_subtitles \
+            --deselect=tests/test_intake_files.py::test_ocr_image_and_scanned_pdf \
+            --deselect=tests/test_whiteboard_jobs.py::test_full_owner_interface_worker_and_real_mp4 \
+            --deselect=tests/test_whiteboard_length_and_cta.py::test_renderer_makes_a_minute_video_with_a_three_beat_last_scene \
             --deselect=tests/test_whiteboard_length_and_cta.py::test_narration_beyond_a_minute_still_fits_the_long_video
       - name: Check AI Chat JavaScript syntax
         run: node --check app/api/ai_chat_assets/ai-chat.js
