@@ -64,6 +64,11 @@ def test_vk_oauth_pkce_and_company_binding(tmp_path):
         read_oauth_cookie(settings, cookie[:-8] + "tampered", state)
     assert "123456" not in cookie
 
+    vanity_url, vanity_cookie = begin_oauth(settings, "3ecb2135-1077-428e-9a65-ea1d895a8432",
+                                          "https://vk.com/my_studio")
+    vanity_state = parse_qs(urlsplit(vanity_url).query)["state"][0]
+    assert read_oauth_cookie(settings, vanity_cookie, vanity_state)["account_id"] == "my_studio"
+
 
 def test_vk_oauth_rejects_bad_group_or_missing_app(tmp_path):
     settings = Settings(products_root=tmp_path, social_vk_client_id="12345678")
@@ -190,20 +195,20 @@ def test_vk_publisher_key_is_encrypted_and_isolated(db, tmp_path):
     with pytest.raises(ValueError):
         connect_community(db, settings, second.id, "-321", private_key)
     when = datetime.now(timezone.utc) + timedelta(minutes=25)
-    pub = schedule(db, product.id, post.id, when)
-    assert pub.product_id == product.id
+    with pytest.raises(ValueError, match="wall.post"):
+        schedule(db, product.id, post.id, when)
 
 
 def test_vk_publisher_key_rotation_invalidates_previous_scheduled_post(db, tmp_path):
     product, post = business_and_post(db, slug="community-rotate")
     settings = Settings(products_root=tmp_path)
     old = connect_community(db, settings, product.id, "123456", "first-test-token")
-    pub = schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(minutes=25))
     new = connect_community(db, settings, product.id, "654321", "second-test-token")
     assert new.id != old.id
     assert connected(db, product.id).account_id == "654321"
     assert not VKStore(tmp_path).path(old.id).exists()
-    assert pub.status == "scheduled"  # Worker must reject the old destination at claim.
+    with pytest.raises(ValueError, match="wall.post"):
+        schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(minutes=25))
 
 
 @pytest.mark.parametrize(("value", "expected"), [
@@ -270,9 +275,9 @@ async def test_vk_key_verification_rejects_missing_group_access(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_vk_comments_use_actual_community_owner_id(monkeypatch):
+async def test_vk_comment_group_key_cannot_pass_read_check(monkeypatch):
     from app.comments.vk import VKAdapter
-    from app.comments.gateway import CommentGateway
+    from app.comments.gateway import CommentGateway, PlatformError
 
     calls = []
 
@@ -281,12 +286,13 @@ async def test_vk_comments_use_actual_community_owner_id(monkeypatch):
         if method == "groups.getById":
             return {"groups": [{"id": 123456, "name": "VK Business"}]}
         if method == "wall.get":
-            return {"items": [], "count": 0}
+            raise PlatformError("wall.get requires a user or service token")
         return {"mask": 8192}
 
     monkeypatch.setattr(VKAdapter, "call", call)
     adapter = VKAdapter(CommentGateway(), "vk")
-    assert await adapter.check("123456", "test-group-key") == "VK Business"
+    with pytest.raises(PlatformError, match="wall.get"):
+        await adapter.check("123456", "test-group-key")
     wall = next(p for m, p in calls if m == "wall.get")
     assert wall["owner_id"] == -123456
     assert "domain" not in wall
