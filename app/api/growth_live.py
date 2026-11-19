@@ -315,7 +315,9 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
     article_cards = []
     if base:
         for article in row.get("articles", []):
-            if article.get("published_confirmed") or article.get("publication_path"):
+            if article.get("publication_mismatch"):
+                status = "Проверить запись публикации"
+            elif article.get("published_confirmed"):
                 status = "Опубликована"
             elif article.get("task_status") == "failed":
                 status = "Ошибка создания"
@@ -327,7 +329,7 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
                       if article["article_id"] else
                       f'/studio/products/{product_id}/tasks/{article["task_id"]}')
             extra = ''
-            pub = article.get("publication_path")
+            pub = article.get("publication_path") if article.get("published_confirmed") else None
             if pub and pub.startswith("/blog/"):
                 if blog_base:
                     extra = (f'<a href="{html.escape(blog_base + pub, quote=True)}"'
@@ -380,7 +382,9 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
     if scheduled_articles:
         preview_items = []
         for article in scheduled_articles[:5]:
-            if article.get("published_confirmed") or article.get("publication_path"):
+            if article.get("publication_mismatch"):
+                current_status = "Проверить запись публикации"
+            elif article.get("published_confirmed"):
                 current_status = "Опубликована"
             elif article.get("task_status") == "failed":
                 current_status = "Ошибка создания"

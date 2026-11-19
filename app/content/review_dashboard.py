@@ -5,7 +5,7 @@ The presentation layer never mutates or guesses the outcome of an AI review.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.domain import (
     Approval, Artifact, ArtifactStatus, Publication, Task, TaskStatus,
 )
-from app.seo.queue import SEO_TASK_PREFIX
+from app.seo.diagnostics import audit_seo
 from app.content.review import REVIEW_KINDS
 
 
@@ -29,6 +29,8 @@ class Page:
     total: int
     page: int
     page_count: int
+    issue_total: int = 0
+    issue_counts: dict[str, int] = field(default_factory=dict)
 
 
 def _page(total: int, page: int) -> tuple[int, int]:
@@ -65,75 +67,18 @@ def history(db: Session, product_id: UUID, *, page: int = 1) -> Page:
     return Page(results, total, current, pages)
 
 
-def seo_progress(db: Session, product_id: UUID, *, page: int = 1) -> Page:
-    """Show the observed state of each scheduled SEO article production task.
+def seo_progress(db: Session, product_id: UUID, *, page: int = 1,
+                 issues_only: bool = False) -> Page:
+    """Paginated status view backed by the same evidence as the owner briefing.
 
-    Tasks without generated articles are still shown. Only actual own-company
-    published Publication records can produce an 'Опубликовано' label.
+    Full task set is read before filtering so the "needs attention" count is
+    correct, not limited to the newest page. No changes to publications.
     """
-    predicate = (
-        Task.product_id == product_id,
-        Task.assigned_agent == "content_factory",
-        Task.title.like(SEO_TASK_PREFIX + "%"),
-    )
-    total = db.scalar(select(func.count(Task.id)).where(*predicate)) or 0
+    audit = audit_seo(db, product_id)
+    visible = [item for item in audit.rows if item["issue_code"]] if issues_only else audit.rows
+    total = len(visible)
     current, pages = _page(total, page)
-    tasks = list(db.scalars(select(Task).where(*predicate).order_by(
-        Task.created_at.desc(), Task.id.desc()
-    ).offset((current - 1) * PAGE_SIZE).limit(PAGE_SIZE)))
-    if not tasks:
-        return Page([], total, current, pages)
-    task_ids = [task.id for task in tasks]
-    articles = {}
-    for row in db.scalars(select(Artifact).where(
-        Artifact.product_id == product_id, Artifact.task_id.in_(task_ids),
-        Artifact.kind == "article",
-    ).order_by(Artifact.created_at.desc(), Artifact.id.desc())):
-        articles.setdefault(row.task_id, row)
-    critic_present = set(db.scalars(select(Artifact.task_id).where(
-        Artifact.product_id == product_id, Artifact.task_id.in_(task_ids),
-        Artifact.kind == "seo_final_review",
-    ).distinct()))
-    ids = [row.id for row in articles.values()]
-    published = set()
-    if ids:
-        published = set(db.scalars(select(Publication.artifact_id).where(
-            Publication.product_id == product_id,
-            Publication.artifact_id.in_(ids),
-            Publication.channel == "own_site",
-            Publication.status == "published",
-        )))
-    result = []
-    for task in tasks:
-        row = articles.get(task.id)
-        # A published artifact without a matching Publication is not proof of
-        # delivery. And an old Publication must not validate a newer article.
-        published_confirmed = bool(
-            row and row.id in published and row.status == ArtifactStatus.PUBLISHED
-        )
-        if published_confirmed:
-            label = "Опубликовано"
-        elif row and row.status == ArtifactStatus.AWAITING_APPROVAL:
-            label = "Ждёт решения владельца"
-        elif row and row.status == ArtifactStatus.APPROVED:
-            label = "Согласовано, не опубликовано"
-        elif row and row.status == ArtifactStatus.PUBLISHED:
-            label = "Сведения о публикации расходятся"
-        elif task.status == TaskStatus.FAILED:
-            label = "Ошибка подготовки"
-        elif task.status == TaskStatus.CANCELLED:
-            label = "Отменено"
-        elif task.status == TaskStatus.RUNNING:
-            label = "Создаётся"
-        elif task.status == TaskStatus.QUEUED:
-            label = "В очереди"
-        elif row is not None:
-            label = "Черновик, публикация не подтверждена"
-        else:
-            label = "Результат ещё не найден"
-        result.append({
-            "task": task, "article": row, "status": label,
-            "critic_recorded": task.id in critic_present,
-            "published": published_confirmed,
-        })
-    return Page(result, total, current, pages)
+    return Page(
+        visible[(current - 1) * PAGE_SIZE:current * PAGE_SIZE],
+        total, current, pages, len(audit.issues), audit.counts,
+    )

@@ -15,6 +15,7 @@ from app.api.content_studio_activity import RESULT_KINDS, notice_items
 from app.dispatcher.readers import plans, upcoming_slots
 from app.models.domain import Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
 from app.seo.schedule import SEO_TASK_PREFIX
+from app.seo.diagnostics import audit_seo
 
 
 def _seo_schedule(db: Session, product_id, now: datetime) -> list[dict]:
@@ -131,11 +132,19 @@ def home_summary(db: Session, product: Product) -> dict:
         Task.status == TaskStatus.FAILED,
         Task.updated_at >= now - timedelta(days=21),
     ).order_by(Task.updated_at.desc(), Task.id.desc()).limit(2)))
+    seo_audit = audit_seo(db, product_id, now=now)
     attention = [
+        {"title": f"SEO: {issue.message} — {issue.title[:70]}",
+         "kind": "error" if issue.code in
+         {"publication_mismatch", "generation_failed", "missing_article"} else "warning",
+         "url": base + "/review?section=seo&view=issues"}
+        for issue in seo_audit.issues[:3]
+    ]
+    attention.extend(
         {"title": "SEO-завод: задание завершилось с ошибкой",
          "kind": "error", "url": base + "/seo/queue"}
         for error in seo_errors
-    ]
+    )
     attention.extend(
         {"title": note["text"], "kind": note["kind"], "url": note["url"]}
         for note in notices
@@ -146,6 +155,8 @@ def home_summary(db: Session, product: Product) -> dict:
         "review": awaiting_artifacts + recent_drafts + waiting_video + (1 if draft_plan else 0),
         "planned_week": planned_week,
         "seo_planned_week": seo_planned_week,
+        "seo_issues": len(seo_audit.issues),
+        "seo_issues_scanned": len(seo_audit.rows),
         "attention": attention[:5],
         "upcoming": upcoming[:4],
         "has_active_plan": bool(approved_plan or seo_slots),

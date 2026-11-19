@@ -1535,7 +1535,9 @@ body[data-growth-design="v4"] .sg-review-page .sg-review-item>p {
 body[data-growth-design="v4"] .sg-review-page .sg-review-footer { display:grid;gap:10px; }
 body[data-growth-design="v4"] .sg-review-page .sg-review-footer>span { font-size:11px;color:var(--s-muted); }
 body[data-growth-design="v4"] .sg-review-page .sg-inline-actions {
-  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;width:100%;align-items:stretch;
+  /* The abbreviated preview now has one safe navigation action; let it
+     occupy the whole row rather than an obsolete half-width approval grid. */
+  display:grid;grid-template-columns:minmax(0,1fr);gap:10px;width:100%;align-items:stretch;
 }
 body[data-growth-design="v4"] .sg-review-page .sg-inline-actions form { display:flex;min-width:0;margin:0; }
 body[data-growth-design="v4"] .sg-review-page .sg-inline-actions .btn {

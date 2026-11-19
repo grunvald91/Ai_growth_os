@@ -140,12 +140,17 @@
     stats(statBox,'На проверке',info.review,base+'/review');
     stats(statBox,'По плану · 7 дней',info.planned_week,
       base + (info.seo_planned_week && !info.has_editorial_plan ? '/seo/queue' : '/calendar'));
+    if (info.seo_issues > 0) {
+      stats(statBox, 'Проверить SEO', info.seo_issues,
+        base + '/review?section=seo&view=issues');
+    }
     content.appendChild(statBox);
     var attention = section('Требует внимания');
     if (!info.attention || !info.attention.length) {
       attention.appendChild(create('p','sg-daily-empty','Событий, требующих внимания, нет.'));
     } else info.attention.forEach(function (notice) {
-      row(attention, notice.title || 'Проверить задание',notice.kind === 'error' ? 'Ошибка' : 'Ожидает решения',notice.url);
+      row(attention, notice.title || 'Проверить задание',notice.kind === 'error' ? 'Ошибка' :
+        notice.kind === 'warning' ? 'Проверить' : 'Ожидает решения',notice.url);
     });
     var upcoming = section('Ближайшие публикации');
     if (!info.upcoming || !info.upcoming.length) {

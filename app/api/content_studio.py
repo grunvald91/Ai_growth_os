@@ -2664,15 +2664,17 @@ def studio_retry_task(product_id: UUID, task_id: UUID, request: Request,
 
 @router.get("/studio/products/{product_id}/review", response_class=HTMLResponse)
 def studio_review_page(product_id: UUID, kind: str = "all", page: int = 1,
-                       section: str = "pending", db: Session = Depends(get_db)):
+                       section: str = "pending", view: str = "all",
+                       db: Session = Depends(get_db)):
     """One company-scoped inbox and verified read-only review/SEO history."""
     product = _owner_product(db, product_id)
     if section in ("history", "seo"):
         from app.content.review_dashboard import history, seo_progress
+        issues_only = section == "seo" and view == "issues"
         result = (history(db, product.id, page=page) if section == "history"
-                  else seo_progress(db, product.id, page=page))
+                  else seo_progress(db, product.id, page=page, issues_only=issues_only))
         body = (review_history_html(product.id, result) if section == "history"
-                else seo_progress_html(product.id, result))
+                else seo_progress_html(product.id, result, issues_only=issues_only))
         response = HTMLResponse(studio_page_shell(
             product, active="review",
             title="История решений" if section == "history" else "Статусы SEO-статей",

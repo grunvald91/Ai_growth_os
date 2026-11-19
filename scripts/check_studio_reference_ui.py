@@ -203,23 +203,14 @@ def main():
                     cdp.send('Input.dispatchTouchEvent', {'type':kind,'touchPoints':[] if x is None else [
                         {'x':x,'y':y,'id':1}], 'modifiers':0})
                 page.locator('#dp-feed').evaluate('(el)=>el.scrollTop=0')
-                # An earlier widget may now occupy the old fixed (100,400) test
-                # point. The real touch gesture intentionally ignores buttons
-                # and links, so choose a noninteractive area inside #main rather
-                # than assuming arbitrary pixel coordinates stay empty.
-                start = page.evaluate("""() => {
-                  const forbidden = 'a,button,input,textarea,select,summary,video,' +
-                    '[contenteditable],.command-dock,.dp-tablewrap,.command-hints,' +
-                    '.v4-more,[role="dialog"]:not(.sg-daily-drawer)';
-                  for (const y of [400,375,425,350,450,325,475,300,500]) {
-                    for (const x of [90,100,110,120]) {
-                      const target = document.elementFromPoint(x,y);
-                      if (target?.closest('#main') && !target.closest(forbidden))
-                        return {x,y};
-                    }
-                  }
-                  throw Error('No unobstructed swipe start in the content area');
-                }""")
+                # Start at the actual daily-drawer handle: it is an explicit
+                # swipe target and is not affected by content cards, keyboard
+                # viewport changes, or hit-testing a random free pixel.
+                expect(page.locator('#sgDailyDrawer')).to_have_attribute('aria-hidden','true')
+                handle_box = page.locator('#sgDailyHandle').bounding_box()
+                assert handle_box is not None
+                start = {'x': handle_box['x'] + handle_box['width']/2,
+                         'y': handle_box['y'] + handle_box['height']/2}
                 touch('touchStart',start['x'],start['y'])
                 touch('touchMove',start['x']+60,start['y'])
                 expect(page.locator('body')).to_have_class(__import__('re').compile('sg-daily-dragging'))
@@ -270,12 +261,25 @@ def main():
                         assert page.locator('.sg-review-item').count()==2
                         item=page.locator('.sg-review-item').first
                         actions=item.locator('.sg-inline-actions .btn')
-                        a,b=actions.nth(0).bounding_box(),actions.nth(1).bounding_box()
-                        assert abs(a['y']-b['y'])<=1 and b['x']>=a['x']+a['width']+8,(width,a,b)
-                        assert 44<=a['height']<=48 and 44<=b['height']<=48,(width,a,b)
+                        # The unified review inbox deliberately removed the
+                        # one-click approve action on an abbreviated excerpt.
+                        assert actions.count()==1, ('unexpected approval shortcut', width)
+                        assert actions.first.inner_text()=='Открыть и проверить'
+                        assert actions.first.get_attribute('href').startswith(base+'/materials/')
+                        assert item.locator('form').count()==0
+                        a=actions.first.bounding_box()
+                        # At 320px the longer safe action may wrap to two
+                        # lines; require a touch target, not a fixed height.
+                        assert a is not None and 44<=a['height']<=72,(width,a)
+                        assert 0<=a['x'] and a['x']+a['width']<=width+1,(width,a)
+                        actions_box=item.locator('.sg-inline-actions').bounding_box()
+                        assert actions_box is not None and a['width']>=actions_box['width']-1,(
+                            'review action does not fill its action row',width,a,actions_box)
                         assert item.locator('p').bounding_box()['height']<90
                         assert not item.locator('p').inner_text().startswith('#')
-                        assert page.locator('.sg-filters').bounding_box()['height']<=44
+                        # Five category tabs are horizontally scrollable on
+                        # mobile; they may have a bottom scroll gutter.
+                        assert page.locator('.sg-filters').bounding_box()['height']<=62
                         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
                         if width==390: page.screenshot(path=str(captures / f'review-{mode}-390.png'))
                 page.set_viewport_size({'width':390,'height':844})
