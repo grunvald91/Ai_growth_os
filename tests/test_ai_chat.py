@@ -913,6 +913,9 @@ def test_chat_paid_model_access_is_server_enforced(chat_env):
     for cheap in ("claude-haiku-5-5", "gemini-3.1-flash", "deepseek-chat"):
         assert model_access(cheap).enabled is True
     assert model_access("kimi-k3").status == "review"
+    assert model_access("gemini-3.8-flash").status == "review"
+    assert model_access("claude-haiku-6").status == "review"
+    assert model_access("strange/gpt-4o-mini").status == "review"
     assert model_access("unknown/another/gpt-4o-mini").enabled is False
     with TestClient(app) as client:
         catalog = client.get("/studio/api/ai-chat/models").json()
