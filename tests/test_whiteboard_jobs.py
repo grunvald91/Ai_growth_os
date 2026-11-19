@@ -676,3 +676,51 @@ def test_refund_is_applied_once_to_old_failures_and_never_to_billable_ones():
     assert refund_unanswered(value) == 3 and value['calls'] == 2
     assert refund_unanswered(value) == 0 and value['calls'] == 2
     assert refund_unanswered({'calls': 0, 'errors': [{'http_status': 502}]}) == 0
+
+
+
+@pytest.mark.asyncio
+async def test_catalogue_outage_is_checked_unattended_after_retry_window(environment):
+    factory, settings, product_id, _ = environment
+    settings = settings.model_copy(update={'whiteboard_auto_resume_attempts': 2})
+    task_id = new_job(environment, maximum=14)
+    approve(environment, task_id)
+    async def down(*args):
+        raise ReadinessError('claudehub_unavailable')
+    for attempt in range(4):
+        assert await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=down) == 1
+        status, state = _state(factory, product_id, task_id)
+        assert status == TaskStatus.QUEUED
+        assert state['auto_resumes'] == attempt + 1
+        assert state['calls'] == 0
+        assert state['retry_at']
+        assert state['stage'] == 'retry_wait'
+        if attempt >= 2:
+            assert state['auto_resume_limit'] == 2
+            due = datetime.fromisoformat(state['retry_at'])
+            logged = datetime.fromisoformat(state['errors'][-1]['at'])
+            assert (due - logged).total_seconds() >= 1799
+        _expire_pause(factory, product_id, task_id)
+    with client() as browser:
+        html = browser.get(f'/studio/products/{product_id}/whiteboard/{task_id}').text
+        assert 'Ожидаем восстановления доступа к моделям' in html
+        assert 'Проверка не выполняет платных вызовов' in html
+    with factory() as db:
+        assert not list(db.scalars(select(AgentRun).where(AgentRun.task_id == task_id)))
+    assert await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=ready) == 1
+    status, state = _state(factory, product_id, task_id)
+    assert status == TaskStatus.COMPLETED and state['calls'] == 14
+    assert len(state['errors']) == 4
+
+
+@pytest.mark.asyncio
+async def test_permanent_claudehub_access_failure_is_not_retried(environment):
+    factory, settings, product_id, _ = environment
+    task_id = new_job(environment)
+    approve(environment, task_id)
+    async def rejected(*args):
+        raise ReadinessError('claudehub_rejected')
+    assert await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=rejected) == 1
+    status, state = _state(factory, product_id, task_id)
+    assert status == TaskStatus.FAILED and state['error'] == 'claudehub_rejected'
+    assert state['calls'] == 0 and not state.get('retry_at')
