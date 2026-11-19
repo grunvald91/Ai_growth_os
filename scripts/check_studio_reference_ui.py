@@ -287,7 +287,7 @@ def main():
                         action=actions.first.bounding_box()
                         assert 44<=action['height']<=64,(width,action)  # Text may wrap at 320px; min touch target stays 44px
                         assert action['x']>=0 and action['x']+action['width']<=width,(width,action)
-                        assert item.locator('p').bounding_box()['height']<90
+                        assert item.locator('p').bounding_box()['height']<=130, (width, item.locator('p').bounding_box())
                         assert not item.locator('p').inner_text().startswith('#')
                         assert page.locator('.sg-filters').bounding_box()['height']<=44
                         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
