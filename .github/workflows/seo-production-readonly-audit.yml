@@ -3,6 +3,9 @@ name: SEO production read-only audit
 # Runs only after a successful production workflow, so inspection sees
 # deployed code rather than racing its rollout. No writes or paid LLM calls.
 on:
+  push:
+    branches: [ops/seo-readonly-prod-audit-20261119]
+    paths: [.github/workflows/seo-production-readonly-audit.yml]
   workflow_run:
     workflows: ["Deploy Growth (production)"]
     types: [completed]
@@ -18,7 +21,7 @@ concurrency:
 
 jobs:
   inspect:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
