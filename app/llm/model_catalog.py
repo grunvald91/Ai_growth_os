@@ -526,6 +526,9 @@ def serialize_model_entry(
     *,
     available: bool,
 ) -> dict:
+    from app.ai_chat.model_access import model_access
+
+    access = model_access(cap.id)
     supported_exts: list[str] = []
     if cap.supports_text and cap.supports_files:
         supported_exts.extend(TEXT_DOCUMENT_EXTENSIONS)
@@ -549,6 +552,9 @@ def serialize_model_entry(
         "max_file_bytes": cap.max_file_bytes,
         "max_files_per_message": cap.max_files_per_message,
         "available": available,
+        "access_enabled": access.enabled,
+        "access_status": access.status,
+        "access_label": access.label,
         "verified": cap.verified,
     }
 
@@ -670,11 +676,11 @@ async def ai_chat_catalog(
         models.append(serialize_model_entry(cap, available=not stale))
 
     default_text = next(
-        (m["id"] for m in models if m["id"] == settings.llm_model and m["supports_text"]),
-        next((m["id"] for m in models if m["supports_text"]), None),
+        (m["id"] for m in models if m["id"] == settings.llm_model and m["supports_text"] and m["access_enabled"] and m["available"]),
+        next((m["id"] for m in models if m["supports_text"] and m["access_enabled"] and m["available"]), None),
     )
     default_image = next(
-        (m["id"] for m in models if m["supports_image_generation"]),
+        (m["id"] for m in models if m["supports_image_generation"] and m["access_enabled"] and m["available"]),
         None,
     )
     has_separate_image_category = any(m["supports_image_generation"] for m in models) and any(

@@ -89,6 +89,7 @@
 
         <div class="ai-topbar-right">
           <div id="chat-title" class="ai-chat-title">Новый диалог</div>
+          <span id="specialist-badge" class="ai-specialist-badge" hidden></span>
           <span id="company-badge" class="ai-company-badge" hidden></span>
           <select id="company-select" class="ai-company-select" hidden aria-label="Компания для контекста"></select>
           <span id="mode-pill" class="ai-mode-pill">Режим: Текст</span>
@@ -101,8 +102,10 @@
       <section id="chat-scroll" class="ai-chat-scroll" aria-label="Сообщения диалога">
         <div id="empty-state" class="ai-empty-state">
           <div class="ai-empty-badge">ServGo AI Chat</div>
-          <h1>Чем помочь сегодня?</h1>
-          <p id="empty-state-desc">Задайте вопрос, прикрепите документ или переключите режим на генерацию изображений. Любой фрагмент ответа ИИ можно выделить, чтобы скопировать или спросить подробнее.</p>
+          <h1 id="empty-state-title">Чем помочь сегодня?</h1>
+          <p id="empty-state-desc">Выберите специалиста или задайте вопрос обычному ИИ.</p>
+          <div id="specialist-picker" class="ai-specialist-grid" role="group" aria-label="Выбор специалиста"></div>
+          <div id="specialist-starters" class="ai-suggestions" aria-label="Начните с вопроса"></div>
         </div>
 
         <div id="message-list" class="ai-message-list" aria-live="polite"></div>

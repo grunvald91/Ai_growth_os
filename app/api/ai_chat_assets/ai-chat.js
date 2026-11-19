@@ -31,6 +31,8 @@
       warning: null,
     },
     conversations: [],
+    specialists: [],
+    specialistId: null,
     activeConversationId: null,
     messages: [],
     selectedModelId: "",
@@ -66,6 +68,11 @@
     modelTabs: document.getElementById("model-tabs"),
     modelList: document.getElementById("model-list"),
     chatTitle: document.getElementById("chat-title"),
+    specialistBadge: document.getElementById("specialist-badge"),
+    specialistPicker: document.getElementById("specialist-picker"),
+    specialistStarters: document.getElementById("specialist-starters"),
+    emptyTitle: document.getElementById("empty-state-title"),
+    emptyDescription: document.getElementById("empty-state-desc"),
     companyBadge: document.getElementById("company-badge"),
     companySelect: document.getElementById("company-select"),
     modePill: document.getElementById("mode-pill"),
@@ -119,8 +126,14 @@
   };
 
   // ---------- Helpers ----------
-  function draftKey(convId) {
-    return `servgo_ai_chat_draft_${PRODUCT_ID || "global"}_${convId || "new"}`;
+  function draftKey(convId, specialistId = state.specialistId) {
+    // Isolate unsent drafts by role rather than sharing a global new-chat draft.
+    const draftId = convId || (specialistId ? `new_${specialistId}` : "new");
+    return `servgo_ai_chat_draft_${PRODUCT_ID || "global"}_${draftId}`;
+  }
+
+  function pendingSpecialistKey() {
+    return `servgo_ai_chat_pending_specialist_${PRODUCT_ID || "global"}`;
   }
 
   function activeConvStorageKey() {
@@ -544,7 +557,7 @@
         opt.type = "button";
         opt.className = "ai-model-option";
         if (m.id === state.selectedModelId) opt.classList.add("is-selected");
-        opt.disabled = !m.available;
+        opt.disabled = !m.available || m.access_enabled !== true;
 
         const head = document.createElement("div");
         head.className = "ai-model-opt-head";
@@ -563,7 +576,11 @@
         if (m.supports_image_generation) tags.push({ label: "Изображения", ok: true });
         if (m.supports_vision) tags.push({ label: "Входящие фото", ok: true });
         if (m.supports_files) tags.push({ label: "Файлы", ok: true });
-        tags.push({ label: m.available ? "Доступна" : "Недоступна", ok: m.available, off: !m.available });
+        if (m.access_enabled !== true) {
+          tags.push({ label: m.access_label || "Недоступна по тарифу", ok: false, off: true });
+        } else {
+          tags.push({ label: m.available ? "Доступна" : "Недоступна", ok: m.available, off: !m.available });
+        }
 
         tags.forEach((t) => {
           const span = document.createElement("span");
@@ -574,6 +591,7 @@
 
         opt.append(head, badges);
         opt.addEventListener("click", async () => {
+          if (!m.available || m.access_enabled !== true) return;
           state.selectedModelId = m.id;
           if (state.mode === "image" && !m.supports_image_generation && m.supports_text) {
             setMode("text");
@@ -624,6 +642,11 @@
     if (!model) {
       warnings.push("Модель не выбрана.");
       blocked = true;
+    } else if (model.access_enabled !== true) {
+      warnings.push(model.access_status === "paid"
+        ? `Модель «${model.name}» доступна за отдельную оплату. Пока она отключена.`
+        : `Модель «${model.name}» требует проверки тарифа. Выберите другую модель.`);
+      blocked = true;
     } else if (!model.available) {
       warnings.push(`Модель «${model.name}» сейчас недоступна.`);
       blocked = true;
@@ -645,6 +668,10 @@
         warnings.push("В режиме генерации изображений прикрепление файлов не поддерживается.");
         blocked = true;
       }
+    }
+
+    if (warnings.length === 0 && state.mode === "image" && state.specialistId) {
+      warnings.push("Инструкции специалиста действуют только для текста. Изображение создаётся по вашему описанию.");
     }
 
     if (warnings.length > 0) {
@@ -687,13 +714,13 @@
     if (state.mode === "image") {
       state.modelTab = "image";
       if (!current || !current.supports_image_generation) {
-        const fallbackImg = state.catalog.default_image_model || (state.catalog.models.find((m) => m.supports_image_generation && m.available) || {}).id;
+        const fallbackImg = state.catalog.default_image_model || (state.catalog.models.find((m) => m.supports_image_generation && m.available && m.access_enabled === true) || {}).id;
         if (fallbackImg) state.selectedModelId = fallbackImg;
       }
     } else {
       state.modelTab = "text";
       if (!current || !current.supports_text) {
-        const fallbackTxt = state.catalog.default_text_model || (state.catalog.models.find((m) => m.supports_text && m.available) || {}).id;
+        const fallbackTxt = state.catalog.default_text_model || (state.catalog.models.find((m) => m.supports_text && m.available && m.access_enabled === true) || {}).id;
         if (fallbackTxt) state.selectedModelId = fallbackTxt;
       }
     }
@@ -834,6 +861,85 @@
     });
   }
 
+  // ---------- Specialist picker (the role is persisted per conversation) ----------
+  function getSpecialist(specialistId) {
+    return state.specialists.find((item) => item.id === specialistId) || null;
+  }
+
+  function renderSpecialistPicker() {
+    if (!el.specialistPicker) return;
+    const chosen = getSpecialist(state.specialistId);
+    el.specialistBadge.hidden = !state.specialistId;
+    if (state.specialistId) {
+      el.specialistBadge.textContent = chosen ? chosen.name : "Специалист недоступен";
+    }
+    if (el.emptyTitle) el.emptyTitle.textContent = chosen ? chosen.name : "Чем помочь сегодня?";
+    if (el.emptyDescription) {
+      el.emptyDescription.textContent = chosen
+        ? chosen.description + ". Начните с готового вопроса или напишите свой."
+        : "Выберите специалиста или задайте вопрос обычному ИИ. Модель можно поменять независимо от роли.";
+    }
+
+    const options = [
+      { id: null, name: "Обычный чат", description: "Любые вопросы без специализации" },
+      ...state.specialists,
+    ];
+    el.specialistPicker.textContent = "";
+    options.forEach((item) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ai-specialist-choice";
+      if (item.id === state.specialistId) btn.classList.add("is-selected");
+      btn.setAttribute("aria-pressed", String(item.id === state.specialistId));
+      const glyph = document.createElement("span");
+      glyph.className = "ai-specialist-choice-icon";
+      glyph.textContent = ({ business_consultant: "▦", marketer: "◎", smm_specialist: "✦" })[item.id] || "◌";
+      const content = document.createElement("span");
+      content.className = "ai-specialist-choice-text";
+      const name = document.createElement("strong");
+      name.textContent = item.name;
+      const description = document.createElement("small");
+      description.textContent = item.description;
+      content.append(name, description);
+      btn.append(glyph, content);
+      btn.addEventListener("click", async () => {
+        if (state.isSending || item.id === state.specialistId) return;
+        // Changing a role starts a new conversation and never borrows its draft.
+        if (!state.activeConversationId) {
+          localStorage.setItem(draftKey(null), el.composerInput.value);
+        } else {
+          await startNewChat();
+        }
+        state.specialistId = item.id;
+        if (item.id) localStorage.setItem(pendingSpecialistKey(), item.id);
+        else localStorage.removeItem(pendingSpecialistKey());
+        el.composerInput.value = localStorage.getItem(draftKey(null)) || "";
+        autoResizeTextarea();
+        if (state.mode !== "text") setMode("text");
+        renderSpecialistPicker();
+        validateComposerCapabilities();
+        el.composerInput.focus();
+      });
+      el.specialistPicker.appendChild(btn);
+    });
+    if (el.specialistStarters) {
+      el.specialistStarters.textContent = "";
+      (chosen ? chosen.starter_prompts : []).forEach((prompt) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ai-suggestion-chip";
+        btn.textContent = prompt;
+        btn.addEventListener("click", () => {
+          el.composerInput.value = prompt;
+          localStorage.setItem(draftKey(state.activeConversationId), prompt);
+          autoResizeTextarea();
+          el.composerInput.focus();
+        });
+        el.specialistStarters.appendChild(btn);
+      });
+    }
+  }
+
   // ---------- Conversations Sidebar ----------
   function renderConversations() {
     el.convList.textContent = "";
@@ -858,7 +964,8 @@
       title.textContent = conv.title;
       const meta = document.createElement("span");
       meta.className = "ai-conv-meta";
-      meta.textContent = conv.last_message_preview || "Пустой диалог";
+      const specialist = getSpecialist(conv.specialist_id);
+      meta.textContent = (specialist ? specialist.name + " · " : "") + (conv.last_message_preview || "Пустой диалог");
       mainBtn.append(title, meta);
       mainBtn.addEventListener("click", () => {
         closeMobileDrawer();
@@ -938,6 +1045,7 @@
       el.messageList.appendChild(buildMessageElement(msg));
     });
     renderContextChips();
+    renderSpecialistPicker();
     if (state.autoScrollPinned) {
       scrollToBottom(false);
     }
@@ -1431,10 +1539,14 @@
       body: JSON.stringify({
         model_id: state.selectedModelId || null,
         product_id: PRODUCT_ID,
+        specialist_id: state.specialistId,
       }),
     });
     state.activeConversationId = conv.id;
+    state.specialistId = conv.specialist_id || null;
+    localStorage.removeItem(pendingSpecialistKey());
     localStorage.setItem(activeConvStorageKey(), conv.id);
+    renderSpecialistPicker();
     await loadConversations();
     return conv.id;
   }
@@ -1531,12 +1643,14 @@
     }
     setSendingUI(false, null);
     state.activeConversationId = convId;
+    localStorage.removeItem(pendingSpecialistKey());
     localStorage.setItem(activeConvStorageKey(), convId);
     renderConversations();
 
     const detail = await apiFetch(`/conversations/${convId}`);
     el.chatTitle.textContent = detail.conversation.title;
     state.messages = detail.messages || [];
+    state.specialistId = detail.conversation.specialist_id || null;
     if (detail.conversation.selected_model && getModel(detail.conversation.selected_model)) {
       state.selectedModelId = detail.conversation.selected_model;
     }
@@ -1566,7 +1680,9 @@
     }
     setSendingUI(false, null);
     state.activeConversationId = null;
+    state.specialistId = null;
     localStorage.removeItem(activeConvStorageKey());
+    localStorage.removeItem(pendingSpecialistKey());
     state.messages = [];
     el.chatTitle.textContent = "Новый диалог";
     clearQuote();
@@ -1574,6 +1690,7 @@
     renderPendingAttachments();
     renderConversations();
     renderMessages();
+    renderSpecialistPicker();
     el.composerInput.value = localStorage.getItem(draftKey(null)) || "";
     autoResizeTextarea();
     el.composerInput.focus();
@@ -2345,12 +2462,19 @@
     syncThemeButtons();
     setupCompanyContextUI();
     renderContextChips();
+    try {
+      const specialistData = await apiFetch("/specialists");
+      state.specialists = Array.isArray(specialistData.specialists) ? specialistData.specialists : [];
+    } catch (_err) {
+      state.specialists = [];
+    }
+    renderSpecialistPicker();
     bindEvents();
     setupVoiceInput();
 
     try {
       state.catalog = await apiFetch("/models");
-      state.selectedModelId = state.catalog.default_text_model || (state.catalog.models[0] && state.catalog.models[0].id) || "";
+      state.selectedModelId = state.catalog.default_text_model || (state.catalog.models.find((m) => m.supports_text && m.available && m.access_enabled === true) || {}).id || "";
       renderCatalog();
     } catch (err) {
       el.catalogWarning.textContent = err.message || "Не удалось загрузить каталог моделей";
@@ -2363,8 +2487,13 @@
       if (lastId && state.conversations.some((c) => c.id === lastId)) {
         await selectConversation(lastId);
       } else {
+        const remembered = localStorage.getItem(pendingSpecialistKey());
+        state.specialistId = getSpecialist(remembered) ? remembered : null;
+        if (!state.specialistId) localStorage.removeItem(pendingSpecialistKey());
+        renderSpecialistPicker();
         el.composerInput.value = localStorage.getItem(draftKey(null)) || "";
         autoResizeTextarea();
+        validateComposerCapabilities();
       }
     } catch (err) {
       showToast(err.message || "Не удалось загрузить историю диалогов");

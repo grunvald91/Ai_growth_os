@@ -2018,3 +2018,64 @@ textarea {
     transition: none;
   }
 }
+
+/* ServGo AI specialists: compact catalog in the normal chat empty state */
+.ai-specialist-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px auto 18px;
+  max-width: 670px;
+  text-align: left;
+}
+.ai-specialist-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--s-line);
+  background: var(--s-surface);
+  border-radius: var(--r-md);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+.ai-specialist-choice:hover {
+  background: var(--s-surface-3);
+}
+.ai-specialist-choice.is-selected {
+  border-color: var(--s-accent);
+  background: var(--s-accent-soft);
+}
+.ai-specialist-choice:focus-visible {
+  outline: 2px solid var(--s-accent);
+  outline-offset: 2px;
+}
+.ai-specialist-choice-icon {
+  font-size: 22px;
+  color: var(--s-accent);
+  flex: 0 0 27px;
+  text-align: center;
+}
+.ai-specialist-choice-text { display: flex; flex-direction: column; min-width: 0; }
+.ai-specialist-choice-text strong { font-size: 13px; font-weight: 650; }
+.ai-specialist-choice-text small { font-size: 11px; color: var(--s-text-2); line-height: 1.35; }
+.ai-specialist-badge {
+  border: 1px solid var(--s-line);
+  border-radius: var(--r-pill);
+  padding: 4px 8px;
+  color: var(--s-accent);
+  background: var(--s-accent-soft);
+  font-size: 11px;
+  white-space: nowrap;
+}
+#specialist-starters { margin: 0 auto; max-width: 670px; }
+@media (max-width: 560px) {
+  .ai-specialist-grid { gap: 7px; }
+  .ai-specialist-choice { gap: 6px; padding: 9px 7px; }
+  .ai-specialist-choice-icon { font-size: 18px; flex-basis: 21px; }
+  .ai-specialist-choice-text strong { font-size: 12px; }
+  .ai-specialist-choice-text small { font-size: 10px; }
+  .ai-specialist-badge { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+}
