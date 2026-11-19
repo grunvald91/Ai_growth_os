@@ -73,7 +73,7 @@ def build_business_agent_brief(*, business_id: int, overview: AnalyticsOverviewO
             "cancellation_rate_percent": cancel,
             "approximate_load_percent": load,
         },
-        "top_services": [{"id": row.id, "name": row.name, "bookings": row.count,
+        "top_services": [{"id": row.id, "name": row.name, "line_items": row.count,
                           "booked_value_estimate_rub": row.revenue} for row in overview.top_services],
         "top_employees": [{"id": row.id, "name": row.name, "bookings": row.count,
                            "booked_value_estimate_rub": row.revenue} for row in overview.top_employees],
