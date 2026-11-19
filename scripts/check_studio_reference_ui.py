@@ -211,14 +211,19 @@ def main():
                   const forbidden = 'a,button,input,textarea,select,summary,video,' +
                     '[contenteditable],.command-dock,.dp-tablewrap,.command-hints,' +
                     '.v4-more,[role="dialog"]:not(.sg-daily-drawer)';
-                  for (const y of [400,375,425,350,450,325,475,300,500]) {
+                  const viewportHeight = window.visualViewport?.height || innerHeight;
+                  const viewportWidth = document.documentElement.clientWidth;
+                  for (const y of [400,375,425,350,450,325,475,300,500,250,220,180]) {
+                    // Match the gesture controller's own permitted center range.
+                    if (!(y > viewportHeight * .22 && y < viewportHeight * .78)) continue;
                     for (const x of [90,100,110,120]) {
+                      if (!(x > viewportWidth * .18 && x < viewportWidth * .82)) continue;
                       const target = document.elementFromPoint(x,y);
                       if (target?.closest('#main') && !target.closest(forbidden))
                         return {x,y};
                     }
                   }
-                  throw Error('No unobstructed swipe start in the content area');
+                  throw Error('No eligible swipe start in the controller center region');
                 }""")
                 touch('touchStart',start['x'],start['y'])
                 touch('touchMove',start['x']+60,start['y'])
@@ -270,9 +275,15 @@ def main():
                         assert page.locator('.sg-review-item').count()==2
                         item=page.locator('.sg-review-item').first
                         actions=item.locator('.sg-inline-actions .btn')
-                        a,b=actions.nth(0).bounding_box(),actions.nth(1).bounding_box()
-                        assert abs(a['y']-b['y'])<=1 and b['x']>=a['x']+a['width']+8,(width,a,b)
-                        assert 44<=a['height']<=48 and 44<=b['height']<=48,(width,a,b)
+                        # The unified review inbox deliberately removed the
+                        # one-click approve action on an abbreviated excerpt.
+                        assert actions.count()==1, ('unexpected approval shortcut', width)
+                        assert actions.first.inner_text()=='Открыть и проверить'
+                        assert actions.first.get_attribute('href').startswith(base+'/materials/')
+                        assert item.locator('form').count()==0
+                        a=actions.first.bounding_box()
+                        assert a is not None and 44<=a['height']<=48,(width,a)
+                        assert 0<=a['x'] and a['x']+a['width']<=width+1,(width,a)
                         assert item.locator('p').bounding_box()['height']<90
                         assert not item.locator('p').inner_text().startswith('#')
                         assert page.locator('.sg-filters').bounding_box()['height']<=44
