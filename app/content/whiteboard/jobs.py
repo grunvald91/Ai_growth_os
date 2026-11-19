@@ -368,6 +368,17 @@ class CallLedger:
                         not 0 <= attempt_cap['baseline_runs'] or
                         not 1 <= attempt_cap['max_additional'] <= MAX_API_CALLS):
                     raise ReadinessError('approval_invalid')
+                try:
+                    grant_id = UUID(str(attempt_cap.get('approval_id')))
+                except (TypeError, ValueError) as exc:
+                    raise ReadinessError('approval_invalid') from exc
+                grant = db.get(Approval, grant_id)
+                if (grant is None or grant.status != 'approved'
+                        or grant.action_type != RESUME_ACTION
+                        or grant.product_id != task.product_id
+                        or grant.artifact_id != source.id
+                        or grant.decided_by != attempt_cap.get('authorization')):
+                    raise ReadinessError('approval_invalid')
                 total_begun = db.scalar(select(func.count()).select_from(AgentRun).where(
                     AgentRun.task_id == task.id))
                 if total_begun < attempt_cap['baseline_runs']:
