@@ -15,7 +15,7 @@ from pathlib import Path
 from app.company_profile import parse_company_profile
 
 
-POSITIONING_ADDENDUM = (
+LEGACY_POSITIONING_ADDENDUM = (
     " Актуальные подтверждённые сценарии ServGo: визуальное расписание день/неделя "
     "и ручная запись клиента в админ-панели, отдельная клиентская CRM с историей "
     "записей и датой следующего контакта. Это помогает планировать "
@@ -24,6 +24,46 @@ POSITIONING_ADDENDUM = (
     "Контакт в CRM сам по себе не даёт согласия на рекламную рассылку. "
     "Автоматическая передача CRM-аудиторий в Mail и реактивационные кампании "
     "не подтверждены; не описывать их как действующие."
+)
+POSITIONING_ADDENDUM = (
+    " Актуальные сценарии ServGo: визуальное расписание день/неделя и ручная "
+    "запись клиента, собственная CRM с историей визитов и датой следующего "
+    "контакта. Это помогает владельцу видеть загрузку, не терять обращения "
+    "и планировать повторные контакты. Самостоятельная онлайн-запись — "
+    "дополнительная возможность. Для рекламных сообщений требуется согласие "
+    "получателя."
+)
+
+# Replace only exact previously distributed stock wording, never an owner's
+# independently edited assertions or a different source reference.
+STOCK_FACT_REPLACEMENTS = {
+    "В CRM ServGo можно фиксировать заметки, категорию клиента и дату следующего контакта; автоматическая рассылка по наступлении даты не подтверждена.":
+        "В CRM ServGo можно вручную фиксировать заметки, категорию клиента и дату следующего контакта.",
+    "ServGo Mail поддерживает почтовые кампании, согласование писем и отказ от дальнейших писем; автоматическая синхронизация CRM с Mail не подтверждена.":
+        "ServGo Mail поддерживает создание почтовых кампаний, согласование писем и отказ от дальнейших писем.",
+    "В Growth реализована Студия для подготовки контента; этапы генерации зависят от доступности ИИ-провайдера, результат проходит редакторскую проверку. Надёжность всего конвейера и сквозная атрибуция не подтверждены.":
+        "В ServGo Growth реализована Студия для подготовки контента и его редакторской проверки.",
+    "SEO-завод собирает поисковые подсказки из Яндекса и Google, создаёт семантические кластеры и планы по компании. Недельный авторежим реализован для всех включивших SEO компаний, но глобально выключен до приёмки; статистика частотности и гарантированное привлечение лидов не подтверждены.":
+        "SEO-завод собирает поисковые подсказки из Яндекса и Google, создаёт семантические кластеры и планы публикаций для конкретной компании.",
+}
+
+STOCK_OFFER_REPLACEMENTS = {
+    "У каждой организации есть собственный список контактов; включаются клиенты с записями и контакты, добавленные вручную. Видны количество и история записей, последние и будущие визиты, заметки, статусы и дата следующего контакта. Автоматическая синхронизация CRM с Mail и автоматические повторные рассылки не подтверждены.":
+        "У каждой организации есть собственный список контактов; включаются клиенты с записями и контакты, добавленные вручную. Видны количество и история записей, последние и будущие визиты, заметки, статусы и дата следующего контакта.",
+    "Реализованы создание кампаний, управление получателями, подготовка и согласование рассылки, запуск/остановка и отказ от писем. Полная проверка доставки и конфигурации каждого отправителя требуется отдельно. Нельзя приписывать автоматическую синхронизацию с CRM, автоматический возврат клиентов или гарантированную доставляемость.":
+        "Реализованы создание кампаний, управление получателями, подготовка и согласование рассылки, запуск/остановка и отказ от писем. Параметры конкретного отправителя и доставку писем необходимо проверять отдельно.",
+}
+LEGACY_POSITIONING_TAIL = (
+    "Почтовые кампании существуют отдельно в ServGo Mail, но интеграция аудиторий из CRM в Mail не подтверждена; "
+    "для рекламных сообщений требуется предварительное согласие адресата и соблюдение отказов; "
+    "персональные предложения возможны только получателям, согласившимся на такую коммуникацию. "
+    "Автоматическое возвращение клиентов, AI-анализ CRM и сквозная атрибуция остаются направлением развития, "
+    "а не проверенными готовыми функциями."
+)
+NEW_POSITIONING_TAIL = (
+    "Почтовые кампании доступны как отдельный инструмент ServGo Mail. "
+    "Рекламные сообщения следует направлять только с учётом согласия адресата "
+    "и возможности отказаться от рассылки."
 )
 
 
@@ -66,6 +106,12 @@ def merge_profile(current: dict, packaged: dict) -> tuple[dict, dict]:
         # Change only that exact stock record; never overwrite the owner's
         # custom text or custom release-status evidence. This transition is
         # explicitly backed by the owner's first-party confirmation.
+        old_description = existing_offer.get("description", "")
+        replacement = STOCK_OFFER_REPLACEMENTS.get(old_description)
+        if (replacement is not None and
+            replacement == packaged_offer.get("description")):
+            existing_offer["description"] = replacement
+            added["stock_corrections"] += 1
         if (packaged_offer["product_family"] == "Смена"
             and packaged_offer.get("release_status") == "live"
             and "owner-confirmation:servgo:2026-11-03:shifts-operational"
@@ -95,6 +141,17 @@ def merge_profile(current: dict, packaged: dict) -> tuple[dict, dict]:
     verified_paths = ("SchedulePage.tsx", "web/api/routes/crm.py", "mail_campaign_",
                       "Ai_growth_os/app/api/content_studio.py", "Ai_growth_os/app/seo/suggest.py",
                       "owner-confirmation:servgo:2026-11-03:shifts-operational")
+    # Migrate exact historic stock statements on the persistent runtime
+    # volume. Adding the revised fact without replacing its predecessor would
+    # leave the "не подтверждена" sentence available to article generation.
+    approved_by_statement = {f["statement"]: f for f in new["proof"]["approved_facts"]}
+    for old_fact in facts:
+        replacement = STOCK_FACT_REPLACEMENTS.get(old_fact.get("statement"))
+        expected = approved_by_statement.get(replacement) if replacement else None
+        if expected and old_fact.get("evidence_ref") == expected["evidence_ref"]:
+            old_fact["statement"] = replacement
+            added["stock_corrections"] += 1
+    present = {f["statement"] for f in facts}
     for fact in new["proof"]["approved_facts"]:
         evidence = str(fact.get("evidence_ref") or "")
         if any(part in evidence for part in verified_paths) and fact["statement"] not in present:
@@ -133,11 +190,37 @@ def merge_profile(current: dict, packaged: dict) -> tuple[dict, dict]:
                 added["audience"] += 1
 
     original_positioning = str(merged["brand"].get("positioning") or "")
+    if LEGACY_POSITIONING_TAIL in original_positioning:
+        original_positioning = original_positioning.replace(
+            LEGACY_POSITIONING_TAIL, NEW_POSITIONING_TAIL)
+        added["stock_corrections"] += 1
+    if LEGACY_POSITIONING_ADDENDUM.strip() in original_positioning:
+        original_positioning = original_positioning.replace(
+            LEGACY_POSITIONING_ADDENDUM.strip(), POSITIONING_ADDENDUM.strip())
+        added["stock_corrections"] += 1
     if POSITIONING_ADDENDUM.strip() not in original_positioning:
         merged["brand"]["positioning"] = (
             original_positioning.rstrip() + POSITIONING_ADDENDUM
         ).strip()
         added["positioning"] = True
+    elif original_positioning != str(merged["brand"].get("positioning") or ""):
+        merged["brand"]["positioning"] = original_positioning
+
+    # Keep risk boundaries in non-public profile policy, never as confirmed
+    # feature claims. Preserve owner-authored rules and unknown questions.
+    for rule in new["constraints"]["operational"]:
+        if rule.startswith("Не ") and rule not in merged["constraints"]["operational"]:
+            merged["constraints"]["operational"].append(rule)
+            added["stock_corrections"] += 1
+    for claim in new["brand"]["prohibited_claims"]:
+        if claim.startswith("Unverified automatic CRM") and claim not in merged["brand"]["prohibited_claims"]:
+            merged["brand"]["prohibited_claims"].append(claim)
+            added["stock_corrections"] += 1
+    for question in new["unknowns"]:
+        if ("автоматическая отправка сообщения из CRM" in question["question"]
+                and question not in merged["unknowns"]):
+            merged["unknowns"].append(question)
+            added["unknowns"] += 1
 
     # Remove only the exact obsolete question introduced by the previous
     # package, and retain independent questions written by the owner.
