@@ -1,0 +1,44 @@
+name: ServGo SEO stale appendix guarded cleanup
+
+on:
+  push:
+    branches: [ops/seo-readonly-prod-audit-20261119]
+    paths: [.github/workflows/seo-appendix-cleanup-once.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servgo-seo-stale-appendix-20261119
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate one-time script syntax
+        run: python -m py_compile deploy/ops/20261119/seo_appendix_cleanup.py
+      - name: Read-only preview of exact rows to repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS" || { echo "::error::Missing SSH credential"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/seo-hostscan
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/seo-onekey
+            if ssh-keygen -lf /tmp/seo-onekey 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/seo-hostscan
+          test -s ~/.ssh/known_hosts || { echo "::error::Pinned host mismatch"; exit 1; }
+          git show "$GITHUB_SHA:deploy/ops/20261119/seo_appendix_cleanup.py" \
+            | sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+                'docker exec -i ai-growth-os-api-1 python -'
