@@ -141,7 +141,9 @@ class WhiteboardPipeline:
         visual_audit = None
         layout_repairs = []
         if self.visual_review:
-            from .review import VisualReview, VisualDecision, IssueDecision, REVIEW_POLICY
+            from .review import (VisualReview, VisualDecision, IssueDecision, REVIEW_POLICY,
+                InvalidAuthorDecision, VISUAL_DECISION_FALLBACK_REASON)
+            from pydantic import ValidationError
             from .runtime import ReadinessError
             if total - 1 + 2 + len(storyboard.scenes) > self.max_api_calls:
                 raise ReadinessError('review_budget')
@@ -168,7 +170,16 @@ class WhiteboardPipeline:
             self._report('visual_decision', completed, total)
             async def decide():
                 if any(i.eligible for i in review.issues):
-                    return await self.visual_author.decide(storyboard, review)
+                    try:
+                        return await self.visual_author.decide(storyboard, review)
+                    except (InvalidAuthorDecision, ValidationError):
+                        # The advisory decision is malformed, not the images or
+                        # storyboard. Preserve all originals instead of buying
+                        # up to 12 more identical failed author calls.
+                        return VisualDecision(decisions=[IssueDecision(
+                            issue_id=i.id, accept=False,
+                            reason=VISUAL_DECISION_FALLBACK_REASON)
+                            for i in review.issues])
                 return VisualDecision(decisions=[IssueDecision(issue_id=i.id, accept=False,
                     reason='Нет подтверждённого существенного дефекта; платная перерисовка не требуется.')
                     for i in review.issues])
@@ -181,6 +192,8 @@ class WhiteboardPipeline:
             chosen = [index for index in range(len(originals)) if decision.accepted(review, index)]
             total += len(chosen)
             visual_audit = {'policy': REVIEW_POLICY, 'critic_passes': 1,
+                'author_decision_fallback': bool(decision.decisions) and all(
+                    d.reason == VISUAL_DECISION_FALLBACK_REASON for d in decision.decisions),
                 'review': review.model_dump(), 'author_decision': decision.model_dump(),
                 'redrawn_scenes': chosen, 'revised_images_reviewed_again': False,
                 'human_review_required': True, 'images': []}
