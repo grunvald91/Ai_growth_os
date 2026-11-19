@@ -284,10 +284,17 @@ def job_html(state, product_id, *, error=None):
         body += f'<p class="sg-warning" role="alert">{esc(warning)}</p>'
     if state['status'] == 'queued' and state.get('retry_at'):
         reason = MESSAGES.get(state.get('last_error'), 'временный сбой')
-        body += (f'<p class="sg-warning" role="status">Автоматическое продолжение {state.get("auto_resumes", 1)} '
-                 f'из {state.get("auto_resume_limit", state.get("auto_resumes", 1))}. Причина остановки: {esc(reason)} '
-                 f'Запуск не раньше {esc(state["retry_at"][:16].replace("T", " "))} UTC. '
-                 'Готовые этапы повторно не оплачиваются; вызовы расходуются только из подтверждённого лимита.</p>')
+        provider_wait = (state.get('last_error') in {'openrouter_unavailable', 'claudehub_unavailable'}
+                         and state.get('auto_resumes', 0) > state.get('auto_resume_limit', 0))
+        if provider_wait:
+            body += (f'<p class="sg-warning" role="status">Ожидаем восстановления доступа к моделям. '
+                     f'Следующая автоматическая проверка не раньше {esc(state["retry_at"][:16].replace("T", " "))} UTC. '
+                     'Проверка не выполняет платных вызовов; готовые этапы сохранены.</p>')
+        else:
+            body += (f'<p class="sg-warning" role="status">Автоматическое продолжение {state.get("auto_resumes", 1)} '
+                     f'из {state.get("auto_resume_limit", state.get("auto_resumes", 1))}. Причина остановки: {esc(reason)} '
+                     f'Запуск не раньше {esc(state["retry_at"][:16].replace("T", " "))} UTC. '
+                     'Готовые этапы повторно не оплачиваются; вызовы расходуются только из подтверждённого лимита.</p>')
     elif state['status'] == 'failed' and state.get('auto_resumes') and not state.get('top_up'):
         body += (f'<p>Автоматических продолжений было: {state["auto_resumes"]}. '
                  'Сбой повторяется; ошибки сохранены в журнале ниже для разбора.</p>')
