@@ -744,7 +744,7 @@ async def seo_search_metrics_page(product_id: UUID, days: int = 28,
                      'Для блога этой компании статус отправки неизвестен.</p></section>')
     else:
         state = delivery['states']
-        configured = ('Подключён ключ домена.' if delivery['status'] == 'configured'
+        configured = ('Ключ указан в настройках сервера; доступность файла подтверждения не проверена.' if delivery['status'] == 'configured'
                       else 'Ключ домена не настроен; уведомления не отправляются.')
         cards.append('<section class="panel"><h3>IndexNow</h3><p>'
                      + html.escape(configured)
