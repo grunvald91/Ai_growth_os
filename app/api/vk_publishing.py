@@ -22,7 +22,7 @@ from app.models.domain import Artifact, Publication
 from app.social_vk import (
     OAUTH_COOKIE, OAUTH_PATH, VKStore, approved_posts, begin_oauth,
     cancel, connected, connect_community, finish_oauth, read_oauth_cookie, schedule,
-    community_reference, resolve_community, verify_community_key,
+    community_reference, resolve_community, verify_community_key, client_id, redirect_uri,
 )
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -49,6 +49,7 @@ def connection_error(key):
         "bad_key": "ВКонтакте не подтвердил ключ или его права. Проверьте ссылку и создайте ключ сообщества с правами управления и работы со стеной.",
         "save_failed": "Не удалось сохранить подключение. Проверьте настройки и повторите.",
         "already_connected": "Сообщество уже подключено через VK ID. Ограниченный ключ не заменит действующее подключение.",
+        "vk_not_configured": "VK ID пока не настроен на сервере ServGo. Нужны ID приложения VK и разрешённый HTTPS-адрес возврата.",
         "vk_id_input": "Проверьте ссылку на сообщество и настройки VK ID. Адрес вида vk.com/название подходит.",
     }.get(key, "")
 
@@ -109,6 +110,12 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
         current = '<p class="sg-muted">Сообщество ещё не подключено.</p>'
     enabled = bool(settings.content_vk_autopost_enabled)
     can_schedule = bool(channel and not channel.is_community_token and posts)
+    try:
+        client_id(settings)
+        redirect_uri(settings)
+        vk_oauth_ready = True
+    except ValueError:
+        vk_oauth_ready = False
     status = ("Отправка по расписанию включена на сервере."
               if enabled else "Отправка на сервере выключена. Планирование сохраняется, но публикации не уходят.")
     body = f"""
@@ -120,8 +127,9 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
   <label class="sg-field"><span>Ссылка на сообщество</span>
    <input name="community_link" type="text" maxlength="255" autocomplete="off"
       placeholder="https://vk.com/my_community" required></label>
-  <button class="btn primary" type="submit">Подключить через ВКонтакте</button>
+  <button class="btn primary" type="submit" {"disabled" if not vk_oauth_ready else ""}>Подключить через ВКонтакте</button>
  </form>
+ {'' if vk_oauth_ready else '<p role="alert" class="sg-notice">Для входа через VK ID нужно настроить приложение ВКонтакте на сервере ServGo.</p>'}
  <p class="sg-footnote">Войдите в свой VK-аккаунт с правами на сообщество. ServGo определит его числовой ID и проверит возможность читать публикации и комментарии. Право отправлять новые посты проверяется только реальной публикацией.</p>
  <details><summary>Дополнительно: ключ доступа сообщества (ограниченные возможности)</summary>
   <p class="sg-footnote">ВКонтакте → Управление сообществом → Работа с API → Ключи доступа.
@@ -171,8 +179,9 @@ async def vk_connect(product_id: UUID, request: Request, db: Session = Depends(g
     try:
         url, cookie = begin_oauth(settings, product_id, fields.get("community_link", fields.get("group_id", "")),
                                   owner_login=getattr(request.state, "studio_login", None))
-    except ValueError:
-        return RedirectResponse(f"/studio/products/{product_id}/vk?error=vk_id_input", status_code=303)
+    except ValueError as exc:
+        key = "vk_not_configured" if ("SOCIAL_VK_CLIENT_ID" in str(exc) or "HTTPS origin VK" in str(exc)) else "vk_id_input"
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error={key}", status_code=303)
     response = RedirectResponse(url, status_code=303,
         headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
     response.set_cookie(OAUTH_COOKIE, cookie, max_age=600, path=OAUTH_PATH,
