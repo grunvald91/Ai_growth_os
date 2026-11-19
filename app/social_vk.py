@@ -59,6 +59,67 @@ def group_id(value):
     return value
 
 
+def community_reference(value):
+    """Accept the address the owner sees in VK; never fetch user-supplied URLs."""
+    if not isinstance(value, str) or not value.strip() or len(value) > 255:
+        raise ValueError("Вставьте ссылку на сообщество VK")
+    raw = value.strip()
+    if raw.startswith(("vk.com/", "www.vk.com/", "m.vk.com/", "vk.ru/", "www.vk.ru/", "m.vk.ru/")):
+        raw = "https://" + raw
+    if "://" in raw:
+        parts = urlsplit(raw)
+        if (parts.scheme != "https" or parts.username or parts.password
+                or (parts.hostname or "").lower() not in {
+                    "vk.com", "www.vk.com", "m.vk.com",
+                    "vk.ru", "www.vk.ru", "m.vk.ru",
+                } or parts.port not in (None, 443)):
+            raise ValueError("Нужна обычная ссылка на сообщество vk.com или vk.ru")
+        raw = parts.path.strip("/")
+        if "/" in raw:
+            raise ValueError("Вставьте ссылку на страницу сообщества, не на запись")
+    match = re.fullmatch(r"(?:club|public|event)([1-9]\d{0,14})", raw, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    if re.fullmatch(r"[1-9]\d{0,14}", raw):
+        return raw
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.]{2,99}", raw) and not raw.startswith(("id", "app")):
+        return raw
+    raise ValueError("Укажите ссылку на сообщество VK, например https://vk.com/my_group")
+
+
+async def resolve_community(token, reference):
+    """Resolve screen names through VK's fixed API host, not by scraping URLs."""
+    name_or_id = community_reference(reference)
+    adapter = VKAdapter(CommentGateway(), "vk")
+    try:
+        data = await adapter.call("groups.getById", token, group_ids=name_or_id)
+    except ValueError:
+        raise ValueError("Не удалось найти сообщество по ссылке. Проверьте ссылку и ключ") from None
+    groups = data.get("groups", []) if isinstance(data, dict) else data
+    if not isinstance(groups, list) or len(groups) != 1 or not isinstance(groups[0], dict):
+        raise ValueError("Сообщество не найдено. Укажите ссылку на саму группу")
+    group = groups[0]
+    account_id = str(group.get("id") or "")
+    group_id(account_id)
+    if name_or_id.isdigit() and account_id != name_or_id:
+        raise ValueError("Ссылка ведёт на другое сообщество")
+    name = str(group.get("name") or "Сообщество VK").strip()[:255]
+    return account_id, name
+
+
+async def verify_community_key(token, account_id):
+    """Read-only check that this is a community key with access to this group."""
+    adapter = VKAdapter(CommentGateway(), "vk")
+    try:
+        await adapter.call("groups.getTokenPermissions", token)
+        await adapter.call("groups.getCallbackSettings", token, group_id=account_id)
+    except ValueError:
+        raise ValueError(
+            "Ключ не даёт доступ к настройкам этого сообщества. "
+            "Создайте ключ в Управление → Работа с API с правами на управление и стену."
+        ) from None
+
+
 class VKStore(CommentSecrets):
     """Share the durable encrypted integration key, not an unencrypted token table."""
 
@@ -92,7 +153,9 @@ class VKStore(CommentSecrets):
 
 
 def begin_oauth(settings, product_id, account_id, *, owner_login=None):
-    group_id(account_id)
+    account_id = community_reference(account_id)
+    if not account_id.isdigit():
+        raise ValueError("Для подключения через VK ID укажите ссылку вида vk.com/club123; обычные адреса используйте с ключом сообщества")
     app_id = client_id(settings)
     verifier = secrets.token_urlsafe(48)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
@@ -226,7 +289,7 @@ def connected(db, product_id):
         except (TypeError, ValueError, KeyError):
             return None
         return SimpleNamespace(id=row.id, product_id=product_id, account_id=account_id,
-            account_name="Сообщество VK #" + account_id, is_community_token=True)
+            account_name=str(details.get("name") or "Сообщество VK #" + account_id)[:255], is_community_token=True)
     account = db.scalar(select(CommentChannel).where(
         CommentChannel.product_id == product_id,
         CommentChannel.platform == "vk", CommentChannel.status == "connected"))
@@ -237,7 +300,7 @@ def connected(db, product_id):
     return None
 
 
-def connect_community(db, settings, product_id, account_id, token):
+def connect_community(db, settings, product_id, account_id, token, *, name=None):
     """Owner supplies the official community key; never claim permission before a real post."""
     group_id(account_id)
     if not isinstance(token, str) or not token or len(token) > 8000 or any(
@@ -257,7 +320,7 @@ def connect_community(db, settings, product_id, account_id, token):
     row = Artifact(product_id=product_id, kind="vk_publish_connection",
         title="Публикации VK: сообщество #" + account_id,
         status=ArtifactStatus.APPROVED,
-        content=json.dumps({"group_id": account_id, "auth_type": "community_token"}))
+        content=json.dumps({"group_id": account_id, "auth_type": "community_token", "name": name}))
     db.add(row)
     db.flush()
     VKStore(settings.products_root).save_token(row.id, token)
