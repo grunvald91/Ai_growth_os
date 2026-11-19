@@ -237,12 +237,17 @@ async def finish_oauth(db, settings, payload, state, code, device_id):
     account_id, _ = await resolve_community(result["access_token"], payload["account_id"])
     connection = await CommentService(db, settings).connect(product_id, ConnectInput(
         platform="vk", account_id=account_id, token=result["access_token"]))
-    # OAuth success supersedes any previous community-token publishing connection.
+    # OAuth success supersedes a limited community key. Revoke local key copies.
+    old_ids = []
     for old in db.scalars(select(Artifact).where(Artifact.product_id == product_id,
             Artifact.kind == "vk_publish_connection", Artifact.status == ArtifactStatus.APPROVED)):
         old.status = ArtifactStatus.REJECTED
+        old_ids.append(old.id)
     db.commit()
-    VKStore(settings.products_root).save_oauth(connection.id, {
+    store = VKStore(settings.products_root)
+    for old_id in old_ids:
+        store.forget(old_id)
+    store.save_oauth(connection.id, {
         "device_id": device_id, "refresh_token": result.get("refresh_token"),
         "expires_at": expiry(result.get("expires_in")),
     })
