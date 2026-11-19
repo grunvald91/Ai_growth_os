@@ -1,0 +1,61 @@
+name: Whiteboard c55 one-time checkpoint recovery (no paid calls)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/operations/restore_whiteboard_c55_decision.py"
+      - ".github/workflows/whiteboard-c55-one-time-repair.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-whiteboard-c55-one-time-repair
+  cancel-in-progress: false
+
+jobs:
+  restore-decision:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check operator script syntax
+        run: python -m py_compile scripts/operations/restore_whiteboard_c55_decision.py
+      - name: Validate pinned production SSH identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS" || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519 "$HOST" 2>/dev/null > /tmp/whiteboard-c55-host-key
+          test -s /tmp/whiteboard-c55-host-key
+          ssh-keygen -lf /tmp/whiteboard-c55-host-key | grep -q "SHA256:$HOST_FP "
+          cat /tmp/whiteboard-c55-host-key >> ~/.ssh/known_hosts
+      - name: Verify failed task and all eight completed checkpoints (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'docker exec -i ai-growth-os-api-1 python -' \
+            < scripts/operations/restore_whiteboard_c55_decision.py
+      - name: Repair only visual-decision checkpoint; no paid requests or resumption
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'docker exec -i ai-growth-os-api-1 python - --apply' \
+            < scripts/operations/restore_whiteboard_c55_decision.py
+      - name: Verify persisted fallback in checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'docker exec -i ai-growth-os-api-1 python -' \
+            < scripts/operations/restore_whiteboard_c55_decision.py
