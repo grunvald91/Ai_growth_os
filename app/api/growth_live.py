@@ -315,7 +315,9 @@ def seo_run_card(row: dict, product_id: UUID | None = None, *, blog_base: str | 
     article_cards = []
     if base:
         for article in row.get("articles", []):
-            if article.get("published_confirmed") or article.get("publication_path"):
+            if article.get("publication_mismatch"):
+                status = "Проверить запись публикации"
+            elif article.get("published_confirmed"):
                 status = "Опубликована"
             elif article.get("task_status") == "failed":
                 status = "Ошибка создания"
