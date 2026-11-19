@@ -67,7 +67,7 @@ def test_vk_oauth_pkce_and_company_binding(tmp_path):
 
 def test_vk_oauth_rejects_bad_group_or_missing_app(tmp_path):
     settings = Settings(products_root=tmp_path, social_vk_client_id="12345678")
-    for value in ("-1234", "id12", "0", "not-a-url"):
+    for value in ("-1234", "id12", "0", "not-a-url", "a!"):
         with pytest.raises(ValueError):
             begin_oauth(settings, "3ecb2135-1077-428e-9a65-ea1d895a8432", value)
     with pytest.raises(ValueError):
@@ -267,3 +267,28 @@ async def test_vk_key_verification_rejects_missing_group_access(monkeypatch):
     monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
     with pytest.raises(ValueError, match="Ключ не даёт доступ"):
         await verify_community_key("test-group-key", "123456")
+
+
+@pytest.mark.asyncio
+async def test_vk_comments_use_actual_community_owner_id(monkeypatch):
+    from app.comments.vk import VKAdapter
+    from app.comments.gateway import CommentGateway
+
+    calls = []
+
+    async def call(self, method, token, **params):
+        calls.append((method, params))
+        if method == "groups.getById":
+            return {"groups": [{"id": 123456, "name": "VK Business"}]}
+        if method == "wall.get":
+            return {"items": [], "count": 0}
+        return {"mask": 8192}
+
+    monkeypatch.setattr(VKAdapter, "call", call)
+    adapter = VKAdapter(CommentGateway(), "vk")
+    assert await adapter.check("123456", "test-group-key") == "VK Business"
+    wall = next(p for m, p in calls if m == "wall.get")
+    assert wall["owner_id"] == -123456
+    assert "domain" not in wall
+    assert "groups.getTokenPermissions" in [m for m, _ in calls]
+    assert "groups.getCallbackSettings" in [m for m, _ in calls]
