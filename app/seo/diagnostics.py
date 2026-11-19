@@ -131,7 +131,9 @@ def audit_seo(db: Session, product_id: UUID, *, now: datetime | None = None,
         publication_statuses = publication_states.get(row.id, set()) if row else set()
         has_published_receipt = "published" in publication_statuses
         is_marked_published = bool(row and row.status == ArtifactStatus.PUBLISHED)
-        published = bool(is_marked_published and has_published_receipt)
+        # A conflicting withdrawal/duplicate record cannot count as a clean
+        # publication receipt, even when one row still says "published".
+        published = bool(is_marked_published and publication_statuses == {"published"})
         due = _utc(task.due_at)
         updated = _utc(task.updated_at) or _utc(task.created_at)
         issue_code = None
