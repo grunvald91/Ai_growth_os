@@ -985,7 +985,7 @@ def test_sales_copy_ads_are_different_specialists_with_clear_boundaries():
     sales = get_specialist_prompt("sales_manager")
     copy = get_specialist_prompt("copywriter")
     ads = get_specialist_prompt("ads_specialist")
-    assert "возражен" in sales and "запис" in sales
+    assert "возражен" in sales.lower() and "запис" in sales.lower()
     assert "маркетинговая статья" in copy.lower() and "готовый текст" in copy
     assert "ROAS" in ads and "бюджет" in ads
     assert len({sales, copy, ads}) == 3
