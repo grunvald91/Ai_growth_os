@@ -13,6 +13,15 @@ from .contracts import Contract, WhiteboardStoryboard
 from app.llm.schemas import LLMMessage, LLMRequest
 
 REVIEW_POLICY = 'one_pass_v1'
+# Safe no-redraw decision when the advisory author model returns invalid JSON.
+# Keep the original approved storyboard and flag the decision for human review.
+VISUAL_DECISION_FALLBACK_REASON = ('Ответ автора не прошёл проверку структуры. '
+    'Исходный рисунок сохранён без автоматической перерисовки.')
+
+
+class InvalidAuthorDecision(ValueError):
+    """The author responded but its decision was unusable, not a provider outage."""
+
 
 
 class VisualIssue(Contract):
@@ -167,6 +176,11 @@ class LLMVisualAuthor:
             messages=[LLMMessage(role='user', content=json.dumps({'storyboard': storyboard.model_dump(),
                 'advice': review.model_dump()}, ensure_ascii=False))],
             max_tokens=4000, response_schema=VisualDecision.model_json_schema()))
-        decision = VisualDecision.from_author_json(response.content, review)
-        decision.check_for(review)
+        try:
+            decision = VisualDecision.from_author_json(response.content, review)
+            decision.check_for(review)
+        except (ValueError, TypeError):
+            # An invalid structured reply is not a transient HTTP failure.
+            # Do not burn the rest of the approved budget retrying it repeatedly.
+            raise InvalidAuthorDecision('Author returned an invalid decision') from None
         return decision
