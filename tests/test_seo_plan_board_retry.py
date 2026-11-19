@@ -33,6 +33,7 @@ def test_seo_board_distinguishes_planned_from_actual_publication_and_escapes():
              "scheduled_at": "08.11.2026 09:00", "scheduled_iso": "2026-11-08T06:00:00+00:00",
              "task_status": "completed", "article_status": "published",
              "published_at": "08.11.2026 12:32", "publication_path": "/blog/record",
+             "published_confirmed": True,
              "task_id": str(uuid4()), "article_id": str(uuid4())},
             {"title": "На согласовании", "scheduled_at": "10.11.2026 09:00",
              "scheduled_iso": "2026-11-10T06:00:00+00:00", "task_status": "completed",
