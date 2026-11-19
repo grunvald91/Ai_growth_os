@@ -269,10 +269,13 @@ def main():
                         page.set_viewport_size({'width':width,'height':844})
                         assert page.locator('.sg-review-item').count()==2
                         item=page.locator('.sg-review-item').first
+                        # Review cards now expose one action to open the full material.
+                        # The former two-button layout is no longer rendered here.
                         actions=item.locator('.sg-inline-actions .btn')
-                        a,b=actions.nth(0).bounding_box(),actions.nth(1).bounding_box()
-                        assert abs(a['y']-b['y'])<=1 and b['x']>=a['x']+a['width']+8,(width,a,b)
-                        assert 44<=a['height']<=48 and 44<=b['height']<=48,(width,a,b)
+                        assert actions.count() == 1
+                        action=actions.first.bounding_box()
+                        assert 44<=action['height']<=48,(width,action)
+                        assert action['x']>=0 and action['x']+action['width']<=width,(width,action)
                         assert item.locator('p').bounding_box()['height']<90
                         assert not item.locator('p').inner_text().startswith('#')
                         assert page.locator('.sg-filters').bounding_box()['height']<=44
