@@ -30,8 +30,19 @@ class VKAdapter:
         data = await self.call("groups.getById", token, group_id=account_id)
         groups = data.get("groups", []) if isinstance(data, dict) else data
         group = next((g for g in groups if str(g.get("id")) == account_id), None)
-        if not group or group.get("is_admin") != 1 or group.get("admin_level", 0) < 2:
-            raise PlatformError("Нужен пользовательский токен редактора или администратора этого сообщества VK")
+        if not group:
+            raise PlatformError("Сообщество ВКонтакте не найдено")
+        if group.get("is_admin") == 1 and group.get("admin_level", 0) >= 2:
+            return group
+        # VK community keys do not carry a user-level is_admin flag.
+        # Validate their kind and their authority for the specific group.
+        try:
+            await self.call("groups.getTokenPermissions", token)
+            await self.call("groups.getCallbackSettings", token, group_id=account_id)
+        except PlatformError:
+            raise PlatformError(
+                "Нужен ключ этого сообщества с правами управления и работы со стеной"
+            ) from None
         return group
 
     async def objects(self, account_id, token, offset=0, count=25):
