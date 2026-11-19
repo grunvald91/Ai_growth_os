@@ -1,0 +1,104 @@
+name: GEO/SEO production read-only probe 2026-11-19
+
+on:
+  push:
+    branches: [ops/geo-seo-production-readonly-20261119]
+    paths: [.github/workflows/geo-seo-production-readonly-20261119.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - name: Pinned SSH identity check
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS" || { echo "::error::SSH secret not configured"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/seo-hostscan
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/seo-key
+            if ssh-keygen -lf /tmp/seo-key 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/seo-hostscan
+          test -s ~/.ssh/known_hosts || { echo "::error::Pinned server fingerprint mismatch"; exit 1; }
+      - name: Read-only production runtime snapshot
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "== Production containers =="
+          docker ps --format '{{.Names}} {{.Status}}' | grep -E 'ai-growth-os-(api|worker)' || true
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          import collections
+          import json
+          import os
+          from sqlalchemy import select
+          from app.core.config import get_settings
+          from app.db.session import SessionLocal
+          from app.models.domain import Artifact, Product, Publication
+          from app.seo.activation import is_enabled
+          settings = get_settings()
+          print("deployed_sha=", os.getenv("RELEASE_SHA", "unknown"))
+          print("seo_autorun_global=", settings.seo_autorun_enabled)
+          print("seo_autorun_servgo=", settings.seo_servgo_autorun_enabled)
+          print("indexnow_key_configured=", bool(settings.geo_indexnow_key))
+          with SessionLocal() as db:
+              product = db.scalar(select(Product).where(Product.slug == "servgo"))
+              if product is None:
+                  raise RuntimeError("ServGo product absent")
+              print("seo_servgo_opt_in=", is_enabled(db, product.id))
+              print("articles_saved=", len(list(db.scalars(select(Artifact.id).where(
+                  Artifact.product_id == product.id, Artifact.kind == "article")))))
+              print("publications_published=", len(list(db.scalars(select(Publication.id).where(
+                  Publication.product_id == product.id, Publication.status == "published",
+                  Publication.channel == "own_site")))))
+              rows = db.scalars(select(Artifact.content).where(
+                  Artifact.product_id == product.id, Artifact.kind == "geo_indexnow_outbox"))
+              counts = collections.Counter()
+              for raw in rows:
+                  try:
+                      event = json.loads(raw)
+                      state = event.get("state") if isinstance(event, dict) else None
+                  except (ValueError, TypeError):
+                      state = None
+                  counts[state if isinstance(state, str) else "unknown"] += 1
+              print("indexnow_events_by_state=", json.dumps(dict(counts), sort_keys=True))
+          PY
+          echo "== Public routes on production TLS =="
+          for path in /robots.txt /blog /blog/sitemap.xml /business-blog-sitemap.xml; do
+            printf "%s => " "$path"
+            curl -sS --max-time 12 --resolve servgo.ru:443:127.0.0.1 \
+              -o /dev/null -w '%{http_code} %{content_type}\n' "https://servgo.ru$path" || echo network_error
+          done
+          echo "== IndexNow local TLS proof =="
+          key="$(docker exec ai-growth-os-api-1 python -c 'from app.core.config import get_settings;print(get_settings().geo_indexnow_key or "")')"
+          if [ -z "$key" ]; then
+            echo "indexnow_proof=not_configured"
+          elif [[ "$key" =~ ^[A-Za-z0-9-]{8,128}$ ]]; then
+            proof="$(curl -fsS --max-time 12 --resolve servgo.ru:443:127.0.0.1 "https://servgo.ru/$key.txt" || true)"
+            if [ "$proof" = "$key" ]; then
+              echo "indexnow_proof=valid_local_tls_only"
+            else
+              echo "indexnow_proof=missing_or_mismatched"
+            fi
+          else
+            echo "indexnow_proof=invalid_key"
+          fi
+          REMOTE
+      - name: Runner-side public status check
+        run: |
+          for path in /robots.txt /blog /blog/sitemap.xml /business-blog-sitemap.xml; do
+            printf "runner %s => " "$path"
+            curl -sS -L --max-redirs 2 --max-time 12 -o /dev/null \
+              -w '%{http_code} %{content_type}\n' "https://servgo.ru$path" || echo network_error
+          done
