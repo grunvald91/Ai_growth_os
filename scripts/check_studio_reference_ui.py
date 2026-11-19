@@ -285,7 +285,7 @@ def main():
                         actions=item.locator('.sg-inline-actions .btn')
                         assert actions.count() == 1
                         action=actions.first.bounding_box()
-                        assert 44<=action['height']<=48,(width,action)
+                        assert 44<=action['height']<=64,(width,action)  # Text may wrap at 320px; min touch target stays 44px
                         assert action['x']>=0 and action['x']+action['width']<=width,(width,action)
                         assert item.locator('p').bounding_box()['height']<90
                         assert not item.locator('p').inner_text().startswith('#')
