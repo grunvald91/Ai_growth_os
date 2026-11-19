@@ -376,7 +376,7 @@ def test_text_chat_streaming_dedup_quote_switch_model_and_history(chat_env):
         turn_body = {
             "content": "Расскажи про три этапа запуска сервиса",
             "mode": "text",
-            "model_id": "claude-opus-4-6",
+            "model_id": "gemini-3.1-flash",
             "client_key": "dedup-key-1",
         }
         r1 = client.post(f"/studio/api/ai-chat/conversations/{conv_id}/messages", json=turn_body)
@@ -448,7 +448,7 @@ def test_capability_validation_no_auto_retry_and_manual_retry(chat_env):
             json={
                 "content": "Нарисуй логотип",
                 "mode": "image",
-                "model_id": "claude-opus-4-6",
+                "model_id": "gemini-3.1-flash",
                 "client_key": "bad-mode-1",
             },
         )
@@ -832,7 +832,7 @@ def test_specialist_catalog_validation_and_role_persists_in_chat(chat_env):
             conv_id = conv["id"]
             msg = client.post(
                 f"/studio/api/ai-chat/conversations/{conv_id}/messages",
-                json={"content": "Дай один практический совет", "mode": "text", "model_id": "claude-opus-4-6"},
+                json={"content": "Дай один практический совет", "mode": "text", "model_id": "gemini-3.1-flash"},
             )
             assert msg.status_code == 201
             response = client.get(f"/studio/api/ai-chat/requests/{msg.json()['request']['id']}/events")
@@ -858,7 +858,7 @@ def test_specialist_catalog_validation_and_role_persists_in_chat(chat_env):
         assert ordinary["specialist_id"] is None
         message = client.post(
             f"/studio/api/ai-chat/conversations/{ordinary['id']}/messages",
-            json={"content": "Привет", "mode": "text", "model_id": "claude-opus-4-6"},
+            json={"content": "Привет", "mode": "text", "model_id": "gemini-3.1-flash"},
         )
         client.get(f"/studio/api/ai-chat/requests/{message.json()['request']['id']}/events")
         assert "ПРОФИЛЬ ВЫБРАННОГО СПЕЦИАЛИСТА" not in fake_client.chat_calls[-1]["system_prompt"]
@@ -879,7 +879,7 @@ def test_retired_specialist_does_not_strand_streaming_request(chat_env):
 
         turn = client.post(
             f"/studio/api/ai-chat/conversations/{conv_id}/messages",
-            json={"content": "Составь план", "mode": "text", "model_id": "claude-opus-4-6"},
+            json={"content": "Составь план", "mode": "text", "model_id": "gemini-3.1-flash"},
         )
         assert turn.status_code == 201
         request_id = turn.json()["request"]["id"]
@@ -901,3 +901,45 @@ def test_specialist_frontend_has_text_mode_notice_and_isolated_drafts(chat_env):
         assert "specialistId ? " in res.text
         assert "pendingSpecialistKey()" in res.text
         assert "Инструкции специалиста действуют только для текста." in res.text
+
+
+def test_chat_paid_model_access_is_server_enforced(chat_env):
+    from app.ai_chat.model_access import model_access
+    db, _, company, _, fake = chat_env
+    for expensive in ("claude-sonnet-5-5", "anthropic/claude-opus-4-6",
+                      "openai/gpt-5", "gpt-4.1", "grok-4.7", "gemini-2.5-pro"):
+        assert model_access(expensive).status == "paid"
+        assert model_access(expensive).enabled is False
+    for cheap in ("claude-haiku-5-5", "gemini-3.1-flash", "deepseek-chat"):
+        assert model_access(cheap).enabled is True
+    assert model_access("kimi-k3").status == "review"
+    assert model_access("unknown/another/gpt-4o-mini").enabled is False
+    with TestClient(app) as client:
+        catalog = client.get("/studio/api/ai-chat/models").json()
+        entries = {item["id"]: item for item in catalog["models"]}
+        assert entries["claude-opus-4-6"]["access_status"] == "paid"
+        assert not entries["claude-opus-4-6"]["access_enabled"]
+        assert entries["gemini-3.1-flash"]["access_enabled"]
+        assert catalog["default_text_model"] == "gemini-3.1-flash"
+        conv_id = client.post("/studio/api/ai-chat/conversations",
+                              json={"product_id": str(company.id)}).json()["id"]
+        denied = client.post(f"/studio/api/ai-chat/conversations/{conv_id}/messages",
+                             json={"mode": "text", "content": "Привет", "model_id": "claude-opus-4-6"})
+        assert denied.status_code == 402
+        assert not fake.chat_calls
+        assert not client.get(f"/studio/api/ai-chat/conversations/{conv_id}").json()["messages"]
+        allowed = client.post(f"/studio/api/ai-chat/conversations/{conv_id}/messages",
+                              json={"mode": "text", "content": "Привет", "model_id": "gemini-3.1-flash"})
+        assert allowed.status_code == 201
+        client.get(f"/studio/api/ai-chat/requests/{allowed.json()['request']['id']}/events")
+        answer = allowed.json()["assistant_message"]["id"]
+        retry = client.post(f"/studio/api/ai-chat/conversations/{conv_id}/messages/{answer}/retry",
+                            json={"model_id": "claude-opus-4-6"})
+        assert retry.status_code == 402
+
+def test_paid_model_ui_has_disabled_choices(chat_env):
+    with TestClient(app) as client:
+        js = client.get("/studio/assets/ai-chat.js")
+        assert js.status_code == 200
+        assert "m.access_enabled !== true" in js.text
+        assert "Отдельная оплата" in js.text

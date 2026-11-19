@@ -24,6 +24,7 @@ from app.ai_chat.client import (
 )
 from app.ai_chat.context import build_chat_context
 from app.ai_chat.specialists import get_specialist_prompt
+from app.ai_chat.model_access import model_access
 from app.ai_chat.files import (
     MAX_ATTACHMENT_BYTES,
     MAX_FILES_PER_MESSAGE,
@@ -520,6 +521,15 @@ def _validate_send_request(
     return attachments
 
 
+def _require_model_access(model_id: str) -> None:
+    access = model_access(model_id)
+    if access.enabled:
+        return
+    if access.status == "paid":
+        raise ChatError("Модель требует отдельной оплаты. Пока она не подключена.", status_code=402)
+    raise ChatError("Тариф модели не подтверждён. Выберите другую модель.", status_code=403)
+
+
 def create_message_turn(
     db: Session,
     settings: Settings,
@@ -567,6 +577,7 @@ def create_message_turn(
 
     cap = resolve_model_capabilities(body.model_id)
     attachments = _validate_send_request(db, settings, principal, conv, body, cap)
+    _require_model_access(body.model_id)
     _check_user_limits(db, settings, principal)
 
     max_seq = db.scalar(
@@ -697,6 +708,7 @@ def retry_assistant_turn(
                 f"Модель «{cap.name}» не поддерживает анализ изображений в этом сообщении."
             )
 
+    _require_model_access(chosen_model)
     _check_user_limits(db, settings, principal)
 
     max_seq = db.scalar(
@@ -890,6 +902,23 @@ async def stream_request_events(
                     "message": serialize_message(assistant_msg, request_id=req.id).model_dump(mode="json"),
                 },
             )
+            return
+
+        # Re-check at execution time: previously queued requests cannot bypass
+        # model restrictions after a deployment.
+        access = model_access(req.model_id)
+        if not access.enabled:
+            reason = ("Модель требует отдельной оплаты. Пока она не подключена."
+                      if access.status == "paid" else
+                      "Тариф модели не подтверждён. Выберите другую модель.")
+            assistant_msg.status = "error"
+            assistant_msg.error_message = reason
+            req.status = "error"
+            req.error_code = "model_access_denied"
+            req.error_detail = "model_access_denied"
+            req.finished_at = _utcnow()
+            db.commit()
+            yield _sse("error", {"status": "error", "error": reason, "outcome_unknown": False})
             return
 
         # Resolve the stored role before claiming a paid request.

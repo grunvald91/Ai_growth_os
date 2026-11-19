@@ -55,7 +55,7 @@ from app.models.domain import Product
 from app.voice.dictionary import SLUG as VOICE_PROJECT_SLUG
 
 ASSETS = Path(__file__).parent / "ai_chat_assets"
-ASSET_VERSION = "4"
+ASSET_VERSION = "5"
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 

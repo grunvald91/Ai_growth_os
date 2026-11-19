@@ -557,7 +557,7 @@
         opt.type = "button";
         opt.className = "ai-model-option";
         if (m.id === state.selectedModelId) opt.classList.add("is-selected");
-        opt.disabled = !m.available;
+        opt.disabled = !m.available || m.access_enabled !== true;
 
         const head = document.createElement("div");
         head.className = "ai-model-opt-head";
@@ -576,7 +576,11 @@
         if (m.supports_image_generation) tags.push({ label: "Изображения", ok: true });
         if (m.supports_vision) tags.push({ label: "Входящие фото", ok: true });
         if (m.supports_files) tags.push({ label: "Файлы", ok: true });
-        tags.push({ label: m.available ? "Доступна" : "Недоступна", ok: m.available, off: !m.available });
+        if (m.access_enabled !== true) {
+          tags.push({ label: m.access_label || "Недоступна по тарифу", ok: false, off: true });
+        } else {
+          tags.push({ label: m.available ? "Доступна" : "Недоступна", ok: m.available, off: !m.available });
+        }
 
         tags.forEach((t) => {
           const span = document.createElement("span");
@@ -587,6 +591,7 @@
 
         opt.append(head, badges);
         opt.addEventListener("click", async () => {
+          if (!m.available || m.access_enabled !== true) return;
           state.selectedModelId = m.id;
           if (state.mode === "image" && !m.supports_image_generation && m.supports_text) {
             setMode("text");
@@ -636,6 +641,11 @@
 
     if (!model) {
       warnings.push("Модель не выбрана.");
+      blocked = true;
+    } else if (model.access_enabled !== true) {
+      warnings.push(model.access_status === "paid"
+        ? `Модель «${model.name}» доступна за отдельную оплату. Пока она отключена.`
+        : `Модель «${model.name}» требует проверки тарифа. Выберите другую модель.`);
       blocked = true;
     } else if (!model.available) {
       warnings.push(`Модель «${model.name}» сейчас недоступна.`);
@@ -704,13 +714,13 @@
     if (state.mode === "image") {
       state.modelTab = "image";
       if (!current || !current.supports_image_generation) {
-        const fallbackImg = state.catalog.default_image_model || (state.catalog.models.find((m) => m.supports_image_generation && m.available) || {}).id;
+        const fallbackImg = state.catalog.default_image_model || (state.catalog.models.find((m) => m.supports_image_generation && m.available && m.access_enabled === true) || {}).id;
         if (fallbackImg) state.selectedModelId = fallbackImg;
       }
     } else {
       state.modelTab = "text";
       if (!current || !current.supports_text) {
-        const fallbackTxt = state.catalog.default_text_model || (state.catalog.models.find((m) => m.supports_text && m.available) || {}).id;
+        const fallbackTxt = state.catalog.default_text_model || (state.catalog.models.find((m) => m.supports_text && m.available && m.access_enabled === true) || {}).id;
         if (fallbackTxt) state.selectedModelId = fallbackTxt;
       }
     }
@@ -2464,7 +2474,7 @@
 
     try {
       state.catalog = await apiFetch("/models");
-      state.selectedModelId = state.catalog.default_text_model || (state.catalog.models[0] && state.catalog.models[0].id) || "";
+      state.selectedModelId = state.catalog.default_text_model || (state.catalog.models.find((m) => m.supports_text && m.available && m.access_enabled === true) || {}).id || "";
       renderCatalog();
     } catch (err) {
       el.catalogWarning.textContent = err.message || "Не удалось загрузить каталог моделей";
