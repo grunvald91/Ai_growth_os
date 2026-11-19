@@ -150,6 +150,23 @@ def test_transient_failure_has_backoff_and_technical_retries_are_bounded(scenari
     assert deliver_one(db, key="ab123456", client=fake, now=now) == 0
 
 
+def test_accepted_outbox_rows_cannot_starve_later_pending_events(scenario):
+    db, servgo, _, make_article = scenario
+    article = make_article(servgo, "zapis-klientov")
+    for n in range(201):
+        db.add(Artifact(product_id=servgo.id, kind="geo_indexnow_outbox",
+                        title=f"older-accepted:{n}", content=json.dumps({
+                            "state": "accepted_by_endpoint", "url": "https://servgo.ru/blog/old",
+                            "attempts": 1,
+                        })))
+    db.commit()
+    enqueue_published_article(db, article, "zapis-klientov")
+    db.commit()
+    client = FakeIndexNow("ab123456")
+    assert deliver_one(db, key="ab123456", client=client) == 1
+    assert len([entry for entry in client.calls if entry[0] == "POST"]) == 1
+
+
 def test_invalid_url_and_unpublished_article_never_post(scenario):
     db, servgo, _, make_article = scenario
     article = make_article(servgo, "zapis-klientov")
