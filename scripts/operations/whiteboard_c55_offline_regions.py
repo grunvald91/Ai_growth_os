@@ -91,6 +91,22 @@ def operate(apply=False):
                 "methods": {name: method for name, (plan, method) in plans.items()},
                 "human_review_required": True,
             }
+            if not plans:
+                prior = value.get("c55_offline_region_fallback") or {}
+                if sorted(prior.get("stage_names", [])) != [
+                    f"scene-{i:02}-regions" for i in range(6)
+                ]:
+                    raise RuntimeError("No previously recorded six-scene offline fallback")
+                report["action"] = "all_six_regions_already_complete"
+                if apply:
+                    # The five-minute retry was for the now-bypassed region
+                    # model. Make the queued worker eligible immediately;
+                    # this does not start, approve, or pay for any call.
+                    value["retry_at"] = datetime.now(timezone.utc).isoformat()
+                    state.content = json.dumps(value, ensure_ascii=False)
+                    db.commit()
+                    report["action"] = "all_six_regions_complete_retry_due_now"
+                return report
             if not apply:
                 report["action"] = "dry_run"
                 return report
