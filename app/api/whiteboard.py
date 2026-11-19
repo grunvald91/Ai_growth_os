@@ -42,6 +42,8 @@ class CreateJob(Contract):
     call_to_action: str = Field(default='', max_length=200)
     # Empty: exactly as many calls as this video needs.
     max_api_calls: int | None = Field(default=None, ge=13, le=MAX_API_CALLS)
+    # An optional extra five calls are included in the *upfront* approval, never added later.
+    recovery_budget: bool = False
     profile: Literal['configured', 'gemini_ru'] = 'gemini_ru'
     visual_review: bool = False
     source_script: str = Field(default='', max_length=12000)
@@ -100,9 +102,10 @@ def _queue(db, product, body, settings):
                                 science_policy_version=1)
     needed = required_calls(request, visual_review=body.visual_review)
     if body.max_api_calls is not None and body.max_api_calls < needed:
-        raise HTTPException(422, f'Для этого видео нужно не меньше {needed} вызовов. Выберите лимит {needed} или больше, либо «Столько, сколько нужно».')
+        raise HTTPException(422, f'Для этого видео нужно не меньше {needed} вызовов. Выберите лимит {needed} или больше, либо минимальный автоматический лимит.')
+    limit = body.max_api_calls or min(MAX_API_CALLS, needed + (5 if body.recovery_budget else 0))
     try:
-        return queue_job(db, request, models, max_api_calls=body.max_api_calls or needed,
+        return queue_job(db, request, models, max_api_calls=limit,
                          visual_review=body.visual_review, image_provider='claudehub')
     except ValueError:
         raise HTTPException(422, 'Проверьте тему, призыв и лимит вызовов. Ключи и персональные данные нельзя включать в видео.') from None
@@ -417,7 +420,8 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
     )
     call_options = ''.join(
         f'<option value="{value}"' + (' selected' if maximum == str(value) else '') + f'>{label}</option>'
-        for value, label in [('auto', 'Автоматически под выбранные настройки'),
+        for value, label in [('auto', 'Минимум без запаса на ошибки'),
+                             ('robust', 'Автозавершение · до 5 дополнительных вызовов'),
                              (19, '19'), (25, '25'), (34, '34'), (45, '45')]
     )
     feedback = f'<p class="sg-warning" role="alert">{esc(error)}</p>' if error else ''
@@ -493,7 +497,7 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
             </label>
             <label class="sg-field"><span>Максимум платных API-вызовов</span>
               <select name="max_api_calls">{call_options}</select>
-              <small>Ограничение числа обращений, а не стоимости в деньгах. Для 30 секунд без критика нужно 14 вызовов, с критиком — 19; для минуты 26 и 34.</small>
+              <small>При «Автозавершении» заранее подтверждается максимум на 5 вызовов больше необходимого: они расходуются только при необходимости. Минимальный режим не оставляет запаса на сбои. Это ограничение вызовов, а не стоимости в деньгах.</small>
             </label>
           </div>
         </details>
@@ -603,7 +607,7 @@ async def studio_topic_quote(product_id: UUID, request: Request, db: Session = D
             source_script=q.get('source_script', ''))
         needed = required_calls(draft, visual_review=q.get('visual_review', 'once') == 'once')
         raw = q.get('max_api_calls', 'auto')
-        limit = needed if raw == 'auto' else int(raw)
+        limit = needed if raw == 'auto' else min(MAX_API_CALLS, needed + 5) if raw == 'robust' else int(raw)
         if not 13 <= limit <= MAX_API_CALLS:
             raise ValueError('Invalid limit')
     except (TypeError, ValueError, KeyError, ValidationError):
@@ -636,7 +640,8 @@ async def studio_create(product_id: UUID, request: Request, db: Session = Depend
     fields = await _studio_form(request)
     try:
         limit = fields.get('max_api_calls', 'auto')
-        body = CreateJob(topic=fields.get('topic', ''), max_api_calls=None if limit in ('', 'auto') else limit,
+        body = CreateJob(topic=fields.get('topic', ''), max_api_calls=None if limit in ('', 'auto', 'robust') else limit,
+                         recovery_budget=limit == 'robust',
                          duration_seconds=int(fields.get('duration_seconds') or 30),
                          call_to_action=(fields.get('call_to_action') or '').strip(),
                          profile=fields.get('profile', 'gemini_ru'), visual_review=fields.get('visual_review') == 'once',
