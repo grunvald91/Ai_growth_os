@@ -17,7 +17,7 @@ from app.db.session import SessionLocal
 from app.models.domain import Task, Artifact, AgentRun, Approval
 from app.content.whiteboard.jobs import AGENT, job_directory
 
-SAFE_ERROR_FIELDS = ("at", "stage", "code", "http_status", "exception_type", "calls", "refunded", "auto_resume")
+SAFE_ERROR_FIELDS = ("at", "stage", "code", "http_status", "exception_type", "validation_types", "reason", "calls", "refunded", "auto_resume")
 
 
 def value_of(item):
@@ -99,7 +99,16 @@ def audit():
                 "retry_at": state.get("retry_at"),
                 "auto_resumes": state.get("auto_resumes", 0),
                 "approved_call_limit": allowed, "recorded_calls": total_calls,
-                "last_errors": [reduced_error(e) for e in errors[-12:] if isinstance(e, dict)],
+                "last_errors": [reduced_error(e) for e in
+                    (errors if str(task.id) == "c55fd232-73f7-4080-b15e-026c4c3e6df3" else errors[-12:])
+                    if isinstance(e, dict)],
+                "error_breakdown": dict(Counter(
+                    f"{e.get('stage')}:{e.get('exception_type')}:{e.get('code')}"
+                    for e in errors if isinstance(e, dict))),
+                "last_diagnostic": {
+                    key: value for key, value in (state.get("diagnostic") or {}).items()
+                    if key in ("exception_type", "http_status", "validation_types", "reason")
+                } if str(task.id) == "c55fd232-73f7-4080-b15e-026c4c3e6df3" else None,
                 "error_count": len(errors),
                 "attempt_run_counts": dict(Counter(str(value_of(r.status)) for r in runs)),
                 "auto_approval_count": sum(a.action_type == "whiteboard_auto_resume" for a in approvals),
