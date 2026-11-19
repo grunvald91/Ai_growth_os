@@ -7,7 +7,7 @@ import os
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, select, update
 
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, Task, TaskStatus
 from app.llm.service import LLMService
@@ -131,16 +131,24 @@ def recover_interrupted_jobs(session_factory, settings):
 async def run_whiteboard_once(session_factory, settings, *, factory=None, readiness=None):
     recover_interrupted_jobs(session_factory, settings)
     with session_factory() as db:
-        queued = list(db.scalars(select(Task).where(Task.assigned_agent == AGENT, Task.status == TaskStatus.QUEUED)
-                                 .order_by(Task.priority.desc(), Task.created_at, Task.id).limit(20)))
+        # Check *all* queued jobs in priority order. Limiting the SQL result to the
+        # first 20 before inspecting retry_at starves every due job behind 20
+        # provider-outage jobs waiting for their next no-cost preflight check.
+        # Join saved state in one query; do not perform one SELECT per candidate.
+        queued = db.execute(
+            select(Task, Artifact.content).outerjoin(
+                Artifact, and_(Artifact.task_id == Task.id,
+                               Artifact.kind == 'whiteboard_job_state'))
+            .where(Task.assigned_agent == AGENT, Task.status == TaskStatus.QUEUED)
+            .order_by(Task.priority.desc(), Task.created_at, Task.id))
         task = None
-        for candidate in queued:
-            # A job waiting out its automatic-retry pause stays queued until the pause ends.
-            saved = db.scalar(select(Artifact.content).where(Artifact.task_id == candidate.id,
-                                                             Artifact.kind == 'whiteboard_job_state'))
-            if saved is None or retry_due(json.loads(saved)):
-                task = candidate
-                break
+        try:
+            for candidate, saved in queued:
+                if saved is None or retry_due(json.loads(saved)):
+                    task = candidate
+                    break
+        finally:
+            queued.close()
         if task is None:
             return 0
         task_id, product_id = task.id, task.product_id
