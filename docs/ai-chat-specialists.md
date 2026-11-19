@@ -34,3 +34,22 @@
 Начальный allowlist приведён в `app/ai_chat/model_access.py`. Модели Claude Haiku, Gemini Flash (включая Flash Image), DeepSeek Chat/Flash и некоторые GPT mini/nano включены; Sonnet/Opus, старшие GPT, Gemini Pro и Grok помечены `paid`, а неизвестные тарифы — `review`. И `paid`, и `review` неактивны.
 
 Каталог возвращает `access_enabled`, `access_status` и `access_label`. Проверка выполняется при отправке, повторе и исполнении старого запроса из очереди. Цены ClaudeHub не подтверждены, и это не биллинг; до запуска оплаты активация платных моделей не предусмотрена.
+
+## Вторая группа: продажи, копирайтинг, платная реклама
+
+- `sales_manager` — диагностика потребности, работа с возражениями, сценарии ответа на заявки и записи без манипуляции.
+- `copywriter` — продающие статьи, лендинги, офферы, редактура с отделением готового рекламного текста от служебных замечаний.
+- `ads_specialist` — выбор каналов, рекламные гипотезы, тесты креативов, анализ расходов/заявок/выручки; никаких действий в рекламных кабинетах.
+
+Роли добавляются в прежнюю таблицу `ai_chat_conversations.specialist_id` без новой миграции базы. Существующие записи и сохранённые роли сохраняются. Системные инструкции загружаются только из разрешённых файлов на сервере; фронтенд видит лишь метаданные. Дорогие модели остаются выключенными через `app/ai_chat/model_access.py`.
+
+### Методические источники (MIT, оригинальная адаптация, не импорт)
+- https://github.com/msitarzewski/agency-agents/blob/main/sales/sales-discovery-coach.md
+- https://github.com/zarif3624/gtm-skills/blob/main/skills/handle-objections/SKILL.md
+- https://github.com/zarif3624/gtm-skills/blob/main/skills/prepare-discovery/SKILL.md
+- https://github.com/coreyhaines31/marketingskills/blob/main/skills/copywriting/SKILL.md
+- https://github.com/coreyhaines31/marketingskills/blob/main/skills/copy-editing/SKILL.md
+- https://github.com/coreyhaines31/marketingskills/blob/main/skills/ads/SKILL.md
+- https://github.com/msitarzewski/agency-agents/blob/main/paid-media/paid-media-creative-strategist.md
+
+Инструкции специально написаны на русском для ServGo и не копируют чужие материалы дословно. Числовые рекламные нормативы из сторонних текстов не переносятся как гарантии.

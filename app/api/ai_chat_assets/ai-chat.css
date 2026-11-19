@@ -2079,3 +2079,12 @@ textarea {
   .ai-specialist-choice-text small { font-size: 10px; }
   .ai-specialist-badge { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
 }
+
+/* More specialist roles: three columns on desktops, two on phones. */
+@media (min-width: 780px) {
+  .ai-specialist-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 750px; }
+  #specialist-starters { max-width: 750px; }
+}
+@media (max-width: 779px) {
+  .ai-empty-state { margin-top: 16px; padding-top: 16px; }
+}

@@ -47,6 +47,42 @@ SPECIALISTS: dict[str, dict] = {
         ],
         "filename": "smm_specialist.md",
     },
+    "sales_manager": {
+        "id": "sales_manager",
+        "name": "Менеджер по продажам",
+        "description": "Заявки, возражения и запись клиентов",
+        "icon": "handshake",
+        "starter_prompts": [
+            "Составь сценарий ответа на новую заявку на услугу.",
+            "Клиент говорит «дорого». Как ответить без давления?",
+            "Как повысить конверсию обращений в записи?",
+        ],
+        "filename": "sales_manager.md",
+    },
+    "copywriter": {
+        "id": "copywriter",
+        "name": "Копирайтер",
+        "description": "Продающие статьи, тексты и редактура",
+        "icon": "pencil-line",
+        "starter_prompts": [
+            "Напиши продающий текст страницы моей услуги.",
+            "Перепиши эту статью: больше пользы и конкретных выгод.",
+            "Создай три варианта заголовка и призыва к записи.",
+        ],
+        "filename": "copywriter.md",
+    },
+    "ads_specialist": {
+        "id": "ads_specialist",
+        "name": "Специалист по рекламе",
+        "description": "Кампании, бюджеты, креативы и аналитика",
+        "icon": "megaphone",
+        "starter_prompts": [
+            "Подготовь рекламный план для моей услуги на небольшой бюджет.",
+            "Предложи объявления и гипотезы для Яндекс Директа и VK Рекламы.",
+            "Помоги разобрать результаты кампании: расходы, заявки и продажи.",
+        ],
+        "filename": "ads_specialist.md",
+    },
 }
 
 
@@ -58,7 +94,7 @@ def specialist_catalog() -> list[dict]:
     ]
 
 
-@lru_cache(maxsize=3)
+@lru_cache(maxsize=8)
 def get_specialist_prompt(specialist_id: str | None) -> str | None:
     if specialist_id is None:
         return None

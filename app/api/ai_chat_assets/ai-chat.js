@@ -893,7 +893,7 @@
       btn.setAttribute("aria-pressed", String(item.id === state.specialistId));
       const glyph = document.createElement("span");
       glyph.className = "ai-specialist-choice-icon";
-      glyph.textContent = ({ business_consultant: "▦", marketer: "◎", smm_specialist: "✦" })[item.id] || "◌";
+      glyph.textContent = ({ business_consultant: "▦", marketer: "◎", smm_specialist: "✦", sales_manager: "↗", copywriter: "✎", ads_specialist: "◉" })[item.id] || "◌";
       const content = document.createElement("span");
       content.className = "ai-specialist-choice-text";
       const name = document.createElement("strong");
