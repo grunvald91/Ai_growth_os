@@ -27,7 +27,9 @@ def _when(value: str | None, zone: str) -> str:
 
 
 def _state(item: dict) -> tuple[str, str]:
-    if item.get("published_confirmed") or item.get("publication_path"):
+    if item.get("publication_mismatch"):
+        return "failed", "Проверить запись публикации"
+    if item.get("published_confirmed"):
         return "published", "Опубликована"
     if item.get("task_status") == "failed":
         reason = item.get("failure_code")
