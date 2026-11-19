@@ -13,7 +13,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.db.models import Base
 from app.models.domain import Artifact, ArtifactStatus, Product, Publication
-from app.seo.search_metrics import article_urls, company_search_metrics, inspect_google_article
+from app.seo.search_metrics import (article_urls, company_search_metrics,
+                                    indexnow_delivery_metrics, inspect_google_article)
 from app.sso.models import StudioBusinessLink
 
 
@@ -226,3 +227,37 @@ def test_nonfinite_provider_values_are_not_converted_to_zero():
     for value in (float("nan"), float("inf"), float("-inf"), -1):
         with pytest.raises(ValueError, match="Invalid search metric"):
             _number(value)
+
+
+def test_indexnow_local_receipts_are_servgo_scoped_and_not_indexing(env):
+    db, company_id, other_id = env
+    assert indexnow_delivery_metrics(db, company_id, env={}) == {
+        "status": "not_applicable", "events_total": None,
+    }
+    servgo = Product(name="ServGo", slug="servgo")
+    db.add(servgo)
+    db.flush()
+    for state in ("pending", "accepted_by_endpoint", "failed_after_retries"):
+        db.add(Artifact(product_id=servgo.id, kind="geo_indexnow_outbox",
+                        title="indexnow:" + state,
+                        content=json.dumps({"state": state,
+                                            "url": "https://servgo.ru/blog/example"})))
+    # A foreign company's forged outbox event must not appear in ServGo's
+    # metrics, and a company must not see the central blog's events.
+    db.add(Artifact(product_id=other_id, kind="geo_indexnow_outbox",
+                    title="indexnow:foreign",
+                    content=json.dumps({"state": "accepted_by_endpoint",
+                                        "url": "https://servgo.ru/blog/private"})))
+    db.commit()
+    own = indexnow_delivery_metrics(db, servgo.id, env={})
+    assert own["status"] == "not_configured"
+    assert own["events_total"] == 3
+    assert own["states"]["accepted_by_endpoint"] == 1
+    assert own["states"]["pending"] == 1
+    assert own["states"]["failed_after_retries"] == 1
+    assert own["indexing_confirmed"] is None
+    enabled = indexnow_delivery_metrics(
+        db, servgo.id, env={"GEO_INDEXNOW_KEY": "test-key-not-secret"})
+    assert enabled["status"] == "configured"
+    assert "test-key-not-secret" not in str(enabled)
+    assert indexnow_delivery_metrics(db, other_id, env={})["events_total"] is None
