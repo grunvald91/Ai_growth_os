@@ -46,7 +46,9 @@ class VKAdapter:
         return group
 
     async def objects(self, account_id, token, offset=0, count=25):
-        params = {"owner_id": self.owner(account_id)} if self.video else {"domain": f"club{account_id}", "filter": "owner"}
+        params = {"owner_id": self.owner(account_id)}
+        if not self.video:
+            params["filter"] = "owner"
         return await self.call(f"{self.namespace}.get", token, **params, offset=offset, count=count)
 
     async def check(self, account_id, token):
