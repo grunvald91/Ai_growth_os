@@ -561,7 +561,7 @@ async def test_transient_failure_resumes_automatically_after_pause_and_finishes(
     url = f'/studio/products/{product_id}/whiteboard/{task_id}'
     with client() as browser:
         page = browser.get(url).text
-        assert 'Автоматическое продолжение 1 из 5' in page and 'Журнал ошибок (1)' in page
+        assert 'Автоматическое продолжение 1 из 12' in page and 'Журнал ошибок (1)' in page
     # The pause is respected: nothing runs before retry_at.
     assert await run_whiteboard_once(factory, settings, factory=flaky_factory, readiness=ready) == 0
     assert len(attempts) == 1
