@@ -32,6 +32,8 @@ def test_two_owner_pages_are_clear_complete_and_rich(slug):
     assert "\n### " in body and "\n> " in body
     assert "\n- " in body and "\n1. " in body
     assert "ServGo" in body
+    assert "не подтвержд" not in body.casefold()
+    assert "здесь не обещаем" not in body.casefold()
     assert "онлайн-запись" in body
     assert len(reader.meta_description) > 60
     # Published company evidence explicitly separates manual CRM actions from
@@ -39,7 +41,8 @@ def test_two_owner_pages_are_clear_complete_and_rich(slug):
     owner_capabilities = reader.sections[-1].body.casefold()
     assert "вручную" in owner_capabilities
     assert "crm" in owner_capabilities
-    assert "не подтвержд" in owner_capabilities
+    assert "не подтвержд" not in owner_capabilities
+    assert "сама по себе не запускает рассылку" in owner_capabilities or "сама не отправляет сообщение" in owner_capabilities
 
 
 
