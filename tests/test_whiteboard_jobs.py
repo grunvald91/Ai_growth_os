@@ -709,7 +709,8 @@ async def test_catalogue_outage_is_checked_unattended_after_retry_window(environ
         assert not list(db.scalars(select(AgentRun).where(AgentRun.task_id == task_id)))
     assert await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=ready) == 1
     status, state = _state(factory, product_id, task_id)
-    assert status == TaskStatus.COMPLETED and state['calls'] == 14
+    # The synthetic planner in these tests uses six narration beats (13 calls total).
+    assert status == TaskStatus.COMPLETED and state['calls'] == 13
     assert len(state['errors']) == 4
 
 
