@@ -754,3 +754,33 @@ def test_unattended_headroom_is_explicitly_approved_at_creation(environment):
         assert quote.status_code == 200
         assert quote.json()['required_calls'] == 14
         assert quote.json()['limit'] == 19
+
+
+@pytest.mark.asyncio
+async def test_due_job_after_twenty_delayed_jobs_is_not_starved(environment):
+    factory, settings, product_id, _ = environment
+    delayed_ids = []
+    for index in range(23):
+        with factory() as db:
+            task = queue_job(db, WhiteboardRequest(
+                product_id=product_id, topic=f'Видео в очереди номер {index}: пример записи',
+                voice='Kore'), configured_models(settings), max_api_calls=14)
+            source, saved, _, _ = records(db, task)
+            approve_job(db, product_id, task.id,
+                        request_digest=digest(source.content),
+                        confirmed=True, decided_by='owner')
+            value = json.loads(saved.content)
+            value.update(stage='retry_wait',
+                         retry_at=(datetime.now(timezone.utc) + timedelta(hours=4)).isoformat())
+            saved.content = json.dumps(value)
+            db.commit()
+            delayed_ids.append(task.id)
+    due_id = new_job(environment)
+    approve(environment, due_id)
+    assert await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=ready) == 1
+    status, state = _state(factory, product_id, due_id)
+    assert status == TaskStatus.COMPLETED, state
+    for delayed_id in delayed_ids:
+        delayed_status, delayed_state = _state(factory, product_id, delayed_id)
+        assert delayed_status == TaskStatus.QUEUED
+        assert delayed_state['stage'] == 'retry_wait'
