@@ -9,7 +9,7 @@ from pathlib import Path
 from uuid import UUID
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Product, Task, TaskStatus
 from app.privacy import PrivacyGateway
@@ -356,6 +356,35 @@ class CallLedger:
             value = json.loads(state.content)
             if value['calls'] >= call_limit(value, payload):
                 raise ReadinessError('call_limit')
+            # Optional owner-authorized hard ceiling on the number of *begun*
+            # provider calls, not the refundable billing ledger. HTTP 502,
+            # timeouts or a crashed worker cannot replenish this allowance.
+            # Only a specifically approved rescue job receives this state key.
+            attempt_cap = value.get('owner_chat_paid_attempt_cap')
+            if attempt_cap is not None:
+                if (not isinstance(attempt_cap, dict) or
+                        type(attempt_cap.get('baseline_runs')) is not int or
+                        type(attempt_cap.get('max_additional')) is not int or
+                        not 0 <= attempt_cap['baseline_runs'] or
+                        not 1 <= attempt_cap['max_additional'] <= MAX_API_CALLS):
+                    raise ReadinessError('approval_invalid')
+                try:
+                    grant_id = UUID(str(attempt_cap.get('approval_id')))
+                except (TypeError, ValueError) as exc:
+                    raise ReadinessError('approval_invalid') from exc
+                grant = db.get(Approval, grant_id)
+                if (grant is None or grant.status != 'approved'
+                        or grant.action_type != RESUME_ACTION
+                        or grant.product_id != task.product_id
+                        or grant.artifact_id != source.id
+                        or grant.decided_by != attempt_cap.get('authorization')):
+                    raise ReadinessError('approval_invalid')
+                total_begun = db.scalar(select(func.count()).select_from(AgentRun).where(
+                    AgentRun.task_id == task.id))
+                if total_begun < attempt_cap['baseline_runs']:
+                    raise ReadinessError('approval_invalid')
+                if total_begun - attempt_cap['baseline_runs'] >= attempt_cap['max_additional']:
+                    raise ReadinessError('call_limit')
             model_stage = {'visual_review': 'regions', 'visual_decision': 'storyboard', 'image_revision': 'image', 'science_review': 'regions'}.get(stage, stage)
             run = AgentRun(task_id=task.id, agent_name='whiteboard_' + stage,
                            provider='configured_text' if model_stage == 'storyboard' or stage == 'science_review' else
