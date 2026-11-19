@@ -169,7 +169,11 @@ def deliver_one(db: Session, *, key: str | None = None,
         code = 503
 
     if code is None:
-        # Key not yet served publicly. No attempt was made.
+        # A misconfigured key must NOT generate an HTTP request every worker
+        # poll. Recheck proof in one hour; no IndexNow submission was made.
+        state["next_attempt_at"] = (now + timedelta(hours=1)).isoformat()
+        row.content = json.dumps(state)
+        db.commit()
         return 0
     count = int(state.get("attempts") or 0) + 1
     state["attempts"] = count
