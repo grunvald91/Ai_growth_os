@@ -517,7 +517,7 @@ def render_v4(page, request, pid, switch):
         )
         template = template.replace('</body>', drawer+'</body>', 1)
     extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
-    extras += '<script src="/studio/assets/growth-daily.js?v=3"></script>'
+    extras += '<script src="/studio/assets/growth-daily.js?v=4"></script>'
     template = template.replace('</head>', (
         '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=21">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
