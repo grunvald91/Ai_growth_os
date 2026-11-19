@@ -23,7 +23,7 @@ from app.models.domain import Artifact, Publication
 from app.social_vk import (
     OAUTH_COOKIE, OAUTH_PATH, VKStore, approved_posts, begin_oauth,
     cancel, connected, connect_community, finish_oauth, read_oauth_cookie, schedule,
-    resolve_community, verify_community_key,
+    community_reference, resolve_community, verify_community_key,
 )
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -194,9 +194,15 @@ async def vk_community_key(product_id: UUID, request: Request,
     token = fields.get("access_token", "")
     reference = fields.get("community_link", fields.get("group_id", ""))
     try:
-        account_id, name = await resolve_community(token, reference)
+        community_reference(reference)
     except ValueError:
         return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_link", status_code=303)
+    if not token or len(token) > 8000 or any(ord(ch) < 32 for ch in token):
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_key", status_code=303)
+    try:
+        account_id, name = await resolve_community(token, reference)
+    except ValueError:
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_key", status_code=303)
     try:
         await verify_community_key(token, account_id)
     except ValueError:
