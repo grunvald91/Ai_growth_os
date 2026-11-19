@@ -41,4 +41,4 @@ jobs:
           test -s ~/.ssh/known_hosts || { echo "::error::Pinned host mismatch"; exit 1; }
           git show "$GITHUB_SHA:deploy/ops/20261119/seo_appendix_cleanup.py" \
             | sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
-                'docker exec -i ai-growth-os-api-1 python -'
+                'docker exec -i ai-growth-os-api-1 python - --apply --expected-batch-hash 1d3b302f9a6a65ad4c563d7778e511bec99851dcf75fd1be1ad67ef1ab54839c'
