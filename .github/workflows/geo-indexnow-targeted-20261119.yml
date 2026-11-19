@@ -20,5 +20,7 @@ jobs:
           cache: pip
       - name: Install Python test dependencies (no network during tests)
         run: python -m pip install -e '.[test]'
-      - name: Run IndexNow and SEO publication regression
-        run: python -m pytest -q tests/test_geo_indexnow.py tests/test_seo_publishing.py
+      - name: Run full Python regression without apt-installed media extras
+        run: python -m pytest -q
+      - name: Check AI Chat JavaScript syntax
+        run: node --check app/api/ai_chat_assets/ai-chat.js
