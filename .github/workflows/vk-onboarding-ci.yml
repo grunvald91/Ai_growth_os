@@ -5,6 +5,8 @@ on:
     paths:
       - 'app/social_vk.py'
       - 'app/api/vk_publishing.py'
+      - 'app/api/comments.py'
+      - 'app/comments/platforms.py'
       - 'app/comments/vk.py'
       - 'app/comments/service.py'
       - 'tests/test_vk_publishing.py'
@@ -34,4 +36,4 @@ jobs:
       - name: VK onboarding and comment regression
         run: python -m pytest -q tests/test_vk_publishing.py tests/test_comments.py
       - name: Compile changed Python modules
-        run: python -m compileall -q app/social_vk.py app/api/vk_publishing.py app/comments/vk.py app/comments/service.py
+        run: python -m compileall -q app/social_vk.py app/api/vk_publishing.py app/api/comments.py app/comments/vk.py app/comments/platforms.py app/comments/service.py
