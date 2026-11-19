@@ -1,0 +1,41 @@
+name: Verify completed c55 MP4 read-only
+
+on:
+  push:
+    branches: [diag/verify-whiteboard-c55-completed-mp4]
+    paths:
+      - "scripts/diagnostics/whiteboard_c55_final_mp4.py"
+      - ".github/workflows/whiteboard-c55-final-mp4-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 10
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m py_compile scripts/diagnostics/whiteboard_c55_final_mp4.py
+      - name: Pinned SSH identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519 "$HOST" 2>/dev/null > /tmp/c55-mp4-key
+          ssh-keygen -lf /tmp/c55-mp4-key | grep -q "SHA256:$HOST_FP "
+          cat /tmp/c55-mp4-key >> ~/.ssh/known_hosts
+      - name: Read-only DB, MP4, audio, subtitles and approved calls check
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'docker exec -i ai-growth-os-api-1 python -' \
+            < scripts/diagnostics/whiteboard_c55_final_mp4.py
