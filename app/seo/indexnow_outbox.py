@@ -97,7 +97,7 @@ def deliver_one(db: Session, *, key: str | None = None,
     now = now or datetime.now(timezone.utc)
     rows = list(db.scalars(select(Artifact).where(
         Artifact.kind == _KIND,
-    ).order_by(Artifact.created_at, Artifact.id).limit(200)))
+    ).order_by(Artifact.created_at, Artifact.id)))
     row = None
     state = None
     for candidate in rows:
