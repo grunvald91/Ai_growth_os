@@ -62,3 +62,82 @@ body[data-growth-design="v4"] .sg-resource-widget{
   .material-grid:not(.route-material-grid)>.sg-resource-widget{min-width:155px;scroll-snap-align:start}
   .sg-resource-widget>.dp-task{padding:10px 12px}
 }
+
+/* Shared multi-step result: the same native disclosure/SDK upgrade as task cards. */
+.sg-workflow-main{min-width:0;border:1px solid var(--sg-widget-line);border-radius:13px;
+  background:var(--sg-widget-surface);padding:12px 14px;color:var(--sg-widget-text)}
+.sg-workflow-title{display:block;font-size:14px;line-height:1.4;margin-bottom:9px}
+.sg-workflow-list{list-style:none;margin:0;padding:0;display:grid;gap:7px}
+.sg-workflow-step{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:8px;
+  align-items:center;min-width:0;font-size:12px;line-height:1.4}
+.sg-workflow-index{border:1px solid var(--sg-widget-line);background:var(--sg-widget-soft);
+  border-radius:8px;width:24px;height:24px;display:grid;place-items:center;font-variant-numeric:tabular-nums}
+.sg-workflow-step-title{min-width:0;overflow-wrap:anywhere}
+.sg-workflow-state{font-size:11px;font-weight:700;white-space:nowrap;color:var(--sg-widget-muted)}
+.sg-workflow-completed .sg-workflow-state{color:var(--sg-green,var(--green,#218270))}
+.sg-workflow-failed .sg-workflow-state{color:var(--sg-red,var(--red,#be5557))}
+.sg-workflow-result{display:grid;gap:9px;padding:12px 0;border-top:1px solid var(--sg-widget-line);min-width:0}
+.sg-workflow-result:first-of-type{border-top:0}
+.sg-workflow-result-title{margin:0;font-size:12px;color:var(--sg-widget-text);overflow-wrap:anywhere}
+.sg-workflow-result-detail{margin:0;font-size:12px;line-height:1.5;white-space:pre-wrap;
+  color:var(--sg-widget-muted);overflow-wrap:anywhere}
+.sg-workflow-result .dp-tablewrap,.sg-workflow-result .dp-resource-list,
+.sg-workflow-result .dp-links{max-width:100%;min-width:0;overflow-x:auto}
+.sg-workflow-result .dp-material,.sg-workflow-result .dp-task{margin-top:0}
+@media(max-width:440px){
+ .sg-workflow-step{grid-template-columns:24px minmax(0,1fr);row-gap:2px}
+ .sg-workflow-state{grid-column:2;white-space:normal}
+ .sg-workflow-main{padding:11px}
+}
+
+/* Durable workflow approvals reuse the existing dispatcher controls; they are
+   never nested inside the disclosure trigger, so keyboard actions stay distinct. */
+.sg-workflow-actions{display:grid;gap:10px;margin-top:8px;min-width:0}
+.sg-workflow-approval{padding:12px 14px;border:1px solid var(--sg-widget-line);
+  border-radius:13px;background:var(--sg-widget-surface);color:var(--sg-widget-text);font-size:12px}
+.sg-workflow-approval>strong{display:block;font-size:13px;margin-bottom:7px}
+.sg-workflow-approval>p{margin:5px 0;line-height:1.5;overflow-wrap:anywhere}
+.sg-workflow-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-top:12px}
+.sg-workflow-waiting_approval .sg-workflow-state{color:var(--sg-accent,var(--blue,#3478d6))}
+.sg-workflow-declined .sg-workflow-state{color:var(--sg-widget-muted)}
+
+/* Workflow receipt is not the AI generation result: surface live Task state. */
+.sg-workflow-activity{margin:11px 0 0;font-size:12px;line-height:1.5;
+  color:var(--sg-widget-muted);overflow-wrap:anywhere}
+.sg-workflow-refresh{justify-self:start;max-width:100%;white-space:normal;text-align:center}
+
+/* Unified owner approval inbox. The native disclosure is the accessibility
+   fallback; the pinned local UI SDK progressively enhances the same markup. */
+.sg-review-page .sg-review-list{gap:12px}
+.sg-review-page .sg-review-list>.sg-resource-widget{
+  padding:14px;border:1px solid var(--sg-widget-line);border-radius:14px;
+  background:var(--sg-widget-surface);color:var(--sg-widget-text);
+}
+.sg-review-page .sg-review-item{border:0;padding:0 0 8px;min-width:0}
+.sg-review-page .sg-review-item h3{overflow-wrap:anywhere}
+.sg-review-page .sg-review-list>.sg-resource-widget .sg-resource-details,
+.sg-review-page .sg-review-list>.sg-resource-widget .sg-resource-sdk{margin-top:8px}
+.sg-review-filter-count{margin-left:5px;font-variant-numeric:tabular-nums;opacity:.8}
+.sg-review-showing{margin:0 0 14px;font-size:12px;color:var(--sg-widget-muted,var(--sg-muted))}
+.sg-review-pagination{display:flex;align-items:center;justify-content:space-between;
+  gap:12px;flex-wrap:wrap;margin-top:18px}
+.sg-review-pagination>span{font-size:12px;color:var(--sg-widget-muted,var(--sg-muted))}
+@media(max-width:640px){
+  .sg-review-page .sg-review-list>.sg-resource-widget{padding:11px}
+  .sg-review-page .sg-filters{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}
+  .sg-review-page .sg-filter{white-space:nowrap}
+  .sg-review-page .sg-review-footer .sg-inline-actions,
+  .sg-review-page .sg-review-footer .btn{width:100%}
+}
+
+/* Review center: same accessible tabs and read-only cards in the new sections. */
+.sg-review-sections{display:flex;align-items:center;flex-wrap:wrap;gap:7px;
+  margin:0 0 20px;padding:0 0 16px;border-bottom:1px solid var(--sg-widget-line,var(--sg-line,#dce6f1))}
+.sg-review-sections .sg-filter{min-height:42px;border:1px solid var(--sg-widget-line,var(--sg-line,#dce6f1))}
+.sg-review-sections .sg-filter.is-active{font-weight:750}
+.sg-review-empty{margin:16px 0!important;font-size:13px;line-height:1.6;
+  color:var(--sg-widget-muted,var(--sg-muted,#526176))}
+@media(max-width:640px){
+  .sg-review-sections{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}
+  .sg-review-sections .sg-filter{white-space:nowrap}
+}

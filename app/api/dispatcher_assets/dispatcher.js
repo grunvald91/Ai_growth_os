@@ -216,6 +216,179 @@
     return wrapper;
   }
 
+  // Shared workflow disclosure: pure reads stay static; durable workflows
+  // fetch their latest state from the server and approve each write separately.
+  function renderWorkflow(block, synchronized) {
+    var main = el('section', 'sg-workflow-main');
+    main.appendChild(el('strong', 'sg-workflow-title', block.title));
+    var list = el('ol', 'sg-workflow-list');
+    var statuses = {
+      pending: 'Ожидает', waiting_approval: 'Нужно решение',
+      completed: block.workflow_id ? 'Шаг выполнен' : 'Проверено',
+      no_data: 'Данных нет', failed: 'Ошибка',
+      declined: 'Отклонено', skipped: 'Пропущено'
+    };
+    function statusLabel(step) {
+      // Generation may finish before the owner has approved the material.
+      if (step.status === 'completed' && step.kind === 'queued_post' &&
+          step.review_href && step.task_status === 'completed') return 'Ждёт проверки';
+      if (step.status === 'completed' && step.kind === 'queued_post' && step.task_status) {
+        return ({
+          queued: 'В очереди', running: 'Создаётся',
+          waiting_approval: 'Ждёт проверки', completed: 'Задание выполнено',
+          failed: 'Ошибка создания', cancelled: 'Отменено',
+          unavailable: 'Задание недоступно'
+        })[step.task_status] || 'Статус неизвестен';
+      }
+      if (step.status === 'completed' && block.workflow_id)
+        return step.kind === 'queued_post' ? 'Пост в очереди' : 'Проверено';
+      return statuses[step.status] || 'Неизвестно';
+    }
+    block.steps.forEach(function (step, index) {
+      var item = el('li', 'sg-workflow-step sg-workflow-' + step.status);
+      item.appendChild(el('span', 'sg-workflow-index', String(index + 1)));
+      item.appendChild(el('span', 'sg-workflow-step-title', step.title));
+      item.appendChild(el('span', 'sg-workflow-state', statusLabel(step)));
+      list.appendChild(item);
+    });
+    main.appendChild(list);
+    // Workflow dispatch and content generation are distinct states. Only
+    // verified Task records supplied by the owner-scoped server are counted.
+    if (block.task_summary && block.task_summary.total) {
+      var counts = block.task_summary;
+      var parts = [];
+      [
+        ['queued', 'в очереди'], ['running', 'создаются'],
+        ['waiting_approval', 'ждут проверки'], ['completed', 'завершены'],
+        ['failed', 'с ошибкой'], ['cancelled', 'отменены'],
+        ['unavailable', 'недоступны']
+      ].forEach(function (entry) {
+        if (counts[entry[0]]) parts.push(counts[entry[0]] + ' ' + entry[1]);
+      });
+      if (counts.review_pending) parts.push('из них ' + counts.review_pending + ' ждут согласования');
+      main.appendChild(el('p', 'sg-workflow-activity',
+        'Задания на материалы (' + counts.total + '): ' + parts.join(' · ')));
+    }
+    var note = block.workflow_id
+      ? 'Создание черновиков запускается только после отдельного подтверждения. Публикации не выполняются.'
+      : 'Каждое действие выполнено последовательно и только на чтение.';
+    var widget = wrapResourceCard('workflow', main, 'Результаты по шагам',
+      'Данные получены из подключённых разделов ServGo.', note);
+    var body = widget.querySelector('.sg-resource-details-body');
+    block.steps.forEach(function (step, index) {
+      var group = el('section', 'sg-workflow-result');
+      group.appendChild(el('h4', 'sg-workflow-result-title',
+        String(index + 1) + '. ' + step.title + ' — ' + statusLabel(step)));
+      group.appendChild(el('p', 'sg-workflow-result-detail', step.detail));
+      (step.blocks || []).forEach(function (item) {
+        if (item.type === 'text') group.appendChild(el('p', 'dp-text', item.text));
+        else if (item.type === 'links') group.appendChild(renderLinks(item.items));
+        else if (item.type === 'table') group.appendChild(renderTable(item));
+        else if (item.type === 'resource_list') group.appendChild(renderResourceList(item));
+        else if (item.type === 'task') group.appendChild(renderTask(item));
+        else if (item.type === 'material') group.appendChild(renderMaterial(item));
+        else if (item.type === 'chips') group.appendChild(renderChips(item.items, sendChip));
+      });
+      body.appendChild(group);
+    });
+    if (block.workflow_id) {
+      widget.dataset.workflowId = block.workflow_id;
+      var actions = el('div', 'sg-workflow-actions');
+      var path = '/workflows/' + encodeURIComponent(block.workflow_id);
+      function replaceFromServer(data) {
+        if (data && data.workflow && widget.isConnected)
+          widget.replaceWith(renderWorkflow(data.workflow, true));
+      }
+      function reload(showError) {
+        return fetch(api + path, {credentials:'same-origin',
+          headers:{Accept:'application/json'},cache:'no-store'})
+          .then(function (res) {
+            if (!res.ok) throw new Error('Ошибка HTTP ' + res.status);
+            return res.json();
+          })
+          .then(replaceFromServer)
+          .catch(function () {
+            // Hydration is silent; a user-initiated refresh must report failure.
+            if (showError) notify('Не удалось обновить статус. Проверьте подключение и попробуйте ещё раз.');
+          });
+      }
+      function doAction(route, payload, buttons) {
+        buttons.forEach(function (button) { button.disabled = true; });
+        post(path + route, payload).then(replaceFromServer).catch(function (error) {
+          notify(error.message);
+          reload(); // A lost response must never invite a duplicate confirmation.
+        }).finally(function () {
+          buttons.forEach(function (button) {
+            if (button.isConnected) button.disabled = false;
+          });
+        });
+      }
+      if (block.status === 'waiting_approval' && block.approval) {
+        var preview = el('section', 'sg-workflow-approval');
+        preview.appendChild(el('strong', '', block.approval.title));
+        (block.approval.details || []).forEach(function (line) {
+          preview.appendChild(el('p', '', line));
+        });
+        if (block.approval.paid)
+          preview.appendChild(el('strong', 'dp-badge', 'Платно'));
+        var choices = el('div', 'sg-workflow-buttons');
+        var yes = el('button', 'dp-btn primary',
+          block.approval.confirm_label || 'Подтвердить');
+        var no = el('button', 'dp-btn ghost', 'Отменить остальные шаги');
+        yes.type = no.type = 'button';
+        var payload = {position:block.approval.position,revision:block.revision};
+        yes.addEventListener('click', function () {
+          doAction('/decision', Object.assign({accept:true},payload), [yes,no]);
+        });
+        no.addEventListener('click', function () {
+          doAction('/decision', Object.assign({accept:false},payload), [yes,no]);
+        });
+        choices.append(yes,no);
+        preview.appendChild(choices);
+        actions.appendChild(preview);
+      } else if (block.status === 'running') {
+        var resume = el('button','dp-btn ghost','Продолжить проверку');
+        resume.type = 'button';
+        resume.addEventListener('click',function () {
+          doAction('/resume',{},[resume]); // Only read actions, never pending writes.
+        });
+        actions.appendChild(resume);
+      } else if (block.can_retry_read && block.status === 'failed') {
+        var retry = el('button','dp-btn ghost','Повторить просмотр');
+        retry.type = 'button';
+        retry.addEventListener('click',function () {
+          doAction('/retry-read',{revision:block.revision},[retry]);
+        });
+        actions.appendChild(retry);
+      }
+      // Review navigation is a server-validated link, never an action that
+      // automatically approves or publishes content.
+      block.steps.forEach(function (step, index) {
+        if (!step.review_href || step.status !== 'completed') return;
+        var reviewLink = el('a', 'dp-btn ghost sg-workflow-review-link',
+          'Проверить готовый пост №' + String(index + 1));
+        reviewLink.href = step.review_href;
+        actions.appendChild(reviewLink);
+      });
+      if (block.task_summary && block.task_summary.total) {
+        var refresh = el('button', 'dp-btn ghost sg-workflow-refresh', 'Обновить статус материалов');
+        refresh.type = 'button';
+        refresh.addEventListener('click', function () {
+          refresh.disabled = true;
+          reload(true).finally(function () {
+            if (refresh.isConnected) refresh.disabled = false;
+          });
+        });
+        actions.appendChild(refresh);
+      }
+      if (actions.childNodes.length) widget.appendChild(actions);
+      // Persisted chat blocks are snapshots, not a source of truth after
+      // an approval on another device. Always reconcile once on hydration.
+      if (!synchronized) reload();
+    }
+    return widget;
+  }
+
   function renderTask(block) {
     var taskId = String(block.task_id || '');
     var result = taskResults[taskId];
@@ -678,6 +851,7 @@
       }
       else if (block.type === 'table') bubble.appendChild(renderTable(block));
       else if (block.type === 'resource_list') bubble.appendChild(renderResourceList(block));
+      else if (block.type === 'workflow') bubble.appendChild(renderWorkflow(block));
       else if (block.type === 'task') bubble.appendChild(renderTask(block));
       else if (block.type === 'material') bubble.appendChild(renderMaterial(block));
       else if (block.type === 'confirm') bubble.appendChild(renderConfirm(block));
@@ -1403,6 +1577,19 @@
   document.addEventListener('visibilitychange', function () { if (!document.hidden) checkUpdates(); });
 
   (state.messages || []).forEach(upsert);
+  // An interrupted request can persist a workflow before its chat reply.
+  // Surface scoped unfinished workflows even when a new topic was started.
+  var seenWorkflows = new Set();
+  (state.messages || []).forEach(function (message) {
+    (message.blocks || []).forEach(function (block) {
+      if (block.type === 'workflow' && block.workflow_id) seenWorkflows.add(block.workflow_id);
+    });
+  });
+  (state.workflows || []).forEach(function (block) {
+    if (!block.workflow_id || seenWorkflows.has(block.workflow_id)) return;
+    upsert({id:'recovered-' + block.workflow_id,role:'assistant',text:'Незавершённое поручение',
+      blocks:[{type:'text',text:'Незавершённое поручение'},block]});
+  });
   hydrated = true;
   syncConversationLayout();
   renderHints();

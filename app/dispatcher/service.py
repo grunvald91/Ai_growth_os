@@ -20,11 +20,11 @@ from sqlalchemy.orm import Session
 
 from app.dispatcher import executors
 from app.dispatcher.blocks import Chip, clean_blocks
-from app.dispatcher.decision import (CONFIDENCE_TO_ACT, SYSTEM_PROMPT, DispatcherDecision, build_user_message)
+from app.dispatcher.decision import (CONFIDENCE_TO_ACT, SYSTEM_PROMPT, DispatcherDecision, PlannedStep, build_user_message)
 from app.dispatcher.executors import Confirmation, Context, Outcome
 from app.dispatcher.fast_routes import quick_capability, quick_video_request, requested_story_count
 from app.dispatcher.models import DispatcherConversation, DispatcherMessage
-from app.dispatcher.policy import Verdict, verdict
+from app.dispatcher.policy import Cost, Verdict, verdict
 from app.dispatcher.readers import snapshot
 from app.dispatcher.registry import CAPABILITIES
 from app.llm.costing import usage_cost_details
@@ -243,6 +243,90 @@ async def act(ctx: Context, capability_id: str, raw_params: dict) -> tuple[Outco
 
 FOLLOW_UP = [Chip(label="Что в работе", capability="show_work").model_dump()]
 
+# Explicit allowlist: even an ANALYTICS operation may mutate saved preferences.
+# Do not infer permission from the model, the capability description or its cost.
+READ_ONLY_PLAN_CAPABILITIES = frozenset({
+    "show_work", "show_review", "show_plan", "show_recent_videos", "show_material", "go_to",
+})
+
+
+def _preflight_readonly_plan(steps: list[PlannedStep]) -> tuple[list[tuple[str, object]], str | None]:
+    """Validate every step before executing even the first read.
+
+    A plan never creates tasks, confirms publication, changes settings or calls
+    a paid model. Invalid/mixed plans are refused in full, not partially run.
+    """
+    if not 2 <= len(steps) <= 3:
+        return [], "В одном плане нужно от двух до трёх просмотров данных."
+    parsed: list[tuple[str, object]] = []
+    seen = set()
+    for step in steps:
+        cap = CAPABILITIES.get(step.capability)
+        if (not cap or cap.id not in READ_ONLY_PLAN_CAPABILITIES
+                or cap.operation != ToolOperation.ANALYTICS or cap.cost != Cost.NONE
+                or cap.always_confirm):
+            return [], ("В цепочке есть действие, требующее отдельного запуска или подтверждения. "
+                        "Его нельзя выполнять автоматически вместе с просмотрами.")
+        try:
+            params = cap.params.model_validate(step.params)
+        except ValidationError as exc:
+            return [], _missing(exc)
+        signature = (cap.id, json.dumps(params.model_dump(mode="json"), sort_keys=True))
+        if signature in seen:
+            return [], "В поручении повторяется одно и то же действие. Уточните, что сравнить."
+        seen.add(signature)
+        parsed.append((cap.id, params))
+    return parsed, None
+
+
+async def run_readonly_plan(ctx: Context, steps: list[PlannedStep]) -> Outcome:
+    """Bounded serial execution. Stop on failure; no writes or hidden approvals."""
+    parsed, error = _preflight_readonly_plan(steps)
+    if error:
+        return Outcome(error, ok=False)
+    results: list[dict] = []
+    failed = False
+    completed = 0
+    for capability_id, params in parsed:
+        title = CAPABILITIES[capability_id].title
+        if failed:
+            results.append({"title": title, "status": "skipped",
+                            "detail": "Не выполнялось: предыдущий шаг завершился ошибкой.", "blocks": []})
+            continue
+        try:
+            result, confirmation, _ = await act(ctx, capability_id, params.model_dump(exclude_none=True))
+            # Defense in depth: never render a hidden confirmation as a completed step.
+            if confirmation is not None:
+                result = Outcome("Действие требует отдельного подтверждения.", ok=False)
+        except Exception:
+            _logger.exception("dispatcher_readonly_plan_step_failed", extra={"capability": capability_id})
+            result = Outcome("Не удалось получить данные этого шага.", ok=False)
+        if result.ok:
+            completed += 1
+        else:
+            failed = True
+        # Typed blocks: links and tables still come from existing scoped
+        # executors, not model-authored content; confirmations stay outside.
+        child_blocks = [
+            block for block in clean_blocks(result.blocks)
+            if block["type"] in {"text", "chips", "links", "table",
+                                 "resource_list", "task", "material"}
+        ][:8]
+        results.append({
+            "title": title,
+            "status": ("failed" if not result.ok else "no_data" if result.no_data else "completed"),
+            "detail": result.text[:600],
+            "blocks": child_blocks,
+        })
+    summary = (f"Проверено {completed} из {len(parsed)} разделов."
+               if not failed else
+               f"Проверено {completed} из {len(parsed)} разделов. Остальные остановлены из-за ошибки.")
+    return Outcome(summary, summary, [{"type": "workflow", "title": "Результаты поручения",
+                                       "steps": results}], ok=not failed)
+
+
+
+
 
 def _apply_create_hints(decision: DispatcherDecision, hints, text: str) -> None:
     """Merge optional UI settings only after dispatcher has determined an action.
@@ -398,6 +482,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             if count is not None:
                 decision.params["frame_count"] = count
     outcome: Outcome | None = None
+    workflow_id: str | None = None
     confirmation: Confirmation | None = None
     capability_id: str | None = None
     intent = decision.intent if decision else "failed"
@@ -421,6 +506,36 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 reply_text, spoken = outcome.text, outcome.spoken or outcome.text
                 blocks = outcome.blocks
                 chips = [] if confirmation else FOLLOW_UP
+        elif decision.intent == "plan":
+            if decision.confidence < CONFIDENCE_TO_ACT:
+                intent = "clarify"
+                reply_text = decision.reply_text or "Уточните, пожалуйста, какие данные проверить."
+                spoken = reply_text
+            elif any(step.capability not in READ_ONLY_PLAN_CAPABILITIES for step in decision.steps):
+                # Persist mixed workflows; mutating steps *never* execute here.
+                # Every draft-post step requires its own explicit approval.
+                from app.dispatcher import workflows
+                try:
+                    workflow = await workflows.create(ctx, conversation, decision.steps, client_key)
+                except (ValueError, PermissionError) as exc:
+                    intent = "clarify"
+                    reply_text = str(exc)
+                    spoken = reply_text
+                    chips = []
+                else:
+                    workflow_id = workflow["workflow_id"]
+                    reply_text = ("Поручение сохранено. Для каждого поста потребуется "
+                                  "отдельное подтверждение; публикация не запускается.")
+                    spoken = reply_text
+                    blocks = [workflow]
+                    chips = []
+            else:
+                outcome = await run_readonly_plan(ctx, decision.steps)
+                reply_text, spoken = outcome.text, outcome.spoken or outcome.text
+                blocks = outcome.blocks
+                if not outcome.ok:
+                    intent = "clarify" if not blocks else "plan"
+                chips = FOLLOW_UP if blocks else []
         elif decision.intent == "unsupported":
             reply_text = decision.reply_text or "Этого я пока не умею."
     blocks = [{"type": "text", "text": reply_text}, *blocks]
@@ -432,6 +547,8 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         blocks.append({"type": "chips", "items": chips})
     params = {**confirmation.params, "_capability": capability_id} if confirmation is not None else \
         (decision.params if decision else {})
+    if workflow_id:
+        params = {**params, "_workflow_id": workflow_id}
     answer = _add_committed(db, conversation, role="assistant", input_mode="text", text=reply_text, spoken=spoken,
                             blocks=clean_blocks(blocks),
                             intent=intent, capability=capability_id or (decision.capability if decision else None),

@@ -40,6 +40,16 @@ async def run_content_once(session_factory, settings):
                 ~and_(Task.title.like(f'{SEO_TASK_PREFIX}%'), Task.product_id.in_(exhausted)),
                 Task.id.in_(previously_counted),
             ))
+        # A burst of identical provider/schema failures should not spend on
+        # every queued article. The owner can still explicitly retry one.
+        from app.seo.failure_guard import paused_products, owner_authorized_task_ids
+        paused = paused_products(db)
+        if paused:
+            approved_retries = owner_authorized_task_ids(db, paused)
+            query = query.where(or_(
+                ~and_(Task.title.like(f'{SEO_TASK_PREFIX}%'), Task.product_id.in_(paused)),
+                Task.id.in_(approved_retries),
+            ))
         # SEO may be generated BEFORE its publication slot (Task.due_at).
         # Publication checks the original slot separately. A transient-provider
         # retry has its own ten-minute cooldown, stored in the recovery marker,

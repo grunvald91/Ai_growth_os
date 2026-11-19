@@ -133,8 +133,63 @@ class ConfirmBlock(_Block):
     change_preview: dict | None = None
 
 
+class PlanResultStep(_Block):
+    """Distinguish workflow dispatch state from a queued task's live state."""
+    kind: Literal["read", "queued_post"] = "read"
+    title: str = Field(min_length=1, max_length=100)
+    status: Literal["pending", "waiting_approval", "completed", "no_data", "failed", "declined", "skipped"]
+    task_status: Literal["queued", "running", "waiting_approval", "completed", "failed",
+                         "cancelled", "unavailable"] | None = None
+    # Only the server constructs this path from a product-scoped, awaiting-approval Artifact.
+    review_href: str | None = None
+    detail: str = Field(max_length=600)
+    blocks: list[Annotated[
+        TextBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock,
+        Field(discriminator="type"),
+    ]] = Field(default_factory=list, max_length=8)
+
+    def model_post_init(self, __context) -> None:
+        if self.review_href is not None and not safe_href(self.review_href):
+            raise ValueError("Review material link target is not allowed")
+
+
+class WorkflowApproval(_Block):
+    """Visual proposal only; only the authenticated workflow API executes it."""
+    title: str = Field(min_length=1, max_length=100)
+    details: list[str] = Field(default_factory=list, max_length=8)
+    confirm_label: str = Field(default="Подтвердить", max_length=60)
+    paid: bool = False
+    position: int = Field(ge=0, le=2)
+
+
+class WorkflowTaskSummary(_Block):
+    """Live status counters: dispatch completion is not content completion."""
+    total: int = Field(ge=0, le=3)
+    queued: int = Field(default=0, ge=0, le=3)
+    running: int = Field(default=0, ge=0, le=3)
+    waiting_approval: int = Field(default=0, ge=0, le=3)
+    completed: int = Field(default=0, ge=0, le=3)
+    failed: int = Field(default=0, ge=0, le=3)
+    cancelled: int = Field(default=0, ge=0, le=3)
+    unavailable: int = Field(default=0, ge=0, le=3)
+    # Generated content may need review even after Task.status == completed.
+    review_pending: int = Field(default=0, ge=0, le=3)
+
+
+class WorkflowBlock(_Block):
+    type: Literal["workflow"] = "workflow"
+    workflow_id: str | None = Field(default=None, max_length=36)
+    title: str = Field(min_length=1, max_length=100)
+    status: Literal["running", "waiting_approval", "completed", "failed", "cancelled"] | None = None
+    revision: int = Field(default=0, ge=0)
+    approval: WorkflowApproval | None = None
+    task_summary: WorkflowTaskSummary | None = None
+    can_retry_read: bool = False
+    steps: list[PlanResultStep] = Field(min_length=2, max_length=3)
+
+
 Block = Annotated[
-    TextBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock,
+    TextBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock | WorkflowBlock,
     Field(discriminator="type"),
 ]
 _adapter: TypeAdapter[Block] = TypeAdapter(Block)

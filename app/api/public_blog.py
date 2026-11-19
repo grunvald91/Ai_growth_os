@@ -141,9 +141,30 @@ def split_body(body: str) -> tuple[list[str], list[str]]:
             [item for block in blocks if block["type"] == "list" for item in block["items"]])
 
 
+def public_article_dates(row: Artifact, publication: Publication) -> tuple[str, str]:
+    """Only a genuine post-publication content revision changes dateModified.
+
+    Artifact.updated_at also advances during status transitions; that is NOT
+    evidence the public text changed. The published article revision workflow
+    increments version when committing an actual editorial change.
+    """
+    published = publication.published_at
+    if published is None:
+        raise ValueError("Published article is missing publication timestamp")
+    modified = published
+    if (row.version or 1) > 1 and row.updated_at is not None:
+        from datetime import timezone
+        def comparable(value):
+            return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        if comparable(row.updated_at) > comparable(published):
+            modified = row.updated_at
+    return published.isoformat(), modified.isoformat()
+
+
 def _article(row: Artifact, publication: Publication) -> dict:
     article = ArticleArtifact.model_validate_json(row.content)
     reader = article.reader_article
+    published_at, modified_at = public_article_dates(row, publication)
     sections = []
     for section in reader.sections:
         blocks = body_blocks(section.body)
@@ -166,8 +187,8 @@ def _article(row: Artifact, publication: Publication) -> dict:
         "closing": reader.closing,
         "faq": [item.model_dump() for item in reader.faq],
         "cta": article.conversion.cta,
-        "published_at": publication.published_at.isoformat(),
-        "updated_at": row.updated_at.isoformat(),
+        "published_at": published_at,
+        "updated_at": modified_at,
     }
 
 

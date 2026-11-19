@@ -31,7 +31,10 @@ from app.api.content_studio_article import render_article
 from app.content.render import asset_path
 from app.api.content_studio_activity import (work_items, notice_items, notice_html,
     activity_html, activity_overview, task_detail_html, RESULT_KINDS)
-from app.api.content_studio_ui import create_content_html, review_html, channels_html, speed_html
+from app.api.content_studio_ui import (
+    create_content_html, review_html, channels_html, speed_html, REVIEW_KINDS_BY_FILTER,
+    review_history_html, seo_progress_html,
+)
 from app.content.durations import call_speed, duration_notice, task_durations
 from app.content.notice_reads import mark_read, read_ids
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
@@ -373,13 +376,14 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         {item("chat", f"/studio/chat?product_id={product_id}", "✦", "ИИ-чат")}
         {item("work", base + "/work", "◴", "В работе")}
         {item("materials", base + "/materials", "▤", "Мои материалы")}
+        {item("review", base + "/review", "✓", "На согласовании")}
         {item("channels", base + "/channels", "↗", "Публикации")}
         {item("accounts", base + "/accounts", "☺", "Аккаунты")}
       </nav>
       <details class="sg-side-extras">
         <summary>Настройки маркетинга и другое</summary>
         <nav class="nav" aria-label="Дополнительные инструменты">
-          {"".join(item(*link) for link in more_links(product_id) if link[0] not in {"mail", "servgo", "accounts"})}
+          {"".join(item(*link) for link in more_links(product_id) if link[0] not in {"mail", "servgo", "accounts", "review"})}
         </nav>
       </details>
       <div class="sidebar-spacer"></div>
@@ -1196,8 +1200,8 @@ def studio_page_shell(
     dialogs: str = "",
     actions: str = "",
 ) -> str:
-    resource_assets = active in {"overview", "work", "materials", "plan"}
-    resource_css = ('<link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=2">'
+    resource_assets = active in {"overview", "work", "materials", "plan", "review"}
+    resource_css = ('<link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=7">'
                     if resource_assets else "")
     resource_js = (
         '<script src="/studio/assets/resource-widgets.js?v=2"></script>'
@@ -2659,21 +2663,55 @@ def studio_retry_task(product_id: UUID, task_id: UUID, request: Request,
 
 
 @router.get("/studio/products/{product_id}/review", response_class=HTMLResponse)
-def studio_review_page(product_id: UUID, kind: str = "all", db: Session = Depends(get_db)):
+def studio_review_page(product_id: UUID, kind: str = "all", page: int = 1,
+                       section: str = "pending", db: Session = Depends(get_db)):
+    """One company-scoped inbox and verified read-only review/SEO history."""
     product = _owner_product(db, product_id)
-    if kind not in {"all", "text", "creative"}:
+    if section in ("history", "seo"):
+        from app.content.review_dashboard import history, seo_progress
+        result = (history(db, product.id, page=page) if section == "history"
+                  else seo_progress(db, product.id, page=page))
+        body = (review_history_html(product.id, result) if section == "history"
+                else seo_progress_html(product.id, result))
+        response = HTMLResponse(studio_page_shell(
+            product, active="review",
+            title="История решений" if section == "history" else "Статусы SEO-статей",
+            subtitle=("Только зафиксированные решения без догадок."
+                      if section == "history" else
+                      "Реальные состояния задач, материалов, проверок и публикаций."),
+            body=body,
+        ))
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+    if kind not in REVIEW_KINDS_BY_FILTER:
         kind = "all"
+    # Count all reviews before pagination, so the category counters and
+    # total never incorrectly claim that the first 30 are all materials.
+    rows = db.execute(select(Artifact.kind, func.count(Artifact.id)).where(
+        Artifact.product_id == product.id,
+        Artifact.kind.in_(REVIEW_KINDS_BY_FILTER["all"]),
+        Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
+    ).group_by(Artifact.kind)).all()
+    counts = {name: int(count) for name, count in rows}
+    total = sum(counts.values())
+    filtered_total = sum(counts.get(name, 0) for name in REVIEW_KINDS_BY_FILTER[kind])
+    page_size = 30
+    page_count = max(1, (filtered_total + page_size - 1) // page_size)
+    page = min(max(1, page), page_count)
     records = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product.id,
-        Artifact.kind.in_(["channel_text", "creative_brief", "article", "video_script", "video_render"]),
+        Artifact.kind.in_(REVIEW_KINDS_BY_FILTER[kind]),
         Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
-    ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(250)))
+    ).order_by(Artifact.created_at.desc(), Artifact.id.desc())
+        .offset((page - 1) * page_size).limit(page_size)))
     response = HTMLResponse(studio_page_shell(
-        product, active="review", title="На проверке",
-        subtitle="Только готовые материалы, для которых необходимо ваше решение.",
-        body=review_html(product.id, records, filter_name=kind),
+        product, active="review", title="Центр согласования",
+        subtitle="Только готовые материалы. Решения принимаются в полном просмотре.",
+        body=review_html(product.id, records, filter_name=kind, counts=counts,
+                         page=page, page_count=page_count, total=total,
+                         filtered_total=filtered_total),
     ))
-    response.headers["Cache-Control"] = "no-store"
+    response.headers["Cache-Control"] = "private, no-store"
     return response
 
 
@@ -2686,7 +2724,12 @@ async def studio_material_approve(product_id: UUID, artifact_id: UUID, request: 
     if current is not None and current.product_id == product_id and needs_fact_check(current):
         facts_confirmed = (await _studio_form(request)).get("facts_confirmed") == "yes"
     try:
-        approve_material(db, get_settings().products_root, product_id, artifact_id, facts_confirmed=facts_confirmed)
+        approve_material(
+            db, get_settings().products_root, product_id, artifact_id,
+            facts_confirmed=facts_confirmed,
+            actor=getattr(request.state, "studio_login", None) or "local-owner",
+            action_type="studio:approve_material", via="studio",
+        )
     except ReviewError as exc:
         raise HTTPException(exc.status, exc.message) from None
     return RedirectResponse(f"/studio/products/{product_id}/materials/{artifact_id}", status_code=303)

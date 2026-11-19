@@ -176,62 +176,144 @@ def speed_html(product_id, calls, durations, *, days=7) -> str:
     </section>"""
 
 
-def review_html(product_id, records, *, filter_name="all") -> str:
-    base=f"/studio/products/{product_id}"
-    tabs=[]
-    types=[("all","Всё"),("text","Тексты"),("creative","Визуалы")]
-    for value,label in types:
-        tabs.append(f'<a class="sg-filter {"is-active" if value==filter_name else ""}" '
-                    f'href="{base}/review?kind={value}">{label}</a>')
-    cards=[]
+# The same Artifact.status and category scope drives every review filter.
+# The source of truth for approving a material remains app.content.review.
+REVIEW_KINDS_BY_FILTER = {
+    "all": ("channel_text", "article", "creative_brief", "video_script", "video_render"),
+    "posts": ("channel_text",),
+    "articles": ("article",),
+    "creative": ("creative_brief", "video_script", "video_render"),
+    "video": ("video_script", "video_render"),
+    # Backwards compatible pre-redesign link; do not silently widen permissions.
+    "text": ("channel_text", "article"),
+}
+REVIEW_TABS = (
+    ("all", "Всё"), ("posts", "Посты"), ("articles", "Статьи / SEO"),
+    ("creative", "Креативы"), ("video", "Видео"),
+)
+
+
+def _review_preview(row, data: dict) -> str:
+    """A short, safe excerpt. Never pretend it is the complete review text."""
+    sources = (
+        data.get("body"), data.get("preview_text"), data.get("full_article"),
+        data.get("reader_article"),
+    )
+    raw = next((entry for entry in sources if isinstance(entry, str) and entry.strip()), "")
+    if not raw and isinstance(data.get("production_brief"), dict):
+        raw = data["production_brief"].get("voiceover_or_dialogue_script") or ""
+    if not isinstance(raw, str):
+        raw = ""
+    lines = raw.strip().splitlines()
+    if lines and re.sub(r'^#+\\s*', '', lines[0]).strip().casefold() == (row.title or '').strip().casefold():
+        lines = lines[1:]
+    preview = re.sub(r'\\s+', ' ', '\\n'.join(lines)).strip()
+    return (preview[:220].rsplit(" ", 1)[0] or preview[:220]) + "…" if len(preview) > 220 else preview
+
+
+def review_html(product_id, records, *, filter_name="all", counts=None,
+                page=1, page_count=1, total=None, filtered_total=None) -> str:
+    """One scoped, paginated approval inbox; no separate mutation endpoint.
+
+    Full content, version checks, warning resolution and media existence checks
+    still happen on the material detail page using app.content.review.
+    """
+    from app.api.studio_resource_widgets import resource_widget
+
+    base = f"/studio/products/{product_id}"
+    counts = counts or {kind: 0 for kind in REVIEW_KINDS_BY_FILTER["all"]}
+    def count_for(kind: str) -> int:
+        return sum(counts.get(value, 0) for value in REVIEW_KINDS_BY_FILTER[kind])
+    total = count_for("all") if total is None else total
+    filtered_total = count_for(filter_name) if filtered_total is None else filtered_total
+    types = list(REVIEW_TABS)
+    if filter_name == "text":
+        types.insert(1, ("text", "Тексты"))
+    tabs = []
+    for value, label in types:
+        count = count_for(value)
+        current = 'aria-current="page"' if value == filter_name else ""
+        tabs.append(
+            f'<a class="sg-filter {"is-active" if value == filter_name else ""}" '
+            f'href="{base}/review?kind={value}" {current}>'
+            f'{esc(label)} <span class="sg-review-filter-count">{count}</span></a>'
+        )
+    cards = []
     for row in records:
-        try: data=json.loads(row.content)
-        except (ValueError,TypeError): data={}
-        is_creative=row.kind in {"creative_brief", "video_script", "video_render"}
-        if filter_name=="text" and is_creative: continue
-        if filter_name=="creative" and not is_creative: continue
-        preview=(data.get("body") or data.get("preview_text") or
-                 data.get("full_article") or data.get("reader_article") or
-                 (data.get("production_brief") or {}).get("voiceover_or_dialogue_script") or "")
-        if not isinstance(preview, str):
-            preview=str(preview)
-        lines=preview.strip().splitlines()
-        if lines and re.sub(r'^#+\s*', '', lines[0]).strip().casefold() == (row.title or '').strip().casefold():
-            lines=lines[1:]
-        preview=re.sub(r'\s+', ' ', '\n'.join(lines)).strip()
-        if len(preview)>220:
-            preview=preview[:220].rsplit(' ',1)[0]+'…'
-        channel=str(data.get("platform") or data.get("channel") or "Материал")
-        channel={"own_site":"Сайт", "telegram":"Telegram", "vk":"ВКонтакте", "zen":"Дзен"}.get(channel, channel)
-        kind={"creative_brief":"Креативный бриф", "video_script":"Сценарий", "video_render":"Готовый MP4",
-              "article":"Статья", "channel_text":"Пост"}.get(row.kind, "Материал")
-        action=f'{base}/materials/{row.id}'
-        approve=(f'{base}/review/{row.id}/approve')
-        warnings=data.get("quality_warnings") or []
-        warning=f'<span class="sg-warning">Проверить: {len(warnings)}</span>' if warnings else ""
-        cards.append(f"""
-          <article class="sg-review-item">
-            <div class="sg-review-top"><span class="sg-tag">{esc(kind)}</span>
-            <span class="sg-channel">{esc(channel)}</span>{warning}</div>
-            <h3>{esc(row.title)}</h3><p>{esc(preview)}</p>
-            <div class="sg-review-footer"><span>Ожидает решения</span>
-              <div class="sg-inline-actions">
-                <a class="btn secondary" href="{action}" aria-label="Открыть и исправить: {esc(row.title)}">Открыть</a>
-                <form method="post" action="{approve}">
-                  {'<a class="btn primary" href="' + action + '">Проверить факты</a>' if data.get('fact_check_required') else '<button class="btn primary" type="submit">Утвердить ✓</button>'}
-                </form>
-              </div>
-            </div>
-          </article>""")
-    empty_title = "В этом разделе нет материалов" if filter_name != "all" else "Материалы проверены"
-    empty_note = "Попробуйте фильтр «Всё»." if filter_name != "all" else "Сейчас ничего не требует согласования."
-    empty=f'<div class="sg-empty"><div>✓</div><h3>{empty_title}</h3><p>{empty_note}</p><a class="btn primary" href="{base}/create">Создать материал →</a></div>'
-    return (f'<section class="sg-surface sg-review-page"><div class="sg-section-head"><div>'
-            f'<span class="sg-overline">ВАШЕ ВНИМАНИЕ</span><h2>Очередь согласования</h2>'
-            f'<p>Сначала проверяйте материал, затем разрешайте публикацию.</p></div>'
-            f'<span class="sg-count">{len(records)} на проверке</span></div>'
-            f'<div class="sg-filters">{"".join(tabs)}</div>'
-            f'<div class="sg-review-list">{"".join(cards) or empty}</div></section>')
+        try:
+            data = json.loads(row.content)
+        except (ValueError, TypeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        preview = _review_preview(row, data)
+        channel = str(data.get("platform") or data.get("channel") or "Материал")
+        channel = {"own_site": "Сайт", "telegram": "Telegram", "vk": "ВКонтакте",
+                   "zen": "Дзен"}.get(channel, channel)
+        kind = {"creative_brief": "Креативный бриф", "video_script": "Сценарий",
+                "video_render": "Готовый MP4", "article": "Статья",
+                "channel_text": "Пост"}.get(row.kind, "Материал")
+        if row.kind == "article" and data.get("seo_brief"):
+            kind = "SEO-статья"
+        action = f"{base}/materials/{row.id}"
+        warnings = data.get("quality_warnings")
+        count_warnings = len(warnings) if isinstance(warnings, list) else 0
+        fact_check = bool(data.get("fact_check_required"))
+        badges = (f'<span class="sg-warning">Замечаний: {count_warnings}</span>'
+                  if count_warnings else "")
+        if fact_check:
+            badges += '<span class="sg-warning">Проверьте факты</span>'
+        primary = (
+            '<div class="sg-review-item">'
+            f'<div class="sg-review-top"><span class="sg-tag">{esc(kind)}</span>'
+            f'<span class="sg-channel">{esc(channel)}</span>{badges}</div>'
+            f'<h3>{esc(row.title)}</h3>'
+            f'<p>{esc(preview) if preview else "Предпросмотр недоступен. Откройте материал целиком."}</p>'
+            '<div class="sg-review-footer"><span>Ожидает решения</span>'
+            '<div class="sg-inline-actions">'
+            f'<a class="btn secondary" href="{action}" '
+            f'aria-label="Открыть и проверить: {esc(row.title)}">'
+            'Открыть и проверить</a></div></div></div>'
+        )
+        warning_note = ("Числа, цены и результаты нужно проверить по источникам до утверждения."
+                        if fact_check else
+                        "Утвердить можно только после проверки полной версии материала.")
+        cards.append(resource_widget(
+            kind="material", primary_html=primary,
+            description=f"{kind} · {channel}. Предпросмотр сокращён; полную версию проверьте перед решением.",
+            note=warning_note, detail_label="Что проверить",
+        ))
+    empty_title = "В этой категории нет материалов" if filter_name != "all" else "Материалы проверены"
+    empty_note = ("Выберите другую категорию." if filter_name != "all"
+                  else "Сейчас ничего не требует согласования.")
+    empty = (
+        f'<div class="sg-empty"><div>✓</div><h3>{empty_title}</h3><p>{empty_note}</p>'
+        f'<a class="btn primary" href="{base}/create">Создать материал →</a></div>'
+    )
+    paging = ""
+    if page_count > 1:
+        links = []
+        if page > 1:
+            links.append(f'<a class="btn secondary" href="{base}/review?kind={filter_name}&page={page - 1}">← Назад</a>')
+        links.append(f'<span aria-current="page">Страница {page} из {page_count}</span>')
+        if page < page_count:
+            links.append(f'<a class="btn secondary" href="{base}/review?kind={filter_name}&page={page + 1}">Дальше →</a>')
+        paging = '<nav class="sg-review-pagination" aria-label="Страницы согласования">' + "".join(links) + '</nav>'
+    return (
+        '<section class="sg-surface sg-review-page">'
+        + review_section_nav(product_id, "pending")
+        + '<div class="sg-section-head"><div><span class="sg-overline">ЕДИНЫЙ ЦЕНТР СОГЛАСОВАНИЯ</span>'
+        '<h2>Очередь согласования</h2>'
+        '<p>Посты, статьи, креативы и видео. Проверка материала — до утверждения.</p>'
+        '</div>'
+        f'<span class="sg-count">{total} на проверке</span></div>'
+        f'<nav class="sg-filters" aria-label="Категории материалов">{"".join(tabs)}</nav>'
+        f'<p class="sg-review-showing">В категории: {filtered_total}. '
+        f'Показано: {len(records)}.</p>'
+        f'<div class="sg-review-list">{"".join(cards) or empty}</div>'
+        + paging + '</section>'
+    )
+
 
 def channels_html(product_id, connections, publications, approved_posts, *, added=False, scheduled=False,
                   selected_post=None, autopost_enabled=False, publication_details=None,
@@ -324,3 +406,158 @@ def channels_html(product_id, connections, publications, approved_posts, *, adde
         </section>
       </aside>
     </div>"""
+
+
+# Pages stay on the same authenticated /review route. Section navigation never
+# performs approval, requeue, publication or another paid operation.
+def review_section_nav(product_id, selected="pending") -> str:
+    base = f"/studio/products/{product_id}/review"
+    sections = [
+        ("pending", "Ожидают решения", base),
+        ("history", "История решений", base + "?section=history"),
+        ("seo", "Статусы SEO", base + "?section=seo"),
+    ]
+    return (
+        '<nav class="sg-review-sections" aria-label="Разделы центра согласования">'
+        + "".join(
+            f'<a class="sg-filter {"is-active" if name == selected else ""}" '
+            f'{"aria-current=page" if name == selected else ""} '
+            f'href="{url}">{esc(label)}</a>'
+            for name, label, url in sections
+        ) + '</nav>'
+    )
+
+
+def _review_paging(product_id, section: str, page: int, page_count: int) -> str:
+    if page_count <= 1:
+        return ""
+    base = f"/studio/products/{product_id}/review?section={section}&page="
+    previous = (f'<a class="btn secondary" href="{base}{page-1}">← Назад</a>'
+                if page > 1 else "")
+    following = (f'<a class="btn secondary" href="{base}{page+1}">Дальше →</a>'
+                 if page < page_count else "")
+    return (
+        '<nav class="sg-review-pagination" aria-label="Страницы раздела">'
+        + previous + f'<span aria-current="page">Страница {page} из {page_count}</span>'
+        + following + '</nav>'
+    )
+
+
+def review_history_html(product_id, result) -> str:
+    """Render persisted audit events; never infer a decision from a status."""
+    from app.api.studio_resource_widgets import resource_widget
+
+    base = f"/studio/products/{product_id}"
+    cards = []
+    for approval, artifact in result.records:
+        if approval.action_type == "publish":
+            label = ("SEO: публикация разрешена" if approval.status == "approved"
+                     else "SEO: публикация отклонена")
+        else:
+            label = "Материал утверждён" if approval.status == "approved" else "Материал отклонён"
+        origin = ("ИИ / политика SEO" if approval.requested_by == "seo_factory"
+                  else "Диспетчер" if approval.action_type.startswith("dispatcher:")
+                  else "Studio")
+        time = (approval.decided_at.strftime("%d.%m.%Y %H:%M")
+                if approval.decided_at else "Время решения не записано")
+        href = f"{base}/materials/{artifact.id}"
+        primary = (
+            '<div class="sg-review-item">'
+            f'<div class="sg-review-top"><span class="sg-tag">{esc(label)}</span>'
+            f'<span class="sg-channel">{esc(origin)}</span></div>'
+            f'<h3>{esc(artifact.title)}</h3>'
+            f'<p>{esc(time)} · {esc(approval.decided_by or "Решение без указанного автора")}</p>'
+            '<div class="sg-review-footer"><span>Запись журнала</span>'
+            f'<a class="btn secondary" href="{href}">Открыть материал</a>'
+            '</div></div>'
+        )
+        cards.append(resource_widget(
+            kind="material", primary_html=primary,
+            description="Запись о решении из журнала согласований.",
+            note="История показывает зафиксированное решение, а не текущую готовность к публикации.",
+            detail_label="Что означает запись",
+        ))
+    empty = ('<p class="sg-review-empty">Решений в журнале пока нет. '
+             'Ранее утверждённые материалы без записи не выдаются за проверенные события.</p>')
+    return (
+        '<section class="sg-surface sg-review-page">'
+        + review_section_nav(product_id, "history")
+        + '<div class="sg-section-head"><div>'
+        '<span class="sg-overline">ПОДТВЕРЖДЁННЫЕ СОБЫТИЯ</span>'
+        '<h2>История решений</h2>'
+        '<p>Зафиксированные утверждения и решения о SEO-публикации. '
+        'Дата и автор берутся из журнала, публикация отслеживается отдельно.</p>'
+        '</div>'
+        f'<span class="sg-count">Всего записей: {result.total}</span></div>'
+        f'<div class="sg-review-list">{"".join(cards) or empty}</div>'
+        + _review_paging(product_id, "history", result.page, result.page_count)
+        + '</section>'
+    )
+
+
+def seo_progress_html(product_id, result) -> str:
+    """Per-step observations: no invented score or automatic publish claim."""
+    from app.api.studio_resource_widgets import resource_widget
+
+    base = f"/studio/products/{product_id}"
+    stage_labels = {
+        "queued": "В очереди",
+        "running": "Создание",
+        "waiting_approval": "Ожидает разрешения",
+        "completed": "Задание завершено",
+        "failed": "Ошибка",
+        "cancelled": "Отменено",
+    }
+    cards = []
+    for entry in result.records:
+        task, article = entry["task"], entry["article"]
+        title = article.title if article else "SEO-статья — материал пока не готов"
+        task_state = stage_labels.get(getattr(task.status, "value", task.status), "Неизвестно")
+        artifact_state = (
+            "На согласовании" if article and article.status.value == "awaiting_approval"
+            else "Согласовано" if article and article.status.value == "approved"
+            else "Опубликовано" if entry["published"] else
+            "Черновик" if article and article.status.value == "draft" else
+            "Текст найден, статус требует проверки" if article else "Ещё нет результата"
+        )
+        critic = ("Есть запись проверки (не означает допуск)"
+                  if entry["critic_recorded"] else "Результат проверки не найден")
+        release = ("Публикация подтверждена" if entry["published"] else
+                   "Публикация не подтверждена")
+        href = (f"{base}/materials/{article.id}" if article
+                else f"{base}/tasks/{task.id}")
+        primary = (
+            '<div class="sg-review-item">'
+            '<div class="sg-review-top"><span class="sg-tag">SEO-статья</span>'
+            f'<span class="sg-channel">{esc(entry["status"])}</span></div>'
+            f'<h3>{esc(title)}</h3>'
+            f'<div class="sg-review-footer"><span>{esc(task_state)}</span>'
+            f'<a class="btn secondary" href="{href}">Открыть {("статью" if article else "задачу")}</a>'
+            '</div></div>'
+        )
+        stages = (
+            "Задание: " + task_state + ". "
+            "Материал: " + artifact_state + ". "
+            "ИИ-проверка: " + critic + ". "
+            "Публикация: " + release + "."
+        )
+        cards.append(resource_widget(
+            kind="material", primary_html=primary,
+            description=stages, note="Согласование статьи не равно её публикации.",
+            detail_label="Этапы подготовки",
+        ))
+    empty = ('<p class="sg-review-empty">Задач SEO-завода по производству статей '
+             'для этой компании пока не найдено.</p>')
+    return (
+        '<section class="sg-surface sg-review-page">'
+        + review_section_nav(product_id, "seo")
+        + '<div class="sg-section-head"><div>'
+        '<span class="sg-overline">SEO-ЗАВОД</span>'
+        '<h2>Статусы SEO-статей</h2>'
+        '<p>Задание, материал, проверка и публикация — отдельные подтверждаемые этапы.</p>'
+        '</div>'
+        f'<span class="sg-count">Заданий: {result.total}</span></div>'
+        f'<div class="sg-review-list">{"".join(cards) or empty}</div>'
+        + _review_paging(product_id, "seo", result.page, result.page_count)
+        + '</section>'
+    )

@@ -158,6 +158,10 @@ def _article_body(article: dict, business: Business, *, links: dict | None = Non
     if published:
         output.append(f'<p class="meta">Опубликовано: <time datetime="{_text(published)}">'
                       f'{_text(str(published)[:10])}</time></p>')
+    modified = article.get("updated_at")
+    if published and modified and str(modified) != str(published):
+        output.append(f'<p class="meta">Обновлено: <time datetime="{_text(modified)}">'
+                      f'{_text(str(modified)[:10])}</time></p>')
     if article.get("lead"):
         output.append(f'<p class="lead">{_text(article["lead"])}</p>')
     if article.get("direct_answer"):

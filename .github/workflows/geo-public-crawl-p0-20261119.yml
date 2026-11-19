@@ -1,0 +1,45 @@
+name: GEO P0 — public AI bot crawl audit (read only)
+
+on:
+  push:
+    branches: [feat/geo-public-crawl-p0-20261119]
+    paths:
+      - .github/workflows/geo-public-crawl-p0-20261119.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: geo-public-crawl-p0-audit
+  cancel-in-progress: false
+
+jobs:
+  public-readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check public GEO crawl matrix from runner (location not verified)
+        id: audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::notice::User-Agent test only; runner region and true bot identity are unverified"
+          python3 services/booking_bot/scripts/geo_public_crawl_audit.py \
+            --region "github-hosted-runner-region-unverified" \
+            --out geo_public_crawl_report.json
+      - name: Upload observations (no HTML/private content)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: servgo-geo-public-crawl-matrix
+          path: geo_public_crawl_report.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Mark probe failed when any public check fails
+        if: steps.audit.outcome != 'success'
+        run: |
+          echo "::error::GEO P0 public crawl probe found an error; inspect report artifact"
+          exit 1

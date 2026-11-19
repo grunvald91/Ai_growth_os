@@ -17,7 +17,7 @@ from app.llm.fake import FakeLLMProvider
 from app.llm.schemas import LLMResponse
 from app.llm.service import LLMService
 from app.main import app
-from app.models.domain import Product, Task
+from app.models.domain import Artifact, ArtifactStatus, Product, Task, TaskStatus
 from app.privacy import PrivacyGateway
 
 
@@ -353,6 +353,138 @@ def test_company_account_cannot_use_another_companys_dispatcher(env, tmp_path, m
     assert reply.status_code == 200
     stored = db.scalar(select(DispatcherMessage).where(DispatcherMessage.role == "user"))
     assert stored.product_id == other.id
+
+
+
+def test_durable_workflow_api_confirmation_replay_and_reload(env):
+    db, _, servgo, _, _ = env
+    client = TestClient(app)
+    base = f"/studio/products/{servgo.id}/dispatch"
+    steps = [
+        {"capability": "create_post", "params": {"topic": "Пост о записи", "channel": "telegram"}},
+        {"capability": "show_work", "params": {}},
+    ]
+    response = client.post(base + "/workflows", json={"client_key": "http-workflow-1", "steps": steps})
+    assert response.status_code == 200, response.text
+    initial = response.json()["workflow"]
+    assert initial["status"] == "waiting_approval"
+    assert initial["approval"]["position"] == 0
+    assert db.scalar(select(Task)) is None
+
+    wid = initial["workflow_id"]
+    get_state = client.get(base + "/workflows/" + wid)
+    assert get_state.status_code == 200
+    assert get_state.json()["workflow"]["revision"] == initial["revision"]
+    recovered = client.get(base + "/state").json()["workflows"]
+    assert any(item["workflow_id"] == wid for item in recovered)
+    repeated = client.post(base + "/workflows", json={
+        "client_key": "http-workflow-1", "steps": steps,
+    })
+    assert repeated.status_code == 200
+    assert repeated.json()["workflow"]["workflow_id"] == wid
+    assert db.scalar(select(Task)) is None
+
+    result = client.post(base + f"/workflows/{wid}/decision", json={
+        "position": 0, "revision": initial["revision"], "accept": True,
+    })
+    assert result.status_code == 200, result.text
+    finished = result.json()["workflow"]
+    assert finished["status"] == "completed"
+    assert len(list(db.scalars(select(Task)))) == 1
+    stale = client.post(base + f"/workflows/{wid}/decision", json={
+        "position": 0, "revision": initial["revision"], "accept": True,
+    })
+    assert stale.status_code == 409
+    assert len(list(db.scalars(select(Task)))) == 1
+    resume = client.post(base + f"/workflows/{wid}/resume")
+    assert resume.status_code == 200
+    assert resume.json()["workflow"]["status"] == "completed"
+    assert len(list(db.scalars(select(Task)))) == 1
+    # The dispatch is finished but generation is still queued: keep it recoverable.
+    active = client.get(base + "/state").json()["workflows"]
+    assert any(item["workflow_id"] == wid and item["task_summary"]["queued"] == 1
+               for item in active)
+    db.scalar(select(Task)).status = TaskStatus.COMPLETED
+    db.commit()
+    # The worker marks its task completed even while the generated artifact
+    # awaits the owner's editorial decision.
+    task = db.scalar(select(Task))
+    post = Artifact(
+        product_id=servgo.id, task_id=task.id,
+        kind="channel_text", title="Пост на проверке",
+        content='{"body":"Черновик"}', status=ArtifactStatus.AWAITING_APPROVAL,
+    )
+    db.add(post)
+    db.commit()
+    final = client.get(base + "/workflows/" + wid).json()["workflow"]
+    assert final["task_summary"]["completed"] == 1
+    assert final["task_summary"]["review_pending"] == 1
+    assert final["steps"][0]["task_status"] == "completed"
+    assert final["steps"][0]["review_href"] == (
+        f"/studio/products/{servgo.id}/materials/{post.id}"
+    )
+    assert any(item["workflow_id"] == wid for item in client.get(base + "/state").json()["workflows"])
+    post.status = ArtifactStatus.APPROVED
+    db.commit()
+    reviewed = client.get(base + "/workflows/" + wid).json()["workflow"]
+    assert reviewed["task_summary"]["review_pending"] == 0
+    assert reviewed["steps"][0]["review_href"] is None
+    assert not any(item["workflow_id"] == wid for item in client.get(base + "/state").json()["workflows"])
+
+
+def test_durable_workflow_api_rejects_unsafe_steps_and_wrong_product(env):
+    db, _, servgo, other, _ = env
+    client = TestClient(app)
+    base = f"/studio/products/{servgo.id}/dispatch"
+    unsafe = client.post(base + "/workflows", json={
+        "client_key": "unsafe", "steps": [
+            {"capability": "show_work", "params": {}},
+            {"capability": "seo_factory", "params": {"horizon_days": "30"}},
+        ],
+    })
+    assert unsafe.status_code == 422
+    assert db.scalar(select(Task)) is None
+    started = client.post(base + "/workflows", json={
+        "client_key": "scoped-workflow", "steps": [
+            {"capability": "create_post", "params": {"topic": "Новый материал"}},
+            {"capability": "show_work", "params": {}},
+        ],
+    })
+    assert started.status_code == 200
+    wid = started.json()["workflow"]["workflow_id"]
+    wrong = f"/studio/products/{other.id}/dispatch/workflows/{wid}"
+    assert client.get(wrong).status_code == 404
+    assert client.post(wrong + "/decision", json={
+        "position": 0, "revision": started.json()["workflow"]["revision"], "accept": True,
+    }).status_code == 404
+    assert db.scalar(select(Task)) is None
+
+
+def test_durable_workflow_dispatcher_model_creates_approval_not_a_post(env):
+    db, _, servgo, _, provider = env
+    provider.response = LLMResponse(content=json.dumps({
+        "intent": "plan", "confidence": 0.97,
+        "steps": [
+            {"capability": "create_post", "params": {"topic": "Как заполнить окна"}},
+            {"capability": "show_work", "params": {}},
+        ],
+    }), model="fake")
+    client = TestClient(app)
+    base = f"/studio/products/{servgo.id}/dispatch"
+    response = client.post(base + "/messages", json={
+        "text": "Сделай пост и покажи задания", "client_key": "chat-workflow",
+    })
+    assert response.status_code == 200, response.text
+    assistant = response.json()["messages"][-1]
+    workflow = next(block for block in assistant["blocks"] if block["type"] == "workflow")
+    assert workflow["status"] == "waiting_approval"
+    assert workflow["approval"]["position"] == 0
+    assert db.scalar(select(Task)) is None
+    retry = client.post(base + "/messages", json={
+        "text": "Сделай пост и покажи задания", "client_key": "chat-workflow",
+    })
+    assert retry.status_code == 200 and retry.json()["replayed"] is True
+    assert db.scalar(select(Task)) is None
 
 
 def test_static_assets_are_served(env):
