@@ -115,6 +115,7 @@ def test_simple_video_creation_uses_servgo_ui_without_changing_payload_contract(
     assert 'id="wb-topic-dialog"' in html
     assert 'Продолжить к подтверждению' in html
     assert 'Без платного запуска до вашего согласия.' in html
+    assert 'value="robust"' in html and 'Автозавершение' in html
 
 
 def test_simple_video_result_prioritizes_player_and_preserves_downloads():
@@ -561,7 +562,7 @@ async def test_transient_failure_resumes_automatically_after_pause_and_finishes(
     url = f'/studio/products/{product_id}/whiteboard/{task_id}'
     with client() as browser:
         page = browser.get(url).text
-        assert 'Автоматическое продолжение 1 из 5' in page and 'Журнал ошибок (1)' in page
+        assert 'Автоматическое продолжение 1 из 12' in page and 'Журнал ошибок (1)' in page
     # The pause is respected: nothing runs before retry_at.
     assert await run_whiteboard_once(factory, settings, factory=flaky_factory, readiness=ready) == 0
     assert len(attempts) == 1
@@ -676,3 +677,80 @@ def test_refund_is_applied_once_to_old_failures_and_never_to_billable_ones():
     assert refund_unanswered(value) == 3 and value['calls'] == 2
     assert refund_unanswered(value) == 0 and value['calls'] == 2
     assert refund_unanswered({'calls': 0, 'errors': [{'http_status': 502}]}) == 0
+
+
+
+@pytest.mark.asyncio
+async def test_catalogue_outage_is_checked_unattended_after_retry_window(environment):
+    factory, settings, product_id, _ = environment
+    settings = settings.model_copy(update={'whiteboard_auto_resume_attempts': 2})
+    task_id = new_job(environment, maximum=14)
+    approve(environment, task_id)
+    async def down(*args):
+        raise ReadinessError('claudehub_unavailable')
+    for attempt in range(4):
+        assert await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=down) == 1
+        status, state = _state(factory, product_id, task_id)
+        assert status == TaskStatus.QUEUED
+        assert state['auto_resumes'] == attempt + 1
+        assert state['calls'] == 0
+        assert state['retry_at']
+        assert state['stage'] == 'retry_wait'
+        if attempt >= 2:
+            assert state['auto_resume_limit'] == 2
+            due = datetime.fromisoformat(state['retry_at'])
+            logged = datetime.fromisoformat(state['errors'][-1]['at'])
+            assert (due - logged).total_seconds() >= 1799
+        _expire_pause(factory, product_id, task_id)
+    with client() as browser:
+        html = browser.get(f'/studio/products/{product_id}/whiteboard/{task_id}').text
+        assert 'Ожидаем восстановления доступа к моделям' in html
+        assert 'Проверка не выполняет платных вызовов' in html
+    with factory() as db:
+        assert not list(db.scalars(select(AgentRun).where(AgentRun.task_id == task_id)))
+    assert await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=ready) == 1
+    status, state = _state(factory, product_id, task_id)
+    # The synthetic planner in these tests uses six narration beats (13 calls total).
+    assert status == TaskStatus.COMPLETED and state['calls'] == 13
+    assert len(state['errors']) == 4
+
+
+@pytest.mark.asyncio
+async def test_permanent_claudehub_access_failure_is_not_retried(environment):
+    factory, settings, product_id, _ = environment
+    task_id = new_job(environment)
+    approve(environment, task_id)
+    async def rejected(*args):
+        raise ReadinessError('claudehub_rejected')
+    assert await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=rejected) == 1
+    status, state = _state(factory, product_id, task_id)
+    assert status == TaskStatus.FAILED and state['error'] == 'claudehub_rejected'
+    assert state['calls'] == 0 and not state.get('retry_at')
+
+
+
+def test_unattended_headroom_is_explicitly_approved_at_creation(environment):
+    factory, settings, product_id, _ = environment
+    with factory() as db:
+        product = db.get(Product, product_id)
+        minimum = api._queue(db, product, api.CreateJob(
+            topic='Как работает онлайн-запись', visual_review=False), settings)
+        robust = api._queue(db, product, api.CreateJob(
+            topic='Как работает онлайн-запись', visual_review=False,
+            recovery_budget=True), settings)
+        assert minimum.id != robust.id
+        _, _, approval_min, request_min = records(db, minimum)
+        _, _, approval_robust, request_robust = records(db, robust)
+        assert request_min.max_api_calls == 14
+        assert request_robust.max_api_calls == 19
+        assert minimum.status == TaskStatus.WAITING_APPROVAL
+        assert robust.status == TaskStatus.WAITING_APPROVAL
+        assert approval_min.status == approval_robust.status == 'pending'
+    with client() as browser:
+        params = {'topic': 'Как работает онлайн-запись', 'duration_seconds': '30',
+                  'visual_review': 'off', 'max_api_calls': 'robust'}
+        quote = browser.get(f'/studio/products/{product_id}/whiteboard/quote.json',
+                            params=params)
+        assert quote.status_code == 200
+        assert quote.json()['required_calls'] == 14
+        assert quote.json()['limit'] == 19

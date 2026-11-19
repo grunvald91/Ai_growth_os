@@ -169,13 +169,16 @@ def approve_job(db, product_id, task_id, *, request_digest, confirmed, decided_b
 # A storyboard cut off at the (now generous) output ceiling is a runaway reply: repeating the
 # same request five times only bills the same failure again, so it is not resumed automatically.
 RESUMABLE_ERRORS = frozenset({'generation_failed', 'interrupted', 'provider_server_error',
-                              'openrouter_unavailable', 'storyboard_empty'})
+                              'openrouter_unavailable', 'claudehub_unavailable', 'storyboard_empty'})
 RESUME_ACTION = 'whiteboard_resume'
 AUTO_RESUME_ACTION = 'whiteboard_auto_resume'
 # Pause before an automatic continuation, the same every time (it never grows):
 # 5 minutes when the provider is down or silent (it is checked again at that rhythm),
 # 30 seconds for anything else (a reply that missed our format; waiting does not help it).
 PROVIDER_RESUME_DELAY = 300
+# Keep checking preflight-only outages without any paid calls; after the ordinary retry
+# window, slow the checks down to avoid repeated load while the provider is offline.
+PROVIDER_POLL_DELAY = 1800
 OTHER_RESUME_DELAY = 30
 PROVIDER_EXCEPTIONS = frozenset({'ConnectError', 'ConnectTimeout', 'ReadTimeout', 'WriteTimeout', 'PoolTimeout',
                                  'RemoteProtocolError', 'ReadError', 'TimeoutError'})
@@ -184,7 +187,7 @@ PROVIDER_EXCEPTIONS = frozenset({'ConnectError', 'ConnectTimeout', 'ReadTimeout'
 def resume_delay(code, value) -> int:
     """How long to wait before the next automatic attempt, by who caused the stop."""
     diagnostic = value.get('diagnostic') or {}
-    provider = (code in ('provider_server_error', 'openrouter_unavailable')
+    provider = (code in ('provider_server_error', 'openrouter_unavailable', 'claudehub_unavailable')
                 or diagnostic.get('exception_type') in PROVIDER_EXCEPTIONS
                 or diagnostic.get('http_status') in TRANSIENT_STATUSES)
     return PROVIDER_RESUME_DELAY if provider else OTHER_RESUME_DELAY
@@ -249,11 +252,17 @@ def schedule_auto_resume(db, task, source, value, payload, code, *, attempts, no
     """
     used = int(value.get('auto_resumes', 0))
     limit = attempts
-    if (code not in RESUMABLE_ERRORS or used >= limit or payload.visual_repair_from is not None
-            or not (value.get('calls', 0) < call_limit(value, payload) or value.get('failed_stage') == 'rendering')):
+    # Preflight only checks connectivity/catalogues. No paid call has begun on this
+    # attempt, so a prolonged outage must not require an operator to click Resume.
+    provider_wait = (value.get('failed_stage') == 'preflight'
+                     and code in {'openrouter_unavailable', 'claudehub_unavailable'})
+    if (code not in RESUMABLE_ERRORS or (used >= limit and not provider_wait)
+            or payload.visual_repair_from is not None
+            or not (value.get('calls', 0) < call_limit(value, payload) or provider_wait
+                    or value.get('failed_stage') == 'rendering')):
         return False
     now = now or datetime.now(timezone.utc)
-    delay = resume_delay(code, value)
+    delay = PROVIDER_POLL_DELAY if provider_wait and used >= limit else resume_delay(code, value)
     db.add(Approval(product_id=task.product_id, artifact_id=source.id, action_type=AUTO_RESUME_ACTION,
                     risk_level='YELLOW', status='approved', requested_by='policy', decided_by='policy:auto_resume',
                     decided_at=now, reason=f'auto resume {used + 1}/{limit} after {code} at {value.get("failed_stage")}; '

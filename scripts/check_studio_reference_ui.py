@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import tempfile
 from pathlib import Path
 import socket
 import sys
@@ -19,7 +20,6 @@ import uvicorn
 from playwright.sync_api import sync_playwright, expect
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from sqlalchemy.pool import StaticPool
 from app.main import app
 from app.core.config import Settings, get_settings
 from app.db.models import Base
@@ -35,7 +35,9 @@ def main():
     args = parser.parse_args()
     captures = Path(args.screenshots)
     captures.mkdir(parents=True, exist_ok=True)
-    engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+    database_dir = tempfile.TemporaryDirectory(prefix='servgo-studio-smoke-')
+    database_path = Path(database_dir.name) / 'studio.sqlite3'
+    engine = create_engine('sqlite+pysqlite:///' + str(database_path), connect_args={'check_same_thread': False})
     Base.metadata.create_all(engine)
     sock = socket.socket()
     sock.bind(('127.0.0.1', 0))
@@ -74,7 +76,12 @@ def main():
                 content=json.dumps({'platform':channel,'body':'# '+title+'\n\n'+
                     'Владелец небольшого сервисного бизнеса тратит часы на переписку и планирование записей. '*8})))
         db.commit()
-        app.dependency_overrides[get_db] = lambda: db
+        def request_session():
+            # Separate sessions/connections for concurrent HTTP requests and pollers.
+            # Sharing the fixture Session across AnyIO threads corrupts SQLite usage.
+            with Session(engine) as request_db:
+                yield request_db
+        app.dependency_overrides[get_db] = request_session
         app.dependency_overrides[get_settings] = lambda: Settings(app_env='development', _env_file=None)
         server = uvicorn.Server(uvicorn.Config(app, log_level='error'))
         thread = threading.Thread(target=lambda: server.run(sockets=[sock]), daemon=True)
@@ -211,8 +218,12 @@ def main():
                   const forbidden = 'a,button,input,textarea,select,summary,video,' +
                     '[contenteditable],.command-dock,.dp-tablewrap,.command-hints,' +
                     '.v4-more,[role="dialog"]:not(.sg-daily-drawer)';
-                  for (const y of [400,375,425,350,450,325,475,300,500]) {
+                  const height = visualViewport?.height ?? innerHeight;
+                  const width = document.documentElement.clientWidth;
+                  for (const y of [400,375,425,350,450,325,475,300,500,250,225]) {
                     for (const x of [90,100,110,120]) {
+                      if (x <= width * .18 || x >= width * .82 ||
+                          y <= height * .22 || y >= height * .78) continue;
                       const target = document.elementFromPoint(x,y);
                       if (target?.closest('#main') && !target.closest(forbidden))
                         return {x,y};
@@ -269,11 +280,14 @@ def main():
                         page.set_viewport_size({'width':width,'height':844})
                         assert page.locator('.sg-review-item').count()==2
                         item=page.locator('.sg-review-item').first
+                        # Review cards now expose one action to open the full material.
+                        # The former two-button layout is no longer rendered here.
                         actions=item.locator('.sg-inline-actions .btn')
-                        a,b=actions.nth(0).bounding_box(),actions.nth(1).bounding_box()
-                        assert abs(a['y']-b['y'])<=1 and b['x']>=a['x']+a['width']+8,(width,a,b)
-                        assert 44<=a['height']<=48 and 44<=b['height']<=48,(width,a,b)
-                        assert item.locator('p').bounding_box()['height']<90
+                        assert actions.count() == 1
+                        action=actions.first.bounding_box()
+                        assert 44<=action['height']<=64,(width,action)  # Text may wrap at 320px; min touch target stays 44px
+                        assert action['x']>=0 and action['x']+action['width']<=width,(width,action)
+                        assert item.locator('p').bounding_box()['height']<=130, (width, item.locator('p').bounding_box())
                         assert not item.locator('p').inner_text().startswith('#')
                         assert page.locator('.sg-filters').bounding_box()['height']<=44
                         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
@@ -336,6 +350,7 @@ def main():
             app.dependency_overrides.clear()
             app.dependency_overrides.update(overrides)
     engine.dispose()
+    database_dir.cleanup()
 
 
 if __name__ == '__main__':

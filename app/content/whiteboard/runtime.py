@@ -84,6 +84,9 @@ MESSAGES = {
     'openrouter_forbidden': 'OpenRouter вернул HTTP 403. Новые вызовы остановлены; проверьте разрешения аккаунта и доступ сервера.',
     'openrouter_key_invalid': 'OpenRouter не принял API-ключ. Администратору нужно проверить ключ.',
     'openrouter_unavailable': 'OpenRouter сейчас недоступен с сервера. Платная генерация не началась.',
+    'openrouter_catalog_error': 'OpenRouter отклонил проверку каталога моделей. Автоматические повторы остановлены: необходимо проверить параметры подключения.',
+    'claudehub_unavailable': 'ClaudeHub временно недоступен при проверке моделей. Генерация автоматически продолжится после восстановления API.',
+    'claudehub_catalog_error': 'ClaudeHub отклонил проверку каталога моделей. Необходимо проверить настройки доступа и API.',
     'model_unavailable': 'Выбранная модель или голос отсутствует в каталоге провайдера.',
     'approval_invalid': 'Подтверждение отсутствует или относится к другой версии задания.',
     'call_limit': 'Достигнут подтверждённый лимит API-вызовов. Чтобы доделать видео, добавьте вызовы и продолжите: готовые этапы повторно не оплачиваются.',
@@ -147,7 +150,7 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
         if response.status_code == 401:
             raise ReadinessError('openrouter_key_invalid')
         if response.status_code != 200:
-            raise ReadinessError('openrouter_unavailable')
+            raise ReadinessError('openrouter_unavailable' if response.status_code in TRANSIENT_STATUSES else 'openrouter_catalog_error')
         catalogues = [('models?output_modalities=speech', models.speech)]
         if not regions_on_claudehub(models):
             catalogues.append(('models', models.regions))
@@ -155,8 +158,13 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
             catalogues.insert(0, ('images/models', models.image))
         for endpoint, chosen in catalogues:
             result = await client.get(endpoint, headers=headers)
+            if result.status_code == 403:
+                code = 'openrouter_security_policy' if 'Access denied by security policy' in result.text else 'openrouter_forbidden'
+                raise ReadinessError(code)
+            if result.status_code == 401:
+                raise ReadinessError('openrouter_key_invalid')
             if result.status_code != 200:
-                raise ReadinessError('openrouter_unavailable')
+                raise ReadinessError('openrouter_unavailable' if result.status_code in TRANSIENT_STATUSES else 'openrouter_catalog_error')
             entries = result.json().get('data', [])
             match = next((m for m in entries if m.get('id') == chosen), None)
             if match is None:
@@ -168,7 +176,18 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
         return {'ready': True, 'code': 'ready'}
     async def check_claudehub(connection):
         response = await connection.get('models', headers={'Authorization':'Bearer '+settings.xai_api_key})
-        identifiers = {item.get('id') for item in response.json().get('data', [])} if response.status_code == 200 else set()
+        if response.status_code in (401, 403):
+            raise ReadinessError('claudehub_rejected')
+        if response.status_code != 200:
+            code = 'claudehub_unavailable' if response.status_code in TRANSIENT_STATUSES else 'claudehub_catalog_error'
+            raise ReadinessError(code)
+        try:
+            entries = response.json()['data']
+            if not isinstance(entries, list):
+                raise ValueError('Invalid model catalogue')
+            identifiers = {item.get('id') for item in entries if isinstance(item, dict)}
+        except (KeyError, ValueError, TypeError):
+            raise ReadinessError('claudehub_unavailable') from None
         if 'gemini-3.1-flash-image' not in identifiers:
             raise ReadinessError('claudehub_image_unavailable')
         if regions_on_claudehub(models) and models.regions not in identifiers:
