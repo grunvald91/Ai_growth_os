@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # The limit does not apply to ordinary Studio posts or content plans.
     seo_articles_per_day: int = Field(default=30, ge=1)
     seo_publications_per_day: int = Field(default=3, ge=1)
+    # Disabled by default. Set only AFTER the public verification key file
+    # is accessible on servgo.ru. Key is a public domain verification token.
+    geo_indexnow_key: str | None = None
     # Global safe rollout switch; individual owners also must enable SEO.
     # Keep it OFF until three real end-to-end production canaries pass.
     seo_autorun_enabled: bool = False

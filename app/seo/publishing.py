@@ -341,6 +341,10 @@ def _go_live(db: Session, row: Artifact, article: ArticleArtifact, approval: App
     db.add(Publication(product_id=row.product_id, artifact_id=row.id, approval_id=approval.id, channel=CHANNEL,
                        status="published", external_reference=f"/blog/{slug}", published_at=now))
     row.status = ArtifactStatus.PUBLISHED
+    # Outbox is committed atomically with the public publication. No network
+    # or IndexNow call is permitted inside this transaction.
+    from app.seo.indexnow_outbox import enqueue_published_article
+    enqueue_published_article(db, row, slug)
     return slug
 
 

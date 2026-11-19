@@ -72,6 +72,10 @@ async def test_clean_critic_publishes_without_owner_confirmation(env, tmp_path, 
     assert approval.status == "approved" and approval.decided_by == "policy:critic_reviewed"
     assert publish_if_clear(db, article_id).reason == "already_published"
     assert publish_owner_approved(db) == 0
+    # IndexNow is queued ONLY after publication, in the same database transaction.
+    notices = list(db.scalars(select(Artifact).where(Artifact.kind == "geo_indexnow_outbox")))
+    assert len(notices) == 1
+    assert json.loads(notices[0].content)["url"] == "https://servgo.ru/blog/kak-vesti-zapis-klientov"
 
 
 @pytest.mark.asyncio
