@@ -119,8 +119,13 @@ def test_unverified_domain_key_never_submits_and_can_be_retried(scenario):
     fake = FakeIndexNow("ab123456", verified=False)
     assert deliver_one(db, key="ab123456", client=fake) == 0
     assert [x[0] for x in fake.calls] == ["GET"]
-    assert json.loads(_notice(db).content)["attempts"] == 0
-    assert deliver_one(db, key="ab123456", client=FakeIndexNow("ab123456")) == 1
+    state = json.loads(_notice(db).content)
+    assert state["attempts"] == 0
+    assert state["next_attempt_at"] is not None
+    assert deliver_one(db, key="ab123456", client=FakeIndexNow("ab123456")) == 0
+    from datetime import timedelta
+    recovered_at = datetime.fromisoformat(state["next_attempt_at"]) + timedelta(minutes=1)
+    assert deliver_one(db, key="ab123456", client=FakeIndexNow("ab123456"), now=recovered_at) == 1
 
 
 def test_transient_failure_has_backoff_and_technical_retries_are_bounded(scenario):
