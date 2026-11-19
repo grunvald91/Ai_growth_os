@@ -6,6 +6,7 @@ Credentials are server-side only and never written to the database/logs.
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -213,6 +214,38 @@ async def inspect_google_article(db: Session, product_id: UUID, *,
         return {"url": url, "status": "provider_unavailable", "indexing": None}
 
 
+def indexnow_delivery_metrics(db: Session, product_id: UUID, *,
+                              env: dict | None = None) -> dict:
+    """Local delivery receipts, not search indexing or AI citation evidence.
+
+    IndexNow is a ServGo-only pilot. Never expose other products' outbox
+    events (or their URLs), and never claim an HTTP 202 means indexed.
+    """
+    slug = db.scalar(select(Product.slug).where(Product.id == product_id))
+    if slug != "servgo":
+        return {"status": "not_applicable", "events_total": None}
+    variables = os.environ if env is None else env
+    counts = {
+        "pending": 0, "accepted_by_endpoint": 0, "rejected": 0,
+        "failed_after_retries": 0, "skipped_unpublished": 0, "other": 0,
+    }
+    for content in db.scalars(select(Artifact.content).where(
+            Artifact.product_id == product_id,
+            Artifact.kind == "geo_indexnow_outbox")):
+        try:
+            event = json.loads(content)
+            state = event.get("state") if isinstance(event, dict) else None
+        except (TypeError, ValueError):
+            state = None
+        counts[state if state in counts and state != "other" else "other"] += 1
+    return {
+        "status": "configured" if variables.get("GEO_INDEXNOW_KEY") else "not_configured",
+        "events_total": sum(counts.values()),
+        "states": counts,
+        "indexing_confirmed": None,
+    }
+
+
 async def company_search_metrics(db: Session, product_id: UUID, *,
                                  days: int = 28,
                                  client: httpx.AsyncClient | None = None,
@@ -229,6 +262,7 @@ async def company_search_metrics(db: Session, product_id: UUID, *,
             yandex = await yandex_metrics(urls, days=days, client=c, env=env)
     return {"product_id": str(product_id), "published_url_count": len(urls),
             "google_search_console": google, "yandex_webmaster": yandex,
+            "indexnow_delivery": indexnow_delivery_metrics(db, product_id, env=env),
             "bing_ai_performance": {"status": "no_verified_api_integration",
                                     "citations": None},
             "chatgpt_search": {"status": "no_verified_citation_feed",

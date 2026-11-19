@@ -737,6 +737,24 @@ async def seo_search_metrics_page(product_id: UUID, days: int = 28,
                      + '<p>API может возвращать неполную выборку страниц — '
                        'это не гарантированные общие показатели.</p>'
                      + '<ul>' + ''.join(entries) + '</ul></section>')
+    delivery = metrics['indexnow_delivery']
+    if delivery['status'] == 'not_applicable':
+        cards.append('<section class="panel"><h3>IndexNow</h3>'
+                     '<p>Уведомления пока подключены только для блога ServGo. '
+                     'Для блога этой компании статус отправки неизвестен.</p></section>')
+    else:
+        state = delivery['states']
+        configured = ('Ключ указан в настройках сервера; доступность файла подтверждения не проверена.' if delivery['status'] == 'configured'
+                      else 'Ключ домена не настроен; уведомления не отправляются.')
+        cards.append('<section class="panel"><h3>IndexNow</h3><p>'
+                     + html.escape(configured)
+                     + '</p><p>Событий: ' + str(delivery['events_total'])
+                     + '; приняты endpoint: ' + str(state['accepted_by_endpoint'])
+                     + '; ожидают: ' + str(state['pending'])
+                     + '; отклонены/ошибки: '
+                     + str(state['rejected'] + state['failed_after_retries'])
+                     + '.</p><p>Приём уведомления не доказывает индексацию '
+                       'или цитирование в ответах ИИ.</p></section>')
     content = ('<p><a href="/studio/products/' + str(product_id)
                + '/seo">← SEO-завод</a></p>'
                + '<p>Опубликованных адресов: '
@@ -766,9 +784,11 @@ def seo_insights_html(db: Session, product_id: UUID) -> str:
         '<div class="seo-insights-body">'
         f'<p>Опубликовано статей: {report["published_articles"]}. '
         f'Скрыто: {report["hidden_articles"]}.</p>'
-        '<p>Google Search Console, Яндекс Вебмастер и Bing AI Performance '
-        'не предоставляют подтверждённых данных. '
-        'Показы, клики, позиции и цитирования пока неизвестны.</p>'
+        '<p>Данные Google Search Console и Яндекс Вебмастера отображаются '
+        'после подключения соответствующих источников. '
+        'При отсутствии подключения показатели неизвестны. '
+        'Подтверждённые данные о цитировании в ChatGPT и Bing Copilot '
+        'пока не подключены.</p>'
         '<p>Публикация статьи сама по себе не подтверждает индексацию.</p>'
         f'<a class="btn secondary" href="/studio/products/{product_id}/seo/search-metrics">'
         'Открыть поисковые показатели</a></div></details>'
