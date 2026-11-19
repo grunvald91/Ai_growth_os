@@ -1,0 +1,53 @@
+name: Whiteboard production read-only diagnosis
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/whiteboard-production-diagnosis.yml"
+      - "scripts/diagnostics/whiteboard_jobs_readonly.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whiteboard-prod-diagnosis
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate pinned production host identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS" || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/whiteboard-host-keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/whiteboard-one-key
+            if ssh-keygen -lf /tmp/whiteboard-one-key 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/whiteboard-host-keys
+          test -s ~/.ssh/known_hosts || { echo "::error::Pinned host identity mismatch"; exit 1; }
+      - name: Inspect production whiteboard jobs (no writes or paid models)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "== Worker status"
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST"             'docker ps --format "{{.Names}} {{.Status}}" | grep -E "ai-growth-os-(worker|api)-1"'
+          echo "== Worker retry policy"
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST"             'docker exec ai-growth-os-worker-1 python -c "from app.core.config import get_settings; s=get_settings(); print(chr(10).join([str(s.whiteboard_auto_resume_attempts), str(s.release_sha)]))"'
+          echo "== Last 8 whiteboard jobs; errors only"
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST"             'docker exec -i ai-growth-os-api-1 python -'             < scripts/diagnostics/whiteboard_jobs_readonly.py
