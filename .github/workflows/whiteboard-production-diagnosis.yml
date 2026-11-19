@@ -3,7 +3,7 @@ name: Whiteboard production read-only diagnosis
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, 'diag/whiteboard-c55-20261119']
     paths:
       - ".github/workflows/whiteboard-production-diagnosis.yml"
       - "scripts/diagnostics/whiteboard_jobs_readonly.py"
