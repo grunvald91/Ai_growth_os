@@ -93,6 +93,13 @@ class CommentService:
         )
         self.secrets = CommentSecrets(settings.products_root)
 
+    async def channel_token(self, channel):
+        """Refresh VK ID credentials before reading/sending, not after a send claim."""
+        if channel.platform == "vk":
+            from app.social_vk import active_token
+            return await active_token(self.settings, channel)
+        return self.secrets.load_token(channel.id)
+
     def product(self, product_id, *, lock=False):
         from app.models.domain import Product
         query = select(Product).where(Product.id == product_id)
@@ -284,7 +291,7 @@ class CommentService:
                 pass
 
         try:
-            token = self.secrets.load_token(channel.id)
+            token = await self.channel_token(channel)
             rows, cursor = await self.gateway.fetch(channel, token)
         except Exception as exc:
             if not background:
@@ -634,7 +641,7 @@ class CommentService:
             tool_call_id=call.id, channel=comment.platform, status="sending")
         self.db.add(publication)
         comment.status = "sending"
-        token = self.secrets.load_token(channel.id)
+        token = await self.channel_token(channel)
         # Durable claim before HTTP: retries/restarts cannot send twice.
         self.db.commit()
         try:
