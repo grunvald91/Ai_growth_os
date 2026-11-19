@@ -428,10 +428,11 @@ def review_section_nav(product_id, selected="pending") -> str:
     )
 
 
-def _review_paging(product_id, section: str, page: int, page_count: int) -> str:
+def _review_paging(product_id, section: str, page: int, page_count: int, *, view: str = "all") -> str:
     if page_count <= 1:
         return ""
-    base = f"/studio/products/{product_id}/review?section={section}&page="
+    view_query = "&view=issues" if section == "seo" and view == "issues" else ""
+    base = f"/studio/products/{product_id}/review?section={section}{view_query}&page="
     previous = (f'<a class="btn secondary" href="{base}{page-1}">← Назад</a>'
                 if page > 1 else "")
     following = (f'<a class="btn secondary" href="{base}{page+1}">Дальше →</a>'
@@ -495,7 +496,7 @@ def review_history_html(product_id, result) -> str:
     )
 
 
-def seo_progress_html(product_id, result) -> str:
+def seo_progress_html(product_id, result, *, issues_only=False) -> str:
     """Per-step observations: no invented score or automatic publish claim."""
     from app.api.studio_resource_widgets import resource_widget
 
@@ -526,10 +527,12 @@ def seo_progress_html(product_id, result) -> str:
                    "Публикация не подтверждена")
         href = (f"{base}/materials/{article.id}" if article
                 else f"{base}/tasks/{task.id}")
+        issue = entry.get("issue_message")
+        issue_badge = f'<span class="sg-warning">{esc(issue)}</span>' if issue else ""
         primary = (
             '<div class="sg-review-item">'
             '<div class="sg-review-top"><span class="sg-tag">SEO-статья</span>'
-            f'<span class="sg-channel">{esc(entry["status"])}</span></div>'
+            f'<span class="sg-channel">{esc(entry["status"])}</span>{issue_badge}</div>'
             f'<h3>{esc(title)}</h3>'
             f'<div class="sg-review-footer"><span>{esc(task_state)}</span>'
             f'<a class="btn secondary" href="{href}">Открыть {("статью" if article else "задачу")}</a>'
@@ -543,11 +546,23 @@ def seo_progress_html(product_id, result) -> str:
         )
         cards.append(resource_widget(
             kind="material", primary_html=primary,
-            description=stages, note="Согласование статьи не равно её публикации.",
+            description=stages,
+            note=(issue + ". Проверьте исходные записи; автоматически статусы не меняются."
+                  if issue else "Согласование статьи не равно её публикации."),
             detail_label="Этапы подготовки",
         ))
-    empty = ('<p class="sg-review-empty">Задач SEO-завода по производству статей '
+    empty = ('<p class="sg-review-empty">Заданий с обнаруженными отклонениями нет.</p>'
+             if issues_only else
+             '<p class="sg-review-empty">Задач SEO-завода по производству статей '
              'для этой компании пока не найдено.</p>')
+    filters = (
+        '<nav class="sg-filters" aria-label="Проверка SEO-статей">'
+        f'<a class="sg-filter {"is-active" if not issues_only else ""}" '
+        f'href="{base}/review?section=seo">Все SEO-статьи</a>'
+        f'<a class="sg-filter {"is-active" if issues_only else ""}" '
+        f'href="{base}/review?section=seo&view=issues">'
+        f'Нужна проверка ({result.issue_total})</a></nav>'
+    )
     return (
         '<section class="sg-surface sg-review-page">'
         + review_section_nav(product_id, "seo")
@@ -556,8 +571,12 @@ def seo_progress_html(product_id, result) -> str:
         '<h2>Статусы SEO-статей</h2>'
         '<p>Задание, материал, проверка и публикация — отдельные подтверждаемые этапы.</p>'
         '</div>'
-        f'<span class="sg-count">Заданий: {result.total}</span></div>'
+        f'<span class="sg-count">{"Проблемных заданий" if issues_only else "Заданий"}: {result.total}</span></div>'
+        + filters
+        + '<p class="sg-review-showing">Сверка по внутренним записям ServGo. '
+          'Это не внешняя проверка доступности страницы в браузере.</p>'
         f'<div class="sg-review-list">{"".join(cards) or empty}</div>'
-        + _review_paging(product_id, "seo", result.page, result.page_count)
+        + _review_paging(product_id, "seo", result.page, result.page_count,
+                         view="issues" if issues_only else "all")
         + '</section>'
     )
