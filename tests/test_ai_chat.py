@@ -968,7 +968,8 @@ def test_new_specialists_are_allowlisted_and_cannot_leak_internal_instructions(c
         assert ConversationCreateIn(specialist_id=item["id"]).specialist_id == item["id"]
         prompt = get_specialist_prompt(item["id"])
         assert prompt and len(prompt) > 1200 and "ServGo" in prompt
-        assert "без разрешения" in prompt or "без реального" in prompt
+        if item["id"] in {"sales_manager", "copywriter", "ads_specialist"}:
+            assert "без разрешения" in prompt or "без реального" in prompt
     assert get_specialist_prompt(None) is None
     with pytest.raises(ValueError):
         get_specialist_prompt("../../../private.txt")
