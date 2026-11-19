@@ -172,3 +172,20 @@ def test_owner_review_prompt_has_verified_evidence_from_current_profile():
     assert "approved_company_claims(settings.products_root)" in source
     assert '"approved_company_facts": verified_facts' in source
     assert '"verified_company_features"' not in source
+
+
+def test_approved_servgo_facts_are_reader_safe_without_losing_feature_limits():
+    import json
+    from pathlib import Path
+    source = Path(__file__).resolve().parents[1] / "products/servgo/company-profile.json"
+    profile = json.loads(source.read_text(encoding="utf-8"))
+    approved = [fact["statement"] for fact in profile["proof"]["approved_facts"]]
+    assert all(fact["evidence_ref"] for fact in profile["proof"]["approved_facts"])
+    assert any("дату следующего контакта" in statement for statement in approved)
+    assert all("не подтвержден" not in statement.casefold() for statement in approved)
+    assert all("до приёмки" not in statement.casefold() for statement in approved)
+    assert "не подтверждена" not in profile["brand"]["positioning"].casefold()
+    constraints = " ".join(profile["constraints"]["operational"])
+    assert "автоматические рассылки" in constraints
+    assert "технические замечания критика" in constraints
+    assert any("автоматическая отправка" in item["question"] for item in profile["unknowns"])
