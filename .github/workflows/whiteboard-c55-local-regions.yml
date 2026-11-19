@@ -1,0 +1,53 @@
+name: Whiteboard c55 one-off offline region repair
+
+on:
+  push:
+    branches: [ops/whiteboard-c55-offline-region-fallback]
+    paths:
+      - "scripts/operations/whiteboard_c55_offline_regions.py"
+      - ".github/workflows/whiteboard-c55-local-regions.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whiteboard-c55-local-regions
+  cancel-in-progress: false
+
+jobs:
+  fallback:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 12
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python syntax
+        run: python -m py_compile scripts/operations/whiteboard_c55_offline_regions.py
+      - name: Pin and verify production SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS"
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519 "$HOST" 2>/dev/null > /tmp/c55-local-host-key
+          ssh-keygen -lf /tmp/c55-local-host-key | grep -q "SHA256:$HOST_FP "
+          cat /tmp/c55-local-host-key >> ~/.ssh/known_hosts
+      - name: Dry-run nonpaid plans against immutable prior stages and explicit owner cap
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'docker exec -i ai-growth-os-api-1 python -' \
+            < scripts/operations/whiteboard_c55_offline_regions.py
+      - name: Save only six local region checkpoints; no model calls or resumption
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'docker exec -i ai-growth-os-api-1 python - --apply' \
+            < scripts/operations/whiteboard_c55_offline_regions.py
