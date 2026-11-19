@@ -48,10 +48,11 @@ jobs:
           sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           echo "== Runtime containers"
-          docker ps --format '{{.Names}} {{.Status}}' | grep -E 'ai-growth-os-(api|team-worker)' || true
+          docker ps --format '{{.Names}} {{.Status}}' | grep -E 'ai-growth-os-(api|worker)' || true
           echo "== Database / article inspection (read-only)"
           docker exec -i ai-growth-os-api-1 python - <<'PY'
           import json
+          import os
           from datetime import datetime, timedelta, timezone
           from sqlalchemy import select
           from app.core.config import get_settings
@@ -62,6 +63,7 @@ jobs:
           from app.workflows.article_contracts import ArticleArtifact
 
           settings = get_settings()
+          print("deployed_release_sha=", os.environ.get("RELEASE_SHA", "unknown"))
           print("seo_global_autorun=", settings.seo_autorun_enabled)
           print("seo_servgo_autorun=", settings.seo_servgo_autorun_enabled)
           with SessionLocal() as db:
