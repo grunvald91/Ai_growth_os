@@ -134,7 +134,6 @@ def test_audit_classifies_real_overdue_and_publication_mismatches(diagnostic_env
     for task in (waiting_owner, future_task, recent):
         assert statuses[task.id]["issue_code"] is None
     assert statuses[waiting_owner.id]["status"] == "Ждёт решения владельца"
-    assert statuses[foreign.id]["issue_code"] if foreign.id in statuses else True
     assert foreign.id not in statuses
     assert len(audit.issues) == 10
     assert audit.counts["publication_mismatch"] == 4
@@ -147,7 +146,6 @@ def test_audit_classifies_real_overdue_and_publication_mismatches(diagnostic_env
 def test_seo_issue_filter_pagination_and_owner_daily_summary(diagnostic_env):
     db, client, own, other = diagnostic_env
     now = datetime.now(timezone.utc)
-    old = now - timedelta(days=5)
     for i in range(36):
         job(db, own, f"failed-{i}", TaskStatus.FAILED)
     safe = job(db, own, "future", TaskStatus.QUEUED, due_at=now + timedelta(days=3))
@@ -172,10 +170,10 @@ def test_seo_issue_filter_pagination_and_owner_daily_summary(diagnostic_env):
     assert all_view.total == 37
     assert all_view.issue_total == 36
     assert issues_view.total == 36
-    assert all_view.records[0]["status"] == "В очереди" or any(
+    assert any(
         entry["task"].id == safe.id and entry["status"] == "В очереди"
         for entry in all_view.records
-    )  # first page contains newest tasks; future task may be on the first page
+    )  # The future scheduled item remains normal, not an issue.
 
     summary = client.get(base + "/home-summary.json")
     assert summary.status_code == 200
