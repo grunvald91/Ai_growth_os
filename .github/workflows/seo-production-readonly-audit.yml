@@ -83,6 +83,29 @@ jobs:
                   count = sum(t.status == status for t in tasks)
                   if count:
                       print("seo_tasks_", status.value, "=", count, sep="")
+              # Include saved drafts and held articles too: those are not
+              # repaired by a deploy and cannot be inferred from the public feed.
+              all_articles = list(db.scalars(select(Artifact).where(
+                  Artifact.product_id == p.id, Artifact.kind == "article")))
+              print("article_artifacts_total=", len(all_articles))
+              from collections import Counter
+              print("article_states=", json.dumps(dict(Counter(
+                  str(a.status.value if hasattr(a.status, "value") else a.status)
+                  for a in all_articles)), ensure_ascii=False))
+              for art in all_articles:
+                  try:
+                      parsed = ArticleArtifact.model_validate_json(art.content)
+                      issues = static_problems(parsed)
+                      if issues:
+                          print("article_review_needed=", json.dumps({
+                              "status": str(art.status.value if hasattr(art.status, "value") else art.status),
+                              "issues": issues[:5],
+                              "task_state": str(db.get(Task, art.task_id).status.value)
+                                  if art.task_id and db.get(Task, art.task_id) else None,
+                          }, ensure_ascii=False))
+                  except Exception:
+                      print("article_parse_problem_state=",
+                            str(art.status.value if hasattr(art.status, "value") else art.status))
               pubs = db.execute(select(Artifact, Publication)
                   .join(Publication, Publication.artifact_id == Artifact.id)
                   .where(Publication.product_id == p.id,
