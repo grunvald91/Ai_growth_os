@@ -72,7 +72,7 @@ def test_daily_drawer_and_compact_navigation_use_v4_real_routes(live):
     assert 'id="sgDailyDrawer"' in page.text
     assert 'id="sgDailyHandle"' in page.text
     assert 'id="sgDailyBackdrop"' in page.text
-    assert '/studio/assets/growth-daily.js?v=3' in page.text
+    assert '/studio/assets/growth-daily.js?v=4' in page.text
     assert '/studio/assets/growth-daily.css?v=5' in page.text
     assert 'id="sgOrgMenu" hidden' in page.text
     nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
