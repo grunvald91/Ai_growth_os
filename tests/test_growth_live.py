@@ -1270,7 +1270,7 @@ def test_mobile_seo_dashboard_prioritizes_status_and_hides_process_details(live)
     assert 'Запусков пока нет.' in page.text
     assert 'Подключить SEO-завод' in page.text
     assert 'после отдельного серверного выпуска' not in page.text
-    assert '/studio/assets/growth-servgo-air.css?v=13' in page.text
+    assert '/studio/assets/growth-servgo-air.css?v=14' in page.text
 
 
 def test_notification_bell_is_real_svg_centered_on_every_v4_screen(live):
@@ -1423,5 +1423,5 @@ def test_owner_home_chat_canvas_overrides_later_air_surface_styles():
     assert 'outline:none;' in active
     assert 'outline:1px solid var(--s-accent);' not in active
     assert (ASSETS.parent / "growth_v4.py").read_text(encoding="utf-8").count(
-        "growth-servgo-air.css?v=13"
+        "growth-servgo-air.css?v=14"
     ) == 1
