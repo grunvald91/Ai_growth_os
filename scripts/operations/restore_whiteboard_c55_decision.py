@@ -20,7 +20,7 @@ from app.content.whiteboard.review import (
 )
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.models.domain import TaskStatus
+from app.models.domain import Task, TaskStatus
 
 TASK_ID = UUID("c55fd232-73f7-4080-b15e-026c4c3e6df3")
 
@@ -37,7 +37,7 @@ def recover(*, apply: bool) -> dict:
     settings = get_settings()
     with SessionLocal() as db:
         # Hold the task row lock until the checkpoint update is complete.
-        task = db.get(__import__("app.models.domain", fromlist=["Task"]).Task, TASK_ID)
+        task = db.get(Task, TASK_ID)
         if task is None or task.assigned_agent != AGENT:
             raise RuntimeError("Expected Whiteboard task does not exist")
         task = owner_task(db, task.product_id, TASK_ID, lock=True)
