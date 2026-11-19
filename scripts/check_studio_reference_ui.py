@@ -286,7 +286,9 @@ def main():
                         # lines; require a touch target, not a fixed height.
                         assert a is not None and 44<=a['height']<=72,(width,a)
                         assert 0<=a['x'] and a['x']+a['width']<=width+1,(width,a)
-                        assert a['width']>=width*.55,('review action too narrow',width,a)
+                        actions_box=item.locator('.sg-inline-actions').bounding_box()
+                        assert actions_box is not None and a['width']>=actions_box['width']-1,(
+                            'review action does not fill its action row',width,a,actions_box)
                         assert item.locator('p').bounding_box()['height']<90
                         assert not item.locator('p').inner_text().startswith('#')
                         # Five category tabs are horizontally scrollable on
