@@ -171,3 +171,23 @@ def test_claudehub_catalogue_outage_is_not_mistaken_for_missing_models(status, e
             assert caught.value.code == expected
     asyncio.run(run())
     assert calls == ['/v1/models']
+
+
+def test_claudehub_network_timeout_is_classified_as_claudehub_outage():
+    from app.content.whiteboard.runtime import configured_models, preflight
+    from app.core.config import Settings
+    cfg = Settings(_env_file=None, xai_api_key='test-key', openrouter_api_key='media-key',
+        xai_base_url='https://api.claudehub.fun/v1',
+        whiteboard_storyboard_model='kimi-2.7',
+        whiteboard_image_model='gemini-3.1-flash-image',
+        whiteboard_regions_model='gemini-flash-3.8',
+        whiteboard_speech_model='x-ai/grok-voice-tts-1.0', whiteboard_voice='eve')
+    def fail(_):
+        raise httpx.ConnectTimeout('provider connection timed out')
+    async def run():
+        async with httpx.AsyncClient(base_url=cfg.xai_base_url + '/',
+                                     transport=httpx.MockTransport(fail)) as connection:
+            with pytest.raises(ReadinessError, match='claudehub_unavailable'):
+                await preflight(cfg, configured_models(cfg), cfg.whiteboard_voice,
+                                claudehub_client=connection)
+    asyncio.run(run())
