@@ -183,9 +183,7 @@ def candidate_for(original: ArticleArtifact, slug: str, cluster) -> ArticleArtif
              "**Коротко:** " + reader.direct_answer]
     parts.extend("## " + section.heading + "\n\n" + section.body
                  for section in reader.sections)
-    if reader.fact_renderings:
-        parts.append("## Проверенные факты о компании\n\n" + "\n".join(
-            "- " + fact.text for fact in reader.fact_renderings))
+    # Fact renderings stay as immutable critic evidence, not a public checklist.
     parts.append(reader.closing)
     if reader.faq:
         parts.append("## Частые вопросы\n\n" + "\n\n".join(
