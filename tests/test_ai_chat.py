@@ -808,7 +808,7 @@ def test_specialist_catalog_validation_and_role_persists_in_chat(chat_env):
         catalog_response = client.get("/studio/api/ai-chat/specialists")
         assert catalog_response.status_code == 200
         catalog = catalog_response.json()["specialists"]
-        assert {item["id"] for item in catalog} == {"business_consultant", "marketer", "smm_specialist"}
+        assert {item["id"] for item in catalog} == {"business_consultant", "marketer", "smm_specialist", "sales_manager", "copywriter", "ads_specialist"}
         assert all("filename" not in item and "system_prompt" not in item for item in catalog)
         invalid = client.post(
             "/studio/api/ai-chat/conversations",
@@ -820,6 +820,9 @@ def test_specialist_catalog_validation_and_role_persists_in_chat(chat_env):
             "business_consultant": "Бизнес-консультант",
             "marketer": "Маркетолог",
             "smm_specialist": "SMM-специалист",
+            "sales_manager": "Менеджер по продажам",
+            "copywriter": "Копирайтер",
+            "ads_specialist": "Специалист по рекламе",
         }
         for specialist_id, label in expected.items():
             created = client.post(
@@ -946,3 +949,42 @@ def test_paid_model_ui_has_disabled_choices(chat_env):
         assert js.status_code == 200
         assert "m.access_enabled !== true" in js.text
         assert "m.access_label" in js.text
+
+
+def test_new_specialists_are_allowlisted_and_cannot_leak_internal_instructions(chat_env):
+    from app.ai_chat.specialists import SPECIALISTS, specialist_catalog, get_specialist_prompt
+    from app.ai_chat.schemas import ConversationCreateIn
+
+    expected = {"business_consultant", "marketer", "smm_specialist",
+                "sales_manager", "copywriter", "ads_specialist"}
+    assert set(SPECIALISTS) == expected
+    public = specialist_catalog()
+    assert len(public) == len(expected)
+    for item in public:
+        assert item["id"] in expected
+        assert item["starter_prompts"]
+        assert not any(key in item for key in ("filename", "prompt", "system_prompt", "filepath"))
+        assert item["description"]
+        assert ConversationCreateIn(specialist_id=item["id"]).specialist_id == item["id"]
+        prompt = get_specialist_prompt(item["id"])
+        assert prompt and len(prompt) > 1200 and "ServGo" in prompt
+        assert "без разрешения" in prompt or "без реального" in prompt
+    assert get_specialist_prompt(None) is None
+    with pytest.raises(ValueError):
+        get_specialist_prompt("../../../private.txt")
+    with TestClient(app) as client:
+        second_route = client.get("/api/ai-chat/specialists")
+        assert second_route.status_code == 200
+        assert len(second_route.json()["specialists"]) == len(expected)
+
+
+def test_sales_copy_ads_are_different_specialists_with_clear_boundaries():
+    from app.ai_chat.specialists import get_specialist_prompt
+
+    sales = get_specialist_prompt("sales_manager")
+    copy = get_specialist_prompt("copywriter")
+    ads = get_specialist_prompt("ads_specialist")
+    assert "возражен" in sales and "запис" in sales
+    assert "маркетинговая статья" in copy.lower() and "готовый текст" in copy
+    assert "ROAS" in ads and "бюджет" in ads
+    assert len({sales, copy, ads}) == 3

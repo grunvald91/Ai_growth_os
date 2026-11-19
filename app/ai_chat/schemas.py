@@ -13,7 +13,10 @@ class ConversationCreateIn(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     model_id: str | None = Field(default=None, max_length=150)
     product_id: UUID | None = None
-    specialist_id: Literal["business_consultant", "marketer", "smm_specialist"] | None = None
+    specialist_id: Literal[
+        "business_consultant", "marketer", "smm_specialist",
+        "sales_manager", "copywriter", "ads_specialist",
+    ] | None = None
 
 
 class ConversationUpdateIn(BaseModel):
