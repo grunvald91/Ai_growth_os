@@ -50,6 +50,37 @@ def checkpoint_summary(directory: Path):
         return {"available": True, "invalid": True}
 
 
+
+def selected_context(directory: Path, request: dict, runs: list):
+    """Describe only issue counts and public model IDs, never critic text."""
+    models = request.get("models") or {}
+    output = {
+        "models": {k: models.get(k) for k in ("storyboard", "image", "regions", "speech")},
+        "scenes": (request.get("request") or {}).get("scenes"),
+        "visual_review_enabled": request.get("visual_review"),
+        "run_stage_counts": dict(Counter(
+            f"{r.agent_name}:{value_of(r.status)}" for r in runs
+        )),
+    }
+    location = directory / "stages" / "visual-review.data"
+    if location.is_file():
+        try:
+            review = json.loads(location.read_text(encoding="utf-8"))
+            issues = review.get("issues", [])
+            if isinstance(issues, list):
+                output["critic_total_issues"] = len(issues)
+                output["critic_eligible_issues"] = sum(
+                    i.get("severity") in ("major", "blocking")
+                    and i.get("confidence") == "high" and i.get("category") != "style"
+                    for i in issues if isinstance(i, dict))
+                output["critic_severity_counts"] = dict(Counter(
+                    i.get("severity") for i in issues if isinstance(i, dict)))
+                output["critic_scene_counts"] = dict(Counter(
+                    str(i.get("scene_index")) for i in issues if isinstance(i, dict)))
+        except (ValueError, OSError):
+            output["critic_checkpoint_parse_error"] = True
+    return output
+
 def audit():
     settings = get_settings()
     print("whiteboard_runtime=", json.dumps({
@@ -105,6 +136,10 @@ def audit():
                 "error_breakdown": dict(Counter(
                     f"{e.get('stage')}:{e.get('exception_type')}:{e.get('code')}"
                     for e in errors if isinstance(e, dict))),
+                "selected_context": selected_context(
+                    job_directory(settings.products_root, task.product_id, task.id),
+                    approved_request, runs
+                ) if str(task.id) == "c55fd232-73f7-4080-b15e-026c4c3e6df3" else None,
                 "last_diagnostic": {
                     key: value for key, value in (state.get("diagnostic") or {}).items()
                     if key in ("exception_type", "http_status", "validation_types", "reason")
