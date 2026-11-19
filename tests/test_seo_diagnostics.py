@@ -172,8 +172,8 @@ def test_seo_issue_filter_pagination_and_owner_daily_summary(diagnostic_env):
     assert issues_view.total == 36
     assert any(
         entry["task"].id == safe.id and entry["status"] == "В очереди"
-        for entry in all_view.records
-    )  # The future scheduled item remains normal, not an issue.
+        for entry in audit_seo(db, own.id).rows
+    )  # The future item may be on another page, but is never an issue.
 
     summary = client.get(base + "/home-summary.json")
     assert summary.status_code == 200
