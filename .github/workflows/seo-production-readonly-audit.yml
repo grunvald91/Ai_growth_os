@@ -134,6 +134,37 @@ jobs:
                   except Exception as exc:
                       print(json.dumps({"slug": pub.external_reference, "article_parse_error": type(exc).__name__}))
           PY
+          echo "== Public ServGo article editorial excerpt"
+          docker exec -i ai-growth-os-api-1 python - <<'PY'
+          import json
+          from sqlalchemy import select
+          from app.db.session import SessionLocal
+          from app.models.domain import Artifact, Publication, Product
+          from app.workflows.article_contracts import ArticleArtifact
+          slug = "/blog/programma-dlya-zapisi-klientov-po-vremeni"
+          with SessionLocal() as db:
+              product = db.scalar(select(Product).where(Product.slug == "servgo"))
+              result = db.execute(select(Artifact, Publication)
+                  .join(Publication, Publication.artifact_id == Artifact.id)
+                  .where(Publication.product_id == product.id,
+                         Publication.external_reference == slug,
+                         Publication.status == "published")).first()
+              if result:
+                  article = ArticleArtifact.model_validate_json(result[0].content)
+                  reader = article.reader_article
+                  print("EDITORIAL_PUBLIC_PAGE=", json.dumps({
+                      "slug": slug, "title": reader.title,
+                      "lead": reader.lead[:500],
+                      "headings": [s.heading for s in reader.sections],
+                      "suspect_sections": [
+                          {"heading": sec.heading, "text": sec.body[:1300]}
+                          for sec in reader.sections
+                          if any(w in sec.body.casefold()
+                              for w in ("не подтвержден", "проверенные факты", "проверенные возможности"))
+                      ],
+                      "cta": article.conversion.cta[:350],
+                  }, ensure_ascii=False))
+          PY
           echo "== Public routes (status only)"
           for entry in 'servgo.ru /blog' 'servgo.ru /blog/sitemap.xml' 'servgo.ru /robots.txt' 'growth.servgo.ru /public/blog/servgo/articles'; do
             set -- $entry
