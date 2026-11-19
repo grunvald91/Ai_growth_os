@@ -139,3 +139,35 @@ def test_fallback_is_not_used_when_the_model_answered_or_none_is_configured():
     assert result.model == 'kimi-2.7' and asked == ['kimi-2.7']
     result, asked = _chain(lambda m: httpx.Response(502), chain='')
     assert isinstance(result, httpx.HTTPStatusError) and asked == ['kimi-2.7']
+
+
+
+@pytest.mark.parametrize('status,expected', [
+    (503, 'claudehub_unavailable'),
+    (429, 'claudehub_unavailable'),
+    (401, 'claudehub_rejected'),
+    (403, 'claudehub_rejected'),
+    (400, 'claudehub_catalog_error'),
+])
+def test_claudehub_catalogue_outage_is_not_mistaken_for_missing_models(status, expected):
+    from app.content.whiteboard.runtime import configured_models, preflight
+    from app.core.config import Settings
+    cfg = Settings(_env_file=None, xai_api_key='test-key', openrouter_api_key='media-key',
+        xai_base_url='https://api.claudehub.fun/v1',
+        whiteboard_storyboard_model='kimi-2.7',
+        whiteboard_image_model='gemini-3.1-flash-image',
+        whiteboard_regions_model='gemini-flash-3.8',
+        whiteboard_speech_model='x-ai/grok-voice-tts-1.0', whiteboard_voice='eve')
+    calls = []
+    def respond(request):
+        calls.append(request.url.path)
+        return httpx.Response(status)
+    async def run():
+        async with httpx.AsyncClient(base_url=cfg.xai_base_url + '/',
+                                     transport=httpx.MockTransport(respond)) as provider:
+            with pytest.raises(ReadinessError) as caught:
+                await preflight(cfg, configured_models(cfg), cfg.whiteboard_voice,
+                                claudehub_client=provider)
+            assert caught.value.code == expected
+    asyncio.run(run())
+    assert calls == ['/v1/models']
