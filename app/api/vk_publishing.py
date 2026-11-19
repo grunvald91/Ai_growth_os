@@ -16,12 +16,14 @@ from sqlalchemy.orm import Session
 from app.api.content_studio import _owner_product, _studio_form, studio_page_shell
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.comments.service import CommentService
+from app.comments.contracts import ConnectInput
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import Artifact, Publication
 from app.social_vk import (
     OAUTH_COOKIE, OAUTH_PATH, VKStore, approved_posts, begin_oauth,
     cancel, connected, connect_community, finish_oauth, read_oauth_cookie, schedule,
+    resolve_community, verify_community_key,
 )
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -38,11 +40,22 @@ def feedback(key):
             "cancelled": "Запланированная публикация отменена.",
             "checked": "Результат ручной проверки сохранён.",
             "disconnected": "VK отключён, будущие публикации отменены.",
-            "connected_key": "Ключ сообщества сохранён. Отправьте один тестовый пост, чтобы проверить доступ."}.get(key, "")
+            "connected_key": "Ключ проверен. Подключены публикации и комментарии; отправку проверьте отдельным тестом.",
+            "connected_partial": "Ключ для публикаций сохранён. Комментарии пока не подключились — проверьте права ключа и повторите.",
+            }.get(key, "")
+
+
+def connection_error(key):
+    return {
+        "bad_link": "Не удалось распознать ссылку. Скопируйте адрес страницы сообщества из ВКонтакте.",
+        "bad_key": "ВКонтакте не подтвердил ключ или его права. Проверьте ссылку и создайте ключ сообщества с правами управления и работы со стеной.",
+        "save_failed": "Не удалось сохранить подключение. Проверьте настройки и повторите.",
+        "vk_id_input": "Для VK ID пока требуется ссылка вида vk.com/club123. Для обычной ссылки используйте подключение по ключу.",
+    }.get(key, "")
 
 
 @router.get("/studio/products/{product_id}/vk", response_class=HTMLResponse)
-def vk_page(product_id: UUID, done: str = "", db: Session = Depends(get_db),
+def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Depends(get_db),
             settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     channel = connected(db, product_id)
@@ -77,14 +90,21 @@ def vk_page(product_id: UUID, done: str = "", db: Session = Depends(get_db),
         history += (f'<li class="sg-publication-row"><div><b>{esc(statuses.get(row.status, row.status))}</b>'
                     f'<small>{esc(stamp)} МСК</small>{reference}</div>{buttons}</li>')
     alert = f'<p role="status" class="sg-notice">{esc(feedback(done))}</p>' if feedback(done) else ""
+    if connection_error(error):
+        alert += f'<p role="alert" class="sg-notice">{esc(connection_error(error))}</p>'
     if channel:
         current = (f'<div class="sg-channel-line"><span class="sg-link-dot">✓</span><div>'
                    f'<b>{esc(channel.account_name)}</b><small>Сообщество VK · ID {esc(channel.account_id)}</small></div>' +
-                   ('<span class="sg-channel-status">Ключ сообщества · отправка не проверена</span></div>'
+                   ('<span class="sg-channel-status">Ключ проверен · отправка не проверена</span></div>'
                     if channel.is_community_token else
-                    '<span class="sg-channel-status">VK ID · отправка не проверена</span></div>') +
+                    '<span class="sg-channel-status">VK ID · права отправки не подтверждены</span></div>') +
                    f'<form method="post" action="/studio/products/{product_id}/vk/disconnect">'
                    '<button type="submit" class="btn secondary small">Отключить VK</button></form>')
+        reply_channel = CommentService(db, settings).channel(product_id, "vk")
+        replies_ready = bool(reply_channel and reply_channel.status == "connected"
+                             and reply_channel.account_id == channel.account_id)
+        current += ('<p class="sg-footnote">Комментарии: подключены, отправка ответов не проверена.</p>'
+                    if replies_ready else '<p class="sg-footnote">Комментарии: не подключены.</p>')
     else:
         current = '<p class="sg-muted">Сообщество ещё не подключено.</p>'
     enabled = bool(settings.content_vk_autopost_enabled)
@@ -93,26 +113,32 @@ def vk_page(product_id: UUID, done: str = "", db: Session = Depends(get_db),
     body = f"""
 <section class="sg-surface">
  <div class="sg-section-head"><div><span class="sg-overline">КАНАЛЫ</span><h2>ВКонтакте</h2>
- <p>Подключите сообщество через VK ID без копирования токенов. Нужны права редактора или администратора.</p></div></div>
+ <p>Для публикаций и ответов на комментарии укажите обычную ссылку на ваше сообщество. Числовой ID искать не требуется.</p></div></div>
  {alert}{current}
- <form method="post" action="/studio/products/{product_id}/vk/connect" class="sg-fields sg-compact-form">
-  <label class="sg-field"><span>Числовой ID сообщества</span>
-   <input type="text" name="group_id" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="15"
-      value="{esc(channel.account_id if channel else '')}" placeholder="Например, 123456789" required>
-  </label>
-  <button class="btn secondary" type="submit">Подключить через VK ID →</button>
+ <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
+  <label class="sg-field"><span>Ссылка на сообщество</span>
+   <input name="community_link" type="text" maxlength="255" autocomplete="off"
+      placeholder="https://vk.com/my_community" required></label>
+  <label class="sg-field"><span>Ключ доступа сообщества</span>
+   <input name="access_token" type="password" autocomplete="off" maxlength="8000"
+      placeholder="Вставьте ключ из настроек сообщества" required></label>
+  <button class="btn primary" type="submit">Проверить и подключить</button>
  </form>
- <p class="sg-footnote">Новые токены VK ID не всегда позволяют выполнять wall.post. При отказе используйте ключ своего сообщества.</p>
- <details><summary>Альтернатива: подключить по ключу сообщества</summary>
-   <p class="sg-footnote">Создайте ключ в разделе Управление сообществом → Работа с API. Он сохраняется зашифрованным.
-   Вставляйте ключ только на этой защищённой странице ServGo, не отправляйте в чат.</p>
-   <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
-     <label class="sg-field">Числовой ID сообщества
-       <input name="group_id" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="15" required></label>
-     <label class="sg-field">Ключ сообщества
-       <input name="access_token" type="password" autocomplete="off" maxlength="8000" required></label>
-     <button type="submit" class="btn secondary">Подключить ключ сообщества</button>
-   </form>
+ <details><summary>Где получить ключ доступа?</summary>
+  <p class="sg-footnote">Откройте ваше сообщество ВКонтакте → Управление → Работа с API → Ключи доступа.
+  Создайте ключ с правами управления сообществом и работы со стеной. Скопируйте его сюда.
+  ServGo проверит доступ, определит название и ID сообщества и сохранит ключ зашифрованным.
+  Ключ не нужно отправлять в чат или поддержку.</p>
+ </details>
+ <details><summary>Другой способ: VK ID (права публикации могут быть ограничены)</summary>
+  <p class="sg-footnote">Этот способ поддерживает только числовую ссылку формата vk.com/club123456.
+  Для обычной короткой ссылки используйте ключ сообщества выше.
+  Авторизация VK ID сама по себе не подтверждает право публиковать посты.</p>
+  <form method="post" action="/studio/products/{product_id}/vk/connect" class="sg-fields sg-compact-form">
+   <label class="sg-field">Ссылка вида vk.com/club123456
+    <input name="community_link" type="text" maxlength="255" placeholder="https://vk.com/club123456" required></label>
+   <button class="btn secondary" type="submit">Подключить через VK ID</button>
+  </form>
  </details>
 </section>
 <section class="sg-surface">
@@ -148,10 +174,10 @@ async def vk_connect(product_id: UUID, request: Request, db: Session = Depends(g
     _owner_product(db, product_id)
     fields = await _studio_form(request)
     try:
-        url, cookie = begin_oauth(settings, product_id, fields.get("group_id", ""),
+        url, cookie = begin_oauth(settings, product_id, fields.get("community_link", fields.get("group_id", "")),
                                   owner_login=getattr(request.state, "studio_login", None))
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from None
+    except ValueError:
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=vk_id_input", status_code=303)
     response = RedirectResponse(url, status_code=303,
         headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
     response.set_cookie(OAUTH_COOKIE, cookie, max_age=600, path=OAUTH_PATH,
@@ -165,12 +191,28 @@ async def vk_community_key(product_id: UUID, request: Request,
                            db: Session = Depends(get_db), settings=Depends(get_settings)):
     _owner_product(db, product_id)
     fields = await _studio_form(request)
+    token = fields.get("access_token", "")
+    reference = fields.get("community_link", fields.get("group_id", ""))
     try:
-        connect_community(db, settings, product_id, fields.get("group_id", ""),
-                          fields.get("access_token", ""))
-    except (LookupError, ValueError) as exc:
+        account_id, name = await resolve_community(token, reference)
+    except ValueError:
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_link", status_code=303)
+    try:
+        await verify_community_key(token, account_id)
+    except ValueError:
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_key", status_code=303)
+    try:
+        connect_community(db, settings, product_id, account_id, token, name=name)
+    except (LookupError, ValueError):
         db.rollback()
-        raise HTTPException(422, str(exc)) from None
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=save_failed", status_code=303)
+    try:
+        await CommentService(db, settings).connect(
+            product_id, ConnectInput(platform="vk", account_id=account_id, token=token))
+    except (LookupError, ValueError):
+        db.rollback()
+        return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_partial",
+                                status_code=303)
     return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_key",
                             status_code=303)
 
