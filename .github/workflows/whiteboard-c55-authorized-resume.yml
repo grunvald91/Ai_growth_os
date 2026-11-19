@@ -1,0 +1,99 @@
+name: Whiteboard c55 owner-authorized 19 paid calls
+
+# Never authorize a paid run on a push before its CI-tested code has
+# actually deployed. This event happens only after Deploy Growth finishes.
+on:
+  workflow_run:
+    workflows: ["Deploy Growth (production)"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-whiteboard-c55-owner-authorization
+  cancel-in-progress: false
+
+jobs:
+  authorize-and-requeue:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'workflow_run' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.head_repository.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    environment: production
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+      EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Syntax and pinned authorization checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/operations/resume_whiteboard_c55_authorized.py
+          grep -Fq 'ADDITIONAL_PAID_ATTEMPTS = 19' scripts/operations/resume_whiteboard_c55_authorized.py
+      - name: Validate pinned SSH production identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS" || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519 "$HOST" 2>/dev/null > /tmp/c55-host-key
+          test -s /tmp/c55-host-key
+          ssh-keygen -lf /tmp/c55-host-key | grep -q "SHA256:$HOST_FP "
+          cat /tmp/c55-host-key >> ~/.ssh/known_hosts
+      - name: Confirm API and worker run the newly deployed hard paid-attempt guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          for service in api worker; do
+            remote_sha="$(sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+              "docker exec ai-growth-os-${service}-1 python -c 'from app.core.config import get_settings; print(get_settings().release_sha)'")"
+            if [ "$remote_sha" != "$EXPECTED_SHA" ]; then
+              echo "::error::${service} deployed SHA differs from the tested deployment; no paid calls approved"
+              exit 1
+            fi
+            sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+              "docker exec ai-growth-os-${service}-1 python -c 'import inspect; from app.content.whiteboard.jobs import CallLedger; assert \"owner_chat_paid_attempt_cap\" in inspect.getsource(CallLedger.begin)'"
+          done
+      - name: Read-only owner authorization preflight and saved media verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'docker exec -i ai-growth-os-api-1 python -' \
+            < scripts/operations/resume_whiteboard_c55_authorized.py
+      - name: Register only the user-approved 19 attempts; requeue the failed video
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'docker exec -i ai-growth-os-api-1 python - --apply' \
+            < scripts/operations/resume_whiteboard_c55_authorized.py
+      - name: Verify grant is idempotent and further paid attempts remain capped
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'docker exec -i ai-growth-os-api-1 python -' \
+            < scripts/operations/resume_whiteboard_c55_authorized.py
+      - name: Check worker status and take a bounded read-only progress sample
+        shell: bash
+        run: |
+          set -euo pipefail
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+            'docker ps --format "{{.Names}} {{.Status}}" | grep -E "ai-growth-os-(worker|api)-1"'
+          for i in 1 2 3 4 5 6; do
+            sleep 20
+            sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" \
+              'docker exec -i ai-growth-os-api-1 python -' \
+              < scripts/operations/resume_whiteboard_c55_authorized.py
+          done
