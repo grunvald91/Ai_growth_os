@@ -298,3 +298,19 @@ async def test_vk_comment_group_key_cannot_pass_read_check(monkeypatch):
     assert "domain" not in wall
     assert "groups.getTokenPermissions" in [m for m, _ in calls]
     assert "groups.getCallbackSettings" in [m for m, _ in calls]
+
+
+@pytest.mark.asyncio
+async def test_vk_comment_token_refreshes_before_sync_and_send(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from app.comments.service import CommentService
+
+    service = object.__new__(CommentService)
+    service.settings = Settings(products_root=tmp_path)
+    async def fresh(settings, channel):
+        assert channel.platform == "vk"
+        return "refreshed-vk-user-token"
+
+    monkeypatch.setattr("app.social_vk.active_token", fresh)
+    channel = SimpleNamespace(platform="vk", id="stub-id")
+    assert await service.channel_token(channel) == "refreshed-vk-user-token"
