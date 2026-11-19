@@ -14,7 +14,7 @@ from uuid import UUID
 from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
-from app.models.domain import AgentRun, Approval, Artifact, Publication, Task
+from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Publication, Task
 from app.seo.activation import editorial_preferences
 
 SEO_AGENT = "seo_factory"
