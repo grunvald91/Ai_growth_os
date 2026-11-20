@@ -726,6 +726,22 @@ async def test_vk_one_click_fake_sender_does_not_verify_app(monkeypatch, db, tmp
     assert not group_app_verified(settings)
 
 
+def test_vk_pilot_gate_uses_exact_operator_access_rules(tmp_path):
+    from types import SimpleNamespace
+    from app.api.vk_publishing import _can_begin_community_oauth, _is_tune_owner
+
+    settings = Settings(products_root=tmp_path, app_env="production",
+                        studio_tune_usernames="owner",
+                        social_vk_community_app_id="1234567",
+                        social_vk_community_app_secret="secret-only-studio", _env_file=None)
+    permitted = SimpleNamespace(state=SimpleNamespace(studio_login="owner", studio_product_ids=None))
+    wrong_case = SimpleNamespace(state=SimpleNamespace(studio_login="Owner", studio_product_ids=None))
+    tenant_scoped = SimpleNamespace(state=SimpleNamespace(studio_login="owner", studio_product_ids=["example"]))
+    assert _can_begin_community_oauth(settings, permitted) == _is_tune_owner(settings, permitted)
+    assert not _can_begin_community_oauth(settings, wrong_case)
+    assert not _can_begin_community_oauth(settings, tenant_scoped)
+
+
 def test_vk_page_shows_contextual_settings_link_only_to_operator(db, tmp_path):
     from types import SimpleNamespace
     from app.api.vk_publishing import vk_page
@@ -745,6 +761,8 @@ def test_vk_page_shows_contextual_settings_link_only_to_operator(db, tmp_path):
     owner_html = vk_page(product.id, owner, db=db, settings=settings).body.decode()
     assert 'Авторизация одним нажатием пока не настроена.' in owner_html
     assert '<a href="/studio/tune/vk"' in owner_html
+    assert owner_html.count('href="https://vk.com/groups"') == 2
+    assert 'target="_blank" rel="noopener noreferrer"' in owner_html
     assert "Настроить подключение VK" in owner_html
 
     customer_html = vk_page(product.id, customer, db=db, settings=settings).body.decode()
@@ -770,6 +788,7 @@ def test_vk_page_shows_settings_near_pilot_and_missing_comments(db, tmp_path):
 
     pilot_html = vk_page(product.id, owner, db=db, settings=settings).body.decode()
     assert "Проверить вход ВКонтакте" in pilot_html
+    assert pilot_html.count('href="https://vk.com/groups"') == 3
     assert 'совместимость с вашим VK-приложением ещё не подтверждена.' in pilot_html
     assert '<a href="/studio/tune/vk"' in pilot_html
     assert "/studio/tune/vk" not in vk_page(
