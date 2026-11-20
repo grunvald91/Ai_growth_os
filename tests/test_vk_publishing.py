@@ -761,10 +761,15 @@ def test_vk_page_shows_contextual_settings_link_only_to_operator(db, tmp_path):
     owner_html = vk_page(product.id, owner, db=db, settings=settings).body.decode()
     assert 'Авторизация одним нажатием пока не настроена.' in owner_html
     assert '<a href="/studio/tune/vk"' in owner_html
-    assert owner_html.count('href="https://vk.com/groups"') == 2
+    assert owner_html.count('href="https://vk.com/groups"') == 1
     assert 'id="sg-vk-community-link"' in owner_html
     assert 'id="sg-vk-token-link"' in owner_html
     assert 'encodeURIComponent(name) + "?act=tokens"' in owner_html
+    assert 'id="sg-vk-token-link" target="_blank" rel="noopener noreferrer" hidden' in owner_html
+    assert 'id="sg-vk-token-copy" type="button"' in owner_html
+    assert 'id="sg-vk-token-help" role="status" aria-live="polite"' in owner_html
+    assert 'link.removeAttribute("href")' in owner_html
+    assert 'sg-vk-oauth-community-link' not in owner_html
     assert 'https://vk.ru/' in owner_html
     assert 'target="_blank" rel="noopener noreferrer"' in owner_html
     assert "Настроить подключение VK" in owner_html
@@ -792,7 +797,8 @@ def test_vk_page_shows_settings_near_pilot_and_missing_comments(db, tmp_path):
 
     pilot_html = vk_page(product.id, owner, db=db, settings=settings).body.decode()
     assert "Проверить вход ВКонтакте" in pilot_html
-    assert pilot_html.count('href="https://vk.com/groups"') == 3
+    assert pilot_html.count('href="https://vk.com/groups"') == 2
+    assert 'id="sg-vk-oauth-community-link"' in pilot_html
     assert 'совместимость с вашим VK-приложением ещё не подтверждена.' in pilot_html
     assert '<a href="/studio/tune/vk"' in pilot_html
     assert "/studio/tune/vk" not in vk_page(
