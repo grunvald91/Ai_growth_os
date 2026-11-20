@@ -34,7 +34,7 @@ def test_author_normalizes_nested_grouped_and_direct_decisions_without_rewriting
             'reason': 'Стилистическую правку принимать не следует.',
         }],
     }}, ensure_ascii=False)
-    value = VisualDecision.from_author_json('generate file\n' if False else '```json\n' + text + '\n```', report)
+    value = VisualDecision.from_author_json('```json\n' + text + '\n```', report)
     assert [i.accept for i in value.decisions] == [True, False]
     assert value.accepted(report, 0) == (report.issues[0],)
     assert value.accepted(report, 1) == ()
