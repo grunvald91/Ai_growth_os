@@ -122,7 +122,13 @@ def create_content_html(product_id, *, created=False, fields=None, error=None,
                   <option value="openai">ChatGPT Image</option>
                 </select>
               </label>
-              <small>Одна иллюстрация 4:5, 1080×1350. Сначала получим готовый текст, затем по его смыслу создадим изображение. Пока загрузка на стену VK не подключена — картинка доступна в предпросмотре и для скачивания.</small>
+              <label class="sg-field"><span>Формат картинки</span>
+                <select name="vk_image_ratio">
+                  <option value="4:5" {"selected" if fields.get("vk_image_ratio", "4:5") == "4:5" else ""}>Вертикальная 4:5 · 1080×1350 (рекомендуем)</option>
+                  <option value="1:1" {"selected" if fields.get("vk_image_ratio") == "1:1" else ""}>Квадратная 1:1 · 1080×1080</option>
+                </select>
+              </label>
+              <small>Иллюстрация создаётся по готовому тексту поста. Для первой одиночной публикации рекомендуем 4:5. Пока автоматическая загрузка фото во ВКонтакте не подключена — изображение доступно для просмотра и скачивания.</small>
             </fieldset>
             <label class="sg-field sg-wide"><span>Дополнительные требования <em>· необязательно</em></span>
               <textarea name="editorial_brief" maxlength="3500" rows="3"
