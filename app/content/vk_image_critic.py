@@ -10,6 +10,7 @@ import base64
 import hashlib
 import json
 from typing import Literal
+from uuid import UUID
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -160,7 +161,7 @@ async def review_vk_post_image(db, settings, *, product, task, post,
     if meta.get("channel") != "vk" or not meta.get("image_artifact_id"):
         raise ValueError("У поста нет изображения для критика")
     image = db.scalar(select(Artifact).where(
-        Artifact.id == meta["image_artifact_id"],
+        Artifact.id == UUID(str(meta["image_artifact_id"])),
         Artifact.product_id == product.id,
         Artifact.task_id == task.id,
         Artifact.kind == "generated_image",
