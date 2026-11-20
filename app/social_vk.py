@@ -284,14 +284,11 @@ async def finish_community_oauth(db, settings, payload, code):
             expires_at = (datetime.now(timezone.utc) + timedelta(seconds=lifetime)).isoformat()
         except (TypeError, OverflowError):
             raise ValueError("Неверный срок действия ключа VK") from None
-    connection = connect_community(db, settings, product_id, group, token,
-                                   name=name, expires_at=expires_at)
-    # A real VK authorization and accepted scope confirms this platform app.
-    # Only the credential fingerprint is stored; old app credentials cannot
-    # inherit the successful-provider mark after a rotation.
-    from app.vk_service import mark_group_app_verified
-    mark_group_app_verified(settings)
-    return connection
+    # Provider consent alone does not prove wall.post works. Public rollout
+    # remains off until a real (non-mocked) approved post returns post_id.
+    return connect_community(db, settings, product_id, group, token,
+                             name=name, expires_at=expires_at,
+                             auth_type="community_oauth")
 
 
 def begin_oauth(settings, product_id, account_id, *, owner_login=None):
@@ -436,7 +433,9 @@ def connected(db, product_id):
             return None
         return SimpleNamespace(id=row.id, product_id=product_id, account_id=account_id,
             account_name=str(details.get("name") or "Сообщество VK #" + account_id)[:255],
-            is_community_token=True, expires_at=details.get("expires_at"))
+            is_community_token=True, expires_at=details.get("expires_at"),
+            auth_type=details.get("auth_type", "community_token"),
+            app_fingerprint=details.get("app_fingerprint"))
     account = db.scalar(select(CommentChannel).where(
         CommentChannel.product_id == product_id,
         CommentChannel.platform == "vk", CommentChannel.status == "connected"))
@@ -447,9 +446,19 @@ def connected(db, product_id):
     return None
 
 
-def connect_community(db, settings, product_id, account_id, token, *, name=None, expires_at=None):
+def connect_community(db, settings, product_id, account_id, token, *,
+                      name=None, expires_at=None, auth_type="community_token"):
     """Owner supplies the official community key; never claim permission before a real post."""
     group_id(account_id)
+    if auth_type not in {"community_token", "community_oauth"}:
+        raise ValueError("Неизвестный источник ключа сообщества")
+    app_fingerprint = None
+    if auth_type == "community_oauth":
+        from app.vk_service import group_app_credentials, _group_app_fingerprint
+        creds = group_app_credentials(settings)
+        if creds is None:
+            raise ValueError("Настройка VK OAuth изменилась")
+        app_fingerprint = _group_app_fingerprint(*creds)
     if not isinstance(token, str) or not token or len(token) > 8000 or any(
             ord(ch) < 32 for ch in token):
         raise ValueError("Неверный ключ доступа сообщества")
@@ -467,8 +476,9 @@ def connect_community(db, settings, product_id, account_id, token, *, name=None,
     row = Artifact(product_id=product_id, kind="vk_publish_connection",
         title="Публикации VK: сообщество #" + account_id,
         status=ArtifactStatus.APPROVED,
-        content=json.dumps({"group_id": account_id, "auth_type": "community_token",
-                            "name": name, "expires_at": expires_at}))
+        content=json.dumps({"group_id": account_id, "auth_type": auth_type,
+                            "name": name, "expires_at": expires_at,
+                            "app_fingerprint": app_fingerprint}))
     db.add(row)
     db.flush()
     VKStore(settings.products_root).save_token(row.id, token)
@@ -685,4 +695,15 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
             pub.external_reference = f"vk:-{group}_{post_id}"
             pub.published_at = datetime.now(timezone.utc)
             db.commit()
+    if sender is None and ch.auth_type == "community_oauth":
+        # Only real VK wall.post success verifies this OAuth app's ability
+        # to publish, never an authorization success or injected test sender.
+        from app.vk_service import (_group_app_fingerprint, group_app_credentials,
+                                    mark_group_app_verified)
+        creds = group_app_credentials(settings)
+        if creds and ch.app_fingerprint == _group_app_fingerprint(*creds):
+            try:
+                mark_group_app_verified(settings)
+            except (OSError, ValueError):
+                pass  # A published post is not rolled back on metadata failure.
     return 1
