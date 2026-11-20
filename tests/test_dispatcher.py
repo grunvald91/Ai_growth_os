@@ -432,17 +432,28 @@ async def test_simple_video_selected_in_create_uses_paid_approval_without_llm(db
     assert videos[0].status == TaskStatus.CANCELLED
 
 
-@pytest.mark.asyncio
-async def test_create_whiteboard_short_topic_returns_validation_without_task(db, product):
+def test_create_whiteboard_short_topic_rejected_before_dispatch(db, product):
     from app.dispatcher.editable import CreateHints
+    from pydantic import ValidationError
 
-    result = await service.handle_message(
-        db, context(db, product), None, text="CRM?",
-        client_key="short-whiteboard", creation=CreateHints(
-            format="whiteboard", topic="CRM?"))
-    answer = result["messages"][-1]
-    assert not any(block["type"] == "confirm" for block in answer["blocks"])
+    with pytest.raises(ValidationError, match="минимум 8 символов"):
+        CreateHints(format="whiteboard", topic="CRM?")
     assert tasks(db, "whiteboard_renderer") == []
+
+
+def test_create_topic_limits_apply_consistently_to_all_formats():
+    from app.dispatcher.editable import CreateHints
+    from pydantic import ValidationError
+
+    for fmt in ("post", "story", "short_video", "static_image", "package"):
+        assert CreateHints(format=fmt, topic="CRM").topic == "CRM"
+        with pytest.raises(ValidationError):
+            CreateHints(format=fmt, topic="ab")
+        with pytest.raises(ValidationError):
+            CreateHints(format=fmt, topic="а" * 301)
+    assert CreateHints(format="whiteboard", topic="Про CRM?").topic == "Про CRM?"
+    with pytest.raises(ValidationError):
+        CreateHints(format="whiteboard", topic="а" * 301)
 
 
 def test_create_whiteboard_cannot_accept_unrelated_image_and_platform_options():

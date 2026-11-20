@@ -231,4 +231,4 @@ def test_dispatcher_review_cards_keep_video_subjects_and_material_status_separat
     ):
         assert fragment in adapter, fragment
     assert 'growth-servgo-air.css?v=13' in v4
-    assert 'create-matrix-v2-20261120' in v4
+    assert 'create-topic-validation-v3-20261120' in v4
