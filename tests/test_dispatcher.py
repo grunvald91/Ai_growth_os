@@ -361,6 +361,52 @@ async def test_all_create_formats_queue_only_after_user_approval(
 
 
 @pytest.mark.asyncio
+async def test_create_story_subject_does_not_override_selected_frame_count(db, product):
+    from app.dispatcher.editable import CreateHints
+
+    topic = "Как придумать 10 историй для клиентов"
+    result = await service.handle_message(
+        db, context(db, product), None, text=topic,
+        client_key="subject-mentions-ten-stories", creation=CreateHints(
+            format="story", platform="vk", frame_count=4, topic=topic))
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "story"
+    assert card["editable"]["frame_count"] == 4
+    assert card["editable"]["platform"] == "vk"
+
+
+@pytest.mark.asyncio
+async def test_create_image_subject_does_not_override_selected_ratio_or_platform(db, product):
+    from app.dispatcher.editable import CreateHints
+
+    topic = "Почему вертикальное видео во ВКонтакте привлекает клиентов"
+    result = await service.handle_message(
+        db, context(db, product), None, text=topic,
+        client_key="subject-mentions-vk-vertical", creation=CreateHints(
+            format="static_image", topic=topic, platform="telegram",
+            aspect_ratio="1:1", image_model="auto"))
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "static_image"
+    assert card["editable"]["platform"] == "telegram"
+    assert card["editable"]["aspect_ratio"] == "1:1"
+
+
+@pytest.mark.asyncio
+async def test_create_post_subject_about_illustrated_posts_remains_selected_post(db, product):
+    from app.dispatcher.editable import CreateHints
+
+    topic = "Почему посты с картинками лучше продают"
+    result = await service.handle_message(
+        db, context(db, product), None, text=topic,
+        client_key="subject-illustrated-posts", creation=CreateHints(
+            format="post", topic=topic, platform="vk"))
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "post"
+    assert card["editable"]["platform"] == "vk"
+    assert card["editable"]["topic"] == topic
+
+
+@pytest.mark.asyncio
 async def test_simple_video_selected_in_create_uses_paid_approval_without_llm(db, product):
     from app.dispatcher.editable import CreateHints
 
