@@ -1,0 +1,23 @@
+[Unit]
+Description=ServGo read-only Telegram SOCKS5 egress health check
+Documentation=https://github.com/grunvald91/Ai_growth_os/blob/main/services/booking_bot/scripts/socks5_telegram_health.py
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+StateDirectory=servgo-socks5-health
+StateDirectoryMode=0750
+ExecStart=/usr/bin/python3 /usr/local/libexec/servgo-socks5-telegram-health.py
+TimeoutStartSec=35
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
