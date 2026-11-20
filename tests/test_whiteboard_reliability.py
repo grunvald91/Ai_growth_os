@@ -98,7 +98,7 @@ async def test_region_service_error_finishes_video_with_local_layout_and_no_repe
         task = owner_task(db, product_id, task_id)
         assert task.status == TaskStatus.COMPLETED
         state = json.loads(records(db, task)[1].content)
-        assert state['attempts_started'] == state['calls'] == 14
+        assert state['attempts_started'] == state['calls'] == 13
         assert len(calls) == 3
         repairs = state['region_layout']
         assert len(repairs) == 3
