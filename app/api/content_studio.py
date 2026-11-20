@@ -1708,6 +1708,34 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
         text = artifact_text(record, value)
         review_html = ""
         if record.kind == "channel_text":
+            if value.get("channel") == "vk" and value.get("image_model", "none") != "none":
+                state = value.get("image_state")
+                if state == "ready" and record.task_id and value.get("image_artifact_id"):
+                    try:
+                        image_id = UUID(str(value["image_artifact_id"]))
+                        image = db.scalar(select(Artifact).where(
+                            Artifact.id == image_id, Artifact.product_id == product.id,
+                            Artifact.task_id == record.task_id,
+                            Artifact.kind == "generated_image"))
+                        if (image is None or
+                                parse_json(image).get("sha256") != value.get("image_sha256")):
+                            raise LookupError("Media version mismatch")
+                        verified_gallery_image(
+                            db, root or get_settings().products_root,
+                            product.id, record.task_id, image)
+                    except (LookupError, ValueError, TypeError, OSError):
+                        review_html += ('<p class="sg-warning" role="alert">'
+                                        'Изображение недоступно или повреждено. '
+                                        'Публикацию нужно проверить.</p>')
+                    else:
+                        review_html += gallery_html(product.id, record.task_id, [image])
+                elif state in {"stale", "failed", "pending"}:
+                    reason = ("Текст изменён; прежняя иллюстрация больше не подходит."
+                              if state == "stale" else
+                              "Создание изображения остановилось; текст сохранился.")
+                    review_html += (
+                        '<p class="sg-warning" role="status">' + esc(reason) +
+                        ' Публикация с изображением пока недоступна.</p>')
             warnings = value.get("quality_warnings") or []
             warning_list = "".join(f"<li>{esc(note)}</li>" for note in warnings[:6])
             if warning_list:
