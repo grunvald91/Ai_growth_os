@@ -236,9 +236,14 @@ async def begin_community_oauth(settings, product_id, reference, *, owner_login=
 
 
 def read_community_oauth_cookie(settings, cookie, state):
-    if not cookie or not isinstance(cookie, str):
+    if not cookie or not isinstance(cookie, str) or len(cookie) > 12000:
         raise ValueError("Подключение VK истекло. Попробуйте заново")
     try:
+        # Fernet implementations can ignore garbage after base64 padding.
+        # Reject non-canonical encodings before verifying the signed cookie.
+        if (not re.fullmatch(r"[A-Za-z0-9_-]+={0,2}", cookie)
+                or base64.urlsafe_b64encode(base64.urlsafe_b64decode(cookie)).decode("ascii") != cookie):
+            raise ValueError("Подключение VK содержит недопустимый токен")
         store = VKStore(settings.products_root)
         with store.locked():
             data = json.loads(store.cipher().decrypt(cookie.encode("ascii"), ttl=OAUTH_TTL))
