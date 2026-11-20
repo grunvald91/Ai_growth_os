@@ -37,6 +37,9 @@ def test_vk_post_only_opt_in_and_prompt_no_fake_claims():
     with Image.open(io.BytesIO(export_vk_png(picture()))) as generated:
         assert generated.format == "PNG"
         assert generated.size == (1080, 1350)
+    with Image.open(io.BytesIO(export_vk_png(picture(), ratio="1:1"))) as square:
+        assert square.size == (1080, 1080)
+    assert "square 1:1" in vk_visual_prompt("Компания", "Тема", "Текст", ratio="1:1")
 
 
 @pytest.mark.asyncio
@@ -59,8 +62,8 @@ async def test_vk_image_saved_and_reused_without_repeat_paid_api(db, tmp_path, m
     settings = Settings(_env_file=None, products_root=tmp_path, xai_api_key="dummy")
     requests = []
 
-    async def fake_request(settings, model, prompt, ratio):
-        requests.append((model, prompt, ratio))
+    async def fake_request(settings, model, prompt, ratio, *, preserve_source=False):
+        requests.append((model, prompt, ratio, preserve_source))
         return picture()
 
     monkeypatch.setattr("app.content.vk_post_image.request_image", fake_request)
@@ -71,7 +74,7 @@ async def test_vk_image_saved_and_reused_without_repeat_paid_api(db, tmp_path, m
         assert actual.size == (1080, 1350)
     assert json.loads(post.content)["image_artifact_id"] == str(asset.id)
     assert json.loads(post.content)["image_state"] == "ready"
-    assert len(requests) == 1 and requests[0][2] == "4:5"
+    assert len(requests) == 1 and requests[0][2:] == ("4:5", True)
     again = await prepare_vk_post_image(db, settings, product=product, task=task,
                                          post=post, model_choice="auto")
     assert again.id == asset.id
@@ -95,3 +98,48 @@ def test_vk_image_post_must_not_silently_send_text_only(db):
     db.commit()
     with pytest.raises(ValueError, match="иллюстрацию"):
         schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(minutes=10))
+
+def test_vk_export_does_not_stretch_subject(tmp_path):
+    """A square source must be center-cropped, not geometrically distorted."""
+    raw = io.BytesIO()
+    # Left red and right blue stripes show if the image was stretched.
+    source = Image.new("RGB", (1000, 1000), (0, 0, 0))
+    for x in range(400, 600):
+        for y in range(1000):
+            source.putpixel((x, y), (255, 0, 0))
+    source.save(raw, format="PNG")
+    with Image.open(io.BytesIO(export_vk_png(raw.getvalue(), ratio="4:5"))) as frame:
+        # Original stripe is 200px wide, cropping to 800px produces 270px at 1080px target.
+        red_at_middle = sum(1 for x in range(1080) if frame.getpixel((x, 675))[0] > 220)
+        assert 250 <= red_at_middle <= 290
+
+
+@pytest.mark.asyncio
+async def test_vk_square_preset_is_persisted(db, tmp_path, monkeypatch):
+    product = Product(name="Квадрат", slug="vk-square")
+    db.add(product)
+    db.flush()
+    task = Task(product_id=product.id, assigned_agent="content_factory",
+                title="CONTENT: post:vk:square", status="running")
+    db.add(task)
+    db.flush()
+    post = Artifact(product_id=product.id, task_id=task.id, kind="channel_text",
+                    title="Квадрат", status="awaiting_approval",
+                    content=json.dumps({"channel": "vk", "title": "Квадрат",
+                                        "body": "Описание для квадратной иллюстрации"}))
+    db.add(post)
+    db.commit()
+    settings = Settings(_env_file=None, products_root=tmp_path, xai_api_key="dummy")
+    requests = []
+    async def fake_request(settings, model, prompt, ratio, *, preserve_source=False):
+        requests.append((ratio, preserve_source))
+        return picture()
+    monkeypatch.setattr("app.content.vk_post_image.request_image", fake_request)
+    asset = await prepare_vk_post_image(db, settings, product=product, task=task,
+                                        post=post, model_choice="auto", ratio="1:1")
+    with Image.open(tmp_path / "_creative_images" / str(product.id) /
+                    str(task.id) / "frame-01.png") as result:
+        assert result.size == (1080, 1080)
+    assert json.loads(asset.content)["ratio"] == "1:1"
+    assert json.loads(post.content)["image_ratio"] == "1:1"
+    assert requests == [("1:1", True)]
