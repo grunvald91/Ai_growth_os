@@ -126,3 +126,51 @@ async def test_work_pages_show_stages_outputs_and_critic(tmp_path, prompt_root):
         finally:
             app.dependency_overrides.clear()
     engine.dispose()
+
+
+def test_operator_can_set_encrypted_vk_read_key_but_company_user_cannot(tmp_path, monkeypatch):
+    from app.vk_service import platform_service_token
+    path = tmp_path / "operators"
+    path.write_text("owner:" + apr_md5_crypt.hash("owner-pass") + "\\n"
+                    "company:" + apr_md5_crypt.hash("company-pass") + "\\n")
+    settings = Settings(
+        app_env="production", products_root=tmp_path / "products",
+        studio_htpasswd_file=path, studio_tune_usernames="owner",
+        studio_public_origin="https://growth.servgo.ru",
+        social_vk_service_token=None, _env_file=None,
+    )
+    async def verified(token, reference):
+        assert token == "read-service-key-not-for-ui"
+        assert reference == "https://vk.com/test_company"
+        return ("123456", "Тест", True)
+    monkeypatch.setattr("app.api.tune.verify_platform_service_token", verified)
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        with TestClient(app) as c:
+            assert c.get("/studio/tune/vk").status_code == 401
+            assert c.get("/studio/tune/vk", auth=("company", "company-pass")).status_code == 403
+            assert c.post("/studio/tune/vk", auth=("company", "company-pass"),
+                          headers={"Origin": "https://growth.servgo.ru"},
+                          data={"token": "read-service-key-not-for-ui",
+                                "community_link": "https://vk.com/test_company"}).status_code == 403
+            page = c.get("/studio/tune/vk", auth=("owner", "owner-pass"))
+            assert page.status_code == 200
+            assert "Сервисный ключ не настроен" in page.text
+            saved = c.post("/studio/tune/vk", auth=("owner", "owner-pass"),
+                           headers={"Origin": "https://growth.servgo.ru"},
+                           data={"token": "read-service-key-not-for-ui",
+                                 "community_link": "https://vk.com/test_company"},
+                           follow_redirects=False)
+            assert saved.status_code == 303
+            assert "result=saved" in saved.headers["location"]
+            assert platform_service_token(settings) == "read-service-key-not-for-ui"
+            rendered = c.get("/studio/tune/vk", auth=("owner", "owner-pass"))
+            assert rendered.status_code == 200
+            assert "read-service-key-not-for-ui" not in rendered.text
+            removed = c.post("/studio/tune/vk/remove", auth=("owner", "owner-pass"),
+                             headers={"Origin": "https://growth.servgo.ru"},
+                             data={"confirm": "yes"}, follow_redirects=False)
+            assert removed.status_code == 303
+            assert platform_service_token(settings) is None
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
