@@ -60,6 +60,14 @@ class PostParams(_Params):
     channel: Literal["telegram", "vk", "dzen", "vc_ru", "tenchat"] = "telegram"
     audience: str | None = Field(default=None, max_length=300)
     editorial_brief: str | None = Field(default=None, max_length=3500)
+    image_model: Literal["none", "auto", "gemini", "openai"] = "none"
+    image_ratio: Literal["4:5", "1:1"] = "4:5"
+
+    @model_validator(mode="after")
+    def vk_image_only(self):
+        if self.image_model != "none" and self.channel != "vk":
+            raise ValueError("Изображение в быстром посте пока доступно только для ВКонтакте")
+        return self
 
 
 class CreativeParams(_Params):
