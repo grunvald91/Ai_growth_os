@@ -469,3 +469,74 @@ async def test_vk_worker_refuses_stale_approved_publications_on_reenable(db, tmp
     assert pub.status == "failed_before_send"
     assert sent == []
     assert await deliver_once(lambda: sessions(db), settings, sender=send, now=far_later) == 0
+
+
+def test_vk_platform_service_token_is_encrypted_and_can_be_removed(tmp_path):
+    from app.vk_service import (platform_service_token, save_platform_service_token,
+                                delete_platform_service_token, _SERVICE_KEY_ID)
+    settings = Settings(products_root=tmp_path, social_vk_service_token=None, _env_file=None)
+    secret = "vk-platform-readonly-token-test"
+    assert platform_service_token(settings) is None
+    save_platform_service_token(settings, secret)
+    assert platform_service_token(settings) == secret
+    from app.comments.secrets import CommentSecrets
+    store = CommentSecrets(tmp_path)
+    assert secret.encode() not in store.path(_SERVICE_KEY_ID).read_bytes()
+    env_managed = Settings(products_root=tmp_path, social_vk_service_token="env-key", _env_file=None)
+    assert platform_service_token(env_managed) == "env-key"
+    with pytest.raises(ValueError, match="окружением"):
+        save_platform_service_token(env_managed, "replacement")
+    with pytest.raises(ValueError, match="окружении"):
+        delete_platform_service_token(env_managed)
+    delete_platform_service_token(settings)
+    assert platform_service_token(settings) is None
+
+
+@pytest.mark.asyncio
+async def test_vk_platform_service_key_is_verified_with_read_only_calls(monkeypatch):
+    from app.vk_service import verify_platform_service_token
+    from app.comments.vk import VKAdapter
+
+    calls = []
+
+    async def fake(self, method, token, **params):
+        assert token == "app-service-token"
+        calls.append((method, params))
+        if method == "groups.getById":
+            return {"groups": [{"id": 123456, "name": "Проверка ServGo"}]}
+        if method == "wall.get":
+            return {"items": [{"id": 49, "owner_id": -123456}]}
+        if method == "wall.getComments":
+            return {"items": [], "count": 0}
+        raise AssertionError("Unexpected VK call: " + method)
+
+    monkeypatch.setattr(VKAdapter, "call", fake)
+    result = await verify_platform_service_token("app-service-token", "https://vk.com/my_community")
+    assert result == ("123456", "Проверка ServGo", True)
+    assert [name for name, _ in calls] == ["groups.getById", "wall.get", "wall.getComments"]
+    assert calls[-1][1]["owner_id"] == -123456
+    assert calls[-1][1]["post_id"] == 49
+
+
+@pytest.mark.asyncio
+async def test_vk_platform_service_key_empty_wall_not_marked_comments_verified(monkeypatch):
+    from app.vk_service import verify_platform_service_token
+    from app.comments.vk import VKAdapter
+    from app.comments.gateway import CommentGateway, PlatformError
+
+    async def fake(self, method, token, **params):
+        if method == "groups.getById":
+            return {"groups": [{"id": 123456, "name": "Пустая группа"}]}
+        if method == "wall.get":
+            return {"items": [], "count": 0}
+        raise AssertionError("Comments must not be probed without a post")
+    monkeypatch.setattr(VKAdapter, "call", fake)
+    assert await verify_platform_service_token("token", "vk.com/club123456") == (
+        "123456", "Пустая группа", False)
+    adapter = VKAdapter(CommentGateway(vk_read_token="token"), "vk")
+    # A manager is still verified using the original group key.
+    async def manager(self, account_id, token):
+        return {"name": "Пустая группа"}
+    monkeypatch.setattr(VKAdapter, "manager", manager)
+    with pytest.raises(PlatformError, match="нет открытых записей"):
+        await adapter.check("123456", "group-token")
