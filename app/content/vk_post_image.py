@@ -159,7 +159,9 @@ async def prepare_vk_post_image(db, settings, *, product, task, post, model_choi
     meta = json.loads(post.content)
     meta["image_artifact_id"] = str(row.id)
     meta["image_sha256"] = json.loads(row.content)["sha256"]
-    meta["image_state"] = "ready"
+    # Only the vision critic may promote this image to ready for publication.
+    meta["image_state"] = "awaiting_review"
+    meta["image_review_state"] = "pending"
     meta["image_ratio"] = ratio
     post.content = json.dumps(meta, ensure_ascii=False)
     db.commit()
