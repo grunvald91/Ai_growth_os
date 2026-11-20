@@ -174,7 +174,9 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     if request.image_model != "none":
         from app.content.creative_images import resolve_model
-        resolve_model(settings, request.image_model)  # Fail before spending text-model tokens.
+        from app.content.vk_image_critic import critic_profile
+        resolve_model(settings, request.image_model)
+        critic_profile(settings)  # Image AND vision review must be configured before billing.
     # Resolve the configured provider BEFORE changing task state: missing keys
     # must never strand an already-claimed job in RUNNING.
     llm = LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings),
@@ -387,6 +389,9 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                 await prepare_vk_post_image(
                     db, settings, product=product, task=task, post=post_record,
                     model_choice=request.image_model, ratio=request.image_ratio)
+                from app.content.vk_image_critic import review_vk_post_image
+                await review_vk_post_image(
+                    db, settings, product=product, task=task, post=post_record)
             except Exception as exc:
                 db.rollback()
                 # Preserve the finished article and label the missing image for review.
