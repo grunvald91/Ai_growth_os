@@ -2427,7 +2427,9 @@ async def studio_create_submit(product_id: UUID, request: Request, db: Session =
                 if fields.get("channel") != "vk":
                     raise ValueError("На этом этапе изображение доступно только для постов ВКонтакте")
                 from app.content.creative_images import resolve_model
-                resolve_model(settings, image_model)  # Before queueing paid work.
+                resolve_model(settings, image_model)
+                from app.content.vk_image_critic import critic_profile
+                critic_profile(settings)  # Visual review is mandatory, not a hidden optional step.
             task = queue_content(db, product.id, topic, format="post",
                           channel=fields.get("channel"), audience=audience, editorial_brief=brief,
                           image_model=image_model,
